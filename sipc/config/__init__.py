@@ -1,0 +1,1 @@
+"""SIPC configuration package."""
