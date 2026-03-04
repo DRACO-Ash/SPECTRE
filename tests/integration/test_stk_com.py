@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 
 from sipc.stk_adapter.com_session import StkComSession
-from sipc.stk_adapter.exceptions import StkConnectionError
 
 
 @pytest.mark.integration
@@ -42,7 +41,6 @@ class TestStkComSession:
 
     def test_get_scenario_epoch_returns_datetime(self) -> None:
         """get_scenario_epoch() should return a UTC-aware datetime."""
-        from datetime import timezone
 
         session = StkComSession()
         session.connect("")

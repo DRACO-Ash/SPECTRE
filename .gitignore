@@ -88,6 +88,9 @@ logs/
 *~
 .DS_Store
 
+# Claude Code
+.claude/
+
 # Jupyter
 .ipynb_checkpoints/
 

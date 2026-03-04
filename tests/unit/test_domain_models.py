@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from sipc.config.constants import BLUE_PREFIX, RED_PREFIX
 from sipc.domain.models import (
@@ -31,7 +29,10 @@ class TestBlueAsset:
 
     def test_tle_stored_verbatim(self) -> None:
         """TLE string should be stored exactly as provided."""
-        tle = "1 25544U 98067A   24001.00000000  .00000000  00000-0  00000-0 0  9990\n2 25544  51.6000 000.0000 0001000   0.0000   0.0000 15.50000000000000"
+        tle = (
+            "1 25544U 98067A   24001.00000000  .00000000  00000-0  00000-0 0  9990\n"
+            "2 25544  51.6000 000.0000 0001000   0.0000   0.0000 15.50000000000000"
+        )
         asset = BlueAsset(name="ISS", tle=tle)
         assert asset.tle == tle
 
@@ -54,7 +55,7 @@ class TestAccessInterval:
 
     def test_zero_duration(self) -> None:
         """duration_seconds should be 0 for same start/end."""
-        t = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        t = datetime(2026, 1, 1, tzinfo=UTC)
         interval = AccessInterval(start=t, end=t)
         assert interval.duration_seconds == 0.0
 
@@ -64,8 +65,8 @@ class TestInterceptWindow:
 
     def test_fields_stored(self) -> None:
         """All constructor fields should be stored correctly."""
-        start = datetime(2026, 3, 4, 12, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 3, 4, 12, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 3, 4, 12, 30, 0, tzinfo=UTC)
         window = InterceptWindow(start=start, end=end, min_range_km=250.5)
         assert window.min_range_km == 250.5
         assert window.start == start

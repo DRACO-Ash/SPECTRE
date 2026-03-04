@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QListWidget,
     QPushButton,
     QVBoxLayout,

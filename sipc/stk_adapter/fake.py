@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sipc.domain.models import AccessInterval
@@ -34,7 +34,7 @@ class FakeStkSession:
         self.propagators: dict[str, str] = {}
         self.actions_log: list[tuple[str, str, dict[str, Any]]] = []
         self.access_intervals: list[AccessInterval] = []
-        self.epoch: datetime = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        self.epoch: datetime = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
 
     # ── IStkSession interface ─────────────────────────────────────────────────
 

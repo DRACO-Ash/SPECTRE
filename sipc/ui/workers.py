@@ -6,7 +6,7 @@ import logging
 import traceback
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class Worker(QRunnable):
         **kwargs: Keyword arguments forwarded to *fn*.
     """
 
-    def __init__(self, fn: Any, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, fn: Any, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         super().__init__()
         self._fn = fn
         self._args = args

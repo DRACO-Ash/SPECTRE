@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sipc.domain.models import AccessInterval
@@ -129,7 +129,7 @@ class StkComSession:
         self._require_connection()
         # TODO: parse self._root.CurrentScenario.StartTime
         logger.info("get_scenario_epoch (stub)")
-        return datetime(2026, 1, 1, tzinfo=timezone.utc)
+        return datetime(2026, 1, 1, tzinfo=UTC)
 
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Log a provenance-tagged STK action.

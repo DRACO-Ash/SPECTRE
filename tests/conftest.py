@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -49,7 +49,7 @@ def run_config() -> RunConfig:
     return RunConfig(
         operator="test_operator",
         source="TEST",
-        timestamp=datetime(2026, 3, 4, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC),
         run_id="RUN_TEST000001",
     )
 
@@ -58,6 +58,6 @@ def run_config() -> RunConfig:
 def sample_access_interval() -> AccessInterval:
     """Return a sample AccessInterval for test assertions."""
     return AccessInterval(
-        start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=timezone.utc),
+        start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC),
+        end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=UTC),
     )

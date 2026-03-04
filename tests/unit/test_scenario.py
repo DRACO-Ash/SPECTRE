@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from sipc.domain.models import AccessInterval, BlueAsset, RedTrack, RunConfig
 from sipc.domain.scenario import ScenarioPlanner
@@ -88,12 +86,12 @@ class TestScenarioPlanner:
     ) -> None:
         """plan() should return windows in ascending start-time order."""
         later = AccessInterval(
-            start=datetime(2026, 3, 4, 14, 0, 0, tzinfo=timezone.utc),
-            end=datetime(2026, 3, 4, 14, 10, 0, tzinfo=timezone.utc),
+            start=datetime(2026, 3, 4, 14, 0, 0, tzinfo=UTC),
+            end=datetime(2026, 3, 4, 14, 10, 0, tzinfo=UTC),
         )
         earlier = AccessInterval(
-            start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=timezone.utc),
-            end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=timezone.utc),
+            start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC),
+            end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=UTC),
         )
         fake_session.access_intervals = [later, earlier]
         planner = ScenarioPlanner(session=fake_session, config=run_config)
