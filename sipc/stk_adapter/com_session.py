@@ -520,40 +520,49 @@ class StkComSession:
         _E_PROPAGATOR_SGP4 = 5
         errors: list[str] = []
 
-        # Approach A: GetObjectFromPath → QueryInterface(IID_IDispatch) → CommonTasks
-        # With late binding, Propagator is returned as IUnknown (<unknown>).
-        # QueryInterface converts it to IDispatch, giving access to the runtime
-        # dispatch table of the actual IAgVePropagatorSGP4 object.
+        # Approach A: propagator.CommonTasks → native QI to IDispatch → AddSegsFromLines
+        #
+        # Diagnosis from previous runs:
+        #   - sat_obj.Propagator returns CDispatch (VT_DISPATCH) — do NOT call
+        #     .QueryInterface() on it; that dispatches to the COM method table,
+        #     serialising the IID as bytes and failing.
+        #   - propagator.CommonTasks returns PyIUnknown (VT_UNKNOWN / <unknown>).
+        #   - PyIUnknown.QueryInterface(IID_IDispatch) is a native Python call
+        #     that correctly reaches AddSegsFromLines through IDispatch.
         try:
             import pythoncom  # type: ignore[import]  # noqa: PLC0415
             import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
-            propagator = sat_obj.Propagator  # IUnknown in late binding
-            idispatch = propagator.QueryInterface(pythoncom.IID_IDispatch)
-            prop_d = _wc.Dispatch(idispatch)
-            prop_d.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            prop_d.Propagate()
-            logger.info("set_propagator (QI→IDispatch→CommonTasks) succeeded for %r", sat_name)
+            propagator = sat_obj.Propagator         # CDispatch over IAgVePropagatorSGP4
+            ct_raw = propagator.CommonTasks         # PyIUnknown (<unknown>)
+            # Native Python QI — NOT a COM dispatch call
+            ct_idispatch = ct_raw.QueryInterface(pythoncom.IID_IDispatch)
+            ct = _wc.Dispatch(ct_idispatch)
+            ct.AddSegsFromLines(sat_name, line1, line2)
+            propagator.Propagate()
+            logger.info("set_propagator (CommonTasks QI→IDispatch) succeeded for %r", sat_name)
             return
         except Exception as exc_a:
-            errors.append(f"QI+CommonTasks: {exc_a}")
+            errors.append(f"CommonTasks QI: {exc_a}")
             logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
 
-        # Approach B: same path but wrap Dispatch(propagator) directly
-        # (works if Propagator returns IDispatch rather than IUnknown)
+        # Approach B: Dispatch(ct_raw) — lets pywin32 do the QI internally.
+        # Covers the case where ct_raw is already PyIDispatch and direct QI is
+        # unnecessary.
         try:
             import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
-            prop_d = _wc.Dispatch(propagator)
-            prop_d.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            prop_d.Propagate()
-            logger.info("set_propagator (Dispatch(propagator)→CommonTasks) succeeded for %r", sat_name)
+            ct_raw = propagator.CommonTasks         # PyIUnknown
+            ct = _wc.Dispatch(ct_raw)               # Dispatch QIs to IDispatch internally
+            ct.AddSegsFromLines(sat_name, line1, line2)
+            propagator.Propagate()
+            logger.info("set_propagator (CommonTasks Dispatch) succeeded for %r", sat_name)
             return
         except Exception as exc_b:
-            errors.append(f"Dispatch+CommonTasks: {exc_b}")
+            errors.append(f"CommonTasks Dispatch: {exc_b}")
             logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
 
         # Approach C: write a 3-line TLE file and load it via the OM file-loader
