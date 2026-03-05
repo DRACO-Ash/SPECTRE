@@ -245,6 +245,67 @@ async def stk_connect(
     )
 
 
+@router.post("/stk/new", response_model=None)
+async def stk_new_scenario(
+    request: Request,
+    scenario_name: Annotated[str, Form()],
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Create a new blank STK scenario, closing any currently-open one.
+
+    Runs the blocking COM call in a thread-pool executor.
+    """
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    from sipc.stk_adapter.com_session import StkComSession  # noqa: PLC0415
+
+    name = scenario_name.strip()
+    if not name:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/stk_status.html",
+            {
+                "request": request,
+                "stk_connected": False,
+                "stk_scenario": "",
+                "error": "Scenario name is required.",
+            },
+        )
+
+    session = StkComSession()
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, session.new_scenario, name)
+    except StkConnectionError as exc:
+        logger.warning("STK new_scenario failed for operator %s: %s", current_user.username, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/stk_status.html",
+            {
+                "request": request,
+                "stk_connected": False,
+                "stk_scenario": "",
+                "error": str(exc),
+            },
+        )
+
+    if state.stk_session is not None:
+        state.stk_session.disconnect()
+    state.stk_session = session
+    state.stk_scenario = name
+    state.append_log(f"[STK] New scenario created: {name}")
+    logger.info("STK new scenario %r for operator %s", name, current_user.username)
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/stk_status.html",
+        {
+            "request": request,
+            "stk_connected": True,
+            "stk_scenario": name,
+            "error": None,
+        },
+    )
+
+
 @router.post("/stk/disconnect", response_model=None)
 async def stk_disconnect(
     request: Request,

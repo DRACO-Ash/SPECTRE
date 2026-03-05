@@ -44,6 +44,15 @@ class FakeStkSession:
         self.scenario_path = scenario_path
         logger.debug("FakeStkSession.connect", extra={"scenario_path": scenario_path})
 
+    def new_scenario(self, name: str) -> None:
+        """Record new-scenario creation; resets satellite/propagator state."""
+        self.connected = True
+        self.scenario_path = ""
+        self.satellites.clear()
+        self.propagators.clear()
+        self.actions_log.clear()
+        logger.debug("FakeStkSession.new_scenario", extra={"name": name})
+
     def disconnect(self) -> None:
         """Record disconnection."""
         self.connected = False

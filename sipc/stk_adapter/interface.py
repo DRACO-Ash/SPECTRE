@@ -18,7 +18,7 @@ class IStkSession(Protocol):
     """
 
     def connect(self, scenario_path: str) -> None:
-        """Open an STK scenario.
+        """Attach to a running STK instance and optionally load an existing scenario.
 
         Args:
             scenario_path: Absolute path to the ``.sc`` scenario file, or an
@@ -26,6 +26,21 @@ class IStkSession(Protocol):
 
         Raises:
             StkConnectionError: If STK is not reachable or the scenario fails to load.
+        """
+        ...
+
+    def new_scenario(self, name: str) -> None:
+        """Create a brand-new blank scenario in STK.
+
+        Any currently-open scenario is closed before the new one is created.
+
+        Args:
+            name: The scenario name (no path required; STK manages the file
+                location until the operator saves it).
+
+        Raises:
+            StkConnectionError: If STK is not running or the scenario cannot
+                be created.
         """
         ...
 

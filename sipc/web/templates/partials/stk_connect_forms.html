@@ -1,0 +1,43 @@
+<div class="stk-connect-tabs">
+
+  <fieldset class="stk-tab">
+    <legend>Attach to running instance</legend>
+    <p class="stk-hint">STK must already be open with a scenario loaded.</p>
+    <form hx-post="/stk/connect"
+          hx-target="#stk-status"
+          hx-swap="innerHTML"
+          class="stk-form">
+      <input name="scenario_path" value="" type="hidden" />
+      <button type="submit" class="btn-primary btn-sm">Attach</button>
+    </form>
+  </fieldset>
+
+  <fieldset class="stk-tab">
+    <legend>Load existing scenario</legend>
+    <form hx-post="/stk/connect"
+          hx-target="#stk-status"
+          hx-swap="innerHTML"
+          class="stk-form">
+      <input name="scenario_path"
+             placeholder="Full path to .sc file"
+             required
+             class="stk-path-input" />
+      <button type="submit" class="btn-primary btn-sm">Load</button>
+    </form>
+  </fieldset>
+
+  <fieldset class="stk-tab">
+    <legend>Create new scenario</legend>
+    <form hx-post="/stk/new"
+          hx-target="#stk-status"
+          hx-swap="innerHTML"
+          class="stk-form">
+      <input name="scenario_name"
+             placeholder="Scenario name (e.g. SIPC_Run_001)"
+             required
+             class="stk-path-input" />
+      <button type="submit" class="btn-primary btn-sm">Create</button>
+    </form>
+  </fieldset>
+
+</div>

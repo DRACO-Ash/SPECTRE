@@ -59,6 +59,26 @@ class StkComSession:
         except Exception as exc:
             raise StkConnectionError(f"Failed to connect to STK: {exc}") from exc
 
+    def new_scenario(self, name: str) -> None:
+        """Create a new blank STK scenario, closing any currently-open one.
+
+        Args:
+            name: Scenario name string (not a file path).
+
+        Raises:
+            StkConnectionError: If STK is not running or the call fails.
+        """
+        try:
+            import win32com.client  # type: ignore[import]
+
+            self._app = win32com.client.Dispatch("STK13.Application")
+            self._app.Visible = True
+            self._root = self._app.Personality2
+            self._root.NewScenario(name)
+            logger.info("New scenario created", extra={"name": name})
+        except Exception as exc:
+            raise StkConnectionError(f"Failed to create new STK scenario: {exc}") from exc
+
     def disconnect(self) -> None:
         """Release COM references."""
         self._root = None
