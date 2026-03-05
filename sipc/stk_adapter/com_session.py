@@ -62,15 +62,40 @@ def _purge_stk_gen_py_stubs() -> None:
 
 
 def _stk_dispatch() -> Any:
-    """Return an ``STK13.Application`` COM object using pure late binding.
+    """Return an ``STK13.Application`` COM object with the best available binding.
 
-    Purges any partial gen_py stubs before connecting so that all COM return
-    values use runtime ``IDispatch`` rather than broken type-library stubs.
+    Strategy:
+    1. Purge any previously-incomplete gen_py stubs (disk + sys.modules).
+    2. Try ``EnsureDispatch`` to regenerate **complete** stubs from scratch.
+       Complete stubs are required because ``IAgVePropagatorSGP4`` is a
+       vtable-only (non-dual) interface — it cannot be called via pure late
+       binding; ``CastTo`` / generated wrapper classes are the only path.
+    3. If ``EnsureDispatch`` fails, fall back to pure ``Dispatch`` (satellite
+       creation still works; TLE loading will be limited).
     """
     _purge_stk_gen_py_stubs()
     import win32com.client  # type: ignore[import]
-    logger.info("STK connecting with late binding (Dispatch)")
-    return win32com.client.Dispatch("STK13.Application")
+    logger.info("STK: attempting EnsureDispatch to generate complete COM type stubs")
+    try:
+        app = win32com.client.EnsureDispatch("STK13.Application")
+        # Verify that the critical propagator interface was stubbed.
+        import sys  # noqa: PLC0415
+        _guid = "AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0"
+        if any(_guid in k and "IAgVePropagatorSGP4" in k for k in sys.modules):
+            logger.info("STK stubs include IAgVePropagatorSGP4 — CastTo will work")
+        else:
+            logger.warning(
+                "STK stubs generated but IAgVePropagatorSGP4 not found in sys.modules; "
+                "CastTo may still work if the stub was generated without importing"
+            )
+        return app
+    except Exception as exc:
+        logger.warning(
+            "STK: EnsureDispatch failed (%s) — falling back to pure late binding; "
+            "TLE loading via Object Model may be limited",
+            exc,
+        )
+        return win32com.client.Dispatch("STK13.Application")
 
 
 def _parse_stk_time(stk_time: str) -> datetime:
@@ -534,7 +559,41 @@ class StkComSession:
         errors: list[str] = []
 
         # ------------------------------------------------------------------
-        # Approach A: type-library IID lookup → QI to IAgVePropagatorSGP4
+        # Approach A: CastTo via generated stubs (EnsureDispatch path)
+        # ------------------------------------------------------------------
+        # IAgVePropagatorSGP4 is a vtable-only (non-dual) interface.
+        # The ONLY way to call its methods from Python is via gen_py stubs.
+        # _stk_dispatch() now regenerates stubs via EnsureDispatch before
+        # connecting; if that succeeded, CastTo will work here.
+        try:
+            import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
+
+            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+            sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
+            propagator = sat_obj.Propagator
+            logger.warning(
+                "[set_propagator] propagator type=%s repr=%r",
+                type(propagator).__name__, repr(propagator)[:100],
+            )
+            prop_sgp4 = _wc.CastTo(propagator, "IAgVePropagatorSGP4")
+            logger.warning(
+                "[set_propagator] CastTo IAgVePropagatorSGP4 OK: type=%s repr=%r",
+                type(prop_sgp4).__name__, repr(prop_sgp4)[:100],
+            )
+            ct = prop_sgp4.CommonTasks
+            logger.warning("[set_propagator] CommonTasks type=%s", type(ct).__name__)
+            ct.AddSegsFromLines(sat_name, line1, line2)
+            prop_sgp4.Propagate()
+            logger.info("set_propagator (CastTo+CommonTasks) succeeded for %r", sat_name)
+            return
+        except Exception as exc_a0:
+            errors.append(f"CastTo+CommonTasks: {exc_a0}")
+            logger.warning(
+                "[set_propagator] CastTo approach failed for %r: %s", sat_name, exc_a0
+            )
+
+        # ------------------------------------------------------------------
+        # Approach B: type-library IID lookup → QI to IAgVePropagatorSGP4
         # ------------------------------------------------------------------
         # 1. Load the STK Objects type library directly from the registry.
         # 2. Scan for the IAgVePropagatorSGP4 type-info entry to get its IID.
@@ -547,10 +606,6 @@ class StkComSession:
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
-            logger.info(
-                "[set_propagator] propagator type=%s repr=%r",
-                type(propagator).__name__, repr(propagator)[:100],
-            )
 
             # Look up IAgVePropagatorSGP4 IID from the type library.
             iid_sgp4 = None
@@ -580,7 +635,7 @@ class StkComSession:
                     p_unk.QueryInterface(pythoncom.IID_IDispatch)
                 )
 
-            logger.info(
+            logger.warning(
                 "[set_propagator] prop_sgp4 type=%s repr=%r",
                 type(prop_sgp4).__name__, repr(prop_sgp4)[:100],
             )
@@ -605,20 +660,20 @@ class StkComSession:
                 sat_name,
             )
             return
-        except Exception as exc_a:
-            errors.append(f"TypeLib IID QI: {exc_a}")
-            logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
+        except Exception as exc_b:
+            errors.append(f"TypeLib IID QI: {exc_b}")
+            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
 
         # ------------------------------------------------------------------
-        # Approach B: TLE file import via ExecuteCommand (last resort)
+        # Approach C: TLE file import via ExecuteCommand (last resort)
         # ------------------------------------------------------------------
         try:
             self._set_tle_via_file(sat_name, line1, line2)
             logger.info("set_propagator (TLE file import) succeeded for %r", sat_name)
             return
-        except Exception as exc_b:
-            errors.append(f"TLE file import: {exc_b}")
-            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
+        except Exception as exc_c:
+            errors.append(f"TLE file import: {exc_c}")
+            logger.debug("set_propagator approach C failed for %r: %s", sat_name, exc_c)
 
         raise StkCommandError(
             f"set_propagator({sat_name!r}): all OM approaches failed — "
