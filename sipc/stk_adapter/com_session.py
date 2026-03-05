@@ -503,29 +503,35 @@ class StkComSession:
                 f" — {exc}"
             ) from exc
 
-        # Approach A: CastTo IAgVePropagatorSGP4 then .CommonTasks
-        # This QIs to the concrete interface, bypassing the base-typed property return.
+        # Approach A: wrap propagator in a late-binding Dispatch so the runtime
+        # type's IDispatch table is used instead of the type-library stub.
+        # EnsureDispatch types Propagator as IAgVePropagator (base), hiding
+        # CommonTasks.  Dispatch(propagator) calls GetIDsOfNames on the actual
+        # runtime object which IS IAgVePropagatorSGP4 and DOES have CommonTasks.
         try:
-            from win32com.client import CastTo  # type: ignore[import]  # noqa: PLC0415
-            p_sgp4 = CastTo(propagator, "IAgVePropagatorSGP4")
-            p_sgp4.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            p_sgp4.Propagate()
-            logger.info("set_propagator (CastTo+CommonTasks) succeeded for %r", sat_name)
+            import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
+            prop_late = _wc.Dispatch(propagator)
+            prop_late.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
+            prop_late.Propagate()
+            logger.info("set_propagator (late-bind CommonTasks) succeeded for %r", sat_name)
             return
         except Exception as exc_a:
-            errors.append(f"CastTo+CommonTasks: {exc_a}")
+            errors.append(f"late-bind CommonTasks: {exc_a}")
             logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
 
-        # Approach B: Segments.AddSegsFromLines (exposed directly in some STK 13 builds)
+        # Approach B: same late-binding trick on the Segments collection.
         try:
-            propagator.Segments.AddSegsFromLines(sat_name, line1, line2)
+            import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
+            segs_late = _wc.Dispatch(propagator.Segments)
+            segs_late.AddSegsFromLines(sat_name, line1, line2)
             propagator.Propagate()
             logger.info(
-                "set_propagator (Segments.AddSegsFromLines) succeeded for %r", sat_name
+                "set_propagator (late-bind Segments.AddSegsFromLines) succeeded for %r",
+                sat_name,
             )
             return
         except Exception as exc_b:
-            errors.append(f"Segments.AddSegsFromLines: {exc_b}")
+            errors.append(f"late-bind Segments.AddSegsFromLines: {exc_b}")
             logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
 
         # Approach C: write a 3-line TLE file and load it via the OM file-loader
