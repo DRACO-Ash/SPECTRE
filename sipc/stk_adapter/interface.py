@@ -29,6 +29,19 @@ class IStkSession(Protocol):
         """
         ...
 
+    def setup_scenario_folders(self, folders: list[str]) -> None:
+        """Create the standard scenario folder structure.
+
+        Called immediately after :meth:`new_scenario` to pre-create the
+        canonical organisational folders (``/Blue``, ``/Red``, etc.).
+        Implementations should tolerate folders that already exist.
+
+        Args:
+            folders: List of folder paths as defined in
+                ``sipc.config.constants.STK_FOLDERS`` (e.g. ``["/Blue", "/Red", ...]``).
+        """
+        ...
+
     def new_scenario(self, name: str) -> None:
         """Create a brand-new blank scenario in STK.
 

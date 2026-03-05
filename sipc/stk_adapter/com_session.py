@@ -65,7 +65,9 @@ class StkComSession:
         self._app: Any = None
         self._root: Any = None
 
-    # ── IStkSession interface ─────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
+    # IStkSession interface
+    # -------------------------------------------------------------------------
 
     def connect(self, scenario_path: str) -> None:
         """Attach to a running STK instance and optionally load an existing scenario.
@@ -89,8 +91,28 @@ class StkComSession:
         except Exception as exc:
             raise StkConnectionError(f"Failed to connect to STK: {exc}") from exc
 
+    def setup_scenario_folders(self, folders: list[str]) -> None:
+        """Create the standard scenario folder structure in STK.
+
+        Safe to call on an existing scenario -- folders that already exist are
+        silently skipped.  Called automatically by :meth:`new_scenario` but
+        can also be called after :meth:`connect` to ensure folders are present
+        in a pre-existing scenario.
+
+        Args:
+            folders: List of folder paths as defined in
+                ``sipc.config.constants.STK_FOLDERS``
+                (e.g. ``["/Blue", "/Red", ...]``).
+        """
+        self._require_connection()
+        for path in folders:
+            self._ensure_folder(path.lstrip("/"))
+
     def new_scenario(self, name: str) -> None:
         """Create a new blank STK scenario, closing any currently-open one.
+
+        After creating the scenario, the standard folder structure is set up
+        automatically via :meth:`setup_scenario_folders`.
 
         Args:
             name: The scenario name (no path required; STK manages the file
@@ -111,6 +133,10 @@ class StkComSession:
         except Exception as exc:
             raise StkConnectionError(f"Failed to create new STK scenario: {exc}") from exc
 
+        from sipc.config.constants import STK_FOLDERS  # noqa: PLC0415
+
+        self.setup_scenario_folders(STK_FOLDERS)
+
     def disconnect(self) -> None:
         """Release COM references."""
         self._root = None
@@ -118,28 +144,54 @@ class StkComSession:
         logger.info("Disconnected from STK")
 
     def create_satellite(self, name: str, group: str) -> str:
-        """Create a satellite object in the STK scenario.
+        """Create a satellite object in the STK scenario inside the correct folder.
 
-        Uses the Connect command ``New / Satellite <name>`` which is reliable
-        with raw COM regardless of type-library enum values.
+        Steps:
+
+        1. Ensure the target folder exists (creates it if absent).
+        2. Create the satellite object at scenario root.
+        3. Move it into the folder via the ``SetGroup`` Connect command.
+
+        The folder assignment in step 3 is best-effort: if ``SetGroup`` is
+        not available (older STK build or different syntax), a warning is logged
+        but the satellite still exists with the correct name and TLE at scenario
+        root so the planning run is not blocked.
 
         Args:
             name: STK object name (e.g. ``B_SAT_Alpha``).
-            group: Scenario folder path (e.g. ``/Blue``). Reserved for future
-                group/folder management; satellites are created at scenario root.
+            group: Scenario folder path (e.g. ``/Blue``).
 
         Returns:
             The STK object path of the new satellite (``Satellite/<name>``).
 
         Raises:
             StkConnectionError: If not connected.
-            StkCommandError: If the Connect command fails.
+            StkCommandError: If satellite creation fails.
         """
         self._require_connection()
+        folder_name = group.lstrip("/")
+        self._ensure_folder(folder_name)
+
         result = self._root.ExecuteCommand(f"New / Satellite {name}")
         _check(result, f"create_satellite({name!r})")
+
+        # Move into the folder. STK Connect command: SetGroup */Satellite/<name> Group <folder>
+        move_result = self._root.ExecuteCommand(
+            f"SetGroup */Satellite/{name} Group {folder_name}"
+        )
+        if move_result.IsSucceeded == 0:
+            logger.warning(
+                "Could not assign satellite %r to folder %r: %s",
+                name,
+                folder_name,
+                move_result.Message,
+            )
+
         stk_path = f"Satellite/{name}"
-        logger.info("create_satellite", extra={"name": name, "path": stk_path})
+        logger.info(
+            "create_satellite",
+            extra={"name": name, "folder": folder_name, "path": stk_path},
+        )
         return stk_path
 
     def set_propagator(self, sat_name: str, tle: str) -> None:
@@ -202,7 +254,9 @@ class StkComSession:
         try:
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{obj_a}")
         except Exception as exc:
-            raise StkObjectNotFoundError(f"Satellite not found in scenario: {obj_a!r}") from exc
+            raise StkObjectNotFoundError(
+                f"Satellite not found in scenario: {obj_a!r}"
+            ) from exc
 
         try:
             access = sat_obj.GetAccessTo(f"*/Satellite/{obj_b}")
@@ -254,7 +308,26 @@ class StkComSession:
             extra={"run_id": run_id, "action": action, "payload": payload},
         )
 
-    # ── Internal helpers ─────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
+    # Internal helpers
+    # -------------------------------------------------------------------------
+
+    def _ensure_folder(self, folder_name: str) -> None:
+        """Create a scenario-level folder if it does not already exist.
+
+        STK returns an error when a folder already exists; that specific error
+        is silently ignored.  Any other failure is logged as a warning.
+
+        Args:
+            folder_name: Folder name without leading slash (e.g. ``Blue``).
+        """
+        result = self._root.ExecuteCommand(f"New / Folder {folder_name}")
+        if result.IsSucceeded == 0:
+            msg = result.Message.lower()
+            if "already" not in msg and "exist" not in msg:
+                logger.warning(
+                    "Could not create STK folder %r: %s", folder_name, result.Message
+                )
 
     def _require_connection(self) -> None:
         """Raise :class:`StkConnectionError` if not connected to STK."""

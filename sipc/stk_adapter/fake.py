@@ -44,6 +44,10 @@ class FakeStkSession:
         self.scenario_path = scenario_path
         logger.debug("FakeStkSession.connect", extra={"scenario_path": scenario_path})
 
+    def setup_scenario_folders(self, folders: list[str]) -> None:
+        """Record folder setup; no-op for the fake session."""
+        logger.debug("FakeStkSession.setup_scenario_folders", extra={"folders": folders})
+
     def new_scenario(self, name: str) -> None:
         """Record new-scenario creation; resets satellite/propagator state."""
         self.connected = True
