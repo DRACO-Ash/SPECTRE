@@ -41,18 +41,23 @@
                 hx-target="#blue-tle-fields"
                 hx-swap="innerHTML"
                 hx-indicator="#blue-tle-indicator"
+                hx-disabled-elt="this"
                 class="btn-secondary btn-sm">Fetch TLE</button>
-        <span id="blue-tle-indicator" class="htmx-indicator">Fetching&hellip;</span>
+        <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
       </div>
       <form hx-post="/assets/blue"
             hx-target="#blue-list"
             hx-swap="innerHTML"
+            hx-disabled-elt="find button[type=submit]"
             hx-on::after-settle="if(event.detail.elt===this){this.closest('details').removeAttribute('open'); document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
         <div id="blue-tle-fields">
           {% include "partials/tle_fields.html" %}
         </div>
-        <button type="submit" class="btn-primary">Add</button>
+        <div class="submit-row">
+          <button type="submit" class="btn-primary">Add</button>
+          <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
+        </div>
       </form>
     </details>
   </section>
@@ -73,18 +78,23 @@
                 hx-target="#red-tle-fields"
                 hx-swap="innerHTML"
                 hx-indicator="#red-tle-indicator"
+                hx-disabled-elt="this"
                 class="btn-secondary btn-sm">Fetch TLE</button>
-        <span id="red-tle-indicator" class="htmx-indicator">Fetching&hellip;</span>
+        <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
       </div>
       <form hx-post="/assets/red"
             hx-target="#red-list"
             hx-swap="innerHTML"
+            hx-disabled-elt="find button[type=submit]"
             hx-on::after-settle="if(event.detail.elt===this){this.closest('details').removeAttribute('open'); document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
         <div id="red-tle-fields">
           {% include "partials/tle_fields.html" %}
         </div>
-        <button type="submit" class="btn-primary">Add</button>
+        <div class="submit-row">
+          <button type="submit" class="btn-primary">Add</button>
+          <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
+        </div>
       </form>
     </details>
   </section>
@@ -104,8 +114,11 @@
         <input name="source" placeholder="e.g. SPADOC / MANUAL" required />
       </label>
       <div class="run-actions">
-        <button type="submit" class="btn-primary">Run Plan</button>
-        <span id="run-indicator" class="htmx-indicator">Running&hellip;</span>
+        <button type="submit" class="btn-primary"
+                hx-disabled-elt="this">Run Plan</button>
+        <span id="run-indicator" class="htmx-indicator">
+          <span class="spinner"></span>Running intercept plan&hellip;
+        </span>
       </div>
     </form>
   </section>

@@ -6,9 +6,13 @@
     <form hx-post="/stk/connect"
           hx-target="#stk-status"
           hx-swap="innerHTML"
+          hx-disabled-elt="find button[type=submit]"
           class="stk-form">
       <input name="scenario_path" value="" type="hidden" />
-      <button type="submit" class="btn-primary btn-sm">Attach</button>
+      <div class="submit-row">
+        <button type="submit" class="btn-primary btn-sm">Attach</button>
+        <span class="htmx-indicator"><span class="spinner"></span>Attaching to STK&hellip;</span>
+      </div>
     </form>
   </fieldset>
 
@@ -17,12 +21,16 @@
     <form hx-post="/stk/connect"
           hx-target="#stk-status"
           hx-swap="innerHTML"
+          hx-disabled-elt="find button[type=submit]"
           class="stk-form">
       <input name="scenario_path"
              placeholder="Full path to .sc file"
              required
              class="stk-path-input" />
-      <button type="submit" class="btn-primary btn-sm">Load</button>
+      <div class="submit-row">
+        <button type="submit" class="btn-primary btn-sm">Load</button>
+        <span class="htmx-indicator"><span class="spinner"></span>Loading scenario&hellip;</span>
+      </div>
     </form>
   </fieldset>
 
@@ -31,6 +39,7 @@
     <form hx-post="/stk/new"
           hx-target="#stk-status"
           hx-swap="innerHTML"
+          hx-disabled-elt="find button[type=submit]"
           class="stk-form">
       <input name="scenario_name"
              placeholder="Scenario name (e.g. SIPC_Run_001)"
@@ -42,7 +51,10 @@
       <label class="stk-time-label">Stop (UTC)
         <input type="datetime-local" name="scenario_stop" id="sc-stop" required class="stk-path-input" />
       </label>
-      <button type="submit" class="btn-primary btn-sm">Create</button>
+      <div class="submit-row">
+        <button type="submit" class="btn-primary btn-sm">Create</button>
+        <span class="htmx-indicator"><span class="spinner"></span>Creating STK scenario &mdash; this may take 15&ndash;30 s&hellip;</span>
+      </div>
     </form>
   </fieldset>
   <script>

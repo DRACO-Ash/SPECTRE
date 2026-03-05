@@ -268,6 +268,48 @@ textarea { resize: vertical; }
 .login-form input { margin-top: 0.2rem; }
 .login-form .btn-primary { margin-top: 0.5rem; }
 
+/* ── Loading spinner ──────────────────────────────────────────── */
+@keyframes sipc-spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 170, 0, 0.2);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: sipc-spin 0.65s linear infinite;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 /* ── HTMX indicator ───────────────────────────────────────────── */
-.htmx-indicator { display: none; color: var(--amber); font-size: 0.8rem; }
-.htmx-request .htmx-indicator { display: inline; }
+.htmx-indicator {
+  display: none;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--amber);
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+}
+.htmx-request .htmx-indicator,
+.htmx-indicator.htmx-request {
+  display: inline-flex;
+}
+
+/* Disable submit buttons while a request is in flight */
+button:disabled,
+button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Row that holds a submit button + its indicator side-by-side */
+.submit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}

@@ -9,10 +9,13 @@
 {% elif stk_connected %}
 <div class="stk-state stk-connected">
   <span class="stk-label">STK &#10003; Connected &mdash; <em>{{ stk_scenario or "running instance" }}</em></span>
+  <span class="htmx-indicator" id="stk-disc-ind"><span class="spinner"></span>Disconnecting&hellip;</span>
   <button class="btn-secondary btn-sm"
           hx-post="/stk/disconnect"
           hx-target="#stk-status"
-          hx-swap="innerHTML">Disconnect</button>
+          hx-swap="innerHTML"
+          hx-indicator="#stk-disc-ind"
+          hx-disabled-elt="this">Disconnect</button>
 </div>
 {% else %}
 <div class="stk-state stk-disconnected">

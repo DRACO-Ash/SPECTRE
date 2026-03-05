@@ -9,7 +9,11 @@
           class="udl-login-form">
       <input name="username" placeholder="UDL Username" required autocomplete="off" />
       <input name="password" type="password" placeholder="UDL Password" required autocomplete="off" />
-      <button type="submit" class="btn-primary btn-sm">Connect</button>
+      <div class="submit-row">
+        <button type="submit" class="btn-primary btn-sm"
+                hx-disabled-elt="this">Connect</button>
+        <span class="htmx-indicator"><span class="spinner"></span>Connecting&hellip;</span>
+      </div>
     </form>
   </details>
 </div>
@@ -32,7 +36,11 @@
           class="udl-login-form">
       <input name="username" placeholder="UDL Username" required autocomplete="off" />
       <input name="password" type="password" placeholder="UDL Password" required autocomplete="off" />
-      <button type="submit" class="btn-primary btn-sm">Connect</button>
+      <div class="submit-row">
+        <button type="submit" class="btn-primary btn-sm"
+                hx-disabled-elt="this">Connect</button>
+        <span class="htmx-indicator"><span class="spinner"></span>Connecting&hellip;</span>
+      </div>
     </form>
   </details>
 </div>
