@@ -102,6 +102,8 @@ class StkComSession:
         except Exception as exc:
             raise StkConnectionError(f"Failed to connect to STK: {exc}") from exc
 
+        self._log_connect_diagnostic()
+
     def setup_scenario_folders(self, folders: list[str]) -> None:
         """Create the standard scenario folder structure in STK.
 
@@ -155,6 +157,8 @@ class StkComSession:
         except Exception as exc:
             raise StkConnectionError(f"Failed to create new STK scenario: {exc}") from exc
 
+        self._log_connect_diagnostic()
+
         from sipc.config.constants import STK_FOLDERS  # noqa: PLC0415
 
         self.setup_scenario_folders(STK_FOLDERS)
@@ -194,32 +198,46 @@ class StkComSession:
         folder_name = group.lstrip("/")
         self._ensure_folder(folder_name)
 
-        # If the satellite already exists (e.g. from a previous run), skip creation.
+        # If satellite already exists (e.g. from a previous run), skip creation.
+        already_exists = False
         try:
             self._root.GetObjectFromPath(f"Satellite/{name}")
-            logger.info("Satellite %r already exists in scenario; skipping New command", name)
+            already_exists = True
+            logger.info("Satellite %r already exists in scenario; skipping creation", name)
         except Exception:
-            try:
-                result = self._root.ExecuteCommand(f"New / Satellite {name}")
-                _check(result, f"create_satellite({name!r})")
-            except StkCommandError:
-                raise
-            except Exception as exc:
-                raise StkCommandError(
-                    f"create_satellite({name!r}): STK raised COM exception — {exc}"
-                ) from exc
+            pass  # Does not exist — create it below
 
-        # Move into the folder. STK Connect command: SetGroup */Satellite/<name> Group <folder>
-        move_result = self._root.ExecuteCommand(
-            f"SetGroup */Satellite/{name} Group {folder_name}"
-        )
-        if move_result.IsSucceeded == 0:
-            logger.warning(
-                "Could not assign satellite %r to folder %r: %s",
-                name,
-                folder_name,
-                move_result.Message,
+        if not already_exists:
+            # Prefer the STK Object Model (Children.New) over ExecuteCommand.
+            # ExecuteCommand("New / Satellite …") can fail in ODTK-managed STK
+            # instances because ODTK intercepts the Connect command layer.
+            # Children.New goes directly to the COM object model and is unaffected.
+            created = self._create_satellite_via_om(name)
+            if not created:
+                # Object model unavailable — fall back to Connect command.
+                try:
+                    result = self._root.ExecuteCommand(f"New / Satellite {name}")
+                    _check(result, f"create_satellite({name!r})")
+                    logger.info("Satellite %r created via Connect command", name)
+                except StkCommandError:
+                    raise
+                except Exception as exc:
+                    raise StkCommandError(
+                        f"create_satellite({name!r}): both OM and Connect command failed — {exc}"
+                    ) from exc
+
+        # Best-effort folder assignment via Connect command.
+        try:
+            move_result = self._root.ExecuteCommand(
+                f"SetGroup */Satellite/{name} Group {folder_name}"
             )
+            if move_result.IsSucceeded == 0:
+                logger.warning(
+                    "Could not assign satellite %r to folder %r: %s",
+                    name, folder_name, move_result.Message,
+                )
+        except Exception as exc:
+            logger.warning("SetGroup threw for satellite %r: %s", name, exc)
 
         stk_path = f"Satellite/{name}"
         logger.info(
@@ -259,11 +277,21 @@ class StkComSession:
             f'SetState */Satellite/{sat_name} TLE '
             f'"{sat_name}" "{line1}" "{line2}"'
         )
-        _check(self._root.ExecuteCommand(set_cmd), f"set_propagator TLE({sat_name!r})")
-        _check(
-            self._root.ExecuteCommand(f"Propagate */Satellite/{sat_name}"),
-            f"set_propagator Propagate({sat_name!r})",
-        )
+        try:
+            _check(self._root.ExecuteCommand(set_cmd), f"set_propagator TLE({sat_name!r})")
+            _check(
+                self._root.ExecuteCommand(f"Propagate */Satellite/{sat_name}"),
+                f"set_propagator Propagate({sat_name!r})",
+            )
+        except StkCommandError:
+            raise
+        except Exception as exc:
+            # Connect command layer unavailable — try Object Model TLE assignment.
+            logger.warning(
+                "set_propagator Connect command failed for %r (%s); trying Object Model",
+                sat_name, exc,
+            )
+            self._set_propagator_via_om(sat_name, line1, line2)
         logger.info("set_propagator", extra={"sat_name": sat_name})
 
     def compute_access(self, obj_a: str, obj_b: str) -> list[AccessInterval]:
@@ -420,6 +448,90 @@ class StkComSession:
             # Some STK builds throw instead of returning IsSucceeded==0 for
             # "already exists" — treat all COM exceptions here as non-fatal.
             logger.warning("STK folder %r COM exception (likely already exists): %s", folder_name, exc)
+
+    def _set_propagator_via_om(self, sat_name: str, line1: str, line2: str) -> None:
+        """Set the SGP4/TLE propagator via the STK Object Model.
+
+        Used as a fallback when the ``SetState`` / ``Propagate`` Connect
+        commands are unavailable (e.g. ODTK-managed instances).
+
+        Args:
+            sat_name: STK object name of the satellite.
+            line1: TLE line 1.
+            line2: TLE line 2.
+
+        Raises:
+            StkCommandError: If the Object Model approach also fails.
+        """
+        # AgEVePropagatorType.ePropagatorSGP4 = 5 (stable across STK 10–13)
+        _E_PROPAGATOR_SGP4 = 5
+        try:
+            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+            sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
+            propagator = sat_obj.Propagator
+            propagator.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
+            propagator.Propagate()
+            logger.info("set_propagator (OM) succeeded for %r", sat_name)
+        except Exception as exc:
+            raise StkCommandError(
+                f"set_propagator({sat_name!r}): Object Model TLE assignment failed — {exc}"
+            ) from exc
+
+    def _create_satellite_via_om(self, name: str) -> bool:
+        """Create a satellite using the STK Object Model (``Children.New``).
+
+        Bypasses the Connect command layer entirely, which makes this reliable
+        even in ODTK-managed STK instances where ``ExecuteCommand`` is
+        intercepted.
+
+        Args:
+            name: STK object name for the new satellite.
+
+        Returns:
+            ``True`` if the satellite was created, ``False`` if the Object
+            Model approach is unavailable (caller should fall back to
+            ``ExecuteCommand``).
+        """
+        # AgESTKObjectType.eSatellite = 18 (stable across STK 10–13)
+        _E_SATELLITE = 18
+        try:
+            scenario_obj = self._root.CurrentScenario
+            scenario_obj.Children.New(_E_SATELLITE, name)
+            logger.info("Satellite %r created via STK Object Model", name)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Object model satellite creation unavailable for %r: %s — "
+                "will try Connect command",
+                name, exc,
+            )
+            return False
+
+    def _log_connect_diagnostic(self) -> None:
+        """Run a lightweight STK diagnostic and log the results.
+
+        Calls ``ExecuteCommand("GetVersion")`` so that the run log immediately
+        shows whether the Connect command layer is functional.  If the call
+        fails, a warning is logged — satellite creation will fall back to the
+        Object Model path automatically.
+        """
+        try:
+            result = self._root.ExecuteCommand("GetVersion")
+            if result.IsSucceeded:
+                version = result.Item(0) if result.Count > 0 else "(no output)"
+                logger.info("STK Connect commands operational — version: %s", version)
+            else:
+                logger.warning(
+                    "STK Connect command layer not responding (GetVersion failed: %s). "
+                    "Will use Object Model for satellite creation.",
+                    result.Message,
+                )
+        except Exception as exc:
+            logger.warning(
+                "STK Connect command layer unavailable (%s). "
+                "Will use Object Model for satellite creation.",
+                exc,
+            )
 
     def _require_connection(self) -> None:
         """Raise :class:`StkConnectionError` if not connected to STK."""
