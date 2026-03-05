@@ -1,7 +1,7 @@
 {% if error %}
 <div class="udl-state udl-error">
   <span class="udl-label">UDL &#9888; {{ error }}</span>
-  <details class="udl-login-wrap">
+  <details class="udl-login-wrap" open>
     <summary class="btn-secondary btn-sm">Retry</summary>
     <form hx-post="/udl/login"
           hx-target="#udl-status"

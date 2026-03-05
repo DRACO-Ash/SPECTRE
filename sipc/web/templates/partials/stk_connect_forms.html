@@ -36,8 +36,25 @@
              placeholder="Scenario name (e.g. SIPC_Run_001)"
              required
              class="stk-path-input" />
+      <label class="stk-time-label">Start (UTC)
+        <input type="datetime-local" name="scenario_start" id="sc-start" required class="stk-path-input" />
+      </label>
+      <label class="stk-time-label">Stop (UTC)
+        <input type="datetime-local" name="scenario_stop" id="sc-stop" required class="stk-path-input" />
+      </label>
       <button type="submit" class="btn-primary btn-sm">Create</button>
     </form>
   </fieldset>
+  <script>
+    (function () {
+      var now = new Date();
+      var plus24 = new Date(now.getTime() + 86400000);
+      function fmt(d) { return d.toISOString().slice(0, 16); }
+      var s = document.getElementById('sc-start');
+      var e = document.getElementById('sc-stop');
+      if (s && !s.value) s.value = fmt(now);
+      if (e && !e.value) e.value = fmt(plus24);
+    })();
+  </script>
 
 </div>

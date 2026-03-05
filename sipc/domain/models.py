@@ -52,10 +52,13 @@ class AccessInterval:
     Attributes:
         start: UTC-aware start of the access window.
         end: UTC-aware end of the access window.
+        min_range_km: Minimum range between the two objects during this window (km).
+            Zero indicates the value was not computed or is unavailable.
     """
 
     start: datetime
     end: datetime
+    min_range_km: float = 0.0
 
     @property
     def duration_seconds(self) -> float:
@@ -71,11 +74,15 @@ class InterceptWindow:
         start: UTC-aware start of the intercept opportunity.
         end: UTC-aware end of the intercept opportunity.
         min_range_km: Minimum range between interceptor and target during this window (km).
+        blue_name: Human-readable name of the blue (friendly) asset.
+        red_name: Human-readable name of the red (threat) track.
     """
 
     start: datetime
     end: datetime
     min_range_km: float
+    blue_name: str
+    red_name: str
 
 
 @dataclass

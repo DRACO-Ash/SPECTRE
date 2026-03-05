@@ -67,10 +67,15 @@ class TestInterceptWindow:
         """All constructor fields should be stored correctly."""
         start = datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC)
         end = datetime(2026, 3, 4, 12, 30, 0, tzinfo=UTC)
-        window = InterceptWindow(start=start, end=end, min_range_km=250.5)
+        window = InterceptWindow(
+            start=start, end=end, min_range_km=250.5,
+            blue_name="Alpha", red_name="Track01",
+        )
         assert window.min_range_km == 250.5
         assert window.start == start
         assert window.end == end
+        assert window.blue_name == "Alpha"
+        assert window.red_name == "Track01"
 
 
 class TestRunConfig:

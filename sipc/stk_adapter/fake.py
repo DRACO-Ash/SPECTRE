@@ -35,6 +35,9 @@ class FakeStkSession:
         self.actions_log: list[tuple[str, str, dict[str, Any]]] = []
         self.access_intervals: list[AccessInterval] = []
         self.epoch: datetime = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+        self.range_km: float = 100.0
+        self.scenario_start: datetime = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+        self.scenario_stop: datetime = datetime(2026, 1, 2, 0, 0, 0, tzinfo=UTC)
 
     # ── IStkSession interface ─────────────────────────────────────────────────
 
@@ -75,11 +78,27 @@ class FakeStkSession:
         logger.debug("FakeStkSession.set_propagator", extra={"sat_name": sat_name})
 
     def compute_access(self, obj_a: str, obj_b: str) -> list[AccessInterval]:
-        """Return pre-configured access intervals (default: empty list)."""
+        """Return pre-configured access intervals with ``range_km`` applied to each."""
         logger.debug(
             "FakeStkSession.compute_access", extra={"obj_a": obj_a, "obj_b": obj_b}
         )
-        return list(self.access_intervals)
+        return [
+            AccessInterval(
+                start=iv.start,
+                end=iv.end,
+                min_range_km=self.range_km,
+            )
+            for iv in self.access_intervals
+        ]
+
+    def set_scenario_time(self, start: datetime, stop: datetime) -> None:
+        """Store scenario time window in memory."""
+        self.scenario_start = start
+        self.scenario_stop = stop
+        logger.debug(
+            "FakeStkSession.set_scenario_time",
+            extra={"start": start.isoformat(), "stop": stop.isoformat()},
+        )
 
     def get_scenario_epoch(self) -> datetime:
         """Return the configured epoch (default: 2026-01-01T00:00:00Z)."""

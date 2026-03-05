@@ -36,6 +36,15 @@ def _parse_stk_time(stk_time: str) -> datetime:
     return datetime.strptime(s_clean, "%d %b %Y %H:%M:%S").replace(tzinfo=UTC)
 
 
+def _to_stk_time(dt: datetime) -> str:
+    """Format a UTC-aware datetime as an STK UTCG time string.
+
+    Produces the format STK expects for ``SetTimePeriod`` and similar calls:
+    ``"d Mon YYYY HH:MM:SS.000"``  (e.g. ``"5 Mar 2026 12:00:00.000"``).
+    """
+    return f"{dt.day} {dt.strftime('%b %Y %H:%M:%S')}.000"
+
+
 def _check(result: Any, context: str) -> None:
     """Raise :class:`StkCommandError` if an ExecuteCommand result failed."""
     if result.IsSucceeded == 0:
@@ -80,8 +89,10 @@ class StkComSession:
             StkConnectionError: If STK is not running or the scenario fails to load.
         """
         try:
+            import pythoncom  # type: ignore[import]
             import win32com.client  # type: ignore[import]
 
+            pythoncom.CoInitialize()
             self._app = win32com.client.Dispatch("STK13.Application")
             self._app.Visible = True
             self._root = self._app.Personality2
@@ -123,8 +134,10 @@ class StkComSession:
                 be created.
         """
         try:
+            import pythoncom  # type: ignore[import]
             import win32com.client  # type: ignore[import]
 
+            pythoncom.CoInitialize()
             self._app = win32com.client.Dispatch("STK13.Application")
             self._app.Visible = True
             self._root = self._app.Personality2
@@ -270,10 +283,14 @@ class StkComSession:
         intervals: list[AccessInterval] = []
         for i in range(time_periods.Count):
             period = time_periods.Item(i)
+            min_range = self._query_min_range_km(
+                access, period.StartTime, period.StopTime
+            )
             intervals.append(
                 AccessInterval(
                     start=_parse_stk_time(period.StartTime),
                     end=_parse_stk_time(period.StopTime),
+                    min_range_km=min_range,
                 )
             )
 
@@ -282,6 +299,25 @@ class StkComSession:
             extra={"obj_a": obj_a, "obj_b": obj_b, "interval_count": len(intervals)},
         )
         return intervals
+
+    def set_scenario_time(self, start: datetime, stop: datetime) -> None:
+        """Set the scenario analysis time window and rewind to the start epoch.
+
+        Args:
+            start: UTC-aware scenario start epoch.
+            stop: UTC-aware scenario stop epoch.
+
+        Raises:
+            StkConnectionError: If not connected.
+        """
+        self._require_connection()
+        scenario = self._root.CurrentScenario
+        scenario.SetTimePeriod(_to_stk_time(start), _to_stk_time(stop))
+        self._root.Rewind()
+        logger.info(
+            "set_scenario_time",
+            extra={"start": start.isoformat(), "stop": stop.isoformat()},
+        )
 
     def get_scenario_epoch(self) -> datetime:
         """Return the scenario start epoch as a UTC-aware datetime.
@@ -311,6 +347,36 @@ class StkComSession:
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
+
+    def _query_min_range_km(
+        self, access: Any, start_time: str, stop_time: str, step_s: float = 30.0
+    ) -> float:
+        """Return the minimum range (km) between two objects over an access interval.
+
+        Queries the STK ``Range`` data provider on the already-computed access
+        object using a fixed time step.  On any failure the method returns
+        ``0.0`` and logs a warning so that a data-provider error never aborts
+        a planning run.
+
+        Args:
+            access: The STK access COM object (``IAgSatelliteAccess``).
+            start_time: STK-format start time string for the interval.
+            stop_time: STK-format stop time string for the interval.
+            step_s: Sampling step in seconds (default 30 s).
+
+        Returns:
+            Minimum range in km, or ``0.0`` if unavailable.
+        """
+        try:
+            dp = access.DataProviders.GetDataPrvIntervalFromPath("Range")
+            result = dp.Exec(start_time, stop_time, step_s)
+            values = list(result.DataSets.GetDataSetByName("Range").GetValues())
+            return float(min(values)) if values else 0.0
+        except Exception as exc:
+            logger.warning(
+                "Range data provider query failed; min_range_km will be 0: %s", exc
+            )
+            return 0.0
 
     def _ensure_folder(self, folder_name: str) -> None:
         """Create a scenario-level folder if it does not already exist.

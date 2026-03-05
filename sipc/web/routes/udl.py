@@ -62,13 +62,20 @@ async def udl_login(
             logger.warning("UDL login rejected for operator %s", current_user.username)
             return tmpl.TemplateResponse(  # type: ignore[attr-defined]
                 "partials/udl_status.html",
-                {"request": request, "udl_user": None, "error": "Invalid UDL credentials."},
+                {"request": request, "udl_user": None, "error": "Invalid UDL credentials (401)."},
             )
         resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        error = f"UDL probe returned HTTP {exc.response.status_code} — check credentials or UDL status."
+        logger.warning("UDL login probe HTTP error for operator %s: %s", current_user.username, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/udl_status.html",
+            {"request": request, "udl_user": None, "error": error},
+        )
     except httpx.TimeoutException:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/udl_status.html",
-            {"request": request, "udl_user": None, "error": "UDL connection timed out."},
+            {"request": request, "udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL login probe failed: %s", exc)
@@ -187,4 +194,100 @@ async def fetch_tle(
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/tle_fields.html",
         {"request": request, "name": name, "tle": tle, "error": None},
+    )
+
+
+# ── State vector fetch proxy ───────────────────────────────────────────────
+
+
+@router.get("/statevector", response_model=None)
+async def fetch_statevector(
+    request: Request,
+    satno: int = Query(..., description="NORAD satellite catalog number"),
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Fetch the latest Cartesian state vector for *satno* from UDL.
+
+    Returns position (km) and velocity (km s⁻¹) in the J2000 reference frame
+    at the most recent available epoch. Useful for initialising high-fidelity
+    intercept geometry without propagating a TLE.
+    """
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    if not state.udl_username or not state.udl_password:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/statevector_fields.html",
+            {
+                "request": request,
+                "sv": None,
+                "error": "Not connected to UDL — use the UDL panel to log in first.",
+            },
+        )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/statevector",
+                params={"satNo": satno, "maxResults": 1, "orderby": "EPOCH desc"},
+                auth=(state.udl_username, state.udl_password),
+                timeout=10.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
+        logger.warning(error)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/statevector_fields.html",
+            {"request": request, "sv": None, "error": error},
+        )
+    except httpx.TimeoutException:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/statevector_fields.html",
+            {"request": request, "sv": None, "error": "UDL request timed out."},
+        )
+    except httpx.RequestError as exc:
+        logger.warning("UDL state vector fetch failed for SATNO %s: %s", satno, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/statevector_fields.html",
+            {"request": request, "sv": None, "error": f"UDL unreachable: {exc}"},
+        )
+
+    if not data:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/statevector_fields.html",
+            {
+                "request": request,
+                "sv": None,
+                "error": f"No state vector found for SATNO {satno}.",
+            },
+        )
+
+    rec = data[0]
+    sv = {
+        "name": str(rec.get("objectName") or rec.get("OBJECT_NAME", satno)).strip(),
+        "epoch": rec.get("epoch", "—"),
+        "x": rec.get("x"),
+        "y": rec.get("y"),
+        "z": rec.get("z"),
+        "x_dot": rec.get("xDot"),
+        "y_dot": rec.get("yDot"),
+        "z_dot": rec.get("zDot"),
+        "ref_frame": rec.get("refFrame", "J2000"),
+    }
+
+    state.append_log(
+        f"[UDL] Fetched state vector for SATNO {satno} ({sv['name']}) epoch {sv['epoch']}"
+    )
+    logger.info(
+        "State vector fetched for SATNO %s (%s) by operator %s",
+        satno,
+        sv["name"],
+        current_user.username,
+    )
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/statevector_fields.html",
+        {"request": request, "sv": sv, "error": None},
     )

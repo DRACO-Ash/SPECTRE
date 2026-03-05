@@ -9,7 +9,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
+from datetime import UTC, datetime
+
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
+from sipc.config.constants import STK_FOLDERS
 from sipc.domain.scenario import ScenarioPlanner
 from sipc.stk_adapter.exceptions import StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
@@ -71,6 +74,20 @@ async def add_blue_asset(
     asset = BlueAsset(name=name.strip(), tle=tle.strip())
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Added asset: {asset.stk_name}")
+
+    if state.stk_session is not None:
+        def _push_blue() -> None:
+            state.stk_session.create_satellite(asset.stk_name, STK_FOLDERS[0])
+            state.stk_session.set_propagator(asset.stk_name, asset.tle)
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _push_blue)
+            state.append_log(f"[STK] {asset.stk_name} created and propagated")
+        except Exception as exc:
+            logger.warning("STK push failed for %s: %s", asset.stk_name, exc)
+            state.append_log(f"[STK] WARNING: could not push {asset.stk_name} to STK — {exc}")
+
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/blue_list.html",
         {"request": request, "blue_assets": state.blue_assets},
@@ -107,6 +124,20 @@ async def add_red_track(
     track = RedTrack(name=name.strip(), tle=tle.strip())
     state.red_tracks.append(track)
     state.append_log(f"[RED] Added track: {track.stk_name}")
+
+    if state.stk_session is not None:
+        def _push_red() -> None:
+            state.stk_session.create_satellite(track.stk_name, STK_FOLDERS[1])
+            state.stk_session.set_propagator(track.stk_name, track.tle)
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _push_red)
+            state.append_log(f"[STK] {track.stk_name} created and propagated")
+        except Exception as exc:
+            logger.warning("STK push failed for %s: %s", track.stk_name, exc)
+            state.append_log(f"[STK] WARNING: could not push {track.stk_name} to STK — {exc}")
+
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/red_list.html",
         {"request": request, "red_tracks": state.red_tracks},
@@ -249,6 +280,8 @@ async def stk_connect(
 async def stk_new_scenario(
     request: Request,
     scenario_name: Annotated[str, Form()],
+    scenario_start: Annotated[str, Form()] = "",
+    scenario_stop: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Create a new blank STK scenario, closing any currently-open one.
@@ -294,6 +327,18 @@ async def stk_new_scenario(
     state.stk_scenario = name
     state.append_log(f"[STK] New scenario created: {name}")
     logger.info("STK new scenario %r for operator %s", name, current_user.username)
+
+    if scenario_start and scenario_stop:
+        try:
+            start_dt = datetime.fromisoformat(scenario_start).replace(tzinfo=UTC)
+            stop_dt = datetime.fromisoformat(scenario_stop).replace(tzinfo=UTC)
+            await loop.run_in_executor(None, session.set_scenario_time, start_dt, stop_dt)
+            state.append_log(
+                f"[STK] Scenario time: {scenario_start} → {scenario_stop} UTC"
+            )
+        except Exception as exc:
+            logger.warning("Failed to set scenario time: %s", exc)
+            state.append_log(f"[STK] WARNING: could not set scenario time — {exc}")
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/stk_status.html",

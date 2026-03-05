@@ -37,32 +37,105 @@ class TestDegreesRadiansConversion:
 
 
 class TestAzimuthElevationRange:
-    """Tests for azimuth_elevation_range."""
+    """Tests for azimuth_elevation_range using a proper ECEF → SEZ transform.
+
+    Reference observer: lat=0°, lon=0° → ECEF (6371, 0, 0) km.
+    At this point the local frame is:
+        Zenith (Z) = (1, 0, 0)
+        East   (E) = (0, 1, 0)
+        North  (N) = (0, 0, 1)  →  South (S) = (0, 0, -1)
+
+    All azimuth values are measured clockwise from North (0–360°).
+    Elevation is measured from the local horizontal plane (−90° to +90°).
+
+    These tests define the behaviour of the *correct* SEZ implementation
+    (Phase 2.2). They are expected to fail on the current placeholder stub.
+    """
+
+    _R: float = 6371.0  # nominal Earth radius (km)
 
     def test_same_position_returns_zero_range(self) -> None:
-        """Identical positions should give zero range."""
-        _, _, rng = azimuth_elevation_range((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        """Identical positions should give zero range regardless of location."""
+        _, _, rng = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, 0.0, 0.0)
+        )
         assert rng == 0.0
 
-    def test_range_along_x_axis(self) -> None:
-        """Target 100 km along +X from observer at origin."""
-        _, _, rng = azimuth_elevation_range((0.0, 0.0, 0.0), (100.0, 0.0, 0.0))
-        assert math.isclose(rng, 100.0)
+    def test_range_is_euclidean_distance(self) -> None:
+        """Range should equal the straight-line distance between the two points."""
+        _, _, rng = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R + 100.0, 0.0, 0.0)
+        )
+        assert math.isclose(rng, 100.0, rel_tol=1e-9)
 
-    def test_azimuth_east(self) -> None:
-        """Target due east (+Y in ECEF approximation) should give ~90° azimuth."""
-        az, _, _ = azimuth_elevation_range((0.0, 0.0, 0.0), (0.0, 100.0, 0.0))
-        assert math.isclose(az, 90.0, abs_tol=0.1)
+    def test_elevation_90_target_directly_overhead(self) -> None:
+        """Target in the observer's zenith direction should give elevation = 90°."""
+        # Δr = (100, 0, 0) → purely in Zenith direction
+        _, el, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R + 100.0, 0.0, 0.0)
+        )
+        assert math.isclose(el, 90.0, abs_tol=1e-6)
 
-    def test_elevation_above(self) -> None:
-        """Target directly above (+Z) should give positive elevation."""
-        _, el, _ = azimuth_elevation_range((0.0, 0.0, 0.0), (0.0, 0.0, 100.0))
-        assert el > 0.0
+    def test_elevation_0_target_on_horizon(self) -> None:
+        """Target perpendicular to zenith (due East) should give elevation = 0°."""
+        # Δr = (0, 100, 0) → purely in East direction, no Z component
+        _, el, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, 100.0, 0.0)
+        )
+        assert math.isclose(el, 0.0, abs_tol=1e-6)
 
-    def test_returns_three_values(self) -> None:
-        """Should always return a 3-tuple."""
-        result = azimuth_elevation_range((1.0, 2.0, 3.0), (4.0, 5.0, 6.0))
-        assert len(result) == 3
+    def test_azimuth_90_due_east(self) -> None:
+        """Target due East should give azimuth = 90°."""
+        # Δr = (0, 100, 0) → SEZ: S=0, E=100, Z=0 → Az = atan2(100, 0) = 90°
+        az, _, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, 100.0, 0.0)
+        )
+        assert math.isclose(az, 90.0, abs_tol=1e-6)
+
+    def test_azimuth_0_due_north(self) -> None:
+        """Target due North should give azimuth = 0°."""
+        # Δr = (0, 0, 100) → SEZ: S=-100, E=0, Z=0 → Az = atan2(0, 100) = 0°
+        az, _, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, 0.0, 100.0)
+        )
+        assert math.isclose(az, 0.0, abs_tol=1e-6)
+
+    def test_azimuth_180_due_south(self) -> None:
+        """Target due South should give azimuth = 180°."""
+        # Δr = (0, 0, -100) → SEZ: S=100, E=0, Z=0 → Az = atan2(0, -100) = 180°
+        az, _, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, 0.0, -100.0)
+        )
+        assert math.isclose(az, 180.0, abs_tol=1e-6)
+
+    def test_azimuth_270_due_west(self) -> None:
+        """Target due West should give azimuth = 270°."""
+        # Δr = (0, -100, 0) → SEZ: S=0, E=-100, Z=0 → Az = atan2(-100, 0) → 270°
+        az, _, _ = azimuth_elevation_range(
+            (self._R, 0.0, 0.0), (self._R, -100.0, 0.0)
+        )
+        assert math.isclose(az, 270.0, abs_tol=1e-6)
+
+    def test_elevation_45_degrees(self) -> None:
+        """Target at 45° elevation due North should give az=0°, el=45°, range=100 km."""
+        # In SEZ: S = -100*cos(45°), E = 0, Z = 100*sin(45°)
+        # In ECEF: Δr = Z_hat * 70.711 + N_hat * 70.711 = (70.711, 0, 70.711)
+        d = 100.0
+        delta = d / math.sqrt(2)
+        observer = (self._R, 0.0, 0.0)
+        target = (self._R + delta, 0.0, delta)
+        az, el, rng = azimuth_elevation_range(observer, target)
+        assert math.isclose(el, 45.0, abs_tol=1e-4)
+        assert math.isclose(az, 0.0, abs_tol=1e-4)
+        assert math.isclose(rng, d, rel_tol=1e-6)
+
+    def test_north_pole_observer_overhead_target(self) -> None:
+        """At the North Pole, zenith is +Z; target directly above should give El=90°."""
+        # For lat=90°: Zenith=(0,0,1), so Δr purely in +Z → El=90°
+        observer = (0.0, 0.0, self._R)
+        target = (0.0, 0.0, self._R + 100.0)
+        _, el, _ = azimuth_elevation_range(observer, target)
+        assert math.isclose(el, 90.0, abs_tol=1e-6)
 
 
 class TestClosureRate:

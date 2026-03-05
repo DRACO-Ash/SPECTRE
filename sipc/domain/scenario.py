@@ -119,7 +119,9 @@ class ScenarioPlanner:
                         InterceptWindow(
                             start=interval.start,
                             end=interval.end,
-                            min_range_km=0.0,  # TODO: query geometry for min-range
+                            min_range_km=interval.min_range_km,
+                            blue_name=asset.name,
+                            red_name=track.name,
                         )
                     )
         windows.sort(key=lambda w: w.start)

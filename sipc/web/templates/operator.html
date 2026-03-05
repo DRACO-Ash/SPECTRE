@@ -47,6 +47,7 @@
       <form hx-post="/assets/blue"
             hx-target="#blue-list"
             hx-swap="innerHTML"
+            hx-on::after-settle="this.closest('details').removeAttribute('open'); document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value=''});"
             class="asset-form">
         <div id="blue-tle-fields">
           {% include "partials/tle_fields.html" %}
@@ -78,6 +79,7 @@
       <form hx-post="/assets/red"
             hx-target="#red-list"
             hx-swap="innerHTML"
+            hx-on::after-settle="this.closest('details').removeAttribute('open'); document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value=''});"
             class="asset-form">
         <div id="red-tle-fields">
           {% include "partials/tle_fields.html" %}

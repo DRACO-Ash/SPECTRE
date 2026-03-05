@@ -4,6 +4,8 @@
 <table class="results-table">
   <thead>
     <tr>
+      <th>Blue</th>
+      <th>Red</th>
       <th>Start UTC</th>
       <th>End UTC</th>
       <th>Duration (s)</th>
@@ -13,6 +15,8 @@
   <tbody>
     {% for w in results %}
     <tr>
+      <td>{{ w.blue_name }}</td>
+      <td>{{ w.red_name }}</td>
       <td>{{ w.start.strftime("%Y-%m-%d %H:%M:%S") }}</td>
       <td>{{ w.end.strftime("%Y-%m-%d %H:%M:%S") }}</td>
       <td>{{ "%.1f"|format((w.end - w.start).total_seconds()) }}</td>

@@ -106,6 +106,18 @@ class IStkSession(Protocol):
         """
         ...
 
+    def set_scenario_time(self, start: datetime, stop: datetime) -> None:
+        """Set the scenario analysis time window.
+
+        Args:
+            start: UTC-aware scenario start epoch.
+            stop: UTC-aware scenario stop epoch.
+
+        Raises:
+            StkConnectionError: If not connected.
+        """
+        ...
+
     def get_scenario_epoch(self) -> datetime:
         """Return the scenario start epoch as a UTC-aware datetime.
 

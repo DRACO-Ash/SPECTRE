@@ -68,6 +68,56 @@ class TestScenarioPlanner:
         assert windows[0].start == sample_access_interval.start
         assert windows[0].end == sample_access_interval.end
 
+    def test_plan_propagates_min_range_from_access_interval(
+        self,
+        fake_session: FakeStkSession,
+        run_config: RunConfig,
+        sample_access_interval: AccessInterval,
+    ) -> None:
+        """plan() should copy min_range_km from AccessInterval into InterceptWindow."""
+        fake_session.range_km = 250.5
+        fake_session.access_intervals = [sample_access_interval]
+        planner = ScenarioPlanner(session=fake_session, config=run_config)
+        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
+        red = [RedTrack(name="Track01", tle="l1\nl2")]
+
+        windows = planner.plan(blue, red)
+
+        assert windows[0].min_range_km == 250.5
+
+    def test_plan_sets_asset_pair_labels(
+        self,
+        fake_session: FakeStkSession,
+        run_config: RunConfig,
+        sample_access_interval: AccessInterval,
+    ) -> None:
+        """InterceptWindow should carry the blue and red asset names."""
+        fake_session.access_intervals = [sample_access_interval]
+        planner = ScenarioPlanner(session=fake_session, config=run_config)
+        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
+        red = [RedTrack(name="Track01", tle="l1\nl2")]
+
+        windows = planner.plan(blue, red)
+
+        assert windows[0].blue_name == "Alpha"
+        assert windows[0].red_name == "Track01"
+
+    def test_plan_min_range_nonzero_by_default(
+        self,
+        fake_session: FakeStkSession,
+        run_config: RunConfig,
+        sample_access_interval: AccessInterval,
+    ) -> None:
+        """FakeStkSession default range_km (100.0) should produce non-zero min_range_km."""
+        fake_session.access_intervals = [sample_access_interval]
+        planner = ScenarioPlanner(session=fake_session, config=run_config)
+        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
+        red = [RedTrack(name="Track01", tle="l1\nl2")]
+
+        windows = planner.plan(blue, red)
+
+        assert windows[0].min_range_km > 0.0
+
     def test_plan_logs_actions_with_run_id(
         self, fake_session: FakeStkSession, run_config: RunConfig
     ) -> None:

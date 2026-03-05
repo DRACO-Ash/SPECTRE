@@ -1,0 +1,28 @@
+{% if sv %}
+<p class="field-success">&#10003; State vector loaded: <strong>{{ sv.name }}</strong> &mdash; epoch {{ sv.epoch }} ({{ sv.ref_frame }})</p>
+<table class="sv-table">
+  <thead>
+    <tr><th>Axis</th><th>Position (km)</th><th>Velocity (km/s)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>X</td>
+      <td>{{ "%.3f"|format(sv.x) if sv.x is not none else "&mdash;" }}</td>
+      <td>{{ "%.6f"|format(sv.x_dot) if sv.x_dot is not none else "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td>Y</td>
+      <td>{{ "%.3f"|format(sv.y) if sv.y is not none else "&mdash;" }}</td>
+      <td>{{ "%.6f"|format(sv.y_dot) if sv.y_dot is not none else "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td>Z</td>
+      <td>{{ "%.3f"|format(sv.z) if sv.z is not none else "&mdash;" }}</td>
+      <td>{{ "%.6f"|format(sv.z_dot) if sv.z_dot is not none else "&mdash;" }}</td>
+    </tr>
+  </tbody>
+</table>
+{% endif %}
+{% if error %}
+<p class="field-error">{{ error }}</p>
+{% endif %}
