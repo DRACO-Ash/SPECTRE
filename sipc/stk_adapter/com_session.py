@@ -478,8 +478,8 @@ class StkComSession:
     def _set_propagator_via_om(self, sat_name: str, line1: str, line2: str) -> None:
         """Set the SGP4/TLE propagator via the STK Object Model.
 
-        Used as a fallback when the ``SetState`` / ``Propagate`` Connect
-        commands are unavailable (e.g. ODTK-managed instances).
+        Tries multiple approaches in order, logging each attempt so that the
+        working path is visible in the server log on the first successful run.
 
         Args:
             sat_name: STK object name of the satellite.
@@ -487,24 +487,96 @@ class StkComSession:
             line2: TLE line 2.
 
         Raises:
-            StkCommandError: If the Object Model approach also fails.
+            StkCommandError: If all approaches fail.
         """
         # AgEVePropagatorType.ePropagatorSGP4 = 5 (stable across STK 10–13)
         _E_PROPAGATOR_SGP4 = 5
+        errors: list[str] = []
+
         try:
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
-            # CommonTasks.AddSegsFromLines is the STK OM equivalent of the
-            # SetState TLE Connect command.  It requires early binding
-            # (EnsureDispatch) to be reachable; late binding returns <unknown>.
-            propagator.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            propagator.Propagate()
-            logger.info("set_propagator (OM) succeeded for %r", sat_name)
         except Exception as exc:
             raise StkCommandError(
-                f"set_propagator({sat_name!r}): Object Model TLE assignment failed — {exc}"
+                f"set_propagator({sat_name!r}): could not get satellite or set propagator type"
+                f" — {exc}"
             ) from exc
+
+        # Approach A: CastTo IAgVePropagatorSGP4 then .CommonTasks
+        # This QIs to the concrete interface, bypassing the base-typed property return.
+        try:
+            from win32com.client import CastTo  # type: ignore[import]  # noqa: PLC0415
+            p_sgp4 = CastTo(propagator, "IAgVePropagatorSGP4")
+            p_sgp4.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
+            p_sgp4.Propagate()
+            logger.info("set_propagator (CastTo+CommonTasks) succeeded for %r", sat_name)
+            return
+        except Exception as exc_a:
+            errors.append(f"CastTo+CommonTasks: {exc_a}")
+            logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
+
+        # Approach B: Segments.AddSegsFromLines (exposed directly in some STK 13 builds)
+        try:
+            propagator.Segments.AddSegsFromLines(sat_name, line1, line2)
+            propagator.Propagate()
+            logger.info(
+                "set_propagator (Segments.AddSegsFromLines) succeeded for %r", sat_name
+            )
+            return
+        except Exception as exc_b:
+            errors.append(f"Segments.AddSegsFromLines: {exc_b}")
+            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
+
+        # Approach C: write a 3-line TLE file and load it via the OM file-loader
+        try:
+            self._set_tle_via_file(sat_name, line1, line2)
+            logger.info("set_propagator (TLE file import) succeeded for %r", sat_name)
+            return
+        except Exception as exc_c:
+            errors.append(f"TLE file import: {exc_c}")
+            logger.debug("set_propagator approach C failed for %r: %s", sat_name, exc_c)
+
+        raise StkCommandError(
+            f"set_propagator({sat_name!r}): all OM approaches failed — "
+            + " | ".join(errors)
+        )
+
+    def _set_tle_via_file(self, sat_name: str, line1: str, line2: str) -> None:
+        """Write a 3-line TLE temp file and import it via the STK Object Model.
+
+        STK's satellite object exposes a ``LoadTleData`` or ``LoadTLEFile``
+        method on some interfaces.  This is the last-resort fallback when both
+        the Connect command and in-memory OM approaches fail.
+
+        Args:
+            sat_name: STK object name.
+            line1: TLE line 1.
+            line2: TLE line 2.
+
+        Raises:
+            StkCommandError: If the file-based load also fails.
+        """
+        import os  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        tle_content = f"{sat_name}\n{line1}\n{line2}\n"
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".tle", delete=False, encoding="ascii"
+        ) as fh:
+            fh.write(tle_content)
+            tle_path = fh.name
+
+        try:
+            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+            # Try the Connect command with a file path — some STK/ODTK builds
+            # allow file-based imports even when in-memory commands are blocked.
+            result = self._root.ExecuteCommand(
+                f'ImportFromFile */Satellite/{sat_name} TLE "{tle_path}"'
+            )
+            _check(result, f"ImportFromFile TLE({sat_name!r})")
+        finally:
+            os.unlink(tle_path)
 
     def _create_satellite_via_om(self, name: str) -> bool:
         """Create a satellite using the STK Object Model (``Children.New``).
