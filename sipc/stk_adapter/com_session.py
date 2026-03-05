@@ -505,8 +505,19 @@ class StkComSession:
     def _set_propagator_via_om(self, sat_name: str, line1: str, line2: str) -> None:
         """Set the SGP4/TLE propagator via the STK Object Model.
 
-        Tries multiple approaches in order, logging each attempt so that the
-        working path is visible in the server log on the first successful run.
+        Root-cause summary (discovered through iterative live debugging):
+
+        * ``sat.Propagator`` returns the *base* ``IAgVePropagator`` interface,
+          not the derived ``IAgVePropagatorSGP4``, even after
+          ``SetPropagatorType(ePropagatorSGP4)``.  ``CommonTasks`` only exists
+          on ``IAgVePropagatorSGP4``, so late-binding dispatch never finds it.
+        * With pure late binding (no gen_py stubs) the return comes back as
+          ``VT_UNKNOWN`` (``<unknown>`` / ``PyIUnknown``), so attribute access
+          via IDispatch is impossible without an explicit QueryInterface.
+
+        Fix: look up ``IAgVePropagatorSGP4``'s IID directly from the registered
+        STK Objects type library (no stubs required), then QI the underlying
+        COM pointer to that specific derived interface.
 
         Args:
             sat_name: STK object name of the satellite.
@@ -518,61 +529,96 @@ class StkComSession:
         """
         # AgEVePropagatorType.ePropagatorSGP4 = 5 (stable across STK 10–13)
         _E_PROPAGATOR_SGP4 = 5
+        # STK Objects type library GUID (same across STK 10–13).
+        _STK_OBJECTS_LIBID = "{AB621A84-81D2-45BF-9236-112CF72743D7}"
         errors: list[str] = []
 
-        # Approach A: propagator.CommonTasks → native QI to IDispatch → AddSegsFromLines
-        #
-        # Diagnosis from previous runs:
-        #   - sat_obj.Propagator returns CDispatch (VT_DISPATCH) — do NOT call
-        #     .QueryInterface() on it; that dispatches to the COM method table,
-        #     serialising the IID as bytes and failing.
-        #   - propagator.CommonTasks returns PyIUnknown (VT_UNKNOWN / <unknown>).
-        #   - PyIUnknown.QueryInterface(IID_IDispatch) is a native Python call
-        #     that correctly reaches AddSegsFromLines through IDispatch.
+        # ------------------------------------------------------------------
+        # Approach A: type-library IID lookup → QI to IAgVePropagatorSGP4
+        # ------------------------------------------------------------------
+        # 1. Load the STK Objects type library directly from the registry.
+        # 2. Scan for the IAgVePropagatorSGP4 type-info entry to get its IID.
+        # 3. QI the propagator's underlying COM pointer to that IID.
+        # 4. Wrap as Dispatch so .CommonTasks is accessible via IDispatch.
         try:
             import pythoncom  # type: ignore[import]  # noqa: PLC0415
             import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
-            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
-            sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
-            propagator = sat_obj.Propagator         # CDispatch over IAgVePropagatorSGP4
-            ct_raw = propagator.CommonTasks         # PyIUnknown (<unknown>)
-            # Native Python QI — NOT a COM dispatch call
-            ct_idispatch = ct_raw.QueryInterface(pythoncom.IID_IDispatch)
-            ct = _wc.Dispatch(ct_idispatch)
-            ct.AddSegsFromLines(sat_name, line1, line2)
-            propagator.Propagate()
-            logger.info("set_propagator (CommonTasks QI→IDispatch) succeeded for %r", sat_name)
-            return
-        except Exception as exc_a:
-            errors.append(f"CommonTasks QI: {exc_a}")
-            logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
 
-        # Approach B: Dispatch(ct_raw) — lets pywin32 do the QI internally.
-        # Covers the case where ct_raw is already PyIDispatch and direct QI is
-        # unnecessary.
-        try:
-            import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
-            ct_raw = propagator.CommonTasks         # PyIUnknown
-            ct = _wc.Dispatch(ct_raw)               # Dispatch QIs to IDispatch internally
-            ct.AddSegsFromLines(sat_name, line1, line2)
-            propagator.Propagate()
-            logger.info("set_propagator (CommonTasks Dispatch) succeeded for %r", sat_name)
-            return
-        except Exception as exc_b:
-            errors.append(f"CommonTasks Dispatch: {exc_b}")
-            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
+            logger.info(
+                "[set_propagator] propagator type=%s repr=%r",
+                type(propagator).__name__, repr(propagator)[:100],
+            )
 
-        # Approach C: write a 3-line TLE file and load it via the OM file-loader
+            # Look up IAgVePropagatorSGP4 IID from the type library.
+            iid_sgp4 = None
+            try:
+                tlb = pythoncom.LoadRegTypeLib(
+                    pythoncom.IID(_STK_OBJECTS_LIBID), 1, 0
+                )
+                for i in range(tlb.GetTypeInfoCount()):
+                    if tlb.GetDocumentation(i)[0] == "IAgVePropagatorSGP4":
+                        iid_sgp4 = tlb.GetTypeInfo(i).GetTypeAttr().iid
+                        logger.info(
+                            "[set_propagator] IAgVePropagatorSGP4 IID=%s", iid_sgp4
+                        )
+                        break
+            except Exception as tlb_exc:
+                logger.warning("[set_propagator] type lib IID lookup failed: %s", tlb_exc)
+
+            # Get the underlying raw COM pointer (works for both CDispatch and
+            # PyIUnknown).
+            p_unk = getattr(propagator, "_oleobj_", propagator)
+
+            if iid_sgp4 is not None:
+                prop_sgp4 = _wc.Dispatch(p_unk.QueryInterface(iid_sgp4))
+            else:
+                # IID not found — fall back to plain IDispatch QI.
+                prop_sgp4 = _wc.Dispatch(
+                    p_unk.QueryInterface(pythoncom.IID_IDispatch)
+                )
+
+            logger.info(
+                "[set_propagator] prop_sgp4 type=%s repr=%r",
+                type(prop_sgp4).__name__, repr(prop_sgp4)[:100],
+            )
+
+            # CommonTasks may itself return VT_UNKNOWN — handle both cases.
+            ct_raw = prop_sgp4.CommonTasks
+            logger.info(
+                "[set_propagator] CommonTasks type=%s repr=%r",
+                type(ct_raw).__name__, repr(ct_raw)[:100],
+            )
+            if hasattr(ct_raw, "AddSegsFromLines"):
+                ct_raw.AddSegsFromLines(sat_name, line1, line2)
+            else:
+                # QI CommonTasks to IDispatch as well.
+                ct_unk = getattr(ct_raw, "_oleobj_", ct_raw)
+                ct = _wc.Dispatch(ct_unk.QueryInterface(pythoncom.IID_IDispatch))
+                ct.AddSegsFromLines(sat_name, line1, line2)
+
+            prop_sgp4.Propagate()
+            logger.info(
+                "set_propagator (TypeLib IID QI→IAgVePropagatorSGP4) succeeded for %r",
+                sat_name,
+            )
+            return
+        except Exception as exc_a:
+            errors.append(f"TypeLib IID QI: {exc_a}")
+            logger.debug("set_propagator approach A failed for %r: %s", sat_name, exc_a)
+
+        # ------------------------------------------------------------------
+        # Approach B: TLE file import via ExecuteCommand (last resort)
+        # ------------------------------------------------------------------
         try:
             self._set_tle_via_file(sat_name, line1, line2)
             logger.info("set_propagator (TLE file import) succeeded for %r", sat_name)
             return
-        except Exception as exc_c:
-            errors.append(f"TLE file import: {exc_c}")
-            logger.debug("set_propagator approach C failed for %r: %s", sat_name, exc_c)
+        except Exception as exc_b:
+            errors.append(f"TLE file import: {exc_b}")
+            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
 
         raise StkCommandError(
             f"set_propagator({sat_name!r}): all OM approaches failed — "
