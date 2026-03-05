@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}SIPC{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2uoGkzmgK43XXs5x/hZQLko/A3VQoB8Bqj" crossorigin="anonymous"></script>
+</head>
+<body>
+  <nav class="nav-bar">
+    <span class="nav-title">SIPC &mdash; STK Intercept Planning Console</span>
+    {% block nav_actions %}{% endblock %}
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

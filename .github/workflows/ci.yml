@@ -22,7 +22,8 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # pywin32 is Windows-only; skip on Ubuntu CI runner
+        run: pip install -e ".[dev]" --no-deps || pip install fastapi uvicorn[standard] jinja2 python-multipart "sqlalchemy[asyncio]" aiosqlite "passlib[bcrypt]" itsdangerous structlog pytest pytest-asyncio "anyio[trio]" httpx pytest-cov mypy ruff && pip install -e . --no-deps
 
       - name: Lint with ruff
         run: ruff check .

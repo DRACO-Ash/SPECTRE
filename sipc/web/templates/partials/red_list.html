@@ -1,0 +1,16 @@
+{% if red_tracks %}
+<ul class="asset-list">
+  {% for track in red_tracks %}
+  <li class="asset-item">
+    <span class="asset-name">{{ track.stk_name }}</span>
+    <button class="btn-remove"
+            hx-delete="/assets/red/{{ track.name }}"
+            hx-target="#red-list"
+            hx-swap="innerHTML"
+            hx-confirm="Remove {{ track.stk_name }}?">&times;</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-msg">No red tracks defined.</p>
+{% endif %}

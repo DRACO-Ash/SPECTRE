@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}SIPC — Operator Console{% endblock %}
+
+{% block nav_actions %}
+<span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
+<form method="post" action="/logout" class="inline-form">
+  <button type="submit" class="btn-logout">Logout</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="console-grid">
+
+  <!-- ── Blue Assets ───────────────────────────────────────────────── -->
+  <section class="panel panel-blue">
+    <h2>Blue Assets</h2>
+    <div id="blue-list">
+      {% include "partials/blue_list.html" %}
+    </div>
+    <details class="add-form-details">
+      <summary class="btn-add">+ Add Blue Asset</summary>
+      <form hx-post="/assets/blue"
+            hx-target="#blue-list"
+            hx-swap="innerHTML"
+            class="asset-form">
+        <input name="name" placeholder="Name (e.g. Alpha)" required />
+        <textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required></textarea>
+        <button type="submit" class="btn-primary">Add</button>
+      </form>
+    </details>
+  </section>
+
+  <!-- ── Red Tracks ───────────────────────────────────────────────── -->
+  <section class="panel panel-red">
+    <h2>Red Tracks</h2>
+    <div id="red-list">
+      {% include "partials/red_list.html" %}
+    </div>
+    <details class="add-form-details">
+      <summary class="btn-add">+ Add Red Track</summary>
+      <form hx-post="/assets/red"
+            hx-target="#red-list"
+            hx-swap="innerHTML"
+            class="asset-form">
+        <input name="name" placeholder="Name (e.g. Track01)" required />
+        <textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required></textarea>
+        <button type="submit" class="btn-primary">Add</button>
+      </form>
+    </details>
+  </section>
+
+  <!-- ── Run Configuration ─────────────────────────────────────────── -->
+  <section class="panel panel-run full-width">
+    <h2>Run Configuration</h2>
+    <form hx-post="/plan"
+          hx-target="#results-section"
+          hx-swap="innerHTML"
+          hx-indicator="#run-indicator"
+          class="run-form">
+      <label>Operator
+        <input name="operator" value="{{ user.username }}" required />
+      </label>
+      <label>Source
+        <input name="source" placeholder="e.g. SPADOC / MANUAL" required />
+      </label>
+      <label>Scenario
+        <input name="scenario" placeholder="Scenario path (optional)" />
+      </label>
+      <div class="run-actions">
+        <button type="submit" class="btn-primary">Run Plan</button>
+        <span id="run-indicator" class="htmx-indicator">Running&hellip;</span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ── Intercept Windows ─────────────────────────────────────────── -->
+  <section class="panel full-width">
+    <h2>Intercept Windows</h2>
+    <div id="results-section">
+      {% include "partials/results_table.html" %}
+    </div>
+  </section>
+
+  <!-- ── Run Log ───────────────────────────────────────────────────── -->
+  <section class="panel full-width">
+    <div class="log-header">
+      <h2>Run Log</h2>
+      <div class="log-actions">
+        <button class="btn-secondary"
+                hx-get="/log/entries"
+                hx-target="#log-pane"
+                hx-swap="innerHTML">Refresh</button>
+        <button class="btn-secondary"
+                hx-post="/log/clear"
+                hx-target="#log-pane"
+                hx-swap="innerHTML">Clear</button>
+      </div>
+    </div>
+    <div id="log-pane" class="log-pane"
+         hx-get="/log/entries"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "partials/run_log.html" %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}

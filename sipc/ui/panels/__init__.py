@@ -1,1 +1,0 @@
-"""SIPC UI panels."""

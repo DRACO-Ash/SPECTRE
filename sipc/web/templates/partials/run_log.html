@@ -1,0 +1,7 @@
+{% if log_entries %}
+{% for entry in log_entries %}
+<div class="log-entry">{{ entry }}</div>
+{% endfor %}
+{% else %}
+<p class="empty-msg">Log is empty.</p>
+{% endif %}

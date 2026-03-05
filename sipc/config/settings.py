@@ -32,6 +32,20 @@ class Settings:
             r"C:\Program Files\AGI\STK 13",
         )
     )
+    secret_key: str = field(
+        default_factory=lambda: os.environ.get("SECRET_KEY", "")
+    )
+    database_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "DATABASE_URL", "sqlite+aiosqlite:///./sipc.db"
+        )
+    )
+    sipc_admin_user: str = field(
+        default_factory=lambda: os.environ.get("SIPC_ADMIN_USER", "admin")
+    )
+    sipc_admin_pass: str = field(
+        default_factory=lambda: os.environ.get("SIPC_ADMIN_PASS", "")
+    )
 
 
 def get_settings() -> Settings:

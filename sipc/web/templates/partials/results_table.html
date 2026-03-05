@@ -1,0 +1,26 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% elif results %}
+<table class="results-table">
+  <thead>
+    <tr>
+      <th>Start UTC</th>
+      <th>End UTC</th>
+      <th>Duration (s)</th>
+      <th>Min Range (km)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for w in results %}
+    <tr>
+      <td>{{ w.start.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+      <td>{{ w.end.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+      <td>{{ "%.1f"|format((w.end - w.start).total_seconds()) }}</td>
+      <td>{{ "%.3f"|format(w.min_range_km) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty-msg">No results yet. Configure assets and click <strong>Run Plan</strong>.</p>
+{% endif %}

@@ -10,25 +10,31 @@ readme = "README.md"
 license = { text = "Proprietary" }
 requires-python = ">=3.14"
 dependencies = [
-    "PySide6>=6.8",
     "pywin32>=311",
     "structlog>=25.0",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "python-multipart",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite",
+    "passlib[bcrypt]",
+    "itsdangerous>=2.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
-    "pytest-qt>=4.4",
+    "pytest-asyncio>=0.23",
+    "anyio[trio]>=4.0",
+    "httpx>=0.27",
     "pytest-cov>=6.0",
     "mypy>=1.14",
     "ruff>=0.9",
 ]
-build = [
-    "pyinstaller>=6.12",
-]
 
 [project.scripts]
-sipc = "sipc.ui.app:main"
+sipc-serve = "sipc.web._entrypoint:main"
 
 # ---------------------------------------------------------------------------
 # Hatch
@@ -67,13 +73,14 @@ markers = [
     "integration: marks tests requiring a live STK COM connection (deselect with -m 'not integration')",
 ]
 addopts = "-ra -q"
+asyncio_mode = "auto"
 
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["sipc"]
-omit = ["sipc/ui/*", "tests/*", "sipc/stk_adapter/com_session.py", "sipc/app_logging/setup.py"]
+omit = ["tests/*", "sipc/stk_adapter/com_session.py", "sipc/app_logging/setup.py"]
 
 [tool.coverage.report]
 fail_under = 70

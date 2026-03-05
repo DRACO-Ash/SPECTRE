@@ -1,0 +1,16 @@
+{% if blue_assets %}
+<ul class="asset-list">
+  {% for asset in blue_assets %}
+  <li class="asset-item">
+    <span class="asset-name">{{ asset.stk_name }}</span>
+    <button class="btn-remove"
+            hx-delete="/assets/blue/{{ asset.name }}"
+            hx-target="#blue-list"
+            hx-swap="innerHTML"
+            hx-confirm="Remove {{ asset.stk_name }}?">&times;</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-msg">No blue assets defined.</p>
+{% endif %}
