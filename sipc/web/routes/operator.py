@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
 from sipc.domain.scenario import ScenarioPlanner
+from sipc.stk_adapter.exceptions import StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
 from sipc.web.auth import require_login
 from sipc.web.models import User
@@ -48,6 +49,8 @@ async def dashboard(
             "results": state.results,
             "log_entries": state.log_entries,
             "udl_user": state.udl_username,
+            "stk_connected": state.stk_session is not None,
+            "stk_scenario": state.stk_scenario,
         },
     )
 
@@ -164,7 +167,9 @@ async def run_plan(
     config = RunConfig(operator=operator.strip(), source=source.strip())
     state.append_log(f"[RUN] Starting {config.run_id} — operator={operator}, source={source}")
 
-    session_adapter = FakeStkSession()
+    session_adapter = state.stk_session if state.stk_session is not None else FakeStkSession()
+    if state.stk_session is None:
+        state.append_log("[RUN] WARNING: STK not connected — using FakeStkSession (no real propagation)")
     planner = ScenarioPlanner(session_adapter, config)
 
     loop = asyncio.get_event_loop()
@@ -181,6 +186,89 @@ async def run_plan(
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/results_table.html",
         {"request": request, "results": results, "error": None},
+    )
+
+
+# ── STK connection ────────────────────────────────────────────────────────────
+
+
+@router.post("/stk/connect", response_model=None)
+async def stk_connect(
+    request: Request,
+    scenario_path: Annotated[str, Form()] = "",
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Attach to a running STK instance and optionally load a scenario.
+
+    Runs the blocking COM call in a thread-pool executor so the event loop
+    is not blocked.
+    """
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    from sipc.stk_adapter.com_session import StkComSession  # noqa: PLC0415
+
+    session = StkComSession()
+    path = scenario_path.strip()
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, session.connect, path)
+    except StkConnectionError as exc:
+        logger.warning("STK connect failed for operator %s: %s", current_user.username, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/stk_status.html",
+            {
+                "request": request,
+                "stk_connected": False,
+                "stk_scenario": "",
+                "error": str(exc),
+            },
+        )
+
+    if state.stk_session is not None:
+        state.stk_session.disconnect()
+    state.stk_session = session
+    state.stk_scenario = path
+    state.append_log(
+        f"[STK] Connected — {path or 'attached to running instance'}"
+    )
+    logger.info("STK connected for operator %s (scenario=%r)", current_user.username, path)
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/stk_status.html",
+        {
+            "request": request,
+            "stk_connected": True,
+            "stk_scenario": path,
+            "error": None,
+        },
+    )
+
+
+@router.post("/stk/disconnect", response_model=None)
+async def stk_disconnect(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Release the STK COM session."""
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    if state.stk_session is not None:
+        state.stk_session.disconnect()
+        state.stk_session = None
+        state.stk_scenario = ""
+    state.append_log("[STK] Disconnected")
+    logger.info("STK disconnected for operator %s", current_user.username)
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/stk_status.html",
+        {
+            "request": request,
+            "stk_connected": False,
+            "stk_scenario": "",
+            "error": None,
+        },
     )
 
 

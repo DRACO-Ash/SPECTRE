@@ -12,9 +12,16 @@
 <div class="console-grid">
 
   <!-- ── UDL Connection ────────────────────────────────────────────── -->
-  <section class="panel panel-udl full-width">
+  <section class="panel panel-udl">
     <div id="udl-status">
       {% include "partials/udl_status.html" %}
+    </div>
+  </section>
+
+  <!-- ── STK Connection ────────────────────────────────────────────── -->
+  <section class="panel panel-stk">
+    <div id="stk-status">
+      {% include "partials/stk_status.html" %}
     </div>
   </section>
 
@@ -27,14 +34,15 @@
     <details class="add-form-details">
       <summary class="btn-add">+ Add Blue Asset</summary>
       <div class="satno-row">
-        <input id="blue-satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
+        <input id="blue-satno" name="satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
         <button type="button"
                 hx-get="/udl/tle"
                 hx-include="#blue-satno"
-                hx-vals='js:{"satno": document.getElementById("blue-satno").value}'
                 hx-target="#blue-tle-fields"
                 hx-swap="innerHTML"
+                hx-indicator="#blue-tle-indicator"
                 class="btn-secondary btn-sm">Fetch TLE</button>
+        <span id="blue-tle-indicator" class="htmx-indicator">Fetching&hellip;</span>
       </div>
       <form hx-post="/assets/blue"
             hx-target="#blue-list"
@@ -57,13 +65,15 @@
     <details class="add-form-details">
       <summary class="btn-add">+ Add Red Track</summary>
       <div class="satno-row">
-        <input id="red-satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
+        <input id="red-satno" name="satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
         <button type="button"
                 hx-get="/udl/tle"
-                hx-vals='js:{"satno": document.getElementById("red-satno").value}'
+                hx-include="#red-satno"
                 hx-target="#red-tle-fields"
                 hx-swap="innerHTML"
+                hx-indicator="#red-tle-indicator"
                 class="btn-secondary btn-sm">Fetch TLE</button>
+        <span id="red-tle-indicator" class="htmx-indicator">Fetching&hellip;</span>
       </div>
       <form hx-post="/assets/red"
             hx-target="#red-list"
@@ -90,9 +100,6 @@
       </label>
       <label>Source
         <input name="source" placeholder="e.g. SPADOC / MANUAL" required />
-      </label>
-      <label>Scenario
-        <input name="scenario" placeholder="Scenario path (optional)" />
       </label>
       <div class="run-actions">
         <button type="submit" class="btn-primary">Run Plan</button>

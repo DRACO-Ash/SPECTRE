@@ -1,3 +1,6 @@
+{% if name %}
+<p class="field-success">&#10003; TLE loaded: <strong>{{ name }}</strong></p>
+{% endif %}
 {% if error %}
 <p class="field-error">{{ error }}</p>
 {% endif %}

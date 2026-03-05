@@ -11,6 +11,8 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
+from typing import Any
+
 from sipc.domain.models import BlueAsset, InterceptWindow, RedTrack
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,9 @@ class SessionState:
     # UDL credentials — held in memory for this session only, never persisted.
     udl_username: str | None = None
     udl_password: str | None = None
+    # Live STK session — None means planning runs use FakeStkSession.
+    stk_session: Any | None = None
+    stk_scenario: str = ""
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log, evicting oldest if needed."""

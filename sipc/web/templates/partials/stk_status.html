@@ -1,0 +1,37 @@
+{% if error %}
+<div class="stk-state stk-error">
+  <span class="stk-label">STK &#9888; {{ error }}</span>
+  <details class="stk-connect-wrap">
+    <summary class="btn-secondary btn-sm">Retry</summary>
+    <form hx-post="/stk/connect"
+          hx-target="#stk-status"
+          hx-swap="innerHTML"
+          class="stk-connect-form">
+      <input name="scenario_path" placeholder="Scenario path (optional — leave blank to attach)" />
+      <button type="submit" class="btn-primary btn-sm">Connect</button>
+    </form>
+  </details>
+</div>
+{% elif stk_connected %}
+<div class="stk-state stk-connected">
+  <span class="stk-label">STK &#10003; Connected{% if stk_scenario %} &mdash; <em>{{ stk_scenario }}</em>{% else %} &mdash; attached to running instance{% endif %}</span>
+  <button class="btn-secondary btn-sm"
+          hx-post="/stk/disconnect"
+          hx-target="#stk-status"
+          hx-swap="innerHTML">Disconnect</button>
+</div>
+{% else %}
+<div class="stk-state stk-disconnected">
+  <span class="stk-label">STK &mdash; Not connected</span>
+  <details class="stk-connect-wrap">
+    <summary class="btn-secondary btn-sm">Connect</summary>
+    <form hx-post="/stk/connect"
+          hx-target="#stk-status"
+          hx-swap="innerHTML"
+          class="stk-connect-form">
+      <input name="scenario_path" placeholder="Scenario path (optional — leave blank to attach)" />
+      <button type="submit" class="btn-primary btn-sm">Connect</button>
+    </form>
+  </details>
+</div>
+{% endif %}
