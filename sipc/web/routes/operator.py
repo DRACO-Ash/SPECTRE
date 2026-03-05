@@ -47,6 +47,7 @@ async def dashboard(
             "red_tracks": state.red_tracks,
             "results": state.results,
             "log_entries": state.log_entries,
+            "udl_user": state.udl_username,
         },
     )
 
@@ -186,7 +187,7 @@ async def run_plan(
 # ── Log streaming (SSE) ───────────────────────────────────────────────────────
 
 
-@router.get("/log/stream")
+@router.get("/log/stream", response_model=None)
 async def log_stream(
     request: Request,
     current_user: User = Depends(require_login),

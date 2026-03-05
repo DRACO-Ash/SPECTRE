@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
+import bcrypt
 from fastapi import Cookie, Depends, HTTPException, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +16,6 @@ from sipc.web.database import get_db
 from sipc.web.models import User
 
 logger = logging.getLogger(__name__)
-
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Session cookie expires after 8 hours (28 800 seconds).
 _SESSION_MAX_AGE = 28_800
@@ -37,12 +35,12 @@ def _serializer() -> URLSafeTimedSerializer:
 
 def hash_password(plaintext: str) -> str:
     """Return the bcrypt hash of *plaintext*."""
-    return _pwd_ctx.hash(plaintext)
+    return bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
     """Return ``True`` if *plaintext* matches *hashed*."""
-    return bool(_pwd_ctx.verify(plaintext, hashed))
+    return bcrypt.checkpw(plaintext.encode(), hashed.encode())
 
 
 # ── Cookie helpers ────────────────────────────────────────────────────────────

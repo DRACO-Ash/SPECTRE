@@ -40,8 +40,7 @@ async def init_db() -> None:
 
 async def _bootstrap_admin() -> None:
     """Insert a default admin user when the users table is empty."""
-    from passlib.context import CryptContext  # noqa: PLC0415
-
+    from sipc.web.auth import hash_password  # noqa: PLC0415
     from sipc.web.models import User  # noqa: PLC0415
 
     settings = get_settings()
@@ -55,10 +54,9 @@ async def _bootstrap_admin() -> None:
         if result.scalar_one_or_none() is not None:
             return  # table already has at least one user
 
-        pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
         admin = User(
             username=settings.sipc_admin_user,
-            hashed_password=pwd_ctx.hash(settings.sipc_admin_pass),
+            hashed_password=hash_password(settings.sipc_admin_pass),
             role="admin",
         )
         session.add(admin)

@@ -1,0 +1,5 @@
+{% if error %}
+<p class="field-error">{{ error }}</p>
+{% endif %}
+<input name="name" placeholder="Name (e.g. Alpha)" value="{{ name }}" required />
+<textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required>{{ tle }}</textarea>

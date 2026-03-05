@@ -36,6 +36,9 @@ class SessionState:
     results: list[InterceptWindow] = field(default_factory=list)
     log_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     log_entries: list[str] = field(default_factory=list)
+    # UDL credentials — held in memory for this session only, never persisted.
+    udl_username: str | None = None
+    udl_password: str | None = None
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log, evicting oldest if needed."""

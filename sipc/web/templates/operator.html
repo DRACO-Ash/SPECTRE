@@ -11,6 +11,13 @@
 {% block content %}
 <div class="console-grid">
 
+  <!-- ── UDL Connection ────────────────────────────────────────────── -->
+  <section class="panel panel-udl full-width">
+    <div id="udl-status">
+      {% include "partials/udl_status.html" %}
+    </div>
+  </section>
+
   <!-- ── Blue Assets ───────────────────────────────────────────────── -->
   <section class="panel panel-blue">
     <h2>Blue Assets</h2>
@@ -19,12 +26,23 @@
     </div>
     <details class="add-form-details">
       <summary class="btn-add">+ Add Blue Asset</summary>
+      <div class="satno-row">
+        <input id="blue-satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
+        <button type="button"
+                hx-get="/udl/tle"
+                hx-include="#blue-satno"
+                hx-vals='js:{"satno": document.getElementById("blue-satno").value}'
+                hx-target="#blue-tle-fields"
+                hx-swap="innerHTML"
+                class="btn-secondary btn-sm">Fetch TLE</button>
+      </div>
       <form hx-post="/assets/blue"
             hx-target="#blue-list"
             hx-swap="innerHTML"
             class="asset-form">
-        <input name="name" placeholder="Name (e.g. Alpha)" required />
-        <textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required></textarea>
+        <div id="blue-tle-fields">
+          {% include "partials/tle_fields.html" %}
+        </div>
         <button type="submit" class="btn-primary">Add</button>
       </form>
     </details>
@@ -38,12 +56,22 @@
     </div>
     <details class="add-form-details">
       <summary class="btn-add">+ Add Red Track</summary>
+      <div class="satno-row">
+        <input id="red-satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
+        <button type="button"
+                hx-get="/udl/tle"
+                hx-vals='js:{"satno": document.getElementById("red-satno").value}'
+                hx-target="#red-tle-fields"
+                hx-swap="innerHTML"
+                class="btn-secondary btn-sm">Fetch TLE</button>
+      </div>
       <form hx-post="/assets/red"
             hx-target="#red-list"
             hx-swap="innerHTML"
             class="asset-form">
-        <input name="name" placeholder="Name (e.g. Track01)" required />
-        <textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required></textarea>
+        <div id="red-tle-fields">
+          {% include "partials/tle_fields.html" %}
+        </div>
         <button type="submit" class="btn-primary">Add</button>
       </form>
     </details>

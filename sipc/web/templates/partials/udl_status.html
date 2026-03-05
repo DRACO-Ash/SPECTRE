@@ -1,0 +1,39 @@
+{% if error %}
+<div class="udl-state udl-error">
+  <span class="udl-label">UDL &#9888; {{ error }}</span>
+  <details class="udl-login-wrap">
+    <summary class="btn-secondary btn-sm">Retry</summary>
+    <form hx-post="/udl/login"
+          hx-target="#udl-status"
+          hx-swap="innerHTML"
+          class="udl-login-form">
+      <input name="username" placeholder="UDL Username" required autocomplete="username" />
+      <input name="password" type="password" placeholder="UDL Password" required autocomplete="current-password" />
+      <button type="submit" class="btn-primary btn-sm">Connect</button>
+    </form>
+  </details>
+</div>
+{% elif udl_user %}
+<div class="udl-state udl-connected">
+  <span class="udl-label">UDL &#10003; Connected as <strong>{{ udl_user }}</strong></span>
+  <button class="btn-secondary btn-sm"
+          hx-post="/udl/logout"
+          hx-target="#udl-status"
+          hx-swap="innerHTML">Disconnect</button>
+</div>
+{% else %}
+<div class="udl-state udl-disconnected">
+  <span class="udl-label">UDL &mdash; Not connected</span>
+  <details class="udl-login-wrap">
+    <summary class="btn-secondary btn-sm">Connect</summary>
+    <form hx-post="/udl/login"
+          hx-target="#udl-status"
+          hx-swap="innerHTML"
+          class="udl-login-form">
+      <input name="username" placeholder="UDL Username" required autocomplete="username" />
+      <input name="password" type="password" placeholder="UDL Password" required autocomplete="current-password" />
+      <button type="submit" class="btn-primary btn-sm">Connect</button>
+    </form>
+  </details>
+</div>
+{% endif %}

@@ -33,7 +33,7 @@ async def get_login(request: Request) -> HTMLResponse:
     return tmpl.TemplateResponse("login.html", {"request": request, "error": None})  # type: ignore[attr-defined]
 
 
-@router.post("/login")
+@router.post("/login", response_model=None)
 async def post_login(
     request: Request,
     username: Annotated[str, Form()],
@@ -67,7 +67,7 @@ async def post_login(
     return response
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=None)
 async def post_logout() -> RedirectResponse:
     """Clear the session cookie and redirect to the login page."""
     response = RedirectResponse(url="/login", status_code=302)
