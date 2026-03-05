@@ -54,7 +54,7 @@ async def udl_login(
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/elset",
-                params={"maxResults": 1},
+                params={"satNo": 25544, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
                 auth=(username, password),
                 timeout=10.0,
             )
@@ -64,9 +64,18 @@ async def udl_login(
                 "partials/udl_status.html",
                 {"request": request, "udl_user": None, "error": "Invalid UDL credentials (401)."},
             )
+        if not resp.is_success:
+            body = resp.text[:300].strip() or "(empty)"
+            error = f"UDL probe returned HTTP {resp.status_code}: {body}"
+            logger.warning("UDL login probe %d for operator %s: %s", resp.status_code, current_user.username, body)
+            return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+                "partials/udl_status.html",
+                {"request": request, "udl_user": None, "error": error},
+            )
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        error = f"UDL probe returned HTTP {exc.response.status_code} — check credentials or UDL status."
+        body = exc.response.text[:300].strip() or "(empty)"
+        error = f"UDL probe returned HTTP {exc.response.status_code}: {body}"
         logger.warning("UDL login probe HTTP error for operator %s: %s", current_user.username, exc)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/udl_status.html",
@@ -146,14 +155,15 @@ async def fetch_tle(
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/elset",
-                params={"catalogId": satno, "maxResults": 1, "orderby": "EPOCH desc"},
+                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
                 auth=(state.udl_username, state.udl_password),
                 timeout=10.0,
             )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as exc:
-        error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
+        body = exc.response.text[:300].strip() or "(empty)"
+        error = f"UDL returned {exc.response.status_code} for SATNO {satno}: {body}"
         logger.warning(error)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
@@ -183,9 +193,13 @@ async def fetch_tle(
         )
 
     rec = data[0]
-    name = str(rec.get("OBJECT_NAME", satno)).strip()
-    line1 = str(rec.get("TLE_LINE1", "")).strip()
-    line2 = str(rec.get("TLE_LINE2", "")).strip()
+
+    # UDL field names vary — try the known variants for each value
+    name = str(
+        rec.get("objectName") or rec.get("OBJECT_NAME") or satno
+    ).strip()
+    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
+    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
     tle = f"{line1}\n{line2}"
 
     state.append_log(f"[UDL] Fetched TLE for SATNO {satno} ({name})")
@@ -229,7 +243,7 @@ async def fetch_statevector(
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/statevector",
-                params={"satNo": satno, "maxResults": 1, "orderby": "EPOCH desc"},
+                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
                 auth=(state.udl_username, state.udl_password),
                 timeout=10.0,
             )

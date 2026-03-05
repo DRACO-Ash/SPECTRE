@@ -141,6 +141,15 @@ class StkComSession:
             self._app = win32com.client.Dispatch("STK13.Application")
             self._app.Visible = True
             self._root = self._app.Personality2
+
+            # Close any currently-open scenario before creating a new one.
+            # STK only supports one scenario at a time.
+            try:
+                self._root.CloseScenario()
+                logger.info("Closed existing scenario before creating new one")
+            except Exception:
+                pass  # No scenario open — safe to proceed
+
             self._root.NewScenario(name)
             logger.info("New scenario created", extra={"name": name})
         except Exception as exc:
