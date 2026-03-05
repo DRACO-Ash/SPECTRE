@@ -408,13 +408,18 @@ class StkComSession:
         Args:
             folder_name: Folder name without leading slash (e.g. ``Blue``).
         """
-        result = self._root.ExecuteCommand(f"New / Folder {folder_name}")
-        if result.IsSucceeded == 0:
-            msg = result.Message.lower()
-            if "already" not in msg and "exist" not in msg:
-                logger.warning(
-                    "Could not create STK folder %r: %s", folder_name, result.Message
-                )
+        try:
+            result = self._root.ExecuteCommand(f"New / Folder {folder_name}")
+            if result.IsSucceeded == 0:
+                msg = result.Message.lower()
+                if "already" not in msg and "exist" not in msg:
+                    logger.warning(
+                        "Could not create STK folder %r: %s", folder_name, result.Message
+                    )
+        except Exception as exc:
+            # Some STK builds throw instead of returning IsSucceeded==0 for
+            # "already exists" — treat all COM exceptions here as non-fatal.
+            logger.warning("STK folder %r COM exception (likely already exists): %s", folder_name, exc)
 
     def _require_connection(self) -> None:
         """Raise :class:`StkConnectionError` if not connected to STK."""

@@ -77,7 +77,9 @@ async def add_blue_asset(
 
     if state.stk_session is not None:
         def _push_blue() -> None:
+            state.append_log(f"[STK] Creating satellite object {asset.stk_name}…")
             state.stk_session.create_satellite(asset.stk_name, STK_FOLDERS[0])
+            state.append_log(f"[STK] Loading TLE for {asset.stk_name}…")
             state.stk_session.set_propagator(asset.stk_name, asset.tle)
 
         try:
@@ -127,7 +129,9 @@ async def add_red_track(
 
     if state.stk_session is not None:
         def _push_red() -> None:
+            state.append_log(f"[STK] Creating satellite object {track.stk_name}…")
             state.stk_session.create_satellite(track.stk_name, STK_FOLDERS[1])
+            state.append_log(f"[STK] Loading TLE for {track.stk_name}…")
             state.stk_session.set_propagator(track.stk_name, track.tle)
 
         try:
