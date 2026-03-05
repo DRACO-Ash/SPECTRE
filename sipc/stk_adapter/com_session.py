@@ -194,8 +194,20 @@ class StkComSession:
         folder_name = group.lstrip("/")
         self._ensure_folder(folder_name)
 
-        result = self._root.ExecuteCommand(f"New / Satellite {name}")
-        _check(result, f"create_satellite({name!r})")
+        # If the satellite already exists (e.g. from a previous run), skip creation.
+        try:
+            self._root.GetObjectFromPath(f"Satellite/{name}")
+            logger.info("Satellite %r already exists in scenario; skipping New command", name)
+        except Exception:
+            try:
+                result = self._root.ExecuteCommand(f"New / Satellite {name}")
+                _check(result, f"create_satellite({name!r})")
+            except StkCommandError:
+                raise
+            except Exception as exc:
+                raise StkCommandError(
+                    f"create_satellite({name!r}): STK raised COM exception — {exc}"
+                ) from exc
 
         # Move into the folder. STK Connect command: SetGroup */Satellite/<name> Group <folder>
         move_result = self._root.ExecuteCommand(
