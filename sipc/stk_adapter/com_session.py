@@ -20,6 +20,32 @@ logger = logging.getLogger(__name__)
 _STK_TIME_RE = re.compile(r"\.\d+$")
 
 
+def _stk_dispatch() -> Any:
+    """Return an ``STK13.Application`` COM object using the best available binding.
+
+    Tries ``gencache.EnsureDispatch`` first (early binding — generates Python
+    type stubs from the STK 13 COM type library).  Early binding makes all
+    COM interfaces reachable, including ``IAgVePropagatorSGP4.CommonTasks``,
+    which is not accessible via plain ``Dispatch`` (late binding).
+
+    Falls back to ``win32com.client.Dispatch`` if the type library is not
+    registered or the cache cannot be written.
+    """
+    try:
+        from win32com.client.gencache import EnsureDispatch  # type: ignore[import]
+        app = EnsureDispatch("STK13.Application")
+        logger.info("STK connected with early binding (gencache.EnsureDispatch)")
+        return app
+    except Exception as exc:
+        logger.warning(
+            "gencache.EnsureDispatch failed (%s); falling back to Dispatch (late binding). "
+            "Some Object Model interfaces may be inaccessible.",
+            exc,
+        )
+        import win32com.client  # type: ignore[import]
+        return win32com.client.Dispatch("STK13.Application")
+
+
 def _parse_stk_time(stk_time: str) -> datetime:
     """Parse an STK UTCG time string to a UTC-aware :class:`datetime`.
 
@@ -93,7 +119,7 @@ class StkComSession:
             import win32com.client  # type: ignore[import]
 
             pythoncom.CoInitialize()
-            self._app = win32com.client.Dispatch("STK13.Application")
+            self._app = _stk_dispatch()
             self._app.Visible = True
             self._root = self._app.Personality2
             if scenario_path:
@@ -140,7 +166,7 @@ class StkComSession:
             import win32com.client  # type: ignore[import]
 
             pythoncom.CoInitialize()
-            self._app = win32com.client.Dispatch("STK13.Application")
+            self._app = _stk_dispatch()
             self._app.Visible = True
             self._root = self._app.Personality2
 
@@ -469,6 +495,9 @@ class StkComSession:
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
+            # CommonTasks.AddSegsFromLines is the STK OM equivalent of the
+            # SetState TLE Connect command.  It requires early binding
+            # (EnsureDispatch) to be reachable; late binding returns <unknown>.
             propagator.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
             propagator.Propagate()
             logger.info("set_propagator (OM) succeeded for %r", sat_name)
