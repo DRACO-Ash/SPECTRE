@@ -71,3 +71,33 @@ def get_session_state(username: str) -> SessionState:
 def clear_session_state(username: str) -> None:
     """Remove and discard the state for *username* (e.g. on logout)."""
     _store.pop(username, None)
+
+
+# ── App-level on-orbit catalog (shared across all operator sessions) ─────────
+# Fetched in the background on first successful UDL login.
+_onorbit_catalog: list[dict] = []
+_catalog_status: str = "not_loaded"  # "not_loaded" | "loading" | "ready" | "error"
+
+
+def get_onorbit_catalog() -> list[dict]:
+    """Return the cached on-orbit catalog records."""
+    return _onorbit_catalog
+
+
+def get_catalog_status() -> str:
+    """Return the current catalog load status string."""
+    return _catalog_status
+
+
+def set_onorbit_catalog(records: list[dict]) -> None:
+    """Replace the catalog cache and mark status ready."""
+    global _onorbit_catalog, _catalog_status
+    _onorbit_catalog = records
+    _catalog_status = "ready"
+    logger.info("On-orbit catalog cached: %d objects", len(records))
+
+
+def set_catalog_status(status: str) -> None:
+    """Update the catalog load status."""
+    global _catalog_status
+    _catalog_status = status

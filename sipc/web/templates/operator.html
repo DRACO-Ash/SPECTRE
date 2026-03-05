@@ -99,6 +99,49 @@
     </details>
   </section>
 
+  <!-- ── HRR Watchlist ─────────────────────────────────────────────── -->
+  <section class="panel full-width panel-hrr">
+    <div class="panel-header-row">
+      <h2>HRR Watchlist</h2>
+      <div class="panel-header-actions">
+        <button class="btn-secondary btn-sm"
+                hx-get="/udl/hrr"
+                hx-target="#hrr-content"
+                hx-swap="innerHTML"
+                hx-indicator="#hrr-indicator"
+                hx-disabled-elt="this">Refresh</button>
+        <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
+      </div>
+    </div>
+    <div id="hrr-content">
+      <p class="empty-msg">Click Refresh to load the High Rate Revisit watchlist from UDL.</p>
+    </div>
+  </section>
+
+  <!-- ── On-Orbit Catalog Search ───────────────────────────────────── -->
+  <section class="panel full-width panel-catalog">
+    <div class="panel-header-row">
+      <h2>Orbit Catalog</h2>
+      <span id="catalog-badge" class="catalog-badge"
+            hx-get="/udl/catalog/search"
+            hx-trigger="load"
+            hx-target="#catalog-results"
+            hx-swap="innerHTML"></span>
+    </div>
+    <input type="search"
+           name="q"
+           placeholder="Search by name or SATNO&hellip;"
+           autocomplete="off"
+           hx-get="/udl/catalog/search"
+           hx-trigger="input changed delay:400ms, search"
+           hx-target="#catalog-results"
+           hx-swap="innerHTML"
+           class="catalog-search-input" />
+    <div id="catalog-results" style="margin-top:0.5rem">
+      <p class="empty-msg">Type to search the on-orbit catalog.</p>
+    </div>
+  </section>
+
   <!-- ── Run Configuration ─────────────────────────────────────────── -->
   <section class="panel panel-run full-width">
     <h2>Run Configuration</h2>

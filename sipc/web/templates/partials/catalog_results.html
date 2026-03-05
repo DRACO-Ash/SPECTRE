@@ -1,0 +1,52 @@
+{% if status == "not_loaded" %}
+<p class="empty-msg">Catalog not loaded. Connect to UDL to begin loading in the background.</p>
+{% elif status == "loading" %}
+<p class="empty-msg"><span class="spinner"></span>&nbsp;Loading on-orbit catalog from UDL&hellip;</p>
+{% elif status == "error" %}
+<p class="error-msg">Catalog load failed. Reconnect to UDL to retry.</p>
+{% elif not q %}
+<p class="empty-msg">{{ total }} objects in catalog. Type a name or SATNO to search.</p>
+{% elif not results %}
+<p class="empty-msg">No matches for &ldquo;{{ q }}&rdquo;.</p>
+{% else %}
+<table class="results-table catalog-table">
+  <thead>
+    <tr>
+      <th>SATNO</th>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Country</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for obj in results %}
+    <tr>
+      <td class="mono">{{ obj.satno }}</td>
+      <td>{{ obj.name }}</td>
+      <td class="text-dim">{{ obj.obj_type }}</td>
+      <td class="text-dim">{{ obj.country }}</td>
+      <td class="hrr-actions">
+        <button hx-get="/udl/tle"
+                hx-vals='{"satno": {{ obj.satno }}}'
+                hx-target="#blue-tle-fields"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this"
+                hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                class="btn-secondary btn-sm">&rarr; Blue</button>
+        <button hx-get="/udl/tle"
+                hx-vals='{"satno": {{ obj.satno }}}'
+                hx-target="#red-tle-fields"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this"
+                hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                class="btn-secondary btn-sm">&rarr; Red</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if results | length == 50 %}
+<p class="empty-msg" style="margin-top:0.4rem">Showing first 50 matches &mdash; refine your search to narrow results.</p>
+{% endif %}
+{% endif %}

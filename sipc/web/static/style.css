@@ -237,6 +237,80 @@ textarea { resize: vertical; }
 }
 .log-entry:last-child { border-bottom: none; }
 
+/* ── Panel header row (title + action buttons inline) ─────────── */
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.panel-header-row h2 {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── HRR Watchlist ────────────────────────────────────────────── */
+.hrr-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.hrr-col-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.4rem;
+}
+.hrr-blue-col .hrr-col-title { color: var(--blue); }
+.hrr-red-col  .hrr-col-title { color: var(--red); }
+.hrr-list { list-style: none; }
+.hrr-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+.hrr-item:last-child { border-bottom: none; }
+.hrr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrr-satno { color: var(--text-dim); font-size: 0.72rem; white-space: nowrap; }
+.hrr-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+.hrr-other-details { margin-top: 0.5rem; }
+.hrr-other-summary {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hrr-other-list { margin-top: 0.4rem; }
+
+/* ── Orbit Catalog Search ─────────────────────────────────────── */
+.catalog-search-input {
+  width: 100%;
+  margin-bottom: 0.25rem;
+}
+.catalog-table td.mono { font-family: var(--font-mono); }
+.catalog-table td.text-dim { color: var(--text-dim); }
+.catalog-badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
 /* ── Misc ─────────────────────────────────────────────────────── */
 .empty-msg { color: var(--text-dim); font-size: 0.8rem; font-style: italic; }
 .error-msg { color: var(--red); font-size: 0.85rem; margin-bottom: 0.5rem; }

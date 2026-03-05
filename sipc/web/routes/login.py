@@ -68,8 +68,24 @@ async def post_login(
 
 
 @router.post("/logout", response_model=None)
-async def post_logout() -> RedirectResponse:
-    """Clear the session cookie and redirect to the login page."""
+async def post_logout(request: Request) -> RedirectResponse:
+    """Clear the session cookie, disconnect STK, wipe planning state, then redirect."""
+    from sipc.web.auth import decode_session_cookie  # noqa: PLC0415
+    from sipc.web.planning_state import clear_session_state, get_session_state  # noqa: PLC0415
+
+    cookie = request.cookies.get(_COOKIE_NAME)
+    if cookie:
+        username = decode_session_cookie(cookie)
+        if username:
+            state = get_session_state(username)
+            if state.stk_session is not None:
+                try:
+                    state.stk_session.disconnect()
+                except Exception:
+                    pass
+            clear_session_state(username)
+            logger.info("Session state cleared on logout for: %s", username)
+
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=_COOKIE_NAME)
     return response

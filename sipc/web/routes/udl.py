@@ -7,7 +7,9 @@ and are never written to disk or the database.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import httpx
@@ -16,13 +18,45 @@ from fastapi.responses import HTMLResponse
 
 from sipc.web.auth import require_login
 from sipc.web.models import User
-from sipc.web.planning_state import get_session_state
+from sipc.web.planning_state import (
+    get_onorbit_catalog,
+    get_catalog_status,
+    get_session_state,
+    set_catalog_status,
+    set_onorbit_catalog,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/udl")
 
 _UDL_BASE = "https://unifieddatalibrary.com/udl"
+
+
+async def _fetch_onorbit_background(username: str, password: str) -> None:
+    """Fetch the UDL on-orbit catalog in the background and cache it app-wide.
+
+    Called as an asyncio background task immediately after successful UDL login.
+    Only runs when the catalog has not already been loaded (status != 'ready').
+    """
+    if get_catalog_status() == "ready":
+        return  # Already loaded — no need to fetch again
+    set_catalog_status("loading")
+    logger.info("Background: fetching on-orbit catalog from UDL")
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/onorbit",
+                auth=(username, password),
+                timeout=60.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        set_onorbit_catalog(data if isinstance(data, list) else [])
+        logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
+    except Exception as exc:
+        set_catalog_status("error")
+        logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
 
 
 def _templates() -> object:
@@ -97,6 +131,9 @@ async def udl_login(
     state.udl_password = password
     state.append_log(f"[UDL] Connected as {username}")
     logger.info("UDL credentials stored for operator: %s", current_user.username)
+
+    # Kick off background catalog fetch (no-op if already loaded).
+    asyncio.create_task(_fetch_onorbit_background(username, password))
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/udl_status.html",
@@ -304,4 +341,138 @@ async def fetch_statevector(
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/statevector_fields.html",
         {"request": request, "sv": sv, "error": None},
+    )
+
+
+# ── HRR Watchlist ──────────────────────────────────────────────────────────
+
+
+@router.get("/hrr", response_model=None)
+async def fetch_hrr(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial.
+
+    The HRR notification endpoint is queried for the last 7 days.  Records are
+    split into Blue, Red, and unclassified buckets by inspecting common UDL
+    team/side field names.
+    """
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    if not state.udl_username or not state.udl_password:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/hrr_panel.html",
+            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
+             "error": "Not connected to UDL — use the UDL panel to log in first."},
+        )
+
+    cutoff = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/notification",
+                params={"createdAt": f">{cutoff}", "msgType": "JCO-HRR-SATELLITES"},
+                auth=(state.udl_username, state.udl_password),
+                timeout=30.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:200].strip() or "(empty)"
+        error = f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
+        logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/hrr_panel.html",
+            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [], "error": error},
+        )
+    except httpx.TimeoutException:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/hrr_panel.html",
+            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
+             "error": "UDL request timed out."},
+        )
+    except httpx.RequestError as exc:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/hrr_panel.html",
+            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
+             "error": f"UDL unreachable: {exc}"},
+        )
+
+    hrr_blue: list[dict] = []
+    hrr_red: list[dict] = []
+    hrr_other: list[dict] = []
+
+    for rec in data if isinstance(data, list) else []:
+        sat_no = rec.get("satNo") or rec.get("satno") or rec.get("SATNO") or ""
+        name = str(
+            rec.get("objectName") or rec.get("name") or rec.get("OBJECT_NAME") or sat_no or "—"
+        ).strip()
+        # Try common UDL field names for team/side classification
+        team = str(
+            rec.get("team") or rec.get("side") or rec.get("tag") or
+            rec.get("nation") or rec.get("classification") or ""
+        ).upper()
+        entry = {"satno": sat_no, "name": name, "team": team}
+        if "BLUE" in team or team in ("B", "BLU"):
+            hrr_blue.append(entry)
+        elif "RED" in team or team == "R":
+            hrr_red.append(entry)
+        else:
+            hrr_other.append(entry)
+
+    state.append_log(
+        f"[HRR] Loaded {len(data)} records — {len(hrr_blue)} Blue, "
+        f"{len(hrr_red)} Red, {len(hrr_other)} unclassified"
+    )
+    logger.info("HRR fetched for operator %s: %d records", current_user.username, len(data))
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/hrr_panel.html",
+        {"request": request, "hrr_blue": hrr_blue, "hrr_red": hrr_red,
+         "hrr_other": hrr_other, "error": None},
+    )
+
+
+# ── On-orbit catalog search ────────────────────────────────────────────────
+
+
+@router.get("/catalog/search", response_model=None)
+async def search_catalog(
+    request: Request,
+    q: str = Query("", description="Search query — name substring or SATNO prefix"),
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Search the cached on-orbit catalog and return a results partial.
+
+    Returns up to 50 matching objects.  When *q* is empty the partial shows
+    the current catalog status (loading, ready, error) so the operator can
+    see progress without searching.
+    """
+    tmpl = _templates()
+    catalog = get_onorbit_catalog()
+    status = get_catalog_status()
+
+    results: list[dict] = []
+    if q.strip():
+        q_lower = q.strip().lower()
+        for obj in catalog:
+            name = str(obj.get("name") or obj.get("objectName") or "").lower()
+            satno = str(obj.get("satNo") or obj.get("satno") or "")
+            if q_lower in name or q_lower in satno:
+                results.append({
+                    "satno": obj.get("satNo") or obj.get("satno") or "—",
+                    "name": obj.get("name") or obj.get("objectName") or "—",
+                    "obj_type": obj.get("objectType") or obj.get("type") or "—",
+                    "country": obj.get("country") or "—",
+                })
+                if len(results) >= 50:
+                    break
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/catalog_results.html",
+        {"request": request, "results": results, "q": q,
+         "status": status, "total": len(catalog)},
     )

@@ -1,0 +1,109 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% else %}
+<div class="hrr-grid">
+
+  <!-- Blue HRR column -->
+  <div class="hrr-col hrr-blue-col">
+    <h3 class="hrr-col-title">BLUE ({{ hrr_blue | length }})</h3>
+    {% if hrr_blue %}
+    <ul class="hrr-list">
+      {% for sat in hrr_blue %}
+      <li class="hrr-item">
+        <span class="hrr-name">{{ sat.name }}</span>
+        <span class="hrr-satno">{{ sat.satno }}</span>
+        <div class="hrr-actions">
+          {% if sat.satno %}
+          <button hx-get="/udl/tle"
+                  hx-vals='{"satno": {{ sat.satno }}}'
+                  hx-target="#blue-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-disabled-elt="this"
+                  hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                  class="btn-primary btn-sm hrr-add">&rarr; Blue</button>
+          <button hx-get="/udl/tle"
+                  hx-vals='{"satno": {{ sat.satno }}}'
+                  hx-target="#red-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-disabled-elt="this"
+                  hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                  class="btn-secondary btn-sm hrr-add">&rarr; Red</button>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-msg">No Blue HRR satellites in the last 7 days.</p>
+    {% endif %}
+  </div>
+
+  <!-- Red HRR column -->
+  <div class="hrr-col hrr-red-col">
+    <h3 class="hrr-col-title">RED ({{ hrr_red | length }})</h3>
+    {% if hrr_red %}
+    <ul class="hrr-list">
+      {% for sat in hrr_red %}
+      <li class="hrr-item">
+        <span class="hrr-name">{{ sat.name }}</span>
+        <span class="hrr-satno">{{ sat.satno }}</span>
+        <div class="hrr-actions">
+          {% if sat.satno %}
+          <button hx-get="/udl/tle"
+                  hx-vals='{"satno": {{ sat.satno }}}'
+                  hx-target="#blue-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-disabled-elt="this"
+                  hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                  class="btn-secondary btn-sm hrr-add">&rarr; Blue</button>
+          <button hx-get="/udl/tle"
+                  hx-vals='{"satno": {{ sat.satno }}}'
+                  hx-target="#red-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-disabled-elt="this"
+                  hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                  class="btn-primary btn-sm hrr-add">&rarr; Red</button>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-msg">No Red HRR satellites in the last 7 days.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+{% if hrr_other %}
+<details class="hrr-other-details">
+  <summary class="hrr-other-summary">Unclassified / Other ({{ hrr_other | length }})</summary>
+  <ul class="hrr-list hrr-other-list">
+    {% for sat in hrr_other %}
+    <li class="hrr-item">
+      <span class="hrr-name">{{ sat.name }}</span>
+      <span class="hrr-satno">{{ sat.satno }}</span>
+      <div class="hrr-actions">
+        {% if sat.satno %}
+        <button hx-get="/udl/tle"
+                hx-vals='{"satno": {{ sat.satno }}}'
+                hx-target="#blue-tle-fields"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this"
+                hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                class="btn-secondary btn-sm hrr-add">&rarr; Blue</button>
+        <button hx-get="/udl/tle"
+                hx-vals='{"satno": {{ sat.satno }}}'
+                hx-target="#red-tle-fields"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this"
+                hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                class="btn-secondary btn-sm hrr-add">&rarr; Red</button>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endif %}
