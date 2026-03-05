@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
 from sipc.config.constants import STK_FOLDERS
 from sipc.domain.scenario import ScenarioPlanner
-from sipc.stk_adapter.exceptions import StkConnectionError
+from sipc.stk_adapter.exceptions import StkCommandError, StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
 from sipc.web.auth import require_login
 from sipc.web.models import User
@@ -204,9 +204,24 @@ async def run_plan(
     planner = ScenarioPlanner(session_adapter, config)
 
     loop = asyncio.get_event_loop()
-    results = await loop.run_in_executor(
-        None, planner.plan, list(state.blue_assets), list(state.red_tracks)
-    )
+    try:
+        results = await loop.run_in_executor(
+            None, planner.plan, list(state.blue_assets), list(state.red_tracks)
+        )
+    except (StkConnectionError, StkCommandError) as exc:
+        state.append_log(f"[RUN] ERROR: {exc}")
+        logger.error("Planning run failed for operator %s: %s", current_user.username, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/results_table.html",
+            {"request": request, "results": [], "error": str(exc)},
+        )
+    except Exception as exc:
+        state.append_log(f"[RUN] ERROR: unexpected error — {exc}")
+        logger.exception("Unexpected error in planning run for operator %s", current_user.username)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/results_table.html",
+            {"request": request, "results": [], "error": f"Planning run failed: {exc}"},
+        )
 
     state.results = results
     state.append_log(
