@@ -1,0 +1,15 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% elif selected %}
+<div class="mnv-selected-summary">
+  <span class="badge-ok">&#10003; Option selected</span>
+  <span class="mnv-selected-detail">
+    {{ selected.burn_location.value | replace("_", " ") | title }}
+    &mdash; {{ selected.burn_type.value | title }}
+    &mdash; ΔV <strong>{{ "%.3f" | format(selected.delta_v_km_s) }} km/s</strong>
+    &mdash; burn {{ selected.burn_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
+  </span>
+</div>
+{% else %}
+<p class="empty-msg">No maneuver selected.</p>
+{% endif %}

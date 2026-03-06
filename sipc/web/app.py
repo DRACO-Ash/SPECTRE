@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from sipc.web.database import init_db
 from sipc.web.routes.login import router as login_router
+from sipc.web.routes.maneuver import router as maneuver_router
 from sipc.web.routes.operator import router as operator_router
 from sipc.web.routes.udl import router as udl_router
 
@@ -25,6 +26,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(login_router)
 app.include_router(operator_router)
 app.include_router(udl_router)
+app.include_router(maneuver_router)
 
 
 @app.on_event("startup")

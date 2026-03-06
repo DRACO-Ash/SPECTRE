@@ -82,8 +82,10 @@ main { padding: 1rem; }
   padding-bottom: 0.25rem;
   border-bottom: 1px solid var(--border);
 }
-.panel-blue { border-left: 3px solid var(--blue); }
-.panel-red  { border-left: 3px solid var(--red); }
+.panel-blue  { border-left: 3px solid var(--blue); }
+.panel-red   { border-left: 3px solid var(--red); }
+.panel-intel { border-left: 3px solid var(--amber); }
+.field-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin: 0.4rem 0 0.2rem; }
 .full-width { grid-column: 1 / -1; }
 
 /* ── Asset lists ──────────────────────────────────────────────── */
@@ -335,6 +337,60 @@ textarea { resize: vertical; }
   letter-spacing: 0.05em;
 }
 .hrr-other-list { margin-top: 0.4rem; }
+
+/* ── Maneuver planning ────────────────────────────────────────── */
+.mnv-search-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+}
+.mnv-search-grid label { font-size: 0.78rem; }
+.mnv-check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.mnv-check-group label { font-size: 0.75rem; display: flex; align-items: center; gap: 0.25rem; }
+.mnv-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+.mnv-summary { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.3rem; }
+.mnv-scroll { overflow-y: auto; max-height: 18rem; border: 1px solid var(--border); border-radius: 3px; }
+.mnv-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.78rem; }
+.mnv-table th {
+  position: sticky; top: 0;
+  background: var(--bg-panel);
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.mnv-table th.no-sort { cursor: default; }
+.mnv-table th:hover:not(.no-sort) { color: var(--text); }
+.mnv-table td { padding: 0.2rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.mnv-table tr:last-child td { border-bottom: none; }
+.mnv-table .mnv-dv { color: var(--blue); font-weight: bold; }
+.mnv-table .mnv-notes { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnv-row-selected { background: color-mix(in srgb, var(--amber, #c8960c) 12%, transparent); }
+.mnv-sort-ind { font-size: 0.6rem; opacity: 0.7; }
+.mnv-selected-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  background: color-mix(in srgb, var(--blue-dim) 40%, transparent);
+  border: 1px solid var(--blue);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.mnv-selected-detail { color: var(--text-dim); font-size: 0.75rem; }
 
 /* ── Orbit Catalog Search ─────────────────────────────────────── */
 .catalog-search-input {

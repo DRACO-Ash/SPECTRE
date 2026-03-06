@@ -181,6 +181,88 @@
         </div>
       </form>
     </section>
+
+    <!-- Maneuver Options -->
+    <section class="panel panel-intel">
+      <div class="panel-header-row">
+        <h2>Maneuver Options</h2>
+        <div class="panel-header-actions">
+          <button class="btn-secondary btn-sm"
+                  hx-post="/plan/maneuver/refresh"
+                  hx-target="#maneuver-options-table"
+                  hx-swap="innerHTML"
+                  hx-indicator="#mnv-indicator"
+                  hx-disabled-elt="this">Refresh from Live Orbit</button>
+          <span id="mnv-indicator" class="htmx-indicator"><span class="spinner"></span>Searching&hellip;</span>
+        </div>
+      </div>
+
+      <form id="mnv-search-form"
+            hx-post="/plan/maneuver/search"
+            hx-target="#maneuver-options-table"
+            hx-swap="innerHTML"
+            hx-indicator="#mnv-indicator"
+            hx-disabled-elt="find button[type=submit]">
+
+        <div class="mnv-search-grid">
+          <label>Red satellite
+            <select name="red_sat">
+              {% for track in red_tracks %}
+              <option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
+              {% else %}
+              <option value="" disabled selected>— add a Red Track first —</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Blue target
+            <select name="blue_sat">
+              {% for asset in blue_assets %}
+              <option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
+              {% else %}
+              <option value="" disabled selected>— add a Blue Asset first —</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Window start (UTC)
+            <input type="datetime-local" name="window_start"
+                   value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}" />
+          </label>
+          <label>Window stop (UTC)
+            <input type="datetime-local" name="window_stop"
+                   value="{{ scenario_stop.strftime('%Y-%m-%dT%H:%M') if scenario_stop else '' }}" />
+          </label>
+          <label>Max ΔV (km/s)
+            <input type="number" name="max_dv" value="3.0" min="0.01" step="0.1" />
+          </label>
+        </div>
+
+        <p class="field-label">Burn types</p>
+        <div class="mnv-check-group">
+          <label><input type="checkbox" name="burn_types" value="impulsive" checked> Impulsive</label>
+          <label><input type="checkbox" name="burn_types" value="finite" checked> Finite</label>
+        </div>
+
+        <p class="field-label">Burn locations</p>
+        <div class="mnv-check-group">
+          <label><input type="checkbox" name="burn_locations" value="apogee" checked> Apogee</label>
+          <label><input type="checkbox" name="burn_locations" value="perigee" checked> Perigee</label>
+          <label><input type="checkbox" name="burn_locations" value="ascending_node" checked> Asc Node</label>
+          <label><input type="checkbox" name="burn_locations" value="descending_node" checked> Desc Node</label>
+          <label><input type="checkbox" name="burn_locations" value="north_pole" checked> N Pole</label>
+          <label><input type="checkbox" name="burn_locations" value="south_pole" checked> S Pole</label>
+        </div>
+
+        <div class="mnv-actions">
+          <button type="submit" class="btn-primary">Generate Options</button>
+        </div>
+      </form>
+
+      <div id="maneuver-options-table" style="margin-top:0.6rem">
+        <p class="empty-msg">Configure search parameters and click Generate Options.</p>
+      </div>
+
+      <div id="maneuver-status" style="margin-top:0.4rem"></div>
+    </section>
   </div>
 
   <!-- ── RED FORCE ───────────────────────────────────────────────────── -->

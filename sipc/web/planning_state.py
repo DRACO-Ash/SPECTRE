@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sipc.domain.models import BlueAsset, InterceptWindow, RedTrack
+from sipc.domain.models import BlueAsset, InterceptWindow, ManeuverOption, RedTrack
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,10 @@ class SessionState:
     # Used by the UDL epoch-matched TLE fetch.
     scenario_start: datetime | None = None
     scenario_stop: datetime | None = None
+    # Astrogator maneuver options from the last search run.
+    maneuver_options: list[ManeuverOption] = field(default_factory=list)
+    # The option the operator has selected for application.
+    selected_maneuver: ManeuverOption | None = None
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log, evicting oldest if needed."""
