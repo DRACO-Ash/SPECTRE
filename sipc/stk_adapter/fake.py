@@ -6,7 +6,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sipc.domain.models import AccessInterval
+from sipc.domain.models import (
+    AccessInterval,
+    BurnLocation,
+    BurnType,
+    ManeuverOption,
+    ManeuverSearchConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,11 @@ class FakeStkSession:
         self.range_km: float = 100.0
         self.scenario_start: datetime = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
         self.scenario_stop: datetime = datetime(2026, 1, 2, 0, 0, 0, tzinfo=UTC)
+        # Maneuver options returned by compute_maneuver_options().
+        # Tests may replace this with a custom list.
+        self.maneuver_options: list[ManeuverOption] = []
+        # Tracks the last option passed to apply_maneuver().
+        self.applied_maneuver: ManeuverOption | None = None
 
     # ── IStkSession interface ─────────────────────────────────────────────────
 
@@ -103,6 +114,63 @@ class FakeStkSession:
     def get_scenario_epoch(self) -> datetime:
         """Return the configured epoch (default: 2026-01-01T00:00:00Z)."""
         return self.epoch
+
+    def compute_maneuver_options(
+        self, config: ManeuverSearchConfig
+    ) -> list[ManeuverOption]:
+        """Return pre-configured maneuver options, sorted by delta_v_km_s.
+
+        Tests can configure ``self.maneuver_options`` to control what is returned.
+        If the list is empty, a single deterministic stub option is synthesised
+        using the first enabled burn location from *config* so that tests that
+        only care about non-empty results always get one.
+        """
+        from datetime import timedelta  # noqa: PLC0415
+
+        logger.debug(
+            "FakeStkSession.compute_maneuver_options",
+            extra={"red": config.red_sat, "blue": config.blue_sat},
+        )
+        if self.maneuver_options:
+            return sorted(self.maneuver_options, key=lambda o: o.delta_v_km_s)
+
+        # Synthesise one deterministic option so callers always get a result.
+        location = (
+            config.burn_locations[0]
+            if config.burn_locations
+            else BurnLocation.APOGEE
+        )
+        burn_type = (
+            config.burn_types[0]
+            if config.burn_types
+            else BurnType.IMPULSIVE
+        )
+        burn_epoch = config.search_window_start + timedelta(hours=1)
+        return [
+            ManeuverOption(
+                red_name=config.red_sat,
+                blue_name=config.blue_sat,
+                burn_type=burn_type,
+                burn_location=location,
+                burn_epoch=burn_epoch,
+                delta_v_km_s=0.250,
+                dv_prograde=0.250,
+                dv_normal=0.0,
+                dv_radial=0.0,
+                intercept_epoch=burn_epoch + timedelta(minutes=47),
+                transfer_duration_s=47 * 60,
+                intercept_range_km=0.5,
+                notes=f"Stub: {location.value} {burn_type.value}",
+            )
+        ]
+
+    def apply_maneuver(self, red_sat: str, option: ManeuverOption) -> None:
+        """Record the applied maneuver option for test assertion."""
+        self.applied_maneuver = option
+        logger.debug(
+            "FakeStkSession.apply_maneuver",
+            extra={"red_sat": red_sat, "option_id": option.option_id},
+        )
 
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Append action to the in-memory log."""

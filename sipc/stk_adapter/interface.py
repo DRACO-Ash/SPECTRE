@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from sipc.domain.models import AccessInterval
+from sipc.domain.models import AccessInterval, ManeuverOption, ManeuverSearchConfig
 
 
 @runtime_checkable
@@ -126,6 +126,53 @@ class IStkSession(Protocol):
 
         Raises:
             StkConnectionError: If no scenario is loaded.
+        """
+        ...
+
+    def compute_maneuver_options(
+        self, config: ManeuverSearchConfig
+    ) -> list[ManeuverOption]:
+        """Enumerate viable intercept maneuver options via Astrogator MCS.
+
+        For each enabled :class:`~sipc.domain.models.BurnLocation` in *config*,
+        builds an Astrogator Mission Control Sequence on the red satellite and
+        runs a differential corrector targeting the blue satellite.  Converged
+        solutions are returned as :class:`~sipc.domain.models.ManeuverOption`
+        instances; non-convergent candidates are silently dropped.
+
+        The red satellite's propagator is always restored to SGP4 after the
+        search completes, regardless of success or failure.
+
+        Args:
+            config: Search parameters including satellite names, time window,
+                delta-V budget, burn types, and burn locations.
+
+        Returns:
+            List of :class:`~sipc.domain.models.ManeuverOption`, sorted by
+            ``delta_v_km_s`` ascending.  May be empty if no solutions converge
+            within the given constraints.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the Astrogator module is unavailable or the
+                satellite objects cannot be found.
+        """
+        ...
+
+    def apply_maneuver(self, red_sat: str, option: ManeuverOption) -> None:
+        """Write a selected maneuver option into the red satellite's Astrogator MCS.
+
+        Replaces the red satellite's current propagator with an Astrogator
+        sequence encoding the selected burn.  After this call the satellite
+        will propagate along the intercept trajectory when STK rewinds.
+
+        Args:
+            red_sat: STK object name of the red satellite.
+            option: The :class:`~sipc.domain.models.ManeuverOption` to apply.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the MCS cannot be constructed or propagated.
         """
         ...
 

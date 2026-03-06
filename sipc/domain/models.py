@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 
 from sipc.config.constants import BLUE_PREFIX, RED_PREFIX
 
@@ -83,6 +84,114 @@ class InterceptWindow:
     min_range_km: float
     blue_name: str
     red_name: str
+
+
+class BurnType(Enum):
+    """Type of propulsive maneuver.
+
+    ``IMPULSIVE`` treats the burn as an instantaneous velocity change (ΔV).
+    ``FINITE`` models a continuous-thrust burn over a defined duration.
+    """
+
+    IMPULSIVE = "impulsive"
+    FINITE = "finite"
+
+
+class BurnLocation(Enum):
+    """Orbital geometry position at which a maneuver is executed.
+
+    Each value maps to a well-defined point in the red satellite's orbit,
+    used by the Astrogator MCS to constrain the burn epoch search.
+    """
+
+    APOGEE = "apogee"
+    """Highest point in the orbit — most efficient for perigee raise."""
+
+    PERIGEE = "perigee"
+    """Lowest point in the orbit — most efficient for apogee raise."""
+
+    ASCENDING_NODE = "ascending_node"
+    """Equatorial crossing going north — most efficient for plane changes."""
+
+    DESCENDING_NODE = "descending_node"
+    """Equatorial crossing going south — alternative plane-change point."""
+
+    NORTH_POLE = "north_pole"
+    """Maximum northern latitude pass."""
+
+    SOUTH_POLE = "south_pole"
+    """Maximum southern latitude pass."""
+
+    CUSTOM = "custom"
+    """User-specified true anomaly or epoch."""
+
+
+@dataclass
+class ManeuverOption:
+    """One solved intercept trajectory from the Astrogator search.
+
+    Represents a single candidate maneuver that places the red satellite
+    on an intercept trajectory with the blue target.  All delta-V components
+    are expressed in the VNC (Velocity-Normal-Co-normal) frame.
+
+    Attributes:
+        option_id: Unique identifier; auto-generated UUID if not supplied.
+        red_name: STK object name of the red (threat) satellite.
+        blue_name: STK object name of the blue (friendly) target satellite.
+        burn_type: Impulsive or finite burn.
+        burn_location: Orbital geometry tag for the burn point.
+        burn_epoch: UTC datetime at which the burn is executed.
+        delta_v_km_s: Total delta-V magnitude in km/s.
+        dv_prograde: VNC prograde (along-track) component in km/s.
+        dv_normal: VNC normal (orbit-normal) component in km/s.
+        dv_radial: VNC radial (cross-track) component in km/s.
+        intercept_epoch: UTC datetime when the intercept occurs.
+        transfer_duration_s: Coast time from burn to intercept in seconds.
+        intercept_range_km: Miss distance at intercept in km.
+        notes: Human-readable label, e.g. ``"Hohmann via apogee raise"``.
+    """
+
+    red_name: str
+    blue_name: str
+    burn_type: BurnType
+    burn_location: BurnLocation
+    burn_epoch: datetime
+    delta_v_km_s: float
+    dv_prograde: float
+    dv_normal: float
+    dv_radial: float
+    intercept_epoch: datetime
+    transfer_duration_s: float
+    intercept_range_km: float
+    notes: str = ""
+    option_id: str = field(default_factory=lambda: f"MNV_{uuid.uuid4().hex[:10].upper()}")
+
+
+@dataclass
+class ManeuverSearchConfig:
+    """Parameters controlling the Astrogator intercept option search.
+
+    Attributes:
+        red_sat: STK object name of the red satellite (interceptor).
+        blue_sat: STK object name of the blue satellite (target).
+        search_window_start: UTC start of the maneuver search window.
+        search_window_stop: UTC end of the maneuver search window.
+        max_delta_v_km_s: Solutions requiring more than this ΔV are discarded.
+        burn_types: Which burn types to include in the search.
+        burn_locations: Which orbital positions to evaluate for the burn.
+    """
+
+    red_sat: str
+    blue_sat: str
+    search_window_start: datetime
+    search_window_stop: datetime
+    max_delta_v_km_s: float = 3.0
+    burn_types: list[BurnType] = field(
+        default_factory=lambda: [BurnType.IMPULSIVE, BurnType.FINITE]
+    )
+    burn_locations: list[BurnLocation] = field(
+        default_factory=lambda: list(BurnLocation)
+    )
 
 
 @dataclass
