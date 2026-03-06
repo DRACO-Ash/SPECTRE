@@ -75,27 +75,29 @@ def _stk_dispatch() -> Any:
     """
     _purge_stk_gen_py_stubs()
     import win32com.client  # type: ignore[import]
-    logger.info("STK: attempting EnsureDispatch to generate complete COM type stubs")
+    logger.info("STK: generating COM type stubs via gencache.EnsureModule")
     try:
-        app = win32com.client.EnsureDispatch("STK13.Application")
-        # Verify that the critical propagator interface was stubbed.
+        from win32com.client import gencache as _gencache  # type: ignore[import]  # noqa: PLC0415
+        # Generate stubs for the STK Objects type library (GUID / major / minor).
+        # Complete stubs are required because IAgVePropagatorSGP4 is a vtable-only
+        # (non-dual) interface and cannot be reached via pure late binding.
+        _gencache.EnsureModule("{AB621A84-81D2-45BF-9236-112CF72743D7}", 0, 1, 0)
         import sys  # noqa: PLC0415
         _guid = "AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0"
         if any(_guid in k and "IAgVePropagatorSGP4" in k for k in sys.modules):
             logger.info("STK stubs include IAgVePropagatorSGP4 — CastTo will work")
         else:
             logger.warning(
-                "STK stubs generated but IAgVePropagatorSGP4 not found in sys.modules; "
-                "CastTo may still work if the stub was generated without importing"
+                "STK stubs generated but IAgVePropagatorSGP4 not yet in sys.modules "
+                "(will be loaded on first CastTo call)"
             )
-        return app
     except Exception as exc:
         logger.warning(
-            "STK: EnsureDispatch failed (%s) — falling back to pure late binding; "
+            "STK: stub generation failed (%s) — falling back to pure late binding; "
             "TLE loading via Object Model may be limited",
             exc,
         )
-        return win32com.client.Dispatch("STK13.Application")
+    return win32com.client.Dispatch("STK13.Application")
 
 
 def _parse_stk_time(stk_time: str) -> datetime:
