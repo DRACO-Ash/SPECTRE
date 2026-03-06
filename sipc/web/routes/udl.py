@@ -186,7 +186,7 @@ async def fetch_tle(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
     mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
-    name_override: str = Query("", description="Pre-populated name (e.g. from HRR watchlist commonName)"),
+    name_override: Annotated[str, Query(description="Pre-populated name (e.g. from HRR watchlist commonName)")] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Fetch a TLE for *satno* from UDL and return a pre-filled form partial.

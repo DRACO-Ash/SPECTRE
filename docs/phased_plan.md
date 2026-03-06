@@ -1,6 +1,6 @@
 # SIPC — Phased Development Plan
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ---
 
@@ -131,13 +131,140 @@ Return structured HTMX error partials with the actual STK error message.
 
 ---
 
+---
+
+## Phase 5 — Astrogator Intercept Option Generation
+
+Enumerate viable intercept maneuver options for a Red satellite against a Blue target
+using STK Astrogator MCS.  Sits **alongside** `compute_access` — not a replacement.
+See `docs/astrogator_notes.md` for STK COM reference.
+
+### 5.1 — Domain models  `[ ]`
+
+New types in `sipc/domain/models.py`:
+
+- **`BurnType`** enum — `IMPULSIVE | FINITE`
+- **`BurnLocation`** enum — `APOGEE | PERIGEE | ASCENDING_NODE | DESCENDING_NODE | NORTH_POLE | SOUTH_POLE | CUSTOM`
+- **`ManeuverOption`** dataclass:
+
+  | Field | Type | Description |
+  |-------|------|-------------|
+  | `option_id` | `str` | Auto UUID |
+  | `red_name` | `str` | Red STK object name |
+  | `blue_name` | `str` | Blue STK object name |
+  | `burn_type` | `BurnType` | Impulsive / Finite |
+  | `burn_location` | `BurnLocation` | Orbital geometry tag |
+  | `burn_epoch` | `datetime` | UTC time to execute burn |
+  | `delta_v_km_s` | `float` | Total ΔV magnitude (km/s) |
+  | `dv_prograde` | `float` | VNC prograde component (km/s) |
+  | `dv_normal` | `float` | VNC normal component (km/s) |
+  | `dv_radial` | `float` | VNC radial component (km/s) |
+  | `intercept_epoch` | `datetime` | When intercept occurs |
+  | `transfer_duration_s` | `float` | Coast time burn → intercept (s) |
+  | `intercept_range_km` | `float` | Miss distance at intercept (km) |
+  | `notes` | `str` | Human label e.g. "Hohmann via apogee" |
+
+- **`ManeuverSearchConfig`** dataclass:
+  - `red_sat`, `blue_sat` — STK object names
+  - `search_window_start`, `search_window_stop` — `datetime`
+  - `max_delta_v_km_s` — `float` (discard solutions above this)
+  - `burn_types` — `list[BurnType]`
+  - `burn_locations` — `list[BurnLocation]`
+
+### 5.2 — IStkSession + FakeStkSession + ManeuverPlanner  `[ ]`
+
+- Add `compute_maneuver_options(config) -> list[ManeuverOption]` to `IStkSession` Protocol
+- Add `apply_maneuver(red_sat, option) -> None` to `IStkSession` Protocol
+- `FakeStkSession` returns deterministic stub `ManeuverOption` list for unit tests
+- New `sipc/domain/maneuver_planner.py` — `ManeuverPlanner.compute_options(config, session)`
+  validates inputs, delegates, sorts by `delta_v_km_s` ascending, logs provenance
+- Unit tests: validation errors, sort order, FakeStkSession round-trip
+
+### 5.3 — Web routes `/plan/maneuver/`  `[ ]`
+
+| Route | Method | Action |
+|-------|--------|--------|
+| `/plan/maneuver/search` | `POST` | Run search; return `maneuver_options_table.html` partial |
+| `/plan/maneuver/refresh` | `POST` | Re-run with same config from live STK state |
+| `/plan/maneuver/select` | `POST` | Store selected option in session; return status partial |
+
+`SessionState` gains `maneuver_options: list[ManeuverOption]` and
+`selected_maneuver: ManeuverOption | None`.
+
+### 5.4 — Intel / Mission UI panel  `[ ]`
+
+New section below the force columns in `operator.html` — `panel-intel` accent colour.
+
+Controls:
+- Red asset dropdown (populated from `state.red_tracks`) vs Blue asset dropdown
+- Search window start / stop datetime inputs
+- Max ΔV (km/s) numeric input
+- Burn type checkboxes: Impulsive / Finite
+- Burn location checkboxes: Apogee / Perigee / AN / DN / Poles
+- **[Generate Options]** — HTMX POST to `/plan/maneuver/search`
+- **[Refresh from Live Orbit]** — HTMX POST to `/plan/maneuver/refresh`
+
+Maneuver options table (sortable, same JS pattern as HRR):
+
+| Location | Type | Burn Epoch (UTC) | ΔV km/s | Transfer | Intercept Range | Notes | |
+|----------|------|-----------------|---------|----------|-----------------|-------|--|
+| Apogee | Impulsive | 2026-03-06 … | 0.312 | 47 min | 0.8 km | … | [Select] |
+
+Sorted by ΔV ascending on load.  [Select] fires POST to `/plan/maneuver/select`.
+
+### 5.5 — StkComSession — Astrogator COM  `[ ]`
+
+`compute_maneuver_options` core loop:
+
+1. Get red satellite object; snapshot its current SGP4 propagator state
+2. For each enabled `BurnLocation` × candidate burn epochs (stepped through window):
+   - `SetPropagatorType(ePropagatorAstrogator)`
+   - Build MCS: `InitialState → Propagate (coast) → Maneuver → Propagate → TargetSequence`
+   - Set target constraint: range to blue satellite < threshold at intercept epoch
+   - Run differential corrector; if converged → extract ΔV, epochs, miss distance → `ManeuverOption`
+   - Non-convergence: DEBUG-log and skip
+3. Restore red satellite to SGP4 + original TLE (in `finally` block)
+4. Return all solved options
+
+`apply_maneuver`: write selected `ManeuverOption` into the red satellite's Astrogator MCS
+as a fixed (non-targeting) sequence ready for propagation.
+
+See `docs/astrogator_notes.md` for Astrogator enum values and MCS COM patterns.
+
+### 5.6 — Integration tests  `[ ]`
+
+- Unit test: `ManeuverPlanner` validation (bad window, no burn types, dv ≤ 0)
+- Unit test: `FakeStkSession` returns options sorted by ΔV
+- Integration test (opt-in, requires STK + Astrogator licence): one impulsive apogee burn
+  solves and returns a `ManeuverOption` with `intercept_range_km < 1.0`
+
+### Technical risks
+
+| Risk | Mitigation |
+|------|-----------|
+| Astrogator licence absent | Check at connect time; surface clear error in panel; disable controls |
+| ODTK blocks MCS construction | MCS is pure OM — should be unaffected; verify with first live test |
+| Differential corrector non-convergence | Drop silently; DEBUG-log; operator sees only solved options |
+| Computation time | Run in executor thread (existing pattern); consider SSE progress streaming |
+| Propagator state corruption | Restore SGP4 + TLE in `finally`; never leave satellite in Astrogator state after search |
+| Astrogator enum values unknown | Discover from gen_py stubs at runtime; document in `astrogator_notes.md` |
+
+### Implementation order
+
+1. 5.1 domain models (no STK dependency)
+2. 5.2 FakeStkSession + ManeuverPlanner + unit tests
+3. 5.3 web routes + 5.4 UI panel (end-to-end with fake session)
+4. 5.5 StkComSession Astrogator COM (requires live STK + licence)
+5. 5.6 integration tests
+
+---
+
 ## Backlog / Future Consideration
 
 These are not scheduled but recorded for later discussion:
 
 - **Multi-scenario support** — run multiple named scenarios concurrently per operator session
 - **Intercept scoring / figure of merit** — rank windows by geometry quality (closure rate, elevation angle, range rate)
-- **Maneuver planning** — integrate STK Astrogator for delta-V calculation
 - **PostgreSQL** — already switchable via `DATABASE_URL`; no code change needed, but needs ops runbook
 - **Role-based access** — currently single `admin`/`operator` roles; may need finer-grained permissions
 - **Real-time SSE updates** — push access computation progress to the run log as it computes (currently polling)
