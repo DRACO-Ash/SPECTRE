@@ -104,20 +104,22 @@ def _normalize_tle_line1(line: str) -> str:
     """Normalise TLE line 1 to the format STK accepts.
 
     Some TLE sources (including UDL) include an explicit ``+`` sign in the
-    three sign positions of line 1:
+    five sign positions of line 1:
 
-    * column 34 (0-indexed 33): first derivative of mean motion
-    * column 45 (0-indexed 44): second derivative of mean motion
-    * column 54 (0-indexed 53): BSTAR drag term
+    * column 34 (0-indexed 33): first derivative of mean motion — mantissa sign
+    * column 45 (0-indexed 44): second derivative of mean motion — mantissa sign
+    * column 51 (0-indexed 50): second derivative of mean motion — exponent sign
+    * column 54 (0-indexed 53): BSTAR drag term — mantissa sign
+    * column 60 (0-indexed 59): BSTAR drag term — exponent sign
 
-    STK expects a **space** (not ``+``) in these positions for positive values.
+    STK expects a **space** (not ``+``) in all sign positions for positive values.
     A ``+`` in any of those positions causes ``AddSegsFromFile`` to raise
     "Failed to add the TLE".
     """
     if not line.startswith("1 ") or len(line) < 54:
         return line
     chars = list(line)
-    for idx in (33, 44, 53):
+    for idx in (33, 44, 50, 53, 59):
         if idx < len(chars) and chars[idx] == "+":
             chars[idx] = " "
     return "".join(chars)
@@ -597,12 +599,18 @@ class StkComSession:
             # NORAD catalog number is in TLE line 1, columns 3-7 (1-indexed).
             satno = line1[2:7].strip()
 
-            # UDL TLE data includes explicit '+' signs in the three sign
-            # positions of line 1 (cols 34, 45, 54).  STK expects a space
-            # there for positive values; a '+' causes AddSegsFromFile to fail.
+            # UDL TLE data includes explicit '+' signs in the sign positions
+            # of line 1.  STK expects a space there for positive values; a '+'
+            # causes AddSegsFromFile to raise "Failed to add the TLE".
             line1_norm = _normalize_tle_line1(line1)
 
-            tle_content = f"{sat_name}\n{line1_norm}\n{line2}\n"
+            # The name line MUST match the identifier passed to AddSegsFromFile
+            # exactly.  Using sat_name (e.g. "B_SAT_33274") when the identifier
+            # is the catalog number ("33274") causes a lookup miss and the same
+            # "Failed to add the TLE" error.  Use satno for both.
+            # Use platform-native line endings (no newline= override) so
+            # STK's Windows TLE parser receives \r\n as expected.
+            tle_content = f"{satno}\n{line1_norm}\n{line2}\n"
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".tle", delete=False, encoding="ascii"
             ) as fh:
@@ -659,7 +667,9 @@ class StkComSession:
         import os  # noqa: PLC0415
         import tempfile  # noqa: PLC0415
 
-        tle_content = f"{sat_name}\n{line1}\n{line2}\n"
+        satno_b = line1[2:7].strip()
+        line1_norm_b = _normalize_tle_line1(line1)
+        tle_content = f"{satno_b}\n{line1_norm_b}\n{line2}\n"
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".tle", delete=False, encoding="ascii"
         ) as fh:
