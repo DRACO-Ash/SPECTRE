@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from math import inf
 from typing import Annotated
 
 import httpx
@@ -29,6 +30,23 @@ from sipc.web.planning_state import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/udl")
+
+
+def _parse_tle_epoch(line1: str) -> datetime | None:
+    """Parse TLE line 1 epoch field (0-indexed cols 18-31, format YYDDD.FFFFFFFF) to UTC datetime.
+
+    Returns None if the field cannot be parsed.
+    """
+    try:
+        epoch_str = line1[18:32].strip()
+        year_2d = int(epoch_str[:2])
+        day_frac = float(epoch_str[2:])
+        year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
+        day_int = int(day_frac)
+        frac = day_frac - day_int
+        return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_int - 1 + frac)
+    except (ValueError, IndexError):
+        return None
 
 _UDL_BASE = "https://unifieddatalibrary.com/udl"
 
@@ -167,35 +185,56 @@ async def udl_logout(
 async def fetch_tle(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
+    mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
+    name_override: str = Query("", description="Pre-populated name (e.g. from HRR watchlist commonName)"),
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Fetch the latest TLE for *satno* from UDL and return a pre-filled form partial.
+    """Fetch a TLE for *satno* from UDL and return a pre-filled form partial.
 
-    The returned partial replaces the name/TLE fields in the add-asset form
-    so the operator can immediately submit without manual entry.
+    Two modes are supported:
+
+    * ``latest`` — uses ``/elset/current`` to retrieve the most recent available elset.
+    * ``epoch`` — fetches up to 10 elsets with epoch ≤ scenario start time, then selects
+      the one whose epoch is closest to (but not after) the scenario start.  Requires
+      scenario time to be set via the STK panel first.  A staleness warning is shown
+      when the selected TLE is more than 7 days from the scenario start.
     """
     tmpl = _templates()
     state = get_session_state(current_user.username)
 
+    _empty = {"request": request, "name": "", "tle": "", "tle_epoch_str": None,
+               "tle_age_days": None, "mode": mode, "error": None}
+
     if not state.udl_username or not state.udl_password:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
-            {
-                "request": request,
-                "name": "",
-                "tle": "",
-                "error": "Not connected to UDL — use the UDL panel to log in first.",
-            },
+            {**_empty, "error": "Not connected to UDL — use the UDL panel to log in first."},
         )
 
+    if mode == "epoch" and state.scenario_start is None:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/tle_fields.html",
+            {**_empty, "error": "No scenario time set. Configure scenario time in the STK panel first."},
+        )
+
+    # ── Fetch from UDL ───────────────────────────────────────────────────────
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{_UDL_BASE}/elset",
-                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
-                auth=(state.udl_username, state.udl_password),
-                timeout=10.0,
-            )
+            if mode == "epoch":
+                epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+                resp = await client.get(
+                    f"{_UDL_BASE}/elset",
+                    params={"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10},
+                    auth=(state.udl_username, state.udl_password),
+                    timeout=10.0,
+                )
+            else:
+                resp = await client.get(
+                    f"{_UDL_BASE}/elset/current",
+                    params={"satNo": satno},
+                    auth=(state.udl_username, state.udl_password),
+                    timeout=10.0,
+                )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as exc:
@@ -204,47 +243,95 @@ async def fetch_tle(
         logger.warning(error)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
-            {"request": request, "name": "", "tle": "", "error": error},
+            {**_empty, "error": error},
         )
     except httpx.TimeoutException:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
-            {"request": request, "name": "", "tle": "", "error": "UDL request timed out."},
+            {**_empty, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL TLE fetch failed for SATNO %s: %s", satno, exc)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
-            {"request": request, "name": "", "tle": "", "error": f"UDL unreachable: {exc}"},
+            {**_empty, "error": f"UDL unreachable: {exc}"},
         )
 
-    if not data:
+    # Normalise: /elset/current may return a single dict or a list
+    if isinstance(data, dict):
+        records: list = [data]
+    elif isinstance(data, list):
+        records = data
+    else:
+        records = []
+
+    if not records:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/tle_fields.html",
-            {
-                "request": request,
-                "name": "",
-                "tle": "",
-                "error": f"No elset found for SATNO {satno}.",
-            },
+            {**_empty, "error": f"No elset found for SATNO {satno}."},
         )
 
-    rec = data[0]
+    # ── Select the best record ───────────────────────────────────────────────
+    if mode == "epoch":
+        # Pick the record whose TLE epoch is closest to (and ≤) scenario_start.
+        best_rec = None
+        best_delta = inf
+        for candidate in records:
+            l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
+            ep = _parse_tle_epoch(l1)
+            if ep is None or ep > state.scenario_start:  # type: ignore[operator]
+                continue
+            delta = (state.scenario_start - ep).total_seconds()  # type: ignore[operator]
+            if delta < best_delta:
+                best_delta = delta
+                best_rec = candidate
+        if best_rec is None:
+            return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+                "partials/tle_fields.html",
+                {**_empty, "error": (
+                    f"No elset found for SATNO {satno} with epoch ≤ "
+                    f"{state.scenario_start.strftime('%Y-%m-%d %H:%M UTC')}."  # type: ignore[union-attr]
+                )},
+            )
+        rec = best_rec
+    else:
+        rec = records[0]
 
-    # UDL field names vary — try the known variants for each value
-    name = str(
-        rec.get("objectName") or rec.get("OBJECT_NAME") or satno
-    ).strip()
+    # ── Extract fields ───────────────────────────────────────────────────────
+    name = name_override.strip() or str(rec.get("objectName") or rec.get("OBJECT_NAME") or satno).strip()
     line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
     line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
     tle = f"{line1}\n{line2}"
 
-    state.append_log(f"[UDL] Fetched TLE for SATNO {satno} ({name})")
-    logger.info("TLE fetched for SATNO %s (%s) by operator %s", satno, name, current_user.username)
+    # TLE epoch metadata for the partial
+    tle_epoch_dt = _parse_tle_epoch(line1)
+    tle_epoch_str: str | None = None
+    tle_age_days: float | None = None
+    if tle_epoch_dt is not None:
+        tle_epoch_str = tle_epoch_dt.strftime("%Y-%m-%d %H:%M UTC")
+        if state.scenario_start is not None:
+            tle_age_days = abs((state.scenario_start - tle_epoch_dt).total_seconds()) / 86400.0
+
+    state.append_log(
+        f"[UDL] Fetched TLE for SATNO {satno} ({name}) mode={mode}"
+        + (f" epoch={tle_epoch_str}" if tle_epoch_str else "")
+    )
+    logger.info(
+        "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
+        satno, name, mode, current_user.username,
+    )
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/tle_fields.html",
-        {"request": request, "name": name, "tle": tle, "error": None},
+        {
+            "request": request,
+            "name": name,
+            "tle": tle,
+            "tle_epoch_str": tle_epoch_str,
+            "tle_age_days": tle_age_days,
+            "mode": mode,
+            "error": None,
+        },
     )
 
 
@@ -346,6 +433,23 @@ async def fetch_statevector(
 
 # ── HRR Watchlist ──────────────────────────────────────────────────────────
 
+_RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
+
+
+def _parse_created_at(rec: dict) -> datetime:
+    """Parse the UDL notification createdAt field to a UTC datetime.
+
+    Returns datetime.min (UTC) if the field is absent or unparseable so the
+    record sorts to the bottom when picking the newest notification.
+    """
+    raw = str(rec.get("createdAt") or "").strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+
+
+
 
 @router.get("/hrr", response_model=None)
 async def fetch_hrr(
@@ -354,85 +458,117 @@ async def fetch_hrr(
 ) -> HTMLResponse:
     """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial.
 
-    The HRR notification endpoint is queried for the last 7 days.  Records are
-    split into Blue, Red, and unclassified buckets by inspecting common UDL
-    team/side field names.
+    Queries ``/notification`` with ``msgType=JCO-HRR-SATELLITES``.  Starts at
+    ``now-1 days`` and increments the lookback window by one day until a
+    non-empty response is received (up to ``_HRR_MAX_LOOKBACK_DAYS``).  When
+    multiple notification records are returned the newest by ``createdAt`` is
+    used.  Satellites are classified Red if their country code is in
+    ``_RED_COUNTRIES``; everything else is Blue.
     """
     tmpl = _templates()
     state = get_session_state(current_user.username)
 
+    _empty_err = {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
+
     if not state.udl_username or not state.udl_password:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/hrr_panel.html",
-            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
-             "error": "Not connected to UDL — use the UDL panel to log in first."},
+            {**_empty_err, "error": "Not connected to UDL — use the UDL panel to log in first."},
         )
 
-    cutoff = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    # ── Walk back day-by-day until we get a result (max 3 days) ─────────
+    _HRR_MAX_LOOKBACK_DAYS = 3
+    notifications: list[dict] = []
+    days_used = 0
 
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{_UDL_BASE}/notification",
-                params={"createdAt": f">{cutoff}", "msgType": "JCO-HRR-SATELLITES"},
-                auth=(state.udl_username, state.udl_password),
-                timeout=30.0,
-            )
-        resp.raise_for_status()
-        data = resp.json()
+            for day in range(1, _HRR_MAX_LOOKBACK_DAYS + 1):
+                resp = await client.get(
+                    f"{_UDL_BASE}/notification",
+                    params={
+                        "createdAt": f">now-{day} days",
+                        "dataMode": "REAL",
+                        "msgType": "JCO-HRR-SATELLITES",
+                        "source": "JCO",
+                        "maxResults": 10000,
+                    },
+                    auth=(state.udl_username, state.udl_password),
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, list) and data:
+                    notifications = data
+                    days_used = day
+                    break
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:200].strip() or "(empty)"
         error = f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
         logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/hrr_panel.html",
-            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [], "error": error},
+            "partials/hrr_panel.html", {**_empty_err, "error": error},
         )
     except httpx.TimeoutException:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/hrr_panel.html",
-            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
-             "error": "UDL request timed out."},
+            {**_empty_err, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/hrr_panel.html",
-            {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_other": [],
-             "error": f"UDL unreachable: {exc}"},
+            {**_empty_err, "error": f"UDL unreachable: {exc}"},
         )
 
+    if not notifications:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/hrr_panel.html",
+            {**_empty_err, "error": f"No HRR notifications found in the last {days_used} days."},
+        )
+
+    # ── Pick the newest notification and extract its msgBody ─────────────
+    newest = max(notifications, key=_parse_created_at)
+    msg_body: list[dict] = newest.get("msgBody") or []
+    notification_created_at = str(newest.get("createdAt") or "").strip()
+
+    # ── Classify by country ───────────────────────────────────────────────
     hrr_blue: list[dict] = []
     hrr_red: list[dict] = []
-    hrr_other: list[dict] = []
 
-    for rec in data if isinstance(data, list) else []:
-        sat_no = rec.get("satNo") or rec.get("satno") or rec.get("SATNO") or ""
-        name = str(
-            rec.get("objectName") or rec.get("name") or rec.get("OBJECT_NAME") or sat_no or "—"
-        ).strip()
-        # Try common UDL field names for team/side classification
-        team = str(
-            rec.get("team") or rec.get("side") or rec.get("tag") or
-            rec.get("nation") or rec.get("classification") or ""
-        ).upper()
-        entry = {"satno": sat_no, "name": name, "team": team}
-        if "BLUE" in team or team in ("B", "BLU"):
-            hrr_blue.append(entry)
-        elif "RED" in team or team == "R":
+    for sat in msg_body:
+        satno = str(sat.get("satNo") or sat.get("satno") or "").strip()
+        name = str(sat.get("commonName") or sat.get("objectName") or satno or "—").strip()
+        country = str(sat.get("country") or "").strip().upper()
+        rank = sat.get("rank")
+        orbit_regime = str(sat.get("orbitRegime") or "").strip()
+        entry = {
+            "satno": satno,
+            "name": name,
+            "country": country,
+            "rank": rank,
+            "orbit_regime": orbit_regime,
+            "created_at": notification_created_at,
+        }
+        if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
-            hrr_other.append(entry)
+            hrr_blue.append(entry)
+
+    satellites = msg_body
 
     state.append_log(
-        f"[HRR] Loaded {len(data)} records — {len(hrr_blue)} Blue, "
-        f"{len(hrr_red)} Red, {len(hrr_other)} unclassified"
+        f"[HRR] lookback={days_used}d — "
+        f"{len(hrr_blue)} Blue, {len(hrr_red)} Red ({len(satellites)} sats, {len(notifications)} notifications)"
     )
-    logger.info("HRR fetched for operator %s: %d records", current_user.username, len(data))
+    logger.info(
+        "HRR fetched for operator %s: lookback=%dd %d sats from %d notifications",
+        current_user.username, days_used, len(satellites), len(notifications),
+    )
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/hrr_panel.html",
         {"request": request, "hrr_blue": hrr_blue, "hrr_red": hrr_red,
-         "hrr_other": hrr_other, "error": None},
+         "hrr_lookback": days_used, "error": None},
     )
 
 
