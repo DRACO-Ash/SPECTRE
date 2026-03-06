@@ -745,7 +745,20 @@ class StkComSession:
             )
 
     def _require_connection(self) -> None:
-        """Raise :class:`StkConnectionError` if not connected to STK."""
+        """Raise :class:`StkConnectionError` if not connected to STK.
+
+        Also ensures COM is initialised on the calling thread.  FastAPI
+        dispatches sync route handlers to a thread-pool thread; if that
+        thread has never called ``CoInitialize`` the COM runtime raises
+        ``CoInitialize has not been called``.  Calling it here (idempotent
+        for already-initialised threads) ensures every COM operation is safe
+        regardless of which thread the request arrives on.
+        """
+        try:
+            import pythoncom  # type: ignore[import]  # noqa: PLC0415
+            pythoncom.CoInitialize()
+        except Exception:
+            pass  # Already initialised on this thread — safe to continue
         if self._root is None:
             raise StkConnectionError(
                 "Not connected to STK. Call connect() or new_scenario() first."
