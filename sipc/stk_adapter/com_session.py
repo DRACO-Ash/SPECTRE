@@ -554,60 +554,59 @@ class StkComSession:
         errors: list[str] = []
 
         # ------------------------------------------------------------------
-        # Approach A: direct — SetPropagatorType(4) → Propagator → CommonTasks
+        # Approach A: CommonTasks.AddSegsFromFile via Object Model
         # ------------------------------------------------------------------
-        # With the correct enum value and gen_py stubs loaded, sat.Propagator
-        # returns _IAgVePropagatorSGP4 which has CommonTasks.AddSegsFromLines.
+        # In STK 13, IAgVePropagatorSGP4CommonTasks does NOT have AddSegsFromLines
+        # (removed from the API).  The correct method is AddSegsFromFile which
+        # reads a standard 3-line TLE file.  We write to a temp file and call
+        # via the Object Model — this bypasses the blocked Connect command layer.
         try:
+            import os  # noqa: PLC0415
+            import tempfile  # noqa: PLC0415
+
             sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
             sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
             propagator = sat_obj.Propagator
-            logger.warning(
+            logger.info(
                 "[set_propagator] propagator type=%s", type(propagator).__name__
             )
-            propagator.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            propagator.Propagate()
-            logger.info("set_propagator (direct) succeeded for %r", sat_name)
-            return
+
+            # NORAD catalog number is in TLE line 1, columns 3-7 (1-indexed).
+            satno = line1[2:7].strip()
+
+            tle_content = f"{sat_name}\n{line1}\n{line2}\n"
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".tle", delete=False, encoding="ascii"
+            ) as fh:
+                fh.write(tle_content)
+                tle_path = fh.name
+
+            try:
+                propagator.CommonTasks.AddSegsFromFile(satno, tle_path)
+                propagator.Propagate()
+                logger.info(
+                    "set_propagator (CommonTasks.AddSegsFromFile) succeeded for %r",
+                    sat_name,
+                )
+                return
+            finally:
+                os.unlink(tle_path)
         except Exception as exc_a:
-            errors.append(f"direct: {exc_a}")
+            errors.append(f"AddSegsFromFile: {exc_a}")
             logger.warning(
-                "[set_propagator] direct approach failed for %r: %s", sat_name, exc_a
+                "[set_propagator] AddSegsFromFile failed for %r: %s", sat_name, exc_a
             )
 
         # ------------------------------------------------------------------
-        # Approach B: CastTo — explicit interface cast via gencache stubs
-        # ------------------------------------------------------------------
-        try:
-            import win32com.client as _wc  # type: ignore[import]  # noqa: PLC0415
-
-            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
-            sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
-            propagator = sat_obj.Propagator
-            prop_sgp4 = _wc.CastTo(propagator, "IAgVePropagatorSGP4")
-            logger.warning(
-                "[set_propagator] CastTo OK: type=%s", type(prop_sgp4).__name__
-            )
-            prop_sgp4.CommonTasks.AddSegsFromLines(sat_name, line1, line2)
-            prop_sgp4.Propagate()
-            logger.info("set_propagator (CastTo) succeeded for %r", sat_name)
-            return
-        except Exception as exc_b:
-            errors.append(f"CastTo: {exc_b}")
-            logger.warning(
-                "[set_propagator] CastTo failed for %r: %s", sat_name, exc_b
-            )
-
-        # ------------------------------------------------------------------
-        # Approach C: TLE file import via ExecuteCommand (last resort)
+        # Approach B: ExecuteCommand ImportFromFile (last resort)
         # ------------------------------------------------------------------
         try:
             self._set_tle_via_file(sat_name, line1, line2)
-            logger.info("set_propagator (TLE file import) succeeded for %r", sat_name)
+            logger.info("set_propagator (ImportFromFile) succeeded for %r", sat_name)
             return
-        except Exception as exc_c:
-            errors.append(f"TLE file import: {exc_c}")
-            logger.debug("set_propagator approach C failed for %r: %s", sat_name, exc_c)
+        except Exception as exc_b:
+            errors.append(f"ImportFromFile: {exc_b}")
+            logger.debug("set_propagator approach B failed for %r: %s", sat_name, exc_b)
 
         raise StkCommandError(
             f"set_propagator({sat_name!r}): all OM approaches failed — "
