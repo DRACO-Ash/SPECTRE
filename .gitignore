@@ -96,3 +96,11 @@ logs/
 
 # Distribution / packaging
 MANIFEST
+
+# SQLite / local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Sample / reference data files
+HRR_List.json

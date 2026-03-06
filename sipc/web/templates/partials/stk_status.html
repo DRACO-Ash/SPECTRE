@@ -6,6 +6,16 @@
     {% include "partials/stk_connect_forms.html" %}
   </details>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('stk-dropdown');
+  if (!d) return;
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-amber';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'STK \u26a0';
+})();
+</script>
 {% elif stk_connected %}
 <div class="stk-state stk-connected">
   <span class="stk-label">STK &#10003; Connected &mdash; <em>{{ stk_scenario or "running instance" }}</em></span>
@@ -17,6 +27,17 @@
           hx-indicator="#stk-disc-ind"
           hx-disabled-elt="this">Disconnect</button>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('stk-dropdown');
+  if (!d) return;
+  d.removeAttribute('open');
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-green';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'STK \u2713';
+})();
+</script>
 {% else %}
 <div class="stk-state stk-disconnected">
   <span class="stk-label">STK &mdash; Not connected</span>
@@ -25,4 +46,14 @@
     {% include "partials/stk_connect_forms.html" %}
   </details>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('stk-dropdown');
+  if (!d) return;
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-grey';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'STK';
+})();
+</script>
 {% endif %}

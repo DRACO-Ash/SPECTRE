@@ -54,6 +54,7 @@ async def dashboard(
             "udl_user": state.udl_username,
             "stk_connected": state.stk_session is not None,
             "stk_scenario": state.stk_scenario,
+            "scenario_start": state.scenario_start,
         },
     )
 
@@ -352,6 +353,8 @@ async def stk_new_scenario(
             start_dt = datetime.fromisoformat(scenario_start).replace(tzinfo=UTC)
             stop_dt = datetime.fromisoformat(scenario_stop).replace(tzinfo=UTC)
             await loop.run_in_executor(None, session.set_scenario_time, start_dt, stop_dt)
+            state.scenario_start = start_dt
+            state.scenario_stop = stop_dt
             state.append_log(
                 f"[STK] Scenario time: {scenario_start} → {scenario_stop} UTC"
             )

@@ -1,189 +1,277 @@
 {% extends "base.html" %}
 {% block title %}SIPC — Operator Console{% endblock %}
 
+{% block nav_title %}STK Intercept Planning Console{% endblock %}
+
 {% block nav_actions %}
-<span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
-<form method="post" action="/logout" class="inline-form">
-  <button type="submit" class="btn-logout">Logout</button>
-</form>
+<div class="nav-right">
+
+  <div class="nav-connections">
+    <!-- UDL connection chip + dropdown -->
+    <details class="nav-dropdown" id="udl-dropdown">
+      <summary class="nav-chip">
+        <span class="chip-dot {% if udl_user %}dot-green{% else %}dot-grey{% endif %}"></span>
+        <span class="chip-label">UDL{% if udl_user %} &#10003;{% endif %}</span>
+        <span class="chip-caret">&#9660;</span>
+      </summary>
+      <div class="nav-dropdown-panel">
+        <div id="udl-status">
+          {% include "partials/udl_status.html" %}
+        </div>
+      </div>
+    </details>
+
+    <!-- STK connection chip + dropdown -->
+    <details class="nav-dropdown" id="stk-dropdown">
+      <summary class="nav-chip">
+        <span class="chip-dot {% if stk_connected %}dot-green{% else %}dot-grey{% endif %}"></span>
+        <span class="chip-label">STK{% if stk_connected %} &#10003;{% endif %}</span>
+        <span class="chip-caret">&#9660;</span>
+      </summary>
+      <div class="nav-dropdown-panel">
+        <div id="stk-status">
+          {% include "partials/stk_status.html" %}
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="nav-user-group">
+    <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
+    <form method="post" action="/logout" class="inline-form">
+      <button type="submit" class="btn-logout">Logout</button>
+    </form>
+  </div>
+
+</div>
 {% endblock %}
 
 {% block content %}
-<div class="console-grid">
 
-  <!-- ── UDL Connection ────────────────────────────────────────────── -->
-  <section class="panel panel-udl">
-    <div id="udl-status">
-      {% include "partials/udl_status.html" %}
-    </div>
-  </section>
+<!-- ── Three-column force grid ─────────────────────────────────────────── -->
+<div class="force-grid">
 
-  <!-- ── STK Connection ────────────────────────────────────────────── -->
-  <section class="panel panel-stk">
-    <div id="stk-status">
-      {% include "partials/stk_status.html" %}
-    </div>
-  </section>
+  <!-- ── BLUE FORCE ──────────────────────────────────────────────────── -->
+  <div class="force-column force-column-blue">
+    <div class="force-header force-header-blue">&#9670; BLUE FORCE</div>
 
-  <!-- ── Blue Assets ───────────────────────────────────────────────── -->
-  <section class="panel panel-blue">
-    <h2>Blue Assets</h2>
-    <div id="blue-list">
-      {% include "partials/blue_list.html" %}
-    </div>
-    <details class="add-form-details">
-      <summary class="btn-add">+ Add Blue Asset</summary>
-      <div class="satno-row">
-        <input id="blue-satno" name="satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
-        <button type="button"
-                hx-get="/udl/tle"
-                hx-include="#blue-satno"
-                hx-target="#blue-tle-fields"
-                hx-swap="innerHTML"
-                hx-indicator="#blue-tle-indicator"
-                hx-disabled-elt="this"
-                class="btn-secondary btn-sm">Fetch TLE</button>
-        <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+    <!-- Blue Assets -->
+    <section class="panel">
+      <h2>Blue Assets</h2>
+      <div id="blue-list">
+        {% include "partials/blue_list.html" %}
       </div>
-      <form hx-post="/assets/blue"
+      <div id="blue-fetch-controls">
+        <div class="satno-row">
+          <input id="blue-satno" name="satno"
+                 placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                 hx-get="/udl/tle"
+                 hx-trigger="keyup[key=='Enter']"
+                 hx-include="#blue-fetch-controls [name]"
+                 hx-target="#blue-tle-fields"
+                 hx-swap="innerHTML"
+                 hx-indicator="#blue-tle-indicator" />
+          <button type="button"
+                  hx-get="/udl/tle"
+                  hx-include="#blue-fetch-controls [name]"
+                  hx-target="#blue-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-indicator="#blue-tle-indicator"
+                  hx-disabled-elt="this"
+                  class="btn-secondary btn-sm">Fetch TLE</button>
+          <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+        </div>
+        <div class="tle-mode-row">
+          <span class="tle-mode-select">
+            <label class="radio-label"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
+            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}">
+              <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
+              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
+            </label>
+          </span>
+        </div>
+      </div>
+      <form id="blue-asset-form"
+            hx-post="/assets/blue"
             hx-target="#blue-list"
             hx-swap="innerHTML"
             hx-disabled-elt="find button[type=submit]"
-            hx-on::after-settle="if(event.detail.elt===this){this.closest('details').removeAttribute('open'); document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
+            hx-on::after-settle="if(event.detail.elt===this){document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
         <div id="blue-tle-fields">
           {% include "partials/tle_fields.html" %}
         </div>
         <div class="submit-row">
-          <button type="submit" class="btn-primary">Add</button>
+          <button type="submit" class="btn-primary">Add Blue Asset</button>
           <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
         </div>
       </form>
-    </details>
-  </section>
+    </section>
 
-  <!-- ── Red Tracks ───────────────────────────────────────────────── -->
-  <section class="panel panel-red">
-    <h2>Red Tracks</h2>
-    <div id="red-list">
-      {% include "partials/red_list.html" %}
-    </div>
-    <details class="add-form-details">
-      <summary class="btn-add">+ Add Red Track</summary>
-      <div class="satno-row">
-        <input id="red-satno" name="satno" placeholder="SATNO (e.g. 25544)" pattern="[0-9]+" inputmode="numeric" />
-        <button type="button"
-                hx-get="/udl/tle"
-                hx-include="#red-satno"
-                hx-target="#red-tle-fields"
-                hx-swap="innerHTML"
-                hx-indicator="#red-tle-indicator"
-                hx-disabled-elt="this"
-                class="btn-secondary btn-sm">Fetch TLE</button>
-        <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+    <!-- Blue HRR -->
+    <section class="panel">
+      <div class="panel-header-row">
+        <h2>HRR</h2>
+        <div class="panel-header-actions">
+          <button class="btn-secondary btn-sm"
+                  hx-get="/udl/hrr"
+                  hx-target="#blue-hrr-list"
+                  hx-swap="innerHTML"
+                  hx-indicator="#hrr-indicator"
+                  hx-disabled-elt="this">Refresh</button>
+          <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
+        </div>
       </div>
-      <form hx-post="/assets/red"
+      <div id="blue-hrr-list">
+        <p class="empty-msg">Click Refresh to load HRR watchlist.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── INTEL / MISSION ─────────────────────────────────────────────── -->
+  <div class="force-column force-column-intel">
+    <div class="logo-hero">
+      <img src="/static/SIPC_logo.svg" alt="SIPC" class="logo-hero-img" />
+    </div>
+    <div class="force-header force-header-intel">&#9670; INTEL / MISSION</div>
+
+    <!-- Orbit Catalog -->
+    <section class="panel">
+      <div class="panel-header-row">
+        <h2>Orbit Catalog</h2>
+        <span id="catalog-badge" class="catalog-badge"
+              hx-get="/udl/catalog/search"
+              hx-trigger="load"
+              hx-target="#catalog-results"
+              hx-swap="innerHTML"></span>
+      </div>
+      <input type="search"
+             name="q"
+             placeholder="Search by name or SATNO&hellip;"
+             autocomplete="off"
+             hx-get="/udl/catalog/search"
+             hx-trigger="input changed delay:400ms, search"
+             hx-target="#catalog-results"
+             hx-swap="innerHTML"
+             class="catalog-search-input" />
+      <div id="catalog-results" style="margin-top:0.5rem">
+        <p class="empty-msg">Type to search the on-orbit catalog.</p>
+      </div>
+    </section>
+
+    <!-- Run Configuration -->
+    <section class="panel">
+      <h2>Run Configuration</h2>
+      <form hx-post="/plan"
+            hx-target="#results-section"
+            hx-swap="innerHTML"
+            hx-indicator="#run-indicator"
+            class="run-form">
+        <label>Operator
+          <input name="operator" value="{{ user.username }}" required />
+        </label>
+        <label>Source
+          <input name="source" placeholder="e.g. UDL / MANUAL" required />
+        </label>
+        <div class="run-actions">
+          <button type="submit" class="btn-primary" hx-disabled-elt="this">Run Plan</button>
+          <span id="run-indicator" class="htmx-indicator">
+            <span class="spinner"></span>Running intercept plan&hellip;
+          </span>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <!-- ── RED FORCE ───────────────────────────────────────────────────── -->
+  <div class="force-column force-column-red">
+    <div class="force-header force-header-red">&#9670; RED FORCE</div>
+
+    <!-- Red Tracks -->
+    <section class="panel">
+      <h2>Red Tracks</h2>
+      <div id="red-list">
+        {% include "partials/red_list.html" %}
+      </div>
+      <div id="red-fetch-controls">
+        <div class="satno-row">
+          <input id="red-satno" name="satno"
+                 placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                 hx-get="/udl/tle"
+                 hx-trigger="keyup[key=='Enter']"
+                 hx-include="#red-fetch-controls [name]"
+                 hx-target="#red-tle-fields"
+                 hx-swap="innerHTML"
+                 hx-indicator="#red-tle-indicator" />
+          <button type="button"
+                  hx-get="/udl/tle"
+                  hx-include="#red-fetch-controls [name]"
+                  hx-target="#red-tle-fields"
+                  hx-swap="innerHTML"
+                  hx-indicator="#red-tle-indicator"
+                  hx-disabled-elt="this"
+                  class="btn-secondary btn-sm">Fetch TLE</button>
+          <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+        </div>
+        <div class="tle-mode-row">
+          <span class="tle-mode-select">
+            <label class="radio-label"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
+            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}">
+              <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
+              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
+            </label>
+          </span>
+        </div>
+      </div>
+      <form id="red-track-form"
+            hx-post="/assets/red"
             hx-target="#red-list"
             hx-swap="innerHTML"
             hx-disabled-elt="find button[type=submit]"
-            hx-on::after-settle="if(event.detail.elt===this){this.closest('details').removeAttribute('open'); document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
+            hx-on::after-settle="if(event.detail.elt===this){document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
         <div id="red-tle-fields">
           {% include "partials/tle_fields.html" %}
         </div>
         <div class="submit-row">
-          <button type="submit" class="btn-primary">Add</button>
+          <button type="submit" class="btn-primary">Add Red Track</button>
           <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
         </div>
       </form>
-    </details>
-  </section>
+    </section>
 
-  <!-- ── HRR Watchlist ─────────────────────────────────────────────── -->
-  <section class="panel full-width panel-hrr">
-    <div class="panel-header-row">
-      <h2>HRR Watchlist</h2>
-      <div class="panel-header-actions">
-        <button class="btn-secondary btn-sm"
-                hx-get="/udl/hrr"
-                hx-target="#hrr-content"
-                hx-swap="innerHTML"
-                hx-indicator="#hrr-indicator"
-                hx-disabled-elt="this">Refresh</button>
-        <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
+    <!-- Red HRR -->
+    <section class="panel">
+      <h2>HRR</h2>
+      <div id="red-hrr-list">
+        <p class="empty-msg">Click Refresh in Blue Force to load.</p>
       </div>
-    </div>
-    <div id="hrr-content">
-      <p class="empty-msg">Click Refresh to load the High Rate Revisit watchlist from UDL.</p>
-    </div>
-  </section>
+    </section>
+  </div>
 
-  <!-- ── On-Orbit Catalog Search ───────────────────────────────────── -->
-  <section class="panel full-width panel-catalog">
-    <div class="panel-header-row">
-      <h2>Orbit Catalog</h2>
-      <span id="catalog-badge" class="catalog-badge"
-            hx-get="/udl/catalog/search"
-            hx-trigger="load"
-            hx-target="#catalog-results"
-            hx-swap="innerHTML"></span>
-    </div>
-    <input type="search"
-           name="q"
-           placeholder="Search by name or SATNO&hellip;"
-           autocomplete="off"
-           hx-get="/udl/catalog/search"
-           hx-trigger="input changed delay:400ms, search"
-           hx-target="#catalog-results"
-           hx-swap="innerHTML"
-           class="catalog-search-input" />
-    <div id="catalog-results" style="margin-top:0.5rem">
-      <p class="empty-msg">Type to search the on-orbit catalog.</p>
-    </div>
-  </section>
+</div><!-- end .force-grid -->
 
-  <!-- ── Run Configuration ─────────────────────────────────────────── -->
-  <section class="panel panel-run full-width">
-    <h2>Run Configuration</h2>
-    <form hx-post="/plan"
-          hx-target="#results-section"
-          hx-swap="innerHTML"
-          hx-indicator="#run-indicator"
-          class="run-form">
-      <label>Operator
-        <input name="operator" value="{{ user.username }}" required />
-      </label>
-      <label>Source
-        <input name="source" placeholder="e.g. SPADOC / MANUAL" required />
-      </label>
-      <div class="run-actions">
-        <button type="submit" class="btn-primary"
-                hx-disabled-elt="this">Run Plan</button>
-        <span id="run-indicator" class="htmx-indicator">
-          <span class="spinner"></span>Running intercept plan&hellip;
-        </span>
-      </div>
-    </form>
-  </section>
+<!-- ── Full-width sections ─────────────────────────────────────────────── -->
+<div class="full-sections">
 
-  <!-- ── Intercept Windows ─────────────────────────────────────────── -->
-  <section class="panel full-width">
+  <!-- Intercept Windows -->
+  <section class="panel">
     <h2>Intercept Windows</h2>
     <div id="results-section">
       {% include "partials/results_table.html" %}
     </div>
   </section>
 
-  <!-- ── Run Log ───────────────────────────────────────────────────── -->
-  <section class="panel full-width">
+  <!-- Run Log -->
+  <section class="panel">
     <div class="log-header">
       <h2>Run Log</h2>
       <div class="log-actions">
-        <button class="btn-secondary"
+        <button class="btn-secondary btn-sm"
                 hx-get="/log/entries"
                 hx-target="#log-pane"
                 hx-swap="innerHTML">Refresh</button>
-        <button class="btn-secondary"
+        <button class="btn-secondary btn-sm"
                 hx-post="/log/clear"
                 hx-target="#log-pane"
                 hx-swap="innerHTML">Clear</button>
@@ -197,5 +285,6 @@
     </div>
   </section>
 
-</div>
+</div><!-- end .full-sections -->
+
 {% endblock %}

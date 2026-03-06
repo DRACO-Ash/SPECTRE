@@ -1,6 +1,17 @@
 {% if name %}
 <p class="field-success">&#10003; TLE loaded: <strong>{{ name }}</strong></p>
 {% endif %}
+{% if tle_epoch_str %}
+<p class="field-meta">
+  TLE epoch: <strong>{{ tle_epoch_str }}</strong>
+  {% if tle_age_days is not none %}
+    &mdash; <span class="{% if tle_age_days > 7 %}badge-warn{% else %}badge-ok{% endif %}">
+      {{ "%.1f"|format(tle_age_days) }}d from scenario
+      {% if tle_age_days > 7 %} &mdash; STALE{% endif %}
+    </span>
+  {% endif %}
+</p>
+{% endif %}
 {% if error %}
 <p class="field-error">{{ error }}</p>
 {% endif %}

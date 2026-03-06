@@ -17,6 +17,16 @@
     </form>
   </details>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('udl-dropdown');
+  if (!d) return;
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-amber';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'UDL \u26a0';
+})();
+</script>
 {% elif udl_user %}
 <div class="udl-state udl-connected">
   <span class="udl-label">UDL &#10003; Connected as <strong>{{ udl_user }}</strong></span>
@@ -25,6 +35,17 @@
           hx-target="#udl-status"
           hx-swap="innerHTML">Disconnect</button>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('udl-dropdown');
+  if (!d) return;
+  d.removeAttribute('open');
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-green';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'UDL \u2713';
+})();
+</script>
 {% else %}
 <div class="udl-state udl-disconnected">
   <span class="udl-label">UDL &mdash; Not connected</span>
@@ -44,4 +65,14 @@
     </form>
   </details>
 </div>
+<script>
+(function(){
+  var d = document.getElementById('udl-dropdown');
+  if (!d) return;
+  var dot = d.querySelector('.chip-dot');
+  if (dot) dot.className = 'chip-dot dot-grey';
+  var lbl = d.querySelector('.chip-label');
+  if (lbl) lbl.textContent = 'UDL';
+})();
+</script>
 {% endif %}
