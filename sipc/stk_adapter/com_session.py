@@ -100,6 +100,29 @@ def _stk_dispatch() -> Any:
     return win32com.client.Dispatch("STK13.Application")
 
 
+def _normalize_tle_line1(line: str) -> str:
+    """Normalise TLE line 1 to the format STK accepts.
+
+    Some TLE sources (including UDL) include an explicit ``+`` sign in the
+    three sign positions of line 1:
+
+    * column 34 (0-indexed 33): first derivative of mean motion
+    * column 45 (0-indexed 44): second derivative of mean motion
+    * column 54 (0-indexed 53): BSTAR drag term
+
+    STK expects a **space** (not ``+``) in these positions for positive values.
+    A ``+`` in any of those positions causes ``AddSegsFromFile`` to raise
+    "Failed to add the TLE".
+    """
+    if not line.startswith("1 ") or len(line) < 54:
+        return line
+    chars = list(line)
+    for idx in (33, 44, 53):
+        if idx < len(chars) and chars[idx] == "+":
+            chars[idx] = " "
+    return "".join(chars)
+
+
 def _parse_stk_time(stk_time: str) -> datetime:
     """Parse an STK UTCG time string to a UTC-aware :class:`datetime`.
 
@@ -574,7 +597,12 @@ class StkComSession:
             # NORAD catalog number is in TLE line 1, columns 3-7 (1-indexed).
             satno = line1[2:7].strip()
 
-            tle_content = f"{sat_name}\n{line1}\n{line2}\n"
+            # UDL TLE data includes explicit '+' signs in the three sign
+            # positions of line 1 (cols 34, 45, 54).  STK expects a space
+            # there for positive values; a '+' causes AddSegsFromFile to fail.
+            line1_norm = _normalize_tle_line1(line1)
+
+            tle_content = f"{sat_name}\n{line1_norm}\n{line2}\n"
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".tle", delete=False, encoding="ascii"
             ) as fh:
