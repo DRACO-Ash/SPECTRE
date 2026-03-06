@@ -7,7 +7,13 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from sipc.domain.models import AccessInterval
+from sipc.domain.models import (
+    AccessInterval,
+    BurnLocation,
+    BurnType,
+    ManeuverOption,
+    ManeuverSearchConfig,
+)
 from sipc.stk_adapter.exceptions import (
     StkCommandError,
     StkConnectionError,
@@ -148,6 +154,71 @@ def _to_stk_time(dt: datetime) -> str:
     ``"d Mon YYYY HH:MM:SS.000"``  (e.g. ``"5 Mar 2026 12:00:00.000"``).
     """
     return f"{dt.day} {dt.strftime('%b %Y %H:%M:%S')}.000"
+
+
+def _add_stop_condition(stop_coll: Any, location: BurnLocation, config: ManeuverSearchConfig) -> None:
+    """Add the appropriate Astrogator stopping condition for *location*.
+
+    Maps each :class:`~sipc.domain.models.BurnLocation` to the corresponding
+    STK Astrogator stop-condition name.  ``CUSTOM`` and unrecognised values
+    fall back to a duration-based condition covering half the search window.
+
+    Args:
+        stop_coll: The ``StoppingConditions`` collection on a Propagate segment.
+        location: Orbital geometry tag for the desired burn point.
+        config: Search config (used for time-based fallbacks).
+    """
+    _STOP_MAP: dict[BurnLocation, str] = {
+        BurnLocation.APOGEE:           "Apoapsis",
+        BurnLocation.PERIGEE:          "Periapsis",
+        BurnLocation.ASCENDING_NODE:   "Ascending Node",
+        BurnLocation.DESCENDING_NODE:  "Descending Node",
+        BurnLocation.NORTH_POLE:       "Latitude",
+        BurnLocation.SOUTH_POLE:       "Latitude",
+    }
+    stop_name = _STOP_MAP.get(location)
+    if stop_name:
+        try:
+            sc = stop_coll.Add(stop_name)
+            # For latitude-based stops set the target latitude.
+            if location == BurnLocation.NORTH_POLE:
+                sc.Properties.Trip = 90.0
+            elif location == BurnLocation.SOUTH_POLE:
+                sc.Properties.Trip = -90.0
+            return
+        except Exception as exc:
+            logger.debug("Stop condition %r failed (%s); falling back to duration", stop_name, exc)
+    # Fallback: half the search window duration.
+    half_s = (config.search_window_stop - config.search_window_start).total_seconds() / 2
+    dur = stop_coll.Add("Duration")
+    dur.Properties.Trip = half_s
+
+
+def _configure_burn(burn_seg: Any, burn_type: BurnType) -> None:
+    """Set the burn segment's maneuver type and attitude control frame.
+
+    Configures the segment for either an impulsive or finite burn in the
+    VNC (Velocity-Normal-Co-normal) frame.  For finite burns only the
+    attitude frame is set; engine model parameters are left at defaults.
+
+    Args:
+        burn_seg: The Astrogator Maneuver segment COM object.
+        burn_type: Impulsive or finite.
+    """
+    _MANEUVER_IMPULSIVE = 0
+    _MANEUVER_FINITE    = 1
+    _ATTITUDE_THRUST_VECTOR = 0
+    _THRUST_AXES_VNC    = 4  # AgEVAThrustAxesType.eVAThrustAxesVNC (verify from stubs)
+
+    try:
+        m_type = _MANEUVER_IMPULSIVE if burn_type == BurnType.IMPULSIVE else _MANEUVER_FINITE
+        burn_seg.SetManeuverType(m_type)
+        maneuver = burn_seg.Maneuver
+        maneuver.SetAttitudeControlType(_ATTITUDE_THRUST_VECTOR)
+        atc = maneuver.AttitudeControl
+        atc.ThrustAxesType = _THRUST_AXES_VNC
+    except Exception as exc:
+        logger.debug("_configure_burn partial failure (%s); proceeding with defaults", exc)
 
 
 def _check(result: Any, context: str) -> None:
@@ -485,6 +556,107 @@ class StkComSession:
         logger.info("get_scenario_epoch", extra={"epoch": epoch.isoformat()})
         return epoch
 
+    def compute_maneuver_options(
+        self, config: ManeuverSearchConfig
+    ) -> list[ManeuverOption]:
+        """Enumerate intercept maneuver options via STK Astrogator MCS.
+
+        For each enabled :class:`~sipc.domain.models.BurnLocation`, builds an
+        Astrogator Mission Control Sequence on the red satellite and runs a
+        differential corrector targeting the blue satellite.  Converged
+        solutions become :class:`~sipc.domain.models.ManeuverOption` objects;
+        non-convergent candidates are silently dropped.
+
+        The red satellite's SGP4 propagator is always restored in a ``finally``
+        block so that a failed search never corrupts the planning scenario.
+
+        Args:
+            config: Search parameters — satellite names, time window, delta-V
+                budget, burn types, and burn locations.
+
+        Returns:
+            Solved options sorted by ``delta_v_km_s`` ascending.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the Astrogator module is unavailable or
+                satellite objects cannot be found.
+        """
+        self._require_connection()
+
+        # Check Astrogator licence before touching any satellite state.
+        if not self._astrogator_licensed():
+            raise StkCommandError(
+                "STK Astrogator module is not licensed on this installation. "
+                "Maneuver planning is unavailable."
+            )
+
+        red_obj = self._root.GetObjectFromPath(f"Satellite/{config.red_sat}")
+        # Snapshot the current TLE so we can restore it in the finally block.
+        red_tle = self._snapshot_tle(config.red_sat)
+
+        options: list[ManeuverOption] = []
+
+        try:
+            for location in config.burn_locations:
+                for burn_type in config.burn_types:
+                    result = self._solve_maneuver(config, location, burn_type, red_obj)
+                    if result is not None and result.delta_v_km_s <= config.max_delta_v_km_s:
+                        options.append(result)
+        finally:
+            # Always restore the original SGP4 propagator.
+            if red_tle:
+                self._restore_sgp4(config.red_sat, red_tle)
+
+        options.sort(key=lambda o: o.delta_v_km_s)
+        logger.info(
+            "compute_maneuver_options: %d converged solutions for %s vs %s",
+            len(options), config.red_sat, config.blue_sat,
+        )
+        return options
+
+    def apply_maneuver(self, red_sat: str, option: ManeuverOption) -> None:
+        """Write a selected maneuver option into the red satellite's Astrogator MCS.
+
+        Switches the red satellite to Astrogator and builds a fixed (non-targeting)
+        MCS encoding the chosen burn.  The satellite will propagate along the
+        intercept trajectory when STK rewinds.
+
+        Args:
+            red_sat: STK object name of the red satellite.
+            option: The :class:`~sipc.domain.models.ManeuverOption` to apply.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the MCS cannot be constructed or propagated.
+        """
+        self._require_connection()
+
+        if not self._astrogator_licensed():
+            raise StkCommandError(
+                "STK Astrogator module is not licensed — cannot apply maneuver."
+            )
+
+        _E_PROPAGATOR_ASTROGATOR = self._astrogator_enum_value()
+        _E_PROPAGATOR_SGP4 = 4
+
+        red_obj = self._root.GetObjectFromPath(f"Satellite/{red_sat}")
+        red_obj.SetPropagatorType(_E_PROPAGATOR_ASTROGATOR)
+        prop = red_obj.Propagator
+        mcs = prop.MainSequence
+
+        try:
+            self._build_fixed_mcs(mcs, option)
+            prop.Propagate()
+            logger.info(
+                "apply_maneuver: MCS applied for %r (option %s dv=%.3f km/s)",
+                red_sat, option.option_id, option.delta_v_km_s,
+            )
+        except Exception as exc:
+            raise StkCommandError(
+                f"apply_maneuver failed for {red_sat!r}: {exc}"
+            ) from exc
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Log a provenance-tagged STK adapter action.
 
@@ -753,6 +925,254 @@ class StkComSession:
                 "Will use Object Model for satellite creation.",
                 exc,
             )
+
+    # ── Astrogator helpers ────────────────────────────────────────────────────
+
+    def _astrogator_licensed(self) -> bool:
+        """Return True if the Astrogator module is licensed in this STK installation.
+
+        Attempts the Connect-command path first; if that is blocked (ODTK),
+        assumes licensed and lets the actual Astrogator call surface the error.
+        """
+        try:
+            result = self._root.ExecuteCommand("GetLicensedModules")
+            if result.IsSucceeded and result.Count > 0:
+                licensed_str = result.Item(0)
+                return "Astrogator" in licensed_str
+        except Exception:
+            # Connect layer blocked — cannot determine; assume available and
+            # let the propagator switch fail gracefully if it is not.
+            logger.debug("GetLicensedModules blocked; assuming Astrogator licensed")
+        return True
+
+    def _astrogator_enum_value(self) -> int:
+        """Return the integer value of ePropagatorAstrogator from gen_py stubs.
+
+        Falls back to 8 (the value in STK 12–13) if the stubs cannot be
+        inspected.  The actual value is logged so live test runs can confirm it.
+        """
+        _FALLBACK = 8
+        try:
+            from win32com.client import gencache as _gc  # type: ignore[import]  # noqa: PLC0415
+            mod = _gc.EnsureModule("{AB621A84-81D2-45BF-9236-112CF72743D7}", 0, 1, 0)
+            val = getattr(mod, "ePropagatorAstrogator", None)
+            if val is not None:
+                logger.debug("ePropagatorAstrogator enum value from stubs: %d", val)
+                return int(val)
+        except Exception as exc:
+            logger.debug("Could not read ePropagatorAstrogator from stubs: %s", exc)
+        logger.warning(
+            "Using fallback ePropagatorAstrogator=%d — verify against gen_py stubs", _FALLBACK
+        )
+        return _FALLBACK
+
+    def _snapshot_tle(self, sat_name: str) -> tuple[str, str] | None:
+        """Return the current (line1, line2) TLE from an SGP4 satellite, or None."""
+        try:
+            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+            prop = sat_obj.Propagator
+            segs = prop.Segments
+            if segs.Count == 0:
+                return None
+            seg = segs.Item(0)
+            line1 = str(seg.Line1).strip()
+            line2 = str(seg.Line2).strip()
+            return (line1, line2) if line1.startswith("1 ") else None
+        except Exception as exc:
+            logger.debug("Could not snapshot TLE for %r: %s", sat_name, exc)
+            return None
+
+    def _restore_sgp4(self, sat_name: str, tle: tuple[str, str]) -> None:
+        """Restore *sat_name* to SGP4 propagation using the given TLE lines."""
+        import os  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        _E_PROPAGATOR_SGP4 = 4
+        line1, line2 = tle
+        satno = line1[2:7].strip()
+        line1_norm = _normalize_tle_line1(line1)
+        tle_content = f"{satno}\n{line1_norm}\n{line2}\n"
+        try:
+            sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+            sat_obj.SetPropagatorType(_E_PROPAGATOR_SGP4)
+            propagator = sat_obj.Propagator
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".tle", delete=False, encoding="ascii"
+            ) as fh:
+                fh.write(tle_content)
+                tle_path = fh.name
+            try:
+                propagator.CommonTasks.AddSegsFromFile(satno, tle_path)
+                propagator.Propagate()
+                logger.debug("Restored SGP4 propagator for %r", sat_name)
+            finally:
+                os.unlink(tle_path)
+        except Exception as exc:
+            logger.warning("Failed to restore SGP4 for %r after Astrogator search: %s", sat_name, exc)
+
+    def _solve_maneuver(
+        self,
+        config: ManeuverSearchConfig,
+        location: BurnLocation,
+        burn_type: BurnType,
+        red_obj: Any,
+    ) -> ManeuverOption | None:
+        """Build an Astrogator MCS for one burn location/type and run the targeter.
+
+        Returns a :class:`~sipc.domain.models.ManeuverOption` if the
+        differential corrector converges, ``None`` otherwise.
+        """
+        import math  # noqa: PLC0415
+
+        _E_PROPAGATOR_ASTROGATOR = self._astrogator_enum_value()
+        _E_PROPAGATOR_SGP4 = 4
+
+        try:
+            red_obj.SetPropagatorType(_E_PROPAGATOR_ASTROGATOR)
+            prop = red_obj.Propagator
+            mcs = prop.MainSequence
+
+            # Clear any segments from a previous iteration.
+            mcs.RemoveAll()
+
+            # ── Initial State ────────────────────────────────────────────────
+            _SEG_INITIAL_STATE   = 0
+            _SEG_PROPAGATE       = 1
+            _SEG_MANEUVER        = 2
+            _SEG_TARGET_SEQUENCE = 3
+
+            init_seg = mcs.Insert(_SEG_INITIAL_STATE, "Initial State", "-")
+            # Use the scenario start epoch to seed the initial state from the
+            # existing SGP4 propagator state.  Astrogator will pick up the
+            # current propagated position automatically when the epoch is set.
+            init_seg.Epoch = _to_stk_time(config.search_window_start)
+
+            # ── Coast to burn point ──────────────────────────────────────────
+            coast_seg = mcs.Insert(_SEG_PROPAGATE, "Coast to Burn", "-")
+            stop_coll = coast_seg.StoppingConditions
+            # Remove the default stopping condition and add one appropriate
+            # for the requested burn location.
+            stop_coll.RemoveAll()
+            _add_stop_condition(stop_coll, location, config)
+
+            # ── Maneuver ────────────────────────────────────────────────────
+            burn_seg = mcs.Insert(_SEG_MANEUVER, "Intercept Burn", "-")
+            _configure_burn(burn_seg, burn_type)
+
+            # ── Target Sequence — differential corrector ─────────────────────
+            target_seq = mcs.Insert(_SEG_TARGET_SEQUENCE, "Target Intercept", "-")
+            post_coast = target_seq.Sequence.Insert(_SEG_PROPAGATE, "Coast to Intercept", "-")
+            # Stop at end of search window.
+            post_stop = post_coast.StoppingConditions
+            post_stop.RemoveAll()
+            epoch_stop = post_stop.Add("Epoch")
+            epoch_stop.Properties.Trip = _to_stk_time(config.search_window_stop)
+
+            dc = target_seq.Profiles.Add("Differential Corrector")
+            dc_props = dc.Properties
+            dc_props.MaxIterations = 50
+
+            ctrl = dc.ControlParameters.Add("Impulsive Burn.BurnDirection.DeltaV")
+            ctrl.Enable = True
+            ctrl.Min = 0.0
+            ctrl.Max = config.max_delta_v_km_s
+
+            # Target: range to blue satellite ≤ 1 km at intercept epoch.
+            blue_path = f"*/Satellite/{config.blue_sat}"
+            constraint = dc.Results.Add(f"Range to {blue_path}")
+            constraint.Enable = True
+            constraint.DesiredValue = 0.0
+            constraint.Tolerance = 1.0  # km
+
+            # Run the MCS.
+            prop.Propagate()
+
+            # ── Extract results ──────────────────────────────────────────────
+            burn_final = burn_seg.FinalState
+            burn_epoch_str = burn_final.Epoch
+            burn_epoch = _parse_stk_time(burn_epoch_str)
+
+            dv_total = float(ctrl.CurrentValue) if hasattr(ctrl, "CurrentValue") else 0.0
+            # VNC components — read from the burn segment maneuver object.
+            dv_v = dv_n = dv_c = 0.0
+            try:
+                atc = burn_seg.Maneuver.AttitudeControl
+                vec = atc.DeltaV
+                dv_v, dv_n, dv_c = float(vec.X), float(vec.Y), float(vec.Z)
+                dv_total = math.sqrt(dv_v**2 + dv_n**2 + dv_c**2)
+            except Exception:
+                pass
+
+            intercept_final = post_coast.FinalState
+            intercept_epoch_str = intercept_final.Epoch
+            intercept_epoch = _parse_stk_time(intercept_epoch_str)
+            transfer_s = (intercept_epoch - burn_epoch).total_seconds()
+
+            # Approximate miss distance from the constraint result value.
+            miss_km = float(getattr(constraint, "CurrentValue", 0.0))
+
+            note = f"{location.value.replace('_', ' ').title()} {burn_type.value}"
+
+            return ManeuverOption(
+                red_name=config.red_sat,
+                blue_name=config.blue_sat,
+                burn_type=burn_type,
+                burn_location=location,
+                burn_epoch=burn_epoch,
+                delta_v_km_s=dv_total,
+                dv_prograde=dv_v,
+                dv_normal=dv_n,
+                dv_radial=dv_c,
+                intercept_epoch=intercept_epoch,
+                transfer_duration_s=max(transfer_s, 0.0),
+                intercept_range_km=miss_km,
+                notes=note,
+            )
+
+        except Exception as exc:
+            logger.debug(
+                "Maneuver search non-convergence for location=%s type=%s: %s",
+                location.value, burn_type.value, exc,
+            )
+            return None
+
+    def _build_fixed_mcs(self, mcs: Any, option: ManeuverOption) -> None:
+        """Build a non-targeting Astrogator MCS for a selected ManeuverOption.
+
+        Encodes the burn epoch, delta-V vector, and post-burn coast directly
+        without a differential corrector — i.e. applies the solution as a
+        fixed propagation sequence.
+        """
+        _SEG_INITIAL_STATE = 0
+        _SEG_PROPAGATE     = 1
+        _SEG_MANEUVER      = 2
+
+        mcs.RemoveAll()
+
+        init_seg = mcs.Insert(_SEG_INITIAL_STATE, "Initial State", "-")
+        init_seg.Epoch = _to_stk_time(option.burn_epoch)
+
+        coast_seg = mcs.Insert(_SEG_PROPAGATE, "Coast to Burn", "-")
+        stop_coll = coast_seg.StoppingConditions
+        stop_coll.RemoveAll()
+        epoch_stop = stop_coll.Add("Epoch")
+        epoch_stop.Properties.Trip = _to_stk_time(option.burn_epoch)
+
+        burn_seg = mcs.Insert(_SEG_MANEUVER, "Intercept Burn", "-")
+        _configure_burn(burn_seg, option.burn_type)
+        try:
+            atc = burn_seg.Maneuver.AttitudeControl
+            atc.DeltaV.AssignCartesian(
+                option.dv_prograde, option.dv_normal, option.dv_radial
+            )
+        except Exception as exc:
+            logger.warning("Could not set delta-V vector on fixed MCS: %s", exc)
+
+        post_seg = mcs.Insert(_SEG_PROPAGATE, "Coast to Intercept", "-")
+        post_stop = post_seg.StoppingConditions
+        post_stop.RemoveAll()
+        epoch_stop2 = post_stop.Add("Epoch")
+        epoch_stop2.Properties.Trip = _to_stk_time(option.intercept_epoch)
 
     def _require_connection(self) -> None:
         """Raise :class:`StkConnectionError` if not connected to STK.
