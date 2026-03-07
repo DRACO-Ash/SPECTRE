@@ -109,26 +109,40 @@ def _stk_dispatch() -> Any:
 def _normalize_tle_line1(line: str) -> str:
     """Normalise TLE line 1 to the format STK accepts.
 
-    Some TLE sources (including UDL) include an explicit ``+`` sign in the
-    five sign positions of line 1:
+    TLE line 1 has five sign positions (standard 69-char format, 0-indexed):
 
-    * column 34 (0-indexed 33): first derivative of mean motion — mantissa sign
-    * column 45 (0-indexed 44): second derivative of mean motion — mantissa sign
-    * column 51 (0-indexed 50): second derivative of mean motion — exponent sign
-    * column 54 (0-indexed 53): BSTAR drag term — mantissa sign
-    * column 60 (0-indexed 59): BSTAR drag term — exponent sign
+    * 33 (col 34): first derivative of mean motion — **mantissa sign**
+    * 44 (col 45): second derivative of mean motion — **mantissa sign**
+    * 50 (col 51): second derivative of mean motion — **exponent sign**
+    * 53 (col 54): BSTAR drag term — **mantissa sign**
+    * 59 (col 60): BSTAR drag term — **exponent sign**
 
-    STK expects a **space** (not ``+``) in all sign positions for positive values.
-    A ``+`` in any of those positions causes ``AddSegsFromFile`` to raise
-    "Failed to add the TLE".
+    STK normalisation rules (confirmed via live testing):
+
+    * **Mantissa signs (fixed positions 33, 44, 53)**: STK accepts a space
+      (not ``+``) for positive values.  Replace ``+`` → space.
+    * **Exponent signs**: STK requires an explicit ``+`` or ``-``; a space is
+      rejected with "Failed to add the TLE".  Some UDL TLEs are non-standard
+      length (e.g. 72 chars) with extra spaces that shift all field positions,
+      making fixed-index replacement unreliable.  Use a regex instead: any run
+      of 5 digits followed by a space then a single digit is the mantissa +
+      exponent pattern — replace the space with ``+``.
     """
+    import re  # noqa: PLC0415
+
     if not line.startswith("1 ") or len(line) < 54:
         return line
     chars = list(line)
-    for idx in (33, 44, 50, 53, 59):
+    # Mantissa signs at standard fixed positions: '+' → space.
+    for idx in (33, 44, 53):
         if idx < len(chars) and chars[idx] == "+":
             chars[idx] = " "
-    return "".join(chars)
+    line = "".join(chars)
+    # Exponent signs: replace any DDDDD[space]D pattern with DDDDD+D.
+    # This handles both standard (69-char) and non-standard (e.g. 72-char)
+    # UDL TLEs where field positions are shifted by extra separating spaces.
+    line = re.sub(r"(\d{5}) (\d)", r"\1+\2", line)
+    return line
 
 
 def _parse_stk_time(stk_time: str) -> datetime:
