@@ -7,7 +7,8 @@
             hx-delete="/assets/red/{{ track.name }}"
             hx-target="#red-list"
             hx-swap="innerHTML"
-            hx-confirm="Remove {{ track.stk_name }}?">&times;</button>
+            hx-confirm="Remove {{ track.stk_name }}?"
+            title="Remove {{ track.stk_name }} from SIPC session (does not delete from STK scenario)">&times;</button>
   </li>
   {% endfor %}
 </ul>

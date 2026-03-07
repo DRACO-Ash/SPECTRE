@@ -176,6 +176,23 @@ class IStkSession(Protocol):
         """
         ...
 
+    def list_scenario_satellites(self) -> list[str]:
+        """Return the STK instance names of all Satellite objects in the current scenario.
+
+        Useful for importing pre-existing satellites (loaded directly in STK or
+        left over from a previous SIPC session) into the operator's session state
+        without re-creating or re-propagating them.
+
+        Returns:
+            List of STK object instance names, e.g. ``["B_SAT_Alpha", "R_SAT_Track01"]``.
+            Empty if no satellites exist or no scenario is loaded.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the children cannot be enumerated.
+        """
+        ...
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Record a provenance-tagged adapter action.
 

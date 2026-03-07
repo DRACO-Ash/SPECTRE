@@ -9,12 +9,14 @@
   {% endif %}
   <form method="post" action="/login" class="login-form">
     <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" required autofocus />
+    <input id="username" name="username" type="text" autocomplete="username" required autofocus
+           title="Your SIPC operator account username" />
 
     <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required />
+    <input id="password" name="password" type="password" autocomplete="current-password" required
+           title="Your SIPC operator account password" />
 
-    <button type="submit" class="btn-primary">Sign In</button>
+    <button type="submit" class="btn-primary" title="Authenticate to access the SIPC operator console">Sign In</button>
   </form>
 </div>
 {% endblock %}

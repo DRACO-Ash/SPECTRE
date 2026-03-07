@@ -657,6 +657,37 @@ class StkComSession:
                 f"apply_maneuver failed for {red_sat!r}: {exc}"
             ) from exc
 
+    def list_scenario_satellites(self) -> list[str]:
+        """Return the instance names of all Satellite children in the current scenario.
+
+        Used by the "Import from Scenario" UI action to populate session state
+        from pre-existing STK objects without re-creating or re-propagating them.
+
+        Returns:
+            List of STK object instance names (e.g. ``["B_SAT_Alpha", "R_SAT_Track01"]``).
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If the scenario children cannot be enumerated.
+        """
+        self._require_connection()
+        try:
+            children = self._root.CurrentScenario.Children
+            names: list[str] = []
+            for i in range(children.Count):
+                try:
+                    child = children.Item(i)
+                    if str(child.ClassName) == "Satellite":
+                        names.append(str(child.InstanceName))
+                except Exception as exc:
+                    logger.debug("list_scenario_satellites: skipping item %d: %s", i, exc)
+            logger.info("list_scenario_satellites: found %d satellite(s)", len(names))
+            return names
+        except Exception as exc:
+            raise StkCommandError(
+                f"Failed to enumerate scenario satellites: {exc}"
+            ) from exc
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Log a provenance-tagged STK adapter action.
 
@@ -770,6 +801,17 @@ class StkComSession:
 
             # NORAD catalog number is in TLE line 1, columns 3-7 (1-indexed).
             satno = line1[2:7].strip()
+
+            # Validate TLE line lengths before writing.  STK 13 requires exactly
+            # 69 characters per line; a shorter line (e.g. from UDL records with
+            # stripped padding) produces "Failed to add the TLE".
+            if len(line1) != 69 or len(line2) != 69:
+                logger.warning(
+                    "_set_propagator_via_om: non-standard TLE line length for %r "
+                    "(line1=%d chars, line2=%d chars; expected 69 each). "
+                    "line1=%r  line2=%r",
+                    sat_name, len(line1), len(line2), line1, line2,
+                )
 
             # UDL TLE data includes explicit '+' signs in the sign positions
             # of line 1.  STK expects a space there for positive values; a '+'
@@ -951,7 +993,12 @@ class StkComSession:
         Falls back to 8 (the value in STK 12–13) if the stubs cannot be
         inspected.  The actual value is logged so live test runs can confirm it.
         """
-        _FALLBACK = 8
+        # Confirmed value from STK 13 gen_py stubs (AgEVePropagatorType enum):
+        #   ePropagatorAstrogator = 12
+        # The stubs define this in a tab-indented comment block that is not
+        # importable as a module attribute, so we read it via EnsureModule and
+        # fall back to the confirmed literal if the attribute is absent.
+        _FALLBACK = 12
         try:
             from win32com.client import gencache as _gc  # type: ignore[import]  # noqa: PLC0415
             mod = _gc.EnsureModule("{AB621A84-81D2-45BF-9236-112CF72743D7}", 0, 1, 0)
@@ -961,9 +1008,7 @@ class StkComSession:
                 return int(val)
         except Exception as exc:
             logger.debug("Could not read ePropagatorAstrogator from stubs: %s", exc)
-        logger.warning(
-            "Using fallback ePropagatorAstrogator=%d — verify against gen_py stubs", _FALLBACK
-        )
+        logger.debug("Using confirmed ePropagatorAstrogator=%d (STK 13)", _FALLBACK)
         return _FALLBACK
 
     def _snapshot_tle(self, sat_name: str) -> tuple[str, str] | None:

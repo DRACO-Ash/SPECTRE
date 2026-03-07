@@ -7,7 +7,8 @@
             hx-delete="/assets/blue/{{ asset.name }}"
             hx-target="#blue-list"
             hx-swap="innerHTML"
-            hx-confirm="Remove {{ asset.stk_name }}?">&times;</button>
+            hx-confirm="Remove {{ asset.stk_name }}?"
+            title="Remove {{ asset.stk_name }} from SIPC session (does not delete from STK scenario)">&times;</button>
   </li>
   {% endfor %}
 </ul>

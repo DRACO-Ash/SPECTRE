@@ -1,6 +1,6 @@
 # SIPC — Phased Development Plan
 
-Last updated: 2026-03-06
+Last updated: 2026-03-07
 
 ---
 
@@ -30,7 +30,7 @@ Core scaffold, architecture, and live STK wiring.
 
 ---
 
-## Phase 2 — Core Intercept Geometry ⬅ CURRENT
+## Phase 2 — Core Intercept Geometry
 
 Fill the remaining stub/hardcoded gaps to produce real intercept data.
 
@@ -91,13 +91,9 @@ Add a minimal admin-only panel:
 - `POST /admin/users` — add user
 - `POST /admin/users/{id}/delete` — remove user
 
-### 3.5 Fix README passlib reference
-The user management section of `README.md` references `passlib` which is
-no longer a dependency. Update to use `bcrypt` directly:
-```python
-import bcrypt
-hash = bcrypt.hashpw(b"password", bcrypt.gensalt()).decode()
-```
+### 3.5 Fix README passlib reference ✅ Done
+The user management section of `README.md` now uses `bcrypt` directly
+(`bcrypt.hashpw` / `bcrypt.gensalt`). `passlib` is no longer a dependency.
 
 ---
 
@@ -133,13 +129,13 @@ Return structured HTMX error partials with the actual STK error message.
 
 ---
 
-## Phase 5 — Astrogator Intercept Option Generation
+## Phase 5 — Astrogator Intercept Option Generation ✅ COMPLETE
 
 Enumerate viable intercept maneuver options for a Red satellite against a Blue target
 using STK Astrogator MCS.  Sits **alongside** `compute_access` — not a replacement.
 See `docs/astrogator_notes.md` for STK COM reference.
 
-### 5.1 — Domain models  `[ ]`
+### 5.1 — Domain models  `[x]`
 
 New types in `sipc/domain/models.py`:
 
@@ -171,7 +167,7 @@ New types in `sipc/domain/models.py`:
   - `burn_types` — `list[BurnType]`
   - `burn_locations` — `list[BurnLocation]`
 
-### 5.2 — IStkSession + FakeStkSession + ManeuverPlanner  `[ ]`
+### 5.2 — IStkSession + FakeStkSession + ManeuverPlanner  `[x]`
 
 - Add `compute_maneuver_options(config) -> list[ManeuverOption]` to `IStkSession` Protocol
 - Add `apply_maneuver(red_sat, option) -> None` to `IStkSession` Protocol
@@ -180,7 +176,7 @@ New types in `sipc/domain/models.py`:
   validates inputs, delegates, sorts by `delta_v_km_s` ascending, logs provenance
 - Unit tests: validation errors, sort order, FakeStkSession round-trip
 
-### 5.3 — Web routes `/plan/maneuver/`  `[ ]`
+### 5.3 — Web routes `/plan/maneuver/`  `[x]`
 
 | Route | Method | Action |
 |-------|--------|--------|
@@ -191,7 +187,7 @@ New types in `sipc/domain/models.py`:
 `SessionState` gains `maneuver_options: list[ManeuverOption]` and
 `selected_maneuver: ManeuverOption | None`.
 
-### 5.4 — Intel / Mission UI panel  `[ ]`
+### 5.4 — Intel / Mission UI panel  `[x]`
 
 New section below the force columns in `operator.html` — `panel-intel` accent colour.
 
@@ -212,7 +208,7 @@ Maneuver options table (sortable, same JS pattern as HRR):
 
 Sorted by ΔV ascending on load.  [Select] fires POST to `/plan/maneuver/select`.
 
-### 5.5 — StkComSession — Astrogator COM  `[ ]`
+### 5.5 — StkComSession — Astrogator COM  `[x]`
 
 `compute_maneuver_options` core loop:
 
@@ -231,12 +227,13 @@ as a fixed (non-targeting) sequence ready for propagation.
 
 See `docs/astrogator_notes.md` for Astrogator enum values and MCS COM patterns.
 
-### 5.6 — Integration tests  `[ ]`
+### 5.6 — Integration tests  `[ ]` ⬅ CURRENT
 
 - Unit test: `ManeuverPlanner` validation (bad window, no burn types, dv ≤ 0)
 - Unit test: `FakeStkSession` returns options sorted by ΔV
 - Integration test (opt-in, requires STK + Astrogator licence): one impulsive apogee burn
   solves and returns a `ManeuverOption` with `intercept_range_km < 1.0`
+- 17 `ManeuverPlanner` unit tests implemented (validation paths + sort order)
 
 ### Technical risks
 

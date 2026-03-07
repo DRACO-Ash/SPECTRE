@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from datetime import UTC, datetime
 
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
-from sipc.config.constants import STK_FOLDERS
+from sipc.config.constants import BLUE_PREFIX, RED_PREFIX, STK_FOLDERS
 from sipc.domain.scenario import ScenarioPlanner
 from sipc.stk_adapter.exceptions import StkCommandError, StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
@@ -398,6 +398,87 @@ async def stk_disconnect(
             "error": None,
         },
     )
+
+
+@router.post("/stk/import-satellites", response_model=None)
+async def stk_import_satellites(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Import pre-existing STK satellites into SIPC session state.
+
+    Enumerates all Satellite objects in the currently connected STK scenario
+    and maps them into ``state.blue_assets`` / ``state.red_tracks`` based on
+    the SIPC naming convention (``B_SAT_*`` → blue, ``R_SAT_*`` → red).
+    Satellites that don't carry a recognised prefix are skipped.
+
+    Because the satellites already exist in STK with TLEs loaded, no
+    ``create_satellite`` or ``set_propagator`` calls are made.
+
+    Returns an ``HX-Refresh`` response so HTMX reloads the full operator page
+    and the maneuver-options dropdowns reflect the newly imported assets.
+    """
+    tmpl = _templates()
+    state = get_session_state(current_user.username)
+
+    if state.stk_session is None:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/stk_status.html",
+            {
+                "request": request,
+                "stk_connected": False,
+                "stk_scenario": "",
+                "error": "Not connected to STK.",
+            },
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        sat_names = await loop.run_in_executor(
+            None, state.stk_session.list_scenario_satellites
+        )
+    except (StkConnectionError, StkCommandError) as exc:
+        logger.warning(
+            "stk_import_satellites failed for operator %s: %s", current_user.username, exc
+        )
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/stk_status.html",
+            {
+                "request": request,
+                "stk_connected": True,
+                "stk_scenario": state.stk_scenario,
+                "error": str(exc),
+            },
+        )
+
+    existing_blue = {a.stk_name for a in state.blue_assets}
+    existing_red = {t.stk_name for t in state.red_tracks}
+    imported_blue = imported_red = skipped = 0
+
+    for sat_name in sat_names:
+        if sat_name.startswith(BLUE_PREFIX):
+            if sat_name not in existing_blue:
+                state.blue_assets.append(BlueAsset(name=sat_name[len(BLUE_PREFIX):], tle=""))
+                imported_blue += 1
+        elif sat_name.startswith(RED_PREFIX):
+            if sat_name not in existing_red:
+                state.red_tracks.append(RedTrack(name=sat_name[len(RED_PREFIX):], tle=""))
+                imported_red += 1
+        else:
+            skipped += 1
+
+    msg = f"[STK] Imported {imported_blue} blue asset(s), {imported_red} red track(s)"
+    if skipped:
+        msg += f" — {skipped} satellite(s) skipped (no B_SAT_/R_SAT_ prefix)"
+    state.append_log(msg)
+    logger.info("%s (operator=%s)", msg, current_user.username)
+
+    # HX-Refresh causes HTMX to reload the full page so the maneuver-options
+    # dropdowns (server-rendered at page load) reflect the imported assets.
+    from fastapi.responses import HTMLResponse as _HR  # noqa: PLC0415
+    response = _HR(content="", status_code=200)
+    response.headers["HX-Refresh"] = "true"
+    return response
 
 
 # ── Log streaming (SSE) ───────────────────────────────────────────────────────

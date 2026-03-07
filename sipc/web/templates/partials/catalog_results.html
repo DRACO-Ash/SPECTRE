@@ -33,6 +33,7 @@
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"
                 hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                title="Fetch TLE for {{ obj.name }} ({{ obj.satno }}) and pre-fill the Blue Asset form"
                 class="btn-secondary btn-sm">&rarr; Blue</button>
         <button hx-get="/udl/tle"
                 hx-vals='{"satno": {{ obj.satno }}}'
@@ -40,6 +41,7 @@
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"
                 hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                title="Fetch TLE for {{ obj.name }} ({{ obj.satno }}) and pre-fill the Red Track form"
                 class="btn-secondary btn-sm">&rarr; Red</button>
       </td>
     </tr>

@@ -31,13 +31,13 @@ function mnvSort(th) {
   <table class="mnv-table">
     <thead>
       <tr>
-        <th onclick="mnvSort(this)">Location<span class="mnv-sort-ind"></span></th>
-        <th onclick="mnvSort(this)">Type<span class="mnv-sort-ind"></span></th>
-        <th onclick="mnvSort(this)">Burn Epoch (UTC)<span class="mnv-sort-ind"></span></th>
-        <th onclick="mnvSort(this)">ΔV km/s<span class="mnv-sort-ind" data-active> ▲</span></th>
-        <th onclick="mnvSort(this)">Transfer<span class="mnv-sort-ind"></span></th>
-        <th onclick="mnvSort(this)">Range km<span class="mnv-sort-ind"></span></th>
-        <th class="no-sort">Notes</th>
+        <th onclick="mnvSort(this)" title="Click to sort — orbital position at which the burn is executed">Location<span class="mnv-sort-ind"></span></th>
+        <th onclick="mnvSort(this)" title="Click to sort — impulsive (instantaneous ΔV) or finite (continuous thrust)">Type<span class="mnv-sort-ind"></span></th>
+        <th onclick="mnvSort(this)" title="Click to sort — UTC date and time of the burn">Burn Epoch (UTC)<span class="mnv-sort-ind"></span></th>
+        <th onclick="mnvSort(this)" title="Click to sort — total delta-V magnitude required (km/s)">ΔV km/s<span class="mnv-sort-ind" data-active> ▲</span></th>
+        <th onclick="mnvSort(this)" title="Click to sort — coast time from burn to intercept">Transfer<span class="mnv-sort-ind"></span></th>
+        <th onclick="mnvSort(this)" title="Click to sort — miss distance at the intercept epoch (km)">Range km<span class="mnv-sort-ind"></span></th>
+        <th class="no-sort" title="Solver notes">Notes</th>
         <th class="no-sort"></th>
       </tr>
     </thead>
@@ -67,6 +67,7 @@ function mnvSort(th) {
                   hx-target="#maneuver-status"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
+                  title="Apply this maneuver — stores burn epoch, ΔV vector, and transfer time for the intercept plan"
                   class="btn-primary btn-sm">Select</button>
         </td>
       </tr>

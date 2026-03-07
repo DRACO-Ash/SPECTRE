@@ -9,7 +9,7 @@
   <div class="nav-connections">
     <!-- UDL connection chip + dropdown -->
     <details class="nav-dropdown" id="udl-dropdown">
-      <summary class="nav-chip">
+      <summary class="nav-chip" title="Unified Data Library — click to manage connection">
         <span class="chip-dot {% if udl_user %}dot-green{% else %}dot-grey{% endif %}"></span>
         <span class="chip-label">UDL{% if udl_user %} &#10003;{% endif %}</span>
         <span class="chip-caret">&#9660;</span>
@@ -23,7 +23,7 @@
 
     <!-- STK connection chip + dropdown -->
     <details class="nav-dropdown" id="stk-dropdown">
-      <summary class="nav-chip">
+      <summary class="nav-chip" title="STK Object Model connection — click to manage">
         <span class="chip-dot {% if stk_connected %}dot-green{% else %}dot-grey{% endif %}"></span>
         <span class="chip-label">STK{% if stk_connected %} &#10003;{% endif %}</span>
         <span class="chip-caret">&#9660;</span>
@@ -39,7 +39,7 @@
   <div class="nav-user-group">
     <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
     <form method="post" action="/logout" class="inline-form">
-      <button type="submit" class="btn-logout">Logout</button>
+      <button type="submit" class="btn-logout" title="End your SIPC session">Logout</button>
     </form>
   </div>
 
@@ -65,6 +65,7 @@
         <div class="satno-row">
           <input id="blue-satno" name="satno"
                  placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                 title="NORAD catalog number — press Enter or click Fetch TLE"
                  hx-get="/udl/tle"
                  hx-trigger="keyup[key=='Enter']"
                  hx-include="#blue-fetch-controls [name]"
@@ -78,13 +79,14 @@
                   hx-swap="innerHTML"
                   hx-indicator="#blue-tle-indicator"
                   hx-disabled-elt="this"
+                  title="Query UDL for the latest TLE for this catalog number"
                   class="btn-secondary btn-sm">Fetch TLE</button>
           <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
         </div>
         <div class="tle-mode-row">
           <span class="tle-mode-select">
-            <label class="radio-label"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
-            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}">
+            <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
+            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
               <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
               Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
             </label>
@@ -102,7 +104,7 @@
           {% include "partials/tle_fields.html" %}
         </div>
         <div class="submit-row">
-          <button type="submit" class="btn-primary">Add Blue Asset</button>
+          <button type="submit" class="btn-primary" title="Create this satellite in STK and load the TLE as a Blue Force asset">Add Blue Asset</button>
           <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
         </div>
       </form>
@@ -118,7 +120,8 @@
                   hx-target="#blue-hrr-list"
                   hx-swap="innerHTML"
                   hx-indicator="#hrr-indicator"
-                  hx-disabled-elt="this">Refresh</button>
+                  hx-disabled-elt="this"
+                  title="Query UDL notification feed for High Rate Revisit watchlist satellites (looks back up to 3 days)">Refresh</button>
           <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
         </div>
       </div>
@@ -149,6 +152,7 @@
              name="q"
              placeholder="Search by name or SATNO&hellip;"
              autocomplete="off"
+             title="Search the on-orbit catalog by satellite name or NORAD catalog number"
              hx-get="/udl/catalog/search"
              hx-trigger="input changed delay:400ms, search"
              hx-target="#catalog-results"
@@ -167,14 +171,14 @@
             hx-swap="innerHTML"
             hx-indicator="#run-indicator"
             class="run-form">
-        <label>Operator
+        <label title="Name of the operator running this plan — recorded in provenance log">Operator
           <input name="operator" value="{{ user.username }}" required />
         </label>
-        <label>Source
+        <label title="Data source label for this plan (e.g. UDL / MANUAL) — recorded in provenance log">Source
           <input name="source" placeholder="e.g. UDL / MANUAL" required />
         </label>
         <div class="run-actions">
-          <button type="submit" class="btn-primary" hx-disabled-elt="this">Run Plan</button>
+          <button type="submit" class="btn-primary" hx-disabled-elt="this" title="Compute STK access windows between all Blue assets and Red tracks">Run Plan</button>
           <span id="run-indicator" class="htmx-indicator">
             <span class="spinner"></span>Running intercept plan&hellip;
           </span>
@@ -192,7 +196,8 @@
                   hx-target="#maneuver-options-table"
                   hx-swap="innerHTML"
                   hx-indicator="#mnv-indicator"
-                  hx-disabled-elt="this">Refresh from Live Orbit</button>
+                  hx-disabled-elt="this"
+                  title="Re-run the previous search with the same satellites and window, using their current orbital state">Re-run Last Search</button>
           <span id="mnv-indicator" class="htmx-indicator"><span class="spinner"></span>Searching&hellip;</span>
         </div>
       </div>
@@ -205,7 +210,7 @@
             hx-disabled-elt="find button[type=submit]">
 
         <div class="mnv-search-grid">
-          <label>Red satellite
+          <label title="The red (threat) satellite that will execute the intercept maneuver">Red satellite
             <select name="red_sat">
               {% for track in red_tracks %}
               <option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
@@ -214,7 +219,7 @@
               {% endfor %}
             </select>
           </label>
-          <label>Blue target
+          <label title="The blue (friendly) satellite that will be intercepted">Blue target
             <select name="blue_sat">
               {% for asset in blue_assets %}
               <option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
@@ -223,37 +228,37 @@
               {% endfor %}
             </select>
           </label>
-          <label>Window start (UTC)
+          <label title="Start of the maneuver opportunity search window (UTC)">Window start (UTC)
             <input type="datetime-local" name="window_start"
                    value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}" />
           </label>
-          <label>Window stop (UTC)
+          <label title="End of the maneuver opportunity search window (UTC)">Window stop (UTC)
             <input type="datetime-local" name="window_stop"
                    value="{{ scenario_stop.strftime('%Y-%m-%dT%H:%M') if scenario_stop else '' }}" />
           </label>
-          <label>Max ΔV (km/s)
+          <label title="Maximum total delta-V budget — solutions requiring more than this are discarded">Max ΔV (km/s)
             <input type="number" name="max_dv" value="3.0" min="0.01" step="0.1" />
           </label>
         </div>
 
         <p class="field-label">Burn types</p>
         <div class="mnv-check-group">
-          <label><input type="checkbox" name="burn_types" value="impulsive" checked> Impulsive</label>
-          <label><input type="checkbox" name="burn_types" value="finite" checked> Finite</label>
+          <label title="Instantaneous velocity change — ideal for quick analysis and low-thrust approximations"><input type="checkbox" name="burn_types" value="impulsive" checked> Impulsive</label>
+          <label title="Continuous thrust burn modelled with engine parameters — more realistic for operational planning"><input type="checkbox" name="burn_types" value="finite" checked> Finite</label>
         </div>
 
         <p class="field-label">Burn locations</p>
         <div class="mnv-check-group">
-          <label><input type="checkbox" name="burn_locations" value="apogee" checked> Apogee</label>
-          <label><input type="checkbox" name="burn_locations" value="perigee" checked> Perigee</label>
-          <label><input type="checkbox" name="burn_locations" value="ascending_node" checked> Asc Node</label>
-          <label><input type="checkbox" name="burn_locations" value="descending_node" checked> Desc Node</label>
-          <label><input type="checkbox" name="burn_locations" value="north_pole" checked> N Pole</label>
-          <label><input type="checkbox" name="burn_locations" value="south_pole" checked> S Pole</label>
+          <label title="Burn at orbital apogee — most efficient for raising perigee or changing plane at high altitude"><input type="checkbox" name="burn_locations" value="apogee" checked> Apogee</label>
+          <label title="Burn at orbital perigee — most efficient for raising apogee"><input type="checkbox" name="burn_locations" value="perigee" checked> Perigee</label>
+          <label title="Burn at the ascending node — most efficient for orbital plane changes"><input type="checkbox" name="burn_locations" value="ascending_node" checked> Asc Node</label>
+          <label title="Burn at the descending node — alternative plane change point"><input type="checkbox" name="burn_locations" value="descending_node" checked> Desc Node</label>
+          <label title="Burn at maximum northern latitude passage"><input type="checkbox" name="burn_locations" value="north_pole" checked> N Pole</label>
+          <label title="Burn at maximum southern latitude passage"><input type="checkbox" name="burn_locations" value="south_pole" checked> S Pole</label>
         </div>
 
         <div class="mnv-actions">
-          <button type="submit" class="btn-primary">Generate Options</button>
+          <button type="submit" class="btn-primary" title="Run Astrogator MCS differential corrector for all selected burn locations and types — may take 30–120 seconds">Generate Options</button>
         </div>
       </form>
 
@@ -279,6 +284,7 @@
         <div class="satno-row">
           <input id="red-satno" name="satno"
                  placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                 title="NORAD catalog number — press Enter or click Fetch TLE"
                  hx-get="/udl/tle"
                  hx-trigger="keyup[key=='Enter']"
                  hx-include="#red-fetch-controls [name]"
@@ -292,13 +298,14 @@
                   hx-swap="innerHTML"
                   hx-indicator="#red-tle-indicator"
                   hx-disabled-elt="this"
+                  title="Query UDL for the latest TLE for this catalog number"
                   class="btn-secondary btn-sm">Fetch TLE</button>
           <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
         </div>
         <div class="tle-mode-row">
           <span class="tle-mode-select">
-            <label class="radio-label"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
-            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}">
+            <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
+            <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
               <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
               Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
             </label>
@@ -316,7 +323,7 @@
           {% include "partials/tle_fields.html" %}
         </div>
         <div class="submit-row">
-          <button type="submit" class="btn-primary">Add Red Track</button>
+          <button type="submit" class="btn-primary" title="Create this satellite in STK and load the TLE as a Red Force track">Add Red Track</button>
           <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
         </div>
       </form>
@@ -352,11 +359,13 @@
         <button class="btn-secondary btn-sm"
                 hx-get="/log/entries"
                 hx-target="#log-pane"
-                hx-swap="innerHTML">Refresh</button>
+                hx-swap="innerHTML"
+                title="Reload the run log from server">Refresh</button>
         <button class="btn-secondary btn-sm"
                 hx-post="/log/clear"
                 hx-target="#log-pane"
-                hx-swap="innerHTML">Clear</button>
+                hx-swap="innerHTML"
+                title="Clear all log entries for this session">Clear</button>
       </div>
     </div>
     <div id="log-pane" class="log-pane"

@@ -55,12 +55,14 @@ function hrrSort(th) {
                   hx-target="#blue-tle-fields"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
+                  title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Blue Asset form"
                   class="btn-primary btn-sm">&rarr; Blue</button>
           <button hx-get="/udl/tle"
                   hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
                   hx-target="#red-tle-fields"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
+                  title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Red Track form"
                   class="btn-danger btn-sm">&rarr; Red</button>
           {% endif %}
         </td>
@@ -102,12 +104,14 @@ function hrrSort(th) {
                     hx-target="#red-tle-fields"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
+                    title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Red Track form"
                     class="btn-danger btn-sm">&rarr; Red</button>
             <button hx-get="/udl/tle"
                     hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
                     hx-target="#blue-tle-fields"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
+                    title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Blue Asset form"
                     class="btn-primary btn-sm">&rarr; Blue</button>
             {% endif %}
           </td>

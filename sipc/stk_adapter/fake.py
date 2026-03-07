@@ -172,6 +172,10 @@ class FakeStkSession:
             extra={"red_sat": red_sat, "option_id": option.option_id},
         )
 
+    def list_scenario_satellites(self) -> list[str]:
+        """Return names of all satellites created in this fake session."""
+        return list(self.satellites.keys())
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Append action to the in-memory log."""
         self.actions_log.append((run_id, action, payload))

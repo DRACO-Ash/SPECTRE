@@ -7,11 +7,14 @@
           hx-target="#udl-status"
           hx-swap="innerHTML"
           class="udl-login-form">
-      <input name="username" placeholder="UDL Username" required autocomplete="off" />
-      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off" />
+      <input name="username" placeholder="UDL Username" required autocomplete="off"
+             title="Your UDL account username" />
+      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off"
+             title="Your UDL account password — stored in memory only, never written to disk" />
       <div class="submit-row">
         <button type="submit" class="btn-primary btn-sm"
-                hx-disabled-elt="this">Connect</button>
+                hx-disabled-elt="this"
+                title="Authenticate with UDL to enable TLE fetch and HRR watchlist">Connect</button>
         <span class="htmx-indicator"><span class="spinner"></span>Connecting&hellip;</span>
       </div>
     </form>
@@ -33,7 +36,8 @@
   <button class="btn-secondary btn-sm"
           hx-post="/udl/logout"
           hx-target="#udl-status"
-          hx-swap="innerHTML">Disconnect</button>
+          hx-swap="innerHTML"
+          title="End the UDL session — credentials are cleared from memory">Disconnect</button>
 </div>
 <script>
 (function(){
@@ -55,11 +59,14 @@
           hx-target="#udl-status"
           hx-swap="innerHTML"
           class="udl-login-form">
-      <input name="username" placeholder="UDL Username" required autocomplete="off" />
-      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off" />
+      <input name="username" placeholder="UDL Username" required autocomplete="off"
+             title="Your UDL account username" />
+      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off"
+             title="Your UDL account password — stored in memory only, never written to disk" />
       <div class="submit-row">
         <button type="submit" class="btn-primary btn-sm"
-                hx-disabled-elt="this">Connect</button>
+                hx-disabled-elt="this"
+                title="Authenticate with UDL to enable TLE fetch and HRR watchlist">Connect</button>
         <span class="htmx-indicator"><span class="spinner"></span>Connecting&hellip;</span>
       </div>
     </form>

@@ -668,6 +668,7 @@ details[open] > summary .chip-caret { transform: rotate(180deg); }
 .stk-disconnected .stk-label { color: var(--text-dim); }
 
 .udl-login-wrap, .stk-connect-wrap { margin-top: 0.5rem; width: 100%; }
+.stk-actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 .udl-login-form, .stk-form {
   display: flex;
   flex-direction: column;

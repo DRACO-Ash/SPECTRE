@@ -28,12 +28,17 @@ disabled with a clear message when the licence is absent.
 ## Setting the Astrogator Propagator
 
 ```python
-# AgEVePropagatorType enum — STK 13 values (verify from gen_py stubs)
-# HPOP=0  J2=1  J4=2  LOP=3  SGP4=4  SPICE=5  StkExternal=6  TwoBody=7
-# Astrogator value is NOT in the above list — it is a separate enum:
-# AgEVePropagatorType.ePropagatorAstrogator
-# Actual integer value must be read from stubs; typically 8 in STK 12-13.
-_E_PROPAGATOR_ASTROGATOR = 8  # VERIFY from gen_py stubs
+# AgEVePropagatorType enum — CONFIRMED values from STK 13 gen_py stubs
+# (AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0.py, verified 2026-03-07)
+#
+#   HPOP=0  J2=1  J4=2  LOP=3  SGP4=4  SPICE=5  StkExternal=6  TwoBody=7
+#   GreatArc=9  Ballistic=10  SimpleAscent=11  Astrogator=12
+#   Realtime=13  GPS=14  Aviator=15  SP3=17
+#
+# NOTE: these constants appear in the stubs as tab-indented comments, NOT as
+# importable module attributes, so getattr(mod, "ePropagatorAstrogator") returns
+# None.  The confirmed literal 12 is used as the fallback in _astrogator_enum_value().
+_E_PROPAGATOR_ASTROGATOR = 12  # CONFIRMED STK 13
 
 sat_obj = root.GetObjectFromPath("Satellite/R_SAT_TrackA")
 sat_obj.SetPropagatorType(_E_PROPAGATOR_ASTROGATOR)
@@ -206,7 +211,7 @@ finally:
 
 | Issue | Workaround |
 |-------|-----------|
-| `ePropagatorAstrogator` enum value unknown | Read from gen_py stubs at runtime; log and raise if not found |
+| `ePropagatorAstrogator` enum value | **Confirmed = 12** (STK 13, verified 2026-03-07 from gen_py stubs). Stubs define it as a tab-indented comment, not a module attribute, so `getattr(mod, "ePropagatorAstrogator")` returns None — the hardcoded fallback of 12 is correct. |
 | ODTK may block `prop.Propagate()` | Test on live system; fall back to `ExecuteCommand("Astrogator Run …")` if OM call fails (unlikely) |
 | Differential corrector non-convergence | Catch COM exception from `prop.Propagate()`; log at DEBUG; skip this candidate |
 | Segment type enum values | Confirm all `eVASegmentType*` and `eVAManeuverType*` values from gen_py stubs before use |
