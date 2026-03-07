@@ -91,7 +91,14 @@ class ScenarioPlanner:
                 {"name": asset.stk_name},
             )
             self._session.create_satellite(asset.stk_name, STK_FOLDERS[0])  # /Blue
-            self._session.set_propagator(asset.stk_name, asset.tle)
+            if asset.tle:
+                self._session.set_propagator(asset.stk_name, asset.tle)
+            else:
+                logger.warning(
+                    "Skipping set_propagator for %r — TLE empty; satellite assumed "
+                    "already propagated in STK scenario",
+                    asset.stk_name,
+                )
 
         for track in red_tracks:
             self._session.log_action(
@@ -100,7 +107,14 @@ class ScenarioPlanner:
                 {"name": track.stk_name},
             )
             self._session.create_satellite(track.stk_name, STK_FOLDERS[1])  # /Red
-            self._session.set_propagator(track.stk_name, track.tle)
+            if track.tle:
+                self._session.set_propagator(track.stk_name, track.tle)
+            else:
+                logger.warning(
+                    "Skipping set_propagator for %r — TLE empty; satellite assumed "
+                    "already propagated in STK scenario",
+                    track.stk_name,
+                )
 
     def _compute_windows(
         self,

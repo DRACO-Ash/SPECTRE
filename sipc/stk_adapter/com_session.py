@@ -459,15 +459,16 @@ class StkComSession:
                 self._root.ExecuteCommand(f"Propagate */Satellite/{sat_name}"),
                 f"set_propagator Propagate({sat_name!r})",
             )
-        except StkCommandError:
-            raise
+            logger.info("set_propagator", extra={"sat_name": sat_name})
+            return  # success via Connect command
         except Exception as exc:
-            # Connect command layer unavailable — try Object Model TLE assignment.
+            # Connect command layer unavailable or returned an error — fall back to
+            # the Object Model path which works in ODTK-managed STK instances.
             logger.warning(
                 "set_propagator Connect command failed for %r (%s); trying Object Model",
                 sat_name, exc,
             )
-            self._set_propagator_via_om(sat_name, line1, line2)
+        self._set_propagator_via_om(sat_name, line1, line2)
         logger.info("set_propagator", extra={"sat_name": sat_name})
 
     def compute_access(self, obj_a: str, obj_b: str) -> list[AccessInterval]:

@@ -131,6 +131,29 @@ class TestScenarioPlanner:
         run_ids = {entry[0] for entry in fake_session.actions_log}
         assert run_config.run_id in run_ids
 
+    def test_plan_skips_propagator_for_empty_tle(
+        self, fake_session: FakeStkSession, run_config: RunConfig
+    ) -> None:
+        """plan() must not call set_propagator when TLE is empty.
+
+        An asset imported from an existing STK scenario may have tle='' if
+        get_satellite_tle returned None.  The satellite already has a valid
+        propagator in STK, so we must skip the set_propagator call rather than
+        raising StkCommandError("Invalid TLE … got 0 lines").
+        """
+        planner = ScenarioPlanner(session=fake_session, config=run_config)
+        blue = [BlueAsset(name="Alpha", tle="")]
+        red = [RedTrack(name="Track01", tle="l1\nl2")]
+
+        # Must not raise despite empty blue TLE
+        planner.plan(blue, red)
+
+        # Satellite was created but set_propagator was NOT called for it
+        assert "B_SAT_Alpha" in fake_session.satellites
+        assert "B_SAT_Alpha" not in fake_session.propagators
+        # Red track with valid TLE was propagated normally
+        assert fake_session.propagators["R_SAT_Track01"] == "l1\nl2"
+
     def test_plan_windows_sorted_by_start(
         self, fake_session: FakeStkSession, run_config: RunConfig
     ) -> None:
