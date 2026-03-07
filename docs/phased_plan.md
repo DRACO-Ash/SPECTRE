@@ -108,10 +108,12 @@ Add TestClient tests for:
 - `GET /udl/tle` — happy path, no session, no results
 - `GET /udl/statevector` — happy path, no session, no results
 
-### 4.2 STK error surfacing in UI
-`StkCommandError` and `StkConnectionError` are currently caught by the
-operator route and logged, but the operator sees a generic failure.
-Return structured HTMX error partials with the actual STK error message.
+### 4.2 STK error surfacing in UI *(partially done)*
+`StkCommandError` and `StkConnectionError` are caught by the operator route and
+surfaced via an `stk_error` context key rendered as an inline banner in
+`blue_list.html` and `red_list.html` — the operator sees the actual error message
+without a page reload.  Remaining: propagate the same pattern to other failure
+paths (scenario create/load, run-plan failures).
 
 ### 4.3 Rate limiting & session hardening
 - Add per-user rate limit on `/udl/*` proxy routes (prevent credential hammering)

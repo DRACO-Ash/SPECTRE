@@ -39,6 +39,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - "Refresh from Live Orbit" button renamed to "Re-run Last Search" (clarifies actual behaviour)
 - `ePropagatorAstrogator` fallback changed from `WARNING` log to `DEBUG` (confirmed value; fallback is expected path, not degraded)
+- `planning_state.py`: `log_entries` changed from `list[str]` to `deque[str](maxlen=500)` — O(1) eviction, no manual `pop(0)`
+- `planning_state.py`: `stk_session` typed as `IStkSession | None` (under `TYPE_CHECKING`) instead of bare `Any`
+- All route modules: removed per-module `_templates()` closures; centralised in `sipc/web/deps.py`
+- `operator.py`: `asyncio.get_event_loop()` → `asyncio.get_running_loop()` (correct API inside async functions; `get_event_loop()` deprecated in Python 3.10+)
+- `maneuver_refresh`: now re-uses `state.last_maneuver_config` stored after a successful search instead of reconstructing config with hardcoded defaults
+
+### Added (refactor)
+- `sipc/web/deps.py` — centralised `get_templates()` / `get_com_session()` shared by all route modules; eliminates circular-import `_templates()` pattern
+- `SessionState.last_maneuver_config: ManeuverSearchConfig | None` — stores the operator's last search parameters so **Re-run Last Search** reproduces them exactly
+- `IStkSession.get_satellite_tle(sat_name) -> str | None` — read back TLE from an existing STK satellite (used when importing scenario satellites so imported assets carry real TLEs)
+- `IStkSession.get_scenario_time() -> tuple[datetime, datetime]` — read scenario start/stop from STK after Attach/Load; auto-populates `state.scenario_start` / `state.scenario_stop` on connect
+- TLE auto-pad to exactly 69 chars (`ljust(69)[:69]`) in `_set_propagator_via_om` before writing to temp file
+- Duplicate-name guard in `add_blue_asset` / `add_red_track`: returns an `stk_error` banner instead of silently adding a second copy
+- `stk_error` context key in `blue_list.html` / `red_list.html` partials — surfaces STK push failures to the operator inline without a page reload
 
 ## [0.1.0] — 2026-03-04
 

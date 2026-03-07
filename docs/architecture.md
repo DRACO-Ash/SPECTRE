@@ -54,8 +54,11 @@ FastAPI application. Operators access via any browser — no desktop install req
 - **auth.py** — session cookies (itsdangerous), `require_login` dependency, 8hr expiry
 - **database.py** — async SQLAlchemy engine + admin account bootstrap from env vars
 - **models.py** — `User` ORM model
+- **deps.py** — shared FastAPI dependencies: `get_templates()`, `get_com_session()`;
+  centralises lazy imports to break circular-import chains between `app.py` and routers
 - **planning_state.py** — per-session in-memory state (`SessionState`): assets,
-  maneuver options, UDL credentials, STK session reference
+  maneuver options, UDL credentials, `IStkSession | None` reference,
+  `deque`-backed run log (O(1) eviction), `last_maneuver_config`
 - **routes/**
   - `login.py` — `GET/POST /login`, `POST /logout`
   - `operator.py` — dashboard, asset CRUD, `/plan`, STK connect/disconnect/import,
@@ -87,8 +90,9 @@ definition, preventing accidental coupling.
 
 ### Off-thread STK calls
 All STK COM calls block the calling thread. The web layer dispatches them via
-`asyncio.get_event_loop().run_in_executor(None, ...)` so FastAPI's async event
-loop is never blocked.
+`asyncio.get_running_loop().run_in_executor(None, ...)` so FastAPI's async event
+loop is never blocked. (`get_event_loop()` is deprecated in Python 3.10+ inside
+async functions; `get_running_loop()` is the correct replacement.)
 
 ### In-memory session state
 `SessionState` is a single in-memory object per server process. It holds the
