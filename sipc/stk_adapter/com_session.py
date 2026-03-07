@@ -138,10 +138,11 @@ def _normalize_tle_line1(line: str) -> str:
         if idx < len(chars) and chars[idx] == "+":
             chars[idx] = " "
     line = "".join(chars)
-    # Exponent signs: replace any DDDDD[space]D pattern with DDDDD+D.
+    # Exponent signs: replace any DDDDD[space]D pattern with DDDDD-D.
+    # Convention is negative-zero exponent (e.g. '00000-0') for zero fields.
     # This handles both standard (69-char) and non-standard (e.g. 72-char)
     # UDL TLEs where field positions are shifted by extra separating spaces.
-    line = re.sub(r"(\d{5}) (\d)", r"\1+\2", line)
+    line = re.sub(r"(\d{5}) (\d)", r"\1-\2", line)
     return line
 
 

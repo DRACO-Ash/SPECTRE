@@ -33,9 +33,9 @@ class TestNormalizeTleLine1:
         result = _normalize_tle_line1(line)
         assert result[44] == " "
 
-    def test_exponent_sign_second_deriv_preserved(self) -> None:
-        # '+' at 0-indexed 50 (col 51) is the exponent sign — must NOT become space.
-        # STK rejects a space at this position ("Failed to add the TLE").
+    def test_exponent_sign_second_deriv_explicit_plus_preserved(self) -> None:
+        # '+' at the exponent sign position is explicit and not a space — regex
+        # does not match (only matches space), so '+' is left unchanged.
         result = _normalize_tle_line1(_TLE_39034)
         assert result[50] == "+", f"Expected '+' at idx 50, got {result[50]!r}"
 
@@ -45,21 +45,21 @@ class TestNormalizeTleLine1:
         result = _normalize_tle_line1(line)
         assert result[53] == " "
 
-    def test_exponent_sign_bstar_preserved(self) -> None:
-        # '+' at 0-indexed 59 (col 60) is the BSTAR exponent sign — must NOT become space.
+    def test_exponent_sign_bstar_explicit_plus_preserved(self) -> None:
+        # '+' at the BSTAR exponent sign — not a space, so regex leaves it unchanged.
         line = "1 25544U 98067A   26025.50000000  .00001000  00000+0  10000+3 0  9999 0"
         result = _normalize_tle_line1(line)
         assert result[59] == "+", f"Expected '+' at idx 59, got {result[59]!r}"
 
-    def test_space_at_exponent_sign_normalised_to_plus(self) -> None:
+    def test_space_at_exponent_sign_normalised_to_minus(self) -> None:
         # UDL sometimes produces non-standard 72-char TLEs with extra spaces that
         # shift field positions. Reproduce the live failure for SATNO 33274:
         # both second-deriv and BSTAR had '00000 0' (space as exponent sign).
-        # The regex fix must work regardless of TLE length.
+        # Convention is '00000-0' (negative-zero exponent) for zero fields.
         line = "1 33274U 08038A   26065.97128064  -.00000308  00000 0  00000 0 0  9999 3"
         assert len(line) == 72  # confirm non-standard
         result = _normalize_tle_line1(line)
-        assert "00000+0" in result, f"Expected '00000+0' in result, got: {result!r}"
+        assert "00000-0" in result, f"Expected '00000-0' in result, got: {result!r}"
         assert "00000 0" not in result, f"'00000 0' still present — exponent space not fixed"
 
     def test_negative_signs_preserved(self) -> None:
