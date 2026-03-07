@@ -176,6 +176,14 @@ class FakeStkSession:
         """Return names of all satellites created in this fake session."""
         return list(self.satellites.keys())
 
+    def get_satellite_tle(self, sat_name: str) -> str | None:
+        """Return the stored TLE for a satellite, or None if not propagated."""
+        return self.propagators.get(sat_name)
+
+    def get_scenario_time(self) -> tuple[datetime, datetime]:
+        """Return the configured scenario start and stop epochs."""
+        return (self.scenario_start, self.scenario_stop)
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Append action to the in-memory log."""
         self.actions_log.append((run_id, action, payload))

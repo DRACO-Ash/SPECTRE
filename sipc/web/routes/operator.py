@@ -17,6 +17,7 @@ from sipc.domain.scenario import ScenarioPlanner
 from sipc.stk_adapter.exceptions import StkCommandError, StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
 from sipc.web.auth import require_login
+from sipc.web.deps import get_com_session, get_templates
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -25,10 +26,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _templates() -> object:
-    from sipc.web.app import templates  # noqa: PLC0415
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
-    return templates
+
+def _push_to_stk(
+    state: object,
+    stk_name: str,
+    tle: str,
+    folder: str,
+) -> None:
+    """Create a satellite in STK and load its TLE (blocking — run in executor).
+
+    Args:
+        state: The operator's :class:`~sipc.web.planning_state.SessionState`.
+        stk_name: Full STK object name (e.g. ``B_SAT_Alpha``).
+        tle: Two-line element string (lines 1 & 2, newline-separated).
+        folder: STK scenario folder (e.g. ``/Blue``).
+    """
+    state.append_log(f"[STK] Creating satellite object {stk_name}…")  # type: ignore[attr-defined]
+    state.stk_session.create_satellite(stk_name, folder)  # type: ignore[attr-defined]
+    state.append_log(f"[STK] Loading TLE for {stk_name}…")  # type: ignore[attr-defined]
+    state.stk_session.set_propagator(stk_name, tle)  # type: ignore[attr-defined]
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -40,7 +58,7 @@ async def dashboard(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Render the main operator console."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "operator.html",
@@ -70,30 +88,44 @@ async def add_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a blue asset and return the updated blue list partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
-    asset = BlueAsset(name=name.strip(), tle=tle.strip())
+
+    name = name.strip()
+    tle = tle.strip()
+    asset = BlueAsset(name=name, tle=tle)
+
+    # Reject duplicates — same STK name would cause create_satellite to
+    # silently skip creation then set_propagator to overwrite the existing TLE.
+    if any(a.stk_name == asset.stk_name for a in state.blue_assets):
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/blue_list.html",
+            {
+                "request": request,
+                "blue_assets": state.blue_assets,
+                "stk_error": f"{asset.stk_name} is already in the session.",
+            },
+        )
+
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Added asset: {asset.stk_name}")
 
+    stk_error: str | None = None
     if state.stk_session is not None:
-        def _push_blue() -> None:
-            state.append_log(f"[STK] Creating satellite object {asset.stk_name}…")
-            state.stk_session.create_satellite(asset.stk_name, STK_FOLDERS[0])
-            state.append_log(f"[STK] Loading TLE for {asset.stk_name}…")
-            state.stk_session.set_propagator(asset.stk_name, asset.tle)
-
+        loop = asyncio.get_running_loop()
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _push_blue)
+            await loop.run_in_executor(
+                None, _push_to_stk, state, asset.stk_name, asset.tle, STK_FOLDERS[0]
+            )
             state.append_log(f"[STK] {asset.stk_name} created and propagated")
         except Exception as exc:
+            stk_error = f"STK push failed for {asset.stk_name}: {exc}"
             logger.warning("STK push failed for %s: %s", asset.stk_name, exc)
-            state.append_log(f"[STK] WARNING: could not push {asset.stk_name} to STK — {exc}")
+            state.append_log(f"[STK] WARNING: {stk_error}")
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/blue_list.html",
-        {"request": request, "blue_assets": state.blue_assets},
+        {"request": request, "blue_assets": state.blue_assets, "stk_error": stk_error},
     )
 
 
@@ -104,13 +136,13 @@ async def remove_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/blue_list.html",
-        {"request": request, "blue_assets": state.blue_assets},
+        {"request": request, "blue_assets": state.blue_assets, "stk_error": None},
     )
 
 
@@ -122,30 +154,42 @@ async def add_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a red track and return the updated red list partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
-    track = RedTrack(name=name.strip(), tle=tle.strip())
+
+    name = name.strip()
+    tle = tle.strip()
+    track = RedTrack(name=name, tle=tle)
+
+    if any(t.stk_name == track.stk_name for t in state.red_tracks):
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/red_list.html",
+            {
+                "request": request,
+                "red_tracks": state.red_tracks,
+                "stk_error": f"{track.stk_name} is already in the session.",
+            },
+        )
+
     state.red_tracks.append(track)
     state.append_log(f"[RED] Added track: {track.stk_name}")
 
+    stk_error = None
     if state.stk_session is not None:
-        def _push_red() -> None:
-            state.append_log(f"[STK] Creating satellite object {track.stk_name}…")
-            state.stk_session.create_satellite(track.stk_name, STK_FOLDERS[1])
-            state.append_log(f"[STK] Loading TLE for {track.stk_name}…")
-            state.stk_session.set_propagator(track.stk_name, track.tle)
-
+        loop = asyncio.get_running_loop()
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _push_red)
+            await loop.run_in_executor(
+                None, _push_to_stk, state, track.stk_name, track.tle, STK_FOLDERS[1]
+            )
             state.append_log(f"[STK] {track.stk_name} created and propagated")
         except Exception as exc:
+            stk_error = f"STK push failed for {track.stk_name}: {exc}"
             logger.warning("STK push failed for %s: %s", track.stk_name, exc)
-            state.append_log(f"[STK] WARNING: could not push {track.stk_name} to STK — {exc}")
+            state.append_log(f"[STK] WARNING: {stk_error}")
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/red_list.html",
-        {"request": request, "red_tracks": state.red_tracks},
+        {"request": request, "red_tracks": state.red_tracks, "stk_error": stk_error},
     )
 
 
@@ -156,13 +200,13 @@ async def remove_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a red track by name and return the updated partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/red_list.html",
-        {"request": request, "red_tracks": state.red_tracks},
+        {"request": request, "red_tracks": state.red_tracks, "stk_error": None},
     )
 
 
@@ -178,7 +222,7 @@ async def run_plan(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Execute a planning run and return the results table partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if not state.blue_assets:
@@ -208,7 +252,7 @@ async def run_plan(
         state.append_log("[RUN] WARNING: STK not connected — using FakeStkSession (no real propagation)")
     planner = ScenarioPlanner(session_adapter, config)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         results = await loop.run_in_executor(
             None, planner.plan, list(state.blue_assets), list(state.red_tracks)
@@ -252,17 +296,17 @@ async def stk_connect(
     """Attach to a running STK instance and optionally load a scenario.
 
     Runs the blocking COM call in a thread-pool executor so the event loop
-    is not blocked.
+    is not blocked.  On success, reads the scenario time window from STK and
+    stores it in session state so TLE epoch-matching and age badges work
+    immediately without requiring an explicit scenario-time configuration step.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
-    from sipc.stk_adapter.com_session import StkComSession  # noqa: PLC0415
-
-    session = StkComSession()
+    session = get_com_session()
     path = scenario_path.strip()
+    loop = asyncio.get_running_loop()
     try:
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, session.connect, path)
     except StkConnectionError as exc:
         logger.warning("STK connect failed for operator %s: %s", current_user.username, exc)
@@ -284,6 +328,19 @@ async def stk_connect(
         f"[STK] Connected — {path or 'attached to running instance'}"
     )
     logger.info("STK connected for operator %s (scenario=%r)", current_user.username, path)
+
+    # Read scenario time from STK so epoch-mode TLE fetch and TLE age badges
+    # work without a separate scenario-time configuration step.
+    try:
+        start, stop = await loop.run_in_executor(None, session.get_scenario_time)
+        state.scenario_start = start
+        state.scenario_stop = stop
+        state.append_log(
+            f"[STK] Scenario time: {start.strftime('%Y-%m-%d %H:%M')} → "
+            f"{stop.strftime('%Y-%m-%d %H:%M')} UTC"
+        )
+    except Exception as exc:
+        logger.warning("Could not read scenario time after connect: %s", exc)
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/stk_status.html",
@@ -308,10 +365,8 @@ async def stk_new_scenario(
 
     Runs the blocking COM call in a thread-pool executor.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
-
-    from sipc.stk_adapter.com_session import StkComSession  # noqa: PLC0415
 
     name = scenario_name.strip()
     if not name:
@@ -325,9 +380,9 @@ async def stk_new_scenario(
             },
         )
 
-    session = StkComSession()
+    session = get_com_session()
+    loop = asyncio.get_running_loop()
     try:
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, session.new_scenario, name)
     except StkConnectionError as exc:
         logger.warning("STK new_scenario failed for operator %s: %s", current_user.username, exc)
@@ -379,7 +434,7 @@ async def stk_disconnect(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Release the STK COM session."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if state.stk_session is not None:
@@ -412,13 +467,15 @@ async def stk_import_satellites(
     the SIPC naming convention (``B_SAT_*`` → blue, ``R_SAT_*`` → red).
     Satellites that don't carry a recognised prefix are skipped.
 
-    Because the satellites already exist in STK with TLEs loaded, no
-    ``create_satellite`` or ``set_propagator`` calls are made.
+    For each imported satellite, the TLE is read back from the STK propagator
+    so that assets carry a real TLE rather than an empty string.  This prevents
+    ``set_propagator`` from failing if a subsequent planning run re-provisions
+    the satellite.
 
     Returns an ``HX-Refresh`` response so HTMX reloads the full operator page
     and the maneuver-options dropdowns reflect the newly imported assets.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if state.stk_session is None:
@@ -432,8 +489,8 @@ async def stk_import_satellites(
             },
         )
 
+    loop = asyncio.get_running_loop()
     try:
-        loop = asyncio.get_event_loop()
         sat_names = await loop.run_in_executor(
             None, state.stk_session.list_scenario_satellites
         )
@@ -458,11 +515,18 @@ async def stk_import_satellites(
     for sat_name in sat_names:
         if sat_name.startswith(BLUE_PREFIX):
             if sat_name not in existing_blue:
-                state.blue_assets.append(BlueAsset(name=sat_name[len(BLUE_PREFIX):], tle=""))
+                # Read TLE from STK so the asset carries a real TLE string.
+                tle = await loop.run_in_executor(
+                    None, state.stk_session.get_satellite_tle, sat_name
+                ) or ""
+                state.blue_assets.append(BlueAsset(name=sat_name[len(BLUE_PREFIX):], tle=tle))
                 imported_blue += 1
         elif sat_name.startswith(RED_PREFIX):
             if sat_name not in existing_red:
-                state.red_tracks.append(RedTrack(name=sat_name[len(RED_PREFIX):], tle=""))
+                tle = await loop.run_in_executor(
+                    None, state.stk_session.get_satellite_tle, sat_name
+                ) or ""
+                state.red_tracks.append(RedTrack(name=sat_name[len(RED_PREFIX):], tle=tle))
                 imported_red += 1
         else:
             skipped += 1
@@ -475,8 +539,7 @@ async def stk_import_satellites(
 
     # HX-Refresh causes HTMX to reload the full page so the maneuver-options
     # dropdowns (server-rendered at page load) reflect the imported assets.
-    from fastapi.responses import HTMLResponse as _HR  # noqa: PLC0415
-    response = _HR(content="", status_code=200)
+    response = HTMLResponse(content="", status_code=200)
     response.headers["HX-Refresh"] = "true"
     return response
 
@@ -517,7 +580,7 @@ async def log_entries(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the run log partial (for polling fallback)."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/run_log.html",
@@ -531,7 +594,7 @@ async def clear_log(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear the session run log and return the empty partial."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.log_entries.clear()
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]

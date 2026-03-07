@@ -1,3 +1,6 @@
+{% if stk_error %}
+<div class="stk-push-error error-msg" role="alert">STK: {{ stk_error }}</div>
+{% endif %}
 {% if blue_assets %}
 <ul class="asset-list">
   {% for asset in blue_assets %}

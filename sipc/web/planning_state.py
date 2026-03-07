@@ -9,11 +9,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from sipc.domain.models import BlueAsset, InterceptWindow, ManeuverOption, RedTrack
+from sipc.domain.models import (
+    BlueAsset,
+    InterceptWindow,
+    ManeuverOption,
+    ManeuverSearchConfig,
+    RedTrack,
+)
+
+if TYPE_CHECKING:
+    from sipc.stk_adapter.interface import IStkSession
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +40,22 @@ class SessionState:
         red_tracks: List of threat tracks added in this session.
         results: Last set of :class:`InterceptWindow` results from ``/plan``.
         log_queue: Async queue of log-line strings for SSE streaming.
-        log_entries: Recent log entries (for polling fallback).
+        log_entries: Fixed-size deque of recent log entries (polling fallback).
+            Oldest entries are evicted automatically when the deque is full.
     """
 
     blue_assets: list[BlueAsset] = field(default_factory=list)
     red_tracks: list[RedTrack] = field(default_factory=list)
     results: list[InterceptWindow] = field(default_factory=list)
     log_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
-    log_entries: list[str] = field(default_factory=list)
+    log_entries: deque[str] = field(
+        default_factory=lambda: deque(maxlen=_MAX_LOG_ENTRIES)
+    )
     # UDL credentials — held in memory for this session only, never persisted.
     udl_username: str | None = None
     udl_password: str | None = None
     # Live STK session — None means planning runs use FakeStkSession.
-    stk_session: Any | None = None
+    stk_session: IStkSession | None = None
     stk_scenario: str = ""
     # Scenario time window — set when the operator configures STK scenario time.
     # Used by the UDL epoch-matched TLE fetch.
@@ -52,11 +65,15 @@ class SessionState:
     maneuver_options: list[ManeuverOption] = field(default_factory=list)
     # The option the operator has selected for application.
     selected_maneuver: ManeuverOption | None = None
+    # Config from the most recent maneuver search — used by /refresh.
+    last_maneuver_config: ManeuverSearchConfig | None = None
 
     def append_log(self, message: str) -> None:
-        """Append *message* to the session log, evicting oldest if needed."""
-        if len(self.log_entries) >= _MAX_LOG_ENTRIES:
-            self.log_entries.pop(0)
+        """Append *message* to the session log.
+
+        The underlying :class:`collections.deque` automatically evicts the
+        oldest entry when the log is full — no manual size check required.
+        """
         self.log_entries.append(message)
         try:
             self.log_queue.put_nowait(message)

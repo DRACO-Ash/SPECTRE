@@ -121,7 +121,7 @@ class TestFetchTleLatestMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -153,7 +153,7 @@ class TestFetchTleLatestMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
         ):
             tmpl = MagicMock()
             tmpl_mock.return_value = tmpl
@@ -179,7 +179,7 @@ class TestFetchTleEpochMode:
         """epoch mode without scenario_start must return a clear error."""
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
         ):
             tmpl = MagicMock()
             tmpl_mock.return_value = tmpl
@@ -205,7 +205,7 @@ class TestFetchTleEpochMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -247,7 +247,7 @@ class TestFetchTleEpochMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -285,7 +285,7 @@ class TestFetchTleEpochMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -321,7 +321,7 @@ class TestFetchTleEpochMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl._templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()

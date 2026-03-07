@@ -193,6 +193,34 @@ class IStkSession(Protocol):
         """
         ...
 
+    def get_satellite_tle(self, sat_name: str) -> str | None:
+        """Return the current TLE (line 1 and line 2) for an existing satellite.
+
+        Reads the TLE directly from the satellite's SGP4 propagator in the STK
+        scenario.  Used when importing pre-existing satellites so that their TLE
+        is available in session state without requiring a fresh UDL fetch.
+
+        Args:
+            sat_name: STK object name of the satellite (e.g. ``B_SAT_Alpha``).
+
+        Returns:
+            Two-line TLE string (``"<line1>\\n<line2>"``), or ``None`` if the
+            satellite does not exist, has no SGP4 segments, or the TLE cannot
+            be read.
+        """
+        ...
+
+    def get_scenario_time(self) -> tuple[datetime, datetime]:
+        """Return the scenario analysis start and stop epochs as UTC datetimes.
+
+        Returns:
+            ``(start, stop)`` — both UTC-aware datetimes.
+
+        Raises:
+            StkConnectionError: If not connected to STK or no scenario is loaded.
+        """
+        ...
+
     def log_action(self, run_id: str, action: str, payload: dict[str, Any]) -> None:
         """Record a provenance-tagged adapter action.
 

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
 from sipc.web.auth import require_login
+from sipc.web.deps import get_templates
 from sipc.web.models import User
 from sipc.web.planning_state import (
     get_onorbit_catalog,
@@ -77,13 +78,6 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
 
 
-def _templates() -> object:
-    """Import templates lazily to avoid circular import at module load."""
-    from sipc.web.app import templates  # noqa: PLC0415
-
-    return templates
-
-
 # ── UDL session management ─────────────────────────────────────────────────
 
 
@@ -99,7 +93,7 @@ async def udl_login(
     Performs a lightweight probe request to UDL to confirm the credentials
     are accepted before storing them.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     try:
@@ -165,7 +159,7 @@ async def udl_logout(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear UDL credentials from the operator session."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.udl_username = None
     state.udl_password = None
@@ -199,7 +193,7 @@ async def fetch_tle(
       scenario time to be set via the STK panel first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     _empty = {"request": request, "name": "", "tle": "", "tle_epoch_str": None,
@@ -350,7 +344,7 @@ async def fetch_statevector(
     at the most recent available epoch. Useful for initialising high-fidelity
     intercept geometry without propagating a TLE.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if not state.udl_username or not state.udl_password:
@@ -465,7 +459,7 @@ async def fetch_hrr(
     used.  Satellites are classified Red if their country code is in
     ``_RED_COUNTRIES``; everything else is Blue.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     _empty_err = {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
@@ -587,7 +581,7 @@ async def search_catalog(
     the current catalog status (loading, ready, error) so the operator can
     see progress without searching.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 

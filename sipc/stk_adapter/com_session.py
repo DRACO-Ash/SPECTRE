@@ -556,6 +556,43 @@ class StkComSession:
         logger.info("get_scenario_epoch", extra={"epoch": epoch.isoformat()})
         return epoch
 
+    def get_scenario_time(self) -> tuple[datetime, datetime]:
+        """Return the scenario analysis start and stop epochs as UTC datetimes.
+
+        Returns:
+            ``(start, stop)`` — both UTC-aware datetimes.
+
+        Raises:
+            StkConnectionError: If not connected or no scenario is loaded.
+        """
+        self._require_connection()
+        scenario = self._root.CurrentScenario
+        start = _parse_stk_time(str(scenario.StartTime))
+        stop = _parse_stk_time(str(scenario.StopTime))
+        logger.info(
+            "get_scenario_time",
+            extra={"start": start.isoformat(), "stop": stop.isoformat()},
+        )
+        return (start, stop)
+
+    def get_satellite_tle(self, sat_name: str) -> str | None:
+        """Return the current TLE (line 1 and line 2) for an existing satellite.
+
+        Reads the first TLE segment from the satellite's SGP4 propagator in the
+        active scenario.  Returns ``None`` if the satellite does not exist, has
+        no SGP4 segments, or the TLE cannot be read for any reason.
+
+        Args:
+            sat_name: STK object name of the satellite (e.g. ``B_SAT_Alpha``).
+
+        Returns:
+            Two-line TLE string (``"<line1>\\n<line2>"``), or ``None``.
+        """
+        tle = self._snapshot_tle(sat_name)
+        if tle is None:
+            return None
+        return f"{tle[0]}\n{tle[1]}"
+
     def compute_maneuver_options(
         self, config: ManeuverSearchConfig
     ) -> list[ManeuverOption]:
@@ -817,6 +854,12 @@ class StkComSession:
             # of line 1.  STK expects a space there for positive values; a '+'
             # causes AddSegsFromFile to raise "Failed to add the TLE".
             line1_norm = _normalize_tle_line1(line1)
+
+            # TLE format is fixed-width (69 chars per line).  Some UDL records
+            # strip trailing spaces producing a 68-char line.  Pad both lines to
+            # exactly 69 chars so AddSegsFromFile does not reject them.
+            line1_norm = line1_norm.ljust(69)[:69]
+            line2 = line2.ljust(69)[:69]
 
             # The name line MUST match the identifier passed to AddSegsFromFile
             # exactly.  Using sat_name (e.g. "B_SAT_33274") when the identifier

@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from sipc.domain.models import BurnLocation, BurnType, ManeuverSearchConfig
 from sipc.domain.maneuver_planner import ManeuverPlanner, ManeuverPlannerError
 from sipc.web.auth import require_login
+from sipc.web.deps import get_templates
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -28,11 +29,6 @@ router = APIRouter(prefix="/plan/maneuver")
 
 _BURN_TYPE_MAP: dict[str, BurnType] = {bt.value: bt for bt in BurnType}
 _BURN_LOCATION_MAP: dict[str, BurnLocation] = {bl.value: bl for bl in BurnLocation}
-
-
-def _templates() -> object:
-    from sipc.web.app import templates  # noqa: PLC0415
-    return templates
 
 
 def _parse_burn_types(raw: list[str]) -> list[BurnType]:
@@ -49,7 +45,7 @@ async def _run_search(
     config: ManeuverSearchConfig,
 ) -> HTMLResponse:
     """Common search execution shared by /search and /refresh."""
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if not state.stk_session:
@@ -64,7 +60,7 @@ async def _run_search(
         )
 
     planner = ManeuverPlanner(state.stk_session)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         options = await loop.run_in_executor(None, planner.compute_options, config)
     except ManeuverPlannerError as exc:
@@ -95,6 +91,7 @@ async def _run_search(
 
     state.maneuver_options = options
     state.selected_maneuver = None
+    state.last_maneuver_config = config
     state.append_log(
         f"[MANEUVER] Search complete: {len(options)} option(s) for "
         f"{config.red_sat} vs {config.blue_sat}"
@@ -137,7 +134,7 @@ async def maneuver_search(
         start_dt = datetime.fromisoformat(window_start).replace(tzinfo=UTC)
         stop_dt = datetime.fromisoformat(window_stop).replace(tzinfo=UTC)
     except ValueError as exc:
-        tmpl = _templates()
+        tmpl = get_templates()
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/maneuver_options_table.html",
             {
@@ -172,11 +169,10 @@ async def maneuver_refresh(
     operator already has a satellite in the scenario and wants fresh options
     based on its current propagated state).
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
-    if not state.maneuver_options and state.selected_maneuver is None:
-        # No previous search to refresh from
+    if state.last_maneuver_config is None:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/maneuver_options_table.html",
             {
@@ -187,31 +183,7 @@ async def maneuver_refresh(
             },
         )
 
-    # Reconstruct config from the stored options (use first option's sat names)
-    existing = state.maneuver_options
-    if not existing:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/maneuver_options_table.html",
-            {
-                "request": request,
-                "options": [],
-                "error": "No previous options stored — run a fresh search.",
-                "selected_id": None,
-            },
-        )
-
-    first = existing[0]
-    config = ManeuverSearchConfig(
-        red_sat=first.red_name,
-        blue_sat=first.blue_name,
-        search_window_start=state.scenario_start or datetime.now(tz=UTC),
-        search_window_stop=state.scenario_stop or datetime.now(tz=UTC),
-        max_delta_v_km_s=3.0,
-        burn_types=list(BurnType),
-        burn_locations=list(BurnLocation),
-    )
-
-    return await _run_search(request, current_user, config)
+    return await _run_search(request, current_user, state.last_maneuver_config)
 
 
 @router.post("/select", response_model=None)
@@ -225,7 +197,7 @@ async def maneuver_select(
     The selected option is held in ``SessionState.selected_maneuver``.
     Returns a status partial confirming the selection.
     """
-    tmpl = _templates()
+    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     option = next(

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sipc.web.auth import _COOKIE_NAME, make_session_cookie, verify_password
 from sipc.web.database import get_db
+from sipc.web.deps import get_templates
 from sipc.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -19,17 +20,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _templates() -> object:
-    """Import templates lazily to avoid circular import at module load."""
-    from sipc.web.app import templates  # noqa: PLC0415
-
-    return templates
-
-
 @router.get("/login", response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
-    tmpl = _templates()
+    tmpl = get_templates()
     return tmpl.TemplateResponse("login.html", {"request": request, "error": None})  # type: ignore[attr-defined]
 
 
@@ -41,7 +35,7 @@ async def post_login(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     """Authenticate and set a session cookie, or re-render with an error."""
-    tmpl = _templates()
+    tmpl = get_templates()
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
