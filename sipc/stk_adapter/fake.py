@@ -10,6 +10,8 @@ from sipc.domain.models import (
     AccessInterval,
     BurnLocation,
     BurnType,
+    InterceptConfig,
+    InterceptMethod,
     ManeuverOption,
     ManeuverSearchConfig,
 )
@@ -134,35 +136,107 @@ class FakeStkSession:
         if self.maneuver_options:
             return sorted(self.maneuver_options, key=lambda o: o.delta_v_km_s)
 
-        # Synthesise one deterministic option so callers always get a result.
-        location = (
-            config.burn_locations[0]
-            if config.burn_locations
-            else BurnLocation.APOGEE
-        )
-        burn_type = (
-            config.burn_types[0]
-            if config.burn_types
-            else BurnType.IMPULSIVE
-        )
-        burn_epoch = config.search_window_start + timedelta(hours=1)
-        return [
-            ManeuverOption(
-                red_name=config.red_sat,
-                blue_name=config.blue_sat,
-                burn_type=burn_type,
-                burn_location=location,
-                burn_epoch=burn_epoch,
-                delta_v_km_s=0.250,
-                dv_prograde=0.250,
-                dv_normal=0.0,
-                dv_radial=0.0,
-                intercept_epoch=burn_epoch + timedelta(minutes=47),
-                transfer_duration_s=47 * 60,
-                intercept_range_km=0.5,
-                notes=f"Stub: {location.value} {burn_type.value}",
+        options: list[ManeuverOption] = []
+
+        # Synthesise one deterministic option per burn-location (if any configured).
+        if config.burn_locations:
+            location = config.burn_locations[0]
+            burn_type = config.burn_types[0] if config.burn_types else BurnType.IMPULSIVE
+            burn_epoch = config.search_window_start + timedelta(hours=1)
+            options.append(
+                ManeuverOption(
+                    red_name=config.red_sat,
+                    blue_name=config.blue_sat,
+                    burn_type=burn_type,
+                    burn_location=location,
+                    burn_epoch=burn_epoch,
+                    delta_v_km_s=0.250,
+                    dv_prograde=0.250,
+                    dv_normal=0.0,
+                    dv_radial=0.0,
+                    intercept_epoch=burn_epoch + timedelta(minutes=47),
+                    transfer_duration_s=47 * 60,
+                    intercept_range_km=0.5,
+                    notes=f"Stub: {location.value} {burn_type.value}",
+                )
             )
-        ]
+
+        # Synthesise one stub option per intercept engine method.
+        engine_base_epoch = (
+            config.manoeuvre_start or config.search_window_start
+        )
+        for i, method in enumerate(config.intercept_methods):
+            burn_epoch = engine_base_epoch + timedelta(hours=config.coast_hours)
+            intercept_epoch = burn_epoch + timedelta(hours=config.intercept_hours)
+            options.append(
+                ManeuverOption(
+                    red_name=config.red_sat,
+                    blue_name=config.blue_sat,
+                    burn_type=BurnType.IMPULSIVE,
+                    burn_location=BurnLocation.CUSTOM,
+                    burn_epoch=burn_epoch,
+                    delta_v_km_s=0.100 * (i + 1),
+                    dv_prograde=0.100 * (i + 1),
+                    dv_normal=0.0,
+                    dv_radial=0.0,
+                    intercept_epoch=intercept_epoch,
+                    transfer_duration_s=(intercept_epoch - burn_epoch).total_seconds(),
+                    intercept_range_km=0.1,
+                    notes=f"Stub: {method.value} intercept",
+                )
+            )
+
+        # Always return at least one result.
+        if not options:
+            burn_epoch = config.search_window_start + timedelta(hours=1)
+            options.append(
+                ManeuverOption(
+                    red_name=config.red_sat,
+                    blue_name=config.blue_sat,
+                    burn_type=BurnType.IMPULSIVE,
+                    burn_location=BurnLocation.APOGEE,
+                    burn_epoch=burn_epoch,
+                    delta_v_km_s=0.250,
+                    dv_prograde=0.250,
+                    dv_normal=0.0,
+                    dv_radial=0.0,
+                    intercept_epoch=burn_epoch + timedelta(minutes=47),
+                    transfer_duration_s=47 * 60,
+                    intercept_range_km=0.5,
+                    notes="Stub: apogee impulsive",
+                )
+            )
+
+        return sorted(options, key=lambda o: o.delta_v_km_s)
+
+    def apply_intercept_plan(self, config: InterceptConfig) -> ManeuverOption:
+        """Return a synthetic ManeuverOption for the requested intercept method."""
+        from datetime import timedelta  # noqa: PLC0415
+
+        epoch = config.manoeuvre_start or self.epoch
+        burn_epoch = epoch + timedelta(hours=config.coast_hours)
+        intercept_epoch = burn_epoch + timedelta(hours=config.intercept_hours)
+        option = ManeuverOption(
+            red_name=config.red_sat,
+            blue_name=config.blue_sat,
+            burn_type=BurnType.IMPULSIVE,
+            burn_location=BurnLocation.CUSTOM,
+            burn_epoch=burn_epoch,
+            delta_v_km_s=0.150,
+            dv_prograde=0.150,
+            dv_normal=0.0,
+            dv_radial=0.0,
+            intercept_epoch=intercept_epoch,
+            transfer_duration_s=(intercept_epoch - burn_epoch).total_seconds(),
+            intercept_range_km=0.0,
+            notes=f"Stub: {config.method.value} intercept",
+        )
+        self.applied_maneuver = option
+        logger.debug(
+            "FakeStkSession.apply_intercept_plan",
+            extra={"method": config.method.value, "red": config.red_sat},
+        )
+        return option
 
     def apply_maneuver(self, red_sat: str, option: ManeuverOption) -> None:
         """Record the applied maneuver option for test assertion."""

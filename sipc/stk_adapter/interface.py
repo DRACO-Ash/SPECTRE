@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from sipc.domain.models import AccessInterval, ManeuverOption, ManeuverSearchConfig
+from sipc.domain.models import AccessInterval, InterceptConfig, ManeuverOption, ManeuverSearchConfig
 
 
 @runtime_checkable
@@ -173,6 +173,30 @@ class IStkSession(Protocol):
         Raises:
             StkConnectionError: If not connected to STK.
             StkCommandError: If the MCS cannot be constructed or propagated.
+        """
+        ...
+
+    def apply_intercept_plan(self, config: InterceptConfig) -> ManeuverOption:
+        """Calculate and apply a specific intercept trajectory.
+
+        Uses the selected intercept engine algorithm to build an Astrogator MCS,
+        runs the differential corrector to solve for the required ΔV, then encodes
+        the solved trajectory as a fixed MCS on the red satellite so it moves in STK.
+
+        Unlike :meth:`compute_maneuver_options` this is a direct calculation, not a
+        search — the operator provides the full trajectory geometry (coast time,
+        intercept TOF, etc.) and Astrogator solves for the ΔV.
+
+        Args:
+            config: Algorithm selection and timing parameters.
+
+        Returns:
+            :class:`~sipc.domain.models.ManeuverOption` populated with the solved
+            burn epoch, ΔV vector, intercept epoch, and miss distance.
+
+        Raises:
+            StkConnectionError: If not connected to STK.
+            StkCommandError: If Astrogator fails to converge or propagate.
         """
         ...
 

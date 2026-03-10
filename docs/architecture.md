@@ -28,11 +28,19 @@ the web layer) via well-defined interfaces.
 
 ## Packages
 
+### `sipc/intercept_engine/`
+Pure Python. Four orbit-mechanics algorithm classes that generate `list[dict]` sequence plans
+consumed by `MCSBuilder` in the STK adapter:
+- **lambert_planner.py** — `LambertPlanner`: coast → burn → post-coast → DC targeting R=0
+- **rendezvous_planner.py** — `RendezvousPlanner`: coast → burn → DC targeting R=0 AND V=0
+- **proximity_intercept.py** — `ProximityInterceptPlanner`: coast → burn → DC targeting R=distance
+- **optimal_intercept.py** — `OptimalInterceptPlanner`: coast → N burns → post-coast → Optimizer
+
 ### `sipc/domain/`
 Pure Python. No GUI, no COM, no file I/O. Contains:
-- **models.py** — dataclasses: `BlueAsset`, `RedTrack`, `InterceptWindow`,
+- **models.py** — dataclasses/enums: `BlueAsset`, `RedTrack`, `InterceptWindow`,
   `RunConfig`, `AccessInterval`, `BurnType`, `BurnLocation`, `ManeuverOption`,
-  `ManeuverSearchConfig`
+  `ManeuverSearchConfig`, `InterceptMethod`, `InterceptConfig`
 - **scenario.py** — `ScenarioPlanner`: orchestrates an access-window planning run
 - **maneuver_planner.py** — `ManeuverPlanner`: validates config, delegates to STK
   Astrogator, sorts results by ΔV, logs provenance
@@ -47,6 +55,8 @@ Implements the `IStkSession` Protocol for different backends:
 - **fake.py** — `FakeStkSession`: in-memory double for unit testing
 - **exceptions.py** — adapter-specific exceptions (`StkCommandError`,
   `StkConnectionError`)
+- **mcs_builder.py** — `MCSBuilder`: translates intercept engine `list[dict]` plans into
+  STK Astrogator COM calls (Target Sequence + DC/Optimizer profile, Cartesian VNC controls)
 
 ### `sipc/web/`
 FastAPI application. Operators access via any browser — no desktop install required.
@@ -65,7 +75,7 @@ FastAPI application. Operators access via any browser — no desktop install req
     run log
   - `udl.py` — UDL login/logout, TLE fetch (latest + epoch modes), HRR watchlist,
     orbit catalog search
-  - `maneuver.py` — `/plan/maneuver/search`, `/refresh`, `/select`
+  - `maneuver.py` — `/plan/maneuver/search`, `/refresh`, `/select`, `/apply-intercept`
 - **templates/** — Jinja2 HTML (base, login, operator, HTMX partials)
 - **static/** — dark-mode military CSS, SIPC logo SVG, favicon
 

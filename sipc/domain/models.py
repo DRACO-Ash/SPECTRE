@@ -86,6 +86,23 @@ class InterceptWindow:
     red_name: str
 
 
+class InterceptMethod(Enum):
+    """Algorithm used by the intercept engine to build the Astrogator MCS.
+
+    Each method defines a different MCS structure and DC/Optimizer profile:
+
+    ``LAMBERT``     — pre-burn coast → burn → post-burn coast → DC (R=0).
+    ``RENDEZVOUS``  — coast → burn → DC (R=0 and V=0 simultaneously).
+    ``PROXIMITY``   — coast → burn → DC (R = target_distance_m).
+    ``OPTIMAL``     — coast → N burns → coast → Optimizer (R=distance, min ΔV).
+    """
+
+    LAMBERT    = "lambert"
+    RENDEZVOUS = "rendezvous"
+    PROXIMITY  = "proximity"
+    OPTIMAL    = "optimal"
+
+
 class BurnType(Enum):
     """Type of propulsive maneuver.
 
@@ -192,6 +209,57 @@ class ManeuverSearchConfig:
     burn_locations: list[BurnLocation] = field(
         default_factory=lambda: list(BurnLocation)
     )
+
+    # ── Intercept engine fields ───────────────────────────────────────────────
+    # Ignored when intercept_methods is empty (backward-compatible default).
+    intercept_methods: list[InterceptMethod] = field(default_factory=list)
+    manoeuvre_start: datetime | None = None
+    """Initial State epoch for the aggressor satellite.  If ``None``, the
+    scenario start epoch is used."""
+    coast_hours: float = 1.0
+    """Pre-burn coast duration in hours (all intercept engine methods)."""
+    intercept_hours: float = 6.0
+    """Post-burn time-of-flight in hours (Lambert and Optimal methods)."""
+    number_of_burns: int = 1
+    """Number of burn segments (Optimal only)."""
+    target_distance_m: float = 0.0
+    """Desired miss distance in metres (Proximity and Optimal methods)."""
+    minimize_delta_v: bool = True
+    """Optimizer cost function — minimize total ΔV (Optimal only)."""
+
+
+@dataclass
+class InterceptConfig:
+    """Parameters for a direct intercept engine calculation.
+
+    Unlike :class:`ManeuverSearchConfig`, this does not scan burn locations.
+    It directly encodes a specific trajectory structure (algorithm + timing)
+    and asks STK Astrogator to solve for the ΔV that satisfies it.
+
+    Attributes:
+        red_sat: STK object name of the aggressor satellite.
+        blue_sat: STK object name of the target satellite.
+        method: Which intercept engine algorithm to use.
+        manoeuvre_start: UTC epoch for the Initial State. If ``None``, the
+            scenario start epoch is used.
+        coast_hours: Pre-burn coast duration in hours.
+        intercept_hours: Post-burn time-of-flight in hours (Lambert, Optimal).
+        number_of_burns: Number of burn segments (Optimal only).
+        target_distance_m: Desired miss distance in metres (Proximity, Optimal).
+        minimize_delta_v: Optimizer cost function — minimise total ΔV (Optimal).
+        max_delta_v_km_s: ΔV bound for DC/Optimizer control parameters.
+    """
+
+    red_sat: str
+    blue_sat: str
+    method: InterceptMethod
+    manoeuvre_start: datetime | None = None
+    coast_hours: float = 1.0
+    intercept_hours: float = 6.0
+    number_of_burns: int = 1
+    target_distance_m: float = 0.0
+    minimize_delta_v: bool = True
+    max_delta_v_km_s: float = 3.0
 
 
 @dataclass

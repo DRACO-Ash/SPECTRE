@@ -268,6 +268,102 @@
 
       <div id="maneuver-status" style="margin-top:0.4rem"></div>
     </section>
+
+    <!-- ── Intercept Engine — Calculate & Apply ─────────────────────── -->
+    <section class="panel panel-intel">
+      <h2>Intercept Engine</h2>
+      <p class="empty-msg" style="margin-bottom:0.6rem">
+        Directly calculate a manoeuvre for a given algorithm and timing — no search required.
+        Astrogator solves for the ΔV and the satellite moves in STK immediately.
+      </p>
+
+      <form id="intercept-engine-form"
+            hx-post="/plan/maneuver/apply-intercept"
+            hx-target="#maneuver-status"
+            hx-swap="innerHTML"
+            hx-indicator="#intercept-indicator"
+            hx-disabled-elt="find button[type=submit]">
+
+        <div class="mnv-search-grid">
+          <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red satellite
+            <select name="red_sat">
+              {% for track in red_tracks %}
+              <option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
+              {% else %}
+              <option value="" disabled selected>— add a Red Track first —</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label title="The blue (friendly) satellite to intercept">Blue target
+            <select name="blue_sat">
+              {% for asset in blue_assets %}
+              <option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
+              {% else %}
+              <option value="" disabled selected>— add a Blue Asset first —</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label title="Intercept algorithm — determines the MCS structure Astrogator uses to solve for ΔV">Algorithm
+            <select name="method" id="ie-method" onchange="ieUpdate()">
+              <option value="lambert">Lambert (coast → burn → coast)</option>
+              <option value="rendezvous">Rendezvous (coast → burn, match pos + vel)</option>
+              <option value="proximity">Proximity (coast → burn, min range)</option>
+              <option value="optimal">Optimal (coast → N burns → coast, min ΔV)</option>
+            </select>
+          </label>
+          <label title="When to start the intercept sequence — leave blank to use the scenario start epoch">Manoeuvre start (UTC)
+            <input type="datetime-local" name="manoeuvre_start"
+                   value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}"
+                   title="Initial State epoch for the red satellite — leave blank to use the scenario start epoch" />
+          </label>
+          <label title="Pre-burn coast duration in hours">Coast (hr)
+            <input type="number" name="coast_hours" value="1.0" min="0.01" step="0.1" />
+          </label>
+          <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
+            <input type="number" name="intercept_hours" value="6.0" min="0.01" step="0.1" />
+          </label>
+          <label id="ie-dist-row" title="Desired miss distance in metres — Proximity and Optimal">Target dist (m)
+            <input type="number" name="target_distance_m" value="0.0" min="0" step="1" />
+          </label>
+          <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
+            <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
+          </label>
+          <label title="Maximum ΔV budget for the Astrogator DC control variable (km/s)">Max ΔV (km/s)
+            <input type="number" name="max_dv" value="3.0" min="0.01" step="0.1" />
+          </label>
+        </div>
+
+        <div id="ie-minimize-row" class="mnv-check-group" style="margin-top:0.3rem">
+          <label title="Optimizer cost function — minimise total ΔV (Optimal only)">
+            <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise ΔV
+          </label>
+        </div>
+
+        <div class="mnv-actions" style="margin-top:0.6rem">
+          <button type="submit" class="btn-danger"
+                  title="Calculate the required ΔV using Astrogator and move the satellite — this modifies the STK scenario immediately">
+            Calculate &amp; Apply
+          </button>
+          <span id="intercept-indicator" class="htmx-indicator">
+            <span class="spinner"></span>Calculating&hellip;
+          </span>
+        </div>
+      </form>
+    </section>
+
+    <script>
+    function ieUpdate() {
+      var method = document.getElementById('ie-method').value;
+      var hasTof  = method === 'lambert' || method === 'optimal';
+      var hasDist = method === 'proximity' || method === 'optimal';
+      var hasOpt  = method === 'optimal';
+      document.getElementById('ie-tof-row').style.opacity      = hasTof  ? '' : '0.4';
+      document.getElementById('ie-dist-row').style.opacity     = hasDist ? '' : '0.4';
+      document.getElementById('ie-burns-row').style.opacity    = hasOpt  ? '' : '0.4';
+      document.getElementById('ie-minimize-row').style.opacity = hasOpt  ? '' : '0.4';
+    }
+    ieUpdate();
+    </script>
   </div>
 
   <!-- ── RED FORCE ───────────────────────────────────────────────────── -->

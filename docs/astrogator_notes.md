@@ -81,11 +81,15 @@ insert (`"-"` appends to the end of the sequence).
 
 ## Initial State segment
 
+> **STK 13 gotcha**: `init.Epoch = "..."` raises `"Property 'Insert.Epoch' can not be set."`
+> because `Epoch` is an `IAgDate` COM sub-object, not a directly settable property.
+> Always use `init.Epoch.Value = "..."` instead.
+
 ```python
 # Set epoch and Cartesian state from existing TLE propagator data
 init = init_state  # IAgVAInitialState
 init.SetElementType(eVAElementTypeCartesian)   # or Keplerian
-init.Epoch = "6 Mar 2026 00:00:00.000"         # STK UTCG format
+init.Epoch.Value = "6 Mar 2026 00:00:00.000"   # STK UTCG format — use .Value, not direct assignment
 
 # Keplerian is easier when deriving from TLE
 init.SetElementType(eVAElementTypeKeplerian)
@@ -207,11 +211,42 @@ finally:
 
 ---
 
+## MCSBuilder — intercept engine dict-plan translation
+
+`MCSBuilder` in `sipc/stk_adapter/mcs_builder.py` translates the `list[dict]` plans produced by
+the four intercept engine planners into STK Astrogator COM calls.
+
+Key design rule: **all non-target segments (propagate, maneuver) are inserted inside the Target
+Sequence**, not at the top-level MCS. This lets the DC observe and control them.
+
+### Control parameter path format (Cartesian VNC burns)
+```python
+# For a maneuver segment named "Intercept Burn":
+dvx → "Intercept Burn.ImpulsiveMnvr.Cartesian.X"
+dvy → "Intercept Burn.ImpulsiveMnvr.Cartesian.Y"
+dvz → "Intercept Burn.ImpulsiveMnvr.Cartesian.Z"
+# Bounds: min = -max_dv_km_s, max = +max_dv_km_s
+```
+
+### Result path format
+```python
+R → profile.Results.Add("Range")           # DesiredValue in km (convert from m: / 1000.0)
+V → profile.Results.Add("RelativeVelocity") # DesiredValue in km/s
+# Both require: result.RefSatellite = blue_sat_path  (e.g. "*/Satellite/B_SAT_Alpha")
+```
+
+### DC vs Optimizer profile selection
+- `"target"` step with no `MinimizeFuel` constraint → `"Differential Corrector"` profile (MaxIterations=50)
+- `"target"` step with `MinimizeFuel` constraint → `"Optimizer"` profile (cost function = minimize ΔV)
+
+---
+
 ## Known risks and workarounds
 
 | Issue | Workaround |
 |-------|-----------|
 | `ePropagatorAstrogator` enum value | **Confirmed = 12** (STK 13, verified 2026-03-07 from gen_py stubs). Stubs define it as a tab-indented comment, not a module attribute, so `getattr(mod, "ePropagatorAstrogator")` returns None — the hardcoded fallback of 12 is correct. |
+| `init_seg.Epoch = "..."` raises "Property can not be set" | `Epoch` is an `IAgDate` sub-object. **Always use `init_seg.Epoch.Value = "..."`** — confirmed STK 13 bug/design. |
 | ODTK may block `prop.Propagate()` | Test on live system; fall back to `ExecuteCommand("Astrogator Run …")` if OM call fails (unlikely) |
 | Differential corrector non-convergence | Catch COM exception from `prop.Propagate()`; log at DEBUG; skip this candidate |
 | Segment type enum values | Confirm all `eVASegmentType*` and `eVAManeuverType*` values from gen_py stubs before use |

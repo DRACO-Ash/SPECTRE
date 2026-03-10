@@ -10,6 +10,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Phase 6 — Intercept Engine Integration**
+  - `sipc/intercept_engine/` package: `LambertPlanner`, `RendezvousPlanner`, `ProximityInterceptPlanner`, `OptimalInterceptPlanner` moved from disconnected `intercept engine/` folder into proper Python package
+  - `InterceptMethod` enum (`lambert`, `rendezvous`, `proximity`, `optimal`) in `domain/models.py`
+  - `InterceptConfig` dataclass for direct calculate-and-apply operations
+  - `MCSBuilder` (`stk_adapter/mcs_builder.py`): translates intercept engine dict plans into STK Astrogator COM segment calls (Target Sequence with DC/Optimizer profile, Cartesian VNC controls)
+  - `IStkSession.apply_intercept_plan(config: InterceptConfig) -> ManeuverOption` protocol method + `FakeStkSession` stub
+  - `StkComSession.apply_intercept_plan`: three-phase implementation — (1) targeting MCS with DC, (2) extract solved ΔV, (3) apply as fixed MCS so satellite permanently moves in STK
+  - `ManeuverSearchConfig` extended with optional intercept engine fields (`intercept_methods`, `manoeuvre_start`, `coast_hours`, `intercept_hours`, `number_of_burns`, `target_distance_m`, `minimize_delta_v`) — all backward-compatible with defaults
+  - `POST /plan/maneuver/apply-intercept` endpoint for direct intercept calculation and application
+  - `/plan/maneuver/search` extended to accept and forward intercept engine parameters alongside existing burn-location search
+  - Dedicated "Intercept Engine" operator panel: algorithm selection, timing inputs, Calculate & Apply button
+  - `_set_initial_state_epoch()` helper: robust STK 13 epoch assignment via `init_seg.Epoch.Value` (direct `.Epoch =` assignment raises COM exception in STK 13)
+  - `_EngineLogger` adapter bridging Python `logging.Logger` to intercept engine `.log(msg, tag)` API
+
+### Fixed
+- `init_seg.Epoch = "..."` raises `"Property 'Insert.Epoch' can not be set."` in STK 13 — `Epoch` is an `IAgDate` sub-object; fixed via `init_seg.Epoch.Value = "..."` at all four call sites in `com_session.py`
+
 - **Phase 5 — Astrogator Intercept Maneuver Planning**
   - `BurnType`, `BurnLocation`, `ManeuverOption`, `ManeuverSearchConfig` domain models
   - `ManeuverPlanner` service with full input validation (window, ΔV budget, non-empty burn sets)
