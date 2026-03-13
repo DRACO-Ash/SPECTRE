@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from sipc.domain.models import (
     BlueAsset,
+    InterceptResult,
     InterceptWindow,
     ManeuverOption,
     ManeuverSearchConfig,
@@ -67,6 +68,8 @@ class SessionState:
     selected_maneuver: ManeuverOption | None = None
     # Config from the most recent maneuver search — used by /refresh.
     last_maneuver_config: ManeuverSearchConfig | None = None
+    # Result from the last intercept engine calculation.
+    last_intercept_result: InterceptResult | None = None
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log.

@@ -1,0 +1,56 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% elif not result %}
+<p class="empty-msg">No intercept result.</p>
+{% else %}
+<div class="intercept-result">
+  <div class="intercept-summary">
+    <span class="badge-ok">&#10003; Intercept applied</span>
+    <span class="intercept-detail">
+      {{ result.method.value | title }}
+      &mdash; {{ result.red_name }} &#8594; {{ result.blue_name }}
+      &mdash; Total ΔV <strong>{{ "%.3f" | format(result.total_delta_v_km_s) }} km/s</strong>
+      &mdash; Arrival {{ result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
+      &mdash; Miss <strong>{{ "%.1f" | format(result.intercept_range_km) }} km</strong>
+    </span>
+  </div>
+
+  <div class="mnv-scroll" style="margin-top:0.4rem">
+    <table class="mnv-table">
+      <thead>
+        <tr>
+          <th>Burn #</th>
+          <th>Segment</th>
+          <th>Burn Epoch (UTC)</th>
+          <th title="Total delta-V magnitude for this burn">ΔV km/s</th>
+          <th title="Prograde (velocity direction) component">Prograde</th>
+          <th title="Normal (orbit-normal) component">Normal</th>
+          <th title="Radial (co-normal / radial) component">Radial</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for burn in result.burns %}
+        <tr>
+          <td>{{ burn.burn_number }}</td>
+          <td class="col-dim">{{ burn.segment_name }}</td>
+          <td class="col-dim">{{ burn.burn_epoch.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td class="mnv-dv"><strong>{{ "%.4f" | format(burn.delta_v_km_s) }}</strong></td>
+          <td class="col-dim">{{ "%.4f" | format(burn.dv_prograde) }}</td>
+          <td class="col-dim">{{ "%.4f" | format(burn.dv_normal) }}</td>
+          <td class="col-dim">{{ "%.4f" | format(burn.dv_radial) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="intercept-totals">
+          <td colspan="3"><strong>Total</strong></td>
+          <td class="mnv-dv"><strong>{{ "%.4f" | format(result.total_delta_v_km_s) }}</strong></td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <p class="intercept-notes col-dim" style="margin-top:0.3rem">{{ result.notes }}</p>
+</div>
+{% endif %}

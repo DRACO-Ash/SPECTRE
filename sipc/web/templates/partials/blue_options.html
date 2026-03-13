@@ -1,0 +1,5 @@
+{% for asset in blue_assets %}
+<option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
+{% else %}
+<option value="" disabled selected>— add a Blue Asset first —</option>
+{% endfor %}

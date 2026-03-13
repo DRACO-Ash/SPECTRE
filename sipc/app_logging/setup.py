@@ -28,18 +28,17 @@ def configure_logging(run_id: str, log_level: str = "INFO", log_dir: str = "logs
     # Ensure log directory exists
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
-    # Stdlib root logger — structlog will forward to this
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stderr),
-            logging.FileHandler(
-                Path(log_dir) / f"{run_id}.jsonl",
-                encoding="utf-8",
-            ),
-        ],
-    )
+    root = logging.getLogger()
+    root.setLevel(numeric_level)
+
+    # Add a per-run file handler (JSON-lines).  We add it directly rather than
+    # via basicConfig so this works even after uvicorn has already installed its
+    # own stderr handler (basicConfig is a no-op once any handler exists).
+    log_path = Path(log_dir) / f"{run_id}.jsonl"
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    root.addHandler(file_handler)
 
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,

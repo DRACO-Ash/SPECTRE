@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from sipc.config.settings import get_settings
 from sipc.web.database import init_db
 from sipc.web.routes.login import router as login_router
 from sipc.web.routes.maneuver import router as maneuver_router
@@ -32,4 +34,10 @@ app.include_router(maneuver_router)
 @app.on_event("startup")
 async def _startup() -> None:
     """Initialise database tables and bootstrap admin user on first run."""
+    settings = get_settings()
+    numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric_level,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     await init_db()

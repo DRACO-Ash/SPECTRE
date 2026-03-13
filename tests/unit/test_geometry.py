@@ -8,6 +8,7 @@ from sipc.domain.geometry import (
     azimuth_elevation_range,
     closure_rate_ms,
     degrees_to_radians,
+    ecef_to_sez,
     radians_to_degrees,
 )
 
@@ -34,6 +35,40 @@ class TestDegreesRadiansConversion:
         """Converting to radians and back should recover the original value."""
         original = 45.0
         assert math.isclose(radians_to_degrees(degrees_to_radians(original)), original)
+
+
+class TestEcefToSez:
+    """Tests for ecef_to_sez — ECEF to local South-East-Zenith rotation."""
+
+    _R: float = 6371.0
+
+    def test_equator_prime_meridian_zenith(self) -> None:
+        """At lat=0 lon=0, a radial-outward delta should map entirely to Z."""
+        s, e, z = ecef_to_sez((self._R, 0.0, 0.0), (self._R + 100.0, 0.0, 0.0))
+        assert math.isclose(s, 0.0, abs_tol=1e-9)
+        assert math.isclose(e, 0.0, abs_tol=1e-9)
+        assert math.isclose(z, 100.0, rel_tol=1e-9)
+
+    def test_equator_prime_meridian_east(self) -> None:
+        """At lat=0 lon=0, +Y ECEF delta should map to East."""
+        s, e, z = ecef_to_sez((self._R, 0.0, 0.0), (self._R, 100.0, 0.0))
+        assert math.isclose(s, 0.0, abs_tol=1e-9)
+        assert math.isclose(e, 100.0, rel_tol=1e-9)
+        assert math.isclose(z, 0.0, abs_tol=1e-9)
+
+    def test_equator_prime_meridian_south(self) -> None:
+        """At lat=0 lon=0, -Z ECEF delta should map to South."""
+        s, e, z = ecef_to_sez((self._R, 0.0, 0.0), (self._R, 0.0, -100.0))
+        assert math.isclose(s, 100.0, rel_tol=1e-9)
+        assert math.isclose(e, 0.0, abs_tol=1e-9)
+        assert math.isclose(z, 0.0, abs_tol=1e-9)
+
+    def test_north_pole_zenith(self) -> None:
+        """At the North Pole, +Z ECEF delta should map to Zenith."""
+        s, e, z = ecef_to_sez((0.0, 0.0, self._R), (0.0, 0.0, self._R + 100.0))
+        assert math.isclose(s, 0.0, abs_tol=1e-9)
+        assert math.isclose(e, 0.0, abs_tol=1e-9)
+        assert math.isclose(z, 100.0, rel_tol=1e-9)
 
 
 class TestAzimuthElevationRange:

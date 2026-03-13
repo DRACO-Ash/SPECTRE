@@ -7,6 +7,15 @@ creates ``templates`` and also imports the routers.
 
 from __future__ import annotations
 
+import concurrent.futures
+
+# Single-thread executor for all STK COM calls.  COM objects live in an STA
+# (Single Threaded Apartment) and can only be accessed from the thread that
+# created them.  Routing all calls through one dedicated thread avoids the
+# "interface marshalled for a different thread" error that occurs when
+# FastAPI's default thread-pool dispatches work to arbitrary threads.
+_com_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="stk-com")
+
 
 def get_templates() -> object:
     """Return the Jinja2Templates instance from the application factory.

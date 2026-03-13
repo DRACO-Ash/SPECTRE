@@ -51,7 +51,7 @@ class LambertPlanner:
     # ------------------------------------------------------------------
     # MAIN PLANNING FUNCTION
     # ------------------------------------------------------------------
-    def generate_plan(self, coast_hours: float, intercept_hours: float):
+    def generate_plan(self, coast_hours: float, intercept_hours: float, target_distance_m: float = 0.0):
         """
         Generates a Lambert transfer encounter MCS plan.
 
@@ -121,11 +121,11 @@ class LambertPlanner:
                     {"type": "dvz", "segment_name": "Lambert_Burn"}
                 ],
 
-                # Result: match R = 0 at intercept point
+                # Result: match R at intercept point (user-configurable miss distance)
                 "results": [
                     {
                         "type": "R",
-                        "target_value": 0.0,
+                        "target_value": target_distance_m,
                         "tolerance": 1.0  # 1 meter match tolerance
                     }
                 ],

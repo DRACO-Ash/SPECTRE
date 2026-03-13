@@ -10,15 +10,15 @@ from sipc.domain.models import BurnType
 logger = logging.getLogger(__name__)
 
 # Astrogator segment type integers (AgEVASegmentType enum values in STK 13).
-_SEG_INITIAL_STATE   = 0
-_SEG_PROPAGATE       = 1
-_SEG_MANEUVER        = 2
-_SEG_TARGET_SEQUENCE = 3
+# Confirmed from gen_py stubs for {13C9EAB7-AEAF-43E3-AD94-93C2D6476CB2}.
+_SEG_INITIAL_STATE   = 0   # eVASegmentTypeInitialState
+_SEG_PROPAGATE       = 5   # eVASegmentTypePropagate
+_SEG_MANEUVER        = 2   # eVASegmentTypeManeuver
+_SEG_TARGET_SEQUENCE = 8   # eVASegmentTypeTargetSequence
 
-# Burn / attitude control constants (AgEVAManeuverType / AgEVAThrustAxesType).
-_MANEUVER_IMPULSIVE     = 0
-_ATTITUDE_THRUST_VECTOR = 0
-_THRUST_AXES_VNC        = 4  # VNC (Velocity-Normal-Co-normal) frame
+# Burn / attitude control constants.
+_MANEUVER_IMPULSIVE     = 0  # eVAManeuverTypeImpulsive
+_ATTITUDE_THRUST_VECTOR = 4  # eVAAttitudeControlThrustVector
 
 
 def _configure_maneuver_seg(burn_seg: Any) -> None:
@@ -28,7 +28,7 @@ def _configure_maneuver_seg(burn_seg: Any) -> None:
         maneuver = burn_seg.Maneuver
         maneuver.SetAttitudeControlType(_ATTITUDE_THRUST_VECTOR)
         atc = maneuver.AttitudeControl
-        atc.ThrustAxesType = _THRUST_AXES_VNC
+        atc.ThrustAxesName = "VNC"
     except Exception as exc:
         logger.debug("_configure_maneuver_seg partial failure (%s); proceeding with defaults", exc)
 
@@ -98,7 +98,7 @@ class MCSBuilder:
         target_seq = mcs.Insert(_SEG_TARGET_SEQUENCE, target_step["name"], "-")
 
         # Insert all inner segments into the Target Sequence's inner Sequence.
-        inner_seq = target_seq.Sequence
+        inner_seq = target_seq.Segments
         for step in inner_steps:
             self._insert_segment(inner_seq, step)
 

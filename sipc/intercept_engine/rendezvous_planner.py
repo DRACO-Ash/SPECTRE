@@ -50,7 +50,7 @@ class RendezvousPlanner:
     # ------------------------------------------------------------------
     # MAIN PLANNING FUNCTION
     # ------------------------------------------------------------------
-    def generate_plan(self, intercept_time_hours: float):
+    def generate_plan(self, intercept_time_hours: float, target_distance_m: float = 0.0):
         """
         Creates a sequence plan for rendezvous.
 
@@ -105,8 +105,8 @@ class RendezvousPlanner:
                     {"type": "dvz", "segment_name": "Rendezvous_Burn"}
                 ],
                 "results": [
-                    # Match relative position (R vector)
-                    {"type": "R", "target_value": 0.0, "tolerance": 1.0e-3},
+                    # Match relative position (R — user-configurable miss distance)
+                    {"type": "R", "target_value": target_distance_m, "tolerance": 1.0e-3},
                     # Match relative velocity (V vector)
                     {"type": "V", "target_value": 0.0, "tolerance": 1.0e-4}
                 ],

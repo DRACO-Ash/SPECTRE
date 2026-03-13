@@ -60,12 +60,20 @@ mod = gencache.EnsureModule("{AB621A84-81D2-45BF-9236-112CF72743D7}", 0, 1, 0)
 mcs = prop.MainSequence  # IAgVAMCSSegmentCollection
 
 # Segment type enum: AgEVASegmentType
-# Values must be confirmed from gen_py stubs.  Common values:
+# CONFIRMED from Astrogator gen_py stubs {13C9EAB7-AEAF-43E3-AD94-93C2D6476CB2}:
 #   eVASegmentTypeInitialState    = 0
-#   eVASegmentTypePropagate       = 1
+#   eVASegmentTypeLaunch          = 1
 #   eVASegmentTypeManeuver        = 2
-#   eVASegmentTypeTargetSequence  = 3
-#   eVASegmentTypeSequence        = 4
+#   eVASegmentTypeFollow          = 3
+#   eVASegmentTypeHold            = 4
+#   eVASegmentTypePropagate       = 5
+#   eVASegmentTypeSequence        = 6
+#   eVASegmentTypeReturn          = 7
+#   eVASegmentTypeTargetSequence  = 8
+#   eVASegmentTypeStop            = 9
+#   eVASegmentTypeUpdate          = 10
+#   eVASegmentTypeBackwardSequence= 11
+#   eVASegmentTypeEnd             = 12
 
 # Insert returns the new segment object
 init_state = mcs.Insert(eVASegmentTypeInitialState, "Initial State", "-")

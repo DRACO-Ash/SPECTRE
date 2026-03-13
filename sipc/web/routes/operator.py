@@ -11,13 +11,15 @@ from fastapi.responses import HTMLResponse
 
 from datetime import UTC, datetime
 
+from sipc.app_logging.setup import configure_logging
+from sipc.config.settings import get_settings
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
 from sipc.config.constants import BLUE_PREFIX, RED_PREFIX, STK_FOLDERS
 from sipc.domain.scenario import ScenarioPlanner
 from sipc.stk_adapter.exceptions import StkCommandError, StkConnectionError
 from sipc.stk_adapter.fake import FakeStkSession
 from sipc.web.auth import require_login
-from sipc.web.deps import get_com_session, get_templates
+from sipc.web.deps import _com_executor, get_com_session, get_templates
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -27,6 +29,18 @@ router = APIRouter()
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
+
+
+def _list_response(request: Request, template: str, context: dict) -> HTMLResponse:
+    """Render a list partial plus OOB satellite-select updates for HTMX.
+
+    On HTMX requests the response includes out-of-band ``<select>`` swaps
+    so the Maneuver Options and Intercept Engine dropdowns stay in sync.
+    """
+    tmpl = get_templates()
+    list_html = tmpl.get_template(template).render(context)  # type: ignore[union-attr]
+    oob_html = tmpl.get_template("partials/sat_select_oob.html").render(context)  # type: ignore[union-attr]
+    return HTMLResponse(list_html + oob_html)
 
 
 def _push_to_stk(
@@ -98,14 +112,8 @@ async def add_blue_asset(
     # Reject duplicates — same STK name would cause create_satellite to
     # silently skip creation then set_propagator to overwrite the existing TLE.
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/blue_list.html",
-            {
-                "request": request,
-                "blue_assets": state.blue_assets,
-                "stk_error": f"{asset.stk_name} is already in the session.",
-            },
-        )
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "stk_error": f"{asset.stk_name} is already in the session."}
+        return _list_response(request, "partials/blue_list.html", ctx)
 
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Added asset: {asset.stk_name}")
@@ -115,7 +123,7 @@ async def add_blue_asset(
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
-                None, _push_to_stk, state, asset.stk_name, asset.tle, STK_FOLDERS[0]
+                _com_executor, _push_to_stk, state, asset.stk_name, asset.tle, STK_FOLDERS[0]
             )
             state.append_log(f"[STK] {asset.stk_name} created and propagated")
         except Exception as exc:
@@ -123,10 +131,8 @@ async def add_blue_asset(
             logger.warning("STK push failed for %s: %s", asset.stk_name, exc)
             state.append_log(f"[STK] WARNING: {stk_error}")
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/blue_list.html",
-        {"request": request, "blue_assets": state.blue_assets, "stk_error": stk_error},
-    )
+    ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "stk_error": stk_error}
+    return _list_response(request, "partials/blue_list.html", ctx)
 
 
 @router.delete("/assets/blue/{name}", response_class=HTMLResponse)
@@ -136,14 +142,11 @@ async def remove_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/blue_list.html",
-        {"request": request, "blue_assets": state.blue_assets, "stk_error": None},
-    )
+    ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "stk_error": None}
+    return _list_response(request, "partials/blue_list.html", ctx)
 
 
 @router.post("/assets/red", response_class=HTMLResponse)
@@ -162,14 +165,8 @@ async def add_red_track(
     track = RedTrack(name=name, tle=tle)
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/red_list.html",
-            {
-                "request": request,
-                "red_tracks": state.red_tracks,
-                "stk_error": f"{track.stk_name} is already in the session.",
-            },
-        )
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "stk_error": f"{track.stk_name} is already in the session."}
+        return _list_response(request, "partials/red_list.html", ctx)
 
     state.red_tracks.append(track)
     state.append_log(f"[RED] Added track: {track.stk_name}")
@@ -179,7 +176,7 @@ async def add_red_track(
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
-                None, _push_to_stk, state, track.stk_name, track.tle, STK_FOLDERS[1]
+                _com_executor, _push_to_stk, state, track.stk_name, track.tle, STK_FOLDERS[1]
             )
             state.append_log(f"[STK] {track.stk_name} created and propagated")
         except Exception as exc:
@@ -187,10 +184,8 @@ async def add_red_track(
             logger.warning("STK push failed for %s: %s", track.stk_name, exc)
             state.append_log(f"[STK] WARNING: {stk_error}")
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/red_list.html",
-        {"request": request, "red_tracks": state.red_tracks, "stk_error": stk_error},
-    )
+    ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "stk_error": stk_error}
+    return _list_response(request, "partials/red_list.html", ctx)
 
 
 @router.delete("/assets/red/{name}", response_class=HTMLResponse)
@@ -200,14 +195,11 @@ async def remove_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a red track by name and return the updated partial."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/red_list.html",
-        {"request": request, "red_tracks": state.red_tracks, "stk_error": None},
-    )
+    ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "stk_error": None}
+    return _list_response(request, "partials/red_list.html", ctx)
 
 
 # ── Planning run ──────────────────────────────────────────────────────────────
@@ -245,6 +237,8 @@ async def run_plan(
         )
 
     config = RunConfig(operator=operator.strip(), source=source.strip())
+    settings = get_settings()
+    configure_logging(config.run_id, settings.log_level, settings.log_dir)
     state.append_log(f"[RUN] Starting {config.run_id} — operator={operator}, source={source}")
 
     session_adapter = state.stk_session if state.stk_session is not None else FakeStkSession()
@@ -255,7 +249,7 @@ async def run_plan(
     loop = asyncio.get_running_loop()
     try:
         results = await loop.run_in_executor(
-            None, planner.plan, list(state.blue_assets), list(state.red_tracks)
+            _com_executor, planner.plan, list(state.blue_assets), list(state.red_tracks)
         )
     except (StkConnectionError, StkCommandError) as exc:
         state.append_log(f"[RUN] ERROR: {exc}")
@@ -307,7 +301,7 @@ async def stk_connect(
     path = scenario_path.strip()
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, session.connect, path)
+        await loop.run_in_executor(_com_executor, session.connect, path)
     except StkConnectionError as exc:
         logger.warning("STK connect failed for operator %s: %s", current_user.username, exc)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
@@ -332,7 +326,7 @@ async def stk_connect(
     # Read scenario time from STK so epoch-mode TLE fetch and TLE age badges
     # work without a separate scenario-time configuration step.
     try:
-        start, stop = await loop.run_in_executor(None, session.get_scenario_time)
+        start, stop = await loop.run_in_executor(_com_executor, session.get_scenario_time)
         state.scenario_start = start
         state.scenario_stop = stop
         state.append_log(
@@ -383,7 +377,7 @@ async def stk_new_scenario(
     session = get_com_session()
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, session.new_scenario, name)
+        await loop.run_in_executor(_com_executor, session.new_scenario, name)
     except StkConnectionError as exc:
         logger.warning("STK new_scenario failed for operator %s: %s", current_user.username, exc)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
@@ -407,7 +401,7 @@ async def stk_new_scenario(
         try:
             start_dt = datetime.fromisoformat(scenario_start).replace(tzinfo=UTC)
             stop_dt = datetime.fromisoformat(scenario_stop).replace(tzinfo=UTC)
-            await loop.run_in_executor(None, session.set_scenario_time, start_dt, stop_dt)
+            await loop.run_in_executor(_com_executor, session.set_scenario_time, start_dt, stop_dt)
             state.scenario_start = start_dt
             state.scenario_stop = stop_dt
             state.append_log(
@@ -492,7 +486,7 @@ async def stk_import_satellites(
     loop = asyncio.get_running_loop()
     try:
         sat_names = await loop.run_in_executor(
-            None, state.stk_session.list_scenario_satellites
+            _com_executor, state.stk_session.list_scenario_satellites
         )
     except (StkConnectionError, StkCommandError) as exc:
         logger.warning(
@@ -517,14 +511,14 @@ async def stk_import_satellites(
             if sat_name not in existing_blue:
                 # Read TLE from STK so the asset carries a real TLE string.
                 tle = await loop.run_in_executor(
-                    None, state.stk_session.get_satellite_tle, sat_name
+                    _com_executor, state.stk_session.get_satellite_tle, sat_name
                 ) or ""
                 state.blue_assets.append(BlueAsset(name=sat_name[len(BLUE_PREFIX):], tle=tle))
                 imported_blue += 1
         elif sat_name.startswith(RED_PREFIX):
             if sat_name not in existing_red:
                 tle = await loop.run_in_executor(
-                    None, state.stk_session.get_satellite_tle, sat_name
+                    _com_executor, state.stk_session.get_satellite_tle, sat_name
                 ) or ""
                 state.red_tracks.append(RedTrack(name=sat_name[len(RED_PREFIX):], tle=tle))
                 imported_red += 1

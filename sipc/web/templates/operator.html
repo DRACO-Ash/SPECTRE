@@ -211,21 +211,13 @@
 
         <div class="mnv-search-grid">
           <label title="The red (threat) satellite that will execute the intercept maneuver">Red satellite
-            <select name="red_sat">
-              {% for track in red_tracks %}
-              <option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
-              {% else %}
-              <option value="" disabled selected>— add a Red Track first —</option>
-              {% endfor %}
+            <select name="red_sat" id="mnv-red-sat">
+              {% include "partials/red_options.html" %}
             </select>
           </label>
           <label title="The blue (friendly) satellite that will be intercepted">Blue target
-            <select name="blue_sat">
-              {% for asset in blue_assets %}
-              <option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
-              {% else %}
-              <option value="" disabled selected>— add a Blue Asset first —</option>
-              {% endfor %}
+            <select name="blue_sat" id="mnv-blue-sat">
+              {% include "partials/blue_options.html" %}
             </select>
           </label>
           <label title="Start of the maneuver opportunity search window (UTC)">Window start (UTC)
@@ -279,50 +271,58 @@
 
       <form id="intercept-engine-form"
             hx-post="/plan/maneuver/apply-intercept"
-            hx-target="#maneuver-status"
+            hx-target="#intercept-result"
             hx-swap="innerHTML"
             hx-indicator="#intercept-indicator"
             hx-disabled-elt="find button[type=submit]">
 
         <div class="mnv-search-grid">
           <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red satellite
-            <select name="red_sat">
-              {% for track in red_tracks %}
-              <option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
-              {% else %}
-              <option value="" disabled selected>— add a Red Track first —</option>
-              {% endfor %}
+            <select name="red_sat" id="ie-red-sat">
+              {% include "partials/red_options.html" %}
             </select>
           </label>
           <label title="The blue (friendly) satellite to intercept">Blue target
-            <select name="blue_sat">
-              {% for asset in blue_assets %}
-              <option value="{{ asset.stk_name }}">{{ asset.name }} ({{ asset.stk_name }})</option>
-              {% else %}
-              <option value="" disabled selected>— add a Blue Asset first —</option>
-              {% endfor %}
+            <select name="blue_sat" id="ie-blue-sat">
+              {% include "partials/blue_options.html" %}
             </select>
           </label>
           <label title="Intercept algorithm — determines the MCS structure Astrogator uses to solve for ΔV">Algorithm
             <select name="method" id="ie-method" onchange="ieUpdate()">
-              <option value="lambert">Lambert (coast → burn → coast)</option>
-              <option value="rendezvous">Rendezvous (coast → burn, match pos + vel)</option>
-              <option value="proximity">Proximity (coast → burn, min range)</option>
-              <option value="optimal">Optimal (coast → N burns → coast, min ΔV)</option>
+              <option value="lambert">Lambert (coast &#8594; burn &#8594; coast)</option>
+              <option value="rendezvous">Rendezvous (coast &#8594; burn, match pos + vel)</option>
+              <option value="proximity">Proximity (coast &#8594; burn, min range)</option>
+              <option value="optimal">Optimal (coast &#8594; N burns &#8594; coast, min &#916;V)</option>
             </select>
           </label>
           <label title="When to start the intercept sequence — leave blank to use the scenario start epoch">Manoeuvre start (UTC)
-            <input type="datetime-local" name="manoeuvre_start"
-                   value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}"
-                   title="Initial State epoch for the red satellite — leave blank to use the scenario start epoch" />
+            <div style="display:flex; gap:0.3rem; align-items:center">
+              <input type="datetime-local" name="manoeuvre_start"
+                     value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}"
+                     title="Initial State epoch for the red satellite — leave blank to use the scenario start epoch"
+                     style="flex:1" />
+              <button type="button" class="btn-sm"
+                      title="Query STK for apogee, perigee, ascending node, and descending node times for the selected red satellite"
+                      hx-get="/plan/maneuver/orbital-events"
+                      hx-include="[name=red_sat]"
+                      hx-target="#orbital-events"
+                      hx-swap="innerHTML"
+                      hx-indicator="#events-indicator">Events</button>
+              <span id="events-indicator" class="htmx-indicator"><span class="spinner-sm"></span></span>
+            </div>
           </label>
+        </div>
+
+        <div id="orbital-events" style="margin:0.3rem 0"></div>
+
+        <div class="mnv-search-grid">
           <label title="Pre-burn coast duration in hours">Coast (hr)
             <input type="number" name="coast_hours" value="1.0" min="0.01" step="0.1" />
           </label>
           <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
             <input type="number" name="intercept_hours" value="6.0" min="0.01" step="0.1" />
           </label>
-          <label id="ie-dist-row" title="Desired miss distance in metres — Proximity and Optimal">Target dist (m)
+          <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range for all methods">Target dist (m)
             <input type="number" name="target_distance_m" value="0.0" min="0" step="1" />
           </label>
           <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
@@ -349,6 +349,8 @@
           </span>
         </div>
       </form>
+
+      <div id="intercept-result" style="margin-top:0.4rem"></div>
     </section>
 
     <script>

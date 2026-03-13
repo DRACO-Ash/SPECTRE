@@ -1,0 +1,5 @@
+{% for track in red_tracks %}
+<option value="{{ track.stk_name }}">{{ track.name }} ({{ track.stk_name }})</option>
+{% else %}
+<option value="" disabled selected>— add a Red Track first —</option>
+{% endfor %}

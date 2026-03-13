@@ -263,6 +263,54 @@ class InterceptConfig:
 
 
 @dataclass
+class OrbitalEvent:
+    """A future orbital geometry event for a satellite.
+
+    Used by the Intercept Engine UI to offer clickable manoeuvre start times
+    at apogee, perigee, ascending node, or descending node.
+    """
+
+    event_type: BurnLocation
+    epoch: datetime
+    label: str = ""
+
+
+@dataclass
+class BurnResult:
+    """One solved burn within a multi-burn intercept solution."""
+
+    burn_number: int
+    segment_name: str
+    burn_epoch: datetime
+    delta_v_km_s: float
+    dv_prograde: float = 0.0
+    dv_normal: float = 0.0
+    dv_radial: float = 0.0
+
+
+@dataclass
+class InterceptResult:
+    """Complete result of an intercept engine solve, supporting multi-burn.
+
+    Attributes:
+        burns: Per-burn breakdown (epoch, ΔV components for each manoeuvre).
+        total_delta_v_km_s: Sum of all burn magnitudes.
+        arrival_epoch: UTC time when the red satellite reaches its final position.
+        intercept_range_km: Miss distance at arrival in km.
+    """
+
+    red_name: str
+    blue_name: str
+    method: InterceptMethod
+    burns: list[BurnResult] = field(default_factory=list)
+    total_delta_v_km_s: float = 0.0
+    arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    intercept_range_km: float = 0.0
+    notes: str = ""
+    option_id: str = field(default_factory=lambda: f"INT_{uuid.uuid4().hex[:10].upper()}")
+
+
+@dataclass
 class RunConfig:
     """Provenance metadata for a single planning run.
 

@@ -13,13 +13,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
 from sipc.domain.models import BurnLocation, BurnType, InterceptConfig, InterceptMethod, ManeuverSearchConfig
 from sipc.domain.maneuver_planner import ManeuverPlanner, ManeuverPlannerError
 from sipc.web.auth import require_login
-from sipc.web.deps import get_templates
+from sipc.web.deps import _com_executor, get_templates
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -67,7 +67,7 @@ async def _run_search(
     planner = ManeuverPlanner(state.stk_session)
     loop = asyncio.get_running_loop()
     try:
-        options = await loop.run_in_executor(None, planner.compute_options, config)
+        options = await loop.run_in_executor(_com_executor, planner.compute_options, config)
     except ManeuverPlannerError as exc:
         logger.warning("Maneuver search validation error for %s: %s", current_user.username, exc)
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
@@ -267,6 +267,43 @@ async def maneuver_select(
     )
 
 
+@router.get("/orbital-events", response_model=None)
+async def orbital_events(
+    request: Request,
+    red_sat: Annotated[str, Query()],
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Query STK for upcoming orbital events (apogee, perigee, nodes) for a red satellite.
+
+    Returns clickable event badges that populate the manoeuvre start time.
+    """
+    tmpl = get_templates()
+    state = get_session_state(current_user.username)
+
+    if not state.stk_session:
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/orbital_events.html",
+            {"request": request, "events": [], "error": "Not connected to STK."},
+        )
+
+    loop = asyncio.get_running_loop()
+    try:
+        events = await loop.run_in_executor(
+            _com_executor, state.stk_session.query_orbital_events, red_sat.strip()
+        )
+    except Exception as exc:
+        logger.warning("orbital_events failed for %s: %s", red_sat, exc)
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/orbital_events.html",
+            {"request": request, "events": [], "error": f"Failed to query events: {exc}"},
+        )
+
+    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        "partials/orbital_events.html",
+        {"request": request, "events": events, "error": None},
+    )
+
+
 @router.post("/apply-intercept", response_model=None)
 async def apply_intercept(
     request: Request,
@@ -295,22 +332,14 @@ async def apply_intercept(
 
     if not state.stk_session:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/maneuver_status.html",
-            {
-                "request": request,
-                "selected": None,
-                "error": "Not connected to STK — connect via the STK panel first.",
-            },
+            "partials/intercept_result.html",
+            {"request": request, "result": None, "error": "Not connected to STK — connect via the STK panel first."},
         )
 
     if method not in _INTERCEPT_METHOD_MAP:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/maneuver_status.html",
-            {
-                "request": request,
-                "selected": None,
-                "error": f"Unknown intercept method: {method!r}",
-            },
+            "partials/intercept_result.html",
+            {"request": request, "result": None, "error": f"Unknown intercept method: {method!r}"},
         )
 
     manoeuvre_start_dt = None
@@ -335,8 +364,8 @@ async def apply_intercept(
 
     loop = asyncio.get_running_loop()
     try:
-        option = await loop.run_in_executor(
-            None, state.stk_session.apply_intercept_plan, config
+        result = await loop.run_in_executor(
+            _com_executor, state.stk_session.apply_intercept_plan, config
         )
     except Exception as exc:
         logger.error(
@@ -344,33 +373,28 @@ async def apply_intercept(
         )
         state.append_log(f"[INTERCEPT] {config.method.value} failed: {exc}")
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/maneuver_status.html",
-            {
-                "request": request,
-                "selected": None,
-                "error": f"Intercept calculation failed: {exc}",
-            },
+            "partials/intercept_result.html",
+            {"request": request, "result": None, "error": f"Intercept calculation failed: {exc}"},
         )
 
-    # Store the applied option in session state so the operator can see it.
-    state.selected_maneuver = option
-    state.maneuver_options = [option]
+    state.last_intercept_result = result
+    burn_summary = ", ".join(
+        f"burn{b.burn_number} ΔV={b.delta_v_km_s:.3f}" for b in result.burns
+    )
     state.append_log(
         f"[INTERCEPT] {config.method.value} applied: "
-        f"ΔV={option.delta_v_km_s:.3f} km/s "
-        f"burn@{option.burn_epoch.strftime('%Y-%m-%d %H:%M UTC')}"
+        f"total ΔV={result.total_delta_v_km_s:.3f} km/s, "
+        f"{len(result.burns)} burn(s) [{burn_summary}], "
+        f"arrival={result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC')}, "
+        f"miss={result.intercept_range_km:.1f} km"
     )
     logger.info(
-        "apply_intercept: %s for operator %s (%s → %s dv=%.3f km/s)",
+        "apply_intercept: %s for operator %s (%s → %s total_dv=%.3f km/s, burns=%d)",
         config.method.value, current_user.username,
-        config.red_sat, config.blue_sat, option.delta_v_km_s,
+        config.red_sat, config.blue_sat, result.total_delta_v_km_s, len(result.burns),
     )
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/maneuver_status.html",
-        {
-            "request": request,
-            "selected": option,
-            "error": None,
-        },
+        "partials/intercept_result.html",
+        {"request": request, "result": result, "error": None},
     )

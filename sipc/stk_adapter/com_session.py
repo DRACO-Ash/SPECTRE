@@ -10,11 +10,14 @@ from typing import Any
 from sipc.domain.models import (
     AccessInterval,
     BurnLocation,
+    BurnResult,
     BurnType,
     InterceptConfig,
     InterceptMethod,
+    InterceptResult,
     ManeuverOption,
     ManeuverSearchConfig,
+    OrbitalEvent,
 )
 from sipc.intercept_engine.lambert_planner import LambertPlanner
 from sipc.intercept_engine.optimal_intercept import OptimalInterceptPlanner
@@ -31,6 +34,26 @@ logger = logging.getLogger(__name__)
 
 # STK date string format: "1 Jan 2026 00:00:00.000"  (UTCG)
 _STK_TIME_RE = re.compile(r"\.\d+$")
+
+
+def _propagate_astrogator(prop: Any) -> None:
+    """Call ``Propagate()`` on an Astrogator propagator, handling gen_py binding.
+
+    When gen_py stubs are loaded for the STK Astrogator type library, COM may
+    resolve ``satellite.Propagator`` to ``_IAgVADriverMCS`` rather than the base
+    ``IAgVePropagatorAstrogator`` interface.  ``Propagate()`` is defined on the
+    base interface, while the Astrogator driver exposes the equivalent as
+    ``RunMCS()``.  This helper tries both.
+    """
+    if hasattr(prop, "Propagate"):
+        prop.Propagate()
+    elif hasattr(prop, "RunMCS"):
+        prop.RunMCS()
+    else:
+        raise AttributeError(
+            f"Astrogator propagator object ({type(prop).__name__}) exposes "
+            f"neither 'Propagate' nor 'RunMCS'."
+        )
 
 
 def _purge_stk_gen_py_stubs() -> None:
@@ -53,10 +76,13 @@ def _purge_stk_gen_py_stubs() -> None:
     import shutil  # noqa: PLC0415
     import sys  # noqa: PLC0415
 
-    _GUID_DIR = "AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0"
+    _GUID_DIRS = [
+        "AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0",  # STK Objects
+        "13C9EAB7-AEAF-43E3-AD94-93C2D6476CB2x0x1x0",  # STK Astrogator
+    ]
 
     # 1. Evict from sys.modules (takes effect immediately in this process).
-    stale = [k for k in list(sys.modules) if _GUID_DIR in k]
+    stale = [k for k in list(sys.modules) if any(g in k for g in _GUID_DIRS)]
     for k in stale:
         del sys.modules[k]
     if stale:
@@ -66,12 +92,18 @@ def _purge_stk_gen_py_stubs() -> None:
     try:
         from win32com.client import gencache  # type: ignore[import]  # noqa: PLC0415
         gen_path = gencache.GetGeneratePath()
-        stub_dir = os.path.join(gen_path, _GUID_DIR)
-        if os.path.isdir(stub_dir):
-            shutil.rmtree(stub_dir)
-            logger.info("Deleted partial STK gen_py stub directory: %s", stub_dir)
+        for guid_dir in _GUID_DIRS:
+            stub_dir = os.path.join(gen_path, guid_dir)
+            if os.path.isdir(stub_dir):
+                shutil.rmtree(stub_dir)
+                logger.info("Deleted partial STK gen_py stub directory: %s", stub_dir)
     except Exception as exc:
         logger.debug("gen_py disk cleanup skipped: %s", exc)
+
+
+# Purge Astrogator stubs eagerly on import so that even an already-connected
+# session benefits from the fix without requiring a full app restart.
+_purge_stk_gen_py_stubs()
 
 
 def _stk_dispatch() -> Any:
@@ -95,15 +127,12 @@ def _stk_dispatch() -> Any:
         # Complete stubs are required because IAgVePropagatorSGP4 is a vtable-only
         # (non-dual) interface and cannot be reached via pure late binding.
         _gencache.EnsureModule("{AB621A84-81D2-45BF-9236-112CF72743D7}", 0, 1, 0)
-        import sys  # noqa: PLC0415
-        _guid = "AB621A84-81D2-45BF-9236-112CF72743D7x0x1x0"
-        if any(_guid in k and "IAgVePropagatorSGP4" in k for k in sys.modules):
-            logger.info("STK stubs include IAgVePropagatorSGP4 — CastTo will work")
-        else:
-            logger.warning(
-                "STK stubs generated but IAgVePropagatorSGP4 not yet in sys.modules "
-                "(will be loaded on first CastTo call)"
-            )
+        # NOTE: Astrogator type library stubs ({13C9EAB7-...}) are intentionally
+        # NOT generated.  When present, gen_py resolves Astrogator COM objects to
+        # early-bound interfaces (_IAgVADriverMCS, IAgVAStoppingConditionCollection,
+        # etc.) that omit methods available via late binding (Propagate, RemoveAll).
+        # All Astrogator interfaces are dual, so late binding works correctly.
+        logger.info("STK Objects type stubs generated successfully")
     except Exception as exc:
         logger.warning(
             "STK: stub generation failed (%s) — falling back to pure late binding; "
@@ -304,10 +333,9 @@ def _configure_burn(burn_seg: Any, burn_type: BurnType) -> None:
         burn_seg: The Astrogator Maneuver segment COM object.
         burn_type: Impulsive or finite.
     """
-    _MANEUVER_IMPULSIVE = 0
-    _MANEUVER_FINITE    = 1
-    _ATTITUDE_THRUST_VECTOR = 0
-    _THRUST_AXES_VNC    = 4  # AgEVAThrustAxesType.eVAThrustAxesVNC (verify from stubs)
+    _MANEUVER_IMPULSIVE = 0  # eVAManeuverTypeImpulsive
+    _MANEUVER_FINITE    = 1  # eVAManeuverTypeFinite
+    _ATTITUDE_THRUST_VECTOR = 4  # eVAAttitudeControlThrustVector
 
     try:
         m_type = _MANEUVER_IMPULSIVE if burn_type == BurnType.IMPULSIVE else _MANEUVER_FINITE
@@ -315,7 +343,7 @@ def _configure_burn(burn_seg: Any, burn_type: BurnType) -> None:
         maneuver = burn_seg.Maneuver
         maneuver.SetAttitudeControlType(_ATTITUDE_THRUST_VECTOR)
         atc = maneuver.AttitudeControl
-        atc.ThrustAxesType = _THRUST_AXES_VNC
+        atc.ThrustAxesName = "VNC"
     except Exception as exc:
         logger.debug("_configure_burn partial failure (%s); proceeding with defaults", exc)
 
@@ -395,9 +423,9 @@ def _build_intercept_plan_from_config(
 ) -> list[dict]:
     """Dispatch to the appropriate intercept engine using an :class:`~sipc.domain.models.InterceptConfig`."""
     if config.method == InterceptMethod.LAMBERT:
-        return LambertPlanner(eng_log).generate_plan(config.coast_hours, config.intercept_hours)
+        return LambertPlanner(eng_log).generate_plan(config.coast_hours, config.intercept_hours, config.target_distance_m)
     if config.method == InterceptMethod.RENDEZVOUS:
-        return RendezvousPlanner(eng_log).generate_plan(config.coast_hours)
+        return RendezvousPlanner(eng_log).generate_plan(config.coast_hours, config.target_distance_m)
     if config.method == InterceptMethod.PROXIMITY:
         return ProximityInterceptPlanner(eng_log).generate_plan(
             config.coast_hours, config.target_distance_m
@@ -652,6 +680,7 @@ class StkComSession:
                 f"set_propagator Propagate({sat_name!r})",
             )
             logger.info("set_propagator", extra={"sat_name": sat_name})
+            self._rewind()
             return  # success via Connect command
         except Exception as exc:
             # Connect command layer unavailable or returned an error — fall back to
@@ -662,6 +691,222 @@ class StkComSession:
             )
         self._set_propagator_via_om(sat_name, line1, line2)
         logger.info("set_propagator", extra={"sat_name": sat_name})
+        self._rewind()
+
+    def query_orbital_events(self, sat_name: str, count: int = 3) -> list[OrbitalEvent]:
+        """Return upcoming orbital events (apogee, perigee, nodes) for a satellite.
+
+        Queries the STK satellite's data providers for event times within the
+        scenario time window.  Returns up to *count* occurrences of each event
+        type, sorted chronologically.
+
+        Args:
+            sat_name: STK object name (e.g. ``R_SAT_29270``).
+            count: Maximum occurrences of each event type to return.
+
+        Returns:
+            List of :class:`~sipc.domain.models.OrbitalEvent` sorted by epoch.
+        """
+        self._require_connection()
+
+        sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+        sc_start, sc_stop = self.get_scenario_time()
+        start_str = _to_stk_time(sc_start)
+        stop_str = _to_stk_time(sc_stop)
+
+        # Map STK event names → BurnLocation.
+        _EVENT_MAP: dict[str, BurnLocation] = {
+            "Apoapsis": BurnLocation.APOGEE,
+            "Apogee": BurnLocation.APOGEE,
+            "Periapsis": BurnLocation.PERIGEE,
+            "Perigee": BurnLocation.PERIGEE,
+            "Ascending Node": BurnLocation.ASCENDING_NODE,
+            "Descending Node": BurnLocation.DESCENDING_NODE,
+        }
+
+        # Build provider index.
+        dps = sat_obj.DataProviders
+        provider_by_name: dict[str, Any] = {}
+        for i in range(dps.Count):
+            try:
+                dp = dps.Item(i)
+                provider_by_name[str(dp.Name)] = dp
+            except Exception:
+                pass
+
+        logger.debug(
+            "query_orbital_events: providers for %r: %s",
+            sat_name, list(provider_by_name.keys()),
+        )
+
+        events: list[OrbitalEvent] = []
+
+        # Try data-provider based approach first.
+        _CANDIDATE_PROVIDERS = [
+            "Orbit Events",
+            "Keplerian Orbit Events",
+            "Astrogator Orbit Events",
+        ]
+        for prov_name in _CANDIDATE_PROVIDERS:
+            dp = provider_by_name.get(prov_name)
+            if dp is None:
+                continue
+            try:
+                res = dp.Exec(start_str, stop_str)
+                ds_names = [
+                    str(res.DataSets.Item(i).Name) for i in range(res.DataSets.Count)
+                ]
+                logger.debug(
+                    "query_orbital_events: provider %r datasets: %s", prov_name, ds_names,
+                )
+
+                # Find time and event-type columns.
+                time_ds = None
+                event_ds = None
+                for i in range(res.DataSets.Count):
+                    ds = res.DataSets.Item(i)
+                    name = str(ds.Name).lower()
+                    if name in ("time", "epoch", "date/time"):
+                        time_ds = ds
+                    elif name in ("event", "event type", "event name"):
+                        event_ds = ds
+
+                if time_ds is None or event_ds is None:
+                    logger.debug(
+                        "query_orbital_events: could not identify time/event columns in %r",
+                        prov_name,
+                    )
+                    continue
+
+                counts: dict[BurnLocation, int] = {}
+                for j in range(time_ds.Count):
+                    time_val = str(time_ds.GetValues().Item(j))
+                    event_val = str(event_ds.GetValues().Item(j))
+
+                    loc = None
+                    for pattern, bl in _EVENT_MAP.items():
+                        if pattern.lower() in event_val.lower():
+                            loc = bl
+                            break
+                    if loc is None:
+                        continue
+                    if counts.get(loc, 0) >= count:
+                        continue
+
+                    epoch = _parse_stk_time(time_val)
+                    label = f"{loc.value.replace('_', ' ').title()} @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+                if events:
+                    events.sort(key=lambda e: e.epoch)
+                    logger.info(
+                        "query_orbital_events: %d events from provider %r for %r",
+                        len(events), prov_name, sat_name,
+                    )
+                    return events
+            except Exception as exc:
+                logger.debug(
+                    "query_orbital_events: provider %r failed for %r: %s",
+                    prov_name, sat_name, exc,
+                )
+
+        # Fallback: propagate with stop conditions to find event times.
+        logger.info(
+            "query_orbital_events: no data provider found for %r — "
+            "using Astrogator stop-condition fallback",
+            sat_name,
+        )
+        events = self._query_events_via_propagation(sat_name, sc_start, sc_stop, count)
+        events.sort(key=lambda e: e.epoch)
+        return events
+
+    def _query_events_via_propagation(
+        self,
+        sat_name: str,
+        sc_start: datetime,
+        sc_stop: datetime,
+        count: int,
+    ) -> list[OrbitalEvent]:
+        """Find orbital events by propagating with Astrogator stop conditions.
+
+        Creates a temporary Astrogator MCS with propagate segments that stop
+        at each orbital event type, reads the stop epoch, then restores the
+        satellite to SGP4.
+        """
+        import math  # noqa: PLC0415
+
+        _E_PROPAGATOR_ASTROGATOR = self._astrogator_enum_value()
+        _STOP_MAP = {
+            BurnLocation.APOGEE: "Apoapsis",
+            BurnLocation.PERIGEE: "Periapsis",
+            BurnLocation.ASCENDING_NODE: "AscendingNode",
+            BurnLocation.DESCENDING_NODE: "DescendingNode",
+        }
+
+        events: list[OrbitalEvent] = []
+        red_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+
+        # Snapshot TLE for restore.
+        existing_tle = self._snapshot_tle(sat_name)
+
+        try:
+            red_obj.SetPropagatorType(_E_PROPAGATOR_ASTROGATOR)
+            prop = red_obj.Propagator
+            mcs = prop.MainSequence
+
+            for loc, stop_name in _STOP_MAP.items():
+                mcs.RemoveAll()
+                init_seg = mcs.Insert(0, "Initial State", "-")
+                _set_initial_state_epoch(init_seg, _to_stk_time(sc_start))
+
+                for n in range(count):
+                    seg_name = f"Find_{stop_name}_{n}"
+                    coast = mcs.Insert(5, seg_name, "-")  # 5 = eVASegmentTypePropagate
+                    try:
+                        stop_coll = coast.StoppingConditions
+                        stop_coll.RemoveAll()
+                        stop_coll.Add(stop_name)
+                    except Exception as exc:
+                        logger.debug(
+                            "query_orbital_events (propagation): "
+                            "could not add stop %r: %s", stop_name, exc,
+                        )
+                        break
+
+                try:
+                    _propagate_astrogator(prop)
+                except Exception as exc:
+                    logger.debug(
+                        "query_orbital_events (propagation): propagate failed for %s: %s",
+                        stop_name, exc,
+                    )
+                    continue
+
+                # Read epochs from each propagate segment's FinalState.
+                for i in range(1, mcs.Count):  # skip Initial State
+                    try:
+                        seg = mcs.Item(i)
+                        epoch = _parse_stk_time(seg.FinalState.Epoch)
+                        if epoch > sc_stop:
+                            break
+                        label = f"{loc.value.replace('_', ' ').title()} @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                        events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    except Exception:
+                        pass
+
+        finally:
+            # Restore satellite to SGP4.
+            if existing_tle is not None:
+                try:
+                    self._restore_sgp4(sat_name, existing_tle)
+                except Exception as exc:
+                    logger.warning(
+                        "query_orbital_events: failed to restore SGP4 for %r: %s",
+                        sat_name, exc,
+                    )
+
+        return events
 
     def compute_access(self, obj_a: str, obj_b: str) -> list[AccessInterval]:
         """Compute access intervals between two satellite objects.
@@ -960,7 +1205,7 @@ class StkComSession:
 
         try:
             self._build_fixed_mcs(mcs, option)
-            prop.Propagate()
+            _propagate_astrogator(prop)
             logger.info(
                 "apply_maneuver: MCS applied for %r (option %s dv=%.3f km/s)",
                 red_sat, option.option_id, option.delta_v_km_s,
@@ -970,7 +1215,7 @@ class StkComSession:
                 f"apply_maneuver failed for {red_sat!r}: {exc}"
             ) from exc
 
-    def apply_intercept_plan(self, config: InterceptConfig) -> ManeuverOption:
+    def apply_intercept_plan(self, config: InterceptConfig) -> InterceptResult:
         """Calculate and apply a specific intercept trajectory.
 
         Builds an Astrogator targeting MCS from the intercept engine algorithm,
@@ -981,8 +1226,8 @@ class StkComSession:
             config: Algorithm selection, satellite names, and timing parameters.
 
         Returns:
-            :class:`~sipc.domain.models.ManeuverOption` with solved burn epoch,
-            ΔV vector, intercept epoch, and miss distance.
+            :class:`~sipc.domain.models.InterceptResult` with per-burn breakdown,
+            total ΔV, arrival epoch, and miss distance.
 
         Raises:
             StkConnectionError: If not connected to STK.
@@ -1016,27 +1261,27 @@ class StkComSession:
         MCSBuilder().build(mcs, plan, blue_path, config.max_delta_v_km_s)
 
         try:
-            prop.Propagate()
+            _propagate_astrogator(prop)
         except Exception as exc:
             raise StkCommandError(
                 f"Astrogator failed to converge for {config.method.value} intercept "
                 f"({config.red_sat} → {config.blue_sat}): {exc}"
             ) from exc
 
-        # ── Phase 2: extract the solved result ───────────────────────────────
-        # Re-use _extract_engine_result by building a minimal config proxy.
-        proxy = _InterceptConfigProxy(config)
-        option = self._extract_engine_result(mcs, proxy, config.method, epoch)
-        if option is None:
+        # ── Phase 2: extract the solved multi-burn result ────────────────────
+        result = self._extract_intercept_result(
+            mcs, config.red_sat, config.blue_sat, config.method, epoch,
+        )
+        if result is None:
             raise StkCommandError(
                 f"Could not extract results from solved MCS [{config.method.value}]"
             )
 
         # ── Phase 3: rebuild as fixed MCS and propagate (satellite moves) ─────
         mcs.RemoveAll()
-        self._build_fixed_mcs(mcs, option)
+        self._build_fixed_mcs_multi(mcs, result)
         try:
-            prop.Propagate()
+            _propagate_astrogator(prop)
         except Exception as exc:
             raise StkCommandError(
                 f"apply_intercept_plan: fixed MCS propagation failed for "
@@ -1045,13 +1290,13 @@ class StkComSession:
 
         logger.info(
             "apply_intercept_plan: %s applied for %r → %r "
-            "(dv=%.3f km/s, burn=%s, intercept=%s)",
+            "(total_dv=%.3f km/s, burns=%d, arrival=%s, miss=%.1f km)",
             config.method.value, config.red_sat, config.blue_sat,
-            option.delta_v_km_s,
-            option.burn_epoch.strftime("%Y-%m-%d %H:%M UTC"),
-            option.intercept_epoch.strftime("%Y-%m-%d %H:%M UTC"),
+            result.total_delta_v_km_s, len(result.burns),
+            result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC"),
+            result.intercept_range_km,
         )
-        return option
+        return result
 
     def list_scenario_satellites(self) -> list[str]:
         """Return the instance names of all Satellite children in the current scenario.
@@ -2079,10 +2324,10 @@ class StkComSession:
             mcs.RemoveAll()
 
             # ── Initial State ────────────────────────────────────────────────
-            _SEG_INITIAL_STATE   = 0
-            _SEG_PROPAGATE       = 1
-            _SEG_MANEUVER        = 2
-            _SEG_TARGET_SEQUENCE = 3
+            _SEG_INITIAL_STATE   = 0   # eVASegmentTypeInitialState
+            _SEG_PROPAGATE       = 5   # eVASegmentTypePropagate
+            _SEG_MANEUVER        = 2   # eVASegmentTypeManeuver
+            _SEG_TARGET_SEQUENCE = 8   # eVASegmentTypeTargetSequence
 
             init_seg = mcs.Insert(_SEG_INITIAL_STATE, "Initial State", "-")
             # Use the scenario start epoch to seed the initial state from the
@@ -2104,7 +2349,7 @@ class StkComSession:
 
             # ── Target Sequence — differential corrector ─────────────────────
             target_seq = mcs.Insert(_SEG_TARGET_SEQUENCE, "Target Intercept", "-")
-            post_coast = target_seq.Sequence.Insert(_SEG_PROPAGATE, "Coast to Intercept", "-")
+            post_coast = target_seq.Segments.Insert(_SEG_PROPAGATE, "Coast to Intercept", "-")
             # Stop at end of search window.
             post_stop = post_coast.StoppingConditions
             post_stop.RemoveAll()
@@ -2128,7 +2373,7 @@ class StkComSession:
             constraint.Tolerance = 1.0  # km
 
             # Run the MCS.
-            prop.Propagate()
+            _propagate_astrogator(prop)
 
             # ── Extract results ──────────────────────────────────────────────
             burn_final = burn_seg.FinalState
@@ -2223,7 +2468,7 @@ class StkComSession:
             MCSBuilder().build(mcs, plan, blue_path, config.max_delta_v_km_s)
 
             # Run Astrogator — DC or Optimizer executes inside STK.
-            prop.Propagate()
+            _propagate_astrogator(prop)
 
             # Extract the solved maneuver result.
             return self._extract_engine_result(mcs, config, method, epoch)
@@ -2265,7 +2510,7 @@ class StkComSession:
         for i in range(mcs.Count):
             seg = mcs.Item(i)
             try:
-                _ = seg.Sequence  # Only Target Sequences expose .Sequence
+                _ = seg.Segments  # Only Target Sequences expose .Segments
                 target_seq = seg
                 break
             except Exception:
@@ -2275,7 +2520,7 @@ class StkComSession:
             logger.warning("_extract_engine_result: no Target Sequence found in MCS [%s]", method.value)
             return None
 
-        inner_seq = target_seq.Sequence
+        inner_seq = target_seq.Segments
 
         # Find the first burn segment and last propagate segment after it.
         burn_seg = None
@@ -2357,6 +2602,161 @@ class StkComSession:
             notes=f"{method.value} intercept",
         )
 
+    def _extract_intercept_result(
+        self,
+        mcs: Any,
+        red_sat: str,
+        blue_sat: str,
+        method: InterceptMethod,
+        epoch: datetime,
+    ) -> InterceptResult | None:
+        """Extract per-burn results from a solved Astrogator MCS.
+
+        Walks ALL burn segments in the Target Sequence to build a
+        :class:`~sipc.domain.models.BurnResult` for each, then reads
+        the arrival epoch and miss distance.
+        """
+        import math  # noqa: PLC0415
+
+        # Locate the Target Sequence.
+        target_seq = None
+        for i in range(mcs.Count):
+            seg = mcs.Item(i)
+            try:
+                _ = seg.Segments
+                target_seq = seg
+                break
+            except Exception:
+                pass
+
+        if target_seq is None:
+            logger.warning("_extract_intercept_result: no Target Sequence found [%s]", method.value)
+            return None
+
+        inner_seq = target_seq.Segments
+
+        # Walk all segments — collect burns and track the last propagate.
+        burns: list[BurnResult] = []
+        last_prop_seg = None
+        for i in range(inner_seq.Count):
+            seg = inner_seq.Item(i)
+            name = str(getattr(seg, "Name", ""))
+
+            # Check if it's a burn segment.
+            if "Burn" in name or "burn" in name or "Maneuver" in name:
+                try:
+                    burn_epoch = _parse_stk_time(seg.FinalState.Epoch)
+                except Exception:
+                    burn_epoch = epoch
+
+                dv_v = dv_n = dv_c = 0.0
+                try:
+                    atc = seg.Maneuver.AttitudeControl
+                    vec = atc.DeltaV
+                    dv_v, dv_n, dv_c = float(vec.X), float(vec.Y), float(vec.Z)
+                except Exception as exc:
+                    logger.debug("_extract_intercept_result: could not read DV from %r: %s", name, exc)
+
+                dv_total = math.sqrt(dv_v**2 + dv_n**2 + dv_c**2)
+                burns.append(BurnResult(
+                    burn_number=len(burns) + 1,
+                    segment_name=name,
+                    burn_epoch=burn_epoch,
+                    delta_v_km_s=dv_total,
+                    dv_prograde=dv_v,
+                    dv_normal=dv_n,
+                    dv_radial=dv_c,
+                ))
+            else:
+                # Check if propagate segment (has StoppingConditions).
+                try:
+                    _ = seg.StoppingConditions
+                    last_prop_seg = seg
+                except Exception:
+                    pass
+
+        if not burns:
+            logger.warning("_extract_intercept_result: no burn segments found [%s]", method.value)
+            return None
+
+        # Arrival epoch from last propagate segment.
+        arrival_epoch = burns[-1].burn_epoch
+        if last_prop_seg is not None:
+            try:
+                arrival_epoch = _parse_stk_time(last_prop_seg.FinalState.Epoch)
+            except Exception:
+                pass
+
+        # Miss distance from the DC/Optimizer profile.
+        miss_km = 0.0
+        try:
+            profile = target_seq.Profiles.Item(0)
+            for i in range(profile.Results.Count):
+                res = profile.Results.Item(i)
+                if "Range" in str(getattr(res, "Name", "")):
+                    miss_km = float(getattr(res, "CurrentValue", 0.0))
+                    break
+        except Exception as exc:
+            logger.debug("_extract_intercept_result: could not read miss distance: %s", exc)
+
+        total_dv = sum(b.delta_v_km_s for b in burns)
+
+        return InterceptResult(
+            red_name=red_sat,
+            blue_name=blue_sat,
+            method=method,
+            burns=burns,
+            total_delta_v_km_s=total_dv,
+            arrival_epoch=arrival_epoch,
+            intercept_range_km=miss_km,
+            notes=f"{method.value} intercept ({len(burns)} burn{'s' if len(burns) > 1 else ''})",
+        )
+
+    def _build_fixed_mcs_multi(self, mcs: Any, result: InterceptResult) -> None:
+        """Build a non-targeting Astrogator MCS replaying a multi-burn solution."""
+        _SEG_INITIAL_STATE = 0
+        _SEG_PROPAGATE = 5
+        _SEG_MANEUVER = 2
+
+        mcs.RemoveAll()
+
+        if not result.burns:
+            return
+
+        # Initial State at the first burn epoch.
+        init_seg = mcs.Insert(_SEG_INITIAL_STATE, "Initial State", "-")
+        _set_initial_state_epoch(init_seg, _to_stk_time(result.burns[0].burn_epoch))
+
+        for burn in result.burns:
+            # Coast to this burn's epoch.
+            coast = mcs.Insert(_SEG_PROPAGATE, f"Coast to {burn.segment_name}", "-")
+            try:
+                stop_coll = coast.StoppingConditions
+                stop_coll.RemoveAll()
+                epoch_stop = stop_coll.Add("Epoch")
+                epoch_stop.Properties.Trip = _to_stk_time(burn.burn_epoch)
+            except Exception as exc:
+                logger.debug("_build_fixed_mcs_multi: stop condition failed: %s", exc)
+
+            # Burn with solved ΔV.
+            burn_seg = mcs.Insert(_SEG_MANEUVER, burn.segment_name, "-")
+            _configure_maneuver_seg(burn_seg)
+            try:
+                atc = burn_seg.Maneuver.AttitudeControl
+                atc.DeltaV.AssignCartesian(burn.dv_prograde, burn.dv_normal, burn.dv_radial)
+            except Exception as exc:
+                logger.warning("_build_fixed_mcs_multi: could not set DV for %r: %s", burn.segment_name, exc)
+
+        # Final coast to arrival.
+        post = mcs.Insert(_SEG_PROPAGATE, "Coast to Arrival", "-")
+        try:
+            post_stop = post.StoppingConditions
+            post_stop.RemoveAll()
+            epoch_stop = post_stop.Add("Epoch")
+            epoch_stop.Properties.Trip = _to_stk_time(result.arrival_epoch)
+        except Exception as exc:
+            logger.debug("_build_fixed_mcs_multi: final coast stop failed: %s", exc)
+
     def _build_fixed_mcs(self, mcs: Any, option: ManeuverOption) -> None:
         """Build a non-targeting Astrogator MCS for a selected ManeuverOption.
 
@@ -2364,9 +2764,9 @@ class StkComSession:
         without a differential corrector — i.e. applies the solution as a
         fixed propagation sequence.
         """
-        _SEG_INITIAL_STATE = 0
-        _SEG_PROPAGATE     = 1
-        _SEG_MANEUVER      = 2
+        _SEG_INITIAL_STATE = 0   # eVASegmentTypeInitialState
+        _SEG_PROPAGATE     = 5   # eVASegmentTypePropagate
+        _SEG_MANEUVER      = 2   # eVASegmentTypeManeuver
 
         mcs.RemoveAll()
 
@@ -2394,6 +2794,13 @@ class StkComSession:
         post_stop.RemoveAll()
         epoch_stop2 = post_stop.Add("Epoch")
         epoch_stop2.Properties.Trip = _to_stk_time(option.intercept_epoch)
+
+    def _rewind(self) -> None:
+        """Rewind STK animation so the 3D display refreshes after propagation."""
+        try:
+            self._root.Rewind()
+        except Exception as exc:
+            logger.debug("Rewind after propagation failed (non-fatal): %s", exc)
 
     def _require_connection(self) -> None:
         """Raise :class:`StkConnectionError` if not connected to STK.
