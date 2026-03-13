@@ -312,17 +312,22 @@
 
         <script>
         function fetchOrbitalEvents() {
-          var sel = document.getElementById('ie-red-sat');
-          var redSat = sel ? sel.value : '';
-          if (!redSat) {
+          var redSel = document.getElementById('ie-red-sat');
+          var blueSel = document.getElementById('ie-blue-sat');
+          var redSat = redSel ? redSel.value : '';
+          var blueSat = blueSel ? blueSel.value : '';
+          if (!redSat && !blueSat) {
             document.getElementById('orbital-events').innerHTML =
-              '<p class="error-msg">Select a red satellite first.</p>';
+              '<p class="error-msg">Select at least one satellite first.</p>';
             return;
           }
           var btn = document.getElementById('ie-events-btn');
           btn.disabled = true;
-          btn.textContent = 'Loading…';
-          fetch('/plan/maneuver/orbital-events?red_sat=' + encodeURIComponent(redSat))
+          btn.textContent = 'Loading\u2026';
+          var params = new URLSearchParams();
+          if (redSat) params.set('red_sat', redSat);
+          if (blueSat) params.set('blue_sat', blueSat);
+          fetch('/plan/maneuver/orbital-events?' + params.toString())
             .then(function(resp) {
               if (!resp.ok) throw new Error('HTTP ' + resp.status);
               return resp.text();

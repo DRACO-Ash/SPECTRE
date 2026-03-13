@@ -1,16 +1,49 @@
 {% if error %}
 <p class="error-msg">{{ error }}</p>
-{% elif not events %}
-<p class="empty-msg">No orbital events found for this satellite.</p>
+{% elif not red_events and not blue_events %}
+<p class="empty-msg">No orbital events found for either satellite.</p>
 {% else %}
 <div class="orbital-events-list">
   <span class="label-dim">Click an event to set the manoeuvre start time:</span>
-  {% for ev in events %}
-  <button type="button" class="btn-sm btn-event btn-event-{{ ev.event_type.value }}"
-          title="{{ ev.label }}"
-          onclick="document.querySelector('#intercept-engine-form [name=manoeuvre_start]').value='{{ ev.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}'">
-    {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M UTC') }}
-  </button>
-  {% endfor %}
+
+  {% if red_events %}
+  <div class="orbital-events-group" style="margin-top:0.3rem">
+    <span class="event-group-label event-label-red">&#9670; RED — {{ red_name }}</span>
+    <div class="event-badges">
+      {% for ev in red_events %}
+      <button type="button" class="btn-sm btn-event btn-event-red"
+              title="{{ ev.label }}"
+              onclick="document.querySelector('#intercept-engine-form [name=manoeuvre_start]').value='{{ ev.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}'">
+        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M UTC') }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  {% elif red_name %}
+  <div class="orbital-events-group" style="margin-top:0.3rem">
+    <span class="event-group-label event-label-red">&#9670; RED — {{ red_name }}</span>
+    <span class="empty-msg">No events found</span>
+  </div>
+  {% endif %}
+
+  {% if blue_events %}
+  <div class="orbital-events-group" style="margin-top:0.3rem">
+    <span class="event-group-label event-label-blue">&#9670; BLUE — {{ blue_name }}</span>
+    <div class="event-badges">
+      {% for ev in blue_events %}
+      <button type="button" class="btn-sm btn-event btn-event-blue"
+              title="{{ ev.label }}"
+              onclick="document.querySelector('#intercept-engine-form [name=manoeuvre_start]').value='{{ ev.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}'">
+        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M UTC') }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  {% elif blue_name %}
+  <div class="orbital-events-group" style="margin-top:0.3rem">
+    <span class="event-group-label event-label-blue">&#9670; BLUE — {{ blue_name }}</span>
+    <span class="empty-msg">No events found</span>
+  </div>
+  {% endif %}
 </div>
 {% endif %}

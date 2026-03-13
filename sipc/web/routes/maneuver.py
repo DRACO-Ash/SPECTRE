@@ -270,44 +270,66 @@ async def maneuver_select(
 @router.get("/orbital-events", response_model=None)
 async def orbital_events(
     request: Request,
-    red_sat: Annotated[str, Query()],
+    red_sat: Annotated[str, Query()] = "",
+    blue_sat: Annotated[str, Query()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Query STK for upcoming orbital events (apogee, perigee, nodes) for a red satellite.
+    """Query STK for upcoming orbital events for both red and blue satellites.
 
-    Returns clickable event badges that populate the manoeuvre start time.
+    Returns clickable event badges grouped by satellite that populate
+    the manoeuvre start time.
     """
-    logger.info("orbital_events called: red_sat=%r by %s", red_sat, current_user.username)
+    logger.info(
+        "orbital_events called: red_sat=%r blue_sat=%r by %s",
+        red_sat, blue_sat, current_user.username,
+    )
     tmpl = get_templates()
     state = get_session_state(current_user.username)
 
-    if not red_sat.strip():
+    if not red_sat.strip() and not blue_sat.strip():
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/orbital_events.html",
-            {"request": request, "events": [], "error": "Select a red satellite first."},
+            {"request": request, "red_events": [], "blue_events": [],
+             "red_name": "", "blue_name": "", "error": "Select satellites first."},
         )
 
     if not state.stk_session:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/orbital_events.html",
-            {"request": request, "events": [], "error": "Not connected to STK."},
+            {"request": request, "red_events": [], "blue_events": [],
+             "red_name": "", "blue_name": "", "error": "Not connected to STK."},
         )
 
     loop = asyncio.get_running_loop()
-    try:
-        events = await loop.run_in_executor(
-            _com_executor, state.stk_session.query_orbital_events, red_sat.strip()
-        )
-    except Exception as exc:
-        logger.warning("orbital_events failed for %s: %s", red_sat, exc)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/orbital_events.html",
-            {"request": request, "events": [], "error": f"Failed to query events: {exc}"},
-        )
+    red_events: list = []
+    blue_events: list = []
+
+    if red_sat.strip():
+        try:
+            red_events = await loop.run_in_executor(
+                _com_executor, state.stk_session.query_orbital_events, red_sat.strip()
+            )
+        except Exception as exc:
+            logger.warning("orbital_events failed for red %s: %s", red_sat, exc)
+
+    if blue_sat.strip():
+        try:
+            blue_events = await loop.run_in_executor(
+                _com_executor, state.stk_session.query_orbital_events, blue_sat.strip()
+            )
+        except Exception as exc:
+            logger.warning("orbital_events failed for blue %s: %s", blue_sat, exc)
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/orbital_events.html",
-        {"request": request, "events": events, "error": None},
+        {
+            "request": request,
+            "red_events": red_events,
+            "blue_events": blue_events,
+            "red_name": red_sat.strip(),
+            "blue_name": blue_sat.strip(),
+            "error": None,
+        },
     )
 
 
