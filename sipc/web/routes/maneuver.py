@@ -280,6 +280,12 @@ async def orbital_events(
     tmpl = get_templates()
     state = get_session_state(current_user.username)
 
+    if not red_sat.strip():
+        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            "partials/orbital_events.html",
+            {"request": request, "events": [], "error": "Select a red satellite first."},
+        )
+
     if not state.stk_session:
         return tmpl.TemplateResponse(  # type: ignore[attr-defined]
             "partials/orbital_events.html",

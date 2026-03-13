@@ -304,7 +304,7 @@
               <button type="button" class="btn-sm"
                       title="Query STK for apogee, perigee, ascending node, and descending node times for the selected red satellite"
                       hx-get="/plan/maneuver/orbital-events"
-                      hx-include="[name=red_sat]"
+                      hx-include="#ie-red-sat"
                       hx-target="#orbital-events"
                       hx-swap="innerHTML"
                       hx-indicator="#events-indicator">Events</button>
