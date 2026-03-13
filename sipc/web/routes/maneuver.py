@@ -277,6 +277,7 @@ async def orbital_events(
 
     Returns clickable event badges that populate the manoeuvre start time.
     """
+    logger.info("orbital_events called: red_sat=%r by %s", red_sat, current_user.username)
     tmpl = get_templates()
     state = get_session_state(current_user.username)
 

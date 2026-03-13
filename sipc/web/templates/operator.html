@@ -301,19 +301,45 @@
                      value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}"
                      title="Initial State epoch for the red satellite — leave blank to use the scenario start epoch"
                      style="flex:1" />
-              <button type="button" class="btn-sm"
+              <button type="button" class="btn-sm" id="ie-events-btn"
                       title="Query STK for apogee, perigee, ascending node, and descending node times for the selected red satellite"
-                      hx-get="/plan/maneuver/orbital-events"
-                      hx-include="#ie-red-sat"
-                      hx-target="#orbital-events"
-                      hx-swap="innerHTML"
-                      hx-indicator="#events-indicator">Events</button>
-              <span id="events-indicator" class="htmx-indicator"><span class="spinner-sm"></span></span>
+                      onclick="fetchOrbitalEvents()">Events</button>
             </div>
           </label>
         </div>
 
         <div id="orbital-events" style="margin:0.3rem 0"></div>
+
+        <script>
+        function fetchOrbitalEvents() {
+          var sel = document.getElementById('ie-red-sat');
+          var redSat = sel ? sel.value : '';
+          if (!redSat) {
+            document.getElementById('orbital-events').innerHTML =
+              '<p class="error-msg">Select a red satellite first.</p>';
+            return;
+          }
+          var btn = document.getElementById('ie-events-btn');
+          btn.disabled = true;
+          btn.textContent = 'Loading…';
+          fetch('/plan/maneuver/orbital-events?red_sat=' + encodeURIComponent(redSat))
+            .then(function(resp) {
+              if (!resp.ok) throw new Error('HTTP ' + resp.status);
+              return resp.text();
+            })
+            .then(function(html) {
+              document.getElementById('orbital-events').innerHTML = html;
+            })
+            .catch(function(err) {
+              document.getElementById('orbital-events').innerHTML =
+                '<p class="error-msg">Query failed: ' + err.message + '</p>';
+            })
+            .finally(function() {
+              btn.disabled = false;
+              btn.textContent = 'Events';
+            });
+        }
+        </script>
 
         <div class="mnv-search-grid">
           <label title="Pre-burn coast duration in hours">Coast (hr)
