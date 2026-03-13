@@ -811,15 +811,203 @@ class StkComSession:
                     prov_name, sat_name, exc,
                 )
 
-        # Fallback: propagate with stop conditions to find event times.
+        # Fallback: use STK Connect command to query classical orbital elements
+        # and compute event times from the data provider "Classical Elements".
         logger.info(
-            "query_orbital_events: no data provider found for %r — "
+            "query_orbital_events: no Orbit Events provider for %r — "
+            "trying Classical Elements time-varying provider",
+            sat_name,
+        )
+        events = self._query_events_via_connect(sat_name, sc_start, sc_stop, count)
+        if events:
+            events.sort(key=lambda e: e.epoch)
+            return events
+
+        # Last resort: Astrogator stop-condition propagation.
+        logger.info(
+            "query_orbital_events: Classical Elements fallback empty for %r — "
             "using Astrogator stop-condition fallback",
             sat_name,
         )
         events = self._query_events_via_propagation(sat_name, sc_start, sc_stop, count)
         events.sort(key=lambda e: e.epoch)
         return events
+
+    def _query_events_via_connect(
+        self,
+        sat_name: str,
+        sc_start: datetime,
+        sc_stop: datetime,
+        count: int,
+    ) -> list[OrbitalEvent]:
+        """Find orbital events using STK Connect ``Orbit_MeanElements`` data provider.
+
+        Queries time-varying True Anomaly via the Object Model data provider
+        interface, then detects apogee/perigee/node crossings from TA samples.
+        Works with any propagator (SGP4, HPOP, etc.) — no Astrogator needed.
+        """
+        events: list[OrbitalEvent] = []
+        sat_obj = self._root.GetObjectFromPath(f"Satellite/{sat_name}")
+
+        start_str = _to_stk_time(sc_start)
+        stop_str = _to_stk_time(sc_stop)
+
+        # Try several data provider names — varies by STK version / propagator.
+        _ELEMENT_PROVIDERS = [
+            "Classical Elements//ICRF",
+            "Classical Elements//J2000",
+            "Classical Elements//Fixed",
+            "Classical Elements",
+            "Keplerian Elements",
+        ]
+
+        dps = sat_obj.DataProviders
+        provider_by_name: dict[str, object] = {}
+        for i in range(dps.Count):
+            try:
+                dp = dps.Item(i)
+                provider_by_name[str(dp.Name)] = dp
+            except Exception:
+                pass
+
+        logger.debug(
+            "query_events_via_connect: data providers for %r: %s",
+            sat_name, list(provider_by_name.keys()),
+        )
+
+        dp = None
+        for pname in _ELEMENT_PROVIDERS:
+            # Try exact match first.
+            if pname in provider_by_name:
+                dp = provider_by_name[pname]
+                break
+            # Try sub-group: "Classical Elements" may contain "ICRF" subgroup.
+            base = pname.split("//")[0]
+            if base in provider_by_name:
+                parent = provider_by_name[base]
+                if "//" in pname:
+                    sub = pname.split("//")[1]
+                    try:
+                        dp = parent.Group.Item(sub)
+                        break
+                    except Exception:
+                        pass
+                else:
+                    dp = parent
+                    break
+
+        if dp is None:
+            logger.info(
+                "query_events_via_connect: no classical elements provider for %r",
+                sat_name,
+            )
+            return []
+
+        try:
+            # ExecElements requires time-varying exec.
+            res = dp.Exec(start_str, stop_str, 60.0)  # 60s step
+        except Exception as exc:
+            logger.info(
+                "query_events_via_connect: Exec failed for %r: %s", sat_name, exc,
+            )
+            return []
+
+        # Find True Anomaly and Time datasets.
+        ds_names = []
+        time_ds = None
+        ta_ds = None
+        aop_ds = None
+        for i in range(res.DataSets.Count):
+            ds = res.DataSets.Item(i)
+            name = str(ds.Name)
+            ds_names.append(name)
+            name_lower = name.lower()
+            if name_lower in ("time", "epoch", "date/time"):
+                time_ds = ds
+            elif "true anom" in name_lower:
+                ta_ds = ds
+            elif "arg of" in name_lower or "argument of" in name_lower:
+                aop_ds = ds
+
+        logger.debug(
+            "query_events_via_connect: datasets = %s", ds_names,
+        )
+
+        if time_ds is None or ta_ds is None:
+            logger.info(
+                "query_events_via_connect: missing Time or True Anomaly in datasets %s",
+                ds_names,
+            )
+            return []
+
+        time_values = time_ds.GetValues()
+        ta_values = ta_ds.GetValues()
+        n_rows = time_values.Count
+
+        # Get a representative arg-of-perigee for node detection.
+        aop_val = 0.0
+        if aop_ds is not None:
+            try:
+                aop_val = float(aop_ds.GetValues().Item(0))
+            except Exception:
+                pass
+
+        counts: dict[BurnLocation, int] = {}
+
+        for i in range(1, n_rows):
+            ta_prev = float(ta_values.Item(i - 1))
+            ta_curr = float(ta_values.Item(i))
+            t_str = str(time_values.Item(i))
+
+            # Apogee: TA crosses 180° (ascending)
+            if ta_prev < 180.0 <= ta_curr:
+                loc = BurnLocation.APOGEE
+                if counts.get(loc, 0) < count:
+                    epoch = _parse_stk_time(t_str)
+                    label = f"Apogee @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+            # Perigee: TA wraps 360→0
+            if ta_prev > 300.0 and ta_curr < 60.0:
+                loc = BurnLocation.PERIGEE
+                if counts.get(loc, 0) < count:
+                    epoch = _parse_stk_time(t_str)
+                    label = f"Perigee @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+            # Ascending node: TA crosses (360 - argPeri) mod 360
+            an_ta = (360.0 - aop_val) % 360.0
+            if self._ta_crosses(ta_prev, ta_curr, an_ta):
+                loc = BurnLocation.ASCENDING_NODE
+                if counts.get(loc, 0) < count:
+                    epoch = _parse_stk_time(t_str)
+                    label = f"Ascending Node @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+            # Descending node: TA crosses (180 - argPeri) mod 360
+            dn_ta = (180.0 - aop_val) % 360.0
+            if self._ta_crosses(ta_prev, ta_curr, dn_ta):
+                loc = BurnLocation.DESCENDING_NODE
+                if counts.get(loc, 0) < count:
+                    epoch = _parse_stk_time(t_str)
+                    label = f"Descending Node @ {epoch.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=epoch, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+        logger.info(
+            "query_events_via_connect: %d events for %r", len(events), sat_name,
+        )
+        return events
+
+    @staticmethod
+    def _ta_crosses(ta_prev: float, ta_curr: float, target: float) -> bool:
+        """Check if true anomaly crossed *target* between two samples."""
+        if abs(ta_curr - ta_prev) > 180.0:
+            return False  # wrap-around — skip to avoid false positive
+        return (ta_prev < target <= ta_curr) or (ta_curr < target <= ta_prev)
 
     def _query_events_via_propagation(
         self,
@@ -877,7 +1065,7 @@ class StkComSession:
                 try:
                     _propagate_astrogator(prop)
                 except Exception as exc:
-                    logger.debug(
+                    logger.warning(
                         "query_orbital_events (propagation): propagate failed for %s: %s",
                         stop_name, exc,
                     )
