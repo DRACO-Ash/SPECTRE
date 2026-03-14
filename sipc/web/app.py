@@ -21,7 +21,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-app = FastAPI(title="SIPC — STK Intercept Planning Console", version="0.2.0")
+app = FastAPI(title="SIPC — Space Intercept Planning Console", version="0.3.0")
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

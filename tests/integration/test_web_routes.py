@@ -154,15 +154,11 @@ class TestPlanRun:
     def test_plan_with_assets_returns_results_partial(
         self, client: object, auth_cookie: str
     ) -> None:
-        from datetime import UTC, datetime, timedelta
-
-        from sipc.domain.models import AccessInterval
         from sipc.web.planning_state import clear_session_state, get_session_state
-        from sipc.stk_adapter.fake import FakeStkSession
+        from sipc.domain.models import BlueAsset, RedTrack
 
         clear_session_state("testadmin")
         state = get_session_state("testadmin")
-        from sipc.domain.models import BlueAsset, RedTrack
         state.blue_assets.append(BlueAsset(name="Alpha", tle="l1\nl2"))
         state.red_tracks.append(RedTrack(name="Track01", tle="l1\nl2"))
 
@@ -172,5 +168,4 @@ class TestPlanRun:
             cookies={"sipc_session": auth_cookie},
         )
         assert resp.status_code == 200
-        # FakeStkSession returns empty access intervals, so results table should render
         assert b"results" in resp.content.lower() or b"No results" in resp.content

@@ -12,7 +12,6 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
 
 from sipc.domain.models import (
     BlueAsset,
@@ -22,9 +21,6 @@ from sipc.domain.models import (
     ManeuverSearchConfig,
     RedTrack,
 )
-
-if TYPE_CHECKING:
-    from sipc.stk_adapter.interface import IStkSession
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +51,10 @@ class SessionState:
     # UDL credentials — held in memory for this session only, never persisted.
     udl_username: str | None = None
     udl_password: str | None = None
-    # Live STK session — None means planning runs use FakeStkSession.
-    stk_session: IStkSession | None = None
-    stk_scenario: str = ""
-    # Scenario time window — set when the operator configures STK scenario time.
-    # Used by the UDL epoch-matched TLE fetch.
+    # Scenario time window — set by the operator.
     scenario_start: datetime | None = None
     scenario_stop: datetime | None = None
-    # Astrogator maneuver options from the last search run.
+    # Maneuver options from the last search run.
     maneuver_options: list[ManeuverOption] = field(default_factory=list)
     # The option the operator has selected for application.
     selected_maneuver: ManeuverOption | None = None

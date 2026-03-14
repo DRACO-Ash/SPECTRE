@@ -2,21 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-from sipc.domain.models import AccessInterval, BlueAsset, RedTrack, RunConfig
+from sipc.domain.models import BlueAsset, RedTrack, RunConfig
 from sipc.domain.scenario import ScenarioPlanner
-from sipc.stk_adapter.fake import FakeStkSession
 
 
 class TestScenarioPlanner:
-    """Tests for ScenarioPlanner using FakeStkSession."""
+    """Tests for ScenarioPlanner (now using sipc.astro, no STK)."""
 
-    def test_plan_returns_empty_when_no_access(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() should return an empty list when compute_access returns no intervals."""
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
+    def test_plan_returns_empty_list(self, run_config: RunConfig) -> None:
+        """plan() returns empty until access computation is implemented."""
+        planner = ScenarioPlanner(config=run_config)
         blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
         red = [RedTrack(name="Track01", tle="l1\nl2")]
 
@@ -24,153 +19,8 @@ class TestScenarioPlanner:
 
         assert windows == []
 
-    def test_plan_creates_assets_in_session(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() should create both blue and red satellite objects via the session."""
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        planner.plan(blue, red)
-
-        assert "B_SAT_Alpha" in fake_session.satellites
-        assert "R_SAT_Track01" in fake_session.satellites
-
-    def test_plan_sets_propagators(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() should call set_propagator for all assets."""
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="alpha_tle")]
-        red = [RedTrack(name="Track01", tle="track_tle")]
-
-        planner.plan(blue, red)
-
-        assert fake_session.propagators["B_SAT_Alpha"] == "alpha_tle"
-        assert fake_session.propagators["R_SAT_Track01"] == "track_tle"
-
-    def test_plan_converts_access_to_windows(
-        self,
-        fake_session: FakeStkSession,
-        run_config: RunConfig,
-        sample_access_interval: AccessInterval,
-    ) -> None:
-        """plan() should convert access intervals to InterceptWindow objects."""
-        fake_session.access_intervals = [sample_access_interval]
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert len(windows) == 1
-        assert windows[0].start == sample_access_interval.start
-        assert windows[0].end == sample_access_interval.end
-
-    def test_plan_propagates_min_range_from_access_interval(
-        self,
-        fake_session: FakeStkSession,
-        run_config: RunConfig,
-        sample_access_interval: AccessInterval,
-    ) -> None:
-        """plan() should copy min_range_km from AccessInterval into InterceptWindow."""
-        fake_session.range_km = 250.5
-        fake_session.access_intervals = [sample_access_interval]
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert windows[0].min_range_km == 250.5
-
-    def test_plan_sets_asset_pair_labels(
-        self,
-        fake_session: FakeStkSession,
-        run_config: RunConfig,
-        sample_access_interval: AccessInterval,
-    ) -> None:
-        """InterceptWindow should carry the blue and red asset names."""
-        fake_session.access_intervals = [sample_access_interval]
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert windows[0].blue_name == "Alpha"
-        assert windows[0].red_name == "Track01"
-
-    def test_plan_min_range_nonzero_by_default(
-        self,
-        fake_session: FakeStkSession,
-        run_config: RunConfig,
-        sample_access_interval: AccessInterval,
-    ) -> None:
-        """FakeStkSession default range_km (100.0) should produce non-zero min_range_km."""
-        fake_session.access_intervals = [sample_access_interval]
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert windows[0].min_range_km > 0.0
-
-    def test_plan_logs_actions_with_run_id(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() should log actions tagged with the correct run_id."""
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        planner.plan(blue, red)
-
-        run_ids = {entry[0] for entry in fake_session.actions_log}
-        assert run_config.run_id in run_ids
-
-    def test_plan_skips_propagator_for_empty_tle(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() must not call set_propagator when TLE is empty.
-
-        An asset imported from an existing STK scenario may have tle='' if
-        get_satellite_tle returned None.  The satellite already has a valid
-        propagator in STK, so we must skip the set_propagator call rather than
-        raising StkCommandError("Invalid TLE … got 0 lines").
-        """
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        # Must not raise despite empty blue TLE
-        planner.plan(blue, red)
-
-        # Satellite was created but set_propagator was NOT called for it
-        assert "B_SAT_Alpha" in fake_session.satellites
-        assert "B_SAT_Alpha" not in fake_session.propagators
-        # Red track with valid TLE was propagated normally
-        assert fake_session.propagators["R_SAT_Track01"] == "l1\nl2"
-
-    def test_plan_windows_sorted_by_start(
-        self, fake_session: FakeStkSession, run_config: RunConfig
-    ) -> None:
-        """plan() should return windows in ascending start-time order."""
-        later = AccessInterval(
-            start=datetime(2026, 3, 4, 14, 0, 0, tzinfo=UTC),
-            end=datetime(2026, 3, 4, 14, 10, 0, tzinfo=UTC),
-        )
-        earlier = AccessInterval(
-            start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC),
-            end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=UTC),
-        )
-        fake_session.access_intervals = [later, earlier]
-        planner = ScenarioPlanner(session=fake_session, config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert windows[0].start < windows[1].start
+    def test_plan_accepts_empty_assets(self, run_config: RunConfig) -> None:
+        """plan() should handle empty asset lists gracefully."""
+        planner = ScenarioPlanner(config=run_config)
+        windows = planner.plan([], [])
+        assert windows == []
