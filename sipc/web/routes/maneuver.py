@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+import math
+from datetime import UTC, datetime, timedelta as _timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
+from sgp4.api import Satrec, jday
 
-from sipc.domain.models import BurnLocation, BurnType, InterceptConfig, InterceptMethod, ManeuverSearchConfig
+from sipc.domain.models import BurnLocation, BurnType, InterceptConfig, InterceptMethod, ManeuverSearchConfig, OrbitalEvent
 from sipc.domain.maneuver_planner import ManeuverPlanner, ManeuverPlannerError
 from sipc.web.auth import require_login
 from sipc.web.deps import _com_executor, get_templates
@@ -30,6 +32,125 @@ router = APIRouter(prefix="/plan/maneuver")
 _BURN_TYPE_MAP: dict[str, BurnType] = {bt.value: bt for bt in BurnType}
 _BURN_LOCATION_MAP: dict[str, BurnLocation] = {bl.value: bl for bl in BurnLocation}
 _INTERCEPT_METHOD_MAP: dict[str, InterceptMethod] = {m.value: m for m in InterceptMethod}
+
+_MU_EARTH = 398600.4418  # km³/s² — standard gravitational parameter
+
+
+def _compute_orbital_events(
+    tle: str,
+    sc_start: datetime,
+    sc_stop: datetime,
+    count: int = 3,
+    step_s: float = 30.0,
+) -> list[OrbitalEvent]:
+    """Compute apogee, perigee, ascending/descending node times from a TLE.
+
+    Propagates the TLE with sgp4, computes true anomaly and latitude at
+    each timestep, and detects zero-crossings.
+    """
+    lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return []
+
+    line1, line2 = lines[-2], lines[-1]
+    try:
+        sat = Satrec.twoline2rv(line1, line2)
+    except Exception as exc:
+        logger.warning("_compute_orbital_events: bad TLE: %s", exc)
+        return []
+
+    events: list[OrbitalEvent] = []
+    counts: dict[BurnLocation, int] = {}
+
+    window_s = (sc_stop - sc_start).total_seconds()
+    n_steps = max(2, int(window_s / step_s))
+
+    prev_ta: float | None = None
+    prev_lat: float | None = None
+
+    for i in range(n_steps + 1):
+        t = sc_start + _timedelta(seconds=i * step_s)
+        jd, fr = jday(t.year, t.month, t.day, t.hour, t.minute, t.second + t.microsecond / 1e6)
+
+        e, r, v = sat.sgp4(jd, fr)
+        if e != 0:
+            continue
+
+        x, y, z = r  # km — TEME frame
+        vx, vy, vz = v
+
+        # Compute orbital elements from state vector.
+        r_mag = math.sqrt(x**2 + y**2 + z**2)
+        v_mag = math.sqrt(vx**2 + vy**2 + vz**2)
+
+        # Specific angular momentum h = r × v
+        hx = y * vz - z * vy
+        hy = z * vx - x * vz
+        hz = x * vy - y * vx
+        h_mag = math.sqrt(hx**2 + hy**2 + hz**2)
+
+        # Radial velocity
+        v_r = (x * vx + y * vy + z * vz) / r_mag
+
+        # True anomaly via v_r sign and vis-viva
+        semi_latus = h_mag**2 / _MU_EARTH
+        ecc_vec_factor = v_mag**2 - _MU_EARTH / r_mag
+        ex = (ecc_vec_factor * x - r_mag * v_r * vx) / _MU_EARTH
+        ey = (ecc_vec_factor * y - r_mag * v_r * vy) / _MU_EARTH
+        ez = (ecc_vec_factor * z - r_mag * v_r * vz) / _MU_EARTH
+        ecc = math.sqrt(ex**2 + ey**2 + ez**2)
+
+        if ecc > 1e-10:
+            cos_ta = (ex * x + ey * y + ez * z) / (ecc * r_mag)
+            cos_ta = max(-1.0, min(1.0, cos_ta))
+            ta = math.degrees(math.acos(cos_ta))
+            if v_r < 0:
+                ta = 360.0 - ta
+        else:
+            ta = 0.0
+
+        # Geocentric latitude (TEME ≈ inertial for node detection)
+        lat = math.degrees(math.asin(z / r_mag)) if r_mag > 0 else 0.0
+
+        if prev_ta is not None:
+            # Apogee: TA crosses 180° (ascending past apoapsis)
+            if prev_ta < 180.0 <= ta:
+                loc = BurnLocation.APOGEE
+                if counts.get(loc, 0) < count:
+                    label = f"Apogee @ {t.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=t, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+            # Perigee: TA wraps from >300 to <60
+            if prev_ta > 300.0 and ta < 60.0:
+                loc = BurnLocation.PERIGEE
+                if counts.get(loc, 0) < count:
+                    label = f"Perigee @ {t.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=t, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+        if prev_lat is not None:
+            # Ascending node: latitude crosses 0 going positive
+            if prev_lat < 0.0 <= lat:
+                loc = BurnLocation.ASCENDING_NODE
+                if counts.get(loc, 0) < count:
+                    label = f"Ascending Node @ {t.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=t, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+            # Descending node: latitude crosses 0 going negative
+            if prev_lat >= 0.0 and lat < 0.0:
+                loc = BurnLocation.DESCENDING_NODE
+                if counts.get(loc, 0) < count:
+                    label = f"Descending Node @ {t.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    events.append(OrbitalEvent(event_type=loc, epoch=t, label=label))
+                    counts[loc] = counts.get(loc, 0) + 1
+
+        prev_ta = ta
+        prev_lat = lat
+
+    events.sort(key=lambda ev: ev.epoch)
+    return events
 
 
 def _parse_burn_types(raw: list[str]) -> list[BurnType]:
@@ -274,10 +395,10 @@ async def orbital_events(
     blue_sat: Annotated[str, Query()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Query STK for upcoming orbital events for both red and blue satellites.
+    """Compute upcoming orbital events for both red and blue satellites.
 
-    Returns clickable event badges grouped by satellite that populate
-    the manoeuvre start time.
+    Uses sgp4 to propagate the satellite TLEs and detect apogee, perigee,
+    ascending node, and descending node crossings.  No STK dependency.
     """
     logger.info(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
@@ -293,32 +414,40 @@ async def orbital_events(
              "red_name": "", "blue_name": "", "error": "Select satellites first."},
         )
 
-    if not state.stk_session:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/orbital_events.html",
-            {"request": request, "red_events": [], "blue_events": [],
-             "red_name": "", "blue_name": "", "error": "Not connected to STK."},
-        )
+    # Look up TLEs from session state.
+    def _find_tle(stk_name: str) -> str | None:
+        for a in state.blue_assets:
+            if a.stk_name == stk_name:
+                return a.tle
+        for t in state.red_tracks:
+            if t.stk_name == stk_name:
+                return t.tle
+        return None
 
-    loop = asyncio.get_running_loop()
+    # Use scenario time if available, otherwise default to now + 24h.
+    sc_start = state.scenario_start or datetime.now(tz=UTC)
+    sc_stop = state.scenario_stop or (sc_start + _timedelta(hours=24))
+
     red_events: list = []
     blue_events: list = []
 
     if red_sat.strip():
-        try:
-            red_events = await loop.run_in_executor(
-                _com_executor, state.stk_session.query_orbital_events, red_sat.strip()
-            )
-        except Exception as exc:
-            logger.warning("orbital_events failed for red %s: %s", red_sat, exc)
+        tle = _find_tle(red_sat.strip())
+        if tle:
+            red_events = _compute_orbital_events(tle, sc_start, sc_stop)
+        else:
+            logger.warning("orbital_events: no TLE found for red %s", red_sat)
 
     if blue_sat.strip():
-        try:
-            blue_events = await loop.run_in_executor(
-                _com_executor, state.stk_session.query_orbital_events, blue_sat.strip()
-            )
-        except Exception as exc:
-            logger.warning("orbital_events failed for blue %s: %s", blue_sat, exc)
+        tle = _find_tle(blue_sat.strip())
+        if tle:
+            blue_events = _compute_orbital_events(tle, sc_start, sc_stop)
+        else:
+            logger.warning("orbital_events: no TLE found for blue %s", blue_sat)
+
+    error = None
+    if not red_events and not blue_events:
+        error = "No orbital events found — check that satellites have valid TLEs."
 
     return tmpl.TemplateResponse(  # type: ignore[attr-defined]
         "partials/orbital_events.html",
@@ -328,7 +457,7 @@ async def orbital_events(
             "blue_events": blue_events,
             "red_name": red_sat.strip(),
             "blue_name": blue_sat.strip(),
-            "error": None,
+            "error": error,
         },
     )
 
