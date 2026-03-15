@@ -1,6 +1,6 @@
 """Pure-math geometry helpers for intercept planning.
 
-All functions are stateless and have no STK dependency, making them
+All functions are stateless and dependency-free, making them
 trivially unit-testable. Angles are in degrees, distances in km,
 speeds in m/s unless otherwise noted.
 """

@@ -1,6 +1,6 @@
 """Unit tests for the dual-mode UDL TLE fetch route.
 
-Uses pytest-asyncio + respx (or unittest.mock) to mock httpx without a live
+Uses pytest-asyncio + unittest.mock to mock httpx without a live
 UDL connection.  All tests run offline.
 """
 
@@ -121,7 +121,7 @@ class TestFetchTleLatestMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -133,8 +133,7 @@ class TestFetchTleLatestMode:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -153,10 +152,9 @@ class TestFetchTleLatestMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
         ):
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -166,7 +164,7 @@ class TestFetchTleLatestMode:
                 current_user=_make_user(),
             )
 
-            ctx = tmpl.TemplateResponse.call_args[0][1]
+            ctx = render_mock.call_args[0][2]  # render(request, name, context)
             assert ctx["error"] is not None
             assert "UDL" in ctx["error"]
 
@@ -179,10 +177,9 @@ class TestFetchTleEpochMode:
         """epoch mode without scenario_start must return a clear error."""
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
         ):
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -192,7 +189,7 @@ class TestFetchTleEpochMode:
                 current_user=_make_user(),
             )
 
-            ctx = tmpl.TemplateResponse.call_args[0][1]
+            ctx = render_mock.call_args[0][2]
             assert ctx["error"] is not None
             assert "scenario time" in ctx["error"].lower()
 
@@ -205,7 +202,7 @@ class TestFetchTleEpochMode:
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -217,8 +214,7 @@ class TestFetchTleEpochMode:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -239,15 +235,12 @@ class TestFetchTleEpochMode:
         self, mock_state_with_scenario
     ) -> None:
         """epoch mode should select the record whose epoch is closest to scenario_start."""
-        # scenario_start = 2026-01-25 19:00 UTC
-        # day 25 of 2026 = 26025.xxx → closest
-        # day 1 of 2026 = 26001.xxx → further away
         near_record = _make_udl_record(39034, epoch_str="26025.00000000")
         far_record = _make_udl_record(39034, epoch_str="26001.00000000")
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -259,8 +252,7 @@ class TestFetchTleEpochMode:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -270,9 +262,8 @@ class TestFetchTleEpochMode:
                 current_user=_make_user(),
             )
 
-            ctx = tmpl.TemplateResponse.call_args[0][1]
+            ctx = render_mock.call_args[0][2]
             assert ctx["error"] is None
-            # Near record epoch (day 25) should have been selected → TLE line contains "26025"
             assert "26025" in ctx["tle"]
 
     @pytest.mark.asyncio
@@ -280,12 +271,11 @@ class TestFetchTleEpochMode:
         self, mock_state_with_scenario
     ) -> None:
         """epoch mode must not select a TLE whose epoch is after scenario_start."""
-        # scenario_start = 2026-01-25 19:00 UTC; day 30 is after that
         future_record = _make_udl_record(39034, epoch_str="26030.00000000")
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -297,8 +287,7 @@ class TestFetchTleEpochMode:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -308,20 +297,18 @@ class TestFetchTleEpochMode:
                 current_user=_make_user(),
             )
 
-            ctx = tmpl.TemplateResponse.call_args[0][1]
+            ctx = render_mock.call_args[0][2]
             assert ctx["error"] is not None
             assert "No elset found" in ctx["error"]
 
     @pytest.mark.asyncio
     async def test_tle_age_days_computed(self, mock_state_with_scenario) -> None:
         """tle_age_days should be the absolute difference in days from scenario_start."""
-        # scenario_start = 2026-01-25 19:00 UTC = day 25.79167
-        # TLE epoch = day 25.00000 → delta ≈ 0.79167 days ≈ 19 hours
         record = _make_udl_record(39034, epoch_str="26025.00000000")
 
         with (
             patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.get_templates") as tmpl_mock,
+            patch("sipc.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -333,8 +320,7 @@ class TestFetchTleEpochMode:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            tmpl = MagicMock()
-            tmpl_mock.return_value = tmpl
+            render_mock.return_value = MagicMock()
 
             from sipc.web.routes.udl import fetch_tle
             await fetch_tle(
@@ -344,6 +330,6 @@ class TestFetchTleEpochMode:
                 current_user=_make_user(),
             )
 
-            ctx = tmpl.TemplateResponse.call_args[0][1]
+            ctx = render_mock.call_args[0][2]
             assert ctx["tle_age_days"] is not None
             assert ctx["tle_age_days"] < 1.0  # less than 1 day apart

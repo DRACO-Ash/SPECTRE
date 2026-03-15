@@ -7,6 +7,11 @@ creates ``templates`` and also imports the routers.
 
 from __future__ import annotations
 
+from typing import Any
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+
 
 def get_templates() -> object:
     """Return the Jinja2Templates instance from the application factory.
@@ -19,3 +24,19 @@ def get_templates() -> object:
     from sipc.web.app import templates  # noqa: PLC0415
 
     return templates
+
+
+def render(
+    request: Request,
+    name: str,
+    context: dict[str, Any] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render a Jinja2 template with the modern TemplateResponse signature.
+
+    Wraps ``Jinja2Templates.TemplateResponse`` using the non-deprecated
+    ``(request, name, context)`` argument order.
+    """
+    tmpl = get_templates()
+    ctx = context or {}
+    return tmpl.TemplateResponse(request, name, ctx, status_code=status_code)  # type: ignore[attr-defined]

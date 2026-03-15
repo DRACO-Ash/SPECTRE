@@ -7,20 +7,18 @@ from sipc.domain.scenario import ScenarioPlanner
 
 
 class TestScenarioPlanner:
-    """Tests for ScenarioPlanner (now using sipc.astro, no STK)."""
-
-    def test_plan_returns_empty_list(self, run_config: RunConfig) -> None:
-        """plan() returns empty until access computation is implemented."""
-        planner = ScenarioPlanner(config=run_config)
-        blue = [BlueAsset(name="Alpha", tle="l1\nl2")]
-        red = [RedTrack(name="Track01", tle="l1\nl2")]
-
-        windows = planner.plan(blue, red)
-
-        assert windows == []
+    """Tests for ScenarioPlanner using sipc.astro propagation."""
 
     def test_plan_accepts_empty_assets(self, run_config: RunConfig) -> None:
         """plan() should handle empty asset lists gracefully."""
         planner = ScenarioPlanner(config=run_config)
         windows = planner.plan([], [])
+        assert windows == []
+
+    def test_plan_with_invalid_tle_skips_pair(self, run_config: RunConfig) -> None:
+        """plan() should skip pairs with invalid TLEs without crashing."""
+        planner = ScenarioPlanner(config=run_config)
+        blue = [BlueAsset(name="Alpha", tle="bad\ntle")]
+        red = [RedTrack(name="Track01", tle="bad\ntle")]
+        windows = planner.plan(blue, red)
         assert windows == []

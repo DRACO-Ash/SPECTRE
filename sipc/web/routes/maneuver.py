@@ -30,7 +30,7 @@ from sipc.domain.models import (
     OrbitalEvent,
 )
 from sipc.web.auth import require_login
-from sipc.web.deps import get_templates
+from sipc.web.deps import render
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -57,15 +57,13 @@ async def orbital_events(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
         red_sat, blue_sat, current_user.username,
     )
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if not red_sat.strip() and not blue_sat.strip():
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/orbital_events.html",
-            {"request": request, "red_events": [], "blue_events": [],
-             "red_name": "", "blue_name": "", "error": "Select satellites first."},
-        )
+        return render(request, "partials/orbital_events.html", {
+            "red_events": [], "blue_events": [],
+            "red_name": "", "blue_name": "", "error": "Select satellites first.",
+        })
 
     # Use scenario time if available, otherwise default to now + 24h.
     sc_start = state.scenario_start or datetime.now(tz=UTC)
@@ -94,17 +92,13 @@ async def orbital_events(
     if not red_events and not blue_events:
         error = "No orbital events found — check that satellites have valid TLEs."
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/orbital_events.html",
-        {
-            "request": request,
-            "red_events": red_events,
-            "blue_events": blue_events,
-            "red_name": red_sat.strip(),
-            "blue_name": blue_sat.strip(),
-            "error": error,
-        },
-    )
+    return render(request, "partials/orbital_events.html", {
+        "red_events": red_events,
+        "blue_events": blue_events,
+        "red_name": red_sat.strip(),
+        "blue_name": blue_sat.strip(),
+        "error": error,
+    })
 
 
 @router.post("/apply-intercept", response_model=None)
@@ -129,14 +123,12 @@ async def apply_intercept(
 
     Returns the intercept result partial with per-burn breakdown.
     """
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if method not in _INTERCEPT_METHOD_MAP:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/intercept_result.html",
-            {"request": request, "result": None, "error": f"Unknown intercept method: {method!r}"},
-        )
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "error": f"Unknown intercept method: {method!r}",
+        })
 
     # Parse manoeuvre start time.
     manoeuvre_start_dt = datetime.now(tz=UTC)
@@ -156,11 +148,9 @@ async def apply_intercept(
             missing.append(f"red ({red_sat})")
         if not blue_tle:
             missing.append(f"blue ({blue_sat})")
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/intercept_result.html",
-            {"request": request, "result": None,
-             "error": f"No TLE found for: {', '.join(missing)}"},
-        )
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "error": f"No TLE found for: {', '.join(missing)}",
+        })
 
     intercept_method = _INTERCEPT_METHOD_MAP[method]
     coast_s = coast_hours * 3600.0
@@ -181,10 +171,9 @@ async def apply_intercept(
             "apply_intercept failed for operator %s: %s", current_user.username, exc
         )
         state.append_log(f"[INTERCEPT] {method} failed: {exc}")
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "partials/intercept_result.html",
-            {"request": request, "result": None, "error": f"Intercept calculation failed: {exc}"},
-        )
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "error": f"Intercept calculation failed: {exc}",
+        })
 
     # Map astro InterceptSolution → domain InterceptResult for the template.
     result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), intercept_method)
@@ -206,16 +195,15 @@ async def apply_intercept(
         red_sat, blue_sat, result.total_delta_v_km_s, len(result.burns),
     )
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/intercept_result.html",
-        {"request": request, "result": result, "error": None},
-    )
+    return render(request, "partials/intercept_result.html", {
+        "result": result, "error": None,
+    })
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _find_tle(state: object, sat_name: str) -> str | None:
-    """Look up a satellite TLE from session state by stk_name."""
+    """Look up a satellite TLE from session state by object name."""
     for a in state.blue_assets:  # type: ignore[attr-defined]
         if a.stk_name == sat_name:
             return a.tle
@@ -246,12 +234,10 @@ def _run_intercept(
             red_tle=red_tle, blue_tle=blue_tle,
             manoeuvre_start=start, coast_s=coast_s,
         )
-    elif method == InterceptMethod.OPTIMAL:
-        # Optimal not yet implemented — fall back to Lambert.
-        return lambert_intercept(
+    elif method == InterceptMethod.BIELLIPTIC:
+        return bielliptic_intercept(
             red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, tof_s=tof_s, coast_s=coast_s,
-            target_distance_km=target_km,
+            manoeuvre_start=start, coast_s=coast_s,
         )
     else:
         raise ValueError(f"Unsupported intercept method: {method}")

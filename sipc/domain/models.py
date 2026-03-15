@@ -17,7 +17,7 @@ class BlueAsset:
     Attributes:
         name: Human-readable short name (e.g. ``Alpha``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived STK object name (``B_SAT_<name>``).
+        stk_name: Auto-derived object name (``B_SAT_<name>``).
     """
 
     name: str
@@ -35,7 +35,7 @@ class RedTrack:
     Attributes:
         name: Human-readable track identifier (e.g. ``Track01``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived STK object name (``R_SAT_<name>``).
+        stk_name: Auto-derived object name (``R_SAT_<name>``).
     """
 
     name: str
@@ -48,7 +48,7 @@ class RedTrack:
 
 @dataclass
 class AccessInterval:
-    """A time window during which two STK objects have mutual access (line of sight).
+    """A time window during which two objects have mutual access (line of sight).
 
     Attributes:
         start: UTC-aware start of the access window.
@@ -87,21 +87,20 @@ class InterceptWindow:
 
 
 class InterceptMethod(Enum):
-    """Algorithm used by the intercept engine to build the Astrogator MCS.
+    """Algorithm used by the intercept engine.
 
-    Each method defines a different MCS structure and DC/Optimizer profile:
-
-    ``LAMBERT``     — pre-burn coast → burn → post-burn coast → DC (R=0).
-    ``RENDEZVOUS``  — coast → burn → DC (R=0 and V=0 simultaneously).
-    ``PROXIMITY``   — coast → burn → DC (R = target_distance_m).
-    ``OPTIMAL``     — coast → N burns → coast → Optimizer (R=distance, min ΔV).
+    ``LAMBERT``      — pre-burn coast → burn → post-burn coast (R=0).
+    ``HOHMANN``      — two-burn circular coplanar transfer.
+    ``BIELLIPTIC``   — three-burn transfer via intermediate apoapsis.
+    ``RENDEZVOUS``   — coast → burn (match position + velocity).
+    ``PROXIMITY``    — coast → burn (minimise range to target_distance_m).
     """
 
-    LAMBERT    = "lambert"
-    HOHMANN    = "hohmann"
-    RENDEZVOUS = "rendezvous"
-    PROXIMITY  = "proximity"
-    OPTIMAL    = "optimal"
+    LAMBERT     = "lambert"
+    HOHMANN     = "hohmann"
+    BIELLIPTIC  = "bielliptic"
+    RENDEZVOUS  = "rendezvous"
+    PROXIMITY   = "proximity"
 
 
 class BurnType(Enum):
@@ -119,7 +118,7 @@ class BurnLocation(Enum):
     """Orbital geometry position at which a maneuver is executed.
 
     Each value maps to a well-defined point in the red satellite's orbit,
-    used by the Astrogator MCS to constrain the burn epoch search.
+    used to constrain the burn epoch search.
     """
 
     APOGEE = "apogee"
@@ -146,7 +145,7 @@ class BurnLocation(Enum):
 
 @dataclass
 class ManeuverOption:
-    """One solved intercept trajectory from the Astrogator search.
+    """One solved intercept trajectory from a manoeuvre search.
 
     Represents a single candidate maneuver that places the red satellite
     on an intercept trajectory with the blue target.  All delta-V components
@@ -154,8 +153,8 @@ class ManeuverOption:
 
     Attributes:
         option_id: Unique identifier; auto-generated UUID if not supplied.
-        red_name: STK object name of the red (threat) satellite.
-        blue_name: STK object name of the blue (friendly) target satellite.
+        red_name: Object name of the red (threat) satellite.
+        blue_name: Object name of the blue (friendly) target satellite.
         burn_type: Impulsive or finite burn.
         burn_location: Orbital geometry tag for the burn point.
         burn_epoch: UTC datetime at which the burn is executed.
@@ -187,11 +186,11 @@ class ManeuverOption:
 
 @dataclass
 class ManeuverSearchConfig:
-    """Parameters controlling the Astrogator intercept option search.
+    """Parameters controlling an intercept option search.
 
     Attributes:
-        red_sat: STK object name of the red satellite (interceptor).
-        blue_sat: STK object name of the blue satellite (target).
+        red_sat: Object name of the red satellite (interceptor).
+        blue_sat: Object name of the blue satellite (target).
         search_window_start: UTC start of the maneuver search window.
         search_window_stop: UTC end of the maneuver search window.
         max_delta_v_km_s: Solutions requiring more than this ΔV are discarded.
@@ -235,20 +234,20 @@ class InterceptConfig:
 
     Unlike :class:`ManeuverSearchConfig`, this does not scan burn locations.
     It directly encodes a specific trajectory structure (algorithm + timing)
-    and asks STK Astrogator to solve for the ΔV that satisfies it.
+    and solves for the ΔV that satisfies it.
 
     Attributes:
-        red_sat: STK object name of the aggressor satellite.
-        blue_sat: STK object name of the target satellite.
+        red_sat: Object name of the aggressor satellite.
+        blue_sat: Object name of the target satellite.
         method: Which intercept engine algorithm to use.
-        manoeuvre_start: UTC epoch for the Initial State. If ``None``, the
+        manoeuvre_start: UTC epoch for the initial state. If ``None``, the
             scenario start epoch is used.
         coast_hours: Pre-burn coast duration in hours.
-        intercept_hours: Post-burn time-of-flight in hours (Lambert, Optimal).
-        number_of_burns: Number of burn segments (Optimal only).
-        target_distance_m: Desired miss distance in metres (Proximity, Optimal).
-        minimize_delta_v: Optimizer cost function — minimise total ΔV (Optimal).
-        max_delta_v_km_s: ΔV bound for DC/Optimizer control parameters.
+        intercept_hours: Post-burn time-of-flight in hours (Lambert).
+        number_of_burns: Number of burn segments (reserved for future use).
+        target_distance_m: Desired miss distance in metres (Proximity).
+        minimize_delta_v: Minimise total ΔV (reserved for future use).
+        max_delta_v_km_s: ΔV budget constraint.
     """
 
     red_sat: str

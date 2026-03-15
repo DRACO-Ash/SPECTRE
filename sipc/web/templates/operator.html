@@ -216,9 +216,9 @@
             <select name="method" id="ie-method" onchange="ieUpdate()">
               <option value="lambert">Lambert (coast &#8594; burn &#8594; coast)</option>
               <option value="hohmann">Hohmann (two-burn circular transfer)</option>
+              <option value="bielliptic">Bi-elliptic (three-burn via intermediate apoapsis)</option>
               <option value="rendezvous">Rendezvous (coast &#8594; burn, match orbit)</option>
               <option value="proximity">Proximity (coast &#8594; burn, min range)</option>
-              <option value="optimal">Optimal (multi-burn, min &#916;V)</option>
             </select>
           </label>
           <label title="When to start the intercept sequence — click Events to query orbital events">Manoeuvre Start (UTC)
@@ -313,13 +313,12 @@
     <script>
     function ieUpdate() {
       var method = document.getElementById('ie-method').value;
-      var hasTof  = method === 'lambert' || method === 'optimal';
-      var hasDist = method === 'proximity' || method === 'optimal';
-      var hasOpt  = method === 'optimal';
+      var hasTof  = method === 'lambert';
+      var hasDist = method === 'proximity';
       document.getElementById('ie-tof-row').style.opacity      = hasTof  ? '' : '0.4';
       document.getElementById('ie-dist-row').style.opacity     = hasDist ? '' : '0.4';
-      document.getElementById('ie-burns-row').style.opacity    = hasOpt  ? '' : '0.4';
-      document.getElementById('ie-minimize-row').style.opacity = hasOpt  ? '' : '0.4';
+      document.getElementById('ie-burns-row').style.display    = 'none';
+      document.getElementById('ie-minimize-row').style.display = 'none';
     }
     ieUpdate();
     </script>

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -21,19 +23,10 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-app = FastAPI(title="SIPC — Space Intercept Planning Console", version="0.3.0")
 
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-
-app.include_router(login_router)
-app.include_router(operator_router)
-app.include_router(udl_router)
-app.include_router(maneuver_router)
-
-
-@app.on_event("startup")
-async def _startup() -> None:
-    """Initialise database tables and bootstrap admin user on first run."""
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Initialise database tables and configure logging on startup."""
     settings = get_settings()
     numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.basicConfig(
@@ -41,3 +34,18 @@ async def _startup() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     await init_db()
+    yield
+
+
+app = FastAPI(
+    title="SIPC — Space Intercept Planning Console",
+    version="0.4.0",
+    lifespan=lifespan,
+)
+
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+app.include_router(login_router)
+app.include_router(operator_router)
+app.include_router(udl_router)
+app.include_router(maneuver_router)

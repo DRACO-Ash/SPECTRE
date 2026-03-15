@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
 from sipc.web.auth import require_login
-from sipc.web.deps import get_templates
+from sipc.web.deps import render
 from sipc.web.models import User
 from sipc.web.planning_state import (
     get_onorbit_catalog,
@@ -93,7 +93,6 @@ async def udl_login(
     Performs a lightweight probe request to UDL to confirm the credentials
     are accepted before storing them.
     """
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     try:
@@ -106,37 +105,37 @@ async def udl_login(
             )
         if resp.status_code == 401:
             logger.warning("UDL login rejected for operator %s", current_user.username)
-            return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            return render(request,
                 "partials/udl_status.html",
-                {"request": request, "udl_user": None, "error": "Invalid UDL credentials (401)."},
+                {"udl_user": None, "error": "Invalid UDL credentials (401)."},
             )
         if not resp.is_success:
             body = resp.text[:300].strip() or "(empty)"
             error = f"UDL probe returned HTTP {resp.status_code}: {body}"
             logger.warning("UDL login probe %d for operator %s: %s", resp.status_code, current_user.username, body)
-            return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            return render(request,
                 "partials/udl_status.html",
-                {"request": request, "udl_user": None, "error": error},
+                {"udl_user": None, "error": error},
             )
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:300].strip() or "(empty)"
         error = f"UDL probe returned HTTP {exc.response.status_code}: {body}"
         logger.warning("UDL login probe HTTP error for operator %s: %s", current_user.username, exc)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/udl_status.html",
-            {"request": request, "udl_user": None, "error": error},
+            {"udl_user": None, "error": error},
         )
     except httpx.TimeoutException:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/udl_status.html",
-            {"request": request, "udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
+            {"udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL login probe failed: %s", exc)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/udl_status.html",
-            {"request": request, "udl_user": None, "error": f"UDL unreachable: {exc}"},
+            {"udl_user": None, "error": f"UDL unreachable: {exc}"},
         )
 
     state.udl_username = username
@@ -147,9 +146,9 @@ async def udl_login(
     # Kick off background catalog fetch (no-op if already loaded).
     asyncio.create_task(_fetch_onorbit_background(username, password))
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/udl_status.html",
-        {"request": request, "udl_user": username, "error": None},
+        {"udl_user": username, "error": None},
     )
 
 
@@ -159,16 +158,15 @@ async def udl_logout(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear UDL credentials from the operator session."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.udl_username = None
     state.udl_password = None
     state.append_log("[UDL] Disconnected")
     logger.info("UDL credentials cleared for operator: %s", current_user.username)
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/udl_status.html",
-        {"request": request, "udl_user": None, "error": None},
+        {"udl_user": None, "error": None},
     )
 
 
@@ -190,25 +188,24 @@ async def fetch_tle(
     * ``latest`` — uses ``/elset/current`` to retrieve the most recent available elset.
     * ``epoch`` — fetches up to 10 elsets with epoch ≤ scenario start time, then selects
       the one whose epoch is closest to (but not after) the scenario start.  Requires
-      scenario time to be set via the STK panel first.  A staleness warning is shown
+      scenario time to be set first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
     """
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
-    _empty = {"request": request, "name": "", "tle": "", "tle_epoch_str": None,
+    _empty = {"name": "", "tle": "", "tle_epoch_str": None,
                "tle_age_days": None, "mode": mode, "error": None}
 
     if not state.udl_username or not state.udl_password:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": "Not connected to UDL — use the UDL panel to log in first."},
         )
 
     if mode == "epoch" and state.scenario_start is None:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
-            {**_empty, "error": "No scenario time set. Configure scenario time in the STK panel first."},
+            {**_empty, "error": "No scenario time set. Configure scenario time in the Scenario Configuration panel first."},
         )
 
     # ── Fetch from UDL ───────────────────────────────────────────────────────
@@ -235,18 +232,18 @@ async def fetch_tle(
         body = exc.response.text[:300].strip() or "(empty)"
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}: {body}"
         logger.warning(error)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": error},
         )
     except httpx.TimeoutException:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL TLE fetch failed for SATNO %s: %s", satno, exc)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": f"UDL unreachable: {exc}"},
         )
@@ -260,7 +257,7 @@ async def fetch_tle(
         records = []
 
     if not records:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": f"No elset found for SATNO {satno}."},
         )
@@ -280,7 +277,7 @@ async def fetch_tle(
                 best_delta = delta
                 best_rec = candidate
         if best_rec is None:
-            return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+            return render(request,
                 "partials/tle_fields.html",
                 {**_empty, "error": (
                     f"No elset found for SATNO {satno} with epoch ≤ "
@@ -315,10 +312,10 @@ async def fetch_tle(
         satno, name, mode, current_user.username,
     )
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/tle_fields.html",
         {
-            "request": request,
+
             "name": name,
             "tle": tle,
             "tle_epoch_str": tle_epoch_str,
@@ -344,14 +341,13 @@ async def fetch_statevector(
     at the most recent available epoch. Useful for initialising high-fidelity
     intercept geometry without propagating a TLE.
     """
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     if not state.udl_username or not state.udl_password:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/statevector_fields.html",
             {
-                "request": request,
+    
                 "sv": None,
                 "error": "Not connected to UDL — use the UDL panel to log in first.",
             },
@@ -370,27 +366,27 @@ async def fetch_statevector(
     except httpx.HTTPStatusError as exc:
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
         logger.warning(error)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/statevector_fields.html",
-            {"request": request, "sv": None, "error": error},
+            {"sv": None, "error": error},
         )
     except httpx.TimeoutException:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/statevector_fields.html",
-            {"request": request, "sv": None, "error": "UDL request timed out."},
+            {"sv": None, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL state vector fetch failed for SATNO %s: %s", satno, exc)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/statevector_fields.html",
-            {"request": request, "sv": None, "error": f"UDL unreachable: {exc}"},
+            {"sv": None, "error": f"UDL unreachable: {exc}"},
         )
 
     if not data:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/statevector_fields.html",
             {
-                "request": request,
+    
                 "sv": None,
                 "error": f"No state vector found for SATNO {satno}.",
             },
@@ -419,9 +415,9 @@ async def fetch_statevector(
         current_user.username,
     )
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/statevector_fields.html",
-        {"request": request, "sv": sv, "error": None},
+        {"sv": sv, "error": None},
     )
 
 
@@ -459,13 +455,12 @@ async def fetch_hrr(
     used.  Satellites are classified Red if their country code is in
     ``_RED_COUNTRIES``; everything else is Blue.
     """
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
-    _empty_err = {"request": request, "hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
+    _empty_err = {"hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
 
     if not state.udl_username or not state.udl_password:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/hrr_panel.html",
             {**_empty_err, "error": "Not connected to UDL — use the UDL panel to log in first."},
         )
@@ -500,22 +495,22 @@ async def fetch_hrr(
         body = exc.response.text[:200].strip() or "(empty)"
         error = f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
         logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/hrr_panel.html", {**_empty_err, "error": error},
         )
     except httpx.TimeoutException:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/hrr_panel.html",
             {**_empty_err, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/hrr_panel.html",
             {**_empty_err, "error": f"UDL unreachable: {exc}"},
         )
 
     if not notifications:
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+        return render(request,
             "partials/hrr_panel.html",
             {**_empty_err, "error": f"No HRR notifications found in the last {days_used} days."},
         )
@@ -559,9 +554,9 @@ async def fetch_hrr(
         current_user.username, days_used, len(satellites), len(notifications),
     )
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/hrr_panel.html",
-        {"request": request, "hrr_blue": hrr_blue, "hrr_red": hrr_red,
+        {"hrr_blue": hrr_blue, "hrr_red": hrr_red,
          "hrr_lookback": days_used, "error": None},
     )
 
@@ -581,7 +576,6 @@ async def search_catalog(
     the current catalog status (loading, ready, error) so the operator can
     see progress without searching.
     """
-    tmpl = get_templates()
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 
@@ -601,8 +595,8 @@ async def search_catalog(
                 if len(results) >= 50:
                     break
 
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
+    return render(request,
         "partials/catalog_results.html",
-        {"request": request, "results": results, "q": q,
+        {"results": results, "q": q,
          "status": status, "total": len(catalog)},
     )

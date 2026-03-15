@@ -15,7 +15,7 @@ from sipc.app_logging.setup import configure_logging
 from sipc.config.settings import get_settings
 from sipc.domain.models import BlueAsset, RedTrack, RunConfig
 from sipc.web.auth import require_login
-from sipc.web.deps import get_templates
+from sipc.web.deps import get_templates, render
 from sipc.web.models import User
 from sipc.web.planning_state import get_session_state
 
@@ -48,21 +48,16 @@ async def dashboard(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Render the main operator console."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "operator.html",
-        {
-            "request": request,
-            "user": current_user,
-            "blue_assets": state.blue_assets,
-            "red_tracks": state.red_tracks,
-            "results": state.results,
-            "log_entries": state.log_entries,
-            "udl_user": state.udl_username,
-            "scenario_start": state.scenario_start,
-        },
-    )
+    return render(request, "operator.html", {
+        "user": current_user,
+        "blue_assets": state.blue_assets,
+        "red_tracks": state.red_tracks,
+        "results": state.results,
+        "log_entries": state.log_entries,
+        "udl_user": state.udl_username,
+        "scenario_start": state.scenario_start,
+    })
 
 
 # ── Asset management partials ─────────────────────────────────────────────────
@@ -157,7 +152,6 @@ async def set_scenario_time(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the scenario time window for event detection and planning."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
 
     try:
@@ -218,12 +212,8 @@ async def log_entries(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the run log partial (for polling fallback)."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/run_log.html",
-        {"request": request, "log_entries": state.log_entries},
-    )
+    return render(request, "partials/run_log.html", {"log_entries": state.log_entries})
 
 
 @router.post("/log/clear", response_class=HTMLResponse)
@@ -232,10 +222,6 @@ async def clear_log(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear the session run log and return the empty partial."""
-    tmpl = get_templates()
     state = get_session_state(current_user.username)
     state.log_entries.clear()
-    return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-        "partials/run_log.html",
-        {"request": request, "log_entries": state.log_entries},
-    )
+    return render(request, "partials/run_log.html", {"log_entries": state.log_entries})

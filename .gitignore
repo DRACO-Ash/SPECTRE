@@ -104,3 +104,9 @@ MANIFEST
 
 # Sample / reference data files
 HRR_List.json
+
+# Reference documents (PDFs, Word docs)
+docs/
+
+# Claude Code memory
+memory/

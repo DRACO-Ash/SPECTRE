@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sipc.web.auth import _COOKIE_NAME, make_session_cookie, verify_password
 from sipc.web.database import get_db
-from sipc.web.deps import get_templates
+from sipc.web.deps import render
 from sipc.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,7 @@ router = APIRouter()
 @router.get("/login", response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
-    tmpl = get_templates()
-    return tmpl.TemplateResponse("login.html", {"request": request, "error": None})  # type: ignore[attr-defined]
+    return render(request, "login.html", {"error": None})
 
 
 @router.post("/login", response_model=None)
@@ -35,18 +34,12 @@ async def post_login(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     """Authenticate and set a session cookie, or re-render with an error."""
-    tmpl = get_templates()
-
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.hashed_password):
         logger.warning("Failed login attempt for username: %s", username)
-        return tmpl.TemplateResponse(  # type: ignore[attr-defined]
-            "login.html",
-            {"request": request, "error": "Invalid username or password."},
-            status_code=401,
-        )
+        return render(request, "login.html", {"error": "Invalid username or password."}, status_code=401)
 
     logger.info("Successful login: %s (role=%s)", username, user.role)
     token = make_session_cookie(username)
