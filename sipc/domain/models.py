@@ -98,6 +98,7 @@ class InterceptMethod(Enum):
     """
 
     LAMBERT    = "lambert"
+    HOHMANN    = "hohmann"
     RENDEZVOUS = "rendezvous"
     PROXIMITY  = "proximity"
     OPTIMAL    = "optimal"

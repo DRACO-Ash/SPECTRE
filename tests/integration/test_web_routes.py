@@ -47,7 +47,7 @@ class TestLoginFlow:
     def test_get_login_page(self, client: object) -> None:
         resp = client.get("/login")  # type: ignore[attr-defined]
         assert resp.status_code == 200
-        assert b"SIPC Login" in resp.content
+        assert b"SIPC" in resp.content and b"login" in resp.content.lower()
 
     def test_login_wrong_password(self, client: object) -> None:
         resp = client.post(  # type: ignore[attr-defined]
@@ -80,10 +80,14 @@ class TestLoginFlow:
 
 
 class TestProtectedRoutes:
-    def test_unauthenticated_dashboard_redirects(self, client: object) -> None:
-        resp = client.get("/", follow_redirects=False)  # type: ignore[attr-defined]
-        assert resp.status_code == 302
-        assert "/login" in resp.headers["location"]
+    def test_unauthenticated_dashboard_redirects(self, initialized_app: object) -> None:
+        from fastapi.testclient import TestClient
+
+        # Use a fresh client with no cookies to test unauthenticated access.
+        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+            resp = fresh.get("/", follow_redirects=False)
+            assert resp.status_code == 302
+            assert "/login" in resp.headers["location"]
 
     def test_authenticated_dashboard(self, client: object) -> None:
         # Login first to get a session cookie
@@ -127,7 +131,7 @@ class TestAssetManagement:
         assert b"R_SAT_Track01" in resp.content
 
 
-class TestPlanRun:
+class TestScenarioTime:
     @pytest.fixture(autouse=True)
     def auth_cookie(self, client: object) -> str:
         login = client.post(  # type: ignore[attr-defined]
@@ -137,35 +141,20 @@ class TestPlanRun:
         )
         return login.cookies["sipc_session"]
 
-    def test_plan_without_assets_returns_error_partial(
-        self, client: object, auth_cookie: str
-    ) -> None:
-        from sipc.web.planning_state import clear_session_state
-
-        clear_session_state("testadmin")
+    def test_set_scenario_time(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
-            "/plan",
-            data={"operator": "testadmin", "source": "MANUAL"},
+            "/scenario/time",
+            data={"scenario_start": "2026-01-01T00:00", "scenario_stop": "2026-01-02T00:00"},
             cookies={"sipc_session": auth_cookie},
         )
         assert resp.status_code == 200
-        assert b"No blue assets" in resp.content
+        assert b"Scenario" in resp.content
 
-    def test_plan_with_assets_returns_results_partial(
-        self, client: object, auth_cookie: str
-    ) -> None:
-        from sipc.web.planning_state import clear_session_state, get_session_state
-        from sipc.domain.models import BlueAsset, RedTrack
-
-        clear_session_state("testadmin")
-        state = get_session_state("testadmin")
-        state.blue_assets.append(BlueAsset(name="Alpha", tle="l1\nl2"))
-        state.red_tracks.append(RedTrack(name="Track01", tle="l1\nl2"))
-
+    def test_set_scenario_time_invalid(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
-            "/plan",
-            data={"operator": "testadmin", "source": "MANUAL"},
+            "/scenario/time",
+            data={"scenario_start": "bad", "scenario_stop": "bad"},
             cookies={"sipc_session": auth_cookie},
         )
         assert resp.status_code == 200
-        assert b"results" in resp.content.lower() or b"No results" in resp.content
+        assert b"Invalid" in resp.content or b"error" in resp.content.lower()

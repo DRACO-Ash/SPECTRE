@@ -1,22 +1,37 @@
 {% extends "base.html" %}
-{% block title %}SIPC — Login{% endblock %}
+{% block title %}SIPC — Operator Login{% endblock %}
+
+{% block nav_brand %}
+<div>
+  <span class="nav-title"><span class="nav-title-accent">SIPC</span> Space Intercept Planning Console</span>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="login-container">
-  <h1>SIPC Login</h1>
-  {% if error %}
-  <p class="error-msg">{{ error }}</p>
-  {% endif %}
-  <form method="post" action="/login" class="login-form">
-    <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" required autofocus
-           title="Your SIPC operator account username" />
-
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required
-           title="Your SIPC operator account password" />
-
-    <button type="submit" class="btn-primary" title="Authenticate to access the SIPC operator console">Sign In</button>
-  </form>
+<div class="login-page">
+  <div class="login-container">
+    <div class="login-logo">
+      <img src="/static/SIPC_logo.svg" alt="SIPC" />
+    </div>
+    <p class="login-title">Operator Authentication</p>
+    <p class="login-subtitle">SIPC Console Access</p>
+    {% if error %}
+    <p class="error-msg" style="text-align:center">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="/login" class="login-form">
+      <label for="username">Username
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus
+               placeholder="Enter operator username"
+               title="Your SIPC operator account username" />
+      </label>
+      <label for="password">Password
+        <input id="password" name="password" type="password" autocomplete="current-password" required
+               placeholder="Enter password"
+               title="Your SIPC operator account password" />
+      </label>
+      <button type="submit" class="btn-primary" title="Authenticate to access the SIPC operator console">Sign In</button>
+    </form>
+    <p class="login-footer">Space Intercept Planning Console &middot; Orbital Warfare M&amp;S</p>
+  </div>
 </div>
 {% endblock %}

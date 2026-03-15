@@ -9,8 +9,18 @@
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
+  <!-- Bluestaq four-segment accent bar -->
+  <div class="accent-bar">
+    <div class="accent-bar-navy"></div>
+    <div class="accent-bar-blue"></div>
+    <div class="accent-bar-mid"></div>
+    <div class="accent-bar-gold"></div>
+  </div>
+
   <nav class="nav-bar">
-    <div class="nav-title">{% block nav_title %}{% endblock %}</div>
+    <div class="nav-brand">
+      {% block nav_brand %}{% endblock %}
+    </div>
     {% block nav_actions %}{% endblock %}
   </nav>
   <main>

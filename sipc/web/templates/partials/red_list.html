@@ -1,5 +1,5 @@
-{% if stk_error %}
-<div class="stk-push-error error-msg" role="alert">STK: {{ stk_error }}</div>
+{% if error %}
+<div class="error-msg" role="alert">{{ error }}</div>
 {% endif %}
 {% if red_tracks %}
 <ul class="asset-list">
@@ -11,7 +11,7 @@
             hx-target="#red-list"
             hx-swap="innerHTML"
             hx-confirm="Remove {{ track.stk_name }}?"
-            title="Remove {{ track.stk_name }} from SIPC session (does not delete from STK scenario)">&times;</button>
+            title="Remove {{ track.stk_name }} from the session">&times;</button>
   </li>
   {% endfor %}
 </ul>

@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}SIPC — Operator Console{% endblock %}
 
-{% block nav_title %}STK Intercept Planning Console{% endblock %}
+{% block nav_brand %}
+<div>
+  <span class="nav-title"><span class="nav-title-accent">SIPC</span> Operator Console</span>
+  <div class="nav-subtitle">Space Intercept Planning Console</div>
+</div>
+{% endblock %}
 
 {% block nav_actions %}
 <div class="nav-right">
@@ -17,20 +22,6 @@
       <div class="nav-dropdown-panel">
         <div id="udl-status">
           {% include "partials/udl_status.html" %}
-        </div>
-      </div>
-    </details>
-
-    <!-- STK connection chip + dropdown -->
-    <details class="nav-dropdown" id="stk-dropdown">
-      <summary class="nav-chip" title="STK Object Model connection — click to manage">
-        <span class="chip-dot {% if stk_connected %}dot-green{% else %}dot-grey{% endif %}"></span>
-        <span class="chip-label">STK{% if stk_connected %} &#10003;{% endif %}</span>
-        <span class="chip-caret">&#9660;</span>
-      </summary>
-      <div class="nav-dropdown-panel">
-        <div id="stk-status">
-          {% include "partials/stk_status.html" %}
         </div>
       </div>
     </details>
@@ -53,7 +44,10 @@
 
   <!-- ── BLUE FORCE ──────────────────────────────────────────────────── -->
   <div class="force-column force-column-blue">
-    <div class="force-header force-header-blue">&#9670; BLUE FORCE</div>
+    <div class="force-header force-header-blue">
+      <svg class="force-icon" viewBox="0 0 14 14"><rect width="14" height="14" rx="2" fill="#00659E"/></svg>
+      BLUE FORCE
+    </div>
 
     <!-- Blue Assets -->
     <section class="panel">
@@ -88,7 +82,7 @@
             <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
             <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
               <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
-              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
+              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
             </label>
           </span>
         </div>
@@ -100,20 +94,20 @@
             hx-disabled-elt="find button[type=submit]"
             hx-on::after-settle="if(event.detail.elt===this){document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
-        <div id="blue-tle-fields">
-          {% include "partials/tle_fields.html" %}
-        </div>
-        <div class="submit-row">
-          <button type="submit" class="btn-primary" title="Create this satellite in STK and load the TLE as a Blue Force asset">Add Blue Asset</button>
-          <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
-        </div>
+          <div id="blue-tle-fields">
+            {% include "partials/tle_fields.html" %}
+          </div>
+          <div class="submit-row">
+            <button type="submit" class="btn-primary" title="Add this satellite as a Blue Force asset">Add Blue Asset</button>
+            <span class="htmx-indicator"><span class="spinner"></span>Adding&hellip;</span>
+          </div>
       </form>
     </section>
 
     <!-- Blue HRR -->
     <section class="panel">
       <div class="panel-header-row">
-        <h2>HRR</h2>
+        <h2>HRR Watchlist</h2>
         <div class="panel-header-actions">
           <button class="btn-secondary btn-sm"
                   hx-get="/udl/hrr"
@@ -121,7 +115,7 @@
                   hx-swap="innerHTML"
                   hx-indicator="#hrr-indicator"
                   hx-disabled-elt="this"
-                  title="Query UDL notification feed for High Rate Revisit watchlist satellites (looks back up to 3 days)">Refresh</button>
+                  title="Query UDL notification feed for High Rate Revisit watchlist satellites">Refresh</button>
           <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
         </div>
       </div>
@@ -131,12 +125,42 @@
     </section>
   </div>
 
-  <!-- ── INTEL / MISSION ─────────────────────────────────────────────── -->
+  <!-- ── MISSION / INTEL ─────────────────────────────────────────────── -->
   <div class="force-column force-column-intel">
     <div class="logo-hero">
       <img src="/static/SIPC_logo.svg" alt="SIPC" class="logo-hero-img" />
     </div>
-    <div class="force-header force-header-intel">&#9670; INTEL / MISSION</div>
+    <div class="force-header force-header-intel">
+      <svg class="force-icon" viewBox="0 0 14 14"><polygon points="7,0 14,7 7,14 0,7" fill="#C8A415"/></svg>
+      MISSION PLANNING
+    </div>
+
+    <!-- Scenario Configuration -->
+    <section class="panel">
+      <h2>Scenario Configuration</h2>
+      <form hx-post="/scenario/time"
+            hx-target="#scenario-status"
+            hx-swap="innerHTML"
+            hx-indicator="#scenario-indicator"
+            class="scenario-time-form">
+        <label title="Start of the analysis time window (UTC)">Window Start (UTC)
+          <input type="datetime-local" name="scenario_start"
+                 value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}" />
+        </label>
+        <label title="End of the analysis time window (UTC)">Window Stop (UTC)
+          <input type="datetime-local" name="scenario_stop" />
+        </label>
+        <div class="submit-row" style="grid-column:1/-1">
+          <button type="submit" class="btn-gold" hx-disabled-elt="this" title="Set the scenario time window for event detection and intercept planning">Set Time Window</button>
+          <span id="scenario-indicator" class="htmx-indicator"><span class="spinner"></span>Setting&hellip;</span>
+        </div>
+      </form>
+      <div id="scenario-status" style="margin-top:0.4rem">
+        {% if scenario_start %}
+        <p class="badge-ok">Scenario: {{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC</p>
+        {% endif %}
+      </div>
+    </section>
 
     <!-- Orbit Catalog -->
     <section class="panel">
@@ -163,110 +187,11 @@
       </div>
     </section>
 
-    <!-- Run Configuration -->
-    <section class="panel">
-      <h2>Run Configuration</h2>
-      <form hx-post="/plan"
-            hx-target="#results-section"
-            hx-swap="innerHTML"
-            hx-indicator="#run-indicator"
-            class="run-form">
-        <label title="Name of the operator running this plan — recorded in provenance log">Operator
-          <input name="operator" value="{{ user.username }}" required />
-        </label>
-        <label title="Data source label for this plan (e.g. UDL / MANUAL) — recorded in provenance log">Source
-          <input name="source" placeholder="e.g. UDL / MANUAL" required />
-        </label>
-        <div class="run-actions">
-          <button type="submit" class="btn-primary" hx-disabled-elt="this" title="Compute STK access windows between all Blue assets and Red tracks">Run Plan</button>
-          <span id="run-indicator" class="htmx-indicator">
-            <span class="spinner"></span>Running intercept plan&hellip;
-          </span>
-        </div>
-      </form>
-    </section>
-
-    <!-- Maneuver Options -->
-    <section class="panel panel-intel">
-      <div class="panel-header-row">
-        <h2>Maneuver Options</h2>
-        <div class="panel-header-actions">
-          <button class="btn-secondary btn-sm"
-                  hx-post="/plan/maneuver/refresh"
-                  hx-target="#maneuver-options-table"
-                  hx-swap="innerHTML"
-                  hx-indicator="#mnv-indicator"
-                  hx-disabled-elt="this"
-                  title="Re-run the previous search with the same satellites and window, using their current orbital state">Re-run Last Search</button>
-          <span id="mnv-indicator" class="htmx-indicator"><span class="spinner"></span>Searching&hellip;</span>
-        </div>
-      </div>
-
-      <form id="mnv-search-form"
-            hx-post="/plan/maneuver/search"
-            hx-target="#maneuver-options-table"
-            hx-swap="innerHTML"
-            hx-indicator="#mnv-indicator"
-            hx-disabled-elt="find button[type=submit]">
-
-        <div class="mnv-search-grid">
-          <label title="The red (threat) satellite that will execute the intercept maneuver">Red satellite
-            <select name="red_sat" id="mnv-red-sat">
-              {% include "partials/red_options.html" %}
-            </select>
-          </label>
-          <label title="The blue (friendly) satellite that will be intercepted">Blue target
-            <select name="blue_sat" id="mnv-blue-sat">
-              {% include "partials/blue_options.html" %}
-            </select>
-          </label>
-          <label title="Start of the maneuver opportunity search window (UTC)">Window start (UTC)
-            <input type="datetime-local" name="window_start"
-                   value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}" />
-          </label>
-          <label title="End of the maneuver opportunity search window (UTC)">Window stop (UTC)
-            <input type="datetime-local" name="window_stop"
-                   value="{{ scenario_stop.strftime('%Y-%m-%dT%H:%M') if scenario_stop else '' }}" />
-          </label>
-          <label title="Maximum total delta-V budget — solutions requiring more than this are discarded">Max ΔV (km/s)
-            <input type="number" name="max_dv" value="3.0" min="0.01" step="0.1" />
-          </label>
-        </div>
-
-        <p class="field-label">Burn types</p>
-        <div class="mnv-check-group">
-          <label title="Instantaneous velocity change — ideal for quick analysis and low-thrust approximations"><input type="checkbox" name="burn_types" value="impulsive" checked> Impulsive</label>
-          <label title="Continuous thrust burn modelled with engine parameters — more realistic for operational planning"><input type="checkbox" name="burn_types" value="finite" checked> Finite</label>
-        </div>
-
-        <p class="field-label">Burn locations</p>
-        <div class="mnv-check-group">
-          <label title="Burn at orbital apogee — most efficient for raising perigee or changing plane at high altitude"><input type="checkbox" name="burn_locations" value="apogee" checked> Apogee</label>
-          <label title="Burn at orbital perigee — most efficient for raising apogee"><input type="checkbox" name="burn_locations" value="perigee" checked> Perigee</label>
-          <label title="Burn at the ascending node — most efficient for orbital plane changes"><input type="checkbox" name="burn_locations" value="ascending_node" checked> Asc Node</label>
-          <label title="Burn at the descending node — alternative plane change point"><input type="checkbox" name="burn_locations" value="descending_node" checked> Desc Node</label>
-          <label title="Burn at maximum northern latitude passage"><input type="checkbox" name="burn_locations" value="north_pole" checked> N Pole</label>
-          <label title="Burn at maximum southern latitude passage"><input type="checkbox" name="burn_locations" value="south_pole" checked> S Pole</label>
-        </div>
-
-        <div class="mnv-actions">
-          <button type="submit" class="btn-primary" title="Run Astrogator MCS differential corrector for all selected burn locations and types — may take 30–120 seconds">Generate Options</button>
-        </div>
-      </form>
-
-      <div id="maneuver-options-table" style="margin-top:0.6rem">
-        <p class="empty-msg">Configure search parameters and click Generate Options.</p>
-      </div>
-
-      <div id="maneuver-status" style="margin-top:0.4rem"></div>
-    </section>
-
-    <!-- ── Intercept Engine — Calculate & Apply ─────────────────────── -->
-    <section class="panel panel-intel">
+    <!-- ── Intercept Engine ──────────────────────────────────────────── -->
+    <section class="panel panel-gold">
       <h2>Intercept Engine</h2>
-      <p class="empty-msg" style="margin-bottom:0.6rem">
-        Directly calculate a manoeuvre for a given algorithm and timing — no search required.
-        Astrogator solves for the ΔV and the satellite moves in STK immediately.
+      <p class="callout callout-gold" style="margin-bottom:0.6rem">
+        Calculate intercept manoeuvres between red and blue satellites. Select an algorithm, configure timing, and compute the burn sequence.
       </p>
 
       <form id="intercept-engine-form"
@@ -277,32 +202,33 @@
             hx-disabled-elt="find button[type=submit]">
 
         <div class="mnv-search-grid">
-          <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red satellite
+          <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red Satellite
             <select name="red_sat" id="ie-red-sat">
               {% include "partials/red_options.html" %}
             </select>
           </label>
-          <label title="The blue (friendly) satellite to intercept">Blue target
+          <label title="The blue (friendly) satellite to intercept">Blue Target
             <select name="blue_sat" id="ie-blue-sat">
               {% include "partials/blue_options.html" %}
             </select>
           </label>
-          <label title="Intercept algorithm — determines the MCS structure Astrogator uses to solve for ΔV">Algorithm
+          <label title="Intercept algorithm — determines the trajectory solver used">Algorithm
             <select name="method" id="ie-method" onchange="ieUpdate()">
               <option value="lambert">Lambert (coast &#8594; burn &#8594; coast)</option>
-              <option value="rendezvous">Rendezvous (coast &#8594; burn, match pos + vel)</option>
+              <option value="hohmann">Hohmann (two-burn circular transfer)</option>
+              <option value="rendezvous">Rendezvous (coast &#8594; burn, match orbit)</option>
               <option value="proximity">Proximity (coast &#8594; burn, min range)</option>
-              <option value="optimal">Optimal (coast &#8594; N burns &#8594; coast, min &#916;V)</option>
+              <option value="optimal">Optimal (multi-burn, min &#916;V)</option>
             </select>
           </label>
-          <label title="When to start the intercept sequence — leave blank to use the scenario start epoch">Manoeuvre start (UTC)
+          <label title="When to start the intercept sequence — click Events to query orbital events">Manoeuvre Start (UTC)
             <div style="display:flex; gap:0.3rem; align-items:center">
               <input type="datetime-local" name="manoeuvre_start"
                      value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M') if scenario_start else '' }}"
-                     title="Initial State epoch for the red satellite — leave blank to use the scenario start epoch"
+                     title="Initial epoch for the intercept calculation"
                      style="flex:1" />
-              <button type="button" class="btn-sm" id="ie-events-btn"
-                      title="Query STK for apogee, perigee, ascending node, and descending node times for the selected red satellite"
+              <button type="button" class="btn-sm btn-secondary" id="ie-events-btn"
+                      title="Query orbital events (apogee, perigee, nodes) for the selected satellites"
                       onclick="fetchOrbitalEvents()">Events</button>
             </div>
           </label>
@@ -353,35 +279,35 @@
           <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
             <input type="number" name="intercept_hours" value="6.0" min="0.01" step="0.1" />
           </label>
-          <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range for all methods">Target dist (m)
+          <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
             <input type="number" name="target_distance_m" value="0.0" min="0" step="1" />
           </label>
           <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
             <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
           </label>
-          <label title="Maximum ΔV budget for the Astrogator DC control variable (km/s)">Max ΔV (km/s)
+          <label title="Maximum delta-V budget (km/s)">Max &#916;V (km/s)
             <input type="number" name="max_dv" value="3.0" min="0.01" step="0.1" />
           </label>
         </div>
 
         <div id="ie-minimize-row" class="mnv-check-group" style="margin-top:0.3rem">
-          <label title="Optimizer cost function — minimise total ΔV (Optimal only)">
-            <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise ΔV
+          <label title="Minimise total delta-V (Optimal only)">
+            <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise &#916;V
           </label>
         </div>
 
         <div class="mnv-actions" style="margin-top:0.6rem">
-          <button type="submit" class="btn-danger"
-                  title="Calculate the required ΔV using Astrogator and move the satellite — this modifies the STK scenario immediately">
-            Calculate &amp; Apply
+          <button type="submit" class="btn-gold"
+                  title="Calculate the intercept trajectory and compute per-burn delta-V breakdown">
+            Calculate Intercept
           </button>
           <span id="intercept-indicator" class="htmx-indicator">
-            <span class="spinner"></span>Calculating&hellip;
+            <span class="spinner"></span>Computing trajectory&hellip;
           </span>
         </div>
       </form>
 
-      <div id="intercept-result" style="margin-top:0.4rem"></div>
+      <div id="intercept-result" style="margin-top:0.5rem"></div>
     </section>
 
     <script>
@@ -399,9 +325,12 @@
     </script>
   </div>
 
-  <!-- ── RED FORCE ───────────────────────────────────────────────────── -->
+  <!-- ── RED FORCE ────────────────────────────────────────────────────── -->
   <div class="force-column force-column-red">
-    <div class="force-header force-header-red">&#9670; RED FORCE</div>
+    <div class="force-header force-header-red">
+      <svg class="force-icon" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="#E74C3C"/></svg>
+      RED FORCE
+    </div>
 
     <!-- Red Tracks -->
     <section class="panel">
@@ -436,7 +365,7 @@
             <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
             <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
               <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
-              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time set)</em>{% endif %}
+              Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
             </label>
           </span>
         </div>
@@ -448,13 +377,13 @@
             hx-disabled-elt="find button[type=submit]"
             hx-on::after-settle="if(event.detail.elt===this){document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
             class="asset-form">
-        <div id="red-tle-fields">
-          {% include "partials/tle_fields.html" %}
-        </div>
-        <div class="submit-row">
-          <button type="submit" class="btn-primary" title="Create this satellite in STK and load the TLE as a Red Force track">Add Red Track</button>
-          <span class="htmx-indicator"><span class="spinner"></span>Adding to STK&hellip;</span>
-        </div>
+          <div id="red-tle-fields">
+            {% include "partials/tle_fields.html" %}
+          </div>
+          <div class="submit-row">
+            <button type="submit" class="btn-primary" title="Add this satellite as a Red Force track">Add Red Track</button>
+            <span class="htmx-indicator"><span class="spinner"></span>Adding&hellip;</span>
+          </div>
       </form>
     </section>
 
@@ -472,24 +401,24 @@
 <!-- ── Full-width sections ─────────────────────────────────────────────── -->
 <div class="full-sections">
 
-  <!-- Intercept Windows -->
+  <!-- Intercept Results -->
   <section class="panel">
-    <h2>Intercept Windows</h2>
+    <h2>Intercept Results</h2>
     <div id="results-section">
       {% include "partials/results_table.html" %}
     </div>
   </section>
 
-  <!-- Run Log -->
+  <!-- Operations Log -->
   <section class="panel">
     <div class="log-header">
-      <h2>Run Log</h2>
+      <h2>Operations Log</h2>
       <div class="log-actions">
         <button class="btn-secondary btn-sm"
                 hx-get="/log/entries"
                 hx-target="#log-pane"
                 hx-swap="innerHTML"
-                title="Reload the run log from server">Refresh</button>
+                title="Reload the operations log">Refresh</button>
         <button class="btn-secondary btn-sm"
                 hx-post="/log/clear"
                 hx-target="#log-pane"
