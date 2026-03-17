@@ -1,6 +1,6 @@
-# SIPC — STK Intercept Planning Console
+# SIPC — Satellite Intercept Planning Console
 
-Rapid intercept replanning console interfacing with AGI Systems Tool Kit (STK) via COM automation.
+Real-time orbital manoeuvre planning console for space defence operators.
 Accessed through a browser-based operator interface built on FastAPI + HTMX.
 
 ## Overview
@@ -8,11 +8,15 @@ Accessed through a browser-based operator interface built on FastAPI + HTMX.
 SIPC provides analysts with a web console for:
 
 - Defining blue/red asset sets (satellites) with TLE propagators
-- Configuring intercept planning runs with full provenance tracking (operator, source, run ID)
-- Executing STK scenario updates on-the-fly via the STK Object Model
-- Reviewing intercept windows, geometry data, and scrolling run logs — all without page reloads
+- Computing intercept trajectories using Lambert, Hohmann, and bi-elliptic transfer solvers
+- Executing tactical manoeuvres: phasing orbits, CW relative motion (radial separation / along-track drift), plane changes, J2 RAAN drift planning, collision avoidance, and optimal defensive evasion
+- Advanced analysis: GEO drift orbit (longitude relocation), NMC passive safety ellipse (proximity ops), manoeuvre classification (space intelligence), and intercept detectability metrics
+- Decision support tools: adversary intent prediction, intercept envelope analysis, relative motion stability, manoeuvre fingerprinting, formation defence, orbital terrain mapping, and minimum-time intercept optimisation
+- Comparing solutions via a ΔV vs transfer-time trade-space scatter plot
+- Detecting orbital events (apogee, perigee, node crossings) via SGP4 propagation
+- Reviewing per-burn ΔV breakdowns (VNB frame), miss distances, and scrolling run logs — all without page reloads
 
-The application runs as a local or cloud-hosted web server. Operators access it from any browser; no desktop install required.
+All orbital mechanics computations use the pure-Python `sipc.astro` package — no external astrodynamics software required.
 
 ---
 
@@ -21,11 +25,7 @@ The application runs as a local or cloud-hosted web server. Operators access it 
 | Component | Minimum version | Notes |
 |-----------|-----------------|-------|
 | Python | 3.14 | |
-| AGI STK | 13.0 | Object Model licence required for live STK |
-| pywin32 | 311 | Windows only; skipped automatically without STK |
 | uvicorn | 0.29 | Bundled via `pip install` |
-
-> **STK COM is Windows-only.** On Linux / macOS (or in Docker), SIPC falls back to `FakeStkSession`, which returns empty access intervals. All domain and web logic is fully functional without STK.
 
 ---
 
@@ -99,79 +99,69 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 | `SIPC_ADMIN_PASS` | No | — | Bootstrap admin password (first run only). Omit to skip bootstrap. |
 | `SIPC_LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `SIPC_LOG_DIR` | No | `logs` | Directory for structlog output files. |
-| `SIPC_SCENARIO_PATH` | No | — | Path to `.sc` scenario file passed to STK on connect. |
-| `STK_INTEGRATION_TESTS` | No | `0` | Set to `1` to enable live-STK integration tests. |
 
 ---
 
 ## Operator Walkthrough
 
-Once logged in, the operator console is divided into several panels. The nav bar exposes two connection chips:
+Once logged in, the operator console has a collapsible sidebar (default 500 px) on the left and an intelligence panel on the right. The nav bar exposes a UDL connection chip:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  [≡] SIPC    [STK ●] [UDL ●]              [operator] [Logout]│
-├───────────────────────────┬──────────────────────────────────┤
-│  BLUE ASSETS              │  RED TRACKS                      │
-│  (asset list with TLE age)│  (track list with TLE age)       │
-│  SATNO [______] [Fetch]   │  SATNO [______] [Fetch]          │
-│  [+ Add Blue Asset]       │  [+ Add Red Track]               │
-│                           │                                  │
-│  HRR WATCHLIST            │  HRR WATCHLIST                   │
-│  (sortable UDL HRR table) │  (sortable UDL HRR table)        │
-│                           │                                  │
-│  ORBIT CATALOG SEARCH     │                                  │
-│  [name/SATNO ___] [Search]│                                  │
-├───────────────────────────┴──────────────────────────────────┤
-│  MANEUVER OPTIONS (Intel/Mission panel)                      │
-│  Red [dropdown] vs Blue [dropdown]                           │
-│  Window start [__] stop [__]  Max ΔV [__] km/s              │
-│  Burns: [x] Impulsive [ ] Finite                             │
-│  Locs:  [x] Apogee [x] Perigee [x] AN [x] DN [x] Poles     │
-│  [Generate Options]   [Re-run Last Search]                   │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │ Loc | Type | Burn Epoch | ΔV km/s | Transfer | Range | │ │
-│  └─────────────────────────────────────────────────────────┘ │
-├──────────────────────────────────────────────────────────────┤
-│  RUN CONFIGURATION                                           │
-│  Operator [____] | Source [____]          [Run Plan]         │
-├──────────────────────────────────────────────────────────────┤
-│  INTERCEPT WINDOWS                                           │
-│  Blue | Red | Start UTC | End UTC | Duration (s)             │
-├──────────────────────────────────────────────────────────────┤
-│  RUN LOG                           [Refresh] [Clear]         │
-│  (scrolling structured log, auto-polled every 5 s)           │
-└──────────────────────────────────────────────────────────────┘
+│  [≡] SIPC    [UDL ●]                       [operator] [Logout]│
+├──────────────────────┬─────────────────────────────────────────┤
+│  SIDEBAR (500px)     │  INTELLIGENCE PANEL                    │
+│  ┌ Assets ─────────┐ │  Intercept Engine                      │
+│  │ [Red][Blue][HRR]│ │  Threat Sweep                          │
+│  │  sub-tabs        │ │  Orbital Events                        │
+│  └─────────────────┘ │  Trade-Space Plot                      │
+│  Scenario Time        │  Session Log                           │
+│  UDL Catalogue Search │                                        │
+└──────────────────────┴─────────────────────────────────────────┘
 ```
 
 ### Step-by-step
 
-1. **Connect STK** — click the **STK** chip in the nav bar and choose:
-   - *Attach* — connect to a running STK instance with a scenario already loaded
-   - *Load* — provide a path to a `.sc` file to open it in STK
-   - *Create* — enter a name and UTC start/stop times to create a new scenario
-   - After restart: use **Import from Scenario** to re-populate session state from existing `B_SAT_*`/`R_SAT_*` objects in STK without re-adding or re-propagating them.
+1. **Connect UDL** — click the **UDL** chip in the nav bar and enter credentials. Once connected, TLE fetch, catalogue search, and HRR watchlist are enabled.
 
-2. **Connect UDL** — click the **UDL** chip and enter credentials. Once connected, TLE fetch and HRR watchlist are enabled.
+2. **Load the HRR watchlist** — in the UDL panel, click **Fetch HRR Watchlist**. Objects are classified as Blue (friendly nations) or Red (adversary nations) and ranked 0–5 by activity level.
 
-3. **Add blue assets** — enter a SATNO and click **Fetch TLE** (UDL), or click **+ Add Blue Asset** and paste a TLE manually. Use the HRR watchlist or Orbit Catalog to discover candidates. Repeat for all friendly assets.
+3. **Add assets from the HRR watchlist** — switch to the **HRR** sub-tab inside the Assets panel. Each row in the Blue HRR and Red HRR tables has one-click buttons:
+   - **→ Blue** — fetches the TLE from UDL and immediately adds the satellite as a Blue Asset
+   - **→ Red** — fetches the TLE from UDL and immediately adds the satellite as a Red Track
 
-4. **Add red tracks** — same workflow using the Red column. Repeat for all threat tracks.
+   The button is replaced by a confirmation badge on success.
 
-5. **Generate maneuver options** — in the **Maneuver Options** panel, select a Red satellite, a Blue target, a search window, max ΔV, burn types, and burn locations. Click **Generate Options**. STK Astrogator runs a differential corrector for each location × burn type combination; solved options appear in the sortable table. Click **Select** on any row to store that maneuver.
+4. **Add assets manually** — use the **Blue** and **Red** sub-tabs in the Assets panel to enter a NORAD catalogue number (Fetch TLE) or paste a TLE directly.
 
-6. **Run intercept plan** — confirm the Operator callsign and Source tag, then click **Run Plan**. STK computes access windows for all blue/red pairs; results appear in the **Intercept Windows** table.
+5. **Set scenario time** — define the analysis window (start/stop times) in the Scenario Time panel. Defaults to current UTC + 24 hours.
 
-7. **Review and repeat** — use **Re-run Last Search** to re-run the Astrogator search with updated satellite state. Use **Clear** to reset the run log between runs. Click × on any asset to remove it before the next run.
+6. **Compute orbital events** — select a red and/or blue satellite, click **Compute Events**. Apogee, perigee, and node crossings are detected via SGP4 propagation and displayed as clickable badges that auto-populate the manoeuvre start time.
 
-All panel updates are HTMX partial swaps — the page never fully reloads.
+7. **Run intercept calculations** — in the **Intercept Engine** panel, select a red target, a blue asset, and choose a method. Methods are grouped into:
+   - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Rendezvous, Proximity
+   - **Tactical Manoeuvres**: Phasing, CW Radial Separation, CW Along-Track Drift, Plane Change, J2 Drift, COLA, Evasion
+   - **Advanced Analysis**: GEO Drift (longitude relocation), NMC (safety ellipse), Manoeuvre Detect (classify TLE changes), Detectability (intercept observability)
+   - **Decision Support**: Intent Predict (adversary assessment), Intercept Envelope (reachability analysis), Stability (relative motion), Fingerprint (behavioural classification), Formation Defence (formation-aware COLA), Terrain (orbital regime risk), Min-Time (fastest transfer)
+
+   Set coast and time-of-flight parameters, then click **Calculate Intercept**. The per-burn ΔV breakdown appears with VNB components, arrival epoch, and miss distance.
+
+8. **Run a Threat Sweep** — in the **Threat Sweep** panel:
+   - Select a **Target Group** from the dropdown (Blue HRR or Red HRR, by rank 0–5)
+   - The dropdown automatically pre-fetches TLEs for the selected group
+   - Click **Sweep Targets** to batch-evaluate all objects at 5 orbital epochs (now, apogee, perigee, ascending node, descending node) using Hohmann transfers, then auto-refine the top 5 with Lambert for VNB components
+   - Results are ranked by ΔV with one-click refinement per entry
+
+9. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method. Use this to identify the optimal trade-off.
+
+10. **Review and repeat** — use **Clear History** to reset the trade-space plot. Click × on any asset to remove it. All panel updates are HTMX partial swaps — the page never fully reloads.
 
 ---
 
 ## Running Tests
 
 ```powershell
-# Unit tests only (no STK, no web server required)
+# Unit tests only (no web server required)
 pytest tests/unit/
 
 # Unit tests with coverage report
@@ -184,12 +174,15 @@ pytest tests/integration/test_web_routes.py
 pytest
 ```
 
-### Live STK integration tests
+---
+
+## Generating the Operator Guide
 
 ```powershell
-$env:STK_INTEGRATION_TESTS = "1"
-pytest tests/integration/ -m integration
+python docs/generate_guide.py
 ```
+
+Outputs `docs/SIPC_Operator_Guide.docx` — a comprehensive 15-section guide formatted per the Bluestaq document style guide (Segoe UI, navy/gold headings, data tables, callout boxes). Covers classical transfers, tactical manoeuvres, advanced analysis (GEO drift, NMC, manoeuvre classification, detectability, evasion), trade-space analysis, and 9 operator scenarios.
 
 ---
 
@@ -198,33 +191,33 @@ pytest tests/integration/ -m integration
 ```
 sipc/                       ← repo root
 ├── sipc/                   ← importable package
-│   ├── stk_adapter/        ← IStkSession interface, FakeStkSession, StkComSession
-│   ├── domain/             ← intercept planning logic (decoupled from STK)
-│   │   ├── models.py       ← BlueAsset, RedTrack, RunConfig, InterceptWindow,
-│   │   │                      BurnType, BurnLocation, ManeuverOption, ManeuverSearchConfig
+│   ├── astro/              ← pure-Python orbital mechanics (classical transfers, tactical manoeuvres, advanced analysis, decision support, SGP4, events)
+│   ├── domain/             ← intercept planning logic
+│   │   ├── models.py       ← BlueAsset, RedTrack, RunConfig, InterceptResult,
+│   │   │                      BurnResult, ManeuverOption, ManeuverSearchConfig
 │   │   ├── scenario.py     ← ScenarioPlanner orchestrator
-│   │   ├── maneuver_planner.py ← ManeuverPlanner (Astrogator option search)
 │   │   └── geometry.py     ← geometry helpers
 │   ├── web/                ← FastAPI web console
 │   │   ├── app.py          ← application factory + startup
 │   │   ├── auth.py         ← session cookies + require_login dependency
 │   │   ├── database.py     ← async SQLAlchemy engine + admin bootstrap
 │   │   ├── models.py       ← User ORM model
-│   │   ├── planning_state.py ← per-session in-memory state (assets, maneuver options)
+│   │   ├── planning_state.py ← per-session in-memory state (assets, intercept history)
 │   │   ├── routes/
 │   │   │   ├── login.py    ← GET/POST /login, POST /logout
-│   │   │   ├── operator.py ← dashboard, asset CRUD, /plan, STK connect/import, log
-│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, HRR watchlist, orbit catalog
-│   │   │   └── maneuver.py ← /plan/maneuver/search, /refresh, /select
+│   │   │   ├── operator.py ← dashboard, asset CRUD, log
+│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, catalogue search
+│   │   │   └── maneuver.py ← intercept engine, orbital events, trade-space data
 │   │   ├── templates/      ← Jinja2 HTML (base, login, operator, partials)
-│   │   └── static/         ← style.css (dark-mode military theme), SIPC_logo.svg
+│   │   └── static/         ← style.css (Bluestaq dark ops theme), Chart.js, SIPC_logo.svg
 │   ├── app_logging/        ← structlog setup + run_id correlation
 │   └── config/             ← constants and runtime settings
 ├── tests/
-│   ├── unit/               ← fast tests (FakeStkSession, auth helpers, state, ManeuverPlanner)
-│   └── integration/        ← FastAPI TestClient + live STK (opt-in)
+│   ├── unit/               ← fast tests (auth helpers, state, domain models)
+│   └── integration/        ← FastAPI TestClient web route tests
+├── docs/                   ← operator guide generator, architecture notes, reference PDFs
 ├── Dockerfile              ← production container (uvicorn, Python slim)
-└── docs/                   ← architecture notes, operator guide, astrogator notes
+└── pyproject.toml
 ```
 
 ---
@@ -262,14 +255,13 @@ INSERT INTO users (username, hashed_password, role) VALUES ('newuser', '<hash>',
 |--------|---------|
 | `B_SAT_` | Blue satellite asset |
 | `R_SAT_` | Red track satellite |
-| `CALC_` | Computed / derived STK objects |
 | `OUT_` | Run output folders |
 
-All times are UTC. Distances in km, speeds in m/s, angles in degrees.
+All times are UTC. Distances in km, speeds in km/s, angles in degrees.
 Coordinate frame: ICRF/J2000.
 
 ---
 
 ## Architecture
 
-See `docs/architecture.md` for hexagonal architecture design decisions and adapter pattern details.
+See `docs/architecture.md` for architecture design decisions and adapter pattern details.

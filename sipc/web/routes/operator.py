@@ -57,6 +57,7 @@ async def dashboard(
         "log_entries": state.log_entries,
         "udl_user": state.udl_username,
         "scenario_start": state.scenario_start,
+        "udl_data_mode": state.udl_data_mode,
     })
 
 
@@ -86,6 +87,117 @@ async def add_blue_asset(
 
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
     return _list_response(request, "partials/blue_list.html", ctx)
+
+
+@router.post("/assets/blue/quick-add", response_class=HTMLResponse)
+async def quick_add_blue_asset(
+    request: Request,
+    satno: Annotated[int, Form()],
+    name: Annotated[str, Form()],
+    btn_id: Annotated[str, Form()] = "",
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Fetch TLE from UDL and immediately add the satellite as a blue asset.
+
+    Called from the HRR watchlist "→ Blue" button for one-click ingestion.
+    Returns the updated blue list partial with OOB select updates.
+    """
+    state = get_session_state(current_user.username)
+    clean_name = name.strip() or str(satno)
+
+    # Skip if already in the session.
+    prospective_stk = f"B_SAT_{clean_name}"
+    if any(a.stk_name == prospective_stk for a in state.blue_assets):
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
+               "error": f"{prospective_stk} is already in the session."}
+        return _list_response(request, "partials/blue_list.html", ctx)
+
+    # Fetch TLE from UDL.
+    if not state.udl_username or not state.udl_password:
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
+               "error": "Not connected to UDL — cannot fetch TLE."}
+        return _list_response(request, "partials/blue_list.html", ctx)
+
+    from sipc.web.routes.udl import fetch_tle_for_satno
+
+    tle = await fetch_tle_for_satno(
+        satno, state.udl_username, state.udl_password,
+        data_mode=state.udl_data_mode or "REAL",
+    )
+    if not tle:
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
+               "error": f"TLE fetch failed for {clean_name} ({satno})."}
+        return _list_response(request, "partials/blue_list.html", ctx)
+
+    asset = BlueAsset(name=clean_name, tle=tle)
+    state.blue_assets.append(asset)
+    state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
+
+    ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
+    resp_html = _list_response(request, "partials/blue_list.html", ctx)
+
+    oob_badge = ""
+    if btn_id:
+        oob_badge = (
+            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f' class="badge-ok" style="font-size:0.68rem">&#10003; Added</span>'
+        )
+    return HTMLResponse(resp_html.body.decode() + oob_badge)
+
+
+@router.post("/assets/red/quick-add", response_class=HTMLResponse)
+async def quick_add_red_track(
+    request: Request,
+    satno: Annotated[int, Form()],
+    name: Annotated[str, Form()],
+    btn_id: Annotated[str, Form()] = "",
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Fetch TLE from UDL and immediately add the satellite as a red track.
+
+    Called from the HRR watchlist "→ Red" button for one-click ingestion.
+    Returns the updated red list partial with OOB select updates and an OOB
+    badge replacing the button that was clicked.
+    """
+    state = get_session_state(current_user.username)
+    clean_name = name.strip() or str(satno)
+
+    prospective_stk = f"R_SAT_{clean_name}"
+    if any(t.stk_name == prospective_stk for t in state.red_tracks):
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
+               "error": f"{prospective_stk} is already in the session."}
+        return _list_response(request, "partials/red_list.html", ctx)
+
+    if not state.udl_username or not state.udl_password:
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
+               "error": "Not connected to UDL — cannot fetch TLE."}
+        return _list_response(request, "partials/red_list.html", ctx)
+
+    from sipc.web.routes.udl import fetch_tle_for_satno
+
+    tle = await fetch_tle_for_satno(
+        satno, state.udl_username, state.udl_password,
+        data_mode=state.udl_data_mode or "REAL",
+    )
+    if not tle:
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
+               "error": f"TLE fetch failed for {clean_name} ({satno})."}
+        return _list_response(request, "partials/red_list.html", ctx)
+
+    track = RedTrack(name=clean_name, tle=tle)
+    state.red_tracks.append(track)
+    state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
+
+    ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
+    resp_html = _list_response(request, "partials/red_list.html", ctx)
+
+    oob_badge = ""
+    if btn_id:
+        oob_badge = (
+            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f' class="badge-red" style="font-size:0.68rem">&#10003; Added</span>'
+        )
+    return HTMLResponse(resp_html.body.decode() + oob_badge)
 
 
 @router.delete("/assets/blue/{name}", response_class=HTMLResponse)

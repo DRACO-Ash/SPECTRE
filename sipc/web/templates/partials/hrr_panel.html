@@ -42,7 +42,7 @@ function hrrSort(th) {
     </thead>
     <tbody>
       {% for sat in hrr_blue %}
-      <tr>
+      <tr id="hrr-blue-row-{{ sat.satno }}">
         <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
         <td class="col-dim">{{ sat.satno }}</td>
         <td class="col-dim">{{ sat.country }}</td>
@@ -50,19 +50,21 @@ function hrrSort(th) {
         <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
         <td class="col-actions">
           {% if sat.satno %}
-          <button hx-get="/udl/tle"
-                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
-                  hx-target="#blue-tle-fields"
+          <button id="hrr-bb-{{ sat.satno }}"
+                  hx-post="/assets/blue/quick-add"
+                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-bb-{{ sat.satno }}"}'
+                  hx-target="#blue-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
-                  title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Blue Asset form"
+                  title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
                   class="btn-primary btn-sm">&rarr; Blue</button>
-          <button hx-get="/udl/tle"
-                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
-                  hx-target="#red-tle-fields"
+          <button id="hrr-br-{{ sat.satno }}"
+                  hx-post="/assets/red/quick-add"
+                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-br-{{ sat.satno }}"}'
+                  hx-target="#red-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
-                  title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Red Track form"
+                  title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
                   class="btn-danger btn-sm">&rarr; Red</button>
           {% endif %}
         </td>
@@ -91,7 +93,7 @@ function hrrSort(th) {
       </thead>
       <tbody>
         {% for sat in hrr_red %}
-        <tr>
+        <tr id="hrr-red-row-{{ sat.satno }}">
           <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
           <td class="col-dim">{{ sat.satno }}</td>
           <td class="col-dim">{{ sat.country }}</td>
@@ -99,19 +101,21 @@ function hrrSort(th) {
           <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
           <td class="col-actions">
             {% if sat.satno %}
-            <button hx-get="/udl/tle"
-                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
-                    hx-target="#red-tle-fields"
+            <button id="hrr-rr-{{ sat.satno }}"
+                    hx-post="/assets/red/quick-add"
+                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-rr-{{ sat.satno }}"}'
+                    hx-target="#red-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
-                    title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Red Track form"
+                    title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
                     class="btn-danger btn-sm">&rarr; Red</button>
-            <button hx-get="/udl/tle"
-                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}}'
-                    hx-target="#blue-tle-fields"
+            <button id="hrr-rb-{{ sat.satno }}"
+                    hx-post="/assets/blue/quick-add"
+                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-rb-{{ sat.satno }}"}'
+                    hx-target="#blue-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
-                    title="Fetch TLE for {{ sat.name }} ({{ sat.satno }}) and pre-fill the Blue Asset form"
+                    title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
                     class="btn-primary btn-sm">&rarr; Blue</button>
             {% endif %}
           </td>

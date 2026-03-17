@@ -1,0 +1,32 @@
+{# Single refined child row — replaces via hx-swap="outerHTML" on the <tr>. #}
+{% if error %}
+<tr id="threat-row-{{ index }}"><td colspan="7" class="error-msg">{{ error }}</td></tr>
+{% elif entry %}
+<tr class="threat-child"
+    id="threat-row-{{ index }}"
+    {% if entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+  <td class="threat-child-indent"></td>
+  <td class="col-dim">{{ entry.burn_location }}</td>
+  <td class="col-dim">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
+  <td class="mnv-dv">{{ "%.4f" | format(entry.delta_v_km_s) }}</td>
+  <td class="col-dim">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
+  <td class="col-dim" title="Pro {{ '%.4f' | format(entry.dv_prograde) }}  Nor {{ '%.4f' | format(entry.dv_normal) }}  Rad {{ '%.4f' | format(entry.dv_radial) }}">
+    {{ entry.method }}
+  </td>
+  <td class="col-actions" style="white-space:nowrap">
+    {% if entry.method == "hohmann" %}
+    <button class="btn-secondary btn-sm"
+            hx-post="/plan/threat/refine"
+            hx-vals='{"entry_index": {{ index }}}'
+            hx-target="#threat-row-{{ index }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            title="Refine with Lambert solver">Refine</button>
+    {% endif %}
+    <button class="btn-secondary btn-sm"
+            type="button"
+            onclick="event.stopPropagation(); loadInEngine('{{ entry.target.target_name }}', '{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ entry.method }}')"
+            title="Load in intercept engine">Load</button>
+  </td>
+</tr>
+{% endif %}

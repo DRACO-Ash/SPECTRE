@@ -52,6 +52,51 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
 _UDL_BASE = "https://unifieddatalibrary.com/udl"
 
 
+async def fetch_tle_for_satno(
+    satno: int, username: str, password: str, data_mode: str = "REAL",
+) -> str | None:
+    """Fetch current TLE for a SATNO from UDL.
+
+    Returns ``'line1\\nline2'`` or ``None`` on failure.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            params: dict = {
+                "satNo": satno,
+                "epoch": ">now-1 days",
+            }
+            if data_mode != "REAL":
+                params["dataMode"] = data_mode
+            resp = await client.get(
+                f"{_UDL_BASE}/elset",
+                params=params,
+                auth=(username, password),
+                timeout=10.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("fetch_tle_for_satno(%s) failed: %s", satno, exc)
+        return None
+
+    if isinstance(data, dict):
+        records = [data]
+    elif isinstance(data, list):
+        records = data
+    else:
+        records = []
+
+    if not records:
+        return None
+
+    rec = records[0]
+    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
+    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
+    if not line1 or not line2:
+        return None
+    return f"{line1}\n{line2}"
+
+
 async def _fetch_onorbit_background(username: str, password: str) -> None:
     """Fetch the UDL on-orbit catalog in the background and cache it app-wide.
 
@@ -152,6 +197,29 @@ async def udl_login(
     )
 
 
+_VALID_DATA_MODES = {"REAL", "TEST", "EXERCISE", "SIMULATED"}
+
+
+@router.post("/data-mode", response_model=None)
+async def set_data_mode(
+    request: Request,
+    data_mode: Annotated[str, Form()],
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Set the UDL data classification mode for this session."""
+    state = get_session_state(current_user.username)
+    mode = data_mode.strip().upper()
+    if mode not in _VALID_DATA_MODES:
+        mode = "REAL"
+    state.udl_data_mode = mode
+    state.append_log(f"[UDL] Data mode set to {mode}")
+    logger.info("UDL data mode set to %s for operator %s", mode, current_user.username)
+    return render(request,
+        "partials/data_mode_status.html",
+        {"udl_data_mode": mode},
+    )
+
+
 @router.post("/logout", response_model=None)
 async def udl_logout(
     request: Request,
@@ -211,20 +279,30 @@ async def fetch_tle(
     # ── Fetch from UDL ───────────────────────────────────────────────────────
     try:
         async with httpx.AsyncClient() as client:
+            dm = state.udl_data_mode or "REAL"
             if mode == "epoch":
                 epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+                params: dict = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
+                if dm != "REAL":
+                    params["dataMode"] = dm
                 resp = await client.get(
                     f"{_UDL_BASE}/elset",
-                    params={"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10},
+                    params=params,
                     auth=(state.udl_username, state.udl_password),
                     timeout=10.0,
                 )
             else:
+                latest_params: dict = {
+                    "satNo": satno,
+                    "epoch": ">now-1 days",
+                }
+                if dm != "REAL":
+                    latest_params["dataMode"] = dm
                 resp = await client.get(
-                    f"{_UDL_BASE}/elset/current",
-                    params={"satNo": satno},
+                    f"{_UDL_BASE}/elset",
+                    params=latest_params,
                     auth=(state.udl_username, state.udl_password),
-                    timeout=10.0,
+                    timeout=15.0,
                 )
         resp.raise_for_status()
         data = resp.json()
@@ -263,6 +341,34 @@ async def fetch_tle(
         )
 
     # ── Select the best record ───────────────────────────────────────────────
+    logger.info(
+        "UDL returned %d elset record(s) for SATNO %s mode=%s dataMode=%s",
+        len(records), satno, mode, dm,
+    )
+
+    # Log the keys from the first record so we can verify field names.
+    if records:
+        sample = records[0]
+        logger.info("UDL elset record keys: %s", list(sample.keys()))
+        # Also check for any epoch-like top-level field
+        for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
+            if key in sample:
+                logger.info("  record[%r] = %s", key, str(sample[key])[:80])
+
+    # Log every candidate's TLE line1 epoch for diagnostics.
+    for i, candidate in enumerate(records):
+        l1_raw = str(
+            candidate.get("line1") or candidate.get("TLE_LINE1") or candidate.get("tle1") or ""
+        ).strip()
+        ep = _parse_tle_epoch(l1_raw)
+        logger.info(
+            "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
+            i,
+            l1_raw[18:32] if len(l1_raw) > 32 else l1_raw,
+            ep.isoformat() if ep else "None",
+            candidate.get("objectName") or candidate.get("OBJECT_NAME") or "?",
+        )
+
     if mode == "epoch":
         # Pick the record whose TLE epoch is closest to (and ≤) scenario_start.
         best_rec = None
@@ -286,7 +392,22 @@ async def fetch_tle(
             )
         rec = best_rec
     else:
-        rec = records[0]
+        # For "latest" mode: pick the record with the newest TLE epoch.
+        best_rec = records[0]
+        best_epoch = _parse_tle_epoch(
+            str(best_rec.get("line1") or best_rec.get("TLE_LINE1") or "").strip()
+        )
+        for candidate in records[1:]:
+            l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
+            ep = _parse_tle_epoch(l1)
+            if ep is not None and (best_epoch is None or ep > best_epoch):
+                best_epoch = ep
+                best_rec = candidate
+        rec = best_rec
+        logger.info(
+            "Latest mode selected record with epoch=%s",
+            best_epoch.isoformat() if best_epoch else "None",
+        )
 
     # ── Extract fields ───────────────────────────────────────────────────────
     name = name_override.strip() or str(rec.get("objectName") or rec.get("OBJECT_NAME") or satno).strip()
@@ -353,11 +474,13 @@ async def fetch_statevector(
             },
         )
 
+    dm = state.udl_data_mode or "REAL"
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/statevector",
-                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
+                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z",
+                        "dataMode": dm, "maxResults": 1},
                 auth=(state.udl_username, state.udl_password),
                 timeout=10.0,
             )
@@ -441,31 +564,18 @@ def _parse_created_at(rec: dict) -> datetime:
 
 
 
-@router.get("/hrr", response_model=None)
-async def fetch_hrr(
-    request: Request,
-    current_user: User = Depends(require_login),
-) -> HTMLResponse:
-    """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial.
+async def fetch_hrr_objects(
+    username: str,
+    password: str,
+    data_mode: str = "REAL",
+) -> tuple[list[dict], list[dict], int, str | None]:
+    """Fetch HRR satellites from UDL and return (blue, red, lookback_days, error).
 
-    Queries ``/notification`` with ``msgType=JCO-HRR-SATELLITES``.  Starts at
-    ``now-1 days`` and increments the lookback window by one day until a
-    non-empty response is received (up to ``_HRR_MAX_LOOKBACK_DAYS``).  When
-    multiple notification records are returned the newest by ``createdAt`` is
-    used.  Satellites are classified Red if their country code is in
-    ``_RED_COUNTRIES``; everything else is Blue.
+    Reusable by both the HRR panel route and the threat sweep.  On success the
+    returned lists contain normalised dicts with keys: satno, name, country,
+    rank, orbit_regime, created_at.  On failure, both lists are empty and *error*
+    contains a human-readable message.
     """
-    state = get_session_state(current_user.username)
-
-    _empty_err = {"hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
-
-    if not state.udl_username or not state.udl_password:
-        return render(request,
-            "partials/hrr_panel.html",
-            {**_empty_err, "error": "Not connected to UDL — use the UDL panel to log in first."},
-        )
-
-    # ── Walk back day-by-day until we get a result (max 3 days) ─────────
     _HRR_MAX_LOOKBACK_DAYS = 3
     notifications: list[dict] = []
     days_used = 0
@@ -477,12 +587,12 @@ async def fetch_hrr(
                     f"{_UDL_BASE}/notification",
                     params={
                         "createdAt": f">now-{day} days",
-                        "dataMode": "REAL",
+                        "dataMode": data_mode,
                         "msgType": "JCO-HRR-SATELLITES",
                         "source": "JCO",
                         "maxResults": 10000,
                     },
-                    auth=(state.udl_username, state.udl_password),
+                    auth=(username, password),
                     timeout=30.0,
                 )
                 resp.raise_for_status()
@@ -493,34 +603,19 @@ async def fetch_hrr(
                     break
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:200].strip() or "(empty)"
-        error = f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
-        logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
-        return render(request,
-            "partials/hrr_panel.html", {**_empty_err, "error": error},
-        )
+        return [], [], 0, f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
     except httpx.TimeoutException:
-        return render(request,
-            "partials/hrr_panel.html",
-            {**_empty_err, "error": "UDL request timed out."},
-        )
+        return [], [], 0, "UDL request timed out."
     except httpx.RequestError as exc:
-        return render(request,
-            "partials/hrr_panel.html",
-            {**_empty_err, "error": f"UDL unreachable: {exc}"},
-        )
+        return [], [], 0, f"UDL unreachable: {exc}"
 
     if not notifications:
-        return render(request,
-            "partials/hrr_panel.html",
-            {**_empty_err, "error": f"No HRR notifications found in the last {days_used} days."},
-        )
+        return [], [], 0, f"No HRR notifications found in the last {_HRR_MAX_LOOKBACK_DAYS} days."
 
-    # ── Pick the newest notification and extract its msgBody ─────────────
     newest = max(notifications, key=_parse_created_at)
     msg_body: list[dict] = newest.get("msgBody") or []
     notification_created_at = str(newest.get("createdAt") or "").strip()
 
-    # ── Classify by country ───────────────────────────────────────────────
     hrr_blue: list[dict] = []
     hrr_red: list[dict] = []
 
@@ -543,15 +638,46 @@ async def fetch_hrr(
         else:
             hrr_blue.append(entry)
 
-    satellites = msg_body
+    return hrr_blue, hrr_red, days_used, None
+
+
+@router.get("/hrr", response_model=None)
+async def fetch_hrr(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial."""
+    state = get_session_state(current_user.username)
+
+    _empty_err = {"hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
+
+    if not state.udl_username or not state.udl_password:
+        return render(request,
+            "partials/hrr_panel.html",
+            {**_empty_err, "error": "Not connected to UDL — use the UDL panel to log in first."},
+        )
+
+    dm = state.udl_data_mode or "REAL"
+    hrr_blue, hrr_red, days_used, error = await fetch_hrr_objects(
+        state.udl_username, state.udl_password, dm,
+    )
+
+    if error:
+        logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
+        return render(request,
+            "partials/hrr_panel.html", {**_empty_err, "error": error},
+        )
+
+    # Cache all HRR objects in session state for threat sweep use.
+    state.hrr_objects = hrr_blue + hrr_red
 
     state.append_log(
         f"[HRR] lookback={days_used}d — "
-        f"{len(hrr_blue)} Blue, {len(hrr_red)} Red ({len(satellites)} sats, {len(notifications)} notifications)"
+        f"{len(hrr_blue)} Blue, {len(hrr_red)} Red ({len(hrr_blue) + len(hrr_red)} sats)"
     )
     logger.info(
-        "HRR fetched for operator %s: lookback=%dd %d sats from %d notifications",
-        current_user.username, days_used, len(satellites), len(notifications),
+        "HRR fetched for operator %s: lookback=%dd %d blue + %d red",
+        current_user.username, days_used, len(hrr_blue), len(hrr_red),
     )
 
     return render(request,

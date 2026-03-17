@@ -53,4 +53,11 @@
 
   <p class="intercept-notes col-dim" style="margin-top:0.3rem">{{ result.notes }}</p>
 </div>
+
+{# Kick off background chart render into the full-width panel #}
+{% if intercept_history and intercept_history|length > 1 %}
+<script>
+if (typeof _sipcRenderTradeSpace === 'function') _sipcRenderTradeSpace();
+</script>
+{% endif %}
 {% endif %}

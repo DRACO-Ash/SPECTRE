@@ -1,0 +1,49 @@
+{# Sweep target selector — dropdown of Blue / Red HRR groups by rank #}
+<input type="hidden" name="tgt_config_loaded" value="1" />
+
+{% if not has_udl %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  Connect to UDL first to load the HRR watchlist.
+</p>
+{% elif not has_hrr %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  No HRR objects loaded. Fetch the HRR watchlist from the UDL panel first.
+</p>
+{% else %}
+<div style="display:flex; gap:0.6rem; align-items:flex-end; flex-wrap:wrap">
+  <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); flex:1; min-width:10rem">
+    Target Group
+    <select name="tgt_group" id="ts-tgt-group"
+            hx-post="/plan/threat/fetch-targets"
+            hx-target="#ts-tgt-status"
+            hx-swap="innerHTML"
+            hx-indicator="#ts-tgt-indicator">
+      <option value="">— Select target group —</option>
+      {% if blue_hrr %}
+      <optgroup label="Blue HRR">
+        {% for rank, count in blue_hrr %}
+        <option value="blue:{{ rank }}">Rank {{ rank }} ({{ count }} object{{ 's' if count != 1 else '' }})</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
+      {% if red_hrr %}
+      <optgroup label="Red HRR">
+        {% for rank, count in red_hrr %}
+        <option value="red:{{ rank }}">Rank {{ rank }} ({{ count }} object{{ 's' if count != 1 else '' }})</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
+    </select>
+  </label>
+  <span id="ts-tgt-indicator" class="htmx-indicator" style="font-size:0.72rem">
+    <span class="spinner"></span> Fetching TLEs&hellip;
+  </span>
+</div>
+<div id="ts-tgt-status" style="margin-top:0.3rem"></div>
+<div class="submit-row" style="margin-top:0.7rem; padding-top:0.5rem; border-top:1px solid var(--border)">
+  <button type="submit" class="btn-danger">Sweep Targets</button>
+  <span id="threat-sweep-indicator" class="htmx-indicator">
+    <span class="spinner"></span>Sweeping&hellip;
+  </span>
+</div>
+{% endif %}

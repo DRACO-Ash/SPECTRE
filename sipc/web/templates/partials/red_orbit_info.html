@@ -1,0 +1,11 @@
+<div class="red-orbit-info">
+  <div class="red-orbit-name">{{ name }}</div>
+  <div class="red-orbit-params">
+    <span title="TLE epoch"><strong>Epoch:</strong> {{ epoch_str }}</span>
+    <span title="Sub-satellite longitude (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
+    <span title="Orbital inclination"><strong>Inc:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
+    <span title="Orbital period"><strong>Period:</strong> {{ "%.1f"|format(period_min) }} min</span>
+    <span title="Altitude at epoch"><strong>Alt:</strong> {{ "%.0f"|format(alt_km) }} km</span>
+    <span title="Eccentricity"><strong>Ecc:</strong> {{ "%.6f"|format(ecc) }}</span>
+  </div>
+</div>

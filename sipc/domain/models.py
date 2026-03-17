@@ -94,13 +94,49 @@ class InterceptMethod(Enum):
     ``BIELLIPTIC``   — three-burn transfer via intermediate apoapsis.
     ``RENDEZVOUS``   — coast → burn (match position + velocity).
     ``PROXIMITY``    — coast → burn (minimise range to target_distance_m).
+    ``PHASING``      — period-adjustment rendezvous after N revolutions.
+    ``CW_RADIAL``    — CW radial separation manoeuvre.
+    ``CW_DRIFT``     — CW along-track drift manoeuvre.
+    ``PLANE_CHANGE`` — inclination change (pure or combined with altitude).
+    ``J2_DRIFT``     — exploit J2 RAAN precession for orbital alignment.
+    ``COLA``         — minimum-ΔV collision avoidance.
+    ``GEO_DRIFT``    — GEO longitude relocation via drift orbit.
+    ``MANOEUVRE_DETECT`` — classify observed manoeuvre from TLE changes.
+    ``NMC``          — Natural Motion Circumnavigation / passive safety ellipse.
+    ``DETECTABILITY`` — intercept detectability metric.
+    ``EVASION``      — optimal defensive evasion manoeuvre.
+    ``INTENT_PREDICT`` — adversary intercept intent assessment.
+    ``INTERCEPT_ENVELOPE`` — probabilistic intercept reachability envelope.
+    ``STABILITY``    — relative motion stability analysis.
+    ``FINGERPRINT``  — manoeuvre behavioural fingerprinting.
+    ``FORMATION``    — formation-aware defensive burn.
+    ``TERRAIN``      — orbital regime risk assessment.
+    ``MIN_TIME``     — minimum-time intercept search.
     """
 
-    LAMBERT     = "lambert"
-    HOHMANN     = "hohmann"
-    BIELLIPTIC  = "bielliptic"
-    RENDEZVOUS  = "rendezvous"
-    PROXIMITY   = "proximity"
+    LAMBERT        = "lambert"
+    HOHMANN        = "hohmann"
+    BIELLIPTIC     = "bielliptic"
+    RENDEZVOUS     = "rendezvous"
+    PROXIMITY      = "proximity"
+    PHASING        = "phasing"
+    CW_RADIAL      = "cw_radial"
+    CW_DRIFT       = "cw_drift"
+    PLANE_CHANGE   = "plane_change"
+    J2_DRIFT       = "j2_drift"
+    COLA           = "cola"
+    GEO_DRIFT      = "geo_drift"
+    MANOEUVRE_DETECT = "manoeuvre_detect"
+    NMC            = "nmc"
+    DETECTABILITY  = "detectability"
+    EVASION        = "evasion"
+    INTENT_PREDICT = "intent_predict"
+    INTERCEPT_ENVELOPE = "intercept_envelope"
+    STABILITY      = "stability"
+    FINGERPRINT    = "fingerprint"
+    FORMATION      = "formation"
+    TERRAIN        = "terrain"
+    MIN_TIME       = "min_time"
 
 
 class BurnType(Enum):
@@ -308,6 +344,44 @@ class InterceptResult:
     intercept_range_km: float = 0.0
     notes: str = ""
     option_id: str = field(default_factory=lambda: f"INT_{uuid.uuid4().hex[:10].upper()}")
+
+
+@dataclass
+class ThreatTarget:
+    """One potential target in a threat sweep."""
+
+    target_name: str
+    target_satno: str          # NORAD number or "" for blue assets
+    target_source: str         # "blue" | "hrr"
+    hrr_rank: int | None       # None for blue assets
+
+
+@dataclass
+class ThreatSweepEntry:
+    """One (target, epoch) intercept result."""
+
+    target: ThreatTarget
+    burn_epoch: datetime
+    burn_location: str         # "now" | "apogee" | "perigee" | "asc_node" | "desc_node"
+    delta_v_km_s: float
+    tof_hours: float
+    dv_prograde: float
+    dv_normal: float
+    dv_radial: float
+    method: str                # "hohmann" | "lambert"
+    notes: str = ""
+
+
+@dataclass
+class ThreatAssessment:
+    """Complete threat sweep result for one red satellite."""
+
+    red_name: str
+    sweep_epoch: datetime
+    entries: list[ThreatSweepEntry] = field(default_factory=list)
+    target_count: int = 0
+    elapsed_s: float = 0.0
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass

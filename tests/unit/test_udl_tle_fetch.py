@@ -89,6 +89,7 @@ def mock_state():
     state.udl_username = "testuser"
     state.udl_password = "testpass"
     state.scenario_start = None
+    state.udl_data_mode = "REAL"
     return state
 
 
@@ -112,11 +113,11 @@ def _make_user():
 
 
 class TestFetchTleLatestMode:
-    """Tests for mode='latest' (GET /udl/elset/current)."""
+    """Tests for mode='latest' (GET /udl/elset with orderBy=epoch desc)."""
 
     @pytest.mark.asyncio
-    async def test_latest_calls_elset_current(self, mock_state) -> None:
-        """latest mode should hit /elset/current, not /elset."""
+    async def test_latest_calls_elset_with_sort(self, mock_state) -> None:
+        """latest mode should hit /elset with orderBy=epoch&sort=desc."""
         record = _make_udl_record(39034)
 
         with (
@@ -144,7 +145,9 @@ class TestFetchTleLatestMode:
             )
 
             call_args = mock_client.get.call_args
-            assert "/elset/current" in call_args[0][0]
+            url = call_args[0][0]
+            assert "/elset" in url
+            assert "/elset/current" not in url
 
     @pytest.mark.asyncio
     async def test_latest_no_udl_creds_returns_error(self, mock_state) -> None:

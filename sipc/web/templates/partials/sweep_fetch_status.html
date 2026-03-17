@@ -1,0 +1,12 @@
+{# Status badge after TLE pre-fetch for a sweep target group #}
+{% if error %}
+<p class="error-msg" style="font-size:0.72rem; margin:0.15rem 0">{{ error }}</p>
+{% elif fetched is not none %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.15rem 0">
+  <span class="badge-ok" style="font-size:0.68rem">&#10003; {{ fetched }}/{{ total }} TLEs ready</span>
+  {% if failed > 0 %}
+  <span style="color:var(--amber); margin-left:0.4rem">{{ failed }} failed</span>
+  {% endif %}
+  — ready to sweep.
+</p>
+{% endif %}

@@ -1,0 +1,147 @@
+<div class="trade-space-container panel panel-gold">
+  <div class="trade-space-header">
+    <h2>Trade-Space Analysis</h2>
+    <div class="trade-space-actions">
+      <button class="btn-danger btn-sm"
+              hx-post="/plan/maneuver/clear-history"
+              hx-target="#intercept-result"
+              hx-swap="innerHTML">Clear History</button>
+    </div>
+  </div>
+  <canvas id="tradeSpaceChart" height="260"></canvas>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('tradeSpaceChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  // Destroy existing chart instance if present.
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+
+  const METHOD_COLOURS = {
+    /* Classical */
+    'lambert':          '#00659E',
+    'proximity':        '#00659E',
+    'hohmann':          '#C8A415',
+    'rendezvous':       '#C8A415',
+    'bielliptic':       '#27AE60',
+    /* Tactical */
+    'phasing':          '#E67E22',
+    'cw_radial':        '#8E44AD',
+    'cw_drift':         '#9B59B6',
+    'plane_change':     '#2ECC71',
+    'j2_drift':         '#1ABC9C',
+    'cola':             '#E74C3C',
+    'evasion':          '#C0392B',
+    /* Advanced */
+    'geo_drift':        '#F39C12',
+    'nmc':              '#16A085',
+    'manoeuvre_detect':  '#7F8C8D',
+    'detectability':    '#95A5A6',
+    'fingerprint':      '#BDC3C7',
+    'terrain':          '#D35400',
+    /* Decision Support */
+    'intent_predict':   '#E84393',
+    'intercept_envelope':'#6C5CE7',
+    'stability':        '#00CEC9',
+    'formation':        '#FD79A8',
+    'min_time':         '#FDCB6E',
+  };
+
+  /** Format minutes into a human-readable duration. */
+  function fmtTime(min) {
+    if (min < 60)   return min.toFixed(1) + ' min';
+    if (min < 1440) return (min / 60).toFixed(2) + ' hr';
+    return (min / 1440).toFixed(1) + ' days';
+  }
+
+  fetch('/plan/maneuver/trade-space-data')
+    .then(r => r.json())
+    .then(data => {
+      // Guard: skip points with non-positive values (log scale can't handle them).
+      data = data.filter(pt => pt.transfer_time_min > 0 && pt.delta_v > 0);
+      if (!data.length) return;
+
+      // Group by method.
+      const datasets = {};
+      data.forEach(pt => {
+        const key = pt.method;
+        if (!datasets[key]) {
+          datasets[key] = {
+            label: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            backgroundColor: METHOD_COLOURS[key] || '#999',
+            borderColor: METHOD_COLOURS[key] || '#999',
+            pointRadius: 7,
+            pointHoverRadius: 10,
+            data: [],
+          };
+        }
+        datasets[key].data.push({
+          x: pt.transfer_time_min,
+          y: pt.delta_v,
+          label: pt.label,
+          miss: pt.miss_km,
+        });
+      });
+
+      // Decide whether to use log scale: if max/min ratio > 50 on either axis.
+      const allX = data.map(p => p.transfer_time_min);
+      const allY = data.map(p => p.delta_v);
+      const xSpread = Math.max(...allX) / Math.min(...allX);
+      const ySpread = Math.max(...allY) / Math.min(...allY);
+      const useLogX = allX.length > 1 && xSpread > 50;
+      const useLogY = allY.length > 1 && ySpread > 50;
+
+      new Chart(canvas, {
+        type: 'scatter',
+        data: { datasets: Object.values(datasets) },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: { color: '#D0D8E8', font: { family: 'Segoe UI', size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  const pt = ctx.raw;
+                  return [
+                    pt.label,
+                    '\u0394V: ' + pt.y.toFixed(4) + ' km/s',
+                    'Transfer: ' + fmtTime(pt.x),
+                    'Miss: ' + pt.miss.toFixed(1) + ' km',
+                  ];
+                },
+              },
+              backgroundColor: '#001529',
+              titleColor: '#C8A415',
+              bodyColor: '#D0D8E8',
+              borderColor: '#0A3355',
+              borderWidth: 1,
+            },
+          },
+          scales: {
+            x: {
+              type: useLogX ? 'logarithmic' : 'linear',
+              title: { display: true, text: 'Transfer Time (min)', color: '#5A7A9A', font: { size: 11 } },
+              ticks: {
+                color: '#5A7A9A',
+                callback: function(v) { return fmtTime(v); },
+              },
+              grid: { color: 'rgba(10,51,85,0.4)' },
+            },
+            y: {
+              type: useLogY ? 'logarithmic' : 'linear',
+              title: { display: true, text: '\u0394V (km/s)', color: '#5A7A9A', font: { size: 11 } },
+              ticks: { color: '#5A7A9A' },
+              grid: { color: 'rgba(10,51,85,0.4)' },
+            },
+          },
+        },
+      });
+    });
+})();
+</script>

@@ -1,0 +1,245 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% elif not assessment %}
+<p class="empty-msg">No threat sweep run yet — select a red satellite and click Sweep Targets.</p>
+{% else %}
+<div class="threat-sweep-result">
+  <div class="threat-sweep-summary">
+    <span class="badge-ok">Threat Sweep: {{ assessment.red_name }}</span>
+    <span class="intercept-detail">
+      {{ assessment.target_count }} HRR targets,
+      {{ assessment.entries|length }} solutions in {{ grouped|length }} groups,
+      {{ "%.1f" | format(assessment.elapsed_s) }}s
+    </span>
+  </div>
+
+  {% if assessment.errors %}
+  <div class="callout callout-amber" style="margin:0.4rem 0">
+    {% for err in assessment.errors %}
+    <p style="margin:0.15rem 0; font-size:0.78rem">&#9888; {{ err }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if grouped %}
+  <div style="margin:0.4rem 0; display:flex; gap:0.5rem; align-items:center">
+    <input type="text" id="threat-search" class="form-control"
+           placeholder="Search targets, methods, locations…"
+           oninput="threatFilter(this.value)"
+           style="flex:1; padding:0.35rem 0.5rem; font-size:0.8rem">
+    <button class="btn-secondary btn-sm" onclick="threatExpandAll()" title="Expand all groups">Expand All</button>
+    <button class="btn-secondary btn-sm" onclick="threatCollapseAll()" title="Collapse all groups">Collapse All</button>
+  </div>
+  <div class="threat-scroll">
+    <table class="hrr-table threat-table" id="threat-sweep-table">
+      <thead>
+        <tr>
+          <th style="width:2rem">&nbsp;</th>
+          <th onclick="threatSort(1,'str')">Target <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(2,'str')">Source <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(3,'num')">HRR <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(4,'num')">Best &#916;V <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(5,'str')">Best Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(6,'num')">Profiles <span class="hrr-sort-ind"></span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in grouped %}
+        {# ── Parent row (one per target) ── #}
+        <tr class="threat-parent {% if group.best_dv < 0.5 %}threat-high{% elif group.best_dv < 1.0 %}threat-med{% endif %}"
+            id="threat-group-{{ loop.index0 }}"
+            onclick="threatToggle({{ loop.index0 }})"
+            title="Click to expand {{ group.profile_count }} manoeuvre profiles">
+          <td class="threat-chevron-cell">
+            <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>
+          </td>
+          <td class="col-name" title="{{ group.target.target_name }}">{{ group.target.target_name }}</td>
+          <td class="col-dim">{{ group.target.target_source }}</td>
+          <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
+          <td class="mnv-dv"><strong>{{ "%.4f" | format(group.best_dv) }}</strong></td>
+          <td class="col-dim">{{ group.best_method }}</td>
+          <td class="col-dim">
+            <span class="threat-profile-badge">{{ group.profile_count }}</span>
+          </td>
+        </tr>
+        {# ── Child header + rows (hidden by default) ── #}
+        {% set group_idx = loop.index0 %}
+        <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
+          <td></td>
+          <th onclick="childSort({{ group_idx }},1,'str')">Location <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},2,'str')">Burn Epoch <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},3,'num')">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},4,'num')">TOF <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},5,'str')">Method <span class="hrr-sort-ind"></span></th>
+          <th class="no-sort">Action</th>
+        </tr>
+        {% for child in group.children %}
+        <tr class="threat-child threat-children-{{ group_idx }}"
+            id="threat-row-{{ child.flat_idx }}"
+            style="display:none"
+            {% if child.entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif child.entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+          <td class="threat-child-indent"></td>
+          <td class="col-dim">{{ child.entry.burn_location }}</td>
+          <td class="col-dim">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="mnv-dv">{{ "%.4f" | format(child.entry.delta_v_km_s) }}</td>
+          <td class="col-dim">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
+          <td class="col-dim" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
+            {{ child.entry.method }}
+          </td>
+          <td class="col-actions" style="white-space:nowrap">
+            {% if child.entry.method == "hohmann" %}
+            <button class="btn-secondary btn-sm"
+                    hx-post="/plan/threat/refine"
+                    hx-vals='{"entry_index": {{ child.flat_idx }}}'
+                    hx-target="#threat-row-{{ child.flat_idx }}"
+                    hx-swap="outerHTML"
+                    hx-disabled-elt="this"
+                    title="Refine with Lambert solver">Refine</button>
+            {% endif %}
+            <button class="btn-secondary btn-sm"
+                    type="button"
+                    onclick="event.stopPropagation(); loadInEngine('{{ assessment.red_name }}', '{{ child.entry.target.target_name }}', '{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ child.entry.method }}')"
+                    title="Pre-fill the intercept engine with this solution">Load</button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+  /* ── Toggle a single target group ── */
+  function threatToggle(gIdx) {
+    var rows = document.querySelectorAll('.threat-children-' + gIdx);
+    var chevron = document.getElementById('chevron-' + gIdx);
+    var visible = rows.length > 0 && rows[0].style.display !== 'none';
+    rows.forEach(function(r) { r.style.display = visible ? 'none' : ''; });
+    if (chevron) chevron.innerHTML = visible ? '&#9654;' : '&#9660;';
+  }
+
+  /* ── Expand / Collapse all ── */
+  function threatExpandAll() {
+    document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = ''; });
+    document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9660;'; });
+  }
+  function threatCollapseAll() {
+    document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = 'none'; });
+    document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9654;'; });
+  }
+
+  /* ── Search filter (matches parent target name + all child content) ── */
+  function threatFilter(q) {
+    var term = q.trim().toLowerCase();
+    /* Iterate parent rows */
+    document.querySelectorAll('.threat-parent').forEach(function(parent) {
+      var gIdx = parent.id.replace('threat-group-', '');
+      var children = document.querySelectorAll('.threat-children-' + gIdx);
+      var parentText = parent.textContent.toLowerCase();
+      var childTexts = Array.from(children).map(function(r) { return r.textContent.toLowerCase(); });
+      var allText = parentText + ' ' + childTexts.join(' ');
+      var match = term === '' || allText.indexOf(term) !== -1;
+      parent.style.display = match ? '' : 'none';
+      /* Hide children if parent is hidden; otherwise preserve their toggle state */
+      if (!match) {
+        children.forEach(function(r) { r.style.display = 'none'; });
+      }
+    });
+  }
+
+  /* ── Sort child rows within a single group ── */
+  var _childSortState = {};  /* { groupIdx: { col, asc } } */
+  function childSort(gIdx, col, type) {
+    var state = _childSortState[gIdx] || { col: -1, asc: true };
+    if (state.col === col) { state.asc = !state.asc; }
+    else { state.col = col; state.asc = true; }
+    _childSortState[gIdx] = state;
+
+    var tbody = document.getElementById('threat-sweep-table').tBodies[0];
+    /* Collect only data rows (skip the header row) for this group */
+    var all = document.querySelectorAll('.threat-children-' + gIdx);
+    var headerRow = null;
+    var dataRows = [];
+    all.forEach(function(r) {
+      if (r.classList.contains('threat-child-header')) { headerRow = r; }
+      else { dataRows.push(r); }
+    });
+
+    dataRows.sort(function(a, b) {
+      var av = a.cells[col].textContent.trim();
+      var bv = b.cells[col].textContent.trim();
+      if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
+      if (av < bv) return state.asc ? -1 : 1;
+      if (av > bv) return state.asc ? 1 : -1;
+      return 0;
+    });
+
+    /* Re-insert after the header row */
+    var ref = headerRow;
+    dataRows.forEach(function(r) {
+      ref.parentNode.insertBefore(r, ref.nextSibling);
+      ref = r;
+    });
+  }
+
+  /* ── Sort parent rows (re-orders groups in the table) ── */
+  var _threatSortCol = -1, _threatSortAsc = true;
+  function threatSort(col, type) {
+    var table = document.getElementById('threat-sweep-table');
+    if (!table) return;
+    var tbody = table.tBodies[0];
+
+    if (_threatSortCol === col) { _threatSortAsc = !_threatSortAsc; }
+    else { _threatSortCol = col; _threatSortAsc = true; }
+
+    /* Collect groups: each group = [parentRow, ...childRows] */
+    var groups = [];
+    var currentGroup = null;
+    Array.from(tbody.rows).forEach(function(row) {
+      if (row.classList.contains('threat-parent')) {
+        currentGroup = [row];
+        groups.push(currentGroup);
+      } else if (currentGroup) {
+        currentGroup.push(row);
+      }
+    });
+
+    /* Sort groups by the parent row's cell value */
+    groups.sort(function(a, b) {
+      var av = a[0].cells[col].textContent.trim();
+      var bv = b[0].cells[col].textContent.trim();
+      if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
+      if (av < bv) return _threatSortAsc ? -1 : 1;
+      if (av > bv) return _threatSortAsc ? 1 : -1;
+      return 0;
+    });
+
+    /* Re-append in sorted order */
+    groups.forEach(function(group) {
+      group.forEach(function(row) { tbody.appendChild(row); });
+    });
+  }
+
+  /* ── Load solution into the intercept engine ── */
+  function loadInEngine(redSat, blueSat, epoch, method) {
+    if (typeof switchToEngine === 'function') switchToEngine();
+    var redSel = document.getElementById('ie-red-sat');
+    var blueSel = document.getElementById('ie-blue-sat');
+    var methodSel = document.getElementById('ie-method');
+    var startInput = document.querySelector('input[name="manoeuvre_start"]');
+    if (redSel) { redSel.value = redSat; }
+    if (blueSel) { blueSel.value = blueSat; }
+    if (methodSel) {
+      methodSel.value = method;
+      if (typeof ieUpdate === 'function') ieUpdate();
+    }
+    if (startInput) { startInput.value = epoch; }
+    var engine = document.getElementById('intercept-engine-form');
+    if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  </script>
+  {% else %}
+  <p class="empty-msg">No intercept solutions found within the &#916;V budget.</p>
+  {% endif %}
+</div>
+{% endif %}

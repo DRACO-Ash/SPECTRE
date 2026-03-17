@@ -20,6 +20,7 @@ from sipc.domain.models import (
     ManeuverOption,
     ManeuverSearchConfig,
     RedTrack,
+    ThreatAssessment,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class SessionState:
     # UDL credentials — held in memory for this session only, never persisted.
     udl_username: str | None = None
     udl_password: str | None = None
+    # UDL data classification: REAL | TEST | EXERCISE | SIMULATED.
+    udl_data_mode: str = "REAL"
     # Scenario time window — set by the operator.
     scenario_start: datetime | None = None
     scenario_stop: datetime | None = None
@@ -62,6 +65,14 @@ class SessionState:
     last_maneuver_config: ManeuverSearchConfig | None = None
     # Result from the last intercept engine calculation.
     last_intercept_result: InterceptResult | None = None
+    # History of all intercept results this session (for trade-space plot).
+    intercept_history: list[InterceptResult] = field(default_factory=list)
+    # Threat sweep result.
+    last_threat_assessment: ThreatAssessment | None = None
+    # HRR TLE cache: SATNO → TLE (persists across sweeps).
+    hrr_tle_cache: dict[str, str] = field(default_factory=dict)
+    # Cached HRR satellite list from UDL.
+    hrr_objects: list[dict] = field(default_factory=list)
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log.

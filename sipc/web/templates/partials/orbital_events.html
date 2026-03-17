@@ -14,7 +14,7 @@
       <button type="button" class="btn-sm btn-event btn-event-red"
               title="{{ ev.label }}"
               onclick="document.querySelector('#intercept-engine-form [name=manoeuvre_start]').value='{{ ev.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}'">
-        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M UTC') }}
+        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M:%S UTC') }}
       </button>
       {% endfor %}
     </div>
@@ -34,7 +34,7 @@
       <button type="button" class="btn-sm btn-event btn-event-blue"
               title="{{ ev.label }}"
               onclick="document.querySelector('#intercept-engine-form [name=manoeuvre_start]').value='{{ ev.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}'">
-        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M UTC') }}
+        {{ ev.event_type.value | replace("_"," ") | title }} &mdash; {{ ev.epoch.strftime('%d %b %H:%M:%S UTC') }}
       </button>
       {% endfor %}
     </div>

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta as _timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from sipc.astro.events import EventType, find_orbital_events
 from sipc.astro.maneuvers import (
@@ -21,6 +21,24 @@ from sipc.astro.maneuvers import (
     lambert_intercept,
     hohmann_intercept,
     bielliptic_intercept,
+    phasing_intercept,
+    cw_radial_intercept,
+    cw_drift_intercept,
+    plane_change_intercept,
+    j2_drift_intercept,
+    cola_intercept,
+    geo_drift_intercept,
+    manoeuvre_detect_intercept,
+    nmc_intercept,
+    detectability_intercept,
+    evasion_intercept,
+    intent_predict_intercept,
+    intercept_envelope_intercept,
+    stability_intercept,
+    fingerprint_intercept,
+    formation_intercept,
+    terrain_intercept,
+    min_time_intercept_wrapper,
 )
 from sipc.domain.models import (
     BurnLocation,
@@ -179,6 +197,7 @@ async def apply_intercept(
     result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), intercept_method)
 
     state.last_intercept_result = result
+    state.intercept_history.append(result)
     burn_summary = ", ".join(
         f"burn{b.burn_number} ΔV={b.delta_v_km_s:.3f}" for b in result.burns
     )
@@ -197,6 +216,45 @@ async def apply_intercept(
 
     return render(request, "partials/intercept_result.html", {
         "result": result, "error": None,
+        "intercept_history": state.intercept_history,
+    })
+
+
+@router.get("/trade-space-data", response_model=None)
+async def trade_space_data(
+    current_user: User = Depends(require_login),
+) -> JSONResponse:
+    """Return JSON array of trade-space points from intercept history."""
+    state = get_session_state(current_user.username)
+    points = []
+    for r in state.intercept_history:
+        if r.burns:
+            transfer_s = (r.arrival_epoch - r.burns[0].burn_epoch).total_seconds()
+        else:
+            transfer_s = 0.0
+        points.append({
+            "method": r.method.value,
+            "delta_v": round(r.total_delta_v_km_s, 4),
+            "transfer_time_min": round(transfer_s / 60.0, 2),
+            "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
+            "miss_km": round(r.intercept_range_km, 2),
+        })
+    return JSONResponse(content=points)
+
+
+@router.post("/clear-history", response_model=None)
+async def clear_history(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Clear intercept history and last result."""
+    state = get_session_state(current_user.username)
+    state.intercept_history.clear()
+    state.last_intercept_result = None
+    state.append_log("[INTERCEPT] Trade-space history cleared")
+    return render(request, "partials/intercept_result.html", {
+        "result": None, "error": None,
+        "intercept_history": [],
     })
 
 
@@ -238,6 +296,121 @@ def _run_intercept(
         return bielliptic_intercept(
             red_tle=red_tle, blue_tle=blue_tle,
             manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.PHASING:
+        # Use coast_hours as n_revolutions (integer), tof_s is unused
+        n_revs = max(1, int(coast_s / 3600.0)) if coast_s > 3600 else 1
+        return phasing_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, n_revolutions=n_revs,
+        )
+    elif method == InterceptMethod.CW_RADIAL:
+        return cw_radial_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            desired_separation_km=max(target_km, 5.0),
+            time_s=tof_s,
+            coast_s=coast_s,
+        )
+    elif method == InterceptMethod.CW_DRIFT:
+        return cw_drift_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            desired_drift_km=max(target_km, 10.0),
+            time_s=tof_s,
+            coast_s=coast_s,
+        )
+    elif method == InterceptMethod.PLANE_CHANGE:
+        return plane_change_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.J2_DRIFT:
+        return j2_drift_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.COLA:
+        return cola_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            desired_miss_km=max(target_km, 1.0),
+            time_before_tca_s=tof_s,
+            coast_s=coast_s,
+        )
+    elif method == InterceptMethod.GEO_DRIFT:
+        drift_days = coast_s / 3600.0 if coast_s > 3600 else None
+        return geo_drift_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            drift_time_days=drift_days,
+        )
+    elif method == InterceptMethod.MANOEUVRE_DETECT:
+        return manoeuvre_detect_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.NMC:
+        return nmc_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            along_track_km=max(target_km, 2.0),
+            coast_s=coast_s,
+        )
+    elif method == InterceptMethod.DETECTABILITY:
+        return detectability_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            tof_s=tof_s, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.EVASION:
+        return evasion_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            desired_miss_km=max(target_km, 10.0),
+            time_before_tca_s=tof_s,
+            fuel_budget_km_s=coast_s / 3600.0 if coast_s > 0 else 0.5,
+            coast_s=0.0,
+        )
+    elif method == InterceptMethod.INTENT_PREDICT:
+        return intent_predict_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.INTERCEPT_ENVELOPE:
+        return intercept_envelope_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, tof_s=tof_s,
+            coast_s=coast_s, target_distance_km=target_km,
+        )
+    elif method == InterceptMethod.STABILITY:
+        return stability_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.FINGERPRINT:
+        return fingerprint_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.FORMATION:
+        return formation_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start,
+            desired_miss_km=max(target_km, 5.0),
+            tof_s=tof_s, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.TERRAIN:
+        return terrain_intercept(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, coast_s=coast_s,
+        )
+    elif method == InterceptMethod.MIN_TIME:
+        max_dv = target_km if target_km > 0 else 3.0
+        return min_time_intercept_wrapper(
+            red_tle=red_tle, blue_tle=blue_tle,
+            manoeuvre_start=start, max_delta_v=max_dv,
+            coast_s=coast_s,
         )
     else:
         raise ValueError(f"Unsupported intercept method: {method}")
