@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -13,9 +14,11 @@ from fastapi.templating import Jinja2Templates
 
 from sipc.config.settings import get_settings
 from sipc.web.database import init_db
+from sipc.web.routes.gcat import router as gcat_router
 from sipc.web.routes.login import router as login_router
 from sipc.web.routes.maneuver import router as maneuver_router
 from sipc.web.routes.operator import router as operator_router
+from sipc.web.routes.pol import router as pol_router
 from sipc.web.routes.threat import router as threat_router
 from sipc.web.routes.udl import router as udl_router
 
@@ -23,6 +26,9 @@ _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+# Custom Jinja2 filters
+templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL-encoded string
 
 
 @asynccontextmanager
@@ -51,3 +57,5 @@ app.include_router(operator_router)
 app.include_router(udl_router)
 app.include_router(maneuver_router)
 app.include_router(threat_router)
+app.include_router(pol_router)
+app.include_router(gcat_router)

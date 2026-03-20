@@ -1,0 +1,45 @@
+{#
+  gcat_welcome.html — Initial state shown in the GCAT table area.
+  Replaced when the user clicks a dataset in the nav.
+#}
+<div class="gcat-welcome">
+
+  <div class="gcat-welcome-glyph">⊕</div>
+
+  <h2 class="gcat-welcome-title">General Catalog of Artificial Space Objects</h2>
+  <p class="gcat-welcome-sub">
+    Select a dataset from the panel on the left to load and browse its records.
+    Each dataset downloads directly from
+    <a href="https://planet4589.org/space/gcat/" target="_blank" rel="noopener">planet4589.org</a>
+    and is cached for the session.
+  </p>
+
+  <div class="gcat-welcome-grid">
+    <div class="gcat-welcome-card gcat-wc-gold">
+      <div class="gcat-wc-icon">⊛</div>
+      <div class="gcat-wc-name">Derived</div>
+      <div class="gcat-wc-desc">Current, Launch Log, Active, Geosync, Full Launches</div>
+    </div>
+    <div class="gcat-welcome-card gcat-wc-blue">
+      <div class="gcat-wc-icon">◈</div>
+      <div class="gcat-wc-name">Objects</div>
+      <div class="gcat-wc-desc">SatCat, AuxCat, EventCat, DeepCat &amp; more</div>
+    </div>
+    <div class="gcat-welcome-card gcat-wc-amber">
+      <div class="gcat-wc-icon">◆</div>
+      <div class="gcat-wc-name">Payloads</div>
+      <div class="gcat-wc-desc">Mission metadata, classification, end-of-life data</div>
+    </div>
+    <div class="gcat-welcome-card gcat-wc-green">
+      <div class="gcat-wc-icon">◇</div>
+      <div class="gcat-wc-name">Supporting</div>
+      <div class="gcat-wc-desc">Organisations, Sites, Launch Vehicles, Engines</div>
+    </div>
+  </div>
+
+  <p class="gcat-welcome-hint">
+    All data from <strong>GCAT</strong> (J. McDowell, planet4589.org/space/gcat) &middot; CC-BY &middot;
+    Use <em>↻ Refresh All</em> to force a fresh download of every dataset.
+  </p>
+
+</div>

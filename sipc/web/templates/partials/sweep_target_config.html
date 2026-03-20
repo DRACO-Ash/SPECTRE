@@ -1,4 +1,4 @@
-{# Sweep target selector — dropdown of Blue / Red HRR groups by rank #}
+{# Sweep target selector — dropdown of Blue / Red HRR groups by rank, filtered to interceptor regime #}
 <input type="hidden" name="tgt_config_loaded" value="1" />
 
 {% if not has_udl %}
@@ -9,7 +9,18 @@
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   No HRR objects loaded. Fetch the HRR watchlist from the UDL panel first.
 </p>
+{% elif not interceptor_name %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  Select a Red Satellite above to filter targets by orbital regime.
+</p>
+{% elif not blue_hrr and not red_hrr %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  No HRR objects in regime <strong>{{ interceptor_regime }}</strong> — select a different red satellite or fetch a fresh HRR watchlist.
+</p>
 {% else %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
+  Regime: <strong style="color:var(--ops-blue)">{{ interceptor_regime }}</strong> — targets filtered to match interceptor orbit.
+</p>
 <div style="display:flex; gap:0.6rem; align-items:flex-end; flex-wrap:wrap">
   <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); flex:1; min-width:10rem">
     Target Group
@@ -41,7 +52,13 @@
 </div>
 <div id="ts-tgt-status" style="margin-top:0.3rem"></div>
 <div class="submit-row" style="margin-top:0.7rem; padding-top:0.5rem; border-top:1px solid var(--border)">
-  <button type="submit" class="btn-danger">Sweep Targets</button>
+  <button type="button" class="btn-danger"
+          hx-post="/plan/threat/sweep"
+          hx-target="#threat-sweep-results"
+          hx-swap="innerHTML"
+          hx-indicator="#threat-sweep-indicator"
+          hx-include="closest form"
+          hx-disabled-elt="this">Sweep Targets</button>
   <span id="threat-sweep-indicator" class="htmx-indicator">
     <span class="spinner"></span>Sweeping&hellip;
   </span>

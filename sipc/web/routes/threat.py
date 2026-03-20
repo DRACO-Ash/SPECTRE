@@ -27,6 +27,8 @@ from sipc.astro.maneuvers import (
     bielliptic_intercept,
     phasing_intercept,
     plane_change_intercept,
+    vbar_hop_intercept,
+    hbar_hop_intercept,
     min_time_intercept_wrapper,
 )
 from sipc.astro.propagator import TLEOrbit, state_to_keplerian
@@ -122,16 +124,49 @@ async def red_orbit_info(
         )
 
 
-def _hrr_group_counts(state: object) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Return (blue_hrr, red_hrr) where each is [(rank, count), …] sorted by rank."""
+def _interceptor_regime(state: object, red_sat_name: str) -> str | None:
+    """Return the canonical orbit regime for a red track, or None if not found."""
+    from sipc.astro.constants import classify_orbit_regime
+    from sipc.astro.propagator import TLEOrbit, state_to_keplerian
+
+    for track in state.red_tracks:  # type: ignore[attr-defined]
+        if track.stk_name != red_sat_name:
+            continue
+        try:
+            import math
+            orbit = TLEOrbit(track.tle)
+            t = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+            rv = orbit.propagate(t)
+            kep = state_to_keplerian(rv[0], rv[1])
+            return classify_orbit_regime(kep["semi_major_axis"], kep["eccentricity"])
+        except Exception:
+            return None
+    return None
+
+
+def _hrr_group_counts(
+    state: object,
+    regime: str | None = None,
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Return (blue_hrr, red_hrr) where each is [(rank, count), …] sorted by rank.
+
+    If *regime* is provided, only objects whose normalised ``orbit_regime``
+    matches are counted — allowing the dropdown to be filtered to objects that
+    are actually reachable by the selected interceptor.
+    """
     from collections import Counter
+    from sipc.astro.constants import normalise_regime
 
     blue_ctr: Counter[int] = Counter()
     red_ctr: Counter[int] = Counter()
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
         rank = obj.get("rank")
         if rank is None:
-            continue
+            rank = 0   # treat unranked objects as rank 0 rather than dropping them
+        if regime is not None:
+            obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
+            if obj_regime != regime:
+                continue
         country = str(obj.get("country") or "").strip().upper()
         if country in _RED_COUNTRIES:
             red_ctr[rank] += 1
@@ -141,13 +176,22 @@ def _hrr_group_counts(state: object) -> tuple[list[tuple[int, int]], list[tuple[
 
 
 def _objects_for_group(
-    state: object, side: str, rank: int,
+    state: object, side: str, rank: int, regime: str | None = None,
 ) -> list[dict]:
-    """Return HRR objects matching *side* ('blue'|'red') and *rank*."""
+    """Return HRR objects matching *side* ('blue'|'red'), *rank*, and optionally *regime*."""
+    from sipc.astro.constants import normalise_regime
+
     results: list[dict] = []
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        if obj.get("rank") != rank:
+        obj_rank = obj.get("rank")
+        if obj_rank is None:
+            obj_rank = 0
+        if obj_rank != rank:
             continue
+        if regime is not None:
+            obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
+            if obj_regime != regime:
+                continue
         country = str(obj.get("country") or "").strip().upper()
         is_red = country in _RED_COUNTRIES
         if (side == "red" and is_red) or (side == "blue" and not is_red):
@@ -158,16 +202,20 @@ def _objects_for_group(
 @router.get("/target-config", response_model=None)
 async def target_config(
     request: Request,
+    red_sat: str = Query("", description="Selected interceptor stk_name — used to filter by regime"),
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Return the sweep target dropdown with HRR group counts."""
+    """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
     state = get_session_state(current_user.username)
-    blue_hrr, red_hrr = _hrr_group_counts(state)
+    regime = _interceptor_regime(state, red_sat) if red_sat else None
+    blue_hrr, red_hrr = _hrr_group_counts(state, regime=regime)
     return render(request, "partials/sweep_target_config.html", {
         "has_udl": bool(state.udl_username),
         "has_hrr": bool(state.hrr_objects),
         "blue_hrr": blue_hrr,
         "red_hrr": red_hrr,
+        "interceptor_regime": regime,
+        "interceptor_name": red_sat,
     })
 
 
@@ -411,7 +459,147 @@ def _sweep_all_methods(
         except Exception:
             pass
 
+        # V-bar hop (3-hop sequence, auto-derived distance)
+        try:
+            sol = vbar_hop_intercept(
+                red_tle=red_tle, blue_tle=target_tle,
+                manoeuvre_start=epoch, n_hops=3,
+                coast_s=0.0,
+            )
+            if sol.total_delta_v <= max_dv:
+                entries.append(_sol_to_entry(sol, target, epoch, location, "vbar_hop"))
+        except Exception:
+            pass
+
+        # H-bar hop (3-hop sequence, auto-derived distance)
+        try:
+            sol = hbar_hop_intercept(
+                red_tle=red_tle, blue_tle=target_tle,
+                manoeuvre_start=epoch, n_hops=3,
+                coast_s=0.0,
+            )
+            if sol.total_delta_v <= max_dv:
+                entries.append(_sol_to_entry(sol, target, epoch, location, "hbar_hop"))
+        except Exception:
+            pass
+
     return entries
+
+
+def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict | None:
+    """Identify and describe the most dangerous course of action from sweep entries.
+
+    The "most dangerous" entry is the one with the lowest ΔV — it is the most
+    easily achievable intercept and therefore represents the highest immediate
+    threat to the target set.
+
+    Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
+    """
+    if not entries:
+        return None
+
+    import math
+
+    # entries are already sorted by dv ascending — lowest = most achievable = most dangerous
+    worst = entries[0]
+    dv = worst.delta_v_km_s
+
+    # Threat level: lower ΔV means more achievable, therefore higher threat
+    if dv < 0.2:
+        threat_level = "CRITICAL"
+        threat_color = "#ef4444"
+        threat_bg = "rgba(239,68,68,0.06)"
+    elif dv < 0.5:
+        threat_level = "HIGH"
+        threat_color = "#f59e0b"
+        threat_bg = "rgba(245,158,11,0.06)"
+    elif dv < 1.0:
+        threat_level = "MEDIUM"
+        threat_color = "#3b8beb"
+        threat_bg = "rgba(59,139,235,0.06)"
+    else:
+        threat_level = "LOW"
+        threat_color = "#22c55e"
+        threat_bg = "rgba(34,197,94,0.06)"
+
+    _sweep_intents: dict[str, str] = {
+        "hohmann":      "Orbital Transfer — Energy Change",
+        "lambert":      "Close-Proximity Operation",
+        "bielliptic":   "Orbital Transfer — Energy Change",
+        "phasing":      "Phasing Rendezvous",
+        "plane_change": "Plane Change — Orbit Alignment",
+        "min_time":     "Minimum-Time Intercept",
+        "vbar_hop":     "V-Bar Hop — Along-Track Approach",
+        "hbar_hop":     "H-Bar Hop — Orbit-Normal Approach",
+    }
+    intent_label = _sweep_intents.get(worst.method, "Intercept Manoeuvre")
+
+    # Burn direction breakdown
+    pro = worst.dv_prograde
+    nor = worst.dv_normal
+    rad = worst.dv_radial
+    total_vec = math.sqrt(pro ** 2 + nor ** 2 + rad ** 2)
+    if total_vec > 1e-12:
+        pro_pct = round(abs(pro) / total_vec * 100.0, 1)
+        nor_pct = round(abs(nor) / total_vec * 100.0, 1)
+        rad_pct = round(abs(rad) / total_vec * 100.0, 1)
+        threshold = 0.7 * total_vec
+        if abs(pro) >= threshold:
+            direction = "Prograde" if pro >= 0 else "Retrograde"
+        elif abs(nor) >= threshold:
+            direction = "Normal" if nor >= 0 else "Anti-normal"
+        elif abs(rad) >= threshold:
+            direction = "Radial" if rad >= 0 else "Anti-radial"
+        else:
+            direction = "Combined"
+    else:
+        pro_pct = nor_pct = rad_pct = 0.0
+        direction = "Unknown"
+
+    # Time-of-flight label
+    tof_s = worst.tof_hours * 3600.0
+    if tof_s < 60:
+        tof_label = "< 1m"
+    elif tof_s < 3600:
+        tof_label = f"{int(tof_s // 60)}m"
+    elif tof_s < 86400:
+        h = int(tof_s // 3600)
+        m = int((tof_s % 3600) // 60)
+        tof_label = f"{h}h {m}m" if m else f"{h}h"
+    else:
+        d = int(tof_s // 86400)
+        h = int((tof_s % 86400) // 3600)
+        tof_label = f"{d}d {h}h" if h else f"{d}d"
+
+    dv_budget_pct = round(min(100.0, dv / 3.0 * 100.0), 1)
+
+    summary = (
+        f"Most achievable intercept: {worst.method.upper()} transfer to "
+        f"{worst.target.target_name} burning at {worst.burn_location} "
+        f"requires only {dv:.4f} km/s \u0394V with {tof_label} time of flight. "
+        f"Dominant burn axis: {direction}. "
+        f"Adversary capability assessment — intercept is {threat_level.lower()} threat."
+    )
+
+    return {
+        "target_name": worst.target.target_name,
+        "method": worst.method,
+        "intent_label": intent_label,
+        "dv": round(dv, 4),
+        "tof_label": tof_label,
+        "tof_hours": round(worst.tof_hours, 2),
+        "burn_location": worst.burn_location,
+        "burn_epoch": worst.burn_epoch.strftime("%Y-%m-%d %H:%M UTC"),
+        "threat_level": threat_level,
+        "threat_color": threat_color,
+        "threat_bg": threat_bg,
+        "direction": direction,
+        "pro_pct": pro_pct,
+        "nor_pct": nor_pct,
+        "rad_pct": rad_pct,
+        "dv_budget_pct": dv_budget_pct,
+        "summary": summary,
+    }
 
 
 def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
@@ -559,6 +747,9 @@ async def threat_sweep(
     # Group entries by target for the collapsed-row UI.
     grouped = _group_entries(entries)
 
+    # Identify the most dangerous course of action.
+    worst_coa = _compute_worst_coa(entries)
+
     state.last_threat_assessment = assessment
     state.append_log(
         f"[THREAT] Sweep complete: {red_sat} vs {len(targets)} "
@@ -575,6 +766,7 @@ async def threat_sweep(
         "assessment": assessment,
         "grouped": grouped,
         "hrr_count": hrr_count,
+        "worst_coa": worst_coa,
         "error": None,
     })
 

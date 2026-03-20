@@ -10,6 +10,70 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GCAT Browser** (`sipc/web/routes/gcat.py`)
+  - Fully interactive browser for the General Catalog of Artificial Space Objects
+    (J. McDowell, planet4589.org/space/gcat; CC-BY)
+  - 28 TSV datasets registered across four categories: Derived, Objects, Payloads,
+    Supporting
+  - `GET /gcat/panel` returns the panel skeleton instantly (< 50 ms, no network I/O);
+    skeleton includes header chips (datasets loaded / total records / last refreshed),
+    4-tab category navigator, and per-dataset nav buttons
+  - `GET /gcat/table` fetches the requested dataset on first access (~2–5 s via
+    `ThreadPoolExecutor`) then serves from in-memory `_CACHE` thereafter; supports
+    column search (all columns, case-insensitive), single-column sort (ascending /
+    descending), and windowed pagination (configurable page size, ±3 page window)
+  - `POST /gcat/refresh` concurrently re-downloads all 28 datasets using
+    `asyncio.gather` + `ThreadPoolExecutor` and replaces the full panel via
+    HTMX `hx-swap="outerHTML"`
+  - HTMX out-of-band swaps (`hx-swap-oob`) update nav button row counts after each
+    table load without re-rendering the panel
+  - Debounced search input (350 ms); `urlquote` Jinja2 filter registered in `app.py`
+    for safe URL construction in sort/pagination links
+  - CSS `position: absolute; inset: 0` layout for the GCAT hero panel (avoids
+    `height: 100%` chain failures); `position: relative` added to `.hero-panels`
+  - Fixed loading overlay always-visible bug: `.gcat-load-overlay` defaulted to
+    `display: flex` (overriding `.htmx-indicator { display: none }`) — corrected to
+    `display: none` with `.gcat-load-overlay.htmx-request { display: flex }`
+  - Added `pandas>=2.0` dependency (pandas 3.x installed)
+
+- **Pattern of Life panel** (`sipc/astro/pattern_of_life.py`, `sipc/web/routes/pol.py`)
+  - Historical TLE sequence analysis: period tracking, manoeuvre detection, activity
+    classification, and behavioural baseline from NORAD catalogue number input
+  - Hero tab lazy-loaded via HTMX; Chart.js zoom/pan via `hammer.min.js` +
+    `chartjs-plugin-zoom.min.js`
+
+- **Threat Sweep redesign** (`sipc/web/routes/threat.py`)
+  - HRR group dropdown (Blue/Red HRR by rank 0–5) with TLE pre-fetch on selection
+  - Batch Hohmann evaluation across 5 orbital epochs (now, apogee, perigee, ascending
+    node, descending node); top 5 auto-refined with Lambert for VNB components
+  - Sentinel pattern: background sweep re-run when asset set changes
+  - One-click asset ingestion into Blue/Red lists directly from sweep results
+
+- **HRR Watchlist sub-tab** in the Assets panel
+  - Blue HRR and Red HRR tables with one-click **→ Blue** / **→ Red** buttons
+  - Button replaced by OOB confirmation badge on success
+
+- **Intercept engine expansion** (`sipc/web/routes/maneuver.py`, `sipc/astro/tactical.py`)
+  - 23 total methods: Classical (Lambert, Hohmann, Bi-elliptic, Rendezvous, Proximity),
+    Tactical (Phasing, CW Radial, CW Along-Track, Plane Change, J2 Drift, COLA, Evasion),
+    Advanced Analysis (GEO Drift, NMC, Manoeuvre Detect, Detectability),
+    Decision Support (Intent Predict, Intercept Envelope, Stability, Fingerprint,
+    Formation Defence, Terrain, Min-Time)
+  - All-intercepts comparison result partial
+  - Trade-space ΔV vs transfer-time scatter plot with zoom/pan
+
+### Changed
+- Architecture completely migrated from STK-dependent hexagonal adapter pattern to
+  pure-Python astrodynamics; `sipc/stk_adapter/` and `sipc/intercept_engine/` packages
+  removed; `sipc/astro/` package now provides all orbital mechanics
+- `docs/architecture.md` rewritten to reflect current pure-Python stack
+- `sipc/astro/constants.py` extended with J2 coefficient, sidereal rate, additional
+  unit conversions
+- `sipc/domain/models.py` extended with `InterceptResult`, `BurnResult`, updated enums
+
+---
+
+### Added (prior — Phase 6 — Intercept Engine Integration)
 - **Phase 6 — Intercept Engine Integration**
   - `sipc/intercept_engine/` package: `LambertPlanner`, `RendezvousPlanner`, `ProximityInterceptPlanner`, `OptimalInterceptPlanner` moved from disconnected `intercept engine/` folder into proper Python package
   - `InterceptMethod` enum (`lambert`, `rendezvous`, `proximity`, `optimal`) in `domain/models.py`

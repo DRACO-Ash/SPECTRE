@@ -1996,3 +1996,135 @@ def min_time_intercept_analytical(
         hohmann_tof_s=tof_h,
         hohmann_dv_km_s=dv_h,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  18. V-Bar Hop Sequence
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class VBarHopResult:
+    """Result of a V-bar hop sequence along the velocity vector."""
+
+    hop_distance_km: float       # along-track advance per hop (km)
+    n_hops: int                  # number of discrete hops
+    total_advance_km: float      # total V-bar advance (= hop_distance * n_hops)
+    delta_v_per_hop: float       # km/s — two radial burns per hop (entry + correction)
+    total_delta_v: float         # km/s
+    time_per_hop_s: float        # seconds per hop (default T_orbit / 2)
+    total_time_s: float          # = time_per_hop_s * n_hops
+    method: str = "vbar_hop"
+
+
+def vbar_hop_sequence(
+    r_ref: float,
+    hop_distance_km: float,
+    n_hops: int = 3,
+    time_per_hop_s: float | None = None,
+    mu: float = MU_EARTH,
+) -> VBarHopResult:
+    """Compute a V-bar hop sequence advancing along the velocity vector.
+
+    Uses the classic two-impulse radial-burn hop model.  At half orbital
+    period, a radial impulse Δv_r advances the chaser by 4·Δv_r/n along
+    V-bar.  Two radial burns per hop (entry + correction) give::
+
+        ΔV_hop = n · d / 2
+
+    where d is the hop distance and n the mean motion.  The hop sequence is
+    stealthy because each individual radial impulse is small and mimics
+    natural perturbation-driven drift.
+
+    Args:
+        r_ref: Reference orbit radius (km).
+        hop_distance_km: Along-track advance per hop (km).
+        n_hops: Number of hops in the sequence.
+        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        mu: Gravitational parameter.
+    """
+    n = math.sqrt(mu / r_ref ** 3)
+    T_orbit = 2.0 * math.pi / n
+
+    if time_per_hop_s is None:
+        time_per_hop_s = T_orbit / 2.0
+
+    # Two radial burns per hop: each |Δv_r| = n·d/4, total per hop = n·d/2
+    dv_per_hop = n * hop_distance_km / 2.0
+    total_dv = n_hops * dv_per_hop
+
+    return VBarHopResult(
+        hop_distance_km=hop_distance_km,
+        n_hops=n_hops,
+        total_advance_km=n_hops * hop_distance_km,
+        delta_v_per_hop=dv_per_hop,
+        total_delta_v=total_dv,
+        time_per_hop_s=time_per_hop_s,
+        total_time_s=n_hops * time_per_hop_s,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  19. H-Bar Hop Sequence
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class HBarHopResult:
+    """Result of an H-bar hop sequence in the orbit-normal direction."""
+
+    hop_distance_km: float       # orbit-normal advance per hop (km)
+    n_hops: int
+    total_advance_km: float      # total H-bar advance
+    delta_v_per_hop: float       # km/s — single normal burn per hop
+    total_delta_v: float         # km/s
+    time_per_hop_s: float        # seconds per hop (default T_orbit / 2)
+    total_time_s: float
+    method: str = "hbar_hop"
+
+
+def hbar_hop_sequence(
+    r_ref: float,
+    hop_distance_km: float,
+    n_hops: int = 3,
+    time_per_hop_s: float | None = None,
+    mu: float = MU_EARTH,
+) -> HBarHopResult:
+    """Compute an H-bar hop sequence advancing in the orbit-normal direction.
+
+    Each hop is a small incremental plane change (normal burn at a node
+    crossing), exploiting the SHM out-of-plane dynamics::
+
+        ΔV_hop = n · d
+
+    H-bar hops cost roughly twice as much as V-bar hops for the same advance
+    because out-of-plane burns are more expensive than radial burns.  The
+    node-to-node (T_orbit/2) cadence makes each hop individually ambiguous —
+    consistent with attitude-control or propellant-settling events.
+
+    Args:
+        r_ref: Reference orbit radius (km).
+        hop_distance_km: Orbit-normal advance per hop (km).
+        n_hops: Number of hops.
+        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        mu: Gravitational parameter.
+    """
+    n = math.sqrt(mu / r_ref ** 3)
+    T_orbit = 2.0 * math.pi / n
+
+    if time_per_hop_s is None:
+        time_per_hop_s = T_orbit / 2.0
+
+    # Single normal burn per hop exploiting SHM quarter-period reach: Δv_n = n·d
+    dv_per_hop = n * hop_distance_km
+    total_dv = n_hops * dv_per_hop
+
+    return HBarHopResult(
+        hop_distance_km=hop_distance_km,
+        n_hops=n_hops,
+        total_advance_km=n_hops * hop_distance_km,
+        delta_v_per_hop=dv_per_hop,
+        total_delta_v=total_dv,
+        time_per_hop_s=time_per_hop_s,
+        total_time_s=n_hops * time_per_hop_s,
+    )

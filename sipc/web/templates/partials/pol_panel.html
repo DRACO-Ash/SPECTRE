@@ -1,0 +1,108 @@
+{# Historical Pattern of Life — input panel and results container #}
+
+<section class="panel panel-gold" style="margin-bottom:0.6rem">
+  <h2>Historical Pattern of Life</h2>
+  <p class="callout callout-gold" style="margin-bottom:0.6rem">
+    Fetch all historical TLEs for any satellite from UDL, detect manoeuvres, analyse orbital behaviour patterns,
+    and establish a statistical baseline for anomaly detection.
+  </p>
+
+  <form hx-post="/pol/analyse"
+        hx-target="#pol-results"
+        hx-swap="innerHTML"
+        hx-indicator="#pol-indicator"
+        hx-disabled-elt="find button[type=submit]">
+
+    <div class="mnv-search-grid" style="grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap:0.5rem; margin-bottom:0.5rem">
+
+      <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+        NORAD SATNO
+        <input type="number" name="satno" value="50321" min="1" required
+               style="font-size:0.85rem; font-weight:700; color:var(--ops-gold)"
+               placeholder="e.g. 50321" />
+      </label>
+
+      <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+        ΔV Threshold (m/s)
+        <input type="number" name="dv_threshold_ms" value="2.0" step="0.5" min="0.5" max="50"
+               title="Minimum ΔV to classify as a manoeuvre (typical noise floor: 1–3 m/s)" />
+      </label>
+
+    </div>
+
+    {# ── UDL source selector ── #}
+    <div style="border:1px solid var(--border); border-radius:4px; padding:0.5rem 0.7rem; margin-bottom:0.5rem">
+      <div style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
+        UDL Credentials
+      </div>
+
+      <div style="display:flex; gap:0.5rem; margin-bottom:0.4rem; flex-wrap:wrap">
+        <label style="font-size:0.72rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer">
+          <input type="radio" name="pol_source" value="udl" {% if has_udl %}checked{% endif %}> Session
+        </label>
+        <label style="font-size:0.72rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer">
+          <input type="radio" name="pol_source" value="udl_direct" {% if not has_udl %}checked{% endif %}> Direct
+        </label>
+      </div>
+
+      {# UDL session — no extra fields needed #}
+      <div id="pol-src-udl" class="pol-src-panel" {% if not has_udl %}style="display:none"{% endif %}>
+        {% if has_udl %}
+        <p class="label-dim" style="font-size:0.68rem; margin:0">
+          Using active UDL session credentials &mdash; fetching historical elsets for the entered SATNO.
+        </p>
+        {% else %}
+        <p class="label-dim" style="font-size:0.68rem; margin:0; color:var(--amber)">
+          No UDL session active. Connect UDL first or choose Direct.
+        </p>
+        {% endif %}
+      </div>
+
+      {# UDL direct credentials #}
+      <div id="pol-src-udl_direct" class="pol-src-panel" {% if has_udl %}style="display:none"{% endif %}>
+        <div class="mnv-search-grid" style="grid-template-columns:1fr 1fr; gap:0.4rem">
+          <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+            UDL Username
+            <input type="text" name="udl_user" autocomplete="username" placeholder="UDL username" />
+          </label>
+          <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+            UDL Password
+            <input type="password" name="udl_pass" autocomplete="current-password" placeholder="UDL password" />
+          </label>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="submit-row" style="margin-top:0.5rem">
+      <button type="submit" class="btn-primary">Analyse Pattern of Life</button>
+      <span id="pol-indicator" class="htmx-indicator">
+        <span class="spinner"></span>Fetching TLEs &amp; running analysis&hellip;
+      </span>
+    </div>
+
+    {% if error %}
+    <p class="error-msg" style="margin-top:0.4rem">{{ error }}</p>
+    {% endif %}
+
+  </form>
+
+  <script>
+  document.querySelectorAll('input[name="pol_source"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      document.querySelectorAll('.pol-src-panel').forEach(function(p) { p.style.display = 'none'; });
+      var panel = document.getElementById('pol-src-' + this.value);
+      if (panel) panel.style.display = '';
+    });
+  });
+  </script>
+
+</section>
+
+<div id="pol-results">
+  {% if pol %}
+    {% include "partials/pol_results.html" %}
+  {% else %}
+  <p class="empty-msg">Enter a SATNO and click Analyse to begin.</p>
+  {% endif %}
+</div>

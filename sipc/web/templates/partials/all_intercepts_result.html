@@ -1,0 +1,426 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% else %}
+
+{% set ok_items = items | selectattr('result') | list %}
+{% set best = ok_items | first %}
+
+{# ── Summary header ── #}
+<div class="threat-sweep-summary" style="margin-bottom:0.5rem">
+  <span class="badge-ok">{{ ok_items | length }} / {{ items | length }} methods analysed</span>
+  {% if best %}
+  <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
+    Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
+    &mdash; {{ "%.4f" | format(best.result.total_delta_v_km_s) }} km/s
+  </span>
+  {% endif %}
+  <span class="intercept-detail">
+    <span style="color:var(--red)">{{ red_name }}</span>
+    &#8594;
+    <span style="color:var(--ops-blue)">{{ blue_name }}</span>
+  </span>
+</div>
+
+{# ── Results table ── #}
+<div class="mnv-scroll" style="max-height:72vh; overflow-y:auto">
+<table class="hrr-table threat-table" id="all-intercepts-table" style="table-layout:fixed; width:100%">
+  <colgroup>
+    <col style="width:1.8rem">
+    <col style="width:20%">
+    <col style="width:7rem">
+    <col style="width:7rem">
+    <col style="width:6.5rem">
+    <col style="width:5rem">
+    <col style="width:7rem">
+    <col style="width:6rem">
+    <col style="width:5rem">
+  </colgroup>
+  <thead>
+    <tr>
+      <th></th>
+      <th onclick="aiSort(1,'str')" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(2,'num')" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(3,'str')" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(4,'num')" style="cursor:pointer; user-select:none; text-align:right">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(5,'num')" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(6,'str')" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(7,'num')" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+  {# Threat/obs numeric encodings for correct sort ordering #}
+  {%- set _tord = {'CRITICAL':0,'HIGH':1,'MEDIUM':2,'LOW':3,'ASSESSMENT':4} -%}
+  {%- set _oord = {'HIGH':0,'MEDIUM':1,'LOW':2,'VERY LOW':3} -%}
+  {% for item in items %}
+  {% if item.result %}
+  {# ── Parent (summary) row ── #}
+  <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
+      id="ai-row-{{ loop.index0 }}"
+      onclick="aiToggle({{ loop.index0 }})"
+      style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
+      data-sort-1="{{ item.result.method.value }}"
+      data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"
+      data-sort-3="{{ item.intel.manoeuvre_type }}"
+      data-sort-4="{{ item.result.total_delta_v_km_s }}"
+      data-sort-5="{{ item.intel.tof_hours }}"
+      data-sort-6="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
+      data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}">
+    <td class="threat-chevron-cell">
+      <span class="threat-chevron" id="ai-chevron-{{ loop.index0 }}">&#9654;</span>
+    </td>
+    <td>
+      <div style="font-size:0.73rem; font-weight:700; color:var(--text-bright); white-space:nowrap">
+        {{ item.result.method.value | upper }}
+      </div>
+      <div style="font-size:0.62rem; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis"
+           title="{{ item.intel.intent_label }}">
+        {{ item.intel.intent_label }}
+      </div>
+    </td>
+    <td>
+      <span style="background:{{ item.intel.threat_color }}; color:#fff;
+                   padding:0.15rem 0.45rem; border-radius:3px;
+                   font-size:0.63rem; font-weight:800; letter-spacing:0.05em;
+                   text-transform:uppercase">
+        {{ item.intel.threat_level }}
+      </span>
+    </td>
+    <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.manoeuvre_type }}</td>
+    <td class="mnv-dv" style="text-align:right; color:{{ item.intel.threat_color }}">
+      <strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong>
+    </td>
+    <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.tof_label }}</td>
+    <td style="font-size:0.67rem; color:var(--text-dim)">
+      {% if item.intel.burn_intel %}{{ item.intel.burn_intel[0].direction }}{% else %}&mdash;{% endif %}
+    </td>
+    <td>
+      <span style="color:{{ item.intel.obs_color }}; font-size:0.63rem; font-weight:700">
+        {{ item.intel.obs_level }}
+      </span>
+    </td>
+    <td class="col-actions">
+      <button class="btn-secondary btn-sm"
+              type="button"
+              onclick="event.stopPropagation(); aiLoadEngine('{{ item.result.red_name }}','{{ item.result.blue_name }}','{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}','{{ item.result.method.value }}')"
+              title="Pre-fill intercept engine with this result">Load</button>
+    </td>
+  </tr>
+
+  {# ── Expandable detail row ── #}
+  <tr id="ai-detail-{{ loop.index0 }}" style="display:none">
+    <td></td>
+    <td colspan="8" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
+                            background:{{ item.intel.threat_bg }};
+                            border-bottom:2px solid {{ item.intel.threat_color }}">
+
+      {# §A — Intelligence banner (compact) #}
+      <div style="border-left:4px solid {{ item.intel.threat_color }};
+                  padding:0.6rem 0.8rem; border-radius:0 5px 5px 0; margin-bottom:0.55rem">
+        <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.3rem">
+          <span style="background:{{ item.intel.threat_color }}; color:#fff;
+                       font-size:0.62rem; font-weight:800; padding:0.15rem 0.45rem;
+                       border-radius:3px; text-transform:uppercase; letter-spacing:0.05em">
+            {{ item.intel.threat_level }}
+          </span>
+          <span style="font-size:0.73rem; font-weight:700; color:var(--text-bright)">
+            {{ item.intel.intent_label }}
+          </span>
+          <span style="font-size:0.62rem; color:var(--gold); font-style:italic">
+            {{ item.result.method.value | upper }} &mdash; {{ item.intel.dv_class }}
+          </span>
+        </div>
+        <p style="margin:0; font-size:0.67rem; color:var(--text-dim); line-height:1.5">
+          {{ item.intel.summary }}
+        </p>
+      </div>
+
+      {# §B — Stat cards #}
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.35rem; margin-bottom:0.55rem">
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    padding:0.4rem 0.6rem; border-left:3px solid var(--gold)">
+          <div style="font-size:0.53rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.12rem">
+            Total &#916;V
+          </div>
+          <div style="font-size:1rem; font-weight:700; color:var(--gold)">
+            {{ "%.4f" | format(item.result.total_delta_v_km_s) }}
+          </div>
+          <div style="font-size:0.55rem; color:var(--text-dim)">km/s</div>
+        </div>
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    padding:0.4rem 0.6rem; border-left:3px solid var(--ops-blue)">
+          <div style="font-size:0.53rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.12rem">
+            TOF
+          </div>
+          <div style="font-size:1rem; font-weight:700; color:var(--ops-blue)">{{ item.intel.tof_label }}</div>
+          <div style="font-size:0.55rem; color:var(--text-dim)">{{ "%.2f" | format(item.intel.tof_hours) }} hr</div>
+        </div>
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    padding:0.4rem 0.6rem; border-left:3px solid var(--text-dim)">
+          <div style="font-size:0.53rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.12rem">
+            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}Score{% else %}Miss Dist{% endif %}
+          </div>
+          <div style="font-size:1rem; font-weight:700; color:var(--text-bright)">
+            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}
+              {{ item.result.intercept_range_km | round(0) | int }}
+            {% else %}
+              {{ "%.1f" | format(item.result.intercept_range_km) }}
+            {% endif %}
+          </div>
+          <div style="font-size:0.55rem; color:var(--text-dim)">
+            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}/100{% else %}km{% endif %}
+          </div>
+        </div>
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    padding:0.4rem 0.6rem; border-left:3px solid {{ item.intel.obs_color }}">
+          <div style="font-size:0.53rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.12rem">
+            Observability
+          </div>
+          <div style="font-size:1rem; font-weight:700; color:{{ item.intel.obs_color }}">
+            {{ item.intel.obs_level }}
+          </div>
+          <div style="font-size:0.55rem; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+               title="{{ item.intel.obs_reason }}">
+            {{ item.intel.obs_reason | truncate(40, true, '…') }}
+          </div>
+        </div>
+      </div>
+
+      {# §C — Burn analysis #}
+      {% if item.intel.burn_intel %}
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                  border-left:3px solid var(--gold); padding:0.55rem 0.7rem; margin-bottom:0.55rem">
+        <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim);
+                    text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.4rem">
+          Burn Sequence Analysis
+        </div>
+        {% for b in item.intel.burn_intel %}
+        <div style="{% if not loop.first %}margin-top:0.55rem; padding-top:0.5rem; border-top:1px solid var(--border){% endif %}">
+          <div style="display:flex; justify-content:space-between; margin-bottom:0.22rem">
+            <div style="font-size:0.67rem; font-weight:700; color:var(--text-bright)">
+              Burn {{ b.number }}
+              <span style="font-size:0.57rem; font-weight:400; color:var(--text-dim)">&bull; {{ b.epoch }}</span>
+            </div>
+            <div style="font-size:0.72rem; font-weight:700; color:var(--gold)">{{ "%.1f" | format(b.dv_ms) }} m/s</div>
+          </div>
+          <div style="height:7px; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06);
+                      display:flex; margin-bottom:0.22rem">
+            {% if b.pro_pct > 0 %}<div style="width:{{ b.pro_pct }}%; background:var(--ops-blue)" title="Prograde {{ b.pro_pct }}%"></div>{% endif %}
+            {% if b.nor_pct > 0 %}<div style="width:{{ b.nor_pct }}%; background:var(--gold)" title="Normal {{ b.nor_pct }}%"></div>{% endif %}
+            {% if b.rad_pct > 0 %}<div style="width:{{ b.rad_pct }}%; background:var(--text-dim)" title="Radial {{ b.rad_pct }}%"></div>{% endif %}
+          </div>
+          <div style="display:flex; gap:0.7rem; font-size:0.57rem; color:var(--text-dim)">
+            <span><span style="color:var(--ops-blue)">&#9646;</span> Pro {{ b.pro_pct }}%</span>
+            <span><span style="color:var(--gold)">&#9646;</span> Nor {{ b.nor_pct }}%</span>
+            <span><span style="color:var(--text-dim)">&#9646;</span> Rad {{ b.rad_pct }}%</span>
+            <span style="margin-left:auto; color:var(--text-bright); font-weight:600">{{ b.direction }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {# §D — Method intel + observability (2-col) #}
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.45rem; margin-bottom:0.55rem">
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    border-left:3px solid var(--ops-blue); padding:0.5rem 0.65rem">
+          <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35rem">
+            Method Intelligence
+          </div>
+          <table style="width:100%; font-size:0.63rem; border-collapse:collapse">
+            {% for ins in item.intel.method_insights %}
+            <tr>
+              <td style="color:var(--text-dim); padding:0.15rem 0">{{ ins.label }}</td>
+              <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.15rem 0">{{ ins.value }}</td>
+            </tr>
+            {% endfor %}
+            <tr>
+              <td style="color:var(--text-dim); padding:0.15rem 0">Burns</td>
+              <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.15rem 0">{{ item.result.burns | length }}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
+                    border-left:3px solid {{ item.intel.obs_color }}; padding:0.5rem 0.65rem">
+          <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim);
+                      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35rem">
+            Observability
+          </div>
+          <div style="display:inline-block; padding:0.1rem 0.4rem; border-radius:3px;
+                      background:{{ item.intel.obs_color }}1a; border:1px solid {{ item.intel.obs_color }};
+                      font-size:0.58rem; font-weight:800; color:{{ item.intel.obs_color }};
+                      text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.3rem">
+            {{ item.intel.obs_level }}
+          </div>
+          <div style="font-size:0.62rem; color:var(--text-dim); line-height:1.4; margin-bottom:0.4rem">
+            {{ item.intel.obs_reason }}
+          </div>
+          <div style="font-size:0.57rem; color:var(--text-dim); margin-bottom:0.12rem">
+            &#916;V Budget
+            <span style="float:right; font-weight:600; color:var(--text-bright)">
+              {{ "%.1f" | format(item.intel.dv_budget_pct) }}%
+            </span>
+          </div>
+          <div style="height:5px; border-radius:3px; background:rgba(255,255,255,0.07); overflow:hidden">
+            <div style="height:100%; width:{{ item.intel.dv_budget_pct | round(0) | int }}%;
+                        border-radius:3px; background:{{ item.intel.threat_color }}"></div>
+          </div>
+        </div>
+      </div>
+
+      {# §E — Precise burn table (collapsible) #}
+      <details>
+        <summary style="cursor:pointer; font-size:0.6rem; font-weight:700; color:var(--text-dim);
+                        text-transform:uppercase; letter-spacing:0.06em; padding:0.25rem 0;
+                        list-style:none; display:flex; align-items:center; gap:0.3rem;
+                        border-bottom:1px solid var(--border)">
+          <span style="font-size:0.68rem">&#9654;</span> Precise Burn Parameters
+        </summary>
+        <div class="mnv-scroll" style="margin-top:0.3rem">
+          <table class="mnv-table" style="font-size:0.65rem">
+            <thead>
+              <tr>
+                <th>Burn #</th><th>Segment</th><th>Epoch (UTC)</th>
+                <th>&#916;V km/s</th><th>Prograde</th><th>Normal</th><th>Radial</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for burn in item.result.burns %}
+              <tr>
+                <td>{{ burn.burn_number }}</td>
+                <td class="col-dim">{{ burn.segment_name }}</td>
+                <td class="col-dim">{{ burn.burn_epoch.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="mnv-dv"><strong>{{ "%.4f" | format(burn.delta_v_km_s) }}</strong></td>
+                <td class="col-dim">{{ "%.4f" | format(burn.dv_prograde) }}</td>
+                <td class="col-dim">{{ "%.4f" | format(burn.dv_normal) }}</td>
+                <td class="col-dim">{{ "%.4f" | format(burn.dv_radial) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="intercept-totals">
+                <td colspan="3"><strong>Total</strong></td>
+                <td class="mnv-dv"><strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong></td>
+                <td colspan="3"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </details>
+
+    </td>
+  </tr>
+
+  {% else %}
+  {# ── Failed method row ── #}
+  <tr style="opacity:0.35">
+    <td></td>
+    <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.method.value | upper }}</td>
+    <td><span style="font-size:0.58rem; color:var(--text-dim)">FAILED</span></td>
+    <td colspan="6" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<script>
+/* ── Toggle detail row ── */
+function aiToggle(idx) {
+  var det  = document.getElementById('ai-detail-' + idx);
+  var chev = document.getElementById('ai-chevron-' + idx);
+  if (!det) return;
+  var open = det.style.display !== 'none';
+  det.style.display = open ? 'none' : '';
+  if (chev) chev.innerHTML = open ? '&#9654;' : '&#9660;';
+}
+
+/* ── Pre-fill the intercept engine ── */
+function aiLoadEngine(redSat, blueSat, epoch, method) {
+  if (typeof switchToEngine === 'function') switchToEngine();
+  var redSel  = document.getElementById('ie-red-sat');
+  var blueSel = document.getElementById('ie-blue-sat');
+  var startIn = document.querySelector('input[name="manoeuvre_start"]');
+  if (redSel)  redSel.value  = redSat;
+  if (blueSel) blueSel.value = blueSat;
+  if (startIn) startIn.value = epoch;
+  var engine = document.getElementById('intercept-engine-form');
+  if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/* ── Column sort ── */
+var _aiSortCol = -1, _aiSortAsc = true;
+
+function aiSort(col, type) {
+  var table = document.getElementById('all-intercepts-table');
+  if (!table) return;
+  var tbody = table.tBodies[0];
+
+  /* Toggle direction if same column, else reset to ascending */
+  if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
+  else { _aiSortCol = col; _aiSortAsc = true; }
+
+  /* Update sort indicators in header */
+  table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
+  var th = table.querySelectorAll('thead th')[col];
+  if (th) {
+    var ind = th.querySelector('.hrr-sort-ind');
+    if (ind) ind.textContent = _aiSortAsc ? ' \u25b2' : ' \u25bc';
+  }
+
+  /* Collect parent+detail pairs; non-parent rows (failed) go to the bottom */
+  var pairs = [];
+  var orphans = [];
+  var rows = Array.from(tbody.rows);
+  var i = 0;
+  while (i < rows.length) {
+    var row = rows[i];
+    if (row.classList.contains('threat-parent')) {
+      /* The very next row is always the paired detail row */
+      var detail = (rows[i + 1] && !rows[i + 1].classList.contains('threat-parent'))
+                   ? rows[i + 1] : null;
+      pairs.push([row, detail]);
+      i += detail ? 2 : 1;
+    } else {
+      orphans.push(row);
+      i++;
+    }
+  }
+
+  /* Sort pairs by the data attribute of the parent row */
+  pairs.sort(function(a, b) {
+    var av = a[0].getAttribute('data-sort-' + col) || '';
+    var bv = b[0].getAttribute('data-sort-' + col) || '';
+    if (type === 'num') {
+      av = parseFloat(av);
+      bv = parseFloat(bv);
+      if (isNaN(av)) av = Infinity;
+      if (isNaN(bv)) bv = Infinity;
+    }
+    if (av < bv) return _aiSortAsc ? -1 : 1;
+    if (av > bv) return _aiSortAsc ?  1 : -1;
+    return 0;
+  });
+
+  /* Re-insert: sorted pairs first, failed rows last */
+  pairs.forEach(function(pair) {
+    tbody.appendChild(pair[0]);
+    if (pair[1]) tbody.appendChild(pair[1]);
+  });
+  orphans.forEach(function(r) { tbody.appendChild(r); });
+}
+</script>
+
+{% if intercept_history and intercept_history | length > 1 %}
+<script>
+if (typeof _sipcRenderTradeSpace === 'function') _sipcRenderTradeSpace();
+</script>
+{% endif %}
+
+{% endif %}

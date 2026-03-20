@@ -24,6 +24,7 @@ from sipc.astro.tactical import (
     FingerprintResult,
     FormationDefenceResult,
     GeoDriftResult,
+    HBarHopResult,
     IntentAssessment,
     InterceptEnvelopeResult,
     J2DriftResult,
@@ -35,6 +36,7 @@ from sipc.astro.tactical import (
     PhasingResult,
     StabilityResult,
     TerrainAssessment,
+    VBarHopResult,
     assess_intercept_intent,
     classify_manoeuvre,
     collision_avoidance,
@@ -46,6 +48,7 @@ from sipc.astro.tactical import (
     fingerprint_manoeuvre,
     formation_defence_burn,
     geo_drift,
+    hbar_hop_sequence,
     intercept_envelope_analytical,
     j2_drift_plan,
     j2_raan_rate,
@@ -56,6 +59,7 @@ from sipc.astro.tactical import (
     phasing_orbit,
     plane_change,
     relative_motion_stability,
+    vbar_hop_sequence,
 )
 from sipc.astro.transfers import TransferResult, hohmann, bielliptic
 
@@ -402,7 +406,7 @@ def cw_radial_intercept(
     )
 
     return InterceptSolution(
-        method="cw_radial",
+        method="rbar_hop",
         burns=[burn1],
         total_delta_v=cw.total_delta_v,
         departure_epoch=t_departure,
@@ -458,6 +462,143 @@ def cw_drift_intercept(
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
         miss_distance_km=desired_drift_km,
+    )
+
+
+def vbar_hop_intercept(
+    red_tle: str,
+    blue_tle: str,
+    manoeuvre_start: datetime,
+    n_hops: int = 3,
+    hop_distance_km: float | None = None,
+    coast_s: float = 0.0,
+    mu: float = MU_EARTH,
+) -> "InterceptSolution":
+    """V-bar hop approach sequence along the velocity vector.
+
+    Executes a multi-hop V-bar approach using two radial burns per hop.
+    If *hop_distance_km* is ``None``, derives it from the current
+    along-track separation divided by *n_hops*.
+
+    Args:
+        red_tle: TLE of the manoeuvring satellite.
+        blue_tle: TLE of the target satellite.
+        manoeuvre_start: When the sequence begins.
+        n_hops: Number of discrete hops.
+        hop_distance_km: Along-track advance per hop (km); auto-derived if None.
+        coast_s: Coast before the first hop (seconds).
+        mu: Gravitational parameter.
+    """
+    red_orbit = TLEOrbit(red_tle)
+    blue_orbit = TLEOrbit(blue_tle)
+
+    t_departure = manoeuvre_start + timedelta(seconds=coast_s)
+    sv_red = red_orbit.propagate(t_departure)
+    sv_blue = blue_orbit.propagate(t_departure)
+
+    r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
+
+    if hop_distance_km is None:
+        dr = np.array(sv_blue.r) - np.array(sv_red.r)
+        v_hat_d = sv_red.v / sv_red.v_mag
+        along_track_sep = abs(float(np.dot(dr, v_hat_d)))
+        hop_distance_km = max(along_track_sep / n_hops, 1.0)
+
+    result = vbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
+    t_arrival = t_departure + timedelta(seconds=result.total_time_s)
+
+    # First radial burn (entry): magnitude = dv_per_hop / 2
+    v_hat = sv_red.v / sv_red.v_mag
+    h_vec = np.cross(sv_red.r, sv_red.v)
+    h_mag = float(np.linalg.norm(h_vec))
+    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+    b_hat = np.cross(v_hat, n_hat)  # radial direction
+    dv_mag = result.delta_v_per_hop / 2.0
+    burn1 = _make_burn(1, t_departure, b_hat * dv_mag, sv_red)
+
+    # Final corrective burn (anti-radial, closing the last hop)
+    sv_red_arr = red_orbit.propagate(t_arrival)
+    v_hat_a = sv_red_arr.v / sv_red_arr.v_mag
+    h_a = np.cross(sv_red_arr.r, sv_red_arr.v)
+    h_a_mag = float(np.linalg.norm(h_a))
+    n_hat_a = h_a / h_a_mag if h_a_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+    b_hat_a = np.cross(v_hat_a, n_hat_a)
+    burn2 = _make_burn(2, t_arrival, -b_hat_a * dv_mag, sv_red_arr)
+
+    return InterceptSolution(
+        method="vbar_hop",
+        burns=[burn1, burn2],
+        total_delta_v=result.total_delta_v,
+        departure_epoch=t_departure,
+        arrival_epoch=t_arrival,
+        miss_distance_km=result.total_advance_km,
+    )
+
+
+def hbar_hop_intercept(
+    red_tle: str,
+    blue_tle: str,
+    manoeuvre_start: datetime,
+    n_hops: int = 3,
+    hop_distance_km: float | None = None,
+    coast_s: float = 0.0,
+    mu: float = MU_EARTH,
+) -> "InterceptSolution":
+    """H-bar hop approach sequence in the orbit-normal direction.
+
+    Executes a multi-hop H-bar approach using normal burns at node
+    crossings.  If *hop_distance_km* is ``None``, derives it from the
+    current cross-track separation divided by *n_hops*.
+
+    Args:
+        red_tle: TLE of the manoeuvring satellite.
+        blue_tle: TLE of the target satellite.
+        manoeuvre_start: When the sequence begins.
+        n_hops: Number of discrete hops.
+        hop_distance_km: Orbit-normal advance per hop (km); auto-derived if None.
+        coast_s: Coast before the first hop (seconds).
+        mu: Gravitational parameter.
+    """
+    red_orbit = TLEOrbit(red_tle)
+    blue_orbit = TLEOrbit(blue_tle)
+
+    t_departure = manoeuvre_start + timedelta(seconds=coast_s)
+    sv_red = red_orbit.propagate(t_departure)
+    sv_blue = blue_orbit.propagate(t_departure)
+
+    r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
+
+    if hop_distance_km is None:
+        dr = np.array(sv_blue.r) - np.array(sv_red.r)
+        h_vec0 = np.cross(sv_red.r, sv_red.v)
+        h_mag0 = float(np.linalg.norm(h_vec0))
+        n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
+        cross_track_sep = abs(float(np.dot(dr, n_hat0)))
+        hop_distance_km = max(cross_track_sep / n_hops, 1.0)
+
+    result = hbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
+    t_arrival = t_departure + timedelta(seconds=result.total_time_s)
+
+    # First normal burn in the orbit-normal (H-bar) direction
+    h_vec = np.cross(sv_red.r, sv_red.v)
+    h_mag = float(np.linalg.norm(h_vec))
+    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+    burn1 = _make_burn(1, t_departure, n_hat * result.delta_v_per_hop, sv_red)
+
+    # Final corrective burn (anti-normal)
+    sv_red_arr = red_orbit.propagate(t_arrival)
+    h_arr = np.cross(sv_red_arr.r, sv_red_arr.v)
+    h_arr_mag = float(np.linalg.norm(h_arr))
+    n_hat_arr = h_arr / h_arr_mag if h_arr_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+    burn2 = _make_burn(2, t_arrival, n_hat_arr * result.delta_v_per_hop, sv_red_arr)
+
+    return InterceptSolution(
+        method="hbar_hop",
+        burns=[burn1, burn2],
+        total_delta_v=result.total_delta_v,
+        departure_epoch=t_departure,
+        arrival_epoch=t_arrival,
+        miss_distance_km=result.total_advance_km,
     )
 
 

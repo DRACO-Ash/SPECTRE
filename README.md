@@ -18,6 +18,9 @@ SIPC provides analysts with a web console for:
 
 All orbital mechanics computations use the pure-Python `sipc.astro` package — no external astrodynamics software required.
 
+- Browsing the **GCAT** (General Catalog of Artificial Space Objects — J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, and paginated, with on-demand download and in-session caching
+- Analysing **Pattern of Life** from historical TLE sequences: manoeuvre detection, activity classification, and behavioural baseline
+
 ---
 
 ## Requirements
@@ -107,17 +110,19 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 Once logged in, the operator console has a collapsible sidebar (default 500 px) on the left and an intelligence panel on the right. The nav bar exposes a UDL connection chip:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  [≡] SIPC    [UDL ●]                       [operator] [Logout]│
-├──────────────────────┬─────────────────────────────────────────┤
-│  SIDEBAR (500px)     │  INTELLIGENCE PANEL                    │
-│  ┌ Assets ─────────┐ │  Intercept Engine                      │
-│  │ [Red][Blue][HRR]│ │  Threat Sweep                          │
-│  │  sub-tabs        │ │  Orbital Events                        │
-│  └─────────────────┘ │  Trade-Space Plot                      │
-│  Scenario Time        │  Session Log                           │
-│  UDL Catalogue Search │                                        │
-└──────────────────────┴─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  [≡] SIPC    [UDL ●]                         [operator] [Logout] │
+├────────────────────────┬─────────────────────────────────────────┤
+│  SIDEBAR (500px)       │  HERO TABS                              │
+│  ┌ Assets ───────────┐ │  [Engine] [Sweep] [PoL] [GCAT]         │
+│  │ [Red][Blue][HRR]  │ ├─────────────────────────────────────────┤
+│  │  sub-tabs          │ │  Intercept Engine  (23 methods)        │
+│  └───────────────────┘ │  Threat Sweep      (batch HRR eval)    │
+│  Scenario Time          │  Pattern of Life   (TLE history)       │
+│  UDL Catalogue Search   │  GCAT Browser      (28 datasets)       │
+│                         │  Trade-Space Plot  (ΔV vs time)        │
+│                         │  Session Log                           │
+└────────────────────────┴─────────────────────────────────────────┘
 ```
 
 ### Step-by-step
@@ -154,7 +159,17 @@ Once logged in, the operator console has a collapsible sidebar (default 500 px) 
 
 9. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method. Use this to identify the optimal trade-off.
 
-10. **Review and repeat** — use **Clear History** to reset the trade-space plot. Click × on any asset to remove it. All panel updates are HTMX partial swaps — the page never fully reloads.
+10. **Pattern of Life** — open the **PoL** hero tab, enter a NORAD catalogue number, and fetch a historical TLE sequence. SIPC analyses the sequence for period anomalies, manoeuvre detections, and activity classification, displaying a timeline of inferred events.
+
+11. **GCAT** — open the **GCAT** hero tab for instant access to the General Catalog of Artificial Space Objects. The panel skeleton loads immediately; click any dataset in the left-hand navigator to fetch and display it (first access ~2–5 s, cached for the session thereafter):
+    - **Derived**: Current Satellite Catalog, Launch Log, Active Satellites, Geosync Catalog, Full Launch Log
+    - **Objects**: SatCat, AuxCat, EventCat, DeepCat, and more
+    - **Payloads**: Mission metadata, classification, end-of-life data
+    - **Supporting**: Organisations, Sites, Launch Vehicles, Engines
+
+    Use the search box to filter all columns, click any column header to sort, and navigate pages with the pagination bar. Use **↻ Refresh All** to force a fresh download of all 28 datasets from planet4589.org.
+
+12. **Review and repeat** — use **Clear History** to reset the trade-space plot. Click × on any asset to remove it. All panel updates are HTMX partial swaps — the page never fully reloads.
 
 ---
 
@@ -198,18 +213,22 @@ sipc/                       ← repo root
 │   │   ├── scenario.py     ← ScenarioPlanner orchestrator
 │   │   └── geometry.py     ← geometry helpers
 │   ├── web/                ← FastAPI web console
-│   │   ├── app.py          ← application factory + startup
+│   │   ├── app.py          ← application factory + startup, Jinja2 filters
 │   │   ├── auth.py         ← session cookies + require_login dependency
 │   │   ├── database.py     ← async SQLAlchemy engine + admin bootstrap
 │   │   ├── models.py       ← User ORM model
 │   │   ├── planning_state.py ← per-session in-memory state (assets, intercept history)
 │   │   ├── routes/
 │   │   │   ├── login.py    ← GET/POST /login, POST /logout
-│   │   │   ├── operator.py ← dashboard, asset CRUD, log
-│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, catalogue search
-│   │   │   └── maneuver.py ← intercept engine, orbital events, trade-space data
+│   │   │   ├── operator.py ← dashboard, asset CRUD, log, orbital events
+│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, catalogue search, HRR watchlist
+│   │   │   ├── maneuver.py ← 23-method intercept engine, trade-space data
+│   │   │   ├── threat.py   ← Threat Sweep (batch Hohmann + Lambert refinement)
+│   │   │   ├── pol.py      ← Pattern of Life (historical TLE analysis)
+│   │   │   └── gcat.py     ← GCAT browser (28 datasets, on-demand fetch, in-memory cache)
 │   │   ├── templates/      ← Jinja2 HTML (base, login, operator, partials)
-│   │   └── static/         ← style.css (Bluestaq dark ops theme), Chart.js, SIPC_logo.svg
+│   │   └── static/         ← style.css (Bluestaq dark ops theme), Chart.js, hammer.min.js,
+│   │                          chartjs-plugin-zoom.min.js, SIPC_logo.svg
 │   ├── app_logging/        ← structlog setup + run_id correlation
 │   └── config/             ← constants and runtime settings
 ├── tests/

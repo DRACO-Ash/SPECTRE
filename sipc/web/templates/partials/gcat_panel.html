@@ -1,0 +1,196 @@
+{#
+  gcat_panel.html — GCAT panel skeleton
+  ======================================
+  Returned INSTANTLY by GET /gcat/panel (no network I/O).
+  Replaced wholesale by POST /gcat/refresh when the user forces a full re-download.
+
+  Context variables
+  -----------------
+  datasets      : dict  key → {label, url, category, desc}
+  categories    : dict  key → {label, color, title, desc}
+  cache_rows    : dict  key → int   (row counts for cached datasets)
+  cat_counts    : dict  cat_key → int
+  gcat_total_rows : int
+  loaded_count  : int
+  total_count   : int
+  last_updated  : str
+  fetch_errors  : list[str]
+  fetching      : bool
+#}
+
+<div class="gcat-wrap" id="gcat-panel-body">
+
+  {# ╔══════════════════════════════════════════════════════╗
+     ║  HEADER                                              ║
+     ╚══════════════════════════════════════════════════════╝ #}
+  <header class="gcat-header">
+
+    <div class="gcat-brand">
+      <span class="gcat-brand-glyph">⊕</span>
+      <div class="gcat-brand-text">
+        <div class="gcat-brand-name">
+          GCAT
+          <span class="gcat-brand-full">General Catalog of Artificial Space Objects</span>
+        </div>
+        <div class="gcat-brand-credit">
+          J. McDowell &middot;
+          <a href="https://planet4589.org/space/gcat/" target="_blank" rel="noopener"
+             title="Open GCAT source data at planet4589.org">planet4589.org/space/gcat</a>
+          &middot; <abbr title="Creative Commons Attribution licence">CC-BY</abbr>
+        </div>
+      </div>
+    </div>
+
+    <div class="gcat-header-chips">
+      <div class="gcat-chip" title="{{ loaded_count }} of {{ total_count }} datasets in cache">
+        <span class="gcat-chip-val">{{ loaded_count }}<span class="gcat-chip-tot">/{{ total_count }}</span></span>
+        <span class="gcat-chip-lbl">datasets</span>
+      </div>
+      <div class="gcat-chip" title="Total records across all cached datasets">
+        <span class="gcat-chip-val">
+          {% if gcat_total_rows %}{{ "{:,}".format(gcat_total_rows) }}{% else %}&mdash;{% endif %}
+        </span>
+        <span class="gcat-chip-lbl">records</span>
+      </div>
+      <div class="gcat-chip gcat-chip-time" title="Timestamp of last Refresh All">
+        <span class="gcat-chip-val gcat-chip-ts">{{ last_updated }}</span>
+        <span class="gcat-chip-lbl">refreshed</span>
+      </div>
+    </div>
+
+    <div class="gcat-header-actions">
+      {% if fetch_errors %}
+      <span class="gcat-warn-badge" title="{{ fetch_errors | join('; ') }}">
+        ⚠ {{ fetch_errors | length }} error{{ 's' if fetch_errors | length != 1 else '' }}
+      </span>
+      {% endif %}
+      <button class="btn-secondary btn-sm"
+              hx-post="/gcat/refresh"
+              hx-target="#gcat-panel-body"
+              hx-swap="outerHTML"
+              hx-indicator="#gcat-refresh-ind"
+              hx-disabled-elt="this"
+              title="Re-download all {{ total_count }} GCAT datasets from planet4589.org (takes 10–30 s)">
+        ↻ Refresh All
+      </button>
+      <span id="gcat-refresh-ind" class="htmx-indicator gcat-refresh-ind">
+        <span class="spinner"></span> Downloading&hellip;
+      </span>
+    </div>
+
+  </header>
+
+  {# ╔══════════════════════════════════════════════════════╗
+     ║  CATEGORY TAB BAR                                    ║
+     ╚══════════════════════════════════════════════════════╝ #}
+  <div class="gcat-cat-bar" role="tablist">
+    {% for cat_key, cat in categories.items() %}
+    <button class="gcat-ctab {% if loop.first %}active{% endif %}"
+            role="tab"
+            data-cat="{{ cat_key }}"
+            onclick="gcatCatTab(this)"
+            title="{{ cat.desc }}">
+      <span class="gcat-ctab-pip gcat-pip-{{ cat.color }}"></span>
+      {{ cat.label }}
+      <span class="gcat-ctab-badge">{{ cat_counts[cat_key] }}</span>
+    </button>
+    {% endfor %}
+  </div>
+
+  {# ╔══════════════════════════════════════════════════════╗
+     ║  BODY — Dataset nav (left) + Table area (right)      ║
+     ╚══════════════════════════════════════════════════════╝ #}
+  <div class="gcat-body">
+
+    {# ── LEFT: Dataset navigator ────────────────────────── #}
+    <nav class="gcat-nav" id="gcat-nav">
+      {% for cat_key, cat in categories.items() %}
+      <div class="gcat-nav-group {% if loop.first %}active{% endif %}"
+           data-cat-group="{{ cat_key }}">
+
+        <div class="gcat-nav-group-hdr">
+          <span class="gcat-nav-pip gcat-pip-{{ cat.color }}"></span>
+          {{ cat.title }}
+        </div>
+
+        {% for ds_key, ds in datasets.items() %}
+        {% if ds.category == cat_key %}
+        {% set is_cached = ds_key in cache_rows %}
+        <button id="gcat-ds-{{ ds_key }}"
+                class="gcat-ds-btn {% if not is_cached %}gcat-ds-unloaded{% endif %}"
+                data-ds="{{ ds_key }}"
+                data-cat="{{ cat_key }}"
+                hx-get="/gcat/table?dataset={{ ds_key }}"
+                hx-target="#gcat-table-area"
+                hx-swap="innerHTML"
+                hx-indicator="#gcat-load-ind"
+                onclick="gcatSelectDs(this)"
+                title="{{ ds.desc }}">
+          <span class="gcat-ds-label">{{ ds.label }}</span>
+          <span class="gcat-ds-rows {% if is_cached %}gcat-rows-loaded{% endif %}">
+            {%- if is_cached -%}
+              {{ "{:,}".format(cache_rows[ds_key]) }}
+            {%- else -%}
+              &mdash;
+            {%- endif -%}
+          </span>
+        </button>
+        {% endif %}
+        {% endfor %}
+
+      </div>
+      {% endfor %}
+    </nav>
+
+    {# ── RIGHT: Table area ──────────────────────────────── #}
+    <div class="gcat-main">
+
+      {# HTMX loading overlay #}
+      <div id="gcat-load-ind" class="gcat-load-overlay htmx-indicator">
+        <span class="spinner"></span>
+        <span>Downloading from planet4589.org&hellip;</span>
+      </div>
+
+      {# Table target — starts with welcome state #}
+      <div id="gcat-table-area" class="gcat-table-area">
+        {% include "partials/gcat_welcome.html" %}
+      </div>
+
+    </div>{# end .gcat-main #}
+
+  </div>{# end .gcat-body #}
+
+</div>{# end .gcat-wrap #}
+
+<script>
+/* ── GCAT panel JavaScript ──────────────────────────────────── */
+
+/** Switch visible category group in the dataset nav. */
+function gcatCatTab(btn) {
+  var cat = btn.dataset.cat;
+  document.querySelectorAll('.gcat-ctab').forEach(function(b) {
+    b.classList.toggle('active', b === btn);
+  });
+  document.querySelectorAll('.gcat-nav-group').forEach(function(g) {
+    g.classList.toggle('active', g.dataset.catGroup === cat);
+  });
+}
+
+/** Mark the clicked dataset button active; clear others. */
+function gcatSelectDs(btn) {
+  document.querySelectorAll('.gcat-ds-btn').forEach(function(b) {
+    b.classList.remove('active');
+  });
+  btn.classList.add('active');
+}
+
+/** Clear search and reload the current dataset from page 1.
+ *  Called by the ✕ button in the table toolbar. */
+function gcatClearSearch(dsKey) {
+  htmx.ajax('GET', '/gcat/table?dataset=' + encodeURIComponent(dsKey) + '&q=&page=1', {
+    target: '#gcat-table-area',
+    swap: 'innerHTML',
+    indicator: '#gcat-load-ind'
+  });
+}
+</script>

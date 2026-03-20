@@ -346,6 +346,13 @@
       <button class="htab" data-panel="hero-sweep" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-red"></span>Threat Sweep
       </button>
+      <button class="htab" data-panel="hero-pol" onclick="heroTab(this)">
+        <span class="htab-icon htab-icon-gold"></span>Historical PoL
+      </button>
+      <button class="htab" data-panel="hero-gcat" onclick="heroTab(this)"
+              title="GCAT — General Catalog of Artificial Space Objects (McDowell / planet4589.org, CC-BY)">
+        <span class="htab-icon htab-icon-blue"></span>GCAT
+      </button>
     </div>
 
     <!-- Hero Panels -->
@@ -356,11 +363,11 @@
         <section class="panel panel-gold">
           <h2>Intercept Engine</h2>
           <p class="callout callout-gold" style="margin-bottom:0.6rem">
-            Calculate intercept manoeuvres between red and blue satellites. Select an algorithm, configure timing, and compute the burn sequence.
+            Calculate intercept manoeuvres between red and blue satellites using all 23 methods simultaneously. Configure timing and compute a ranked comparison of every trajectory solver.
           </p>
 
           <form id="intercept-engine-form"
-                hx-post="/plan/maneuver/apply-intercept"
+                hx-post="/plan/maneuver/apply-all-intercepts"
                 hx-target="#intercept-result"
                 hx-swap="innerHTML"
                 hx-indicator="#intercept-indicator"
@@ -377,41 +384,7 @@
                   {% include "partials/blue_options.html" %}
                 </select>
               </label>
-              <label title="Intercept algorithm — determines the trajectory solver used">Algorithm
-                <select name="method" id="ie-method" onchange="ieUpdate()">
-                  <optgroup label="Classical Transfers">
-                    <option value="lambert">Lambert (coast &#8594; burn &#8594; coast)</option>
-                    <option value="hohmann">Hohmann (two-burn circular transfer)</option>
-                    <option value="bielliptic">Bi-elliptic (three-burn via intermediate apoapsis)</option>
-                    <option value="rendezvous">Rendezvous (coast &#8594; burn, match orbit)</option>
-                    <option value="proximity">Proximity (coast &#8594; burn, min range)</option>
-                  </optgroup>
-                  <optgroup label="Tactical Manoeuvres">
-                    <option value="phasing">Phasing (period-adjust rendezvous)</option>
-                    <option value="cw_radial">CW Radial Separation</option>
-                    <option value="cw_drift">CW Along-Track Drift</option>
-                    <option value="plane_change">Plane Change (inclination)</option>
-                    <option value="j2_drift">J2 Drift (RAAN precession)</option>
-                    <option value="cola">COLA (collision avoidance)</option>
-                    <option value="evasion">Evasion (optimal defensive burn)</option>
-                  </optgroup>
-                  <optgroup label="Advanced Analysis">
-                    <option value="geo_drift">GEO Drift (longitude relocation)</option>
-                    <option value="nmc">NMC (circumnavigation / safety ellipse)</option>
-                    <option value="manoeuvre_detect">Manoeuvre Detect (classify TLE change)</option>
-                    <option value="detectability">Detectability (intercept observability)</option>
-                    <option value="fingerprint">Fingerprint (behavioural classification)</option>
-                    <option value="terrain">Terrain (orbital regime risk map)</option>
-                  </optgroup>
-                  <optgroup label="Decision Support">
-                    <option value="intent_predict">Intent Predict (adversary assessment)</option>
-                    <option value="intercept_envelope">Intercept Envelope (reachability)</option>
-                    <option value="stability">Stability (relative motion analysis)</option>
-                    <option value="formation">Formation Defence (formation-aware COLA)</option>
-                    <option value="min_time">Min-Time Intercept (fastest transfer)</option>
-                  </optgroup>
-                </select>
-              </label>
+
               <label title="When to start the intercept sequence — click Events to query orbital events">Manoeuvre Start (UTC)
                 <div style="display:flex; gap:0.3rem; align-items:center">
                   <input type="datetime-local" name="manoeuvre_start" step="1"
@@ -453,11 +426,11 @@
 
             <div class="mnv-actions" style="margin-top:0.6rem">
               <button type="submit" class="btn-gold"
-                      title="Calculate the intercept trajectory and compute per-burn delta-V breakdown">
-                Calculate Intercept
+                      title="Run all 23 intercept methods and return a ranked comparison table">
+                Calculate All Intercepts
               </button>
               <span id="intercept-indicator" class="htmx-indicator">
-                <span class="spinner"></span>Computing trajectory&hellip;
+                <span class="spinner"></span>Computing all trajectories&hellip;
               </span>
             </div>
           </form>
@@ -474,13 +447,15 @@
             Select a Blue or Red HRR target group, fetch their TLEs, then sweep against the red satellite to identify reachable intercept threats ranked by &#916;V.
           </p>
 
-          <form hx-post="/plan/threat/sweep"
-                hx-target="#threat-sweep-results"
-                hx-swap="innerHTML"
-                hx-indicator="#threat-sweep-indicator">
+          <form id="threat-sweep-form">
             <div class="mnv-search-grid">
               <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Red Satellite
-                <select name="red_sat" id="ts-red-sat">
+                <select name="red_sat" id="ts-red-sat"
+                        hx-get="/plan/threat/target-config"
+                        hx-target="#ts-target-config"
+                        hx-swap="innerHTML"
+                        hx-trigger="change"
+                        hx-include="this">
                   {% include "partials/red_options.html" %}
                 </select>
               </label>
@@ -492,7 +467,8 @@
             <div id="ts-target-config" style="margin-top:0.3rem"
                  hx-get="/plan/threat/target-config"
                  hx-trigger="load"
-                 hx-swap="innerHTML">
+                 hx-swap="innerHTML"
+                 hx-include="[name='red_sat']">
               <p class="label-dim" style="font-size:0.72rem">Loading target config&hellip;</p>
             </div>
           </form>
@@ -502,6 +478,25 @@
           </div>
         </section>
       </div><!-- end hero-sweep -->
+
+      <!-- ── HISTORICAL PATTERN OF LIFE ───────────────────── -->
+      <div class="hero-panel" id="hero-pol"
+           hx-get="/pol/panel"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Historical PoL&hellip;</p>
+      </div><!-- end hero-pol -->
+
+      <!-- ── GCAT ─────────────────────────────────────────────── -->
+      <div class="hero-panel gcat-hero" id="hero-gcat"
+           hx-get="/gcat/panel"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:1.5rem;color:var(--text-dim);font-size:0.8rem">
+          <span class="spinner"></span>
+          Connecting to GCAT &mdash; downloading datasets from planet4589.org&hellip;
+        </div>
+      </div><!-- end hero-gcat -->
 
     </div><!-- end hero-panels -->
 
@@ -589,19 +584,7 @@ function fetchOrbitalEvents() {
 }
 </script>
 
-<!-- ── Intercept Engine field visibility ─────────────────────────────── -->
-<script>
-function ieUpdate() {
-  var method = document.getElementById('ie-method').value;
-  var hasTof  = method === 'lambert' || method === 'cw_radial' || method === 'cw_drift' || method === 'cola' || method === 'evasion' || method === 'detectability' || method === 'intercept_envelope' || method === 'formation' || method === 'min_time';
-  var hasDist = method === 'proximity' || method === 'cw_radial' || method === 'cw_drift' || method === 'cola' || method === 'nmc' || method === 'evasion' || method === 'formation' || method === 'intercept_envelope' || method === 'min_time';
-  document.getElementById('ie-tof-row').style.opacity      = hasTof  ? '' : '0.4';
-  document.getElementById('ie-dist-row').style.opacity     = hasDist ? '' : '0.4';
-  document.getElementById('ie-burns-row').style.display    = 'none';
-  document.getElementById('ie-minimize-row').style.display = 'none';
-}
-ieUpdate();
-</script>
+
 
 <!-- ── Tab switching controllers ─────────────────────────────────────── -->
 <script>
@@ -638,7 +621,22 @@ function heroTab(btn) {
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
   var panel = document.getElementById(target);
-  if (panel) panel.classList.add('active');
+  if (panel) {
+    panel.classList.add('active');
+    /* Lazy-load panels declared with hx-get (loads once on first reveal) */
+    if (panel.getAttribute('hx-get') && !panel.dataset.htmxLoaded) {
+      panel.dataset.htmxLoaded = '1';
+      htmx.process(panel);
+      htmx.trigger(panel, 'load');
+    }
+    /* When switching to Threat Sweep, refresh target-config with current red_sat */
+    if (target === 'hero-sweep') {
+      var sel = document.getElementById('ts-red-sat');
+      var val = sel ? (sel.value || '') : '';
+      var url = '/plan/threat/target-config' + (val ? '?red_sat=' + encodeURIComponent(val) : '');
+      htmx.ajax('GET', url, {target: '#ts-target-config', swap: 'innerHTML'});
+    }
+  }
 }
 
 /* Lower tabs */
@@ -697,7 +695,7 @@ function switchToTradeSpace() {
 (function() {
   var _lastRedSat = '';
 
-  function _checkRedSat() {
+  document.body.addEventListener('htmx:afterSettle', function() {
     var sel = document.getElementById('ts-red-sat');
     if (!sel) return;
     var val = sel.value || '';
@@ -710,30 +708,44 @@ function switchToTradeSpace() {
       var tgt = document.getElementById('ts-red-orbit-info');
       if (tgt) tgt.innerHTML = '';
     }
-  }
-
-  /* Check after every HTMX swap settles (catches OOB select replacements). */
-  document.body.addEventListener('htmx:afterSettle', _checkRedSat);
-  /* Also check on direct select change (user manually switches). */
-  document.body.addEventListener('change', function(e) {
-    if (e.target && e.target.id === 'ts-red-sat') {
-      _lastRedSat = '';  /* Force re-fetch */
-      _checkRedSat();
-    }
   });
 })();
 </script>
 
 <!-- ── Sweep target config helpers ──────────────────────────────────── -->
 <script>
-/* Auto-refresh target dropdown after UDL login or HRR fetch */
-document.body.addEventListener('htmx:afterSettle', function(e) {
-  var id = (e.detail.target || {}).id || '';
-  if (id === 'udl-status' || id === 'hrr-panel') {
-    htmx.ajax('GET', '/plan/threat/target-config',
-              {target: '#ts-target-config', swap: 'innerHTML'});
+/* Refresh target-config after UDL login, HRR fetch, or any OOB swap that may
+   have changed the red satellite list (asset add/remove).  Uses the current
+   value of #ts-red-sat so the config always reflects the active selection. */
+(function() {
+  var _lastConfigSat = '';
+
+  function _refreshTargetConfig() {
+    var sel = document.getElementById('ts-red-sat');
+    var val = sel ? (sel.value || '') : '';
+    if (val === _lastConfigSat) return;           /* no change — skip */
+    _lastConfigSat = val;
+    var url = '/plan/threat/target-config' + (val ? '?red_sat=' + encodeURIComponent(val) : '');
+    htmx.ajax('GET', url, {target: '#ts-target-config', swap: 'innerHTML'});
   }
-});
+
+  document.body.addEventListener('htmx:afterSettle', function(e) {
+    var id = (e.detail.target || {}).id || '';
+    /* Always re-check after events that could change the select list or session state */
+    if (id === 'udl-status' || id === 'blue-hrr-list' ||
+        id === 'blue-list'  || id === 'red-list') {
+      _refreshTargetConfig();
+    }
+  });
+
+  /* Also fire on direct user selection (hx-trigger="change" on #ts-red-sat
+     handles the HTMX update, but we track _lastConfigSat here too). */
+  document.body.addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'ts-red-sat') {
+      _lastConfigSat = '';   /* reset so next afterSettle re-evaluates */
+    }
+  });
+})();
 </script>
 
 <!-- ── Sidebar resize controller ──────────────────────────────────────── -->
@@ -783,7 +795,8 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
   var METHOD_COLOURS = {
     'lambert':'#00659E','proximity':'#00659E','hohmann':'#C8A415',
     'rendezvous':'#C8A415','bielliptic':'#27AE60','phasing':'#E67E22',
-    'cw_radial':'#8E44AD','cw_drift':'#9B59B6','plane_change':'#2ECC71',
+    'rbar_hop':'#8E44AD','vbar_hop':'#6C3483','hbar_hop':'#4A235A',
+    'cw_drift':'#9B59B6','plane_change':'#2ECC71',
     'j2_drift':'#1ABC9C','cola':'#E74C3C','evasion':'#C0392B',
     'geo_drift':'#F39C12','nmc':'#16A085','manoeuvre_detect':'#7F8C8D',
     'detectability':'#95A5A6','fingerprint':'#BDC3C7','terrain':'#D35400',

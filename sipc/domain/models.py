@@ -95,7 +95,9 @@ class InterceptMethod(Enum):
     ``RENDEZVOUS``   — coast → burn (match position + velocity).
     ``PROXIMITY``    — coast → burn (minimise range to target_distance_m).
     ``PHASING``      — period-adjustment rendezvous after N revolutions.
-    ``CW_RADIAL``    — CW radial separation manoeuvre.
+    ``RBAR_HOP``     — R-bar hop (CW radial separation, single impulse).
+    ``VBAR_HOP``     — V-bar hop sequence (multi-hop along velocity vector).
+    ``HBAR_HOP``     — H-bar hop sequence (multi-hop in orbit-normal direction).
     ``CW_DRIFT``     — CW along-track drift manoeuvre.
     ``PLANE_CHANGE`` — inclination change (pure or combined with altitude).
     ``J2_DRIFT``     — exploit J2 RAAN precession for orbital alignment.
@@ -120,7 +122,9 @@ class InterceptMethod(Enum):
     RENDEZVOUS     = "rendezvous"
     PROXIMITY      = "proximity"
     PHASING        = "phasing"
-    CW_RADIAL      = "cw_radial"
+    RBAR_HOP       = "rbar_hop"
+    VBAR_HOP       = "vbar_hop"
+    HBAR_HOP       = "hbar_hop"
     CW_DRIFT       = "cw_drift"
     PLANE_CHANGE   = "plane_change"
     J2_DRIFT       = "j2_drift"

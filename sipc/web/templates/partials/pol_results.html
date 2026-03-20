@@ -1,0 +1,848 @@
+{# Pattern of Life — enhanced analysis results with full intelligence output #}
+{# Context: pol (PolAnalysis), source (str) #}
+
+{% set RISK_COLOR  = {"CRITICAL":"#ef4444","HIGH":"#f59e0b","MEDIUM":"#eab308","LOW":"#3b8beb","MINIMAL":"#22c55e"} %}
+{% set RISK_BG     = {"CRITICAL":"rgba(239,68,68,0.04)","HIGH":"rgba(245,158,11,0.04)","MEDIUM":"rgba(234,179,8,0.04)","LOW":"rgba(59,139,235,0.04)","MINIMAL":"rgba(34,197,94,0.04)"} %}
+{% set RISK_ICON   = {"CRITICAL":"⚠","HIGH":"⚠","MEDIUM":"◈","LOW":"◉","MINIMAL":"✓"} %}
+{% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444"} %}
+{% set TYPE_LABEL  = {"station_keeping":"Station Keeping","plane_change":"Plane Change","repositioning":"Repositioning","unknown":"Unknown","none_detected":"None detected"} %}
+{% set DRIFT_COLOR = {"EAST":"#22c55e","WEST":"#ef4444","STATIONARY":"#6b7280"} %}
+{% set DRIFT_ICON  = {"EAST":"→","WEST":"←","STATIONARY":"—"} %}
+
+{% set risk_level  = pol.intel_assessment.risk_level if pol.intel_assessment else "MINIMAL" %}
+{% set rc          = RISK_COLOR.get(risk_level, "#6b7280") %}
+{% set rb          = RISK_BG.get(risk_level, "rgba(107,114,128,0.10)") %}
+{% set is_geo      = pol.regime in ("GEO","DEEP") or (pol.records and pol.records[-1].geo_longitude_deg is not none) %}
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 1 — INTELLIGENCE ASSESSMENT BANNER
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="border:2px solid {{ rc }}; border-radius:7px; background:{{ rb }};
+            padding:0.85rem 1.1rem; margin-bottom:0.8rem">
+  <div style="display:grid; grid-template-columns:auto 1fr auto; gap:1rem; align-items:start; flex-wrap:wrap">
+
+    {# Risk badge #}
+    <div style="text-align:center; min-width:6rem">
+      <div style="font-size:2.4rem; line-height:1; color:{{ rc }}">{{ RISK_ICON.get(risk_level, "◉") }}</div>
+      <div style="font-size:0.6rem; font-weight:900; color:{{ rc }}; text-transform:uppercase; letter-spacing:0.12em; margin-top:0.2rem">
+        {{ risk_level }}
+      </div>
+      {% if pol.anomaly_score %}
+      <div style="font-size:1.5rem; font-weight:900; color:{{ rc }}; line-height:1; margin-top:0.2rem">
+        {{ pol.anomaly_score.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
+      </div>
+      <div style="font-size:0.58rem; color:var(--text-dim)">anomaly score</div>
+      {% endif %}
+    </div>
+
+    {# Mission profile + narrative #}
+    <div>
+      {% if pol.intel_assessment %}
+      <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
+        {{ pol.intel_assessment.mission_profile }}
+      </div>
+      <div style="font-size:0.68rem; color:var(--ops-gold); font-style:italic; margin-bottom:0.4rem">
+        {{ pol.intel_assessment.behaviour_class }}
+      </div>
+      <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.5; max-width:52rem">
+        {{ pol.intel_assessment.anomaly_narrative }}
+      </div>
+      {% if pol.intel_assessment.operational_signature %}
+      <div style="margin-top:0.45rem; font-size:0.64rem; color:var(--text-dim);
+                  border-top:1px solid var(--border); padding-top:0.35rem">
+        <span style="color:var(--text-primary); font-weight:600">Operational Signature:</span>
+        {{ pol.intel_assessment.operational_signature }}
+      </div>
+      {% endif %}
+      {% else %}
+      <div style="font-size:0.75rem; color:var(--text-dim)">Insufficient data for intelligence assessment.</div>
+      {% endif %}
+    </div>
+
+    {# Metadata block #}
+    <div style="text-align:right; font-size:0.68rem; color:var(--text-dim); white-space:nowrap; min-width:9rem">
+      <div style="font-size:1rem; font-weight:800; color:var(--text-primary)">{{ pol.satno }}</div>
+      <div style="font-weight:600; color:var(--ops-blue); margin-bottom:0.2rem">{{ pol.name }}</div>
+      <div>{{ pol.regime }} &bull; {{ pol.tle_count }} TLEs</div>
+      <div>{{ pol.span_days | round(0) | int }} day observation span</div>
+      <div style="margin-top:0.2rem">PoL:
+        <span style="color:{{ STATUS_COLOR.get(pol.pol_status, "#6b7280") }}; font-weight:700">{{ pol.pol_status }}</span>
+      </div>
+      <div style="margin-top:0.2rem; font-style:italic; color:var(--text-dim)">src: {{ source }}</div>
+    </div>
+
+  </div>
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 2 — ANOMALY SCORE BREAKDOWN + PROPELLANT BUDGET
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.7rem">
+
+  {# Anomaly Score Component Bars #}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
+      Anomaly Score — Component Breakdown
+    </div>
+    {% if pol.anomaly_score %}
+    {% set anoms = pol.anomaly_score %}
+    {% macro score_bar(label, val, tooltip="") %}
+    <div style="margin-bottom:0.35rem" {% if tooltip %}title="{{ tooltip }}"{% endif %}>
+      <div style="display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-dim); margin-bottom:0.1rem">
+        <span>{{ label }}</span>
+        <span style="font-weight:700; color:
+          {% if val >= 75 %}#ef4444{% elif val >= 55 %}#f59e0b{% elif val >= 35 %}#eab308{% elif val >= 15 %}#3b8beb{% else %}#22c55e{% endif %}">
+          {{ val | round(1) }}
+        </span>
+      </div>
+      <div style="height:5px; border-radius:3px; background:rgba(255,255,255,0.08); overflow:hidden">
+        <div style="height:100%; width:{{ val | round(0) | int }}%; border-radius:3px; background:
+          {% if val >= 75 %}#ef4444{% elif val >= 55 %}#f59e0b{% elif val >= 35 %}#eab308{% elif val >= 15 %}#3b8beb{% else %}#22c55e{% endif %};
+          transition:width 0.6s ease"></div>
+      </div>
+    </div>
+    {% endmacro %}
+    {{ score_bar("ΔV Magnitude", anoms.dv_magnitude, "How large are the burns vs normal SK?") }}
+    {{ score_bar("Longitude Coverage", anoms.lon_coverage, "Total GEO belt traversed — >60° = full score") }}
+    {{ score_bar("Drift Rate", anoms.drift_rate, "Max drift rate vs ±0.05°/day SK tolerance") }}
+    {{ score_bar("SK Irregularity", anoms.sk_regularity, "Coefficient of variation of manoeuvre intervals") }}
+    {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV vs 200 m/s/yr reference ceiling") }}
+    <div style="margin-top:0.5rem; padding-top:0.4rem; border-top:1px solid var(--border);
+                display:flex; align-items:center; justify-content:space-between">
+      <div style="font-size:0.62rem; color:var(--text-dim)">Overall (weighted composite)</div>
+      <div style="font-size:1.25rem; font-weight:900; color:{{ rc }}">
+        {{ anoms.overall | round(1) }}<span style="font-size:0.6rem; color:var(--text-dim)">/100</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="empty-msg" style="font-size:0.68rem">Insufficient manoeuvres for anomaly scoring (need ≥ 2).</p>
+    {% endif %}
+  </div>
+
+  {# Propellant Budget #}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
+      Propellant Budget Estimate
+    </div>
+    {% if pol.propellant_budget %}
+    {% set pb = pol.propellant_budget %}
+    {# Circular gauge using SVG #}
+    {% set pct = [pb.propellant_used_pct, 100] | min | round(1) %}
+    {% set circ = 100 %}
+    {% set dash = (pct / 100 * circ) | round(2) %}
+    <div style="display:flex; gap:1rem; align-items:center; margin-bottom:0.6rem">
+      <svg width="72" height="72" viewBox="0 0 36 36" style="flex-shrink:0">
+        <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.2"/>
+        <circle cx="18" cy="18" r="15.9" fill="none"
+          stroke="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}"
+          stroke-width="3.2"
+          stroke-dasharray="{{ dash }} {{ circ - dash }}"
+          stroke-dashoffset="25"
+          stroke-linecap="round"
+          transform="rotate(-90 18 18)"/>
+        <text x="18" y="19" text-anchor="middle" font-size="6.5" font-weight="700"
+              fill="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}">
+          {{ pct | round(0) | int }}%
+        </text>
+        <text x="18" y="25" text-anchor="middle" font-size="3.5" fill="#8899aa">used</text>
+      </svg>
+      <div>
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-primary)">{{ pb.budget_class }}</div>
+        <div style="font-size:0.64rem; color:var(--text-dim); margin-top:0.15rem">
+          ISP {{ pb.assumed_isp_s | round(0) | int }} s (bipropellant GEO)<br>
+          Assumes {{ pb.assumed_propellant_kg | round(0) | int }} kg propellant load
+        </div>
+      </div>
+    </div>
+    <table style="width:100%; font-size:0.67rem; border-collapse:collapse">
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Cumulative ΔV</td>
+        <td style="text-align:right; font-weight:600">{{ (pb.total_dv_km_s * 1000) | round(1) }} m/s</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Annual burn rate</td>
+        <td style="text-align:right; font-weight:600">{{ (pb.annual_dv_km_s * 1000) | round(1) }} m/s/yr</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Est. remaining life</td>
+        <td style="text-align:right; font-weight:600">
+          {% if pb.remaining_life_years %}
+            <span style="color:{% if pb.remaining_life_years < 2 %}#ef4444{% elif pb.remaining_life_years < 5 %}#f59e0b{% else %}#22c55e{% endif %}">
+              ~{{ pb.remaining_life_years | round(1) }} yr
+            </span>
+          {% else %}N/A{% endif %}
+        </td>
+      </tr>
+    </table>
+    <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
+      ⚠ Indicative only — assumes ~30% propellant mass fraction. Actual margins unknown.
+    </div>
+    {% else %}
+    <p class="empty-msg" style="font-size:0.68rem">Propellant budget unavailable.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 3 — SUMMARY STAT CARDS
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(9.5rem, 1fr)); gap:0.45rem; margin-bottom:0.7rem">
+
+  {% macro stat_card(label, value, sub="", color="var(--text-primary)") %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.5rem 0.7rem">
+    <div style="font-size:0.58rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.15rem">{{ label }}</div>
+    <div style="font-size:1.05rem; font-weight:700; color:{{ color }}; line-height:1.1">{{ value }}</div>
+    {% if sub %}<div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.1rem">{{ sub }}</div>{% endif %}
+  </div>
+  {% endmacro %}
+
+  {{ stat_card("Manoeuvres", pol.manoeuvres | length, "detected total") }}
+  {{ stat_card("Total ΔV", (pol.total_dv_km_s * 1000) | round(1) ~ " m/s", "cumulative budget") }}
+  {% if pol.dv_stats %}
+  {{ stat_card("Mean ΔV", (pol.dv_stats.mean * 1000) | round(2) ~ " m/s", "σ = " ~ (pol.dv_stats.std * 1000) | round(2) ~ " m/s") }}
+  {% endif %}
+  {% if pol.interval_stats %}
+  {{ stat_card("Mean Interval", pol.interval_stats.mean | round(1) ~ " d", "σ = " ~ pol.interval_stats.std | round(1) ~ " d") }}
+  {% endif %}
+  {{ stat_card("Primary Activity", TYPE_LABEL.get(pol.dominant_activity, pol.dominant_activity), color="var(--ops-blue)") }}
+  {{ stat_card("SK Profile", pol.sk_type) }}
+  {% if pol.next_manoeuvre_est %}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
+  {% endif %}
+  {% if pol.records %}
+  {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
+  {{ stat_card("Altitude", pol.records[-1].alt_km | round(1) ~ " km", "current mean") }}
+  {{ stat_card("Inclination", pol.records[-1].inc_deg | round(4) ~ "°", "current") }}
+  {% if pol.records[-1].geo_longitude_deg is not none %}
+  {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--ops-gold)") }}
+  {% endif %}
+  {% if pol.records[-1].geo_drift_rate_deg_day is not none %}
+  {% set dr = pol.records[-1].geo_drift_rate_deg_day %}
+  {{ stat_card("Drift Rate", dr | round(4) | abs ~ "°/d " ~ ("→E" if dr > 0.005 else ("←W" if dr < -0.005 else "—SK")),
+               "current longitude drift", color=("#22c55e" if dr | abs < 0.05 else "#f59e0b")) }}
+  {% endif %}
+  {% endif %}
+  {% if pol.drift_phases %}
+  {% set last_ph = pol.drift_phases[-1] %}
+  {{ stat_card("Current Phase", DRIFT_ICON.get(last_ph.direction,"?") ~ " " ~ last_ph.direction,
+               last_ph.duration_days | round(0) | int ~ " d at " ~ last_ph.rate_deg_day | round(3) | abs ~ "°/d",
+               color=DRIFT_COLOR.get(last_ph.direction,"#6b7280")) }}
+  {% endif %}
+
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 4 — GEO LONGITUDE DRIFT TIMELINE (GEO/DEEP only)
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if is_geo %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+            padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">
+      GEO Subsatellite Longitude — Full History
+    <span style="font-size:0.58rem; font-weight:400; color:var(--text-dim); margin-left:0.5rem">scroll to zoom · drag to pan · dbl-click to reset</span>
+    </div>
+    <div style="display:flex; gap:0.7rem; font-size:0.6rem; color:var(--text-dim)">
+      <span><span style="display:inline-block;width:10px;height:3px;background:#22c55e;vertical-align:middle;margin-right:3px;border-radius:2px"></span>East drift</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#ef4444;vertical-align:middle;margin-right:3px;border-radius:2px"></span>West drift</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#6b7280;vertical-align:middle;margin-right:3px;border-radius:2px"></span>Stationary</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:50%;vertical-align:middle;margin-right:3px"></span>Manoeuvre</span>
+    </div>
+  </div>
+  <canvas id="pol-lon-chart" height="120"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem">
+      Longitude Drift Rate (°/day) — positive = eastward
+    </div>
+    <canvas id="pol-drift-chart" height="90"></canvas>
+  </div>
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem">
+      Period (min) — proxy for semi-major axis perturbation
+    </div>
+    <canvas id="pol-period-chart" height="90"></canvas>
+  </div>
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 5 — ΔV TIMELINE + PoL BOUNDS
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="display:grid; grid-template-columns:1fr 260px; gap:0.6rem; margin-bottom:0.6rem; align-items:start">
+
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.6rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.35rem">
+      ΔV Timeline — Detected Manoeuvres
+    <span style="font-size:0.58rem; font-weight:400; color:var(--text-dim); margin-left:0.5rem">scroll to zoom · drag to pan · dbl-click to reset</span>
+    </div>
+    <canvas id="pol-dv-chart" height="110"></canvas>
+  </div>
+
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.6rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.45rem">
+      Pattern of Life Bounds
+    </div>
+    {% if pol.dv_stats %}
+    <table style="width:100%; font-size:0.66rem; border-collapse:collapse">
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV Mean</td>
+          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.mean*1000)|round(2) }} m/s</td></tr>
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV ±2σ band</td>
+          <td style="text-align:right; font-weight:600">{{ [pol.dv_stats.low_2sigma*1000, 0]|max|round(1) }} – {{ (pol.dv_stats.high_2sigma*1000)|round(1) }} m/s</td></tr>
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV p95</td>
+          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.p95*1000)|round(2) }} m/s</td></tr>
+      {% if pol.interval_stats %}
+      <tr><td colspan="2" style="border-top:1px solid var(--border); padding-top:0.25rem; margin-top:0.25rem"></td></tr>
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">Interval Mean</td>
+          <td style="text-align:right; font-weight:600">{{ pol.interval_stats.mean|round(1) }} d</td></tr>
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">Interval ±2σ</td>
+          <td style="text-align:right; font-weight:600">{{ [pol.pol_low_interval, 0]|max|round(0)|int }} – {{ pol.pol_high_interval|round(0)|int }} d</td></tr>
+      <tr><td style="color:var(--text-dim); padding:0.15rem 0">Interval p95</td>
+          <td style="text-align:right; font-weight:600">{{ pol.interval_stats.p95|round(1) }} d</td></tr>
+      {% endif %}
+    </table>
+    <div style="margin-top:0.5rem; font-size:0.62rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
+      <strong>Out-of-PoL trigger:</strong> ΔV &gt;
+      <span style="color:var(--ops-gold)">{{ pol.pol_high_dv and (pol.pol_high_dv*1000)|round(1) or "N/A" }} m/s</span>
+      or gap &gt;
+      <span style="color:var(--ops-gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
+    </div>
+    {% else %}
+    <p class="empty-msg" style="font-size:0.68rem">Need ≥ 2 manoeuvres for statistical bounds.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 6 — ORBITAL ELEMENT HISTORY (4-panel sparklines)
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
+    Orbital Element History — {{ pol.tle_count }} epochs over {{ pol.span_days | round(0) | int }} days
+    <span style="font-size:0.58rem; font-weight:400; color:var(--text-dim); margin-left:0.5rem">scroll to zoom · drag to pan · dbl-click to reset</span>
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem">
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Mean Altitude (km)</div>
+         <canvas id="pol-alt-chart" height="75"></canvas></div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Inclination (°)</div>
+         <canvas id="pol-inc-chart" height="75"></canvas></div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Eccentricity</div>
+         <canvas id="pol-ecc-chart" height="75"></canvas></div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">RAAN (°, raw incl. J2 secular)</div>
+         <canvas id="pol-raan-chart" height="75"></canvas></div>
+  </div>
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 7 — DRIFT PHASE LOG (GEO only)
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if is_geo and pol.drift_phases %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
+    Longitude Drift Phase Log — {{ pol.drift_phases | length }} phases detected
+  </div>
+  <div class="hrr-scroll" style="max-height:220px">
+    <table class="hrr-table" style="font-size:0.66rem">
+      <thead>
+        <tr>
+          <th>Start</th><th>End</th><th>Direction</th>
+          <th>Start Lon</th><th>End Lon</th>
+          <th>Distance</th><th>Mean Rate</th><th>Peak Rate</th><th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ph in pol.drift_phases | reverse %}
+        <tr>
+          <td class="col-dim">{{ ph.start_epoch.strftime("%Y-%m-%d") }}</td>
+          <td class="col-dim">{{ ph.end_epoch.strftime("%Y-%m-%d") }}</td>
+          <td>
+            <span style="color:{{ DRIFT_COLOR.get(ph.direction,'#6b7280') }};
+                         font-weight:700; font-size:0.7rem">
+              {{ DRIFT_ICON.get(ph.direction,"?") }} {{ ph.direction }}
+            </span>
+          </td>
+          <td class="col-dim">{{ ph.start_lon | round(2) }}°</td>
+          <td class="col-dim">{{ ph.end_lon | round(2) }}°</td>
+          <td class="col-dim">
+            <span style="color:{% if ph.distance_deg | abs > 10 %}#ef4444{% elif ph.distance_deg | abs > 3 %}#f59e0b{% else %}var(--text-dim){% endif %}">
+              {{ ph.distance_deg | round(2) }}°
+            </span>
+          </td>
+          <td class="col-dim">{{ ph.rate_deg_day | round(4) }}°/d</td>
+          <td class="col-dim">{{ ph.peak_rate | round(4) }}°/d</td>
+          <td class="col-dim">{{ ph.duration_days | round(1) }} d</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 8 — LONGITUDE PREDICTIONS + NOTABLE PERIODS (GEO only)
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if is_geo and pol.intel_assessment and pol.intel_assessment.predicted_lon_30d is not none %}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
+
+  {# 30/60/90-day predictions #}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
+      Longitude Prediction — Linear Extrapolation
+    </div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.5rem; font-style:italic">
+      Assumes current drift of
+      {{ pol.intel_assessment.current_drift_rate | round(4) if pol.intel_assessment.current_drift_rate else "?" }}°/d continues unchanged.
+      Manoeuvres will alter trajectory.
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem">
+      {% macro pred_card(label, lon, dir) %}
+      <div style="border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.5rem; text-align:center">
+        <div style="font-size:0.58rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em">+{{ label }}</div>
+        {% if lon is not none %}
+        <div style="font-size:1rem; font-weight:800; color:var(--ops-gold)">{{ lon | round(1) }}°</div>
+        <div style="font-size:0.6rem; color:{{ DRIFT_COLOR.get(dir,'#6b7280') }}">
+          {{ DRIFT_ICON.get(dir,"") }} {{ dir }}</div>
+        {% else %}
+        <div style="font-size:0.7rem; color:var(--text-dim)">N/A</div>
+        {% endif %}
+      </div>
+      {% endmacro %}
+      {{ pred_card("30 d", pol.intel_assessment.predicted_lon_30d, pol.intel_assessment.current_drift_dir) }}
+      {{ pred_card("60 d", pol.intel_assessment.predicted_lon_60d, pol.intel_assessment.current_drift_dir) }}
+      {{ pred_card("90 d", pol.intel_assessment.predicted_lon_90d, pol.intel_assessment.current_drift_dir) }}
+    </div>
+  </div>
+
+  {# Notable activity periods #}
+  {% if pol.intel_assessment.notable_periods %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.45rem">
+      Notable Activity Periods
+    </div>
+    <ul style="list-style:none; padding:0; margin:0">
+      {% for note in pol.intel_assessment.notable_periods %}
+      <li style="font-size:0.64rem; color:var(--text-dim); padding:0.2rem 0;
+                 border-bottom:1px solid rgba(255,255,255,0.04)">
+        {% if "EAST" in note %}
+        <span style="color:#22c55e; font-weight:700">→</span>
+        {% elif "WEST" in note %}
+        <span style="color:#ef4444; font-weight:700">←</span>
+        {% else %}
+        <span style="color:#6b7280">—</span>
+        {% endif %}
+        {{ note }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.45rem">
+      Notable Activity Periods
+    </div>
+    <p class="empty-msg" style="font-size:0.68rem">No drift phases exceeding 5° arc detected.</p>
+  </div>
+  {% endif %}
+
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 9 — MANOEUVRE CATALOGUE
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if pol.manoeuvres %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
+    Manoeuvre Catalogue — {{ pol.manoeuvres | length }} events
+    <span style="font-size:0.6rem; font-weight:400">(ΔV threshold: {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s)</span>
+  </div>
+  <div class="hrr-scroll" style="max-height:280px">
+    <table class="hrr-table" style="font-size:0.66rem">
+      <thead>
+        <tr>
+          <th onclick="polSort(this)" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
+          {% if is_geo %}<th onclick="polSort(this)" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
+          <th onclick="polSort(this)" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
+          <th style="text-align:right">Alt After</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set TYPE_COL = {"station_keeping":"var(--ops-blue)","plane_change":"#f59e0b","repositioning":"#ef4444","unknown":"var(--text-dim)"} %}
+        {% for m in pol.manoeuvres | sort(attribute="epoch", reverse=True) %}
+        <tr>
+          <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
+          <td data-val="{{ (m.delta_v_km_s*1000)|round(3) }}">
+            <strong style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-primary)') }}">
+              {{ (m.delta_v_km_s*1000)|round(3) }}
+            </strong>
+          </td>
+          <td style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-dim)') }}; white-space:nowrap">
+            {{ TYPE_LABEL.get(m.manoeuvre_type, m.manoeuvre_type) }}
+            {% if m.sk_subtype %}<span class="label-dim">({{ m.sk_subtype }})</span>{% endif %}
+          </td>
+          <td data-val="{{ m.delta_alt_km|round(3) }}">
+            {% if m.delta_alt_km > 0.5 %}<span style="color:#22c55e">+{% elif m.delta_alt_km < -0.5 %}<span style="color:#ef4444">{% else %}<span>{% endif %}{{ m.delta_alt_km|round(2) }}</span>
+          </td>
+          <td class="col-dim" data-val="{{ m.delta_inc_deg|round(4) }}">{{ m.delta_inc_deg|round(4) }}</td>
+          <td class="col-dim" data-val="{{ m.delta_period_s|round(2) }}">{{ m.delta_period_s|round(2) }}</td>
+          {% if is_geo %}
+          <td data-val="{{ m.delta_drift_deg_day|round(4) if m.delta_drift_deg_day is not none else 0 }}">
+            {% if m.delta_drift_deg_day is not none %}
+            <span style="color:{% if m.delta_drift_deg_day | abs > 0.1 %}#f59e0b{% else %}var(--text-dim){% endif %}">
+              {{ ('+' if m.delta_drift_deg_day > 0 else '') }}{{ m.delta_drift_deg_day|round(4) }}
+            </span>
+            {% else %}—{% endif %}
+          </td>
+          {% endif %}
+          <td class="col-dim">{{ m.dominant_element }}</td>
+          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
+          <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.8rem; margin-bottom:0.6rem; text-align:center">
+  <p class="empty-msg">No manoeuvres detected above the {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s threshold.
+  This object appears <strong>passive</strong> or non-manoeuvring.</p>
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 10 — ΔV + INTERVAL DISTRIBUTIONS
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if pol.manoeuvres | length >= 3 %}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.6rem">
+    <div style="font-size:0.62rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem">ΔV Distribution (m/s)</div>
+    <canvas id="pol-dv-hist" height="90"></canvas>
+  </div>
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.6rem">
+    <div style="font-size:0.62rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem">Inter-manoeuvre Interval (days)</div>
+    <canvas id="pol-interval-hist" height="90"></canvas>
+  </div>
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   CHART.JS INITIALISATION
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<script>
+(function () {
+  var SATNO   = {{ pol.satno }};
+  var IS_GEO  = {{ 'true' if is_geo else 'false' }};
+
+  var ZOOM_CFG = {
+    pan:  { enabled: true, mode: 'xy' },
+    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' }
+  };
+
+  var CHART_DEFAULTS = {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: { display: false },
+      zoom: ZOOM_CFG,
+    },
+    scales: {
+      x: { ticks: { color: '#8899aa', font: { size: 9 }, maxTicksLimit: 8, maxRotation: 0 },
+           grid: { color: 'rgba(255,255,255,0.04)' } },
+      y: { ticks: { color: '#8899aa', font: { size: 9 } },
+           grid: { color: 'rgba(255,255,255,0.04)' } }
+    }
+  };
+
+  function deepMerge(base, over) {
+    var out = Object.assign({}, base);
+    for (var k in over) {
+      if (over[k] && typeof over[k] === 'object' && !Array.isArray(over[k])) {
+        out[k] = deepMerge(base[k] || {}, over[k]);
+      } else { out[k] = over[k]; }
+    }
+    return out;
+  }
+
+  // Create a chart and wire dblclick → resetZoom
+  function mkChart(ctx, config) {
+    var chart = new Chart(ctx, config);
+    ctx.addEventListener('dblclick', function () { chart.resetZoom(); });
+    ctx.title = 'Scroll to zoom · Drag to pan · Double-click to reset';
+    return chart;
+  }
+
+  function sparkLine(id, labels, data, color) {
+    var ctx = document.getElementById(id);
+    if (!ctx) return;
+    return mkChart(ctx, {
+      type: 'line',
+      data: { labels: labels, datasets: [{ data: data, borderColor: color, borderWidth: 1.2,
+              pointRadius: 0, fill: false, tension: 0 }] },
+      options: deepMerge(CHART_DEFAULTS, { plugins: { legend: { display: false } } })
+    });
+  }
+
+  function makeHistogram(values, bins) {
+    if (!values || !values.length) return { labels: [], counts: [] };
+    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    if (min === max) { min -= 1; max += 1; }
+    var w = (max - min) / bins, counts = new Array(bins).fill(0), labels = [];
+    for (var i = 0; i < bins; i++) labels.push((min + i * w).toFixed(1));
+    values.forEach(function (v) { counts[Math.min(bins - 1, Math.floor((v - min) / w))]++; });
+    return { labels: labels, counts: counts };
+  }
+
+  function findNearestIdx(epochs, dateStr) {
+    var target = new Date(dateStr).getTime();
+    var best = 0, bestDiff = Infinity;
+    epochs.forEach(function (e, i) {
+      var diff = Math.abs(new Date(e).getTime() - target);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    });
+    return best;
+  }
+
+  // ── Fetch all chart data ────────────────────────────────────────────────────
+  fetch('/pol/chart-data/' + SATNO)
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+
+      var eps = d.elements ? d.elements.epochs : [];
+
+      // ── Element sparklines ───────────────────────────────────────────────
+      if (d.elements) {
+        sparkLine('pol-alt-chart',    eps, d.elements.altitude,     '#3b8beb');
+        sparkLine('pol-inc-chart',    eps, d.elements.inclination,  '#22c55e');
+        sparkLine('pol-ecc-chart',    eps, d.elements.eccentricity, '#f59e0b');
+        sparkLine('pol-raan-chart',   eps, d.elements.raan,         '#a78bfa');
+      }
+
+      // ── Period sparkline (§6 side chart) ────────────────────────────────
+      if (d.elements && d.elements.period) {
+        sparkLine('pol-period-chart', eps, d.elements.period, '#e879f9');
+      }
+
+      // ── ΔV Timeline ─────────────────────────────────────────────────────
+      var dvCtx = document.getElementById('pol-dv-chart');
+      if (dvCtx && d.manoeuvres && d.manoeuvres.epochs.length) {
+        mkChart(dvCtx, {
+          type: 'bar',
+          data: {
+            labels: d.manoeuvres.epochs,
+            datasets: [{
+              data: d.manoeuvres.dvs_ms,
+              backgroundColor: d.manoeuvres.colors,
+              borderColor:     d.manoeuvres.colors,
+              borderWidth: 1, borderRadius: 2
+            }]
+          },
+          options: deepMerge(CHART_DEFAULTS, {
+            scales: { y: { title: { display: true, text: 'ΔV (m/s)', color: '#8899aa', font: { size: 9 } } } }
+          })
+        });
+        // Manual legend
+        var leg = document.createElement('div');
+        leg.style.cssText = 'display:flex;gap:0.8rem;flex-wrap:wrap;margin-top:0.3rem;font-size:0.6rem;color:#8899aa';
+        [['#3b8beb','Station Keeping'], ['#f59e0b','Plane Change'], ['#ef4444','Repositioning'], ['#6b7280','Unknown']].forEach(function (p) {
+          var s = document.createElement('span');
+          s.innerHTML = '<span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:' + p[0] + ';margin-right:3px;vertical-align:middle"></span>' + p[1];
+          leg.appendChild(s);
+        });
+        dvCtx.parentNode.appendChild(leg);
+      } else if (dvCtx) {
+        dvCtx.parentNode.innerHTML += '<p class="empty-msg" style="font-size:0.68rem">No manoeuvres to chart.</p>';
+      }
+
+      // ── GEO Longitude Timeline ──────────────────────────────────────────
+      var lonCtx = document.getElementById('pol-lon-chart');
+      if (IS_GEO && lonCtx && d.geo && d.geo.longitude && d.geo.longitude.length) {
+        var geoEps  = d.geo.epochs;
+        var geoLons = d.geo.longitude;
+        var phases  = d.geo.drift_phases || [];
+
+        // Build segment color lookup from drift phases
+        var phaseRanges = phases.map(function (ph) {
+          return {
+            startIdx: findNearestIdx(geoEps, ph.start),
+            endIdx:   findNearestIdx(geoEps, ph.end),
+            direction: ph.direction
+          };
+        });
+
+        function segColorForIdx(idx) {
+          for (var i = 0; i < phaseRanges.length; i++) {
+            if (idx >= phaseRanges[i].startIdx && idx <= phaseRanges[i].endIdx) {
+              return phaseRanges[i].direction === 'EAST' ? '#22c55e' :
+                     phaseRanges[i].direction === 'WEST' ? '#ef4444' : '#6b7280';
+            }
+          }
+          return '#8899aa';
+        }
+
+        // Manoeuvre scatter points on longitude
+        var mnvLons = (d.manoeuvres && d.manoeuvres.lons) ? d.manoeuvres.lons : [];
+        var mnvEps  = (d.manoeuvres && d.manoeuvres.epochs) ? d.manoeuvres.epochs : [];
+        var scatterData = [];
+        mnvEps.forEach(function (e, i) {
+          if (mnvLons[i] !== null && mnvLons[i] !== undefined) {
+            scatterData.push({ x: e, y: mnvLons[i] });
+          }
+        });
+
+        mkChart(lonCtx, {
+          type: 'line',
+          data: {
+            labels: geoEps,
+            datasets: [
+              {
+                data: geoLons,
+                borderColor: '#8899aa',
+                borderWidth: 1.4,
+                pointRadius: 0,
+                fill: false,
+                tension: 0,
+                segment: {
+                  borderColor: function (ctx) { return segColorForIdx(ctx.p0DataIndex); }
+                }
+              },
+              {
+                type: 'scatter',
+                data: scatterData,
+                pointRadius: 5,
+                pointStyle: 'triangle',
+                backgroundColor: 'rgba(245,158,11,0.85)',
+                borderColor: '#f59e0b',
+                borderWidth: 1,
+                showLine: false
+              }
+            ]
+          },
+          options: deepMerge(CHART_DEFAULTS, {
+            scales: {
+              x: { type: 'category' },
+              y: { title: { display: true, text: 'Longitude (°)', color: '#8899aa', font: { size: 9 } } }
+            }
+          })
+        });
+      }
+
+      // ── Drift Rate Timeline ─────────────────────────────────────────────
+      var drCtx = document.getElementById('pol-drift-chart');
+      if (IS_GEO && drCtx && d.geo && d.geo.drift_rate && d.geo.drift_rate.length) {
+        var nonZero = d.geo.drift_rate.filter(function (v) { return v !== 0; });
+        if (nonZero.length > 0) {
+          mkChart(drCtx, {
+            type: 'line',
+            data: {
+              labels: d.geo.epochs,
+              datasets: [
+                { data: d.geo.drift_rate, borderColor: '#8899aa', borderWidth: 1,
+                  pointRadius: 0, fill: false, tension: 0,
+                  segment: { borderColor: function (ctx) {
+                    var v = d.geo.drift_rate[ctx.p0DataIndex] || 0;
+                    return v > 0.05 ? '#22c55e' : v < -0.05 ? '#ef4444' : '#6b7280';
+                  }}
+                },
+                // Zero reference line
+                { data: d.geo.epochs.map(function () { return 0; }),
+                  borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1,
+                  borderDash: [4, 3], pointRadius: 0, fill: false }
+              ]
+            },
+            options: deepMerge(CHART_DEFAULTS, {
+              scales: {
+                y: { title: { display: true, text: '°/day', color: '#8899aa', font: { size: 9 } } }
+              }
+            })
+          });
+        }
+      }
+
+      // ── ΔV Histogram ────────────────────────────────────────────────────
+      var dvHistCtx = document.getElementById('pol-dv-hist');
+      if (dvHistCtx && d.manoeuvres && d.manoeuvres.dvs_ms && d.manoeuvres.dvs_ms.length >= 3) {
+        var hDv = makeHistogram(d.manoeuvres.dvs_ms, 10);
+        mkChart(dvHistCtx, {
+          type: 'bar',
+          data: { labels: hDv.labels,
+                  datasets: [{ data: hDv.counts, backgroundColor: 'rgba(59,139,235,0.6)',
+                               borderColor: '#3b8beb', borderWidth: 1, borderRadius: 2 }] },
+          options: deepMerge(CHART_DEFAULTS, {
+            scales: { x: { title: { display: true, text: 'ΔV (m/s)', color: '#8899aa', font: { size: 9 } } },
+                      y: { title: { display: true, text: 'Count',    color: '#8899aa', font: { size: 9 } } } }
+          })
+        });
+      }
+
+      // ── Interval Histogram ──────────────────────────────────────────────
+      var ivCtx = document.getElementById('pol-interval-hist');
+      if (ivCtx && d.manoeuvres && d.manoeuvres.epochs && d.manoeuvres.epochs.length >= 3) {
+        var mEps = d.manoeuvres.epochs;
+        var intervals = [];
+        for (var ii = 1; ii < mEps.length; ii++) {
+          intervals.push((new Date(mEps[ii]) - new Date(mEps[ii - 1])) / 86400000);
+        }
+        if (intervals.length >= 2) {
+          var hIv = makeHistogram(intervals, 10);
+          mkChart(ivCtx, {
+            type: 'bar',
+            data: { labels: hIv.labels,
+                    datasets: [{ data: hIv.counts, backgroundColor: 'rgba(34,197,94,0.6)',
+                                 borderColor: '#22c55e', borderWidth: 1, borderRadius: 2 }] },
+            options: deepMerge(CHART_DEFAULTS, {
+              scales: { x: { title: { display: true, text: 'Days', color: '#8899aa', font: { size: 9 } } },
+                        y: { title: { display: true, text: 'Count', color: '#8899aa', font: { size: 9 } } } }
+            })
+          });
+        }
+      }
+
+    })
+    .catch(function (e) { console.warn('PoL chart-data fetch failed:', e); });
+
+  // ── Sortable table helper ─────────────────────────────────────────────────
+  window.polSort = function (th) {
+    var table = th.closest('table');
+    var col   = th.cellIndex;
+    var asc   = th.dataset.dir !== 'asc';
+    table.querySelectorAll('th').forEach(function (h) { h.dataset.dir = ''; });
+    th.dataset.dir = asc ? 'asc' : 'desc';
+    var tbody = table.querySelector('tbody');
+    var rows  = Array.from(tbody.rows);
+    rows.sort(function (a, b) {
+      var av = (a.cells[col].dataset.val !== undefined ? a.cells[col].dataset.val : a.cells[col].textContent).trim();
+      var bv = (b.cells[col].dataset.val !== undefined ? b.cells[col].dataset.val : b.cells[col].textContent).trim();
+      var an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+      return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+    table.querySelectorAll('.hrr-sort-ind').forEach(function (s) { s.textContent = ''; });
+    th.querySelector('.hrr-sort-ind').textContent = asc ? ' ▲' : ' ▼';
+  };
+
+})();
+</script>

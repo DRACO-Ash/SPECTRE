@@ -13,6 +13,76 @@
     </span>
   </div>
 
+  {% if worst_coa %}
+  <div style="border-left:4px solid {{ worst_coa.threat_color }}; background:{{ worst_coa.threat_bg }}; border-radius:6px; padding:0.75rem 1rem; margin:0.6rem 0">
+
+    {# ── Banner header ── #}
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap">
+      <span style="background:{{ worst_coa.threat_color }}; color:#fff; font-size:0.7rem; font-weight:700; padding:0.2rem 0.5rem; border-radius:3px; letter-spacing:0.05em; text-transform:uppercase">&#9888; {{ worst_coa.threat_level }} THREAT</span>
+      <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
+      <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
+    </div>
+
+    {# ── Stat cards ── #}
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ worst_coa.target_name }}">{{ worst_coa.target_name }}</div>
+        <div class="stat-lbl">Primary Target</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="color:{{ worst_coa.threat_color }}">{{ worst_coa.dv }} <span style="font-size:0.7rem; font-weight:400">km/s</span></div>
+        <div class="stat-lbl">Min. &#916;V Required</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">{{ worst_coa.tof_label }}</div>
+        <div class="stat-lbl">Time of Flight</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.method | upper }}</div>
+        <div class="stat-lbl">Transfer Method</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.burn_location }}</div>
+        <div class="stat-lbl">Burn Location</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.direction }}</div>
+        <div class="stat-lbl">Burn Direction</div>
+      </div>
+    </div>
+
+    {# ── ΔV budget bar ── #}
+    <div style="margin-bottom:0.5rem">
+      <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:0.2rem">
+        <span>&#916;V Budget Utilisation</span>
+        <span>{{ worst_coa.dv_budget_pct }}% of 3 km/s</span>
+      </div>
+      <div style="height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden">
+        <div style="height:100%; width:{{ worst_coa.dv_budget_pct }}%; background:{{ worst_coa.threat_color }}; border-radius:3px"></div>
+      </div>
+    </div>
+
+    {# ── Burn axis breakdown ── #}
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
+      <div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Prograde {{ worst_coa.pro_pct }}%</div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:#3b8beb; border-radius:2px"></div></div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Normal {{ worst_coa.nor_pct }}%</div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:#a855f7; border-radius:2px"></div></div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Radial {{ worst_coa.rad_pct }}%</div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:#f59e0b; border-radius:2px"></div></div>
+      </div>
+    </div>
+
+    {# ── Summary text ── #}
+    <p style="margin:0; font-size:0.77rem; color:var(--text-dim); font-style:italic">{{ worst_coa.summary }}</p>
+  </div>
+  {% endif %}
+
   {% if assessment.errors %}
   <div class="callout callout-amber" style="margin:0.4rem 0">
     {% for err in assessment.errors %}
