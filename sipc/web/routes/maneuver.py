@@ -49,6 +49,9 @@ from sipc.domain.models import (
     InterceptResult,
     OrbitalEvent,
 )
+from sipc.astro.constants import regimes_compatible
+from sipc.astro.propagator import regime_from_tle
+from sipc.data.intel import get_intel, satno_from_tle
 from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
@@ -57,6 +60,16 @@ from sipc.web.planning_state import get_session_state
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/maneuver")
+
+# Human-readable altitude hint for each orbit regime — used in error messages.
+_REGIME_ALT_HINT: dict[str, str] = {
+    "LEO": "200–2,000 km",
+    "MEO": "2,000–35,400 km",
+    "GEO": "~35,786 km",
+    "GTO": "LEO→GEO transfer orbit",
+    "HEO": "highly elliptical",
+    "DEEP": ">36,200 km",
+}
 
 # ── Intelligence helper sets ──────────────────────────────────────────────────
 
@@ -529,7 +542,8 @@ async def apply_intercept(
     number_of_burns: Annotated[int, Form()] = 1,
     target_distance_m: Annotated[float, Form()] = 0.0,
     minimize_delta_v: Annotated[bool, Form()] = True,
-    max_dv: Annotated[float, Form()] = 3.0,
+    max_dv: Annotated[float, Form(ge=0.0, le=100.0)] = 3.0,
+    intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Calculate an intercept trajectory using sipc.astro solvers.
@@ -566,6 +580,31 @@ async def apply_intercept(
             missing.append(f"blue ({blue_sat})")
         return render(request, "partials/intercept_result.html", {
             "result": None, "error": f"No TLE found for: {', '.join(missing)}",
+        })
+
+    # Re-fetch TLEs if a per-panel data mode override was requested.
+    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
+    if intercept_data_mode.strip():
+        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+
+    # Regime compatibility check — block cross-belt intercepts.
+    try:
+        red_regime = regime_from_tle(red_tle)
+        blue_regime = regime_from_tle(blue_tle)
+    except Exception:
+        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+
+    if not regimes_compatible(red_regime, blue_regime):
+        return render(request, "partials/intercept_result.html", {
+            "result": None,
+            "intercept_data_mode": effective_dm,
+            "error": (
+                f"Regime mismatch — {red_sat} is {red_regime} "
+                f"({_REGIME_ALT_HINT.get(red_regime, red_regime)}) but "
+                f"{blue_sat} is {blue_regime} "
+                f"({_REGIME_ALT_HINT.get(blue_regime, blue_regime)}). "
+                "Cross-regime intercepts require impractical delta-V and are not supported."
+            ),
         })
 
     intercept_method = _INTERCEPT_METHOD_MAP[method]
@@ -613,11 +652,14 @@ async def apply_intercept(
     )
 
     intel = _compute_intercept_intel(result)
+    osint = get_intel(satno_from_tle(red_tle))
 
     return render(request, "partials/intercept_result.html", {
         "result": result, "error": None,
         "intercept_history": state.intercept_history,
         "intel": intel,
+        "osint": osint,
+        "intercept_data_mode": effective_dm,
     })
 
 
@@ -668,7 +710,8 @@ async def apply_all_intercepts(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
-    max_dv: Annotated[float, Form()] = 3.0,
+    max_dv: Annotated[float, Form(ge=0.0, le=100.0)] = 3.0,
+    intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
@@ -699,6 +742,32 @@ async def apply_all_intercepts(
             "items": [], "error": f"No TLE found for: {', '.join(missing)}",
             "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
             "intercept_history": state.intercept_history,
+        })
+
+    # Re-fetch TLEs if a per-panel data mode override was requested.
+    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
+    if intercept_data_mode.strip():
+        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+
+    # Regime compatibility check — block cross-belt intercepts.
+    try:
+        red_regime = regime_from_tle(red_tle)
+        blue_regime = regime_from_tle(blue_tle)
+    except Exception:
+        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+
+    if not regimes_compatible(red_regime, blue_regime):
+        return render(request, "partials/all_intercepts_result.html", {
+            "items": [], "error": (
+                f"Regime mismatch — {red_sat} is {red_regime} "
+                f"({_REGIME_ALT_HINT.get(red_regime, red_regime)}) but "
+                f"{blue_sat} is {blue_regime} "
+                f"({_REGIME_ALT_HINT.get(blue_regime, blue_regime)}). "
+                "Cross-regime intercepts require impractical delta-V and are not supported."
+            ),
+            "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
+            "intercept_history": state.intercept_history,
+            "intercept_data_mode": effective_dm,
         })
 
     coast_s = coast_hours * 3600.0
@@ -763,6 +832,7 @@ async def apply_all_intercepts(
         "red_name": red_sat.strip(),
         "blue_name": blue_sat.strip(),
         "intercept_history": state.intercept_history,
+        "intercept_data_mode": effective_dm,
     })
 
 
@@ -802,6 +872,7 @@ async def clear_history(
         "result": None, "error": None,
         "intercept_history": [],
         "intel": None,
+        "intercept_data_mode": "",
     })
 
 
@@ -816,6 +887,39 @@ def _find_tle(state: object, sat_name: str) -> str | None:
         if t.stk_name == sat_name:
             return t.tle
     return None
+
+
+async def _refetch_tles(
+    red_tle: str,
+    blue_tle: str,
+    data_mode: str,
+    state: object,
+) -> tuple[str, str]:
+    """Re-fetch the red and blue TLEs from UDL using *data_mode*.
+
+    Falls back silently to the supplied originals when UDL credentials are
+    absent, the SATNO cannot be extracted from the TLE, or the fetch fails.
+    """
+    if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+        return red_tle, blue_tle
+
+    from sipc.web.routes.udl import fetch_tle_for_satno
+
+    async def _try_fetch(tle: str) -> str:
+        satno = satno_from_tle(tle)
+        if satno is None:
+            return tle
+        result = await fetch_tle_for_satno(
+            satno,
+            state.udl_username,  # type: ignore[attr-defined]
+            state.udl_password,  # type: ignore[attr-defined]
+            data_mode=data_mode,
+            source=getattr(state, "udl_tle_source", ""),
+        )
+        return result[0] if result else tle
+
+    new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
+    return new_red, new_blue
 
 
 def _run_intercept(

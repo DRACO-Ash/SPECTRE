@@ -32,22 +32,17 @@ function hrrSort(th) {
   <table class="hrr-table">
     <thead>
       <tr>
+        <th class="no-sort"></th>
         <th onclick="hrrSort(this)">Name<span class="hrr-sort-ind"></span></th>
         <th onclick="hrrSort(this)">SATNO<span class="hrr-sort-ind"></span></th>
         <th onclick="hrrSort(this)">Country<span class="hrr-sort-ind"></span></th>
         <th onclick="hrrSort(this)">Orbit<span class="hrr-sort-ind"></span></th>
         <th onclick="hrrSort(this)">Rank<span class="hrr-sort-ind"></span></th>
-        <th class="no-sort"></th>
       </tr>
     </thead>
     <tbody>
       {% for sat in hrr_blue %}
       <tr id="hrr-blue-row-{{ sat.satno }}">
-        <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
-        <td class="col-dim">{{ sat.satno }}</td>
-        <td class="col-dim">{{ sat.country }}</td>
-        <td class="col-dim">{{ sat.orbit_regime }}</td>
-        <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
         <td class="col-actions">
           {% if sat.satno %}
           <button id="hrr-bb-{{ sat.satno }}"
@@ -57,7 +52,7 @@ function hrrSort(th) {
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
                   title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
-                  class="btn-primary btn-sm">&rarr; Blue</button>
+                  class="btn-primary btn-xs">&rarr; Blue</button>
           <button id="hrr-br-{{ sat.satno }}"
                   hx-post="/assets/red/quick-add"
                   hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-br-{{ sat.satno }}"}'
@@ -65,9 +60,14 @@ function hrrSort(th) {
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
                   title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
-                  class="btn-danger btn-sm">&rarr; Red</button>
+                  class="btn-danger btn-xs">&rarr; Red</button>
           {% endif %}
         </td>
+        <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
+        <td class="col-dim">{{ sat.satno }}</td>
+        <td class="col-dim">{{ sat.country }}</td>
+        <td class="col-dim">{{ sat.orbit_regime }}</td>
+        <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -83,22 +83,17 @@ function hrrSort(th) {
     <table class="hrr-table">
       <thead>
         <tr>
+          <th class="no-sort"></th>
           <th onclick="hrrSort(this)">Name<span class="hrr-sort-ind"></span></th>
           <th onclick="hrrSort(this)">SATNO<span class="hrr-sort-ind"></span></th>
           <th onclick="hrrSort(this)">Country<span class="hrr-sort-ind"></span></th>
           <th onclick="hrrSort(this)">Orbit<span class="hrr-sort-ind"></span></th>
           <th onclick="hrrSort(this)">Rank<span class="hrr-sort-ind"></span></th>
-          <th class="no-sort"></th>
         </tr>
       </thead>
       <tbody>
         {% for sat in hrr_red %}
         <tr id="hrr-red-row-{{ sat.satno }}">
-          <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
-          <td class="col-dim">{{ sat.satno }}</td>
-          <td class="col-dim">{{ sat.country }}</td>
-          <td class="col-dim">{{ sat.orbit_regime }}</td>
-          <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
           <td class="col-actions">
             {% if sat.satno %}
             <button id="hrr-rr-{{ sat.satno }}"
@@ -108,7 +103,7 @@ function hrrSort(th) {
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
                     title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
-                    class="btn-danger btn-sm">&rarr; Red</button>
+                    class="btn-danger btn-xs">&rarr; Red</button>
             <button id="hrr-rb-{{ sat.satno }}"
                     hx-post="/assets/blue/quick-add"
                     hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-rb-{{ sat.satno }}"}'
@@ -116,9 +111,14 @@ function hrrSort(th) {
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
                     title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
-                    class="btn-primary btn-sm">&rarr; Blue</button>
+                    class="btn-primary btn-xs">&rarr; Blue</button>
             {% endif %}
           </td>
+          <td class="col-name" title="{{ sat.name }}">{{ sat.name }}</td>
+          <td class="col-dim">{{ sat.satno }}</td>
+          <td class="col-dim">{{ sat.country }}</td>
+          <td class="col-dim">{{ sat.orbit_regime }}</td>
+          <td class="col-dim" data-val="{{ sat.rank if sat.rank is not none else '' }}">{{ sat.rank if sat.rank is not none else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>

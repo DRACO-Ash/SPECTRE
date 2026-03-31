@@ -85,6 +85,10 @@ class TLERecord:
     geo_longitude_deg:      Optional[float] = None
     geo_drift_rate_deg_day: Optional[float] = None
 
+    # UDL provenance — populated when TLE was fetched via UDL API
+    data_mode: str = ""
+    source:    str = ""
+
 
 @dataclass
 class Manoeuvre:
@@ -678,8 +682,17 @@ def _intel_assessment(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def parse_tle_history(tle_text: str, satno: int | None = None) -> list[TLERecord]:
-    """Parse a block of historical TLEs into chronologically-sorted TLERecords."""
+def parse_tle_history(
+    tle_text: str,
+    satno: int | None = None,
+    metadata: dict[str, tuple[str, str]] | None = None,
+) -> list[TLERecord]:
+    """Parse a block of historical TLEs into chronologically-sorted TLERecords.
+
+    *metadata* optionally maps TLE line-1 strings to ``(data_mode, source)``
+    tuples retrieved from the UDL response, which are stored on each record
+    for provenance tracking and display in the elset table.
+    """
     raw_lines = [l.rstrip() for l in tle_text.splitlines()]
     pairs: list[tuple[str, str]] = []
     i = 0
@@ -701,6 +714,8 @@ def parse_tle_history(tle_text: str, satno: int | None = None) -> list[TLERecord
             key = rec.epoch.strftime("%Y%j%H%M%S")
             if key not in seen:
                 seen.add(key)
+                if metadata and l1 in metadata:
+                    rec.data_mode, rec.source = metadata[l1]
                 records.append(rec)
         except Exception:
             continue

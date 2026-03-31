@@ -228,6 +228,24 @@ def keplerian_to_state(
     )
 
 
+def regime_from_tle(tle: str) -> str:
+    """Return the orbit regime family for a TLE string.
+
+    Derives the semi-major axis from mean motion and eccentricity analytically,
+    without running a full SGP4 propagation step.  This makes it fast and
+    immune to propagation errors caused by stale TLE epochs.
+
+    Returns one of: ``"LEO"``, ``"MEO"``, ``"GEO"``, ``"GTO"``, ``"HEO"``,
+    ``"DEEP"``.
+    """
+    from sipc.astro.constants import MU_EARTH, classify_orbit_regime
+    orbit = TLEOrbit(tle)
+    n_rad_s = orbit._sat.no_kozai / 60.0           # rad/min → rad/s
+    a_km = (MU_EARTH / n_rad_s ** 2) ** (1.0 / 3.0)
+    ecc = float(orbit._sat.ecco)
+    return classify_orbit_regime(a_km, ecc)
+
+
 def _datetime_to_jd(dt: datetime) -> tuple[float, float]:
     """Convert a datetime to Julian date (jd, fraction) for sgp4."""
     sec = dt.second + dt.microsecond / 1e6

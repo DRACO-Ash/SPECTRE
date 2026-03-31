@@ -75,6 +75,11 @@
 </div>
 
 
+{# ── OSINT Intelligence Record (if available for this SATNO) ── #}
+{% set osint_label = "SUBJECT INTELLIGENCE" %}
+{% include "partials/osint_card.html" %}
+
+
 {# ══════════════════════════════════════════════════════════════════════════════
    § 2 — ANOMALY SCORE BREAKDOWN + PROPELLANT BUDGET
    ══════════════════════════════════════════════════════════════════════════════ #}
@@ -542,6 +547,86 @@
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.6rem">
     <div style="font-size:0.62rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem">Inter-manoeuvre Interval (days)</div>
     <canvas id="pol-interval-hist" height="90"></canvas>
+  </div>
+</div>
+{% endif %}
+
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 11 — ELSET HISTORY TABLE
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% if pol.records %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="display:flex; align-items:baseline; gap:0.5rem; margin-bottom:0.4rem; flex-wrap:wrap">
+    <span style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">
+      Elset History
+    </span>
+    <span style="font-size:0.6rem; color:var(--text-dim)">{{ pol.records | length }} records · {{ pol.span_days | round(0) | int }} day span</span>
+    <span style="font-size:0.6rem; color:var(--text-dim)">— newest first · click column header to sort</span>
+    <span style="margin-left:auto; font-size:0.6rem">
+      <span class="badge-ok" style="font-size:0.58rem">Latest from UDL</span>
+      <span style="background:rgba(107,114,128,0.18); color:var(--text-dim); border-radius:3px; padding:0.1rem 0.35rem; font-size:0.58rem">Historical</span>
+    </span>
+  </div>
+  <div class="hrr-scroll" style="max-height:340px">
+    <table class="hrr-table" style="font-size:0.64rem; width:100%">
+      <thead>
+        <tr>
+          <th onclick="polSort(this)" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">SMA (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Inc (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Ecc<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
+          {% if pol.records | selectattr("data_mode") | list %}
+          <th onclick="polSort(this)" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
+          {% endif %}
+          {% if pol.records | selectattr("source") | list %}
+          <th onclick="polSort(this)" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
+          {% endif %}
+          <th style="white-space:nowrap">TLE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set has_dm = pol.records | selectattr("data_mode") | list | length > 0 %}
+        {% set has_src = pol.records | selectattr("source") | list | length > 0 %}
+        {% set sorted_records = pol.records | sort(attribute="epoch", reverse=True) %}
+        {% for rec in sorted_records %}
+        {% set is_newest = loop.first %}
+        <tr>
+          <td style="white-space:nowrap{% if is_newest %}; color:var(--ops-blue); font-weight:700{% endif %}" data-val="{{ rec.epoch.strftime('%Y%m%d%H%M%S') }}">
+            {{ rec.epoch.strftime("%Y-%m-%d %H:%M") }}
+            {% if is_newest %}<span class="badge-ok" style="font-size:0.56rem; margin-left:0.3rem">latest</span>{% endif %}
+          </td>
+          <td class="col-dim">{{ rec.regime }}</td>
+          <td class="col-dim" style="text-align:right" data-val="{{ rec.alt_km | round(3) }}">{{ rec.alt_km | round(2) }}</td>
+          <td class="col-dim" style="text-align:right" data-val="{{ rec.sma_km | round(3) }}">{{ rec.sma_km | round(2) }}</td>
+          <td class="col-dim" style="text-align:right" data-val="{{ rec.inc_deg | round(4) }}">{{ rec.inc_deg | round(4) }}</td>
+          <td class="col-dim" style="text-align:right; font-variant-numeric:tabular-nums" data-val="{{ rec.ecc }}">{{ "%.6f" | format(rec.ecc) }}</td>
+          <td class="col-dim" style="text-align:right" data-val="{{ rec.mean_motion_revday | round(5) }}">{{ rec.mean_motion_revday | round(5) }}</td>
+          <td class="col-dim" style="text-align:right; font-variant-numeric:tabular-nums" data-val="{{ rec.bstar }}">{{ "%.5e" | format(rec.bstar) }}</td>
+          {% if has_dm %}
+          <td class="col-dim">
+            {% if rec.data_mode %}<span style="font-size:0.58rem; background:rgba(59,139,235,0.15); color:var(--ops-blue); border-radius:3px; padding:0.1rem 0.3rem">{{ rec.data_mode }}</span>{% else %}—{% endif %}
+          </td>
+          {% endif %}
+          {% if has_src %}
+          <td class="col-dim" style="white-space:nowrap; max-width:9rem; overflow:hidden; text-overflow:ellipsis" title="{{ rec.source }}">{{ rec.source or "—" }}</td>
+          {% endif %}
+          <td style="font-family:monospace; font-size:0.58rem; white-space:nowrap">
+            <details style="display:inline">
+              <summary style="cursor:pointer; color:var(--ops-blue); list-style:none; font-size:0.6rem">view</summary>
+              <div style="position:absolute; z-index:99; background:var(--panel-bg); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; margin-top:0.2rem; font-size:0.6rem; line-height:1.6; max-width:min(90vw,700px); word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.4)">
+                {{ rec.tle | replace('\n', '<br>') | safe }}
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% endif %}

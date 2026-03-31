@@ -42,6 +42,26 @@ def normalise_regime(raw: str) -> str:
     return _REGIME_MAP.get(raw.strip().upper(), "OTHER")
 
 
+# Regimes that are inherently trans-belt (their orbit naturally spans LEO↔GEO).
+_MULTI_REGIME: frozenset[str] = frozenset({"HEO", "GTO"})
+
+
+def regimes_compatible(r1: str, r2: str) -> bool:
+    """Return True when two orbit regime families can plausibly intercept each other.
+
+    Same-regime pairings are always allowed.  HEO and GTO are inherently
+    trans-belt orbits whose apogee/perigee naturally reaches both LEO and GEO
+    altitudes, so they are permitted against any regime they physically cross.
+    All other cross-regime pairings (e.g. LEO ↔ GEO) require impractical
+    delta-V and are rejected.
+    """
+    if r1 == r2:
+        return True
+    if r1 in _MULTI_REGIME or r2 in _MULTI_REGIME:
+        return True
+    return False
+
+
 def classify_orbit_regime(semi_major_axis_km: float, eccentricity: float = 0.0) -> str:
     """Classify an orbit into a canonical regime family from TLE-derived elements.
 

@@ -8,4 +8,6 @@
     <span title="Altitude at epoch"><strong>Alt:</strong> {{ "%.0f"|format(alt_km) }} km</span>
     <span title="Eccentricity"><strong>Ecc:</strong> {{ "%.6f"|format(ecc) }}</span>
   </div>
+  {% set osint_label = "RED TRACK" %}
+  {% include "partials/osint_card.html" %}
 </div>

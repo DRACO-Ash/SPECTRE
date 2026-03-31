@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from sipc.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
+from sipc.data.intel import get_intel
 from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
@@ -30,11 +31,54 @@ _UDL_MAX_RESULTS = 5000
 
 # ── UDL helper ────────────────────────────────────────────────────────────────
 
-async def _fetch_udl_history(satno: int, username: str, password: str, data_mode: str) -> str:
-    """Fetch historical TLEs from UDL elset endpoint.
+def _parse_udl_elset_response(
+    resp: httpx.Response,
+) -> tuple[str, dict[str, tuple[str, str]]]:
+    """Extract TLE text and provenance metadata from a UDL /elset response.
 
-    UDL's /elset endpoint supports filtering by satNo and epoch range.
-    We request everything from 2015 onward with a high maxResults cap.
+    Returns ``(tle_text, metadata)`` where *metadata* maps TLE line-1 strings
+    to ``(data_mode, source)`` pairs from the UDL JSON record.
+    """
+    raw = resp.text.strip()
+    if not raw:
+        return "", {}
+
+    try:
+        data = resp.json()
+    except Exception:
+        # Plain TLE text — no provenance metadata available.
+        return raw, {}
+
+    if isinstance(data, dict):
+        # Defensive: UDL spec returns a JSON array; wrap a stray single-record dict.
+        records = [data]
+    elif isinstance(data, list):
+        records = data
+    else:
+        return "", {}
+
+    lines: list[str] = []
+    metadata: dict[str, tuple[str, str]] = {}
+    for rec in records:
+        l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
+        l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
+        if l1.startswith("1 ") and l2.startswith("2 "):
+            lines.append(l1)
+            lines.append(l2)
+            dm  = str(rec.get("dataMode") or rec.get("data_mode") or "").strip()
+            src = str(rec.get("source") or "").strip()
+            metadata[l1] = (dm, src)
+
+    logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
+    return "\n".join(lines), metadata
+
+
+async def _fetch_udl_history(
+    satno: int, username: str, password: str, data_mode: str, source: str = "",
+) -> tuple[str, dict[str, tuple[str, str]]]:
+    """Fetch historical TLEs from UDL elset endpoint (2015 → now, max 5 000).
+
+    Returns ``(tle_text, metadata)`` where *metadata* maps line-1 → ``(data_mode, source)``.
     Records may arrive in any order — the parser will sort chronologically.
     """
     params: dict = {
@@ -44,6 +88,8 @@ async def _fetch_udl_history(satno: int, username: str, password: str, data_mode
     }
     if data_mode and data_mode != "REAL":
         params["dataMode"] = data_mode
+    if source:
+        params["source"] = source
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.get(
@@ -53,33 +99,35 @@ async def _fetch_udl_history(satno: int, username: str, password: str, data_mode
         )
         resp.raise_for_status()
 
-    raw = resp.text.strip()
-    if not raw:
-        return ""
+    return _parse_udl_elset_response(resp)
 
-    try:
-        data = resp.json()
-    except Exception:
-        # UDL returned plain TLE text rather than JSON
-        return raw
 
-    if isinstance(data, dict):
-        records = data.get("data", data.get("items", [data]))
-    elif isinstance(data, list):
-        records = data
-    else:
-        return ""
+async def _fetch_udl_latest(
+    satno: int, username: str, password: str, data_mode: str, source: str = "",
+) -> tuple[str, dict[str, tuple[str, str]]]:
+    """Fetch the current/latest TLE from UDL ``/elset/current``.
 
-    lines: list[str] = []
-    for rec in records:
-        l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
-        l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
-        if l1.startswith("1 ") and l2.startswith("2 "):
-            lines.append(l1)
-            lines.append(l2)
+    A satellite with many historical TLEs can exhaust the 5 000-record cap
+    on ``/elset`` before reaching the present.  This second call guarantees
+    the most recent elset is always included regardless of archive depth.
 
-    logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
-    return "\n".join(lines)
+    Returns ``(tle_text, metadata)`` in the same format as :func:`_fetch_udl_history`.
+    """
+    params: dict = {"satNo": satno}
+    if data_mode and data_mode != "REAL":
+        params["dataMode"] = data_mode
+    if source:
+        params["source"] = source
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_UDL_BASE}/elset/current",
+            params=params,
+            auth=(username, password),
+        )
+        resp.raise_for_status()
+
+    return _parse_udl_elset_response(resp)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -125,8 +173,13 @@ async def pol_analyse(
         if not udl_user.strip() or not udl_pass.strip():
             return _err("Enter UDL username and password.")
         try:
-            tle_text = await _fetch_udl_history(
+            tle_text, meta = await _fetch_udl_history(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
+                source=state.udl_tle_source,
+            )
+            latest_text, latest_meta = await _fetch_udl_latest(
+                satno, udl_user.strip(), udl_pass.strip(), "REAL",
+                source=state.udl_tle_source,
             )
             logger.info("PoL: %d chars from UDL (direct) for %d", len(tle_text), satno)
         except Exception as exc:
@@ -138,16 +191,26 @@ async def pol_analyse(
         if not state.udl_username or not state.udl_password:
             return _err("No active UDL session. Connect UDL first, or choose 'UDL (credentials)'.")
         try:
-            tle_text = await _fetch_udl_history(
+            tle_text, meta = await _fetch_udl_history(
                 satno, state.udl_username, state.udl_password,
                 state.udl_data_mode or "REAL",
+                source=state.udl_tle_source,
+            )
+            latest_text, latest_meta = await _fetch_udl_latest(
+                satno, state.udl_username, state.udl_password,
+                state.udl_data_mode or "REAL",
+                source=state.udl_tle_source,
             )
             logger.info("PoL: %d chars from UDL (session) for %d", len(tle_text), satno)
         except Exception as exc:
             logger.warning("PoL: UDL session failed: %s", exc)
             return _err(f"UDL fetch failed: {exc}")
 
-    if not tle_text or not tle_text.strip():
+    # Merge historical + latest: latest_meta overrides historical (newer provenance).
+    merged_meta = {**meta, **latest_meta}
+    merged_text = tle_text + ("\n" if tle_text else "") + latest_text
+
+    if not merged_text.strip():
         return _err(
             f"No TLE data returned from UDL for SATNO {satno}. "
             "Check the SATNO and credentials, and verify the object exists in the catalogue."
@@ -156,7 +219,7 @@ async def pol_analyse(
     # ── Parse + analyse ───────────────────────────────────────────────────────
     try:
         threshold_km_s = dv_threshold_ms / 1000.0
-        records = parse_tle_history(tle_text, satno=satno)
+        records = parse_tle_history(merged_text, satno=satno, metadata=merged_meta)
         if not records:
             return render(request, "partials/pol_panel.html", {
                 "has_udl": bool(state.udl_username),
@@ -186,6 +249,7 @@ async def pol_analyse(
     return render(request, "partials/pol_results.html", {
         "pol": pol,
         "source": "UDL",
+        "osint": get_intel(satno),
     })
 
 

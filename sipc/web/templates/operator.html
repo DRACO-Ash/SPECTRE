@@ -247,6 +247,20 @@
           </div>
         </section>
 
+        <!-- TLE Source -->
+        <section class="panel">
+          <h2>TLE Source</h2>
+          <div id="tle-source-panel">
+            {% if udl_available_sources %}
+            {% set tle_source = udl_tle_source %}
+            {% set available = udl_available_sources %}
+            {% include "partials/tle_source_panel.html" %}
+            {% else %}
+            <span class="label-dim" style="font-size:0.75rem">Connect UDL to discover available sources.</span>
+            {% endif %}
+          </div>
+        </section>
+
         <!-- Scenario Configuration -->
         <section class="panel">
           <h2>Scenario Configuration</h2>
@@ -382,6 +396,16 @@
               <label title="The blue (friendly) satellite to intercept">Blue Target
                 <select name="blue_sat" id="ie-blue-sat">
                   {% include "partials/blue_options.html" %}
+                </select>
+              </label>
+
+              <label title="Re-fetch red and blue TLEs from UDL using this classification before computing — overrides the session-wide data mode for this calculation only">Intercept Data Mode
+                <select name="intercept_data_mode">
+                  <option value="">Session default ({{ udl_data_mode or 'REAL' }})</option>
+                  <option value="REAL">REAL</option>
+                  <option value="SIMULATED">SIMULATED</option>
+                  <option value="TEST">TEST</option>
+                  <option value="EXERCISE">EXERCISE</option>
                 </select>
               </label>
 

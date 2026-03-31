@@ -39,6 +39,10 @@
           hx-swap="innerHTML"
           title="End the UDL session — credentials are cleared from memory">Disconnect</button>
 </div>
+{# OOB: replace the TLE Source panel with the live dropdown #}
+<div id="tle-source-panel" hx-swap-oob="innerHTML">
+  {% include "partials/tle_source_panel.html" %}
+</div>
 <script>
 (function(){
   var d = document.getElementById('udl-dropdown');

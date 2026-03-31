@@ -92,11 +92,23 @@
   {% endif %}
 
   {% if grouped %}
-  <div style="margin:0.4rem 0; display:flex; gap:0.5rem; align-items:center">
+  <div style="margin:0.4rem 0; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
     <input type="text" id="threat-search" class="form-control"
            placeholder="Search targets, methods, locations…"
            oninput="threatFilter(this.value)"
-           style="flex:1; padding:0.35rem 0.5rem; font-size:0.8rem">
+           style="flex:1; min-width:140px; padding:0.35rem 0.5rem; font-size:0.8rem">
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); white-space:nowrap; display:flex; align-items:center; gap:0.3rem"
+           title="Show only target rows whose TLE was fetched with the selected UDL data mode">
+      Data Mode
+      <select id="sweep-dm-filter" onchange="sweepDmFilter(this.value)"
+              style="font-size:0.72rem; padding:0.15rem 0.3rem; border-radius:3px">
+        <option value="">All</option>
+        <option value="REAL">REAL</option>
+        <option value="SIMULATED">SIMULATED</option>
+        <option value="TEST">TEST</option>
+        <option value="EXERCISE">EXERCISE</option>
+      </select>
+    </label>
     <button class="btn-secondary btn-sm" onclick="threatExpandAll()" title="Expand all groups">Expand All</button>
     <button class="btn-secondary btn-sm" onclick="threatCollapseAll()" title="Collapse all groups">Collapse All</button>
   </div>
@@ -118,6 +130,7 @@
         {# ── Parent row (one per target) ── #}
         <tr class="threat-parent {% if group.best_dv < 0.5 %}threat-high{% elif group.best_dv < 1.0 %}threat-med{% endif %}"
             id="threat-group-{{ loop.index0 }}"
+            data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
             title="Click to expand {{ group.profile_count }} manoeuvre profiles">
           <td class="threat-chevron-cell">
@@ -133,6 +146,16 @@
           </td>
         </tr>
         {# ── Child header + rows (hidden by default) ── #}
+        {# ── OSINT intel detail row (hidden, revealed with group) ── #}
+        {% if group.osint %}
+        {% set osint = group.osint %}
+        <tr class="threat-child threat-children-{{ loop.index0 }}" style="display:none">
+          <td colspan="7" style="padding:0 0.5rem 0.4rem 2.5rem">
+            {% set osint_label = "TARGET INTEL" %}
+            {% include "partials/osint_card.html" %}
+          </td>
+        </tr>
+        {% endif %}
         {% set group_idx = loop.index0 %}
         <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
           <td></td>
@@ -213,6 +236,21 @@
       /* Hide children if parent is hidden; otherwise preserve their toggle state */
       if (!match) {
         children.forEach(function(r) { r.style.display = 'none'; });
+      }
+    });
+  }
+
+  /* ── Data Mode filter (show only rows matching a UDL dataMode tag) ── */
+  function sweepDmFilter(val) {
+    document.querySelectorAll('.threat-parent').forEach(function(parent) {
+      var dm = (parent.getAttribute('data-dm') || '').toUpperCase();
+      var match = val === '' || dm === val.toUpperCase();
+      parent.style.display = match ? '' : 'none';
+      var gIdx = parent.id.replace('threat-group-', '');
+      if (!match) {
+        document.querySelectorAll('.threat-children-' + gIdx).forEach(function(r) {
+          r.style.display = 'none';
+        });
       }
     });
   }

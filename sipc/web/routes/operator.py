@@ -58,6 +58,8 @@ async def dashboard(
         "udl_user": state.udl_username,
         "scenario_start": state.scenario_start,
         "udl_data_mode": state.udl_data_mode,
+        "udl_tle_source": state.udl_tle_source,
+        "udl_available_sources": state.udl_available_sources,
     })
 
 
@@ -120,10 +122,12 @@ async def quick_add_blue_asset(
 
     from sipc.web.routes.udl import fetch_tle_for_satno
 
-    tle = await fetch_tle_for_satno(
+    _result = await fetch_tle_for_satno(
         satno, state.udl_username, state.udl_password,
         data_mode=state.udl_data_mode or "REAL",
+        source=state.udl_tle_source,
     )
+    tle = _result[0] if _result else None
     if not tle:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
@@ -175,10 +179,12 @@ async def quick_add_red_track(
 
     from sipc.web.routes.udl import fetch_tle_for_satno
 
-    tle = await fetch_tle_for_satno(
+    _result = await fetch_tle_for_satno(
         satno, state.udl_username, state.udl_password,
         data_mode=state.udl_data_mode or "REAL",
+        source=state.udl_tle_source,
     )
+    tle = _result[0] if _result else None
     if not tle:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}

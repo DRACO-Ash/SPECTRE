@@ -666,6 +666,7 @@ textarea { resize: vertical; }
 .btn-logout:hover { color: var(--text); border-color: var(--text-dim); }
 
 .btn-sm { padding: 0.22rem 0.5rem; font-size: 0.7rem; }
+.btn-xs { padding: 0.1rem 0.35rem; font-size: 0.62rem; }
 
 .inline-form { display: inline; }
 

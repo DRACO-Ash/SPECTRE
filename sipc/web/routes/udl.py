@@ -21,6 +21,7 @@ from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
 from sipc.web.planning_state import (
+    SessionState,
     get_onorbit_catalog,
     get_catalog_status,
     get_session_state,
@@ -53,22 +54,25 @@ _UDL_BASE = "https://unifieddatalibrary.com/udl"
 
 
 async def fetch_tle_for_satno(
-    satno: int, username: str, password: str, data_mode: str = "REAL",
-) -> str | None:
+    satno: int, username: str, password: str,
+    data_mode: str = "REAL",
+    source: str = "",
+) -> tuple[str, str] | None:
     """Fetch current TLE for a SATNO from UDL.
 
-    Returns ``'line1\\nline2'`` or ``None`` on failure.
+    Returns ``('line1\\nline2', 'DATA_MODE_TAG')`` or ``None`` on failure.
+    The second element is the UDL ``dataMode`` field from the first returned record
+    (normalised to upper-case), enabling callers to preserve data-provenance metadata.
     """
     try:
         async with httpx.AsyncClient() as client:
-            params: dict = {
-                "satNo": satno,
-                "epoch": ">now-1 days",
-            }
+            params: dict = {"satNo": satno}
             if data_mode != "REAL":
                 params["dataMode"] = data_mode
+            if source:
+                params["source"] = source
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
+                f"{_UDL_BASE}/elset/current",
                 params=params,
                 auth=(username, password),
                 timeout=10.0,
@@ -94,7 +98,8 @@ async def fetch_tle_for_satno(
     line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
     if not line1 or not line2:
         return None
-    return f"{line1}\n{line2}"
+    data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
+    return (f"{line1}\n{line2}", data_mode_tag)
 
 
 async def _fetch_onorbit_background(username: str, password: str) -> None:
@@ -123,6 +128,35 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
 
 
+async def _discover_tle_sources(username: str, password: str, state: SessionState) -> None:
+    """Probe UDL to discover available TLE source providers for this session.
+
+    Fetches ISS (SATNO 25544) with a wide window and collects unique ``source``
+    field values from the returned records.  Results are stored on *state*.
+    Silent on failure — source discovery is best-effort.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/elset/current",
+                params={"satNo": 25544},
+                auth=(username, password),
+                timeout=15.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+        sources = sorted({
+            str(rec.get("source") or "").strip()
+            for rec in records
+            if rec.get("source") and str(rec.get("source")).strip()
+        })
+        state.udl_available_sources = sources
+        logger.info("UDL TLE sources discovered: %s", sources)
+    except Exception as exc:
+        logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
+
+
 # ── UDL session management ─────────────────────────────────────────────────
 
 
@@ -143,8 +177,8 @@ async def udl_login(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
-                params={"satNo": 25544, "epoch": ">2020-01-01T00:00:00.000000Z", "maxResults": 1},
+                f"{_UDL_BASE}/elset/current",
+                params={"satNo": 25544},
                 auth=(username, password),
                 timeout=10.0,
             )
@@ -188,12 +222,18 @@ async def udl_login(
     state.append_log(f"[UDL] Connected as {username}")
     logger.info("UDL credentials stored for operator: %s", current_user.username)
 
-    # Kick off background catalog fetch (no-op if already loaded).
+    # Kick off background tasks (no-op for catalog if already loaded).
     asyncio.create_task(_fetch_onorbit_background(username, password))
+    asyncio.create_task(_discover_tle_sources(username, password, state))
 
     return render(request,
         "partials/udl_status.html",
-        {"udl_user": username, "error": None},
+        {
+            "udl_user": username,
+            "error": None,
+            "tle_source": state.udl_tle_source,
+            "available": state.udl_available_sources,
+        },
     )
 
 
@@ -217,6 +257,27 @@ async def set_data_mode(
     return render(request,
         "partials/data_mode_status.html",
         {"udl_data_mode": mode},
+    )
+
+
+@router.post("/tle-source", response_model=None)
+async def set_tle_source(
+    request: Request,
+    tle_source: Annotated[str, Form()],
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Set the preferred TLE source provider for this session."""
+    state = get_session_state(current_user.username)
+    source = tle_source.strip()
+    state.udl_tle_source = source
+    if source:
+        state.append_log(f"[UDL] TLE source set to {source}")
+    else:
+        state.append_log("[UDL] TLE source reset to UDL default")
+    logger.info("TLE source set to %r for operator %s", source, current_user.username)
+    return render(request,
+        "partials/tle_source_status.html",
+        {"tle_source": source, "available": state.udl_available_sources},
     )
 
 
@@ -292,14 +353,13 @@ async def fetch_tle(
                     timeout=10.0,
                 )
             else:
-                latest_params: dict = {
-                    "satNo": satno,
-                    "epoch": ">now-1 days",
-                }
+                latest_params: dict = {"satNo": satno}
                 if dm != "REAL":
                     latest_params["dataMode"] = dm
+                if state.udl_tle_source:
+                    latest_params["source"] = state.udl_tle_source
                 resp = await client.get(
-                    f"{_UDL_BASE}/elset",
+                    f"{_UDL_BASE}/elset/current",
                     params=latest_params,
                     auth=(state.udl_username, state.udl_password),
                     timeout=15.0,
@@ -519,13 +579,13 @@ async def fetch_statevector(
     sv = {
         "name": str(rec.get("objectName") or rec.get("OBJECT_NAME", satno)).strip(),
         "epoch": rec.get("epoch", "—"),
-        "x": rec.get("x"),
-        "y": rec.get("y"),
-        "z": rec.get("z"),
-        "x_dot": rec.get("xDot"),
-        "y_dot": rec.get("yDot"),
-        "z_dot": rec.get("zDot"),
-        "ref_frame": rec.get("refFrame", "J2000"),
+        "x": rec.get("xpos"),
+        "y": rec.get("ypos"),
+        "z": rec.get("zpos"),
+        "x_dot": rec.get("xvel"),
+        "y_dot": rec.get("yvel"),
+        "z_dot": rec.get("zvel"),
+        "ref_frame": rec.get("referenceFrame", "J2000"),
     }
 
     state.append_log(
@@ -613,8 +673,17 @@ async def fetch_hrr_objects(
         return [], [], 0, f"No HRR notifications found in the last {_HRR_MAX_LOOKBACK_DAYS} days."
 
     newest = max(notifications, key=_parse_created_at)
-    msg_body: list[dict] = newest.get("msgBody") or []
-    notification_created_at = str(newest.get("createdAt") or "").strip()
+    hrr_blue, hrr_red = parse_hrr_notification(newest)
+    return hrr_blue, hrr_red, days_used, None
+
+
+def parse_hrr_notification(notification: dict) -> tuple[list[dict], list[dict]]:
+    """Parse a single HRR notification dict into (blue, red) normalised satellite lists.
+
+    Shared by the live UDL fetch and the startup loader (HRR_List.json).
+    """
+    msg_body: list[dict] = notification.get("msgBody") or []
+    created_at = str(notification.get("createdAt") or "").strip()
 
     hrr_blue: list[dict] = []
     hrr_red: list[dict] = []
@@ -631,14 +700,14 @@ async def fetch_hrr_objects(
             "country": country,
             "rank": rank,
             "orbit_regime": orbit_regime,
-            "created_at": notification_created_at,
+            "created_at": created_at,
         }
         if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
             hrr_blue.append(entry)
 
-    return hrr_blue, hrr_red, days_used, None
+    return hrr_blue, hrr_red
 
 
 @router.get("/hrr", response_model=None)

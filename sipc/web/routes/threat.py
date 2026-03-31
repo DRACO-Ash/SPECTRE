@@ -31,12 +31,14 @@ from sipc.astro.maneuvers import (
     hbar_hop_intercept,
     min_time_intercept_wrapper,
 )
-from sipc.astro.propagator import TLEOrbit, state_to_keplerian
+from sipc.astro.constants import regimes_compatible
+from sipc.astro.propagator import TLEOrbit, state_to_keplerian, regime_from_tle
 from sipc.domain.models import (
     ThreatAssessment,
     ThreatSweepEntry,
     ThreatTarget,
 )
+from sipc.data.intel import get_intel, satno_from_tle
 from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
@@ -107,6 +109,9 @@ async def red_orbit_info(
 
         epoch_str = epoch.strftime("%Y-%m-%d %H:%M UTC") if tle_epoch else "—"
 
+        satno = satno_from_tle(track.tle)
+        osint = get_intel(satno)
+
         return render(request, "partials/red_orbit_info.html", {
             "name": track.name,
             "epoch_str": epoch_str,
@@ -116,6 +121,7 @@ async def red_orbit_info(
             "alt_km": alt_km,
             "ecc": ecc,
             "a_km": a_km,
+            "osint": osint,
         })
     except Exception as exc:
         logger.warning("red_orbit_info failed for %s: %s", red_sat, exc)
@@ -265,12 +271,15 @@ async def fetch_targets(
             fetched += 1
             return
         async with sem:
-            tle = await fetch_tle_for_satno(
+            _result = await fetch_tle_for_satno(
                 int(satno_str), state.udl_username, state.udl_password,
                 data_mode=state.udl_data_mode or "REAL",
+                source=state.udl_tle_source,
             )
-            if tle:
+            if _result:
+                tle, dm = _result
                 state.hrr_tle_cache[satno_str] = tle
+                state.hrr_tle_data_mode[satno_str] = dm
                 fetched += 1
             else:
                 failed += 1
@@ -628,6 +637,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
             "best_tof": best.tof_hours,
             "profile_count": len(items),
             "children": [{"flat_idx": idx, "entry": e} for idx, e in items],
+            "osint": get_intel(best.target.target_satno or None),
         })
 
     groups.sort(key=lambda g: g["best_dv"])
@@ -638,7 +648,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
 async def threat_sweep(
     request: Request,
     red_sat: Annotated[str, Form()],
-    max_dv: Annotated[float, Form()] = 3.0,
+    max_dv: Annotated[float, Form(ge=0.0, le=100.0)] = 3.0,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run a threat sweep for a red satellite against the selected target group."""
@@ -682,6 +692,12 @@ async def threat_sweep(
             "error": f"No {side.title()} HRR Rank {rank} objects found.",
         })
 
+    # Hard cap: prevent runaway compute on unexpectedly large groups.
+    _MAX_SWEEP_TARGETS = 100
+    if len(targets) > _MAX_SWEEP_TARGETS:
+        targets = targets[:_MAX_SWEEP_TARGETS]
+        errors.append(f"Target list truncated to {_MAX_SWEEP_TARGETS} (cap exceeded).")
+
     # Any targets without a cached TLE get a last-chance fetch now.
     missing = [t for t in targets if t.target_satno and t.target_satno not in state.hrr_tle_cache]
     if missing and state.udl_username and state.udl_password:
@@ -691,12 +707,15 @@ async def threat_sweep(
 
         async def _fetch_one(t: ThreatTarget) -> None:
             async with sem:
-                tle = await fetch_tle_for_satno(
+                _result = await fetch_tle_for_satno(
                     int(t.target_satno), state.udl_username, state.udl_password,
                     data_mode=state.udl_data_mode or "REAL",
+                    source=state.udl_tle_source,
                 )
-                if tle:
+                if _result:
+                    tle, dm = _result
                     state.hrr_tle_cache[t.target_satno] = tle
+                    state.hrr_tle_data_mode[t.target_satno] = dm
                 else:
                     errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
@@ -708,6 +727,12 @@ async def threat_sweep(
     # All targets are HRR — TLEs come from the cache.
     hrr_count = len(targets)
 
+    # Classify red satellite's regime once — used to skip incompatible targets.
+    try:
+        red_regime = regime_from_tle(red_tle)
+    except Exception:
+        red_regime = "LEO"  # assume LEO on parse failure; sweep proceeds
+
     # Run sweep in executor.
     loop = asyncio.get_running_loop()
 
@@ -718,6 +743,17 @@ async def threat_sweep(
             tle = state.hrr_tle_cache.get(target.target_satno)
             if not tle:
                 sweep_errors.append(f"No TLE for {target.target_name} — skipped")
+                continue
+            # Skip targets in incompatible orbit regimes.
+            try:
+                tgt_regime = regime_from_tle(tle)
+            except Exception:
+                tgt_regime = red_regime  # assume compatible if TLE can't be parsed
+            if not regimes_compatible(red_regime, tgt_regime):
+                sweep_errors.append(
+                    f"{target.target_name}: skipped — "
+                    f"{red_regime} red vs {tgt_regime} target (regime mismatch)"
+                )
                 continue
             target_entries = _sweep_all_methods(red_tle, tle, target, epochs, max_dv)
             if not target_entries:
@@ -746,6 +782,10 @@ async def threat_sweep(
 
     # Group entries by target for the collapsed-row UI.
     grouped = _group_entries(entries)
+    # Attach UDL dataMode provenance to each group for the display-time filter.
+    for g in grouped:
+        satno = g["target"].target_satno
+        g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"
 
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries)

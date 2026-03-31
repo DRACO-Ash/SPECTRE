@@ -71,8 +71,22 @@ class SessionState:
     last_threat_assessment: ThreatAssessment | None = None
     # HRR TLE cache: SATNO → TLE (persists across sweeps).
     hrr_tle_cache: dict[str, str] = field(default_factory=dict)
+    # Parallel data-mode cache: SATNO → UDL dataMode tag for the cached TLE.
+    hrr_tle_data_mode: dict[str, str] = field(default_factory=dict)
     # Cached HRR satellite list from UDL.
     hrr_objects: list[dict] = field(default_factory=list)
+    # TLE source filter — empty string means "UDL default" (no filter).
+    udl_tle_source: str = ""
+    # Available TLE sources discovered from UDL after login.
+    udl_available_sources: list[str] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        """Safe repr that never leaks the UDL password."""
+        return (
+            f"SessionState(username={self.udl_username!r}, "
+            f"blue={len(self.blue_assets)}, red={len(self.red_tracks)}, "
+            f"hrr_cache={len(self.hrr_tle_cache)})"
+        )
 
     def append_log(self, message: str) -> None:
         """Append *message* to the session log.
@@ -92,9 +106,16 @@ _store: dict[str, SessionState] = {}
 
 
 def get_session_state(username: str) -> SessionState:
-    """Return the :class:`SessionState` for *username*, creating it if absent."""
+    """Return the :class:`SessionState` for *username*, creating it if absent.
+
+    New sessions are pre-populated with the default HRR object list so the
+    threat sweep is usable immediately without a live UDL connection.
+    """
     if username not in _store:
-        _store[username] = SessionState()
+        state = SessionState()
+        if _default_hrr_objects:
+            state.hrr_objects = list(_default_hrr_objects)
+        _store[username] = state
         logger.debug("Created new session state for user: %s", username)
     return _store[username]
 
@@ -132,3 +153,21 @@ def set_catalog_status(status: str) -> None:
     """Update the catalog load status."""
     global _catalog_status
     _catalog_status = status
+
+
+# ── App-level HRR default (loaded from HRR_List.json at startup) ─────────────
+# Pre-populates new operator sessions so the threat sweep works immediately,
+# before the operator connects to UDL for a live refresh.
+_default_hrr_objects: list[dict] = []
+
+
+def set_default_hrr_objects(objects: list[dict]) -> None:
+    """Store the parsed HRR list loaded from the local cache file at startup."""
+    global _default_hrr_objects
+    _default_hrr_objects = objects
+    logger.info("Default HRR objects loaded: %d satellites", len(objects))
+
+
+def get_default_hrr_objects() -> list[dict]:
+    """Return the default HRR object list (loaded at startup)."""
+    return _default_hrr_objects

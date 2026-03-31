@@ -4,6 +4,13 @@
 <p class="empty-msg">No intercept result.</p>
 {% else %}
 
+{# ── Data Mode provenance badge ── #}
+{% if intercept_data_mode %}
+<div style="margin-bottom:0.4rem">
+  <span class="badge-ok" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
+</div>
+{% endif %}
+
 {# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
    ══════════════════════════════════════════════════════════════════════════════ #}
@@ -76,6 +83,11 @@
 
   </div>
 </div>
+
+
+{# ── OSINT Intelligence Record for red track (if available) ── #}
+{% set osint_label = "RED TRACK INTEL" %}
+{% include "partials/osint_card.html" %}
 
 
 {# ══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,442 @@
+{
+  "40892": {
+    "name": "TJS-1",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "SIGINT",
+    "significance": "Qianshao-3 class with large deployable antenna at 155.0\u00b0E. Dedicated signals intelligence collection platform.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "41911": {
+    "name": "TJS-2",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "Suspected Huoyan-1 class missile early warning satellite positioned at 107.5\u00b0E / 66.5\u00b0E.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "43874": {
+    "name": "TJS-3",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "SDA Spoofing / Inspector",
+    "significance": "Deployed a sub-satellite; conducted manoeuvres assessed as TTPs to deceive space domain awareness trackers. Has approached US military communications satellites.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "McDowell 2025 / SWF Global Counterspace Capabilities 2025"
+  },
+  "44637": {
+    "name": "TJS-4",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "SIGINT",
+    "significance": "Qianshao-3 class signals intelligence collection platform positioned at 83.5\u00b0E.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "44978": {
+    "name": "TJS-5",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "Huoyan-1 class missile early warning satellite positioned at 178.5\u00b0E / 107.5\u00b0E.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "47613": {
+    "name": "TJS-6",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "Huoyan-1 class missile early warning satellite positioned at 178.5\u00b0E.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "50574": {
+    "name": "TJS-9",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "SIGINT",
+    "significance": "Qianshao-3 class signals intelligence collection platform positioned at 137.2\u00b0E.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "58204": {
+    "name": "TJS-10",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "RPO / Proximity Ops",
+    "significance": "Sustained, synchronised proximity operations with TJS-3 for dual-satellite communications and inspection testing. Key RPO capability demonstration.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "McDowell 2025 / SWF Global Counterspace Capabilities 2025"
+  },
+  "62374": {
+    "name": "TJS-12",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "Huoyan class missile early warning satellite at 146.5\u00b0E. CZ-3B launched Dec 2024.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "62804": {
+    "name": "TJS-14",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "Huoyan class at 18.4\u00b0E. First PRC missile warning satellite at a Western longitude \u2014 extends coverage toward European theatre.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "63157": {
+    "name": "TJS-15",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Tech Demo",
+    "significance": "CZ-3B launched Mar 2025 with ejected apogee kick motor. New subseries; mission profile under assessment. Positioned at 90.3\u00b0E / 94.4\u00b0E.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "63397": {
+    "name": "TJS-16",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Tech Demo",
+    "significance": "CZ-7A launched Mar 2025. Possibly Huoyan-2 series. Positioned at 152.5\u00b0E / 160.6\u00b0E.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "63524": {
+    "name": "TJS-17",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Tech Demo",
+    "significance": "CZ-3B launched Apr 2025 with ejected AKM. Same new subseries as TJS-15. Positioned at 152.8\u00b0E / 164.5\u00b0E.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "63924": {
+    "name": "TJS-19",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Tech Demo",
+    "significance": "CZ-3C launched May 2025 with ejected AKM. Positioned at 141.2\u00b0E. Mission profile under assessment.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "41838": {
+    "name": "SJ-17",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "ASAT / Inspector",
+    "significance": "Equipped with a robotic arm. Has conducted numerous close approaches to both foreign and domestic satellites. Primary Chinese GEO inspection and ASAT platform.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / CSIS 2025"
+  },
+  "49330": {
+    "name": "SJ-21",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "ASAT / Tug",
+    "significance": "Demonstrated capability to physically relocate a satellite to a super-graveyard orbit. Refuelled by SJ-25 in 2025, extending operational endurance indefinitely.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / COSMIC Nov 2025"
+  },
+  "55131": {
+    "name": "SJ-23",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Drift Surveillance",
+    "significance": "GEO drift surveillance satellite. Monitors other GEO objects during drift phases. Part of China\u2019s space domain awareness network.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / JCO Threat List"
+  },
+  "62485": {
+    "name": "SJ-25",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Refuelling / Servicing",
+    "significance": "Demonstrated on-orbit refuelling of SJ-21 with ~142 kg hydrazine in 2025. Critical enabler for sustained ASAT operations and GEO fleet longevity.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "COSMIC Nov 2025 / McDowell 2025"
+  },
+  "50321": {
+    "name": "SY-12 01",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Inspector / Counter-SDA",
+    "significance": "Conducted close approach to US SBIRS GEO 6. Demonstrated advanced defensive manoeuvres against a US GSSAP satellite. Active counter-SDA capability.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025"
+  },
+  "50322": {
+    "name": "SY-12 02",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Inspector / Counter-SDA",
+    "significance": "Paired inspector with SY-12 01. Conducted joint close approach to US SBIRS GEO 6. Demonstrated advanced defensive manoeuvres against GSSAP.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025"
+  },
+  "65486": {
+    "name": "SY-29",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Experimental",
+    "significance": "CZ-3C/YZ-1 launched Sep 2025 to inclined GEO (29\u00b0) at 95\u00b0E. Mission profile under assessment.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "41194": {
+    "name": "Gaofen-4",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Surveillance",
+    "significance": "Optical GEO surveillance satellite. Resolution sufficient to track large naval vessels. Foundational layer of China\u2019s persistent GEO ISR architecture.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "JCO Threat List / CSIS 2025"
+  },
+  "46610": {
+    "name": "Gaofen-13",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Surveillance / Targeting",
+    "significance": "15m resolution GEO optical satellite. Persistent monitoring of fixed and mobile targets. Dual civil/military utility; supports PLA targeting.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "JCO Threat List / CSIS 2025"
+  },
+  "55912": {
+    "name": "Gaofen-13-02",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Surveillance / Targeting",
+    "significance": "Successor to Gaofen-13 with similar 15m optical capability. Redundant persistent GEO surveillance; supports PLA kill chain.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "JCO Threat List / McDowell 2025"
+  },
+  "58582": {
+    "name": "Yaogan-41",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "Surveillance / Targeting",
+    "significance": "New large high-resolution GEO optical satellite. Provides persistent stare over the Indo-Pacific. Key enabler for PLA kill chains for anti-ship and land-attack missions.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "JCO Threat List / McDowell 2025"
+  },
+  "57624": {
+    "name": "Ludi Tance-4 01A",
+    "country": "CHN",
+    "orbit": "GEO",
+    "assessed_threat": "All-Weather Surveillance",
+    "significance": "World\u2019s only GEO SAR satellite. Provides all-weather, 24/7 surveillance capability. Negates cloud cover as concealment for surface targets.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / CSIS Space Threat Assessment 2025"
+  },
+  "62188": {
+    "name": "TJS-13",
+    "country": "CHN",
+    "orbit": "HEO",
+    "assessed_threat": "Missile Warning",
+    "significance": "CZ-3B launched Dec 2024 to Molniya orbit. Suspected Huoyan-1 class providing missile early warning coverage of high-latitude regions.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "49258": {
+    "name": "Shiyan-10",
+    "country": "CHN",
+    "orbit": "HEO",
+    "assessed_threat": "Experimental",
+    "significance": "Operating in an unusual Molniya orbit. Assessed as testing new concepts for high-latitude coverage. Precursor to TJS-13/21 HEO series.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "65563": {
+    "name": "Yaogan-45",
+    "country": "CHN",
+    "orbit": "MEO",
+    "assessed_threat": "Surveillance / Targeting",
+    "significance": "China\u2019s first large EO satellite in MEO (~7,500 km, 20\u00b0 inclination). Paradigm shift: persistent wide-area surveillance enhancing PLA targeting kill chains for anti-ship and land-attack operations.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "McDowell 2025 / JCO Threat List"
+  },
+  "40258": {
+    "name": "Luch / Olymp-K",
+    "country": "RUS",
+    "orbit": "GEO",
+    "assessed_threat": "SIGINT / Inspector",
+    "significance": "Long history of close approaches to Western GEO satellites for suspected SIGINT collection. Capable intelligence platform, now less active than its successor Olymp-2.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / RAND 2025"
+  },
+  "55841": {
+    "name": "Luch / Olymp-2",
+    "country": "RUS",
+    "orbit": "GEO",
+    "assessed_threat": "SIGINT / Inspector / Harassment",
+    "significance": "Active GEO inspector. Continues pattern of close approaches (10\u201360 km) to Western military and commercial satellites for suspected SIGINT and intimidation. Targeted Wideband Global SATCOM and Eutelsat assets.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / RAND 2025"
+  },
+  "64467": {
+    "name": "Cosmos 2589",
+    "country": "RUS",
+    "orbit": "HEO",
+    "assessed_threat": "Co-orbital Inspector",
+    "significance": "HEO parent bus operating in highly elliptical synchronous orbit. Deployed the manoeuvrable Cosmos 2590 sub-satellite. May have docked with 2590 in Sep 2025. Assessed as high-orbit Nivelir/Burevestnik ASAT variant.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / RAND 2025"
+  },
+  "64527": {
+    "name": "Cosmos 2590",
+    "country": "RUS",
+    "orbit": "HEO",
+    "assessed_threat": "Co-orbital ASAT",
+    "significance": "Manoeuvrable HEO sub-satellite released from Cosmos 2589. Capable of close-approach operations at GEO altitudes. Assessed as potential co-orbital ASAT weapon (Nivelir programme). Separated Nov 2025.",
+    "threat_level": "CRITICAL",
+    "status": "Operational",
+    "source": "SWF Global Counterspace Capabilities 2025 / RAND 2025"
+  },
+  "65590": {
+    "name": "Cosmos 2595",
+    "country": "RUS",
+    "orbit": "MEO",
+    "assessed_threat": "Military PNT",
+    "significance": "GLONASS-K1 navigation satellite launched Sep 2025. New-generation digital GLONASS. Critical Russian military PNT infrastructure sustaining precision guidance despite sanctions.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "McDowell 2025"
+  },
+  "53370": {
+    "name": "Khayyam",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "EO Reconnaissance",
+    "significance": "Iran\u2019s most capable satellite. Russian-built Kanopus-V derivative with ~1m resolution. Direct military utility for targeting and surveillance. Operated from Shahroud under IRGC control.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026) / SWF 2025"
+  },
+  "58817": {
+    "name": "Sorayya",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "Remote Sensing",
+    "significance": "Launched on Qaem-100 to 750 km \u2014 highest orbit achieved by Iran. Technology demonstrator for solid-fuel IRGC space launch capability.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "61072": {
+    "name": "Chamran-1",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "Orbital Manoeuvre",
+    "significance": "First Iranian satellite to demonstrate on-orbit manoeuvre capability. IRGC direct military asset. Establishes Iranian RPO/proximity operations precedent.",
+    "threat_level": "HIGH",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026) / SWF 2025"
+  },
+  "59065": {
+    "name": "Pars-1",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "Remote Sensing",
+    "significance": "15m resolution remote sensing satellite. Launched on Russian Soyuz. Part of the ISA civil remote sensing programme with potential dual-use utility.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "61769": {
+    "name": "Kowsar",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "EO",
+    "significance": "Earth observation satellite with attitude control issues. Intermittent contact only. Limited operational utility in current state.",
+    "threat_level": "LOW",
+    "status": "Degraded",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "61768": {
+    "name": "Kowsar-1.5",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "IoT Comms",
+    "significance": "IoT communications satellite. Reported intermittent operation (turning on and off) since Jun 2025. Degraded status.",
+    "threat_level": "LOW",
+    "status": "Degraded",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "64889": {
+    "name": "Nahid-2",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "Telecom Ku-band",
+    "significance": "First Iranian Ku-band telecommunications satellite. Simorgh-launched Dec 2025. Advances Iranian independent communications capability.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "67264": {
+    "name": "Kowsar-2",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "EO",
+    "significance": "Improved Kowsar variant. Soyuz-launched Dec 2025. Part of Iran\u2019s expanding LEO earth observation constellation.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  },
+  "67255": {
+    "name": "Zafar-2",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "EO",
+    "significance": "Soyuz-launched Dec 2025. Fregat upper stage anomaly noted by McDowell. Successor to Zafar-1 which failed to achieve orbit in 2020.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026) / McDowell 2025"
+  },
+  "67280": {
+    "name": "Paya",
+    "country": "IRN",
+    "orbit": "LEO",
+    "assessed_threat": "EO",
+    "significance": "Soyuz-launched Dec 2025. ISA acknowledged orbital injection challenges. Status uncertain pending confirmation of operational parameters.",
+    "threat_level": "MEDIUM",
+    "status": "Operational",
+    "source": "Iran Space OOB (PAIR/PatchPlus Feb 2026)"
+  }
+}
