@@ -105,8 +105,9 @@ MANIFEST
 # Sample / reference data files
 HRR_List.json
 
-# Reference documents (PDFs, Word docs)
-docs/
+# Reference documents (PDFs, Word docs) — exclude all except Operator Guide
+docs/*
+!docs/SIPC_Operator_Guide.docx
 
 # Claude Code memory
 memory/
