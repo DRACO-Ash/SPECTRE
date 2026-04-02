@@ -57,9 +57,7 @@ def regimes_compatible(r1: str, r2: str) -> bool:
     """
     if r1 == r2:
         return True
-    if r1 in _MULTI_REGIME or r2 in _MULTI_REGIME:
-        return True
-    return False
+    return bool(r1 in _MULTI_REGIME or r2 in _MULTI_REGIME)
 
 
 def classify_orbit_regime(semi_major_axis_km: float, eccentricity: float = 0.0) -> str:
@@ -75,7 +73,7 @@ def classify_orbit_regime(semi_major_axis_km: float, eccentricity: float = 0.0) 
         return "LEO"
     if perigee_alt > _GEO_MAX_ALT:
         return "DEEP"
-    if _MEO_MAX_ALT <= perigee_alt and apogee_alt <= _GEO_MAX_ALT:
+    if perigee_alt >= _MEO_MAX_ALT and apogee_alt <= _GEO_MAX_ALT:
         return "GEO"
     if perigee_alt < _LEO_MAX_ALT and apogee_alt > _MEO_MAX_ALT:
         # High apogee + low perigee — GTO or HEO depending on eccentricity

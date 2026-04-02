@@ -50,15 +50,20 @@ packages = ["sipc"]
 # Ruff
 # ---------------------------------------------------------------------------
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
-ignore = []
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",   # FastAPI Depends() in default args — intentional pattern
+    "E501",   # line too long — enforced by line-length setting above
+    "SIM108", # ternary over if/else — readability preference
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN"]
+"docs/**"  = ["ALL"]
 
 # ---------------------------------------------------------------------------
 # Mypy

@@ -75,7 +75,6 @@ async def require_login(
     Returns the authenticated :class:`~sipc.web.models.User` on success.
     Raises HTTP 302 (redirect to /login) if the session is missing or invalid.
     """
-    from fastapi.responses import RedirectResponse  # noqa: PLC0415
 
     if not sipc_session:
         raise HTTPException(

@@ -22,7 +22,7 @@ class Base(DeclarativeBase):
     """Shared declarative base for all ORM models."""
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[AsyncSession]:
     """FastAPI dependency that yields a database session per request."""
     async with AsyncSessionLocal() as session:
         yield session
@@ -30,7 +30,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create all tables and bootstrap the default admin user if the table is empty."""
-    from sipc.web.models import User  # noqa: PLC0415  (avoid circular import at module load)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

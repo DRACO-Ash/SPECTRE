@@ -8,40 +8,45 @@ bi-elliptic).  Orbital event detection uses SGP4 via ``sipc.astro.events``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from datetime import UTC, datetime, timedelta as _timedelta
+from datetime import UTC, datetime
+from datetime import timedelta as _timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from sipc.astro.constants import regimes_compatible
 from sipc.astro.events import EventType, find_orbital_events
 from sipc.astro.maneuvers import (
     InterceptSolution,
-    lambert_intercept,
-    hohmann_intercept,
     bielliptic_intercept,
-    phasing_intercept,
-    cw_radial_intercept,
-    cw_drift_intercept,
-    vbar_hop_intercept,
-    hbar_hop_intercept,
-    plane_change_intercept,
-    j2_drift_intercept,
     cola_intercept,
-    geo_drift_intercept,
-    manoeuvre_detect_intercept,
-    nmc_intercept,
+    cw_drift_intercept,
+    cw_radial_intercept,
     detectability_intercept,
     evasion_intercept,
-    intent_predict_intercept,
-    intercept_envelope_intercept,
-    stability_intercept,
     fingerprint_intercept,
     formation_intercept,
-    terrain_intercept,
+    geo_drift_intercept,
+    hbar_hop_intercept,
+    hohmann_intercept,
+    intent_predict_intercept,
+    intercept_envelope_intercept,
+    j2_drift_intercept,
+    lambert_intercept,
+    manoeuvre_detect_intercept,
     min_time_intercept_wrapper,
+    nmc_intercept,
+    phasing_intercept,
+    plane_change_intercept,
+    stability_intercept,
+    terrain_intercept,
+    vbar_hop_intercept,
 )
+from sipc.astro.propagator import regime_from_tle
+from sipc.data.intel import get_intel, satno_from_tle
 from sipc.domain.models import (
     BurnLocation,
     BurnResult,
@@ -49,9 +54,6 @@ from sipc.domain.models import (
     InterceptResult,
     OrbitalEvent,
 )
-from sipc.astro.constants import regimes_compatible
-from sipc.astro.propagator import regime_from_tle
-from sipc.data.intel import get_intel, satno_from_tle
 from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
@@ -122,7 +124,7 @@ _INTENT_LABELS: dict[InterceptMethod, str] = {
 }
 
 
-def _compute_intercept_intel(result: "InterceptResult") -> dict:
+def _compute_intercept_intel(result: InterceptResult) -> dict:
     """Pre-compute all intelligence analysis data for the intercept result template.
 
     Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
@@ -563,10 +565,8 @@ async def apply_intercept(
     # Parse manoeuvre start time.
     manoeuvre_start_dt = datetime.now(tz=UTC)
     if manoeuvre_start.strip():
-        try:
+        with contextlib.suppress(ValueError):
             manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
-        except ValueError:
-            pass
 
     # Look up TLEs.
     red_tle = _find_tle(state, red_sat.strip())
@@ -724,10 +724,8 @@ async def apply_all_intercepts(
 
     manoeuvre_start_dt = datetime.now(tz=UTC)
     if manoeuvre_start.strip():
-        try:
+        with contextlib.suppress(ValueError):
             manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
-        except ValueError:
-            pass
 
     red_tle = _find_tle(state, red_sat.strip())
     blue_tle = _find_tle(state, blue_sat.strip())
@@ -776,7 +774,7 @@ async def apply_all_intercepts(
 
     loop = asyncio.get_running_loop()
 
-    def _run_all() -> list[tuple[InterceptMethod, "InterceptResult | None", "str | None"]]:
+    def _run_all() -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
         out = []
         for method in _ALL_METHODS_SEQUENCE:
             try:

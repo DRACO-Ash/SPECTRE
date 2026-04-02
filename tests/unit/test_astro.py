@@ -9,17 +9,16 @@ import numpy as np
 import pytest
 
 from sipc.astro.constants import MU_EARTH, R_EARTH
-from sipc.astro.transfers import hohmann, bielliptic
+from sipc.astro.events import find_orbital_events
 from sipc.astro.lambert import solve_lambert
+from sipc.astro.maneuvers import hohmann_intercept, lambert_intercept
 from sipc.astro.propagator import (
-    TLEOrbit,
     KeplerianElements,
-    state_to_keplerian,
+    TLEOrbit,
     keplerian_to_state,
+    state_to_keplerian,
 )
-from sipc.astro.events import find_orbital_events, EventType
-from sipc.astro.maneuvers import lambert_intercept, hohmann_intercept
-
+from sipc.astro.transfers import bielliptic, hohmann
 
 # ── ISS TLE for propagation tests ──────────────────────────────────────────
 

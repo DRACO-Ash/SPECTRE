@@ -16,9 +16,8 @@ Given a chronological list of TLEs for a single object this module:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 import numpy as np
 from sgp4.api import Satrec
@@ -28,11 +27,9 @@ from sipc.astro.constants import (
     MU_EARTH,
     R_EARTH,
     SIDEREAL_DAY,
-    GEO_RADIUS,
     classify_orbit_regime,
 )
 from sipc.astro.propagator import TLEOrbit
-
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
@@ -82,8 +79,8 @@ class TLERecord:
     regime:               str
 
     # GEO-specific — None for non-GEO objects
-    geo_longitude_deg:      Optional[float] = None
-    geo_drift_rate_deg_day: Optional[float] = None
+    geo_longitude_deg:      float | None = None
+    geo_drift_rate_deg_day: float | None = None
 
     # UDL provenance — populated when TLE was fetched via UDL API
     data_mode: str = ""
@@ -103,7 +100,7 @@ class Manoeuvre:
     delta_raan_corrected_deg:   float
     delta_argp_corrected_deg:   float
     delta_period_s:             float
-    delta_drift_deg_day:        Optional[float]   # change in longitude drift rate
+    delta_drift_deg_day:        float | None   # change in longitude drift rate
 
     dominant_element:   str
     manoeuvre_type:     str
@@ -150,7 +147,7 @@ class PropellantBudget:
     total_dv_km_s:          float
     propellant_used_pct:    float   # % of assumed propellant mass
     annual_dv_km_s:         float
-    remaining_life_years:   Optional[float]
+    remaining_life_years:   float | None
     budget_class:           str     # "Conservative" | "Normal" | "High" | "Very High"
 
 
@@ -164,11 +161,11 @@ class IntelAssessment:
     operational_signature:  str
     anomaly_narrative:      str
     notable_periods:        list[str]
-    predicted_lon_30d:      Optional[float]
-    predicted_lon_60d:      Optional[float]
-    predicted_lon_90d:      Optional[float]
+    predicted_lon_30d:      float | None
+    predicted_lon_60d:      float | None
+    predicted_lon_90d:      float | None
     current_drift_dir:      str
-    current_drift_rate:     Optional[float]
+    current_drift_rate:     float | None
 
 
 @dataclass
@@ -219,8 +216,8 @@ class PolAnalysis:
 
     # Statistics
     total_dv_km_s:  float
-    dv_stats:       Optional[PolStats]
-    interval_stats: Optional[PolStats]
+    dv_stats:       PolStats | None
+    interval_stats: PolStats | None
 
     # Classification
     dominant_activity:  str
@@ -228,21 +225,21 @@ class PolAnalysis:
     sk_type:            str
 
     # Scoring / assessment
-    anomaly_score:      Optional[AnomalyScore]
-    propellant_budget:  Optional[PropellantBudget]
-    intel_assessment:   Optional[IntelAssessment]
+    anomaly_score:      AnomalyScore | None
+    propellant_budget:  PropellantBudget | None
+    intel_assessment:   IntelAssessment | None
 
     # Prediction
-    next_manoeuvre_est:               Optional[str]
-    next_manoeuvre_uncertainty_days:  Optional[float]
+    next_manoeuvre_est:               str | None
+    next_manoeuvre_uncertainty_days:  float | None
 
     # PoL status (backward compat)
     pol_status:             str
     pol_status_reason:      str
     dv_threshold_km_s:      float
-    pol_high_dv:            Optional[float]
-    pol_high_interval:      Optional[float]
-    pol_low_interval:       Optional[float]
+    pol_high_dv:            float | None
+    pol_high_interval:      float | None
+    pol_low_interval:       float | None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -273,7 +270,7 @@ def _gst_deg(epoch: datetime) -> float:
 
 
 def _satrec_to_record(tle: str) -> TLERecord:
-    lines = [l.strip() for l in tle.strip().splitlines() if l.strip()]
+    lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]
     if len(lines) < 2:
         raise ValueError("Need at least 2 TLE lines")
     l1, l2 = lines[-2], lines[-1]
@@ -371,7 +368,8 @@ def _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime):
 
 
 def _percentile(data, p):
-    if not data: return 0.0
+    if not data:
+        return 0.0
     s = sorted(data)
     idx = (len(s) - 1) * p / 100.0
     lo, hi = int(idx), min(int(idx) + 1, len(s) - 1)
@@ -379,7 +377,8 @@ def _percentile(data, p):
 
 
 def _pol_stats(values):
-    if len(values) < 2: return None
+    if len(values) < 2:
+        return None
     mu  = sum(values) / len(values)
     std = math.sqrt(sum((x - mu) ** 2 for x in values) / (len(values) - 1))
     return PolStats(mean=mu, std=std, p5=_percentile(values, 5), p95=_percentile(values, 95),
@@ -387,7 +386,8 @@ def _pol_stats(values):
 
 
 def _downsample(records, max_pts=500):
-    if len(records) <= max_pts: return records
+    if len(records) <= max_pts:
+        return records
     step = len(records) / max_pts
     return [records[int(i * step)] for i in range(max_pts)]
 
@@ -401,8 +401,10 @@ def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
         return []
 
     def _dir(rate: float) -> str:
-        if rate >  _DRIFT_STATIONARY: return "EAST"
-        if rate < -_DRIFT_STATIONARY: return "WEST"
+        if rate > _DRIFT_STATIONARY:
+            return "EAST"
+        if rate < -_DRIFT_STATIONARY:
+            return "WEST"
         return "STATIONARY"
 
     phases: list[DriftPhase] = []
@@ -451,11 +453,11 @@ def _clamp01(x: float) -> float:
 def _compute_anomaly_score(
     manoeuvres: list[Manoeuvre],
     drift_phases: list[DriftPhase],
-    dv_stats: Optional[PolStats],
-    interval_stats: Optional[PolStats],
+    dv_stats: PolStats | None,
+    interval_stats: PolStats | None,
     span_days: float,
     regime: str,
-) -> Optional[AnomalyScore]:
+) -> AnomalyScore | None:
     if not manoeuvres or len(manoeuvres) < 2:
         return None
 
@@ -497,11 +499,16 @@ def _compute_anomaly_score(
         overall = (dv_score * 0.30 + reg_score * 0.20 + budget_score * 0.25
                    + drift_score * 0.10 + lon_score * 0.15)
 
-    if   overall >= 75: risk = "CRITICAL"
-    elif overall >= 55: risk = "HIGH"
-    elif overall >= 35: risk = "MEDIUM"
-    elif overall >= 15: risk = "LOW"
-    else:               risk = "MINIMAL"
+    if overall >= 75:
+        risk = "CRITICAL"
+    elif overall >= 55:
+        risk = "HIGH"
+    elif overall >= 35:
+        risk = "MEDIUM"
+    elif overall >= 15:
+        risk = "LOW"
+    else:
+        risk = "MINIMAL"
 
     return AnomalyScore(
         dv_magnitude=round(dv_score,  1),
@@ -533,10 +540,14 @@ def _compute_propellant_budget(
     dv_remaining    = -ve * math.log(max(1.0 - prop_remaining / (assumed_prop_kg + assumed_prop_kg), 0.01)) if prop_remaining > 0 else 0.0
     life_remaining  = dv_remaining / annual_dv if annual_dv > 0 else None
 
-    if   annual_dv * 1000 > 100: budget_class = "Very High"
-    elif annual_dv * 1000 > 50:  budget_class = "High"
-    elif annual_dv * 1000 > 20:  budget_class = "Normal"
-    else:                         budget_class = "Conservative"
+    if annual_dv * 1000 > 100:
+        budget_class = "Very High"
+    elif annual_dv * 1000 > 50:
+        budget_class = "High"
+    elif annual_dv * 1000 > 20:
+        budget_class = "Normal"
+    else:
+        budget_class = "Conservative"
 
     return PropellantBudget(
         assumed_isp_s         = isp,
@@ -555,8 +566,8 @@ def _intel_assessment(
     records: list[TLERecord],
     manoeuvres: list[Manoeuvre],
     drift_phases: list[DriftPhase],
-    anomaly: Optional[AnomalyScore],
-    propellant: Optional[PropellantBudget],
+    anomaly: AnomalyScore | None,
+    propellant: PropellantBudget | None,
     regime: str,
     span_days: float,
 ) -> IntelAssessment:
@@ -655,7 +666,6 @@ def _intel_assessment(
         type_counts: dict[str, int] = {}
         for m in manoeuvres:
             type_counts[m.manoeuvre_type] = type_counts.get(m.manoeuvre_type, 0) + 1
-        dominant_type = max(type_counts, key=lambda k: type_counts[k])
         sig_parts = [f"{v} {k.replace('_',' ')}" for k, v in sorted(type_counts.items(), key=lambda x: -x[1])]
         if propellant:
             sig_parts.append(f"~{propellant.propellant_used_pct:.0f}% propellant consumed")
@@ -693,17 +703,23 @@ def parse_tle_history(
     tuples retrieved from the UDL response, which are stored on each record
     for provenance tracking and display in the elset table.
     """
-    raw_lines = [l.rstrip() for l in tle_text.splitlines()]
+    raw_lines = [ln.rstrip() for ln in tle_text.splitlines()]
     pairs: list[tuple[str, str]] = []
     i = 0
     while i < len(raw_lines):
         line = raw_lines[i].strip()
         if not line:
-            i += 1; continue
-        if line.startswith("1 ") and len(line) >= 69:
-            if i + 1 < len(raw_lines) and raw_lines[i + 1].strip().startswith("2 "):
-                pairs.append((line, raw_lines[i + 1].strip()))
-                i += 2; continue
+            i += 1
+            continue
+        if (
+            line.startswith("1 ")
+            and len(line) >= 69
+            and i + 1 < len(raw_lines)
+            and raw_lines[i + 1].strip().startswith("2 ")
+        ):
+            pairs.append((line, raw_lines[i + 1].strip()))
+            i += 2
+            continue
         i += 1
 
     records: list[TLERecord] = []

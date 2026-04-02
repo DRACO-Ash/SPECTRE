@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
-from datetime import UTC, datetime
-
-from sipc.app_logging.setup import configure_logging
-from sipc.config.settings import get_settings
-from sipc.domain.models import BlueAsset, RedTrack, RunConfig
+from sipc.domain.models import BlueAsset, RedTrack
 from sipc.web.auth import require_login
 from sipc.web.deps import get_templates, render
 from sipc.web.models import User
@@ -314,7 +311,7 @@ async def log_stream(
             try:
                 msg = await asyncio.wait_for(state.log_queue.get(), timeout=15.0)
                 yield f"data: {msg}\n\n"
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield ": heartbeat\n\n"
 
     return StreamingResponse(  # type: ignore[return-value]

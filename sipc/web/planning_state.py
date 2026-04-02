@@ -8,6 +8,7 @@ store for multi-node cloud deployments.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -95,10 +96,8 @@ class SessionState:
         oldest entry when the log is full — no manual size check required.
         """
         self.log_entries.append(message)
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self.log_queue.put_nowait(message)
-        except asyncio.QueueFull:
-            pass
 
 
 # Module-level store: username → SessionState.

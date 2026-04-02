@@ -23,7 +23,6 @@ from dataclasses import dataclass
 
 from sipc.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. Phasing Orbit
 # ═══════════════════════════════════════════════════════════════════════════
@@ -564,7 +563,7 @@ def collision_avoidance(
     n = math.sqrt(mu / r_ref**3)
     nt = n * time_before_tca_s
     sin_nt = math.sin(nt)
-    cos_nt = math.cos(nt)
+    _cos_nt = math.cos(nt)
 
     # Radial strategy: pure radial ΔV → radial displacement at TCA
     # x(t) = (Δvx / n) sin(nt)
@@ -1134,7 +1133,7 @@ def optimal_evasion(
         t_burn = time_to_tca_s * time_frac
         nt = n * t_burn
         sin_nt = math.sin(nt)
-        cos_nt = math.cos(nt)
+        _cos_nt = math.cos(nt)
 
         # Prograde/retrograde: along-track displacement
         coeff_y = abs(4.0 * sin_nt - 3.0 * nt) / n
@@ -1167,9 +1166,9 @@ def optimal_evasion(
         if weights:
             total_eff = sum(w[1] for w in weights)
             # Combined ΔV needed for desired_miss along best axis
-            dv_combined = desired_miss_km / total_eff * len(weights)
+            _dv_combined = desired_miss_km / total_eff * len(weights)
         else:
-            dv_combined = float("inf")
+            _dv_combined = float("inf")
 
         # Evaluate each strategy at this timing
         candidates = [
@@ -1505,7 +1504,7 @@ def relative_motion_stability(
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_ref**3)
-    T = 2.0 * math.pi / n  # orbital period
+    _T = 2.0 * math.pi / n  # orbital period
 
     # CW boundedness condition: dvy0 + 2*n*dx0 = 0 for no secular drift
     drift_indicator = dvy0 + 2.0 * n * dx0
@@ -1731,7 +1730,7 @@ def formation_defence_burn(
     """
     n = math.sqrt(mu / r_asset**3)
     nt = n * time_to_tca_s
-    sin_nt = math.sin(nt)
+    _sin_nt = math.sin(nt)
 
     # Compute cheapest COLA burn
     cola = collision_avoidance(r_asset, desired_miss_km, time_to_tca_s, mu)

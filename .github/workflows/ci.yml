@@ -2,31 +2,54 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
-  lint-and-test:
-    name: Lint + Unit Tests
+  lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        run: ruff check sipc/ tests/
 
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - name: Install dependencies
-        # pywin32 is Windows-only; skip on Ubuntu CI runner
-        run: pip install -e ".[dev]" --no-deps || pip install fastapi uvicorn[standard] jinja2 python-multipart "sqlalchemy[asyncio]" aiosqlite "passlib[bcrypt]" itsdangerous structlog pytest pytest-asyncio "anyio[trio]" httpx pytest-cov mypy ruff && pip install -e . --no-deps
+        # pywin32 is Windows-only; skip it on Linux CI runner
+        run: |
+          pip install fastapi "uvicorn[standard]" jinja2 python-multipart \
+            "sqlalchemy[asyncio]" aiosqlite "passlib[bcrypt]" itsdangerous \
+            structlog sgp4 numpy scipy requests \
+            pytest pytest-asyncio "anyio[trio]" httpx pytest-cov
+          pip install -e . --no-deps
+      - name: Run tests with coverage
+        run: pytest tests/ -q --cov=sipc --cov-report=term-missing --cov-fail-under=70
 
-      - name: Lint with ruff
-        run: ruff check .
-
-      - name: Run unit tests with coverage
-        run: pytest tests/unit/ --cov=sipc --cov-report=term-missing --cov-fail-under=70
+  security:
+    name: Security (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bandit
+        run: pip install bandit
+      - name: Run bandit
+        run: bandit -r sipc/ -ll -q

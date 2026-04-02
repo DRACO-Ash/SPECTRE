@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from sipc.domain.models import BlueAsset, RedTrack
-from sipc.web.planning_state import SessionState, clear_session_state, get_session_state
+from sipc.domain.models import BlueAsset
+from sipc.web.planning_state import clear_session_state, get_session_state
 
 
 class TestSessionStateIsolation:

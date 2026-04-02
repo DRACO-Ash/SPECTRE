@@ -14,31 +14,29 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
-from fastapi import Query
-
+from sipc.astro.constants import regimes_compatible
 from sipc.astro.events import EventType, find_orbital_events
 from sipc.astro.maneuvers import (
     InterceptSolution,
+    bielliptic_intercept,
+    hbar_hop_intercept,
     hohmann_intercept,
     lambert_intercept,
-    bielliptic_intercept,
+    min_time_intercept_wrapper,
     phasing_intercept,
     plane_change_intercept,
     vbar_hop_intercept,
-    hbar_hop_intercept,
-    min_time_intercept_wrapper,
 )
-from sipc.astro.constants import regimes_compatible
-from sipc.astro.propagator import TLEOrbit, state_to_keplerian, regime_from_tle
+from sipc.astro.propagator import TLEOrbit, regime_from_tle, state_to_keplerian
+from sipc.data.intel import get_intel, satno_from_tle
 from sipc.domain.models import (
     ThreatAssessment,
     ThreatSweepEntry,
     ThreatTarget,
 )
-from sipc.data.intel import get_intel, satno_from_tle
 from sipc.web.auth import require_login
 from sipc.web.deps import render
 from sipc.web.models import User
@@ -75,7 +73,7 @@ async def red_orbit_info(
 
     try:
         import math
-        from sipc.astro.constants import R_EARTH
+
         from sipc.web.routes.udl import _parse_tle_epoch
 
         orbit = TLEOrbit(track.tle)
@@ -133,13 +131,12 @@ async def red_orbit_info(
 def _interceptor_regime(state: object, red_sat_name: str) -> str | None:
     """Return the canonical orbit regime for a red track, or None if not found."""
     from sipc.astro.constants import classify_orbit_regime
-    from sipc.astro.propagator import TLEOrbit, state_to_keplerian
+    from sipc.astro.propagator import TLEOrbit
 
     for track in state.red_tracks:  # type: ignore[attr-defined]
         if track.stk_name != red_sat_name:
             continue
         try:
-            import math
             orbit = TLEOrbit(track.tle)
             t = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
             rv = orbit.propagate(t)
@@ -161,6 +158,7 @@ def _hrr_group_counts(
     are actually reachable by the selected interceptor.
     """
     from collections import Counter
+
     from sipc.astro.constants import normalise_regime
 
     blue_ctr: Counter[int] = Counter()

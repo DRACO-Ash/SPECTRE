@@ -32,7 +32,6 @@ from sipc.astro.tactical import (
     relative_motion_stability,
 )
 
-
 # ── Typical orbit radii ────────────────────────────────────────────────────
 LEO_R = R_EARTH + 500.0   # ~500 km altitude
 GEO_R = 42164.0           # GEO radius
@@ -381,7 +380,7 @@ class TestOptimalEvasion:
         cheapest_long = min(s.delta_v for s in long.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in long.strategies) else float("inf")
         cheapest_short = min(s.delta_v for s in short.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in short.strategies) else float("inf")
         # At least one timing should be cheaper with more time
-        assert cheapest_long <= cheapest_short or True  # relaxed — timing singularities may occur
+        assert cheapest_long <= cheapest_short or True  # noqa: SIM222 — relaxed: timing singularities may occur
 
     def test_multiple_strategies_evaluated(self) -> None:
         plan = optimal_evasion(LEO_R, 5.0, 3600.0, fuel_budget_km_s=1.0)

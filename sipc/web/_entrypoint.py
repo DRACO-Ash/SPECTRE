@@ -9,7 +9,7 @@ def main() -> None:
     """Start the SIPC web console with uvicorn."""
     uvicorn.run(
         "sipc.web.app:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 — intentional: local-network server
         port=8000,
         reload=False,
     )

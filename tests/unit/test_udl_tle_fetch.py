@@ -6,13 +6,12 @@ UDL connection.  All tests run offline.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from sipc.web.routes.udl import _parse_tle_epoch
-
 
 # ── _parse_tle_epoch ──────────────────────────────────────────────────────────
 

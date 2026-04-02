@@ -30,7 +30,7 @@ import logging
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -270,7 +270,7 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SIPC-GCAT/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 — URL from hardcoded GCAT table, not user input
             raw = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
@@ -340,7 +340,7 @@ async def _load_all() -> None:
         if df is not None:
             _CACHE[key] = {
                 "df": df,
-                "fetched_at": datetime.now(timezone.utc),
+                "fetched_at": datetime.now(UTC),
                 "rows": len(df),
                 "cols": len(df.columns),
                 "columns": list(df.columns),
@@ -350,7 +350,7 @@ async def _load_all() -> None:
             _FETCH_ERRORS.append(f"failed: {DATASETS[key]['label']}")
             failed += 1
 
-    _CACHE_FETCH_TIME = datetime.now(timezone.utc)
+    _CACHE_FETCH_TIME = datetime.now(UTC)
     _FETCHING = False
     total_rows = sum(v["rows"] for v in _CACHE.values())
     elapsed = time.perf_counter() - t_start
@@ -507,7 +507,7 @@ async def gcat_table(
             )
         _CACHE[dataset] = {
             "df": df_result,
-            "fetched_at": datetime.now(timezone.utc),
+            "fetched_at": datetime.now(UTC),
             "rows": len(df_result),
             "cols": len(df_result.columns),
             "columns": list(df_result.columns),

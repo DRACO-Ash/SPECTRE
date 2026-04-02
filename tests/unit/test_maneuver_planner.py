@@ -6,13 +6,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from sipc.domain.maneuver_planner import ManeuverPlannerError, validate_search_config
 from sipc.domain.models import (
     BurnLocation,
     BurnType,
     ManeuverSearchConfig,
 )
-from sipc.domain.maneuver_planner import ManeuverPlannerError, validate_search_config
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

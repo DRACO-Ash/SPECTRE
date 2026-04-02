@@ -15,34 +15,13 @@ import numpy as np
 
 from sipc.astro.constants import MU_EARTH, R_EARTH
 from sipc.astro.lambert import LambertSolution, solve_lambert
-from sipc.astro.propagator import TLEOrbit, StateVector, state_to_keplerian
+from sipc.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from sipc.astro.tactical import (
-    CWResult,
-    CollisionAvoidancePlan,
-    DetectabilityResult,
-    EvasionPlan,
-    FingerprintResult,
-    FormationDefenceResult,
-    GeoDriftResult,
-    HBarHopResult,
-    IntentAssessment,
-    InterceptEnvelopeResult,
-    J2DriftResult,
-    ManoeuvreClassification,
-    MinTimeResult,
-    NMCResult,
-    PlaneChangeResult,
-    CombinedTransferResult,
-    PhasingResult,
-    StabilityResult,
-    TerrainAssessment,
-    VBarHopResult,
     assess_intercept_intent,
     classify_manoeuvre,
     collision_avoidance,
     combined_altitude_plane_change,
     cw_along_track_drift,
-    cw_combined,
     cw_radial_separation,
     detectability_metric,
     fingerprint_manoeuvre,
@@ -51,7 +30,6 @@ from sipc.astro.tactical import (
     hbar_hop_sequence,
     intercept_envelope_analytical,
     j2_drift_plan,
-    j2_raan_rate,
     min_time_intercept_analytical,
     nmc_safety_ellipse,
     optimal_evasion,
@@ -61,7 +39,7 @@ from sipc.astro.tactical import (
     relative_motion_stability,
     vbar_hop_sequence,
 )
-from sipc.astro.transfers import TransferResult, hohmann, bielliptic
+from sipc.astro.transfers import TransferResult, bielliptic, hohmann
 
 
 @dataclass
@@ -156,7 +134,7 @@ def lambert_intercept(
     burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_blue)
 
     # Actual miss distance at arrival.
-    miss = float(np.linalg.norm(r_target - sv_blue.r)) if target_distance_km > 0 else 0.0
+    _miss = float(np.linalg.norm(r_target - sv_blue.r)) if target_distance_km > 0 else 0.0
 
     return InterceptSolution(
         method="lambert",
@@ -400,7 +378,7 @@ def cw_radial_intercept(
     dv_vec = b_hat * cw.delta_v_radial
     burn1 = _make_burn(1, t_departure, dv_vec, sv_red)
 
-    notes = (
+    _notes = (
         f"CW radial: {desired_separation_km:.1f} km separation in "
         f"{time_s / 60:.0f} min, along-track drift {cw.along_track_sep_km:.1f} km"
     )
@@ -473,7 +451,7 @@ def vbar_hop_intercept(
     hop_distance_km: float | None = None,
     coast_s: float = 0.0,
     mu: float = MU_EARTH,
-) -> "InterceptSolution":
+) -> InterceptSolution:
     """V-bar hop approach sequence along the velocity vector.
 
     Executes a multi-hop V-bar approach using two radial burns per hop.
@@ -543,7 +521,7 @@ def hbar_hop_intercept(
     hop_distance_km: float | None = None,
     coast_s: float = 0.0,
     mu: float = MU_EARTH,
-) -> "InterceptSolution":
+) -> InterceptSolution:
     """H-bar hop approach sequence in the orbit-normal direction.
 
     Executes a multi-hop H-bar approach using normal burns at node
@@ -648,7 +626,7 @@ def plane_change_intercept(
         burn1 = _make_burn(1, t_departure, dv_vec, sv_red)
 
         t_arrival = t_departure  # instantaneous
-        notes = (
+        _notes = (
             f"Plane change: Δi={math.degrees(inc_diff):.2f}°, "
             f"optimal at {pc.optimal_location}, "
             f"node ΔV={pc.delta_v_at_node:.4f}, apogee ΔV={pc.delta_v_at_apogee:.4f} km/s"
@@ -744,7 +722,7 @@ def j2_drift_intercept(
 
     t_arrival = t_epoch + timedelta(days=result.accel_convergence_days)
 
-    notes = (
+    _notes = (
         f"J2 drift: ΔRAAN={delta_raan:.2f}°, "
         f"natural convergence {result.convergence_time_days:.1f} days "
         f"({result.differential_rate_deg_day:.4f}°/day), "
@@ -815,7 +793,7 @@ def cola_intercept(
 
     burn1 = _make_burn(1, t_burn, dv_vec, sv_red_burn)
 
-    notes = (
+    _notes = (
         f"COLA {best.strategy}: ΔV={best.delta_v:.4f} km/s → "
         f"{desired_miss_km:.1f} km miss, "
         f"burn {time_before_tca_s / 60:.0f} min before TCA. "
@@ -1083,7 +1061,6 @@ def evasion_intercept(
         coast_s: Additional offset (seconds).
         mu: Gravitational parameter.
     """
-    red_orbit = TLEOrbit(red_tle)
     blue_orbit = TLEOrbit(blue_tle)
 
     t_tca = manoeuvre_start + timedelta(seconds=coast_s)

@@ -22,8 +22,8 @@ from sipc.web.deps import render
 from sipc.web.models import User
 from sipc.web.planning_state import (
     SessionState,
-    get_onorbit_catalog,
     get_catalog_status,
+    get_onorbit_catalog,
     get_session_state,
     set_catalog_status,
     set_onorbit_catalog,

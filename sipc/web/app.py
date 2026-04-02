@@ -22,7 +22,8 @@ from sipc.web.routes.maneuver import router as maneuver_router
 from sipc.web.routes.operator import router as operator_router
 from sipc.web.routes.pol import router as pol_router
 from sipc.web.routes.threat import router as threat_router
-from sipc.web.routes.udl import router as udl_router, parse_hrr_notification, _parse_created_at
+from sipc.web.routes.udl import _parse_created_at, parse_hrr_notification
+from sipc.web.routes.udl import router as udl_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
