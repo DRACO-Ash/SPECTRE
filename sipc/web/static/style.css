@@ -471,7 +471,7 @@ main:has(.console-layout) { padding: 0; }
 .etab.active { color: var(--gold); border-bottom-color: var(--gold); }
 .engine-tab-panel { display: none; overflow-y: auto; flex: 1; padding: 0.75rem 1rem; }
 .engine-tab-panel.active { display: block; }
-.engine-hero { display: flex; flex-direction: column; padding: 0; }
+.engine-hero.active { display: flex; flex-direction: column; padding: 0; }
 .engine-hero .engine-tab-panel.active { display: flex; flex-direction: column; }
 
 /* Lower tabs — kept for backwards compatibility, no longer rendered */
