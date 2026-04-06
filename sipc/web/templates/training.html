@@ -125,6 +125,20 @@
       {{ recommendation }}
     </div>
 
+    {# Return to SIPC — always visible at bottom of sidebar #}
+    <form method="post" action="/training/leave" class="inline-form"
+          style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border)">
+      <input type="hidden" name="session_id" value="{{ training_session_id }}">
+      <button type="submit"
+              style="width:100%; font-size:0.68rem; font-weight:700; padding:0.45rem 0.5rem;
+                     background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.45);
+                     border-radius:5px; color:#22c55e; cursor:pointer; text-align:center;
+                     display:flex; align-items:center; justify-content:center; gap:0.4rem"
+              title="Close training session and return to the operational console">
+        <span style="font-size:0.8rem">&#9664;</span> Return to Operations
+      </button>
+    </form>
+
   </aside>
 
   {# ── Main area ─────────────────────────────────────────────────────────── #}

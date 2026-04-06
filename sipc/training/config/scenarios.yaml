@@ -231,3 +231,303 @@ scenarios:
     scoring:
       passing_score: 400
       optimal_score: 600
+
+  # ── Level 2 additions ──────────────────────────────────────────────────────
+
+  - id: cadet_02_leo_debris_conjunction
+    title: "LEO Debris Conjunction Avoidance"
+    level_required: 1
+    difficulty: easy
+    description: >
+      A catalogued debris fragment closes to within 1 km of your LEO asset.
+      Use the PoL panel to analyse the threat object's recent history, then
+      plan a minimum-ΔV collision-avoidance manoeuvre in the intercept engine.
+    briefing: >
+      DEBRIS-07 (fragmentation remnant from 2019 break-up event) is predicted
+      to pass within 0.8 km of BLUE-LEO at T+14 h.  Your task: confirm threat
+      using Pattern of Life, select the lowest-cost avoidance manoeuvre from
+      the intercept engine, and document your reasoning.
+    scenario_epoch_utc: "2025-06-10T08:00:00Z"
+    horizon_hours: 24
+    challenge: false
+    objects:
+      - satno: 99010
+        name: "BLUE-LEO"
+        side: blue
+        regime: LEO
+        tle_line1: "1 99010U 25010A   25161.33333333  .00001200  00000-0  60000-4 0  9991"
+        tle_line2: "2 99010  97.6000  80.0000 0001000  90.0000 270.0000 15.19000000 00013"
+      - satno: 99011
+        name: "DEBRIS-07"
+        side: red
+        regime: LEO
+        tle_line1: "1 99011U 19055C   25161.33333333  .00002500  00000-0  11000-3 0  9991"
+        tle_line2: "2 99011  97.6100  80.0050 0001050  90.5000 269.5000 15.19000000 00016"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 80
+      optimal_score: 150
+
+  - id: cadet_03_inspection_approach
+    title: "Characterisation Approach — Unknown RSO"
+    level_required: 2
+    difficulty: easy
+    description: >
+      An uncharacterised Resident Space Object has been detected in a
+      near-circular LEO orbit.  Manoeuvre BLUE-INS to an observation station
+      that balances proximity (for sensor resolution) against risk of
+      collision.  Use the Clohessy-Wiltshire solver.
+    briefing: >
+      UNKNOWN-RSO transmits no ID beacon.  BLUE-INS is your inspection
+      platform.  You must place BLUE-INS at a 1–3 km standoff position
+      in the RSO's Hill frame.  Select the safest, most fuel-efficient
+      approach from the intercept engine's CW set.
+    scenario_epoch_utc: "2025-07-15T10:30:00Z"
+    horizon_hours: 12
+    challenge: false
+    objects:
+      - satno: 99020
+        name: "BLUE-INS"
+        side: blue
+        regime: LEO
+        tle_line1: "1 99020U 25020A   25196.43750000  .00000800  00000-0  40000-4 0  9991"
+        tle_line2: "2 99020  51.6000 100.0000 0002000  45.0000 315.0000 15.49000000 00011"
+      - satno: 99021
+        name: "UNKNOWN-RSO"
+        side: red
+        regime: LEO
+        tle_line1: "1 99021U 25021A   25196.43750000  .00000900  00000-0  45000-4 0  9991"
+        tle_line2: "2 99021  51.6000 100.0200 0001800  45.2000 314.8000 15.49000000 00009"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 90
+      optimal_score: 160
+
+  # ── Level 3 additions ──────────────────────────────────────────────────────
+
+  - id: observer_03_geo_cola_budget
+    title: "GEO Collision Avoidance — ΔV Budget Constraint"
+    level_required: 3
+    difficulty: medium
+    description: >
+      Your GEO communications satellite is threatened by a drifting object.
+      You have a hard ΔV budget of 2.5 m/s remaining for the mission life.
+      Select the avoidance option that provides adequate miss distance while
+      consuming minimum propellant.
+    briefing: >
+      GEO-COMM is station-keeping at 75.0° E.  DRIFTER-09 entered the
+      protected zone 6 hours ago and will reach closest approach in 18 h.
+      Your remaining ΔV budget is 2.5 m/s.  Minimise expenditure while
+      keeping minimum separation above 5 km.
+    scenario_epoch_utc: "2025-08-20T00:00:00Z"
+    horizon_hours: 36
+    challenge: false
+    objects:
+      - satno: 99030
+        name: "GEO-COMM"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99030U 25030A   25232.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99030   0.0500  75.0000 0000300  10.0000   0.0000  1.00270000 00018"
+      - satno: 99031
+        name: "DRIFTER-09"
+        side: red
+        regime: GEO
+        tle_line1: "1 99031U 25031A   25232.00000000  .00000010  00000-0  00000-0 0  9991"
+        tle_line2: "2 99031   0.0800  74.8500 0000500  10.5000   0.0000  1.00275000 00012"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 150
+      optimal_score: 250
+
+  - id: observer_04_decision_engine_intro
+    title: "Decision Engine — Adversary Response Planning"
+    level_required: 3
+    difficulty: medium
+    description: >
+      Use the Decision Engine what-if panel to evaluate a set of adversary
+      actions against a GEO asset.  Score each friendly response option and
+      identify the minimax-optimal response strategy.
+    briefing: >
+      Intelligence suggests ADVERSARY-GEO may attempt one of three actions:
+      proximity approach, electronic interference, or no action.  You have
+      four response options available.  Open the Decision Engine panel,
+      configure the scenario, and determine the robust response that
+      minimises the worst-case outcome across all adversary possibilities.
+    scenario_epoch_utc: "2025-09-10T06:00:00Z"
+    horizon_hours: 48
+    challenge: false
+    objects:
+      - satno: 99040
+        name: "BLUE-GEO"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99040U 25040A   25253.25000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99040   0.0300  90.0000 0000200  20.0000   0.0000  1.00270000 00021"
+      - satno: 99041
+        name: "ADVERSARY-GEO"
+        side: red
+        regime: GEO
+        tle_line1: "1 99041U 25041A   25253.25000000  .00000005  00000-0  00000-0 0  9991"
+        tle_line2: "2 99041   0.0400  90.2000 0000250  20.5000   0.0000  1.00270000 00014"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 140
+      optimal_score: 240
+
+  - id: observer_05_notso_correlation
+    title: "NOTSO Correlation — Notification vs Detection"
+    level_required: 3
+    difficulty: medium
+    description: >
+      A space object operator has issued a NOTSO for a planned manoeuvre.
+      Run Pattern of Life on the object, then use the NOTSO correlation
+      panel to determine whether the detected manoeuvre matches the
+      notification in timing, magnitude, and direction.
+    briefing: >
+      RSO-NOTSO filed a notification for a manoeuvre on 2025-08-05 between
+      04:00–06:00 UTC, estimated ΔV 0.08–0.12 km/s.  Your PoL run has
+      detected a manoeuvre on that date.  Correlate the NOTSO against
+      the detection and assess operator transparency.
+    scenario_epoch_utc: "2025-08-01T00:00:00Z"
+    horizon_hours: 120
+    challenge: false
+    objects:
+      - satno: 99050
+        name: "RSO-NOTSO"
+        side: red
+        regime: GEO
+        tle_line1: "1 99050U 25050A   25213.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99050   0.1000  60.0000 0000400  30.0000   0.0000  1.00270000 00008"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 130
+      optimal_score: 220
+
+  # ── Level 4 additions ──────────────────────────────────────────────────────
+
+  - id: planner_04_covert_rendezvous
+    title: "Covert Rendezvous Detection"
+    level_required: 4
+    difficulty: hard
+    description: >
+      An adversary satellite is manoeuvring toward a high-value asset
+      while attempting to mask its approach.  Use Pattern of Life and
+      the Monte Carlo manoeuvre hypothesis tool to characterise the
+      approach trajectory and predict closest approach under uncertainty.
+    briefing: >
+      SHADOW-01 has made at least two manoeuvres in the past 10 days.
+      Its apparent trajectory suggests a covert rendezvous with BLUE-HVA
+      in approximately 36 hours.  Use PoL to characterise its manoeuvre
+      history, then run Monte Carlo on the most recent event to bound
+      the projected closest approach.  Recommend a defensive action.
+    scenario_epoch_utc: "2025-10-01T00:00:00Z"
+    horizon_hours: 72
+    challenge: false
+    objects:
+      - satno: 99060
+        name: "BLUE-HVA"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99060U 25060A   25274.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99060   0.0200  50.0000 0000100  15.0000   0.0000  1.00270000 00031"
+      - satno: 99061
+        name: "SHADOW-01"
+        side: red
+        regime: GEO
+        tle_line1: "1 99061U 25061A   25274.00000000  .00000015  00000-0  00000-0 0  9991"
+        tle_line2: "2 99061   0.0600  50.3500 0000350  16.2000   0.0000  1.00271000 00019"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 280
+      optimal_score: 420
+
+  - id: planner_05_leo_phasing_campaign
+    title: "LEO Phasing Campaign — Multi-Step Manoeuvre"
+    level_required: 4
+    difficulty: hard
+    description: >
+      Execute a three-burn phasing campaign in LEO to place BLUE-PH
+      in a precise trailing position behind a target object within a
+      48-hour window.  Minimise ΔV while meeting the phasing requirement.
+    briefing: >
+      BLUE-PH must arrive 30 km behind TARGET-LEO (measured along-track)
+      within 48 hours.  Current separation is 1,840 km.  Design a
+      phasing campaign using the intercept engine, trading manoeuvre count
+      against fuel expenditure.  Document your Hohmann and phasing burn
+      sequence.
+    scenario_epoch_utc: "2025-11-01T06:00:00Z"
+    horizon_hours: 48
+    challenge: false
+    objects:
+      - satno: 99070
+        name: "BLUE-PH"
+        side: blue
+        regime: LEO
+        tle_line1: "1 99070U 25070A   25305.25000000  .00000700  00000-0  35000-4 0  9991"
+        tle_line2: "2 99070  63.4000 200.0000 0005000  60.0000 300.0000 14.91000000 00041"
+      - satno: 99071
+        name: "TARGET-LEO"
+        side: red
+        regime: LEO
+        tle_line1: "1 99071U 25071A   25305.25000000  .00000720  00000-0  36000-4 0  9991"
+        tle_line2: "2 99071  63.4000 200.0000 0005100  60.2000 294.3000 14.91000000 00038"
+    time_limit_minutes: null
+    scoring:
+      passing_score: 300
+      optimal_score: 460
+
+  # ── Level 5 additions ──────────────────────────────────────────────────────
+
+  - id: planner_challenge_theatre_defence
+    title: "Theatre Defence — Three-Asset Threat"
+    level_required: 5
+    difficulty: very_hard
+    description: >
+      Three adversary objects are manoeuvring simultaneously against two
+      high-value blue assets.  Prioritise the threats, allocate defensive
+      responses, and execute the decision cycle under 30-minute time pressure.
+      All five skill axes are scored.
+    briefing: >
+      CRIMSON-01, CRIMSON-02, and CRIMSON-03 are conducting coordinated
+      proximity operations against BLUE-A and BLUE-B.  You have limited
+      response resources.  Triage the threat matrix, select your defensive
+      posture for each asset, and execute — in 30 minutes.
+    scenario_epoch_utc: "2025-12-01T00:00:00Z"
+    horizon_hours: 72
+    challenge: true
+    objects:
+      - satno: 99080
+        name: "BLUE-A"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99080U 25080A   25335.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99080   0.0300 100.0000 0000150  10.0000   0.0000  1.00270000 00051"
+      - satno: 99081
+        name: "BLUE-B"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99081U 25081A   25335.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99081   0.0400 101.5000 0000200  12.0000   0.0000  1.00270000 00043"
+      - satno: 99082
+        name: "CRIMSON-01"
+        side: red
+        regime: GEO
+        tle_line1: "1 99082U 25082A   25335.00000000  .00000020  00000-0  00000-0 0  9991"
+        tle_line2: "2 99082   0.0700 100.2500 0000400  10.8000   0.0000  1.00271000 00029"
+      - satno: 99083
+        name: "CRIMSON-02"
+        side: red
+        regime: GEO
+        tle_line1: "1 99083U 25083A   25335.00000000  .00000018  00000-0  00000-0 0  9991"
+        tle_line2: "2 99083   0.0600 101.6500 0000350  11.5000   0.0000  1.00270000 00022"
+      - satno: 99084
+        name: "CRIMSON-03"
+        side: red
+        regime: GEO
+        tle_line1: "1 99084U 25084A   25335.00000000  .00000012  00000-0  00000-0 0  9991"
+        tle_line2: "2 99084   0.0500  99.8000 0000300  10.2000   0.0000  1.00270000 00017"
+    time_limit_minutes: 30
+    scoring:
+      passing_score: 500
+      optimal_score: 750

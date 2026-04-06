@@ -381,6 +381,10 @@
       <button class="htab" data-panel="hero-pol" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-gold"></span>Historical PoL
       </button>
+      <button class="htab" data-panel="hero-decision" onclick="heroTab(this)"
+              title="Decision Engine — What-If scenario evaluation, adversary action vs friendly response matrix">
+        <span class="htab-icon htab-icon-blue"></span>Decision Engine
+      </button>
       <button class="htab" data-panel="hero-gcat" onclick="heroTab(this)"
               title="GCAT — General Catalog of Artificial Space Objects (McDowell / planet4589.org, CC-BY)">
         <span class="htab-icon htab-icon-blue"></span>GCAT
@@ -610,6 +614,14 @@
            hx-swap="innerHTML">
         <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Historical PoL&hellip;</p>
       </div><!-- end hero-pol -->
+
+      <!-- ── DECISION ENGINE ───────────────────────────────────── -->
+      <div class="hero-panel" id="hero-decision"
+           hx-get="/plan/decision/panel"
+           hx-trigger="intersect once"
+           hx-swap="innerHTML">
+        <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Decision Engine&hellip;</p>
+      </div><!-- end hero-decision -->
 
       <!-- ── GCAT ─────────────────────────────────────────────── -->
       <div class="hero-panel gcat-hero" id="hero-gcat"
