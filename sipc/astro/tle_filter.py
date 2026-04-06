@@ -199,7 +199,7 @@ def quality_flag_sequence(reps: list[TLERecord]) -> list[QualityFlag]:
 
 def filter_tle_history(
     records: list[TLERecord],
-) -> tuple[list[TLERecord], list[str]]:
+) -> tuple[list[TLERecord], list[QualityFlag]]:
     """Apply regime-aware cadence filtering to a sorted TLE sequence.
 
     Groups consecutive TLEs that fall within the regime-appropriate
@@ -217,8 +217,9 @@ def filter_tle_history(
     -------
     representatives : list[TLERecord]
         One TLE per cluster, in chronological order.
-    quality_flags : list[str]
-        Human-readable warning strings for downstream display.
+    quality_flags : list[QualityFlag]
+        Structured quality warnings; each exposes ``epoch``, ``flag_type``,
+        and ``message`` attributes for UI rendering.
     """
     if not records:
         return [], []

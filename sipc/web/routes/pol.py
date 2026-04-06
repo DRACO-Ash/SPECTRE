@@ -239,7 +239,7 @@ async def pol_analyse(
                 "error": f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             })
 
-        quality_flags: list[str] = []
+        quality_flags = []
         if apply_filter:
             raw_count = len(records)
             records, quality_flags = filter_tle_history(records)
