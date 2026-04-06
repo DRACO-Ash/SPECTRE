@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}SIPC — Training Mode{% endblock %}
+
+{% block nav_brand %}
+<div>
+  <span class="nav-title">
+    <span class="nav-title-accent">SIPC</span> Training
+  </span>
+  <div class="nav-subtitle" style="color:#f59e0b; font-weight:700; letter-spacing:0.05em">
+    ⚠ TRAINING MODE — Synthetic Data Only
+  </div>
+</div>
+{% endblock %}
+
+{% block nav_actions %}
+<div class="nav-right">
+  <span class="nav-user" style="color:var(--text-dim)">{{ user.username }}</span>
+  <form method="post" action="/training/leave" class="inline-form">
+    <input type="hidden" name="session_id" value="{{ training_session_id }}">
+    <button type="submit" class="btn-primary"
+            style="background:#22c55e; border-color:#22c55e; font-weight:700"
+            title="Return to the operational console">
+      &#9664; Return to Operations
+    </button>
+  </form>
+</div>
+{% endblock %}
+
+{% block content %}
+
+{# ── Persistent TRAINING MODE banner ──────────────────────────────────────── #}
+<div id="training-mode-banner"
+     role="status"
+     aria-label="Training mode active — all data is synthetic"
+     style="background:linear-gradient(90deg,#92400e,#b45309,#92400e);
+            border-bottom:2px solid #f59e0b;
+            padding:0.35rem 1rem;
+            display:flex; align-items:center; gap:0.6rem;
+            font-size:0.68rem; font-weight:700; color:#fef3c7;
+            letter-spacing:0.06em; text-transform:uppercase; position:sticky; top:0; z-index:100">
+  <span style="font-size:1rem; line-height:1" aria-hidden="true">⚠</span>
+  TRAINING MODE ACTIVE — All scenarios use synthetic data.
+  No operational systems are affected.
+  <span style="margin-left:auto; font-weight:400; letter-spacing:0; text-transform:none; font-size:0.65rem; color:#fde68a">
+    Level {{ progress.current_level }} · {{ level_def.title if level_def else '—' }} ·
+    {{ progress.total_points }} pts
+  </span>
+</div>
+
+{# ── Training layout ──────────────────────────────────────────────────────── #}
+<div style="display:grid; grid-template-columns:260px 1fr; gap:0; height:calc(100vh - 80px); overflow:hidden">
+
+  {# ── Left nav ─────────────────────────────────────────────────────────── #}
+  <aside style="background:var(--sidebar-bg,var(--panel-bg)); border-right:1px solid var(--border);
+                overflow-y:auto; padding:0.75rem">
+
+    {# Level badge #}
+    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4);
+                border-radius:6px; padding:0.6rem 0.75rem; margin-bottom:0.75rem">
+      <div style="font-size:0.6rem; color:#f59e0b; text-transform:uppercase; letter-spacing:0.07em; font-weight:700">
+        Current Level
+      </div>
+      <div style="font-size:1.3rem; font-weight:800; color:var(--text-primary); line-height:1.2">
+        {{ progress.current_level }}
+        <span style="font-size:0.75rem; font-weight:600; color:#f59e0b">{{ level_def.title if level_def else '' }}</span>
+      </div>
+      {# Progress bar to next level #}
+      {% if next_lv_def %}
+      <div style="margin-top:0.35rem">
+        <div style="display:flex; justify-content:space-between; font-size:0.58rem; color:var(--text-dim); margin-bottom:0.15rem">
+          <span>→ Level {{ progress.current_level + 1 }}: {{ next_lv_def.title }}</span>
+          <span>{{ progress_pct }}%</span>
+        </div>
+        <div style="height:5px; background:var(--border); border-radius:3px; overflow:hidden">
+          <div style="height:100%; width:{{ progress_pct }}%; background:#f59e0b; border-radius:3px; transition:width 0.5s"></div>
+        </div>
+        {% if pts_needed %}
+        <div style="font-size:0.57rem; color:var(--text-dim); margin-top:0.1rem">{{ pts_needed }} pts to unlock</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="font-size:0.6rem; color:#22c55e; margin-top:0.3rem; font-weight:600">★ Maximum Level</div>
+      {% endif %}
+    </div>
+
+    {# Nav tabs #}
+    <div style="display:flex; flex-direction:column; gap:0.2rem; margin-bottom:0.75rem">
+      {% set nav_items = [
+        ("dashboard", "📊 Dashboard"),
+        ("scenarios", "📋 Free-Play"),
+        ("challenges", "🎯 Challenges"),
+      ] %}
+      {% for tab_id, tab_label in nav_items %}
+      <button class="training-nav-btn {% if loop.first %}active{% endif %}"
+              onclick="trainingTab('{{ tab_id }}')"
+              style="text-align:left; padding:0.45rem 0.6rem; font-size:0.7rem; font-weight:600;
+                     background:{% if loop.first %}rgba(245,158,11,0.15){% else %}transparent{% endif %};
+                     border:1px solid {% if loop.first %}rgba(245,158,11,0.4){% else %}transparent{% endif %};
+                     border-radius:4px; cursor:pointer; color:{% if loop.first %}#f59e0b{% else %}var(--text-dim){% endif %};
+                     width:100%"
+              id="tnav-{{ tab_id }}">
+        {{ tab_label }}
+      </button>
+      {% endfor %}
+    </div>
+
+    {# Quick stats #}
+    <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem; font-weight:700">
+      Stats
+    </div>
+    <div style="font-size:0.63rem; line-height:2; color:var(--text-dim)">
+      <div><span style="color:var(--text-primary)">{{ progress.total_points }}</span> total points</div>
+      <div><span style="color:var(--text-primary)">{{ progress.scenarios_passed }}</span> scenarios passed</div>
+      <div><span style="color:var(--text-primary)">{{ progress.tutorials_done }}</span> tutorials complete</div>
+      <div><span style="color:var(--text-primary)">{{ progress.challenges_passed }}</span> challenges passed</div>
+      <div><span style="color:var(--text-primary)">{{ progress.time_in_training_minutes | int }}</span> min in training</div>
+    </div>
+
+    {# Recommendation #}
+    <div style="margin-top:0.75rem; background:rgba(59,139,235,0.08); border:1px solid rgba(59,139,235,0.3);
+                border-radius:4px; padding:0.45rem 0.5rem; font-size:0.62rem; color:var(--text-dim)">
+      <strong style="color:var(--ops-blue); font-size:0.6rem; display:block; margin-bottom:0.15rem">
+        Recommended Next Step
+      </strong>
+      {{ recommendation }}
+    </div>
+
+  </aside>
+
+  {# ── Main area ─────────────────────────────────────────────────────────── #}
+  <main style="overflow-y:auto; padding:0.75rem">
+
+    {# Dashboard tab #}
+    <div class="training-panel active" id="tpanel-dashboard">
+      <div hx-get="/training/dashboard"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div style="color:var(--text-dim); font-size:0.7rem; padding:1rem">
+          <span class="spinner"></span> Loading dashboard…
+        </div>
+      </div>
+    </div>
+
+    {# Scenarios tab #}
+    <div class="training-panel" id="tpanel-scenarios" style="display:none">
+      <div style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.06em; margin-bottom:0.6rem">
+        Free-Play Scenarios
+      </div>
+      <div id="scenario-list">
+        {% include "partials/training_scenario_list.html" %}
+      </div>
+      <div id="scenario-detail" style="margin-top:0.6rem"></div>
+    </div>
+
+    {# Challenges tab #}
+    <div class="training-panel" id="tpanel-challenges" style="display:none">
+      <div style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.06em; margin-bottom:0.6rem">
+        Challenge Scenarios
+      </div>
+      {% if challenge_scenarios %}
+        {% for s in challenge_scenarios %}
+        <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+                    padding:0.6rem 0.75rem; margin-bottom:0.4rem">
+          <div style="display:flex; justify-content:space-between; align-items:baseline">
+            <strong style="font-size:0.7rem; color:var(--text-primary)">{{ s.title }}</strong>
+            <span style="font-size:0.62rem; font-weight:700; color:{{ s.difficulty_colour }}">
+              {{ s.difficulty | replace('_',' ') | upper }}
+            </span>
+          </div>
+          <div style="font-size:0.63rem; color:var(--text-dim); margin:0.2rem 0">{{ s.description }}</div>
+          <button class="btn-primary" style="font-size:0.65rem"
+                  hx-get="/training/scenario/{{ s.id }}"
+                  hx-target="#scenario-detail"
+                  hx-swap="innerHTML"
+                  onclick="trainingTab('scenarios'); document.getElementById('scenario-detail').scrollIntoView({behavior:'smooth'})">
+            View Challenge
+          </button>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p style="font-size:0.7rem; color:var(--text-dim)">
+          Challenges unlock as you advance in level.
+          Reach Level 4 to access your first challenge scenario.
+        </p>
+      {% endif %}
+    </div>
+
+  </main>
+
+</div>
+
+<style>
+.training-panel { }
+.training-nav-btn:hover { background: rgba(245,158,11,0.08) !important; color: #f59e0b !important; border-color: rgba(245,158,11,0.2) !important; }
+</style>
+
+<script>
+function trainingTab(id) {
+  document.querySelectorAll('.training-panel').forEach(function(p) {
+    p.style.display = 'none';
+  });
+  var panel = document.getElementById('tpanel-' + id);
+  if (panel) panel.style.display = 'block';
+
+  document.querySelectorAll('.training-nav-btn').forEach(function(btn) {
+    var active = btn.id === 'tnav-' + id;
+    btn.style.background    = active ? 'rgba(245,158,11,0.15)' : 'transparent';
+    btn.style.borderColor   = active ? 'rgba(245,158,11,0.4)'  : 'transparent';
+    btn.style.color         = active ? '#f59e0b'               : 'var(--text-dim)';
+  });
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,220 @@
+{# NOTSO Correlation Results — rendered into #notso-results #}
+{# Context: correlations, profile, pol, source_label #}
+
+{% if not correlations %}
+<p class="empty-msg" style="font-size:0.7rem; margin-top:0.5rem">No correlations to display — check NORAD ID matches the analysis object.</p>
+{% else %}
+
+{% if source_label %}
+<p style="font-size:0.68rem; color:var(--text-dim); margin-bottom:0.4rem; font-style:italic">
+  Source: {{ source_label }}
+</p>
+{% endif %}
+
+{# ── Behaviour Profile Card ─────────────────────────────────────────────────── #}
+{% set rate_pct = (profile.notification_rate * 100) | round(0) | int %}
+{% if profile.consistent_notifier %}
+  {% set rate_color = "#22c55e" %}
+  {% set rate_label = "Consistent Notifier" %}
+{% elif profile.stealth_operator %}
+  {% set rate_color = "#ef4444" %}
+  {% set rate_label = "Stealth Operator" %}
+{% else %}
+  {% set rate_color = "#f59e0b" %}
+  {% set rate_label = "Inconsistent Notifier" %}
+{% endif %}
+
+<div style="background:var(--panel-bg); border:1px solid rgba(59,139,235,0.35); border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.5rem">
+
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.55rem">
+    <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.06em">
+      Operator Behaviour Profile — SATNO {{ profile.norad_id }}
+    </span>
+    <span style="font-size:0.62rem; color:var(--text-dim)">
+      {{ profile.analysis_period_start.strftime("%Y-%m-%d") }} – {{ profile.analysis_period_end.strftime("%Y-%m-%d") }}
+    </span>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+
+    {# Notification rate #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.2rem">Notification Rate</div>
+      <div style="font-size:1.1rem; font-weight:700; color:{{ rate_color }}">{{ rate_pct }}%</div>
+      <div style="font-size:0.6rem; color:{{ rate_color }}; font-weight:600">{{ rate_label }}</div>
+      <div style="height:4px; background:var(--border); border-radius:2px; margin-top:0.3rem; overflow:hidden">
+        <div style="height:100%; width:{{ rate_pct }}%; background:{{ rate_color }}; border-radius:2px; transition:width 0.4s"></div>
+      </div>
+    </div>
+
+    {# Manoeuvre counts #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.2rem">Manoeuvres</div>
+      <div style="font-size:0.65rem; line-height:1.6">
+        <div><span style="color:var(--text-dim)">Total detected:</span> <strong>{{ profile.total_manoeuvres }}</strong></div>
+        <div><span style="color:var(--text-dim)">Pre-notified:</span> <strong style="color:#22c55e">{{ profile.manoeuvres_with_notso }}</strong></div>
+        <div><span style="color:var(--text-dim)">Silent:</span> <strong style="color:#ef4444">{{ profile.manoeuvres_without_notso }}</strong></div>
+        {% if profile.phantom_notso_count > 0 %}
+        <div><span style="color:var(--text-dim)">Phantom NOTSOs:</span> <strong style="color:#f59e0b">{{ profile.phantom_notso_count }}</strong></div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Timing + accuracy #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.2rem">Timing & Accuracy</div>
+      <div style="font-size:0.65rem; line-height:1.6">
+        {% if profile.mean_lead_time_h is not none %}
+        <div>
+          <span style="color:var(--text-dim)">Lead time:</span>
+          <strong>{{ profile.mean_lead_time_h }}h</strong>
+          {% if profile.std_lead_time_h is not none %}<span style="color:var(--text-dim)"> ± {{ profile.std_lead_time_h }}h</span>{% endif %}
+          {% if profile.predictable_timing %}<span style="color:#22c55e; font-size:0.58rem"> ✓ predictable</span>{% endif %}
+        </div>
+        {% if profile.min_lead_time_h is not none %}
+        <div><span style="color:var(--text-dim)">Range:</span> {{ profile.min_lead_time_h }}h – {{ profile.max_lead_time_h }}h</div>
+        {% endif %}
+        {% else %}
+        <div style="color:var(--text-dim)">No matched pairs</div>
+        {% endif %}
+        <div>
+          <span style="color:var(--text-dim)">Window accuracy:</span>
+          <strong>{{ (profile.window_accuracy_rate * 100) | round(0) | int }}%</strong>
+        </div>
+        {% if profile.mean_magnitude_ratio is not none %}
+        <div>
+          <span style="color:var(--text-dim)">ΔV ratio:</span>
+          <strong>{{ profile.mean_magnitude_ratio }}</strong>
+          {% if profile.std_magnitude_ratio is not none %}<span style="color:var(--text-dim)"> ± {{ profile.std_magnitude_ratio }}</span>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  {# Summary text #}
+  <div style="font-size:0.65rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem; font-style:italic">
+    {{ profile.summary() }}
+  </div>
+
+  {# Behavioural flags #}
+  {% set flags = [] %}
+  {% if profile.consistent_notifier %}{% set _ = flags.append(("consistent notifier", "#22c55e")) %}{% endif %}
+  {% if profile.stealth_operator %}{% set _ = flags.append(("stealth operator", "#ef4444")) %}{% endif %}
+  {% if profile.inconsistent_notifier and not profile.consistent_notifier and not profile.stealth_operator %}{% set _ = flags.append(("inconsistent notifier", "#f59e0b")) %}{% endif %}
+  {% if profile.predictable_timing %}{% set _ = flags.append(("predictable timing", "#3b8beb")) %}{% endif %}
+  {% if flags %}
+  <div style="margin-top:0.35rem; display:flex; gap:0.35rem; flex-wrap:wrap">
+    {% for label, col in flags %}
+    <span style="font-size:0.6rem; font-weight:700; color:{{ col }}; background:{{ col }}22;
+                 border:1px solid {{ col }}55; border-radius:3px; padding:0.1rem 0.4rem;
+                 text-transform:uppercase; letter-spacing:0.04em">{{ label }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+
+{# ── Correlation Table ──────────────────────────────────────────────────────── #}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
+            padding:0.75rem 0.9rem">
+
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.5rem">
+    Correlation Detail
+    <span style="font-weight:400; color:var(--text-dim); margin-left:0.5rem">
+      {{ correlations | length }} record(s) ·
+      <span style="color:#22c55e">{{ correlations | selectattr('correlation_type','eq','matched') | list | length }} matched</span> ·
+      <span style="color:#f59e0b">{{ correlations | selectattr('correlation_type','eq','notso_only') | list | length }} NOTSO-only</span> ·
+      <span style="color:#ef4444">{{ correlations | selectattr('correlation_type','eq','manoeuvre_only') | list | length }} manoeuvre-only</span>
+    </span>
+  </div>
+
+  <div style="overflow-x:auto">
+  <table style="width:100%; font-size:0.62rem; border-collapse:collapse">
+    <thead>
+      <tr style="color:var(--text-dim); border-bottom:1px solid var(--border)">
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600">Type</th>
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600">NOTSO ID</th>
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600">NOTSO Window</th>
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600">Manoeuvre Epoch</th>
+        <th style="text-align:right; padding:0.2rem 0.35rem; font-weight:600">ΔV (m/s)</th>
+        <th style="text-align:right; padding:0.2rem 0.35rem; font-weight:600">Lead Time (h)</th>
+        <th style="text-align:right; padding:0.2rem 0.35rem; font-weight:600">ΔV Ratio</th>
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600">Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in correlations %}
+      {% if c.correlation_type == "matched" %}
+        {% set row_color = "#22c55e" %}
+        {% set row_label = "MATCHED" %}
+        {% set row_bg = "rgba(34,197,94,0.06)" %}
+      {% elif c.correlation_type == "notso_only" %}
+        {% set row_color = "#f59e0b" %}
+        {% set row_label = "NOTSO ONLY" %}
+        {% set row_bg = "rgba(245,158,11,0.06)" %}
+      {% else %}
+        {% set row_color = "#ef4444" %}
+        {% set row_label = "MNV ONLY" %}
+        {% set row_bg = "rgba(239,68,68,0.06)" %}
+      {% endif %}
+      <tr style="border-bottom:1px solid var(--border); background:{{ row_bg }}">
+        <td style="padding:0.25rem 0.35rem">
+          <span style="font-size:0.58rem; font-weight:700; color:{{ row_color }};
+                       background:{{ row_color }}22; border:1px solid {{ row_color }}55;
+                       border-radius:3px; padding:0.1rem 0.3rem; text-transform:uppercase;
+                       letter-spacing:0.03em; white-space:nowrap">{{ row_label }}</span>
+        </td>
+        <td style="padding:0.25rem 0.35rem; font-family:monospace; color:var(--text-primary)">
+          {% if c.notso %}{{ c.notso.message_id }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:0.25rem 0.35rem; white-space:nowrap">
+          {% if c.notso %}
+            <span style="color:var(--text-primary)">{{ c.notso.effective_start_utc.strftime("%Y-%m-%d %H:%M") }}</span>
+            <span style="color:var(--text-dim)"> → {{ c.notso.effective_end_utc.strftime("%H:%M") }}Z</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="padding:0.25rem 0.35rem; white-space:nowrap">
+          {% if c.manoeuvre %}
+            {{ c.manoeuvre.epoch.strftime("%Y-%m-%d %H:%M") }}Z
+          {% else %}—{% endif %}
+        </td>
+        <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">
+          {% if c.manoeuvre and c.manoeuvre.delta_v_km_s %}
+            {{ (c.manoeuvre.delta_v_km_s * 1000) | round(2) }}
+          {% elif c.notso and c.notso.predicted_delta_v_km_s %}
+            <span style="color:var(--text-dim)">({{ (c.notso.predicted_delta_v_km_s * 1000) | round(2) }} pred)</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">
+          {% if c.time_offset_hours is not none %}
+            <span style="color:{% if c.time_offset_hours > 0 %}#22c55e{% else %}#f59e0b{% endif %}">
+              {% if c.time_offset_hours > 0 %}+{% endif %}{{ c.time_offset_hours }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">
+          {% if c.magnitude_ratio is not none %}
+            <span style="color:{% if 0.8 <= c.magnitude_ratio <= 1.2 %}#22c55e{% else %}#f59e0b{% endif %}">
+              {{ c.magnitude_ratio }}×
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="padding:0.25rem 0.35rem; color:var(--text-dim)">
+          {% if c.notso and c.notso.notso_type %}
+            <span style="color:var(--ops-blue)">{{ c.notso.notso_type.value | replace('_',' ') | title }}</span>
+          {% endif %}
+          {% if c.notes %} {{ c.notes }}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+</div>
+
+{% endif %}

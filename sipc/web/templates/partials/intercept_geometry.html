@@ -1,0 +1,314 @@
+{# Relative Geometry Visualisation — Hill (CW) frame
+   Context: geom (RelativeGeometry), chart_json (JSON string — server-serialised)
+   Chart data is injected via a JSON.parse of a server-rendered safe string.
+   Autoescape is ON; chart_json is emitted with |tojson filter for HTML-safe embedding. #}
+
+<div id="geom-panel"
+     style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;
+            padding:0.85rem 1rem; margin-top:0.7rem">
+
+  {# ── Header ── #}
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem; flex-wrap:wrap; gap:0.4rem">
+    <div>
+      <span style="font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em">
+        Relative Geometry — Hill Frame
+      </span>
+      <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.6rem">
+        {{ geom.method | upper }} · {{ geom.red_name }} → {{ geom.blue_name }}
+      </span>
+    </div>
+    <div style="display:flex; gap:0.4rem; align-items:center">
+      {% if not geom.cw_valid %}
+      <span style="font-size:0.6rem; font-weight:700; color:#f59e0b; background:rgba(245,158,11,0.12);
+                   border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:0.1rem 0.4rem">
+        ⚠ INDICATIVE ONLY
+      </span>
+      {% else %}
+      <span style="font-size:0.6rem; font-weight:700; color:#22c55e; background:rgba(34,197,94,0.10);
+                   border:1px solid rgba(34,197,94,0.3); border-radius:3px; padding:0.1rem 0.4rem">
+        ✓ CW VALID
+      </span>
+      {% endif %}
+      <button onclick="document.getElementById('geom-panel').remove()"
+              class="btn-secondary" style="font-size:0.65rem; padding:0.15rem 0.5rem">✕</button>
+    </div>
+  </div>
+
+  {# ── Key stats bar ── #}
+  <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:0.4rem; margin-bottom:0.6rem">
+    <div class="stat-card" style="padding:0.4rem 0.5rem">
+      <div class="stat-val" style="font-size:0.88rem; color:var(--ops-blue)">{{ "%.1f"|format(geom.initial_range_km) }}</div>
+      <div class="stat-lbl">Initial Range km</div>
+    </div>
+    <div class="stat-card" style="padding:0.4rem 0.5rem">
+      <div class="stat-val" style="font-size:0.88rem; color:var(--gold)">{{ "%.1f"|format(geom.dv_total_ms) }}</div>
+      <div class="stat-lbl">ΔV m/s</div>
+    </div>
+    <div class="stat-card" style="padding:0.4rem 0.5rem">
+      <div class="stat-val" style="font-size:0.88rem">{{ "%.2f"|format(geom.tof_hours) }}</div>
+      <div class="stat-lbl">TOF hours</div>
+    </div>
+    <div class="stat-card" style="padding:0.4rem 0.5rem">
+      <div class="stat-val" style="font-size:0.88rem; color:{% if geom.arrival_range_km < 1.0 %}#22c55e{% elif geom.arrival_range_km < 10.0 %}#f59e0b{% else %}#ef4444{% endif %}">
+        {{ "%.2f"|format(geom.arrival_range_km) }}
+      </div>
+      <div class="stat-lbl">Arrival Range km</div>
+    </div>
+    <div class="stat-card" style="padding:0.4rem 0.5rem">
+      <div class="stat-val" style="font-size:0.88rem; font-family:monospace; color:var(--text-dim)">
+        {{ "%.2e"|format(geom.n_rad_s) }}
+      </div>
+      <div class="stat-lbl">n rad/s</div>
+    </div>
+  </div>
+
+  {# ── Validity notes ── #}
+  {% for note in geom.validity_notes %}
+  <div style="font-size:0.61rem; color:{% if 'valid' in note.lower() and 'not' not in note.lower() %}#22c55e{% else %}#f59e0b{% endif %};
+              margin-bottom:0.15rem; padding:0.2rem 0.5rem;
+              background:{% if 'valid' in note.lower() and 'not' not in note.lower() %}rgba(34,197,94,0.06){% else %}rgba(245,158,11,0.08){% endif %};
+              border-radius:3px">
+    {{ note }}
+  </div>
+  {% endfor %}
+
+  {# ── Chart tabs ── #}
+  <div style="display:flex; gap:0.3rem; margin-top:0.5rem; margin-bottom:0.4rem">
+    {% for tid, tlabel in [("vr","V-bar / R-bar"), ("hr","H-bar / R-bar"), ("rt","Range vs Time")] %}
+    <button id="gtab-{{ tid }}" onclick="geomTab('{{ tid }}')"
+            style="font-size:0.65rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:3px;
+                   cursor:pointer; border:1px solid var(--border);
+                   background:{% if loop.first %}rgba(59,139,235,0.18){% else %}transparent{% endif %};
+                   color:{% if loop.first %}var(--ops-blue){% else %}var(--text-dim){% endif %}">
+      {{ tlabel }}
+    </button>
+    {% endfor %}
+  </div>
+
+  {# ── Chart canvases ── #}
+  <div id="gchart-vr" style="position:relative; height:320px">
+    <canvas id="cw-chart-vr"></canvas>
+  </div>
+  <div id="gchart-hr" style="position:relative; height:320px; display:none">
+    <canvas id="cw-chart-hr"></canvas>
+  </div>
+  <div id="gchart-rt" style="position:relative; height:320px; display:none">
+    <canvas id="cw-chart-rt"></canvas>
+  </div>
+
+  {# ── Legend ── #}
+  <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.4rem; font-size:0.62rem; color:var(--text-dim)">
+    {% if geom.coast_points %}
+    <span><span style="display:inline-block;width:18px;height:3px;background:#6b7280;vertical-align:middle;border-radius:2px"></span> Pre-burn coast</span>
+    {% endif %}
+    <span><span style="display:inline-block;width:18px;height:3px;background:#ef4444;vertical-align:middle;border-radius:2px"></span> Transfer trajectory</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;vertical-align:middle;border-radius:50%"></span> Burn point</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;vertical-align:middle;border-radius:50%"></span> Target (origin)</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#3b8beb;vertical-align:middle;border-radius:50%"></span> Initial position</span>
+  </div>
+
+  {# ── Burn state debug ── #}
+  <details style="margin-top:0.5rem">
+    <summary style="font-size:0.62rem; color:var(--text-dim); cursor:pointer; list-style:none; display:flex; align-items:center; gap:0.3rem">
+      <span>&#9654;</span> Hill-frame burn state
+    </summary>
+    <div style="font-size:0.61rem; font-family:monospace; color:var(--text-dim); margin-top:0.3rem;
+                background:var(--bg-secondary); padding:0.4rem 0.6rem; border-radius:4px;
+                display:grid; grid-template-columns:repeat(3,1fr); gap:0.2rem">
+      <span>x (R-bar): {{ "%.4f"|format(geom.burn_state.x) }} km</span>
+      <span>ẋ: {{ "%.5f"|format(geom.burn_state.xd) }} km/s</span>
+      <span>n: {{ "%.6f"|format(geom.n_rad_s) }} rad/s</span>
+      <span>y (V-bar): {{ "%.4f"|format(geom.burn_state.y) }} km</span>
+      <span>ẏ: {{ "%.5f"|format(geom.burn_state.yd) }} km/s</span>
+      <span>burn: {{ geom.burn_epoch.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+      <span>z (H-bar): {{ "%.4f"|format(geom.burn_state.z) }} km</span>
+      <span>ż: {{ "%.5f"|format(geom.burn_state.zd) }} km/s</span>
+      <span>method: {{ geom.method }}</span>
+    </div>
+  </details>
+
+</div>
+
+<script>
+(function () {
+  /* ── Parse server-rendered chart data (safe — no user strings in data) ── */
+  var _cwd = JSON.parse({{ chart_json | tojson }});
+
+  /* ── Dark-theme Chart.js defaults ── */
+  var GRID  = 'rgba(255,255,255,0.07)';
+  var TICK  = '#6b7280';
+  var RED   = '#ef4444';
+  var BLUE  = '#3b8beb';
+  var GREEN = '#22c55e';
+  var GREY  = '#6b7280';
+  var GOLD  = '#f59e0b';
+
+  function _baseScaleOpts(xlabel, ylabel) {
+    return {
+      x: { title: { display: true, text: xlabel, color: TICK, font: { size: 11 } },
+           grid: { color: GRID }, ticks: { color: TICK, font: { size: 10 } } },
+      y: { title: { display: true, text: ylabel, color: TICK, font: { size: 11 } },
+           grid: { color: GRID }, ticks: { color: TICK, font: { size: 10 } } },
+    };
+  }
+
+  function _pointStyle(label, color, radius) {
+    return { label: label, data: [{x: _cwd.target.vbar, y: _cwd.target.rbar}],
+             type: 'scatter', pointRadius: radius, pointBackgroundColor: color,
+             pointBorderColor: color, showLine: false };
+  }
+
+  /* ── Build datasets for V-bar / R-bar (plan view) ── */
+  function _makeVRDatasets() {
+    var sets = [];
+    if (_cwd.vr_coast && _cwd.vr_coast.length > 1) {
+      sets.push({ label: 'Pre-burn coast', data: _cwd.vr_coast.map(function(p){return{x:p[0],y:p[1]};}),
+                  borderColor: GREY, backgroundColor: 'transparent', borderWidth: 1.5,
+                  borderDash: [4,3], pointRadius: 0, tension: 0.3 });
+    }
+    sets.push({ label: 'Transfer trajectory', data: _cwd.vr_transfer.map(function(p){return{x:p[0],y:p[1]};}),
+                borderColor: RED, backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 2,
+                pointRadius: 0, tension: 0.3, fill: false });
+    /* Initial position */
+    if (_cwd.vr_transfer.length > 0) {
+      var p0 = _cwd.vr_transfer[0];
+      sets.push({ label: 'Burn point', data: [{x: p0[0], y: p0[1]}],
+                  type: 'scatter', pointRadius: 7, pointStyle: 'rectRot',
+                  pointBackgroundColor: RED, pointBorderColor: RED, showLine: false });
+    }
+    var startSrc = (_cwd.vr_coast && _cwd.vr_coast.length > 0) ? _cwd.vr_coast : _cwd.vr_transfer;
+    if (startSrc && startSrc.length > 0) {
+      var sp = startSrc[0];
+      sets.push({ label: 'Initial position', data: [{x: sp[0], y: sp[1]}],
+                  type: 'scatter', pointRadius: 7, pointStyle: 'circle',
+                  pointBackgroundColor: BLUE, pointBorderColor: BLUE, showLine: false });
+    }
+    /* Target at origin */
+    sets.push({ label: 'Target', data: [{x: 0, y: 0}],
+                type: 'scatter', pointRadius: 9, pointStyle: 'star',
+                pointBackgroundColor: GREEN, pointBorderColor: GREEN, showLine: false });
+    /* Approach corridor: dashed lines at ±0.1 km R-bar near approach */
+    return sets;
+  }
+
+  /* ── Build datasets for H-bar / R-bar (out-of-plane view) ── */
+  function _makeHRDatasets() {
+    var sets = [];
+    if (_cwd.hr_coast && _cwd.hr_coast.length > 1) {
+      sets.push({ label: 'Pre-burn coast', data: _cwd.hr_coast.map(function(p){return{x:p[0],y:p[1]};}),
+                  borderColor: GREY, backgroundColor: 'transparent', borderWidth: 1.5,
+                  borderDash: [4,3], pointRadius: 0, tension: 0.3 });
+    }
+    sets.push({ label: 'Transfer trajectory', data: _cwd.hr_transfer.map(function(p){return{x:p[0],y:p[1]};}),
+                borderColor: GOLD, backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2,
+                pointRadius: 0, tension: 0.3, fill: false });
+    if (_cwd.hr_transfer.length > 0) {
+      var p0h = _cwd.hr_transfer[0];
+      sets.push({ label: 'Burn point', data: [{x: p0h[0], y: p0h[1]}],
+                  type: 'scatter', pointRadius: 7, pointStyle: 'rectRot',
+                  pointBackgroundColor: GOLD, pointBorderColor: GOLD, showLine: false });
+    }
+    sets.push({ label: 'Target', data: [{x: 0, y: 0}],
+                type: 'scatter', pointRadius: 9, pointStyle: 'star',
+                pointBackgroundColor: GREEN, pointBorderColor: GREEN, showLine: false });
+    return sets;
+  }
+
+  /* ── Build datasets for Range vs Time ── */
+  function _makeRTDatasets() {
+    var pts = _cwd.range_series.map(function(p){return{x: p[0]/60.0, y: p[1]};});
+    return [{
+      label: 'Range km', data: pts,
+      borderColor: BLUE, backgroundColor: 'rgba(59,139,235,0.10)',
+      borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
+    }];
+  }
+
+  /* ── Common chart options ── */
+  function _chartOpts(title, xLabel, yLabel) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { display: true, position: 'bottom',
+                  labels: { color: TICK, font: { size: 10 }, boxWidth: 14, padding: 10 } },
+        title: { display: !!title, text: title, color: '#e5e7eb', font: { size: 12, weight: '700' } },
+        tooltip: {
+          backgroundColor: '#1f2937', titleColor: '#f9fafb', bodyColor: TICK,
+          borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+          callbacks: {
+            label: function(ctx) {
+              var v = ctx.parsed;
+              if (v.y !== undefined && v.x !== undefined) {
+                return ctx.dataset.label + ': (' + v.x.toFixed(3) + ', ' + v.y.toFixed(3) + ') km';
+              }
+              return ctx.dataset.label + ': ' + (v.y !== undefined ? v.y : ctx.parsed).toFixed(3);
+            }
+          }
+        }
+      },
+      scales: _baseScaleOpts(xLabel, yLabel),
+    };
+  }
+
+  /* ── Instantiate charts ── */
+  var _charts = {};
+
+  function _initVR() {
+    if (_charts.vr) return;
+    var ctx = document.getElementById('cw-chart-vr');
+    if (!ctx) return;
+    _charts.vr = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: _makeVRDatasets() },
+      options: _chartOpts(null, 'V-bar (Along-track) km', 'R-bar (Radial) km'),
+    });
+    /* Add zero-axis reference lines after render */
+    _charts.vr.options.scales.x.grid.drawOnChartArea = true;
+    _charts.vr.options.scales.y.grid.drawOnChartArea = true;
+  }
+
+  function _initHR() {
+    if (_charts.hr) return;
+    var ctx = document.getElementById('cw-chart-hr');
+    if (!ctx) return;
+    _charts.hr = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: _makeHRDatasets() },
+      options: _chartOpts(null, 'H-bar (Cross-track) km', 'R-bar (Radial) km'),
+    });
+  }
+
+  function _initRT() {
+    if (_charts.rt) return;
+    var ctx = document.getElementById('cw-chart-rt');
+    if (!ctx) return;
+    _charts.rt = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: _makeRTDatasets() },
+      options: _chartOpts(null, 'Time (minutes)', 'Range km'),
+    });
+  }
+
+  /* ── Tab switching ── */
+  window.geomTab = function(id) {
+    ['vr','hr','rt'].forEach(function(tid) {
+      var panel = document.getElementById('gchart-' + tid);
+      var btn   = document.getElementById('gtab-' + tid);
+      if (!panel || !btn) return;
+      var active = (tid === id);
+      panel.style.display = active ? '' : 'none';
+      btn.style.background = active ? 'rgba(59,139,235,0.18)' : 'transparent';
+      btn.style.color      = active ? 'var(--ops-blue)' : 'var(--text-dim)';
+      btn.style.borderColor = active ? 'rgba(59,139,235,0.4)' : 'var(--border)';
+    });
+    if (id === 'vr') _initVR();
+    if (id === 'hr') { _initHR(); }
+    if (id === 'rt') { _initRT(); }
+  };
+
+  /* Init first tab immediately */
+  _initVR();
+
+})();
+</script>

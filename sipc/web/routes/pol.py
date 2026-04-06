@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from sipc.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
+from sipc.astro.tle_filter import filter_tle_history
 from sipc.data.intel import get_intel
 from sipc.web.auth import require_login
 from sipc.web.deps import render
@@ -33,21 +34,22 @@ _UDL_MAX_RESULTS = 5000
 
 def _parse_udl_elset_response(
     resp: httpx.Response,
-) -> tuple[str, dict[str, tuple[str, str]]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
     """Extract TLE text and provenance metadata from a UDL /elset response.
 
-    Returns ``(tle_text, metadata)`` where *metadata* maps TLE line-1 strings
-    to ``(data_mode, source)`` pairs from the UDL JSON record.
+    Returns ``(tle_text, metadata, rms_metadata)`` where *metadata* maps TLE
+    line-1 strings to ``(data_mode, source)`` pairs and *rms_metadata* maps
+    line-1 strings to RMS residuals (``None`` when not provided by UDL).
     """
     raw = resp.text.strip()
     if not raw:
-        return "", {}
+        return "", {}, {}
 
     try:
         data = resp.json()
     except Exception:
         # Plain TLE text — no provenance metadata available.
-        return raw, {}
+        return raw, {}, {}
 
     if isinstance(data, dict):
         # Defensive: UDL spec returns a JSON array; wrap a stray single-record dict.
@@ -55,10 +57,11 @@ def _parse_udl_elset_response(
     elif isinstance(data, list):
         records = data
     else:
-        return "", {}
+        return "", {}, {}
 
     lines: list[str] = []
     metadata: dict[str, tuple[str, str]] = {}
+    rms_metadata: dict[str, float | None] = {}
     for rec in records:
         l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
         l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
@@ -68,17 +71,20 @@ def _parse_udl_elset_response(
             dm  = str(rec.get("dataMode") or rec.get("data_mode") or "").strip()
             src = str(rec.get("source") or "").strip()
             metadata[l1] = (dm, src)
+            # Extract RMS residual if UDL provides it (used for quality-based TLE selection)
+            rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")
+            rms_metadata[l1] = float(rms_raw) if rms_raw is not None else None
 
     logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
-    return "\n".join(lines), metadata
+    return "\n".join(lines), metadata, rms_metadata
 
 
 async def _fetch_udl_history(
     satno: int, username: str, password: str, data_mode: str, source: str = "",
-) -> tuple[str, dict[str, tuple[str, str]]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
     """Fetch historical TLEs from UDL elset endpoint (2015 → now, max 5 000).
 
-    Returns ``(tle_text, metadata)`` where *metadata* maps line-1 → ``(data_mode, source)``.
+    Returns ``(tle_text, metadata, rms_metadata)``.
     Records may arrive in any order — the parser will sort chronologically.
     """
     params: dict = {
@@ -104,14 +110,14 @@ async def _fetch_udl_history(
 
 async def _fetch_udl_latest(
     satno: int, username: str, password: str, data_mode: str, source: str = "",
-) -> tuple[str, dict[str, tuple[str, str]]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
     """Fetch the current/latest TLE from UDL ``/elset/current``.
 
     A satellite with many historical TLEs can exhaust the 5 000-record cap
     on ``/elset`` before reaching the present.  This second call guarantees
     the most recent elset is always included regardless of archive depth.
 
-    Returns ``(tle_text, metadata)`` in the same format as :func:`_fetch_udl_history`.
+    Returns ``(tle_text, metadata, rms_metadata)``.
     """
     params: dict = {"satNo": satno}
     if data_mode and data_mode != "REAL":
@@ -154,6 +160,7 @@ async def pol_analyse(
     udl_user: Annotated[str, Form()] = "",
     udl_pass: Annotated[str, Form()] = "",
     dv_threshold_ms: Annotated[float, Form()] = 2.0,
+    cadence_filter: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Fetch historical TLEs from UDL and run PoL analysis."""
@@ -173,11 +180,11 @@ async def pol_analyse(
         if not udl_user.strip() or not udl_pass.strip():
             return _err("Enter UDL username and password.")
         try:
-            tle_text, meta = await _fetch_udl_history(
+            tle_text, meta, rms_meta = await _fetch_udl_history(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta = await _fetch_udl_latest(
+            latest_text, latest_meta, latest_rms = await _fetch_udl_latest(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
                 source=state.udl_tle_source,
             )
@@ -191,12 +198,12 @@ async def pol_analyse(
         if not state.udl_username or not state.udl_password:
             return _err("No active UDL session. Connect UDL first, or choose 'UDL (credentials)'.")
         try:
-            tle_text, meta = await _fetch_udl_history(
+            tle_text, meta, rms_meta = await _fetch_udl_history(
                 satno, state.udl_username, state.udl_password,
                 state.udl_data_mode or "REAL",
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta = await _fetch_udl_latest(
+            latest_text, latest_meta, latest_rms = await _fetch_udl_latest(
                 satno, state.udl_username, state.udl_password,
                 state.udl_data_mode or "REAL",
                 source=state.udl_tle_source,
@@ -206,8 +213,9 @@ async def pol_analyse(
             logger.warning("PoL: UDL session failed: %s", exc)
             return _err(f"UDL fetch failed: {exc}")
 
-    # Merge historical + latest: latest_meta overrides historical (newer provenance).
+    # Merge historical + latest: latest entries override historical (newer provenance).
     merged_meta = {**meta, **latest_meta}
+    merged_rms  = {**rms_meta, **latest_rms}
     merged_text = tle_text + ("\n" if tle_text else "") + latest_text
 
     if not merged_text.strip():
@@ -219,7 +227,11 @@ async def pol_analyse(
     # ── Parse + analyse ───────────────────────────────────────────────────────
     try:
         threshold_km_s = dv_threshold_ms / 1000.0
-        records = parse_tle_history(merged_text, satno=satno, metadata=merged_meta)
+        apply_filter = bool(cadence_filter)
+        records = parse_tle_history(
+            merged_text, satno=satno,
+            metadata=merged_meta, rms_metadata=merged_rms,
+        )
         if not records:
             return render(request, "partials/pol_panel.html", {
                 "has_udl": bool(state.udl_username),
@@ -227,16 +239,27 @@ async def pol_analyse(
                 "error": f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             })
 
+        quality_flags: list[str] = []
+        if apply_filter:
+            raw_count = len(records)
+            records, quality_flags = filter_tle_history(records)
+            logger.info(
+                "PoL cadence filter: %d → %d records, %d flags for %d",
+                raw_count, len(records), len(quality_flags), satno,
+            )
+
         pol = analyse_pattern_of_life(
             records,
             satno=satno,
             name=name,
             dv_threshold=threshold_km_s,
+            quality_flags=quality_flags,
         )
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
+        filter_note = f" [cadence-filtered, {len(quality_flags)} flags]" if apply_filter else ""
         state.append_log(
             f"[POL] Analysed {satno}: {pol.tle_count} TLEs, "
-            f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]"
+            f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
     except Exception as exc:
         logger.exception("PoL analysis failed for %d", satno)
@@ -249,7 +272,74 @@ async def pol_analyse(
     return render(request, "partials/pol_results.html", {
         "pol": pol,
         "source": "UDL",
-        "osint": get_intel(satno),
+        "pair": get_intel(satno),
+    })
+
+
+@router.post("/monte-carlo", response_class=HTMLResponse)
+async def pol_monte_carlo(
+    request: Request,
+    satno: Annotated[int, Form()],
+    manoeuvre_epoch: Annotated[str, Form()],
+    dv_km_s: Annotated[float, Form()],
+    manoeuvre_type: Annotated[str, Form()] = "orbit_raise",
+    n_samples: Annotated[int, Form()] = 500,
+    horizon_h: Annotated[float, Form()] = 48.0,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Run Monte Carlo simulation for a specific detected manoeuvre."""
+    import asyncio
+
+    from sipc.astro.monte_carlo import (
+        MANOEUVRE_ARCHETYPES,
+        ManoeuvreHypothesis,
+        hypothesis_from_tle_record,
+        run_monte_carlo,
+    )
+
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+
+    if pol is None or pol.satno != satno:
+        return HTMLResponse(
+            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
+        )
+
+    # Find the manoeuvre matching the requested epoch
+    target_epoch_str = manoeuvre_epoch[:19]  # trim to seconds
+    matching = [
+        m for m in pol.manoeuvres
+        if m.epoch.strftime("%Y-%m-%dT%H:%M:%S") == target_epoch_str
+    ]
+    if not matching:
+        return HTMLResponse(
+            f'<p class="error-msg">Manoeuvre at {manoeuvre_epoch} not found in PoL results.</p>'
+        )
+
+    manoeuvre = matching[0]
+
+    try:
+        hypothesis = hypothesis_from_tle_record(
+            manoeuvre.tle_before,
+            manoeuvre,
+            n_samples=min(max(n_samples, 50), 2000),
+            archetype_override=manoeuvre_type,
+        )
+        hypothesis.prediction_horizon_hours = horizon_h  # type: ignore[attr-defined]
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_monte_carlo(hypothesis, satno=satno, prediction_horizon_hours=horizon_h),
+        )
+    except Exception as exc:
+        logger.exception("Monte Carlo failed for %d", satno)
+        return HTMLResponse(f'<p class="error-msg">Monte Carlo error: {exc}</p>')
+
+    return render(request, "partials/pol_mc_results.html", {
+        "mc": result,
+        "manoeuvre": manoeuvre,
+        "archetypes": list(MANOEUVRE_ARCHETYPES.keys()),
     })
 
 
@@ -321,4 +411,197 @@ async def pol_chart_data(
             "interval_low": pol.pol_low_interval,
             "interval_high": pol.pol_high_interval,
         },
+    })
+
+
+
+@router.get("/notso-panel", response_class=HTMLResponse)
+async def pol_notso_panel(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Return the NOTSO correlation input panel."""
+    from sipc.data.notso_cache import get_notso_cache
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+    cache = get_notso_cache()
+    cache_count_for_sat = len(cache.get_for_satno(pol.satno)) if pol else 0
+    return render(request, "partials/notso_panel.html", {
+        "has_udl": bool(state.udl_username),
+        "pol": pol,
+        "cache_total": cache.total_records(),
+        "cache_last_sync": cache.last_sync_utc(),
+        "cache_count_for_sat": cache_count_for_sat,
+    })
+
+
+@router.post("/notso-correlate", response_class=HTMLResponse)
+async def pol_notso_correlate(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Correlate NOTSOs with the last PoL analysis.
+
+    Source priority:
+      1. Operator-pasted text (``notso_text`` form field, if non-empty).
+      2. Local NOTSO cache for the current satno (automatic if text is empty).
+    """
+    from sipc.astro.notso import (
+        NOTSORecord,
+        NOTSOType,
+        correlate_notsos_with_manoeuvres,
+        extract_behaviour_profile,
+        parse_notso_text,
+    )
+    from sipc.data.notso_cache import get_notso_cache
+
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+
+    if pol is None:
+        return HTMLResponse(
+            '<p class="error-msg">Run Pattern of Life analysis first before correlating NOTSOs.</p>'
+        )
+
+    form = await request.form()
+    notso_text = str(form.get("notso_text") or "").strip()
+
+    notsos: list[NOTSORecord] = []
+    source_label = ""
+
+    if notso_text:
+        # Path 1: operator-pasted text
+        notsos = parse_notso_text(notso_text)
+        source_label = "pasted text"
+        if not notsos:
+            return HTMLResponse(
+                '<p class="error-msg">No NOTSO records could be parsed. '
+                'Check the message format (SATNO, effective window, and type fields are required).</p>'
+            )
+    else:
+        # Path 2: load from local cache for this satno
+        cache = get_notso_cache()
+        raw_records = cache.get_for_satno(pol.satno)
+        if not raw_records:
+            return HTMLResponse(
+                '<p class="error-msg">No NOTSOs in local cache for SATNO '
+                f'{pol.satno}. Run a cache sync first, or paste NOTSO messages manually.</p>'
+            )
+        # Convert raw cache dicts → NOTSORecord using the existing text parser
+        # Each record has a msgText field (full notification text) or we reconstruct it.
+        for rec in raw_records:
+            msg_text = str(rec.get("msgText") or rec.get("message") or "")
+            if not msg_text:
+                # Reconstruct minimal parseable text from structured fields
+                created = rec.get("createdAt") or ""
+                msg_text = (
+                    f"MSGID: {rec.get('msgId', '')}\n"
+                    f"SATNO: {rec.get('satNo', '')}\n"
+                    f"ISSUE DATE: {created}\n"
+                    f"EFFECTIVE START: {created}\n"
+                    f"TYPE: MANOEUVRE\n"
+                    f"DESCRIPTION: {rec.get('msgType', 'TACREP_NOTSO')}"
+                )
+            parsed = parse_notso_text(msg_text)
+            # If parser couldn't extract satno, force it from the record
+            for p in parsed:
+                if p.norad_id == 0 or p.norad_id is None:
+                    p.norad_id = int(rec.get("satNo") or 0)
+            notsos.extend(parsed)
+        source_label = f"local cache ({len(raw_records)} records)"
+        if not notsos:
+            return HTMLResponse(
+                f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
+                f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
+            )
+
+    try:
+        correlations = correlate_notsos_with_manoeuvres(
+            notsos, pol.manoeuvres, pol.satno
+        )
+
+        start = pol.records[0].epoch if pol.records else (pol.manoeuvres[0].epoch if pol.manoeuvres else None)
+        end   = pol.records[-1].epoch if pol.records else (pol.manoeuvres[-1].epoch if pol.manoeuvres else None)
+        profile = extract_behaviour_profile(pol.satno, correlations, start, end) if (start and end) else None
+
+        state.append_log(
+            f"[NOTSO] Correlated {len(notsos)} NOTSOs ({source_label}) for {pol.satno}: "
+            f"{sum(1 for c in correlations if c.correlation_type == 'matched')} matched, "
+            f"{sum(1 for c in correlations if c.correlation_type == 'notso_only')} NOTSO-only, "
+            f"{sum(1 for c in correlations if c.correlation_type == 'manoeuvre_only')} manoeuvre-only"
+        )
+    except Exception as exc:
+        logger.exception("NOTSO correlation failed for %d", pol.satno)
+        return HTMLResponse(f'<p class="error-msg">Correlation error: {exc}</p>')
+
+    return render(request, "partials/notso_results.html", {
+        "correlations": correlations,
+        "profile": profile,
+        "pol": pol,
+        "source_label": source_label,
+    })
+
+
+# ── Photometry routes ─────────────────────────────────────────────────────────
+
+@router.get("/photometry-panel", response_class=HTMLResponse)
+async def pol_photometry_panel(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Return the photometry analysis input panel."""
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+    return render(request, "partials/photometry_panel.html", {
+        "pol": pol,
+    })
+
+
+@router.post("/photometry-analyse", response_class=HTMLResponse)
+async def pol_photometry_analyse(
+    request: Request,
+    csv_text: Annotated[str, Form()] = "",
+    recent_window_days: Annotated[float, Form()] = 30.0,
+    baseline_window_days: Annotated[float, Form()] = 90.0,
+    extinction_coeff: Annotated[float, Form()] = 0.12,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Parse photometry CSV and run change-detection analysis."""
+    from sipc.astro.photometry import assess_photometry, parse_photometry_csv
+
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+
+    if not csv_text.strip():
+        return HTMLResponse('<p class="error-msg">Paste a CSV with at least epoch_utc and apparent_magnitude columns.</p>')
+
+    try:
+        observations = parse_photometry_csv(csv_text)
+        if len(observations) < 5:
+            return HTMLResponse(
+                f'<p class="error-msg">Need at least 5 valid observations, got {len(observations)}.</p>'
+            )
+
+        manoeuvres = pol.manoeuvres if pol else []
+        result = assess_photometry(
+            observations,
+            manoeuvres=manoeuvres,
+            extinction_coeff=extinction_coeff,
+            recent_window_days=recent_window_days,
+            baseline_window_days=baseline_window_days,
+        )
+
+        state.append_log(
+            f"[Photometry] Analysed {len(observations)} obs"
+            + (f" for SATNO {pol.satno}" if pol else "")
+            + f": {result.change_direction} (p={result.p_value:.4f})"
+        )
+    except Exception as exc:
+        logger.exception("Photometry analysis failed")
+        return HTMLResponse(f'<p class="error-msg">Analysis error: {exc}</p>')
+
+    return render(request, "partials/photometry_results.html", {
+        "result": result,
+        "n_observations": len(observations),
+        "pol": pol,
     })

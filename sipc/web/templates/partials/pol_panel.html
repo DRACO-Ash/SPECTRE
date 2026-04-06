@@ -74,6 +74,20 @@
 
     </div>
 
+    {# ── Cadence filter option — collapsed by default ── #}
+    <details style="margin-bottom:0.5rem">
+      <summary style="font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); cursor:pointer; user-select:none; list-style:none; display:flex; align-items:center; gap:0.4rem;">
+        <span style="font-size:0.6rem">&#9654;</span> Advanced Filters
+      </summary>
+      <div style="padding:0.5rem 0 0.2rem 1rem">
+        <label style="font-size:0.72rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer"
+               title="Groups TLEs within the regime spacing threshold (15/30/60 min for LEO/MEO/GEO) and keeps one high-quality representative per cluster. Reduces false manoeuvre detections from dense multi-sensor passes.">
+          <input type="checkbox" name="cadence_filter" value="1">
+          <span>Apply TLE cadence filter <span style="color:var(--text-dim); font-weight:400">(deduplicate dense passes)</span></span>
+        </label>
+      </div>
+    </details>
+
     <div class="submit-row" style="margin-top:0.5rem">
       <button type="submit" class="btn-primary">Analyse Pattern of Life</button>
       <span id="pol-indicator" class="htmx-indicator">

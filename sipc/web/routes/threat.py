@@ -108,7 +108,7 @@ async def red_orbit_info(
         epoch_str = epoch.strftime("%Y-%m-%d %H:%M UTC") if tle_epoch else "—"
 
         satno = satno_from_tle(track.tle)
-        osint = get_intel(satno)
+        pair = get_intel(satno)
 
         return render(request, "partials/red_orbit_info.html", {
             "name": track.name,
@@ -119,7 +119,7 @@ async def red_orbit_info(
             "alt_km": alt_km,
             "ecc": ecc,
             "a_km": a_km,
-            "osint": osint,
+            "pair": pair,
         })
     except Exception as exc:
         logger.warning("red_orbit_info failed for %s: %s", red_sat, exc)
@@ -203,6 +203,65 @@ def _objects_for_group(
     return results
 
 
+@router.post("/add-manual-tle", response_model=None)
+async def add_manual_tle(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Add a manually provided TLE to the session's manual sweep target list."""
+    state = get_session_state(current_user.username)
+    form = await request.form()
+    name = str(form.get("manual_name") or "").strip()
+    tle = str(form.get("manual_tle") or "").strip()
+    confidence = str(form.get("manual_confidence") or "MEDIUM").strip().upper()
+
+    if not name:
+        return render(request, "partials/sweep_manual_tles.html", {
+            "manual_tles": state.manual_sweep_tles,
+            "error": "Target name is required.",
+        })
+    if not tle:
+        return render(request, "partials/sweep_manual_tles.html", {
+            "manual_tles": state.manual_sweep_tles,
+            "error": "TLE is required.",
+        })
+
+    # Validate TLE by attempting to parse it.
+    try:
+        TLEOrbit(tle)
+    except Exception as exc:
+        return render(request, "partials/sweep_manual_tles.html", {
+            "manual_tles": state.manual_sweep_tles,
+            "error": f"Invalid TLE: {exc}",
+        })
+
+    # Replace existing entry with same name, otherwise append.
+    state.manual_sweep_tles = [e for e in state.manual_sweep_tles if e["name"] != name]
+    state.manual_sweep_tles.append({"name": name, "tle": tle, "confidence": confidence})
+    state.append_log(f"[THREAT] Manual TLE added: {name} ({confidence})")
+
+    return render(request, "partials/sweep_manual_tles.html", {
+        "manual_tles": state.manual_sweep_tles,
+        "error": None,
+    })
+
+
+@router.post("/remove-manual-tle", response_model=None)
+async def remove_manual_tle(
+    request: Request,
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Remove a manual TLE entry from the session."""
+    state = get_session_state(current_user.username)
+    form = await request.form()
+    name = str(form.get("manual_name") or "").strip()
+    state.manual_sweep_tles = [e for e in state.manual_sweep_tles if e["name"] != name]
+    return render(request, "partials/sweep_manual_tles.html", {
+        "manual_tles": state.manual_sweep_tles,
+        "error": None,
+    })
+
+
 @router.get("/target-config", response_model=None)
 async def target_config(
     request: Request,
@@ -220,6 +279,7 @@ async def target_config(
         "red_hrr": red_hrr,
         "interceptor_regime": regime,
         "interceptor_name": red_sat,
+        "manual_tles": state.manual_sweep_tles,
     })
 
 
@@ -233,21 +293,26 @@ async def fetch_targets(
     form = await request.form()
     tgt_group = str(form.get("tgt_group") or "").strip()
 
-    if not tgt_group or ":" not in tgt_group:
+    if not tgt_group:
         return HTMLResponse("")
 
-    side, rank_str = tgt_group.split(":", 1)
-    try:
-        rank = int(rank_str)
-    except ValueError:
-        return render(request, "partials/sweep_fetch_status.html", {
-            "error": f"Invalid rank: {rank_str}", "fetched": None, "total": 0, "failed": 0,
-        })
+    if tgt_group == "all":
+        objects = list(state.hrr_objects)
+    elif ":" not in tgt_group:
+        return HTMLResponse("")
+    else:
+        side, rank_str = tgt_group.split(":", 1)
+        try:
+            rank = int(rank_str)
+        except ValueError:
+            return render(request, "partials/sweep_fetch_status.html", {
+                "error": f"Invalid rank: {rank_str}", "fetched": None, "total": 0, "failed": 0,
+            })
+        objects = _objects_for_group(state, side, rank)
 
-    objects = _objects_for_group(state, side, rank)
     if not objects:
         return render(request, "partials/sweep_fetch_status.html", {
-            "error": f"No {side.title()} HRR Rank {rank} objects found.",
+            "error": "No HRR objects found for selected group.",
             "fetched": None, "total": 0, "failed": 0,
         })
 
@@ -257,11 +322,17 @@ async def fetch_targets(
             "fetched": None, "total": 0, "failed": 0,
         })
 
-    from sipc.web.routes.udl import fetch_tle_for_satno
+    from sipc.web.routes.udl import fetch_tle_for_satno, fetch_tle_history_for_satno
+    from sipc.config.constants import TLE_CLUSTERING
+
+    # Clear the multi-TLE cache so this fetch starts clean; prevents stale TLEs
+    # from a prior group selection contaminating clustering for the new group.
+    state.hrr_tle_multiset.clear()
 
     sem = asyncio.Semaphore(10)
     fetched = 0
     failed = 0
+    _window_hours: float = float(TLE_CLUSTERING.get("fetch_window_hours", 24))
 
     async def _fetch_one(satno_str: str) -> None:
         nonlocal fetched, failed
@@ -279,6 +350,15 @@ async def fetch_targets(
                 state.hrr_tle_cache[satno_str] = tle
                 state.hrr_tle_data_mode[satno_str] = dm
                 fetched += 1
+                # Also fetch multi-provider history for clustering.
+                history = await fetch_tle_history_for_satno(
+                    int(satno_str), state.udl_username, state.udl_password,
+                    window_hours=_window_hours,
+                    data_mode=state.udl_data_mode or "REAL",
+                    source=state.udl_tle_source,
+                )
+                if len(history) > 1:
+                    state.hrr_tle_multiset[satno_str] = history
             else:
                 failed += 1
 
@@ -309,24 +389,35 @@ _EVENT_TO_LOCATION = {
 def _build_target_list(
     state: object,
     side: str,
-    rank: int,
+    rank: int | None,
+    exclude_satno: str | None = None,
 ) -> list[ThreatTarget]:
     """Build a target list from HRR objects matching *side* and *rank*.
 
     Parameters:
-        side: ``'blue'`` or ``'red'`` — the HRR side to include.
-        rank: HRR rank level (0–5).
+        side: ``'blue'``, ``'red'``, or ``'all'`` — HRR side to include.
+        rank: HRR rank level (0–5), or ``None`` when *side* is ``'all'``.
+        exclude_satno: SATNO string to omit (the interceptor itself).
     """
     targets: list[ThreatTarget] = []
 
-    for obj in _objects_for_group(state, side, rank):
+    raw_objects: list[dict]
+    if side == "all":
+        raw_objects = list(state.hrr_objects)  # type: ignore[attr-defined]
+    else:
+        raw_objects = _objects_for_group(state, side, rank or 0)
+
+    for obj in raw_objects:
         satno = str(obj.get("satno") or "").strip()
+        if exclude_satno and satno == exclude_satno:
+            continue
         name = str(obj.get("name") or satno or "HRR-?").strip()
+        obj_rank = obj.get("rank")
         targets.append(ThreatTarget(
             target_name=name,
             target_satno=satno,
             target_source="hrr",
-            hrr_rank=rank,
+            hrr_rank=obj_rank,
         ))
 
     return targets
@@ -590,6 +681,7 @@ def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict | None:
 
     return {
         "target_name": worst.target.target_name,
+        "target_satno": worst.target.target_satno or "",
         "method": worst.method,
         "intent_label": intent_label,
         "dv": round(dv, 4),
@@ -635,7 +727,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
             "best_tof": best.tof_hours,
             "profile_count": len(items),
             "children": [{"flat_idx": idx, "entry": e} for idx, e in items],
-            "osint": get_intel(best.target.target_satno or None),
+            "osint": get_intel(best.target.target_satno or None),  # key stays 'osint' — threat_sweep.html reads group.osint
         })
 
     groups.sort(key=lambda g: g["best_dv"])
@@ -655,39 +747,81 @@ async def threat_sweep(
     now = datetime.now(tz=UTC)
     errors: list[str] = []
 
-    # Parse target group selection (e.g. "blue:1", "red:3").
+    # Parse target group selection (e.g. "blue:1", "red:3", "all").
     form = await request.form()
     tgt_group = str(form.get("tgt_group") or "").strip()
 
-    if not tgt_group or ":" not in tgt_group:
+    # Read optional manual red TLE override.
+    manual_red_tle_raw = str(form.get("manual_red_tle") or "").strip()
+    manual_red_confidence = str(form.get("manual_red_confidence") or "MEDIUM").strip().upper()
+    manual_red_tle: str | None = None
+    if manual_red_tle_raw:
+        try:
+            TLEOrbit(manual_red_tle_raw)  # validate
+            manual_red_tle = manual_red_tle_raw
+        except Exception as exc:
+            errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
+
+    if not tgt_group or tgt_group == "none":
+        side, rank = "none", None
+        group_label = "Manual only"
+    elif tgt_group == "all":
+        side, rank = "all", None
+        group_label = "All HRR"
+    elif ":" in tgt_group:
+        side, rank_str = tgt_group.split(":", 1)
+        try:
+            rank = int(rank_str)
+        except ValueError:
+            return render(request, "partials/threat_sweep.html", {
+                "assessment": None,
+                "error": f"Invalid target group rank: {rank_str}",
+            })
+        group_label = f"{side.title()} HRR Rank {rank}"
+    else:
         return render(request, "partials/threat_sweep.html", {
             "assessment": None,
-            "error": "Select a target group from the dropdown before sweeping.",
+            "error": f"Invalid target group: {tgt_group}",
         })
 
-    side, rank_str = tgt_group.split(":", 1)
-    try:
-        rank = int(rank_str)
-    except ValueError:
-        return render(request, "partials/threat_sweep.html", {
-            "assessment": None,
-            "error": f"Invalid target group rank: {rank_str}",
-        })
-
-    # Find red TLE.
-    red_tle = _find_tle(state, red_sat.strip())
+    # Find red TLE — manual override takes precedence over the registered track.
+    if manual_red_tle:
+        red_tle = manual_red_tle
+    else:
+        red_tle = _find_tle(state, red_sat.strip())
     if not red_tle:
         return render(request, "partials/threat_sweep.html", {
             "assessment": None,
             "error": f"No TLE found for red satellite: {red_sat}",
         })
 
-    # Build target list from the selected HRR group.
-    targets = _build_target_list(state, side, rank)
+    # Build HRR target list, excluding the interceptor itself.
+    red_satno = str(satno_from_tle(red_tle)) if red_tle else None
+    if side == "none":
+        targets = []
+    else:
+        targets = _build_target_list(state, side, rank, exclude_satno=red_satno)
+
+    # Build manual targets from session state.
+    _manual_tle_by_name: dict[str, str] = {}
+    for _m in state.manual_sweep_tles:
+        _mname = _m["name"]
+        _mtle = _m["tle"]
+        _mconf = _m.get("confidence", "")
+        _msatno = str(satno_from_tle(_mtle)) if _mtle else ""
+        targets.append(ThreatTarget(
+            target_name=_mname,
+            target_satno=_msatno,
+            target_source="manual",
+            hrr_rank=None,
+            confidence=_mconf,
+        ))
+        _manual_tle_by_name[_mname] = _mtle
+
     if not targets:
         return render(request, "partials/threat_sweep.html", {
             "assessment": None,
-            "error": f"No {side.title()} HRR Rank {rank} objects found.",
+            "error": "No targets available — select an HRR group or add manual TLEs.",
         })
 
     # Hard cap: prevent runaway compute on unexpectedly large groups.
@@ -719,10 +853,26 @@ async def threat_sweep(
 
         await asyncio.gather(*[_fetch_one(t) for t in missing])
 
+    # Cluster multi-provider TLEs and reduce to best representative per object.
+    from sipc.astro.tle_preprocessing import cluster_and_reduce_tle_cache
+    from sipc.config.constants import TLE_CLUSTERING
+
+    clustering_summary = None
+    if state.hrr_tle_multiset:
+        try:
+            reduced, clustering_summary = cluster_and_reduce_tle_cache(
+                state.hrr_tle_multiset,
+                state.hrr_tle_cache,
+                TLE_CLUSTERING,
+            )
+            state.hrr_tle_cache.update(reduced)
+        except Exception as _cl_exc:
+            logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
+
     # Compute epochs for red satellite.
     epochs = _compute_epochs(red_tle, now)
 
-    # All targets are HRR — TLEs come from the cache.
+    # Count total targets (HRR + manual).
     hrr_count = len(targets)
 
     # Classify red satellite's regime once — used to skip incompatible targets.
@@ -738,7 +888,10 @@ async def threat_sweep(
         all_entries: list[ThreatSweepEntry] = []
         sweep_errors: list[str] = []
         for target in targets:
-            tle = state.hrr_tle_cache.get(target.target_satno)
+            if target.target_source == "manual":
+                tle = _manual_tle_by_name.get(target.target_name)
+            else:
+                tle = state.hrr_tle_cache.get(target.target_satno)
             if not tle:
                 sweep_errors.append(f"No TLE for {target.target_name} — skipped")
                 continue
@@ -782,8 +935,11 @@ async def threat_sweep(
     grouped = _group_entries(entries)
     # Attach UDL dataMode provenance to each group for the display-time filter.
     for g in grouped:
-        satno = g["target"].target_satno
-        g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"
+        if g["target"].target_source == "manual":
+            g["data_mode"] = "MANUAL"
+        else:
+            satno = g["target"].target_satno
+            g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"
 
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries)
@@ -791,12 +947,12 @@ async def threat_sweep(
     state.last_threat_assessment = assessment
     state.append_log(
         f"[THREAT] Sweep complete: {red_sat} vs {len(targets)} "
-        f"{side.title()} HRR Rank {rank} targets, "
+        f"{group_label} targets, "
         f"{len(entries)} solutions, {elapsed:.1f}s"
     )
     logger.info(
-        "threat_sweep: %s vs %d targets (%s HRR %d), %d solutions, %.1fs by %s",
-        red_sat, len(targets), side, rank, len(entries), elapsed,
+        "threat_sweep: %s vs %d targets (%s), %d solutions, %.1fs by %s",
+        red_sat, len(targets), group_label, len(entries), elapsed,
         current_user.username,
     )
 
@@ -805,6 +961,9 @@ async def threat_sweep(
         "grouped": grouped,
         "hrr_count": hrr_count,
         "worst_coa": worst_coa,
+        "red_satno": red_satno or "",
+        "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
+        "clustering_summary": clustering_summary,
         "error": None,
     })
 

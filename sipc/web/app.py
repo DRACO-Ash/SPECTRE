@@ -16,6 +16,9 @@ from fastapi.templating import Jinja2Templates
 from sipc.config.settings import get_settings
 from sipc.web.database import init_db
 from sipc.web.planning_state import set_default_hrr_objects
+from sipc.web.routes.decision import router as decision_router
+from sipc.web.routes.geometry import router as geometry_router
+from sipc.web.routes.training import router as training_router
 from sipc.web.routes.gcat import router as gcat_router
 from sipc.web.routes.login import router as login_router
 from sipc.web.routes.maneuver import router as maneuver_router
@@ -33,6 +36,7 @@ templates.env.autoescape = True  # Enforce HTML autoescaping (defence-in-depth a
 
 # Custom Jinja2 filters
 templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL-encoded string
+templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 
 
 _HRR_LIST_PATH = Path(__file__).parent.parent.parent / "HRR_List.json"
@@ -95,3 +99,6 @@ app.include_router(maneuver_router)
 app.include_router(threat_router)
 app.include_router(pol_router)
 app.include_router(gcat_router)
+app.include_router(decision_router)
+app.include_router(geometry_router)
+app.include_router(training_router)

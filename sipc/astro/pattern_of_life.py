@@ -16,7 +16,7 @@ Given a chronological list of TLEs for a single object this module:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -85,6 +85,10 @@ class TLERecord:
     # UDL provenance — populated when TLE was fetched via UDL API
     data_mode: str = ""
     source:    str = ""
+
+    # Quality metadata — populated from UDL elset record when available
+    rms_residual:   float | None = None  # Fit residual from UDL (lower = better quality)
+    element_set_no: int          = 0     # TLE element-set number from line 1 col 64–67
 
 
 @dataclass
@@ -241,6 +245,9 @@ class PolAnalysis:
     pol_high_interval:      float | None
     pol_low_interval:       float | None
 
+    # TLE cadence filter — populated when cadence filtering was applied
+    quality_flags:          list = field(default_factory=list)  # list[QualityFlag]
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -301,6 +308,12 @@ def _satrec_to_record(tle: str) -> TLERecord:
         # Drift rate: positive = east
         geo_drift = 360.0 * (n_revday - _EARTH_ROT)
 
+    # Element Set Number — TLE line 1, columns 65-68 (1-indexed), right-justified
+    try:
+        esn = int(lines[-2][64:68].strip())
+    except (ValueError, IndexError):
+        esn = 0
+
     return TLERecord(
         epoch=epoch, tle=tle,
         sma_km=sma, ecc=ecc, inc_deg=inc_deg,
@@ -309,6 +322,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
         alt_km=alt_km, period_min=period_min, regime=regime,
         geo_longitude_deg=geo_lon,
         geo_drift_rate_deg_day=geo_drift,
+        element_set_no=esn,
     )
 
 
@@ -696,12 +710,18 @@ def parse_tle_history(
     tle_text: str,
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
+    rms_metadata: dict[str, float | None] | None = None,
 ) -> list[TLERecord]:
     """Parse a block of historical TLEs into chronologically-sorted TLERecords.
 
-    *metadata* optionally maps TLE line-1 strings to ``(data_mode, source)``
-    tuples retrieved from the UDL response, which are stored on each record
-    for provenance tracking and display in the elset table.
+    Parameters
+    ----------
+    metadata:
+        Maps TLE line-1 strings to ``(data_mode, source)`` tuples from UDL.
+    rms_metadata:
+        Maps TLE line-1 strings to RMS fit residuals from UDL (optional).
+        Stored on each record as ``rms_residual`` for quality-based selection
+        in :func:`~sipc.astro.tle_filter.filter_tle_history`.
     """
     raw_lines = [ln.rstrip() for ln in tle_text.splitlines()]
     pairs: list[tuple[str, str]] = []
@@ -732,6 +752,8 @@ def parse_tle_history(
                 seen.add(key)
                 if metadata and l1 in metadata:
                     rec.data_mode, rec.source = metadata[l1]
+                if rms_metadata and l1 in rms_metadata:
+                    rec.rms_residual = rms_metadata[l1]
                 records.append(rec)
         except Exception:
             continue
@@ -745,8 +767,16 @@ def analyse_pattern_of_life(
     satno: int = 0,
     name: str = "UNKNOWN",
     dv_threshold: float = _DV_NOISE_FLOOR,
+    quality_flags: list[str] | None = None,
 ) -> PolAnalysis:
-    """Run the full PoL analysis on a sorted list of TLERecords."""
+    """Run the full PoL analysis on a sorted list of TLERecords.
+
+    Parameters
+    ----------
+    quality_flags:
+        Optional list of warning strings from :func:`~sipc.astro.tle_filter.filter_tle_history`.
+        Stored on the returned :class:`PolAnalysis` for display in the UI.
+    """
     if not records:
         raise ValueError("No TLE records to analyse")
 
@@ -895,4 +925,5 @@ def analyse_pattern_of_life(
         pol_high_dv=round(dv_stats.high_2sigma, 4)     if dv_stats else None,
         pol_high_interval=round(interval_stats.high_2sigma, 1) if interval_stats else None,
         pol_low_interval =round(interval_stats.low_2sigma,  1) if interval_stats else None,
+        quality_flags=quality_flags or [],
     )

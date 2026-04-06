@@ -75,9 +75,51 @@
 </div>
 
 
-{# ── OSINT Intelligence Record (if available for this SATNO) ── #}
-{% set osint_label = "SUBJECT INTELLIGENCE" %}
-{% include "partials/osint_card.html" %}
+{# ── TLE Cadence Filter Quality Flags — sorted newest first ── #}
+{% if pol.quality_flags %}
+<div style="background:rgba(245,158,11,0.04); border:1px solid rgba(245,158,11,0.35); border-radius:5px;
+            padding:0.6rem 0.8rem; margin-bottom:0.7rem">
+  <div style="font-size:0.65rem; font-weight:700; color:#f59e0b; text-transform:uppercase;
+              letter-spacing:0.07em; margin-bottom:0.5rem">
+    TLE Cadence Filter — {{ pol.quality_flags | length }} quality flag{{ 's' if pol.quality_flags | length != 1 else '' }}
+  </div>
+  <div style="display:flex; flex-direction:column; gap:0.3rem">
+    {% for flag in pol.quality_flags %}
+    <div style="display:flex; align-items:flex-start; gap:0.5rem; font-size:0.67rem; line-height:1.5">
+      {# Date stamp #}
+      <span style="flex-shrink:0; font-family:var(--font-mono); font-size:0.62rem;
+                   color:var(--text-muted); padding-top:0.05rem; min-width:5.5rem">
+        {{ flag.epoch.strftime('%Y-%m-%d') }}
+      </span>
+      {# Type badge #}
+      {% if flag.flag_type == 'gap' %}
+        <span style="flex-shrink:0; font-size:0.58rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.06em; background:rgba(251,191,36,0.15); color:#fbbf24;
+                     border:1px solid rgba(251,191,36,0.4); border-radius:3px; padding:0.1rem 0.35rem">GAP</span>
+      {% elif flag.flag_type == 'bstar' %}
+        <span style="flex-shrink:0; font-size:0.58rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.06em; background:rgba(249,115,22,0.15); color:#f97316;
+                     border:1px solid rgba(249,115,22,0.4); border-radius:3px; padding:0.1rem 0.35rem">B*</span>
+      {% elif flag.flag_type == 'cluster' %}
+        <span style="flex-shrink:0; font-size:0.58rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.06em; background:rgba(59,130,246,0.15); color:#60a5fa;
+                     border:1px solid rgba(59,130,246,0.4); border-radius:3px; padding:0.1rem 0.35rem">CLUSTER</span>
+      {% else %}
+        <span style="flex-shrink:0; font-size:0.58rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.06em; background:rgba(148,163,184,0.12); color:var(--text-dim);
+                     border:1px solid rgba(148,163,184,0.25); border-radius:3px; padding:0.1rem 0.35rem">INFO</span>
+      {% endif %}
+      {# Message #}
+      <span style="color:var(--text-dim)">{{ flag.message }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── PAIR Intelligence Record (if available for this SATNO) ── #}
+{% set pair_label = "SUBJECT INTELLIGENCE" %}
+{% include "partials/pair_card.html" %}
 
 
 {# ══════════════════════════════════════════════════════════════════════════════
@@ -220,7 +262,7 @@
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
   {{ stat_card("Altitude", pol.records[-1].alt_km | round(1) ~ " km", "current mean") }}
-  {{ stat_card("Inclination", pol.records[-1].inc_deg | round(4) ~ "°", "current") }}
+  {{ stat_card("Inclination [𝑖]", pol.records[-1].inc_deg | round(4) ~ "°", "current") }}
   {% if pol.records[-1].geo_longitude_deg is not none %}
   {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--ops-gold)") }}
   {% endif %}
@@ -270,7 +312,7 @@
   </div>
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
     <div style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem">
-      Period (min) — proxy for semi-major axis perturbation
+      Period (min) — proxy for semi-major axis [𝑎] perturbation
     </div>
     <canvas id="pol-period-chart" height="90"></canvas>
   </div>
@@ -338,11 +380,11 @@
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem">
     <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Mean Altitude (km)</div>
          <canvas id="pol-alt-chart" height="75"></canvas></div>
-    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Inclination (°)</div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Inclination [<em>i</em>] (°)</div>
          <canvas id="pol-inc-chart" height="75"></canvas></div>
-    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Eccentricity</div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">Eccentricity [<em>e</em>]</div>
          <canvas id="pol-ecc-chart" height="75"></canvas></div>
-    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">RAAN (°, raw incl. J2 secular)</div>
+    <div><div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">RAAN [&Omega;] (°, raw incl. J2 secular)</div>
          <canvas id="pol-raan-chart" height="75"></canvas></div>
   </div>
 </div>
@@ -488,6 +530,7 @@
           <th onclick="polSort(this)" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
           <th style="text-align:right">Alt After</th>
+          <th style="text-align:center">MC</th>
         </tr>
       </thead>
       <tbody>
@@ -521,6 +564,19 @@
           <td class="col-dim">{{ m.dominant_element }}</td>
           <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
           <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
+          <td style="text-align:center">
+            <button type="button"
+                    class="btn-secondary"
+                    style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
+                    title="Run Monte Carlo simulation for this manoeuvre"
+                    hx-post="/pol/monte-carlo"
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "dv_km_s": "{{ m.delta_v_km_s }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
+                    hx-target="#pol-mc-results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#pol-mc-indicator">
+              ▶ MC
+            </button>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -533,6 +589,38 @@
   This object appears <strong>passive</strong> or non-manoeuvring.</p>
 </div>
 {% endif %}
+
+{# ── Monte Carlo results placeholder — populated when operator clicks ▶ MC ── #}
+<div id="pol-mc-results" style="margin-bottom:0.6rem">
+  <span id="pol-mc-indicator" class="htmx-indicator" style="font-size:0.7rem; color:var(--text-dim)">
+    <span class="spinner"></span>Running Monte Carlo simulation&hellip;
+  </span>
+</div>
+
+{# ── NOTSO + Photometry sub-panels (lazy-loaded via HTMX) ─────────────────── #}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
+
+  {# NOTSO panel #}
+  <div hx-get="/pol/notso-panel"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+                padding:0.6rem; font-size:0.65rem; color:var(--text-dim)">
+      <span class="spinner"></span> Loading NOTSO panel…
+    </div>
+  </div>
+
+  {# Photometry panel #}
+  <div hx-get="/pol/photometry-panel"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+                padding:0.6rem; font-size:0.65rem; color:var(--text-dim)">
+      <span class="spinner"></span> Loading photometry panel…
+    </div>
+  </div>
+
+</div>
 
 
 {# ══════════════════════════════════════════════════════════════════════════════
@@ -575,9 +663,9 @@
           <th onclick="polSort(this)" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">SMA (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Inc (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Ecc<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
           {% if pol.records | selectattr("data_mode") | list %}

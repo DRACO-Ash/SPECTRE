@@ -80,6 +80,13 @@ class SessionState:
     udl_tle_source: str = ""
     # Available TLE sources discovered from UDL after login.
     udl_available_sources: list[str] = field(default_factory=list)
+    # Manually added TLE targets for threat sweep: [{name, tle, confidence}]
+    manual_sweep_tles: list[dict] = field(default_factory=list)
+    # Multi-TLE cache for clustering: SATNO → [TLE strings] from all providers.
+    # Populated by fetch-targets alongside hrr_tle_cache; consumed by the
+    # clustering step at sweep time. A satno absent from this dict means only
+    # one TLE was returned by UDL (nothing to cluster).
+    hrr_tle_multiset: dict[str, list[str]] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""

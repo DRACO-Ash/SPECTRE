@@ -5,13 +5,22 @@
 {% else %}
 <div class="threat-sweep-result">
   <div class="threat-sweep-summary">
-    <span class="badge-ok">Threat Sweep: {{ assessment.red_name }}</span>
+    <span class="badge-ok">Threat Sweep: {{ assessment.red_name }}{% if red_satno %} [{{ red_satno }}]{% endif %}</span>
     <span class="intercept-detail">
-      {{ assessment.target_count }} HRR targets,
+      {{ assessment.target_count }} targets,
       {{ assessment.entries|length }} solutions in {{ grouped|length }} groups,
       {{ "%.1f" | format(assessment.elapsed_s) }}s
     </span>
   </div>
+
+  {% if manual_red_confidence %}
+  {% set conf_color = "#22c55e" if manual_red_confidence == "CONFIRMED" else "#f59e0b" if manual_red_confidence == "HIGH" else "#3b8beb" if manual_red_confidence == "MEDIUM" else "#94a3b8" if manual_red_confidence == "LOW" else "#64748b" %}
+  <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.7rem; margin:0.3rem 0; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.3); border-radius:4px; font-size:0.75rem">
+    <span style="font-size:0.8rem">&#9888;</span>
+    <span style="color:var(--text-dim)">Red TLE source: <strong style="color:var(--text-primary)">MANUAL OVERRIDE</strong> &mdash; orbital mechanics computed from operator-supplied TLE.</span>
+    <span style="background:{{ conf_color }}22; color:{{ conf_color }}; font-size:0.65rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em; white-space:nowrap">{{ manual_red_confidence }}</span>
+  </div>
+  {% endif %}
 
   {% if worst_coa %}
   <div style="border-left:4px solid {{ worst_coa.threat_color }}; background:{{ worst_coa.threat_bg }}; border-radius:6px; padding:0.75rem 1rem; margin:0.6rem 0">
@@ -26,7 +35,9 @@
     {# ── Stat cards ── #}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
       <div class="stat-card">
-        <div class="stat-val" style="font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ worst_coa.target_name }}">{{ worst_coa.target_name }}</div>
+        <div class="stat-val" style="font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ worst_coa.target_name }}{% if worst_coa.target_satno %} [{{ worst_coa.target_satno }}]{% endif %}">
+          {{ worst_coa.target_name }}{% if worst_coa.target_satno %} <span style="font-size:0.68rem; opacity:0.7">[{{ worst_coa.target_satno }}]</span>{% endif %}
+        </div>
         <div class="stat-lbl">Primary Target</div>
       </div>
       <div class="stat-card">
@@ -83,6 +94,8 @@
   </div>
   {% endif %}
 
+  {% include "partials/clustering_summary.html" %}
+
   {% if assessment.errors %}
   <div class="callout callout-amber" style="margin:0.4rem 0">
     {% for err in assessment.errors %}
@@ -107,6 +120,7 @@
         <option value="SIMULATED">SIMULATED</option>
         <option value="TEST">TEST</option>
         <option value="EXERCISE">EXERCISE</option>
+        <option value="MANUAL">MANUAL</option>
       </select>
     </label>
     <button class="btn-secondary btn-sm" onclick="threatExpandAll()" title="Expand all groups">Expand All</button>
@@ -136,8 +150,23 @@
           <td class="threat-chevron-cell">
             <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>
           </td>
-          <td class="col-name" title="{{ group.target.target_name }}">{{ group.target.target_name }}</td>
-          <td class="col-dim">{{ group.target.target_source }}</td>
+          <td class="col-name" title="{{ group.target.target_name }}{% if group.target.target_satno %} [{{ group.target.target_satno }}]{% endif %}">
+            {{ group.target.target_name }}{% if group.target.target_satno %} <span style="opacity:0.6; font-size:0.75em">[{{ group.target.target_satno }}]</span>{% endif %}
+          </td>
+          <td class="col-dim">
+            {% if group.target.target_source == "manual" %}
+              manual
+              {% set conf = group.target.confidence | upper %}
+              {% if conf == "CONFIRMED" %}<span style="background:#22c55e22;color:#22c55e;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% elif conf == "HIGH" %}<span style="background:#f59e0b22;color:#f59e0b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% elif conf == "MEDIUM" %}<span style="background:#3b8beb22;color:#3b8beb;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% elif conf == "LOW" %}<span style="background:#94a3b822;color:#94a3b8;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% elif conf %}<span style="background:#64748b22;color:#64748b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% endif %}
+            {% else %}
+              {{ group.target.target_source }}
+            {% endif %}
+          </td>
           <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
           <td class="mnv-dv"><strong>{{ "%.4f" | format(group.best_dv) }}</strong></td>
           <td class="col-dim">{{ group.best_method }}</td>
@@ -146,13 +175,13 @@
           </td>
         </tr>
         {# ── Child header + rows (hidden by default) ── #}
-        {# ── OSINT intel detail row (hidden, revealed with group) ── #}
+        {# ── PAIR intel detail row (hidden, revealed with group) ── #}
         {% if group.osint %}
-        {% set osint = group.osint %}
+        {% set pair = group.osint %}
         <tr class="threat-child threat-children-{{ loop.index0 }}" style="display:none">
           <td colspan="7" style="padding:0 0.5rem 0.4rem 2.5rem">
-            {% set osint_label = "TARGET INTEL" %}
-            {% include "partials/osint_card.html" %}
+            {% set pair_label = "TARGET INTEL" %}
+            {% include "partials/pair_card.html" %}
           </td>
         </tr>
         {% endif %}

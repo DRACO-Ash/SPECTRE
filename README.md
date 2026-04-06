@@ -20,6 +20,7 @@ All orbital mechanics computations use the pure-Python `sipc.astro` package — 
 
 - Browsing the **GCAT** (General Catalog of Artificial Space Objects — J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, and paginated, with on-demand download and in-session caching
 - Analysing **Pattern of Life** from historical TLE sequences: manoeuvre detection, activity classification, and behavioural baseline
+- **TLE Clustering & De-duplication**: DBSCAN-based multi-provider TLE reduction, automatically run before each Threat Sweep to select the best representative TLE per satellite and flag objects with divergent orbit solutions (elevated uncertainty indicator)
 
 ---
 
@@ -153,9 +154,10 @@ Once logged in, the operator console has a collapsible sidebar (default 500 px) 
 
 8. **Run a Threat Sweep** — in the **Threat Sweep** panel:
    - Select a **Target Group** from the dropdown (Blue HRR or Red HRR, by rank 0–5)
-   - The dropdown automatically pre-fetches TLEs for the selected group
+   - The dropdown automatically pre-fetches TLEs for the selected group; multi-provider TLE history is fetched concurrently and clustered via DBSCAN to select the best representative per satellite before the sweep runs
    - Click **Sweep Targets** to batch-evaluate all objects at 5 orbital epochs (now, apogee, perigee, ascending node, descending node) using Hohmann transfers, then auto-refine the top 5 with Lambert for VNB components
    - Results are ranked by ΔV with one-click refinement per entry
+   - A **TLE Clustering** accordion in the results shows per-object reduction statistics; objects with multiple divergent clusters (possible recent manoeuvre) are flagged with an elevated-uncertainty warning
 
 9. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method. Use this to identify the optimal trade-off.
 
@@ -206,7 +208,10 @@ Outputs `docs/SIPC_Operator_Guide.docx` — a comprehensive 15-section guide for
 ```
 sipc/                       ← repo root
 ├── sipc/                   ← importable package
-│   ├── astro/              ← pure-Python orbital mechanics (classical transfers, tactical manoeuvres, advanced analysis, decision support, SGP4, events)
+│   ├── astro/              ← pure-Python orbital mechanics
+│   │   ├── tle_preprocessing.py  ← TLE clustering integration bridge;
+│   │   │                            cluster_and_reduce_tle_cache() + ClusteringSummary
+│   │   └── ...             ← transfers, tactical manoeuvres, advanced analysis, SGP4, events
 │   ├── domain/             ← intercept planning logic
 │   │   ├── models.py       ← BlueAsset, RedTrack, RunConfig, InterceptResult,
 │   │   │                      BurnResult, ManeuverOption, ManeuverSearchConfig
@@ -217,27 +222,70 @@ sipc/                       ← repo root
 │   │   ├── auth.py         ← session cookies + require_login dependency
 │   │   ├── database.py     ← async SQLAlchemy engine + admin bootstrap
 │   │   ├── models.py       ← User ORM model
-│   │   ├── planning_state.py ← per-session in-memory state (assets, intercept history)
+│   │   ├── planning_state.py ← per-session in-memory state (assets, TLE caches, intercept history)
 │   │   ├── routes/
 │   │   │   ├── login.py    ← GET/POST /login, POST /logout
 │   │   │   ├── operator.py ← dashboard, asset CRUD, log, orbital events
-│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, catalogue search, HRR watchlist
+│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, multi-provider history fetch,
+│   │   │   │                  catalogue search, HRR watchlist, NOTSO cache sync
 │   │   │   ├── maneuver.py ← 23-method intercept engine, trade-space data
-│   │   │   ├── threat.py   ← Threat Sweep (batch Hohmann + Lambert refinement)
-│   │   │   ├── pol.py      ← Pattern of Life (historical TLE analysis)
+│   │   │   ├── threat.py   ← Threat Sweep (batch Hohmann + Lambert refinement, TLE clustering)
+│   │   │   ├── pol.py      ← Pattern of Life (historical TLE analysis, NOTSO correlation)
 │   │   │   └── gcat.py     ← GCAT browser (28 datasets, on-demand fetch, in-memory cache)
 │   │   ├── templates/      ← Jinja2 HTML (base, login, operator, partials)
 │   │   └── static/         ← style.css (Bluestaq dark ops theme), Chart.js, hammer.min.js,
 │   │                          chartjs-plugin-zoom.min.js, SIPC_logo.svg
 │   ├── app_logging/        ← structlog setup + run_id correlation
-│   └── config/             ← constants and runtime settings
+│   └── config/             ← constants and runtime settings (TLE_CLUSTERING, TLE_FILTER)
+├── tle_clustering/         ← standalone TLE de-duplication package (scikit-learn DBSCAN)
+│   ├── __init__.py         ← cluster_tle_strings() — primary entry point
+│   ├── config.py           ← ClusteringConfig (tolerances, DBSCAN hyper-parameters)
+│   ├── models.py           ← TLERecord, Cluster, NoiseTLE, ClusteringResult
+│   ├── parser.py           ← TLE string parser → TLERecord list (sgp4 backed)
+│   ├── clustering.py       ← DBSCAN clustering (Chebyshev / L-∞ metric, normalised space)
+│   └── selection.py        ← representative selection (min Chebyshev distance, recency tie-break)
 ├── tests/
-│   ├── unit/               ← fast tests (auth helpers, state, domain models)
-│   └── integration/        ← FastAPI TestClient web route tests
+│   ├── unit/               ← fast tests (auth helpers, state, domain models, tle_clustering/)
+│   └── integration/        ← FastAPI TestClient routes + TLE clustering pipeline tests
 ├── docs/                   ← operator guide generator, architecture notes, reference PDFs
 ├── Dockerfile              ← production container (uvicorn, Python slim)
 └── pyproject.toml
 ```
+
+### TLE Clustering
+
+The `tle_clustering/` package is a standalone, dependency-free (except `sgp4` + `scikit-learn`) module that clusters near-duplicate TLEs from multiple tracking providers into a single best representative per satellite.
+
+**Why this matters:** Satellites on the HRR watchlist can attract dozens of TLEs per day from different providers (18 SDS, SpaceTrack, commercial SSA networks). Each provider fits from different observation sets, producing slightly different orbital elements. Feeding all of them into the threat sweep is redundant and misleads the solver — the same orbit re-appears under different labels.
+
+**How it works:**
+
+```
+raw TLE history (N TLEs per sat)
+         │
+         ▼
+  parse_tle_strings()       ← extract inc, RAAN, ecc via sgp4
+         │
+         ▼
+  normalise per tolerance   ← divide by [inc_tol, raan_tol, ecc_tol]
+         │
+         ▼
+  DBSCAN (Chebyshev / L-∞)  ← eps=1.0 → all three elements within tolerance
+         │
+         ├─ cluster members ─▶ select_representative()
+         │                        (min Chebyshev dist to centroid, recency tie-break)
+         └─ noise TLEs ──────▶ flagged in ClusteringSummary
+```
+
+**Tolerances** (configurable in `sipc/config/constants.py → TLE_CLUSTERING`):
+
+| Element | Default | Rationale |
+|---------|---------|-----------|
+| Inclination | 0.01° | J2 + fitting noise < 0.01° |
+| RAAN | 0.05° | Provider epoch offsets of minutes → ~0.05° J2 drift |
+| Eccentricity | 1×10⁻⁴ | Typical inter-provider LEO variation |
+
+**Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite (e.g. after an unannounced manoeuvre, or during poor tracking coverage), the first cluster representative is used and the sweep results show a red ▲ warning. This is the system's automatic indicator that the orbit is not well-determined.
 
 ---
 
@@ -269,12 +317,6 @@ INSERT INTO users (username, hashed_password, role) VALUES ('newuser', '<hash>',
 ---
 
 ## Naming Conventions
-
-| Prefix | Meaning |
-|--------|---------|
-| `B_SAT_` | Blue satellite asset |
-| `R_SAT_` | Red track satellite |
-| `OUT_` | Run output folders |
 
 All times are UTC. Distances in km, speeds in km/s, angles in degrees.
 Coordinate frame: ICRF/J2000.

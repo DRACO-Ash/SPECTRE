@@ -85,9 +85,9 @@
 </div>
 
 
-{# ── OSINT Intelligence Record for red track (if available) ── #}
-{% set osint_label = "RED TRACK INTEL" %}
-{% include "partials/osint_card.html" %}
+{# ── PAIR Intelligence Record for red track (if available) ── #}
+{% set pair_label = "RED TRACK INTEL" %}
+{% include "partials/pair_card.html" %}
 
 
 {# ══════════════════════════════════════════════════════════════════════════════
@@ -159,6 +159,37 @@
 
 </div>
 
+
+{# ── Relative Geometry trigger ── #}
+{% if result.burns %}
+{% set b0 = result.burns[0] %}
+<form hx-post="/plan/geometry/intercept"
+      hx-target="#intercept-geometry-container"
+      hx-swap="innerHTML"
+      hx-indicator="#geom-indicator"
+      style="margin-bottom:0.5rem">
+  <input type="hidden" name="red_sat"       value="{{ result.red_name }}">
+  <input type="hidden" name="blue_sat"      value="{{ result.blue_name }}">
+  <input type="hidden" name="burn_epoch_str" value="{{ b0.burn_epoch.strftime('%Y-%m-%dT%H:%M:%S') }}">
+  <input type="hidden" name="dv_prograde"   value="{{ b0.dv_prograde }}">
+  <input type="hidden" name="dv_normal"     value="{{ b0.dv_normal }}">
+  <input type="hidden" name="dv_radial"     value="{{ b0.dv_radial }}">
+  <input type="hidden" name="tof_hours"     value="{{ intel.tof_hours }}">
+  <input type="hidden" name="coast_hours"   value="0">
+  <input type="hidden" name="method"        value="{{ result.method.value }}">
+  <div style="display:flex; align-items:center; gap:0.5rem">
+    <button type="submit" class="btn-secondary"
+            style="font-size:0.68rem; font-weight:700; border-color:var(--ops-blue); color:var(--ops-blue)"
+            title="Visualise the relative trajectory in the Hill (CW) frame">
+      &#9654; Relative Geometry
+    </button>
+    <span id="geom-indicator" class="htmx-indicator" style="font-size:0.68rem">
+      <span class="spinner"></span> Computing trajectory&hellip;
+    </span>
+  </div>
+</form>
+<div id="intercept-geometry-container"></div>
+{% endif %}
 
 {# ══════════════════════════════════════════════════════════════════════════════
    § 3 — BURN ANALYSIS

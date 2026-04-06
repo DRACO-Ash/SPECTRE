@@ -1,0 +1,146 @@
+{# Active scenario UI — shown while operator is working through objectives #}
+{# Context: scenario (TrainingScenario), result_id (int), attempt_num (int) #}
+
+<div style="background:var(--panel-bg); border:2px solid rgba(245,158,11,0.5); border-radius:6px;
+            padding:0.75rem 0.9rem" id="active-scenario">
+
+  {# Explore-mode notice #}
+  {% if not scored %}
+  <div style="background:rgba(107,114,128,0.12); border:1px solid rgba(107,114,128,0.3);
+              border-radius:4px; padding:0.3rem 0.55rem; margin-bottom:0.4rem;
+              font-size:0.62rem; color:#9ca3af; font-weight:600">
+    🔍 Exploration mode — objectives can be ticked but <strong>no points will be awarded</strong>
+    and this attempt will not count toward your record.
+  </div>
+  {% endif %}
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem">
+    <div>
+      <span style="font-size:0.68rem; font-weight:700; color:{% if scored %}#f59e0b{% else %}#9ca3af{% endif %}; text-transform:uppercase; letter-spacing:0.06em">
+        {% if scored %}▶ Active Scenario{% else %}🔍 Exploring{% endif %}
+      </span>
+      <span style="font-size:0.65rem; font-weight:700; color:var(--text-primary); margin-left:0.5rem">
+        {{ scenario.title }}
+      </span>
+    </div>
+    {% if scenario.time_limit_minutes %}
+    <div style="font-size:0.65rem; font-weight:700; color:#ef4444" id="scenario-timer"
+         data-limit="{{ scenario.time_limit_minutes * 60 }}">
+      ⏱ <span id="timer-display">{{ scenario.time_limit_minutes }}:00</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="background:rgba(59,139,235,0.06); border:1px solid rgba(59,139,235,0.2);
+              border-radius:4px; padding:0.45rem 0.6rem; margin-bottom:0.5rem; font-size:0.63rem; color:var(--text-dim)">
+    {{ scenario.briefing }}
+  </div>
+
+  {# How-to instruction block #}
+  <div style="background:rgba(59,139,235,0.07); border:1px solid rgba(59,139,235,0.25);
+              border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.62rem;
+              color:var(--text-dim); line-height:1.5">
+    <strong style="color:var(--ops-blue); display:block; margin-bottom:0.15rem">How to complete objectives</strong>
+    Read each objective carefully, then work through the scenario using the briefing above and your orbital
+    mechanics knowledge — no live system access is needed, all data is provided in the briefing.
+    <strong style="color:var(--text-primary)">Tick each objective once you have reasoned through it</strong>
+    and arrived at a confident answer.  Submit when you are done.
+    {% if not scored %}
+    In exploration mode your ticks are not recorded — you can safely try everything.
+    {% endif %}
+  </div>
+
+  {# Objective checklist #}
+  <form hx-post="/training/scenario/{{ scenario.id }}/submit"
+        hx-target="#scenario-detail"
+        hx-swap="innerHTML"
+        id="scenario-submit-form">
+    <input type="hidden" name="result_id" value="{{ result_id }}">
+    <input type="hidden" name="time_taken_minutes" id="time-taken-input" value="0">
+
+    <div style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.3rem">
+      Objectives — tick each when complete
+    </div>
+
+    {% for obj in scenario.objectives %}
+    <label style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.3rem;
+                  padding:0.35rem 0.5rem; background:var(--bg-secondary); border-radius:4px;
+                  cursor:pointer; font-size:0.63rem; text-align:left">
+      <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
+             style="margin-top:0.1rem; accent-color:#f59e0b"
+             onchange="updateObjectivesJson()">
+      <div>
+        <div style="color:var(--text-primary); font-weight:600">{{ obj.description }}</div>
+        <div style="color:var(--text-dim); font-size:0.58rem">
+          +{{ obj.points }} pts ({{ obj.skill_axis | replace('_',' ') | title }})
+        </div>
+      </div>
+    </label>
+    {% endfor %}
+
+    {# Hidden field for completed objectives as JSON #}
+    <input type="hidden" name="objectives_completed" id="objectives-json" value="[]">
+
+    <div style="margin-top:0.5rem; display:flex; gap:0.5rem">
+      <button type="submit" class="btn-primary" style="flex:1; font-size:0.7rem; font-weight:700">
+        {% if scored %}Submit &amp; Score{% else %}Finish Exploration{% endif %}
+      </button>
+      {# Reset: posts to /reset, swaps #scenario-detail back to the pre-start briefing #}
+      <form hx-post="/training/scenario/{{ scenario.id }}/reset"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML"
+            style="display:inline">
+        <input type="hidden" name="result_id" value="{{ result_id }}">
+        <button type="submit" class="btn-secondary" style="font-size:0.7rem"
+                title="Return to briefing with no side effects">
+          ↺ Reset
+        </button>
+      </form>
+      <button type="button" class="btn-secondary" style="font-size:0.7rem; color:#ef4444"
+              onclick="document.getElementById('scenario-detail').innerHTML=''; document.getElementById('active-scenario').remove()">
+        Abandon
+      </button>
+    </div>
+
+  </form>
+
+</div>
+
+<script>
+(function() {
+  // Timer
+  {% if scenario.time_limit_minutes %}
+  var remaining = {{ scenario.time_limit_minutes * 60 }};
+  var startTime = Date.now();
+  var timerInterval = setInterval(function() {
+    remaining--;
+    if (remaining < 0) {
+      clearInterval(timerInterval);
+      document.getElementById('timer-display').textContent = '0:00';
+      document.getElementById('timer-display').style.color = '#ef4444';
+      return;
+    }
+    var m = Math.floor(remaining / 60);
+    var s = remaining % 60;
+    document.getElementById('timer-display').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+    if (remaining < 60) document.getElementById('timer-display').style.color = '#ef4444';
+  }, 1000);
+
+  // On submit, record time taken
+  document.getElementById('scenario-submit-form').addEventListener('submit', function() {
+    var elapsed = (Date.now() - startTime) / 60000;
+    document.getElementById('time-taken-input').value = elapsed.toFixed(2);
+    clearInterval(timerInterval);
+  });
+  {% endif %}
+
+  // Build objectives JSON from checkboxes
+  window.updateObjectivesJson = function() {
+    var checked = Array.from(
+      document.querySelectorAll('#scenario-submit-form input[type=checkbox]:checked')
+    ).map(function(cb) { return cb.value; });
+    document.getElementById('objectives-json').value = JSON.stringify(checked);
+  };
+})();
+</script>

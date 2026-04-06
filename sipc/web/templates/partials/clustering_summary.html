@@ -1,0 +1,91 @@
+{# TLE clustering reduction summary — shown in threat sweep results when hrr_tle_multiset was populated #}
+{% if clustering_summary is defined and clustering_summary %}
+{% set cs = clustering_summary %}
+{% if cs.objects_clustered > 0 or cs.objects_skipped > 0 %}
+<details style="margin:0.4rem 0; font-size:0.75rem">
+  <summary style="cursor:pointer; color:var(--text-dim); list-style:none; display:flex; align-items:center; gap:0.5rem; padding:0.25rem 0.1rem; user-select:none">
+    <span style="font-size:0.65rem; opacity:0.6">&#9654;</span>
+    <span>
+      TLE clustering:
+      <strong style="color:var(--text-primary)">{{ cs.objects_clustered }}</strong> object{{ "s" if cs.objects_clustered != 1 else "" }} reduced
+      {% if cs.total_tles_in > 0 %}
+      (<strong style="color:var(--ops-gold)">{{ cs.total_tles_in }}</strong> TLEs
+      &#8594; <strong style="color:var(--ops-gold)">{{ cs.total_representatives_out }}</strong> representative{{ "s" if cs.total_representatives_out != 1 else "" }},
+      {{ "%.0f"|format(cs.overall_reduction_pct) }}% reduction)
+      {% endif %}
+      {% if cs.objects_skipped > 0 %}
+      &mdash; <span style="color:var(--text-muted)">{{ cs.objects_skipped }} skipped (single-provider)</span>
+      {% endif %}
+    </span>
+  </summary>
+
+  {# Multi-cluster warning — elevated orbit uncertainty #}
+  {% if cs.objects_multi_cluster > 0 %}
+  <div style="display:flex; align-items:center; gap:0.4rem; padding:0.3rem 0.6rem; margin:0.25rem 0; background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.3); border-radius:4px; font-size:0.72rem">
+    <span style="color:#ef4444">&#9888;</span>
+    <span style="color:var(--text-dim)">
+      <strong style="color:#ef4444">{{ cs.objects_multi_cluster }}</strong> object{{ "s" if cs.objects_multi_cluster != 1 else "" }}
+      {{ "have" if cs.objects_multi_cluster != 1 else "has" }} divergent TLE clusters &mdash;
+      orbit uncertainty elevated (possible recent manoeuvre or poor coverage).
+      First cluster representative used.
+    </span>
+  </div>
+  {% endif %}
+
+  {# Noise / fallback warning #}
+  {% if cs.total_noise > 0 or cs.objects_fallback > 0 %}
+  <div style="display:flex; align-items:center; gap:0.4rem; padding:0.3rem 0.6rem; margin:0.25rem 0; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.3); border-radius:4px; font-size:0.72rem">
+    <span style="color:var(--amber)">&#9888;</span>
+    <span style="color:var(--text-dim)">
+      {% if cs.total_noise > 0 %}
+      {{ cs.total_noise }} noise TLE{{ "s" if cs.total_noise != 1 else "" }} discarded (outliers outside all clusters).
+      {% endif %}
+      {% if cs.objects_fallback > 0 %}
+      {{ cs.objects_fallback }} object{{ "s" if cs.objects_fallback != 1 else "" }}
+      fell back to existing cached TLE (all submitted TLEs were noise).
+      {% endif %}
+    </span>
+  </div>
+  {% endif %}
+
+  {% if cs.objects %}
+  <table style="width:100%; border-collapse:collapse; margin-top:0.35rem; font-size:0.7rem">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border-subtle); color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em">
+        <th style="text-align:left; padding:0.15rem 0.4rem 0.15rem 0">NORAD</th>
+        <th style="text-align:right; padding:0.15rem 0.4rem">TLEs In</th>
+        <th style="text-align:right; padding:0.15rem 0.4rem">Clusters</th>
+        <th style="text-align:right; padding:0.15rem 0.4rem">Noise</th>
+        <th style="text-align:right; padding:0.15rem 0 0.15rem 0.4rem">Reduction</th>
+        <th style="text-align:center; padding:0.15rem 0 0.15rem 0.4rem">Flags</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for obj in cs.objects %}
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04); {% if obj.skipped %}opacity:0.5{% endif %}">
+        <td style="padding:0.12rem 0.4rem 0.12rem 0; color:var(--text-primary)">{{ obj.satno }}</td>
+        <td style="text-align:right; padding:0.12rem 0.4rem; color:var(--text-dim)">{{ obj.tles_in }}</td>
+        <td style="text-align:right; padding:0.12rem 0.4rem; color:var(--text-dim)">
+          {% if obj.skipped %}<span style="color:var(--text-muted)">—</span>{% else %}{{ obj.clusters_found }}{% endif %}
+        </td>
+        <td style="text-align:right; padding:0.12rem 0.4rem; color:{% if obj.noise_count > 0 %}var(--amber){% else %}var(--text-muted){% endif %}">{{ obj.noise_count }}</td>
+        <td style="text-align:right; padding:0.12rem 0 0.12rem 0.4rem; color:{% if obj.skipped or obj.fallback %}var(--text-muted){% elif obj.reduction_pct >= 30 %}var(--ops-gold){% else %}var(--text-dim){% endif %}">
+          {% if obj.skipped or obj.fallback %}—{% else %}{{ "%.0f"|format(obj.reduction_pct) }}%{% endif %}
+        </td>
+        <td style="text-align:center; padding:0.12rem 0 0.12rem 0.4rem; font-size:0.65rem; white-space:nowrap">
+          {% if obj.multi_cluster %}<span style="color:#ef4444; font-weight:700" title="Multiple clusters — elevated orbit uncertainty">&#9651;</span>{% endif %}
+          {% if obj.fallback %}<span style="color:var(--amber); font-weight:700" title="Fallback: existing cached TLE used (all TLEs were noise)">FB</span>{% endif %}
+          {% if not obj.multi_cluster and not obj.fallback and not obj.skipped %}<span style="color:#22c55e">&#10003;</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin:0.25rem 0 0; font-size:0.65rem; color:var(--text-muted)">
+    &#9651; = multiple clusters (elevated uncertainty) &nbsp;&bull;&nbsp; FB = fallback to cached TLE &nbsp;&bull;&nbsp; &#10003; = clean single cluster
+  </p>
+  {% endif %}
+
+</details>
+{% endif %}
+{% endif %}

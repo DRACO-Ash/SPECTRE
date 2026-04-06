@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
+from sipc.config.constants import BLUE_PREFIX, RED_PREFIX
 from sipc.domain.models import BlueAsset, RedTrack
 from sipc.web.auth import require_login
 from sipc.web.deps import get_templates, render
@@ -105,7 +106,7 @@ async def quick_add_blue_asset(
     clean_name = name.strip() or str(satno)
 
     # Skip if already in the session.
-    prospective_stk = f"B_SAT_{clean_name}"
+    prospective_stk = f"{BLUE_PREFIX}{clean_name}"
     if any(a.stk_name == prospective_stk for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"{prospective_stk} is already in the session."}
@@ -163,7 +164,7 @@ async def quick_add_red_track(
     state = get_session_state(current_user.username)
     clean_name = name.strip() or str(satno)
 
-    prospective_stk = f"R_SAT_{clean_name}"
+    prospective_stk = f"{RED_PREFIX}{clean_name}"
     if any(t.stk_name == prospective_stk for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"{prospective_stk} is already in the session."}

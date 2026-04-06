@@ -119,7 +119,7 @@ class TestAssetManagement:
             cookies={"sipc_session": auth_cookie},
         )
         assert resp.status_code == 200
-        assert b"B_SAT_Alpha" in resp.content
+        assert b"Alpha" in resp.content
 
     def test_add_red_track_returns_partial(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
@@ -128,7 +128,7 @@ class TestAssetManagement:
             cookies={"sipc_session": auth_cookie},
         )
         assert resp.status_code == 200
-        assert b"R_SAT_Track01" in resp.content
+        assert b"Track01" in resp.content
 
 
 class TestScenarioTime:

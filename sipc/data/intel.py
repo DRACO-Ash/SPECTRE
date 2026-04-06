@@ -1,8 +1,8 @@
 """Adversary satellite intelligence lookup.
 
-Provides instant access to OSINT-derived satellite intelligence records
+Provides instant access to PAIR-derived satellite intelligence records
 keyed by NORAD catalogue number.  Data sourced from the Adversary Satellite
-Activity Report (UNCLASSIFIED // OSINT, 30 March 2026).
+Activity Report (UNCLASSIFIED // PAIR, 30 March 2026).
 """
 
 from __future__ import annotations

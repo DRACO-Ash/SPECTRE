@@ -1,11 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="ops">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}SIPC{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/themes.css" />
+  <!-- Apply saved theme before first paint to prevent flash -->
+  <script>(function(){var t=localStorage.getItem('sipc-theme');var valid=['ops','steel'];if(t&&valid.indexOf(t)!==-1){document.documentElement.setAttribute('data-theme',t);}else if(t){localStorage.removeItem('sipc-theme');}})();</script>
   <script src="/static/htmx.min.js"></script>
   <script src="/static/chart.umd.min.js"
           onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'"></script>

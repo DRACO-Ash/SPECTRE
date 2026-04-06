@@ -1,0 +1,63 @@
+{# Manual TLE list — rendered by add-manual-tle and remove-manual-tle endpoints.
+   Always wrapped in #manual-tle-list so outerHTML swap works correctly. #}
+<div id="manual-tle-list">
+{% if error %}
+<p class="error-msg" style="font-size:0.75rem; margin:0.3rem 0">{{ error }}</p>
+{% endif %}
+
+{% if manual_tles %}
+<table style="width:100%; border-collapse:collapse; font-size:0.75rem; margin-top:0.4rem">
+  <thead>
+    <tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left; padding:0.25rem 0.4rem; color:var(--text-dim); font-weight:600">Name</th>
+      <th style="text-align:left; padding:0.25rem 0.4rem; color:var(--text-dim); font-weight:600">Confidence</th>
+      <th style="text-align:left; padding:0.25rem 0.4rem; color:var(--text-dim); font-weight:600">NORAD</th>
+      <th style="padding:0.25rem 0.4rem"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in manual_tles %}
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:0.3rem 0.4rem; color:var(--text-primary); font-weight:500">{{ m.name }}</td>
+      <td style="padding:0.3rem 0.4rem">
+        {% set conf = m.confidence | upper %}
+        {% if conf == "CONFIRMED" %}
+          <span style="background:#22c55e22; color:#22c55e; font-size:0.68rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em">{{ conf }}</span>
+        {% elif conf == "HIGH" %}
+          <span style="background:#f59e0b22; color:#f59e0b; font-size:0.68rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em">{{ conf }}</span>
+        {% elif conf == "MEDIUM" %}
+          <span style="background:#3b8beb22; color:#3b8beb; font-size:0.68rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em">{{ conf }}</span>
+        {% elif conf == "LOW" %}
+          <span style="background:#94a3b822; color:#94a3b8; font-size:0.68rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em">{{ conf }}</span>
+        {% else %}
+          <span style="background:#64748b22; color:#64748b; font-size:0.68rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em">{{ conf if conf else "UNCONFIRMED" }}</span>
+        {% endif %}
+      </td>
+      <td style="padding:0.3rem 0.4rem; color:var(--text-dim); font-family:monospace">
+        {# Extract NORAD from TLE line 1 for display #}
+        {% set lines = m.tle.strip().split('\n') %}
+        {% set norad = "" %}
+        {% for line in lines %}
+          {% if line.strip().startswith('1 ') and line.strip()|length >= 7 %}
+            {% set norad = line.strip()[2:7] %}
+          {% endif %}
+        {% endfor %}
+        {{ norad if norad else "—" }}
+      </td>
+      <td style="padding:0.3rem 0.4rem; text-align:right">
+        <button class="btn-secondary btn-sm"
+                style="color:#ef4444; border-color:#ef4444"
+                hx-post="/plan/threat/remove-manual-tle"
+                hx-vals='{"manual_name": "{{ m.name | e }}"}'
+                hx-target="#manual-tle-list"
+                hx-swap="outerHTML"
+                title="Remove {{ m.name }}">&#10005;</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="font-size:0.72rem; color:var(--text-dim); margin:0.4rem 0; font-style:italic">No manual TLEs added.</p>
+{% endif %}
+</div>

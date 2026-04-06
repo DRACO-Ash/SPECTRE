@@ -1,0 +1,106 @@
+{# Monte Carlo results partial — rendered into #pol-mc-results after ▶ MC click #}
+{# Context: mc (MonteCarloResult), manoeuvre (Manoeuvre), archetypes (list[str]) #}
+
+{% set REGIME_COLOR = {"LEO":"#3b8beb","MEO":"#22c55e","GEO":"#f59e0b","HEO":"#ef4444","GTO":"#a855f7","DEEP":"#6b7280"} %}
+
+<div style="background:var(--panel-bg); border:1px solid rgba(59,139,235,0.4); border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+
+  {# Header #}
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.6rem">
+    <div>
+      <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.06em">
+        Monte Carlo — {{ mc.n_samples_converged }}/{{ mc.n_samples_run }} samples
+      </span>
+      <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
+        {{ mc.prediction_horizon_hours | int }}h horizon ·
+        {{ "%.1f"|format(mc.wall_time_seconds) }}s ·
+        {% if mc.converged %}<span style="color:#22c55e">converged</span>{% else %}<span style="color:#f59e0b">not converged (increase samples)</span>{% endif %}
+      </span>
+    </div>
+    <span style="font-size:0.62rem; color:var(--text-dim)">
+      Manoeuvre: {{ manoeuvre.epoch.strftime("%Y-%m-%d") }} · {{ (manoeuvre.delta_v_km_s*1000)|round(2) }} m/s
+    </span>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem">
+
+    {# Regime probability bars #}
+    <div>
+      <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.05em; margin-bottom:0.35rem">Regime Probability</div>
+      {% for regime, prob in mc.regime_probabilities | dictsort(by='value', reverse=True) %}
+      {% set pct = (prob * 100) | round(1) %}
+      {% set col = REGIME_COLOR.get(regime, "#6b7280") %}
+      <div style="margin-bottom:0.25rem">
+        <div style="display:flex; justify-content:space-between; font-size:0.62rem; margin-bottom:0.06rem">
+          <span style="color:{{ col }}; font-weight:700">{{ regime }}</span>
+          <span style="color:{{ col }}; font-weight:700">{{ pct }}%</span>
+        </div>
+        <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden">
+          <div style="height:100%; width:{{ pct }}%; background:{{ col }}; border-radius:3px; transition:width 0.4s"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# SMA + altitude statistics #}
+    <div>
+      <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.05em; margin-bottom:0.35rem">Orbital Element Spread ({{ mc.prediction_horizon_hours | int }}h)</div>
+      <table style="width:100%; font-size:0.63rem; border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--text-dim)">
+            <th style="text-align:left; padding:0.1rem 0; font-weight:600">Parameter</th>
+            <th style="text-align:right; padding:0.1rem 0.3rem; font-weight:600">5th %ile</th>
+            <th style="text-align:right; padding:0.1rem 0.3rem; font-weight:600">Median</th>
+            <th style="text-align:right; padding:0.1rem 0.3rem; font-weight:600">95th %ile</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-dim); padding:0.1rem 0">SMA [<em>a</em>] (km)</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.sma_km_p5 | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">{{ mc.sma_km_p50 | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.sma_km_p95 | round(1) }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-dim); padding:0.1rem 0">Alt (km)</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.alt_km_p5 | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">—</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.alt_km_p95 | round(1) }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-dim); padding:0.1rem 0">Period (min)</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_range_minutes[0] | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">—</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_range_minutes[1] | round(1) }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-dim); padding:0.1rem 0">Eccentricity [<em>e</em>]</td>
+            <td colspan="3" style="text-align:center; padding:0.1rem 0.3rem">
+              {{ mc.ecc_mean | round(4) }} ± {{ mc.ecc_std | round(4) }}
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-dim); padding:0.1rem 0">Incl. [<em>i</em>] (°)</td>
+            <td colspan="3" style="text-align:center; padding:0.1rem 0.3rem">
+              {{ mc.inc_deg_mean | round(3) }} ± {{ mc.inc_deg_std | round(3) }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {# 3-sigma cloud radius #}
+      <div style="margin-top:0.4rem; font-size:0.62rem; color:var(--text-dim)">
+        Position cloud 3&sigma;: <strong style="color:var(--ops-gold)">{{ mc.position_3sigma_km | round(1) }} km</strong>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.3rem">
+    J2 + exponential drag · RIC perturbation model · seed {{ mc.random_seed }}
+  </div>
+
+</div>

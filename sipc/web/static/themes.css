@@ -1,0 +1,70 @@
+/* SIPC — Operator Theme Overrides
+   Themes applied via [data-theme] on <html>.
+   Each block overrides only the CSS custom properties defined in style.css.
+   Theme "ops" is the default (deep-night Bluestaq) — no override needed.
+   ─────────────────────────────────────────────────────────────────────── */
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   THEME: steel  — Slate Steel (light operational)
+   Clean grey-on-white with Bluestaq blue accents.  Designed for daylight
+   environments and briefing rooms where dark screens look washed out.
+   ══════════════════════════════════════════════════════════════════════ */
+[data-theme="steel"] {
+  --navy:          #1a2a3a;
+  --navy-deep:     #0f1e2e;
+  --navy-light:    #243548;
+  --alliance-blue: #005aaa;
+  --ops-blue:      #0077cc;
+  --gold:          #a07a00;
+  --gold-dim:      rgba(160,122,0,0.12);
+  --gold-mid:      rgba(160,122,0,0.30);
+  --green:         #1a7a3c;
+  --green-dim:     rgba(26,122,60,0.12);
+  --red:           #c0392b;
+  --red-dim:       rgba(192,57,43,0.12);
+  --amber:         #c07800;
+
+  --bg:            #f0f4f8;
+  --surface:       #ffffff;
+  --surface-raised:#e8eef5;
+  --border:        #c2cede;
+  --border-light:  #d8e3ee;
+  --panel-bg:      #ffffff;
+  --bg-secondary:  #edf1f6;
+
+  --text:          #1c2b3a;
+  --text-dim:      #5a7080;
+  --text-bright:   #0a1a28;
+  --text-primary:  #1c2b3a;
+  --text-muted:    #7a8fa0;
+
+  --bar-navy:      #1a2a3a;
+  --bar-blue:      #005aaa;
+  --bar-mid:       #0077cc;
+  --bar-gold:      #c8a415;
+
+  color-scheme: light;
+}
+
+/* Nav needs explicit background in light mode */
+[data-theme="steel"] .nav-bar         { background: #1a2a3a; border-bottom-color: #243548; }
+[data-theme="steel"] .nav-user        { color: #a0b8cc; }
+[data-theme="steel"] .sidebar         { background: #e8eef5; border-right: 1px solid #c2cede; }
+[data-theme="steel"] .sidebar-tabs    { background: #dde5ef; border-bottom-color: #c2cede; }
+[data-theme="steel"] .stab            { color: #4a6070; }
+[data-theme="steel"] .stab.active     { background: #ffffff; color: #0077cc; border-bottom-color: #ffffff; }
+[data-theme="steel"] .panel           { background: #ffffff; border-color: #c2cede; }
+[data-theme="steel"] input,
+[data-theme="steel"] select,
+[data-theme="steel"] textarea         { background: #f5f8fb; border-color: #c2cede; color: #1c2b3a; }
+[data-theme="steel"] .btn-secondary   { background: #edf1f6; border-color: #c2cede; color: #1c2b3a; }
+[data-theme="steel"] .btn-logout      { background: transparent; border-color: #c2cede; color: #a0b8cc; }
+[data-theme="steel"] .hrr-table th    { background: #e0e8f0; color: #3a5060; }
+[data-theme="steel"] .hrr-table tr:hover { background: #f0f5fa; }
+[data-theme="steel"] .nav-dropdown-panel { background: #1a2a3a; border-color: #243548; }
+[data-theme="steel"] .hero-tab-bar    { background: #e8eef5; border-bottom-color: #c2cede; }
+[data-theme="steel"] .htab            { color: #4a6070; }
+[data-theme="steel"] .htab.active     { background: #0077cc; }
+[data-theme="steel"] .hero-panel      { background: #f5f8fb; }
+[data-theme="steel"] details summary  { color: #4a6070; }

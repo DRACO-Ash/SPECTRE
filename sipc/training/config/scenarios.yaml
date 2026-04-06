@@ -1,0 +1,233 @@
+# SIPC Training Scenario Library
+# All data is SYNTHETIC.  Orbital parameters are realistic but no real object.
+# Each scenario is completely isolated from operational data.
+
+scenarios:
+
+  # ── Level 1 / Cadet ─────────────────────────────────────────────────────────
+  - id: cadet_01_geo_stationkeeping
+    title: "GEO Station-Keeping — Routine Manoeuvre"
+    level_required: 1
+    difficulty: easy
+    description: >
+      A geostationary communications satellite (BLUE-01) must perform a
+      routine north-south station-keeping burn to maintain its assigned
+      longitude slot.  No threat present.  Practise loading the scenario,
+      interpreting the orbital parameters, and understanding the ΔV requirement.
+    briefing: >
+      BLUE-01 has drifted 0.08° from its assigned longitude slot at 45.0° East.
+      Station-keeping budget: 50 m/s residual.  Required corrective ΔV: ≤ 5 m/s
+      north-south component.  Execute by 2025-06-15 12:00Z.
+    scenario_epoch_utc: "2025-06-15T00:00:00Z"
+    horizon_hours: 24
+    objects:
+      - satno: 99001
+        name: "BLUE-01"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99001U 25001A   25166.00000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99001   0.0100  45.0000 0000200  90.0000   0.0000  1.00270000 00011"
+    objectives:
+      - id: obj_load
+        description: "Load BLUE-01 as an asset"
+        skill_axis: situational_awareness
+        points: 10
+      - id: obj_read_elements
+        description: "Identify the current longitude slot within ±0.5°"
+        skill_axis: situational_awareness
+        points: 20
+        answer: "45.0"
+        tolerance: 0.5
+      - id: obj_compute_dv
+        description: "Compute the required ΔV (answer: ~2 m/s)"
+        skill_axis: manoeuvre_planning
+        points: 30
+        answer: "0.002"
+        tolerance: 0.003
+    time_limit_minutes: null    # No time pressure at Cadet level
+    scoring:
+      passing_score: 50
+      optimal_score: 60
+
+  # ── Level 2 / Observer ───────────────────────────────────────────────────────
+  - id: observer_02_proximity_threat
+    title: "Proximity Operations Threat — LEO Approach"
+    level_required: 2
+    difficulty: moderate
+    description: >
+      A red object (RED-01) in LEO is manoeuvring toward a friendly asset
+      (BLUE-02).  Identify the threat geometry, estimate time-to-closest-approach,
+      and recommend the correct situational posture.
+    briefing: >
+      BLUE-02 (ISS-altitude circular orbit, 51.6° inclination) has a co-planar
+      object RED-01 closing at approximately 120 m/s range-rate.
+      Predicted closest approach: T+4.5 hours, ~2.1 km range.
+      You have 15 minutes to assess the threat and recommend a response posture.
+    scenario_epoch_utc: "2025-07-20T08:00:00Z"
+    horizon_hours: 8
+    objects:
+      - satno: 99002
+        name: "BLUE-02"
+        side: blue
+        regime: LEO
+        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9991"
+        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00011"
+      - satno: 99003
+        name: "RED-01"
+        side: red
+        regime: LEO
+        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9991"
+        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00011"
+    objectives:
+      - id: obj_id_aggressor
+        description: "Correctly identify RED-01 as the aggressor"
+        skill_axis: situational_awareness
+        points: 25
+      - id: obj_estimate_tca
+        description: "Estimate time-to-closest-approach within ±30 minutes"
+        skill_axis: situational_awareness
+        points: 40
+        answer: "4.5"
+        tolerance: 0.5
+        unit: hours
+      - id: obj_posture
+        description: "Select the correct response posture: HEIGHTENED AWARENESS"
+        skill_axis: decision_quality
+        points: 35
+        answer: "heightened_awareness"
+    time_limit_minutes: 15
+    scoring:
+      passing_score: 75
+      optimal_score: 100
+
+  # ── Level 3 / Planner ───────────────────────────────────────────────────────
+  - id: planner_03_multi_constraint
+    title: "Evasive Manoeuvre — ΔV Budget Constraint"
+    level_required: 3
+    difficulty: hard
+    description: >
+      BLUE-02 faces a confirmed proximity threat.  You must plan an evasive
+      manoeuvre that satisfies all constraints: minimum 5 km miss distance,
+      ΔV ≤ 30 m/s, executable within 2 hours.  Multiple manoeuvre options
+      exist — select the optimal one.
+    briefing: >
+      RED-01 is on a confirmed intercept trajectory.  TCA: T+4.5h, predicted
+      range 1.2 km (below safe threshold of 5 km).  Residual ΔV budget: 30 m/s.
+      Three manoeuvre options have been pre-computed; identify and select the
+      best option.  Time to decide: 10 minutes.
+    scenario_epoch_utc: "2025-07-20T08:00:00Z"
+    horizon_hours: 8
+    objects:
+      - satno: 99002
+        name: "BLUE-02"
+        side: blue
+        regime: LEO
+        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9991"
+        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00011"
+      - satno: 99003
+        name: "RED-01"
+        side: red
+        regime: LEO
+        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9991"
+        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00011"
+    manoeuvre_options:
+      - id: opt_a
+        label: "Option A — In-track +22 m/s at T+1h"
+        dv_ms: 22.0
+        miss_distance_km: 8.2
+        feasible: true
+        optimal: true
+        reason: "Minimises ΔV while achieving > 5 km miss distance"
+      - id: opt_b
+        label: "Option B — Radial +28 m/s at T+0.5h"
+        dv_ms: 28.0
+        miss_distance_km: 11.4
+        feasible: true
+        optimal: false
+        reason: "Achieves larger miss distance but costs more ΔV"
+      - id: opt_c
+        label: "Option C — In-track −15 m/s at T+2h"
+        dv_ms: 15.0
+        miss_distance_km: 3.1
+        feasible: false
+        optimal: false
+        reason: "Miss distance below 5 km threshold — FAILS constraint"
+    objectives:
+      - id: obj_eliminate_infeasible
+        description: "Eliminate Option C as infeasible (miss distance < 5 km)"
+        skill_axis: decision_quality
+        points: 30
+      - id: obj_select_optimal
+        description: "Select Option A as the optimal manoeuvre"
+        skill_axis: decision_quality
+        points: 60
+        answer: "opt_a"
+      - id: obj_rationale
+        description: "Justify selection: lowest ΔV satisfying all constraints"
+        skill_axis: manoeuvre_planning
+        points: 40
+        answer: "minimum_dv"
+      - id: obj_time_pressure
+        description: "Submit decision within time limit"
+        skill_axis: operational_tempo
+        points: 30
+    time_limit_minutes: 10
+    scoring:
+      passing_score: 100
+      optimal_score: 160
+
+  # ── Challenge Scenarios ──────────────────────────────────────────────────────
+  - id: analyst_gauntlet
+    title: "Analyst Gauntlet — Five-Scenario Sprint"
+    level_required: 4
+    difficulty: hard
+    description: >
+      Five consecutive scenarios drawn from the Observer and Planner libraries.
+      Score above the threshold on decision quality in at least 4 of 5 to pass.
+    briefing: >
+      You will face five threat scenarios back-to-back with a combined time limit.
+      Each scenario is fully scored.  You must maintain decision quality above
+      0.75 across the set.  No restart — advance on your decisions.
+    scenario_epoch_utc: "2025-08-01T06:00:00Z"
+    horizon_hours: 48
+    challenge: true
+    challenge_scenarios:
+      - observer_02_proximity_threat
+      - planner_03_multi_constraint
+    time_limit_minutes: 45
+    scoring:
+      passing_score: 350
+      optimal_score: 500
+    objects: []
+
+  - id: operator_timed_full_cycle
+    title: "Full Engagement Cycle — Timed"
+    level_required: 5
+    difficulty: very_hard
+    description: >
+      Detect → assess → plan → decide → act.  A full engagement from initial
+      cueing to manoeuvre execution, under 20-minute time pressure.  All five
+      skill axes are scored.
+    briefing: >
+      RED-02 is an unknown object approaching BLUE-03 in GEO.  You have initial
+      cueing and 20 minutes.  Execute the full P&D decision cycle.
+    scenario_epoch_utc: "2025-09-01T12:00:00Z"
+    horizon_hours: 72
+    challenge: true
+    objects:
+      - satno: 99004
+        name: "BLUE-03"
+        side: blue
+        regime: GEO
+        tle_line1: "1 99004U 25004A   25244.50000000  .00000000  00000-0  00000-0 0  9991"
+        tle_line2: "2 99004   0.0200  75.0000 0000150  90.0000   0.0000  1.00270000 00011"
+      - satno: 99005
+        name: "RED-02"
+        side: red
+        regime: GEO
+        tle_line1: "1 99005U 25005A   25244.50000000  .00000050  00000-0  00000-0 0  9991"
+        tle_line2: "2 99005   0.0300  75.0300 0000200  90.0000   0.0000  1.00270000 00011"
+    time_limit_minutes: 20
+    scoring:
+      passing_score: 400
+      optimal_score: 600

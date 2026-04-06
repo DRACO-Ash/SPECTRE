@@ -1,0 +1,203 @@
+{# Decision Engine — Scenario Builder input panel #}
+{# Context: pol (PolAnalysis|None) #}
+
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.5rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.05em">Decision Engine — What-If Scenario</div>
+    <span style="font-size:0.6rem; color:var(--text-dim)">Phase 1 · Deterministic</span>
+  </div>
+
+  <p style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.6rem">
+    Define adversary actions and friendly responses. The engine evaluates every combination
+    and recommends the robust best response using the selected strategy.
+    {% if pol %}<em>Active PoL object: SATNO {{ pol.satno }}.</em>{% endif %}
+  </p>
+
+  <form hx-post="/plan/decision/evaluate"
+        hx-target="#decision-results"
+        hx-swap="innerHTML"
+        hx-indicator="#decision-indicator"
+        hx-disabled-elt="find button[type=submit]">
+
+    {# ── Scenario name + horizon ── #}
+    <div style="display:grid; grid-template-columns:2fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Scenario Name
+        <input type="text" name="scenario_name" value="Unnamed Scenario"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Horizon (h)
+        <input type="number" name="horizon_hours" value="72" min="1" max="720" step="1"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+    </div>
+
+    {# ── Adversary Actions ── #}
+    <div style="font-size:0.65rem; font-weight:700; color:var(--ops-gold); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.3rem">Adversary Actions</div>
+    <div id="adv-rows">
+      {# Template row — JS duplicates this #}
+      <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
+                                   gap:0.3rem; margin-bottom:0.25rem; align-items:end">
+        <input type="hidden" name="adv_id" value="A1">
+        <input type="text"   name="adv_name" placeholder="Name (e.g. Proximity approach)"
+               style="font-size:0.63rem">
+        <select name="adv_type" style="font-size:0.63rem">
+          <option value="manoeuvre">Manoeuvre</option>
+          <option value="sensor_retask">Sensor Retask</option>
+          <option value="posture_change">Posture Change</option>
+          <option value="no_action">No Action</option>
+        </select>
+        <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
+               placeholder="P" style="font-size:0.63rem" title="Probability [0,1]">
+        <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
+               placeholder="Conf" style="font-size:0.63rem" title="Intel confidence [0,1]">
+        <span style="font-size:0.6rem; color:var(--text-dim)">P · Conf</span>
+        <button type="button" onclick="removeRow(this,'adv-row')"
+                style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
+                       border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
+          ✕
+        </button>
+      </div>
+    </div>
+    <button type="button" onclick="addAdvRow()"
+            style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
+      + Add Adversary Action
+    </button>
+
+    {# ── Friendly Responses ── #}
+    <div style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.3rem">Friendly Responses</div>
+    <div id="fr-rows">
+      <div class="fr-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;
+                                  gap:0.3rem; margin-bottom:0.25rem; align-items:end">
+        <input type="hidden" name="fr_id" value="R1">
+        <input type="text"   name="fr_name" placeholder="Name (e.g. Collision avoidance)"
+               style="font-size:0.63rem">
+        <select name="fr_type" style="font-size:0.63rem">
+          <option value="manoeuvre">Manoeuvre</option>
+          <option value="sensor_retask">Sensor Retask</option>
+          <option value="posture_change">Posture Change</option>
+          <option value="no_action">No Action</option>
+        </select>
+        <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05"
+               placeholder="Cost" style="font-size:0.63rem" title="Normalised cost [0,1]">
+        <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
+               placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
+        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5"
+               placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
+        <button type="button" onclick="removeRow(this,'fr-row')"
+                style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
+                       border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
+          ✕
+        </button>
+      </div>
+    </div>
+    <button type="button" onclick="addFrRow()"
+            style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
+      + Add Friendly Response
+    </button>
+
+    {# ── Scoring weights ── #}
+    <details style="margin-bottom:0.5rem">
+      <summary style="font-size:0.65rem; color:var(--text-dim); cursor:pointer">
+        Scoring weights ▸
+      </summary>
+      <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:0.3rem; margin-top:0.3rem">
+        {% set weights = [
+          ("w_custody","Custody",0.35),
+          ("w_ca","Closest Approach",0.25),
+          ("w_dv","ΔV Cost",0.20),
+          ("w_time","Time to Execute",0.10),
+          ("w_rev","Reversibility",0.10)
+        ] %}
+        {% for name, label, default in weights %}
+        <label style="font-size:0.6rem; color:var(--text-dim)">
+          {{ label }}
+          <input type="number" name="{{ name }}" value="{{ default }}"
+                 min="0" max="1" step="0.05" style="width:100%; font-size:0.63rem; margin-top:0.1rem">
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+
+    {# ── Strategy selector ── #}
+    <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.5rem">
+      Selector Strategy
+      <select name="strategy" style="font-size:0.65rem; margin-left:0.4rem">
+        <option value="minimax">Minimax (minimise worst-case risk)</option>
+        <option value="expected_value">Expected Value (minimise weighted cost)</option>
+        <option value="maximin">Maximin (maximise best-case outcome)</option>
+      </select>
+    </label>
+
+    <div class="submit-row">
+      <button type="submit" class="btn-primary">Evaluate</button>
+      <span id="decision-indicator" class="htmx-indicator">
+        <span class="spinner"></span>Evaluating&hellip;
+      </span>
+    </div>
+
+  </form>
+
+</div>
+
+<div id="decision-results"></div>
+
+<script>
+var _advCount = 1;
+var _frCount  = 1;
+
+function addAdvRow() {
+  _advCount++;
+  var c = _advCount;
+  var div = document.createElement('div');
+  div.className = 'adv-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
+  div.innerHTML = `
+    <input type="hidden" name="adv_id" value="A${c}">
+    <input type="text" name="adv_name" placeholder="Adversary action name" style="font-size:0.63rem">
+    <select name="adv_type" style="font-size:0.63rem">
+      <option value="manoeuvre">Manoeuvre</option>
+      <option value="sensor_retask">Sensor Retask</option>
+      <option value="posture_change">Posture Change</option>
+      <option value="no_action">No Action</option>
+    </select>
+    <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Probability">
+    <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Confidence">
+    <span style="font-size:0.6rem;color:var(--text-dim)">P · Conf</span>
+    <button type="button" onclick="removeRow(this,'adv-row')" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
+  document.getElementById('adv-rows').appendChild(div);
+}
+
+function addFrRow() {
+  _frCount++;
+  var c = _frCount;
+  var div = document.createElement('div');
+  div.className = 'fr-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
+  div.innerHTML = `
+    <input type="hidden" name="fr_id" value="R${c}">
+    <input type="text" name="fr_name" placeholder="Friendly response name" style="font-size:0.63rem">
+    <select name="fr_type" style="font-size:0.63rem">
+      <option value="manoeuvre">Manoeuvre</option>
+      <option value="sensor_retask">Sensor Retask</option>
+      <option value="posture_change">Posture Change</option>
+      <option value="no_action">No Action</option>
+    </select>
+    <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Cost">
+    <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility">
+    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5" style="font-size:0.63rem" title="Time to execute (h)">
+    <button type="button" onclick="removeRow(this,'fr-row')" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
+  document.getElementById('fr-rows').appendChild(div);
+}
+
+function removeRow(btn, cls) {
+  var row = btn.closest('.' + cls);
+  if (row) row.remove();
+}
+</script>

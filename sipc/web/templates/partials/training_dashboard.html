@@ -1,0 +1,216 @@
+{# Training Progress Dashboard — rendered via HTMX into #tpanel-dashboard #}
+{# Context: progress, cfg, level_def, next_lv_def, progress_pct, pts_needed,
+            recommendation, recent_results, first_scenario #}
+
+{# ── Getting Started banner (shown until the operator starts their first scenario) ── #}
+{% if progress.scenarios_started == 0 and first_scenario %}
+<div style="background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(59,139,235,0.10));
+            border:2px solid rgba(245,158,11,0.5); border-radius:8px;
+            padding:0.9rem 1rem; margin-bottom:0.75rem">
+
+  <div style="font-size:0.78rem; font-weight:800; color:#f59e0b; margin-bottom:0.3rem">
+    ▶ Start Here — Begin Your First Scenario
+  </div>
+  <div style="font-size:0.65rem; color:var(--text-dim); margin-bottom:0.6rem; line-height:1.5">
+    Training scenarios are structured decision exercises using <strong style="color:var(--text-primary)">synthetic orbital data</strong>.
+    You will read a scenario briefing, work through each objective (no live system access required),
+    self-assess your answers against the listed criteria, and submit for scoring.
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-bottom:0.65rem; font-size:0.62rem">
+    <div style="background:var(--bg-secondary); border-radius:5px; padding:0.45rem 0.5rem; text-align:center">
+      <div style="font-size:1.1rem; line-height:1.2; margin-bottom:0.1rem">📖</div>
+      <div style="font-weight:700; color:var(--text-primary)">Read the Briefing</div>
+      <div style="color:var(--text-dim); margin-top:0.05rem">Understand the scenario context and objects</div>
+    </div>
+    <div style="background:var(--bg-secondary); border-radius:5px; padding:0.45rem 0.5rem; text-align:center">
+      <div style="font-size:1.1rem; line-height:1.2; margin-bottom:0.1rem">✅</div>
+      <div style="font-weight:700; color:var(--text-primary)">Tick Objectives</div>
+      <div style="color:var(--text-dim); margin-top:0.05rem">Self-assess each objective as you complete it</div>
+    </div>
+    <div style="background:var(--bg-secondary); border-radius:5px; padding:0.45rem 0.5rem; text-align:center">
+      <div style="font-size:1.1rem; line-height:1.2; margin-bottom:0.1rem">🏆</div>
+      <div style="font-weight:700; color:var(--text-primary)">Submit &amp; Score</div>
+      <div style="color:var(--text-dim); margin-top:0.05rem">Earn points and advance your operator level</div>
+    </div>
+  </div>
+
+  <button class="btn-primary"
+          style="font-size:0.75rem; font-weight:800; padding:0.55rem 1.2rem"
+          onclick="trainingTab('scenarios'); htmx.ajax('GET', '/training/scenario/{{ first_scenario.id }}', {target:'#scenario-detail', swap:'innerHTML'}); setTimeout(function(){ var el=document.getElementById('scenario-detail'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 300)">
+    ▶ Load First Scenario — {{ first_scenario.title }}
+  </button>
+  <span style="font-size:0.6rem; color:var(--text-dim); margin-left:0.75rem">
+    or browse all scenarios in the <strong>Free-Play</strong> tab
+  </span>
+</div>
+{% endif %}
+
+{# ── Level progress header ──────────────────────────────────────────────────── #}
+<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
+
+  {# Current level card #}
+  <div style="background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.4);
+              border-radius:6px; padding:0.65rem 0.75rem">
+    <div style="font-size:0.6rem; color:#f59e0b; text-transform:uppercase; letter-spacing:0.06em; font-weight:700">
+      Operator Level
+    </div>
+    <div style="font-size:1.8rem; font-weight:800; color:var(--text-primary); line-height:1">
+      {{ progress.current_level }}
+    </div>
+    <div style="font-size:0.72rem; font-weight:700; color:#f59e0b">
+      {{ level_def.title if level_def else '—' }}
+    </div>
+    {% if level_def %}
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+      {{ level_def.description }}
+    </div>
+    {% endif %}
+  </div>
+
+  {# Points card #}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.65rem 0.75rem">
+    <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; font-weight:700">
+      Total Points
+    </div>
+    <div style="font-size:1.8rem; font-weight:800; color:var(--ops-blue); line-height:1">
+      {{ progress.total_points | int }}
+    </div>
+    {% if pts_needed %}
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.1rem">
+      {{ pts_needed }} pts to Level {{ progress.current_level + 1 }}
+    </div>
+    <div style="height:4px; background:var(--border); border-radius:2px; margin-top:0.3rem; overflow:hidden">
+      <div style="height:100%; width:{{ progress_pct }}%; background:var(--ops-blue); border-radius:2px; transition:width 0.5s"></div>
+    </div>
+    {% else %}
+    <div style="font-size:0.6rem; color:#22c55e; font-weight:700">★ Maximum Level</div>
+    {% endif %}
+  </div>
+
+  {# Activity card #}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.65rem 0.75rem">
+    <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; font-weight:700">
+      Activity
+    </div>
+    <div style="font-size:0.65rem; line-height:2; color:var(--text-dim)">
+      <div><strong style="color:var(--text-primary)">{{ progress.scenarios_passed }}</strong> / {{ progress.scenarios_started }} scenarios passed</div>
+      <div><strong style="color:var(--text-primary)">{{ progress.challenges_passed }}</strong> challenges passed</div>
+      <div><strong style="color:var(--text-primary)">{{ progress.tutorials_done }}</strong> tutorials completed</div>
+      <div><strong style="color:var(--text-primary)">{{ progress.time_in_training_minutes | int }}</strong> min investment</div>
+    </div>
+  </div>
+
+</div>
+
+{# ── Skill Axis Breakdown ─────────────────────────────────────────────────── #}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.06em; margin-bottom:0.5rem">
+    Skill Axis Breakdown
+  </div>
+
+  {% set axis_pts = progress.axis_points %}
+  {% set max_axis = namespace(val=1.0) %}
+  {% for axis in cfg.skill_axes %}
+    {% set v = axis_pts.get(axis.id, 0) %}
+    {% if v > max_axis.val %}{% set max_axis.val = v %}{% endif %}
+  {% endfor %}
+
+  {% for axis in cfg.skill_axes %}
+  {% set pts = axis_pts.get(axis.id, 0) %}
+  {% set pct = ((pts / max_axis.val) * 100) | round(0) | int if max_axis.val > 0 else 0 %}
+  <div style="margin-bottom:0.35rem">
+    <div style="display:flex; justify-content:space-between; font-size:0.62rem; margin-bottom:0.06rem">
+      <span style="color:{{ axis.colour }}; font-weight:600">{{ axis.label }}</span>
+      <span style="color:{{ axis.colour }}">{{ pts | int }} pts</span>
+    </div>
+    <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden"
+         title="{{ axis.description }}">
+      <div style="height:100%; width:{{ pct }}%; background:{{ axis.colour }}; border-radius:3px; transition:width 0.5s"></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ── Level Progression Map ─────────────────────────────────────────────────── #}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.06em; margin-bottom:0.5rem">
+    Level Progression
+  </div>
+  <div style="display:flex; gap:0.4rem; flex-wrap:wrap">
+    {% for lv in cfg.levels %}
+    {% set achieved = (progress.current_level >= lv.level) %}
+    <div style="flex:1; min-width:90px; background:{% if achieved %}rgba(245,158,11,0.12){% else %}var(--bg-secondary){% endif %};
+                border:1px solid {% if lv.level == progress.current_level %}rgba(245,158,11,0.6){% elif achieved %}rgba(245,158,11,0.2){% else %}var(--border){% endif %};
+                border-radius:5px; padding:0.45rem 0.5rem; text-align:center">
+      <div style="font-size:0.7rem; font-weight:800; color:{% if achieved %}#f59e0b{% else %}var(--text-dim){% endif %}">
+        L{{ lv.level }}{% if achieved and lv.level == progress.current_level %} ←{% endif %}
+      </div>
+      <div style="font-size:0.62rem; font-weight:600; color:{% if achieved %}var(--text-primary){% else %}var(--text-dim){% endif %}">
+        {{ lv.title }}
+      </div>
+      <div style="font-size:0.57rem; color:var(--text-dim); margin-top:0.1rem">
+        {{ lv.total_points_required }} pts
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── Recommendation ─────────────────────────────────────────────────────────── #}
+<div style="background:rgba(59,139,235,0.08); border:1px solid rgba(59,139,235,0.35);
+            border-radius:6px; padding:0.6rem 0.75rem; margin-bottom:0.6rem">
+  <div style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); margin-bottom:0.2rem">
+    Recommended Next Step
+  </div>
+  <div style="font-size:0.65rem; color:var(--text-dim)">{{ recommendation }}</div>
+</div>
+
+{# ── Recent Activity ─────────────────────────────────────────────────────────── #}
+{% if recent_results %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
+            padding:0.75rem 0.9rem">
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.06em; margin-bottom:0.45rem">
+    Recent Activity
+  </div>
+  <table style="width:100%; font-size:0.62rem; border-collapse:collapse">
+    <thead>
+      <tr style="color:var(--text-dim); border-bottom:1px solid var(--border)">
+        <th style="text-align:left; padding:0.15rem 0.3rem; font-weight:600">Scenario</th>
+        <th style="text-align:center; padding:0.15rem 0.3rem; font-weight:600">Result</th>
+        <th style="text-align:right; padding:0.15rem 0.3rem; font-weight:600">Score</th>
+        <th style="text-align:right; padding:0.15rem 0.3rem; font-weight:600">Date</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for cr in recent_results %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.2rem 0.3rem; font-family:monospace; color:var(--text-dim)">
+          {{ cr.scenario_id | truncate(28, True, '…') }}
+        </td>
+        <td style="text-align:center; padding:0.2rem 0.3rem">
+          {% if cr.passed %}
+            <span style="color:#22c55e; font-weight:700">PASS</span>
+          {% elif cr.completed_at %}
+            <span style="color:#ef4444">FAIL</span>
+          {% else %}
+            <span style="color:var(--text-dim)">—</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right; padding:0.2rem 0.3rem; font-family:monospace">
+          {{ cr.total_score }}
+        </td>
+        <td style="text-align:right; padding:0.2rem 0.3rem; color:var(--text-dim)">
+          {{ cr.started_at.strftime("%m/%d %H:%M") }}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

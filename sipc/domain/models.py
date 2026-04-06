@@ -17,7 +17,7 @@ class BlueAsset:
     Attributes:
         name: Human-readable short name (e.g. ``Alpha``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (``B_SAT_<name>``).
+        stk_name: Auto-derived object name (equals ``name``).
     """
 
     name: str
@@ -35,7 +35,7 @@ class RedTrack:
     Attributes:
         name: Human-readable track identifier (e.g. ``Track01``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (``R_SAT_<name>``).
+        stk_name: Auto-derived object name (equals ``name``).
     """
 
     name: str
@@ -356,8 +356,9 @@ class ThreatTarget:
 
     target_name: str
     target_satno: str          # NORAD number or "" for blue assets
-    target_source: str         # "blue" | "hrr"
-    hrr_rank: int | None       # None for blue assets
+    target_source: str         # "blue" | "hrr" | "manual"
+    hrr_rank: int | None       # None for blue assets and manual targets
+    confidence: str = ""       # operator-assigned confidence for manual TLEs
 
 
 @dataclass

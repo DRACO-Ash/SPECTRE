@@ -3,11 +3,11 @@
   <div class="red-orbit-params">
     <span title="TLE epoch"><strong>Epoch:</strong> {{ epoch_str }}</span>
     <span title="Sub-satellite longitude (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
-    <span title="Orbital inclination"><strong>Inc:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
+    <span title="Orbital inclination"><strong>Inc [<em>i</em>]:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
     <span title="Orbital period"><strong>Period:</strong> {{ "%.1f"|format(period_min) }} min</span>
     <span title="Altitude at epoch"><strong>Alt:</strong> {{ "%.0f"|format(alt_km) }} km</span>
-    <span title="Eccentricity"><strong>Ecc:</strong> {{ "%.6f"|format(ecc) }}</span>
+    <span title="Eccentricity"><strong>Ecc [<em>e</em>]:</strong> {{ "%.6f"|format(ecc) }}</span>
   </div>
-  {% set osint_label = "RED TRACK" %}
-  {% include "partials/osint_card.html" %}
+  {% set pair_label = "RED TRACK" %}
+  {% include "partials/pair_card.html" %}
 </div>

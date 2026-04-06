@@ -1,0 +1,76 @@
+{# Training scenario browser — rendered inline or via HTMX #}
+{# Context: free_play_scenarios (list[TrainingScenario]), progress #}
+
+{% if not free_play_scenarios %}
+<p style="font-size:0.7rem; color:var(--text-dim)">
+  No scenarios are available yet.  Complete the Orientation tutorial to unlock Level 1 scenarios.
+</p>
+{% else %}
+
+<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:0.5rem">
+  {% for s in free_play_scenarios %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.75rem">
+
+    {# Header row #}
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.3rem">
+      <div>
+        <div style="font-size:0.7rem; font-weight:700; color:var(--text-primary)">{{ s.title }}</div>
+        <div style="font-size:0.58rem; color:var(--text-dim); margin-top:0.05rem">
+          Level {{ s.level_required }} required ·
+          {{ s.horizon_hours }}h horizon
+          {% if s.time_limit_minutes %}· {{ s.time_limit_minutes }}min limit{% endif %}
+        </div>
+      </div>
+      <span style="font-size:0.6rem; font-weight:700; color:{{ s.difficulty_colour }};
+                   background:{{ s.difficulty_colour }}22; border:1px solid {{ s.difficulty_colour }}55;
+                   border-radius:3px; padding:0.1rem 0.35rem; white-space:nowrap; margin-left:0.4rem">
+        {{ s.difficulty | replace('_',' ') | upper }}
+      </span>
+    </div>
+
+    {# Objects badges #}
+    <div style="display:flex; gap:0.25rem; flex-wrap:wrap; margin-bottom:0.4rem">
+      {% for obj in s.blue_objects %}
+      <span style="font-size:0.58rem; color:#3b8beb; background:rgba(59,139,235,0.12);
+                   border:1px solid rgba(59,139,235,0.3); border-radius:3px; padding:0.05rem 0.3rem">
+        ■ {{ obj.name }}
+      </span>
+      {% endfor %}
+      {% for obj in s.red_objects %}
+      <span style="font-size:0.58rem; color:#ef4444; background:rgba(239,68,68,0.12);
+                   border:1px solid rgba(239,68,68,0.3); border-radius:3px; padding:0.05rem 0.3rem">
+        ▲ {{ obj.name }}
+      </span>
+      {% endfor %}
+    </div>
+
+    {# Description #}
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.45rem; line-height:1.4">
+      {{ s.description | truncate(120, True, '…') }}
+    </div>
+
+    {# Scoring #}
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.4rem">
+      Pass: {{ s.scoring.passing_score }} pts · Optimal: {{ s.scoring.optimal_score }} pts
+    </div>
+
+    {# Action button #}
+    {% if progress.current_level >= s.level_required %}
+    <button class="btn-primary" style="font-size:0.65rem; width:100%"
+            hx-get="/training/scenario/{{ s.id }}"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML"
+            hx-on::after-request="setTimeout(function(){ var el=document.getElementById('scenario-detail'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 100)">
+      View &amp; Load
+    </button>
+    {% else %}
+    <button class="btn-secondary" style="font-size:0.65rem; width:100%; opacity:0.5; cursor:not-allowed" disabled>
+      Locked — Reach Level {{ s.level_required }}
+    </button>
+    {% endif %}
+
+  </div>
+  {% endfor %}
+</div>
+
+{% endif %}

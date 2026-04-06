@@ -1,0 +1,84 @@
+{# Historical Photometry Analysis — input panel #}
+{# Context: pol (PolAnalysis|None) #}
+
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+
+  <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.5rem">
+    Photometry Analysis
+  </div>
+
+  <p style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.6rem">
+    Paste a CSV of photometric observations below.
+    {% if pol %}
+      Brightness changes will be correlated with the
+      <strong>{{ pol.manoeuvres | length }}</strong> manoeuvre(s) detected for
+      SATNO <strong>{{ pol.satno }}</strong>.
+    {% else %}
+      Run a Pattern of Life analysis first to enable manoeuvre correlation.
+    {% endif %}
+  </p>
+
+  {# Required / optional columns help #}
+  <details style="margin-bottom:0.5rem">
+    <summary style="font-size:0.65rem; color:var(--ops-blue); cursor:pointer; user-select:none">
+      CSV column guide ▸
+    </summary>
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.35rem; padding-left:0.5rem;
+                border-left:2px solid var(--border)">
+      <strong style="color:var(--text-primary)">Required:</strong>
+      <code>epoch_utc</code> (ISO 8601), <code>apparent_magnitude</code><br>
+      <strong style="color:var(--text-primary)">Optional:</strong>
+      <code>uncertainty</code>, <code>filter_band</code>, <code>range_km</code>,
+      <code>solar_phase_angle_deg</code>, <code>elevation_deg</code>,
+      <code>lunar_phase_fraction</code>, <code>lunar_separation_deg</code>,
+      <code>observer_lat_deg</code>, <code>observer_lon_deg</code>, <code>observer_alt_m</code><br>
+      Missing optional columns are filled with defaults (range=1000 km, elevation=45°, etc.).
+    </div>
+  </details>
+
+  <form hx-post="/pol/photometry-analyse"
+        hx-target="#photometry-results"
+        hx-swap="innerHTML"
+        hx-indicator="#phot-indicator"
+        hx-disabled-elt="find button[type=submit]">
+
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); display:block; margin-bottom:0.3rem">
+      Observation CSV
+    </label>
+    <textarea name="csv_text" id="phot-csv-area" rows="10"
+              style="width:100%; font-size:0.62rem; font-family:monospace; resize:vertical"
+              placeholder="epoch_utc,apparent_magnitude,uncertainty,range_km,solar_phase_angle_deg,elevation_deg&#10;2025-01-01T00:00:00Z,12.45,0.03,950,42.1,55.2&#10;2025-01-02T00:15:00Z,12.51,0.04,980,43.5,52.7&#10;..."></textarea>
+
+    {# Analysis parameters #}
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-top:0.4rem">
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Recent window (days)
+        <input type="number" name="recent_window_days" value="30" min="7" max="180" step="1"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Baseline window (days)
+        <input type="number" name="baseline_window_days" value="90" min="30" max="365" step="1"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Extinction coeff (mag/airmass)
+        <input type="number" name="extinction_coeff" value="0.12" min="0.05" max="0.50" step="0.01"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+    </div>
+
+    <div class="submit-row" style="margin-top:0.5rem">
+      <button type="submit" class="btn-primary">Analyse</button>
+      <span id="phot-indicator" class="htmx-indicator">
+        <span class="spinner"></span>Analysing&hellip;
+      </span>
+    </div>
+
+  </form>
+
+</div>
+
+<div id="photometry-results"></div>

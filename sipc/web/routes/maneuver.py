@@ -652,13 +652,13 @@ async def apply_intercept(
     )
 
     intel = _compute_intercept_intel(result)
-    osint = get_intel(satno_from_tle(red_tle))
+    pair = get_intel(satno_from_tle(red_tle))
 
     return render(request, "partials/intercept_result.html", {
         "result": result, "error": None,
         "intercept_history": state.intercept_history,
         "intel": intel,
-        "osint": osint,
+        "pair": pair,
         "intercept_data_mode": effective_dm,
     })
 

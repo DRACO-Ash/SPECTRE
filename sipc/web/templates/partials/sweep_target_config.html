@@ -29,7 +29,9 @@
             hx-target="#ts-tgt-status"
             hx-swap="innerHTML"
             hx-indicator="#ts-tgt-indicator">
-      <option value="">— Select target group —</option>
+      <option value="none">— Manual TLEs only —</option>
+      {% set total_hrr = (blue_hrr | sum(attribute=1) + red_hrr | sum(attribute=1)) %}
+      <option value="all">All HRR ({{ total_hrr }} object{{ 's' if total_hrr != 1 else '' }})</option>
       {% if blue_hrr %}
       <optgroup label="Blue HRR">
         {% for rank, count in blue_hrr %}
@@ -51,6 +53,64 @@
   </span>
 </div>
 <div id="ts-tgt-status" style="margin-top:0.3rem"></div>
+{% endif %}
+
+{# ── Manual TLE targets — always shown once an interceptor is selected ── #}
+{% if interceptor_name %}
+<details style="margin-top:0.6rem; border-top:1px solid var(--border); padding-top:0.5rem">
+  <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+    <span style="display:inline-block; transition:transform 0.15s; font-size:0.65rem">&#9654;</span>
+    Manual TLE Targets
+    {% if manual_tles %}
+    <span style="background:var(--ops-blue); color:#fff; font-size:0.65rem; padding:0.1rem 0.4rem; border-radius:3px; font-weight:700">{{ manual_tles | length }}</span>
+    {% endif %}
+  </summary>
+
+  <div style="margin-top:0.5rem">
+    {# Add form #}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
+      <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+        Target Name
+        <input type="text" name="manual_name" id="ts-manual-name"
+               class="form-control" placeholder="e.g. TRACK-99"
+               style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
+      </label>
+      <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+        Confidence
+        <select name="manual_confidence" id="ts-manual-conf"
+                style="margin-top:0.2rem; width:100%; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)">
+          <option value="CONFIRMED">CONFIRMED</option>
+          <option value="HIGH">HIGH</option>
+          <option value="MEDIUM" selected>MEDIUM</option>
+          <option value="LOW">LOW</option>
+          <option value="UNCONFIRMED">UNCONFIRMED</option>
+        </select>
+      </label>
+    </div>
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); display:block; margin-bottom:0.4rem">
+      TLE (lines 1 &amp; 2)
+      <textarea name="manual_tle" id="ts-manual-tle"
+                class="form-control"
+                rows="2"
+                placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
+                style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem"></textarea>
+    </label>
+    <button type="button" class="btn-secondary btn-sm"
+            hx-post="/plan/threat/add-manual-tle"
+            hx-target="#manual-tle-list"
+            hx-swap="outerHTML"
+            hx-include="[name='manual_name'],[name='manual_tle'],[name='manual_confidence']"
+            onclick="document.getElementById('ts-manual-name').value=''; document.getElementById('ts-manual-tle').value='';"
+            style="margin-bottom:0.4rem">Add TLE</button>
+  </div>
+
+  {# Current list — replaced by add/remove responses (partial wraps its own #manual-tle-list div) #}
+  {% include "partials/sweep_manual_tles.html" %}
+</details>
+{% endif %}
+
+{# Sweep button — shown when interceptor is selected #}
+{% if interceptor_name %}
 <div class="submit-row" style="margin-top:0.7rem; padding-top:0.5rem; border-top:1px solid var(--border)">
   <button type="button" class="btn-danger"
           hx-post="/plan/threat/sweep"

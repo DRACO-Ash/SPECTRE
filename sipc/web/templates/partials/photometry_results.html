@@ -1,0 +1,140 @@
+{# Photometry Analysis Results — rendered into #photometry-results #}
+{# Context: result (PhotometryChangeAssessment), n_observations (int), pol (PolAnalysis|None) #}
+
+{% if result.significant_at_99 %}
+  {% set sig_color = "#ef4444" %}
+  {% set sig_label = "SIGNIFICANT — 99%" %}
+  {% set sig_bg    = "rgba(239,68,68,0.08)" %}
+{% elif result.significant_at_95 %}
+  {% set sig_color = "#f59e0b" %}
+  {% set sig_label = "SIGNIFICANT — 95%" %}
+  {% set sig_bg    = "rgba(245,158,11,0.08)" %}
+{% else %}
+  {% set sig_color = "#6b7280" %}
+  {% set sig_label = "NOT SIGNIFICANT" %}
+  {% set sig_bg    = "rgba(107,114,128,0.06)" %}
+{% endif %}
+
+{% if result.change_direction == "brightening" %}
+  {% set dir_color = "#22c55e" %}
+  {% set dir_symbol = "▼" %}
+{% elif result.change_direction == "fading" %}
+  {% set dir_color = "#ef4444" %}
+  {% set dir_symbol = "▲" %}
+{% else %}
+  {% set dir_color = "#6b7280" %}
+  {% set dir_symbol = "—" %}
+{% endif %}
+
+<div style="background:var(--panel-bg); border:1px solid {{ sig_color }}55; border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.5rem; background:{{ sig_bg }}">
+
+  {# ── Header ── #}
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.6rem">
+    <div>
+      <span style="font-size:0.68rem; font-weight:700; color:{{ sig_color }};
+                   text-transform:uppercase; letter-spacing:0.06em">
+        Brightness Change: {{ sig_label }}
+      </span>
+      <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
+        {{ n_observations }} observations · p = {{ result.p_value }} · t = {{ result.t_statistic }}
+      </span>
+    </div>
+    {% if pol %}
+    <span style="font-size:0.62rem; color:var(--text-dim)">SATNO {{ pol.satno }}</span>
+    {% endif %}
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-bottom:0.55rem">
+
+    {# Magnitude change #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.05em; margin-bottom:0.2rem">Brightness Change</div>
+      <div style="font-size:1.1rem; font-weight:700; color:{{ dir_color }}">
+        {{ dir_symbol }}
+        {% if result.magnitude_change >= 0 %}+{% endif %}{{ result.magnitude_change }} mag
+      </div>
+      <div style="font-size:0.6rem; color:{{ dir_color }}; font-weight:600; text-transform:capitalize">
+        {{ result.change_direction }}
+      </div>
+    </div>
+
+    {# Baseline vs recent #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.05em; margin-bottom:0.2rem">Residual Comparison</div>
+      <div style="font-size:0.65rem; line-height:1.7">
+        <div>
+          <span style="color:var(--text-dim)">Baseline:</span>
+          <strong>{{ result.baseline_mean }} ± {{ result.baseline_std }}</strong>
+        </div>
+        <div>
+          <span style="color:var(--text-dim)">Recent:</span>
+          <strong style="color:{{ dir_color }}">{{ result.recent_mean }} ± {{ result.recent_std }}</strong>
+        </div>
+        <div>
+          <span style="color:var(--text-dim)">Δ residual:</span>
+          <strong style="color:{{ dir_color }}">
+            {% if result.mean_residual >= 0 %}+{% endif %}{{ result.mean_residual }}
+          </strong>
+        </div>
+      </div>
+    </div>
+
+    {# Confidence + change epoch #}
+    <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase;
+                  letter-spacing:0.05em; margin-bottom:0.2rem">Detection</div>
+      <div style="font-size:0.65rem; line-height:1.7">
+        <div>
+          <span style="color:var(--text-dim)">Confidence:</span>
+          <strong style="color:{{ sig_color }}">{{ (result.confidence * 100) | round(1) }}%</strong>
+        </div>
+        {% if result.estimated_change_epoch %}
+        <div>
+          <span style="color:var(--text-dim)">Est. change epoch:</span>
+          <strong>{{ result.estimated_change_epoch.strftime("%Y-%m-%d %H:%M") }}Z</strong>
+        </div>
+        {% else %}
+        <div style="color:var(--text-dim)">Change epoch: undetermined</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  {# Summary text #}
+  <div style="font-size:0.65rem; font-style:italic; color:var(--text-dim);
+              border-top:1px solid var(--border); padding-top:0.35rem; margin-bottom:0.4rem">
+    {{ result.summary() }}
+  </div>
+
+  {# Correlated manoeuvres #}
+  {% if result.correlated_manoeuvre_epochs %}
+  <div style="font-size:0.65rem; margin-bottom:0.35rem">
+    <span style="color:var(--ops-gold); font-weight:700">
+      {{ result.correlated_manoeuvre_epochs | length }} correlated manoeuvre(s) within ±48h:
+    </span>
+    {% for epoch in result.correlated_manoeuvre_epochs %}
+      <span style="font-family:monospace; color:var(--text-primary)">
+        {{ epoch.strftime("%Y-%m-%d %H:%M") }}Z
+      </span>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Confounding factors #}
+  {% if result.confounding_factors %}
+  <div style="font-size:0.62rem; color:#f59e0b; background:rgba(245,158,11,0.08);
+              border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:0.35rem 0.5rem">
+    <strong>Confounding factors:</strong>
+    <ul style="margin:0.2rem 0 0 1rem; padding:0">
+    {% for f in result.confounding_factors %}
+      <li>{{ f }}</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+</div>

@@ -53,6 +53,76 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
 _UDL_BASE = "https://unifieddatalibrary.com/udl"
 
 
+async def fetch_tle_history_for_satno(
+    satno: int,
+    username: str,
+    password: str,
+    window_hours: float = 24.0,
+    data_mode: str = "REAL",
+    source: str = "",
+) -> list[str]:
+    """Fetch all TLEs for a SATNO within a recent time window from UDL.
+
+    Queries ``/elset`` (not ``/elset/current``) to retrieve every element set
+    filed within *window_hours* of now.  Multiple providers contribute multiple
+    records for the same object, giving the clustering step meaningful input.
+
+    Returns a list of ``"line1\\nline2"`` strings — one per UDL record.
+    Returns an empty list on failure so callers can fall back gracefully.
+
+    Parameters
+    ----------
+    satno:
+        NORAD catalogue number.
+    username / password:
+        UDL credentials.
+    window_hours:
+        How many hours back to search.  Default 24 h.
+    data_mode:
+        UDL data classification filter.
+    source:
+        Optional TLE source provider filter.
+    """
+    from datetime import timedelta
+
+    since = datetime.now(UTC) - timedelta(hours=window_hours)
+    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+
+    params: dict = {
+        "satNo":  satno,
+        "epoch":  f">{since_str}",
+    }
+    if data_mode != "REAL":
+        params["dataMode"] = data_mode
+    if source:
+        params["source"] = source
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/elset",
+                params=params,
+                auth=(username, password),
+                timeout=15.0,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("fetch_tle_history_for_satno(%s) failed: %s", satno, exc)
+        return []
+
+    records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+    tles: list[str] = []
+    for rec in records:
+        line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
+        line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
+        if line1 and line2:
+            tles.append(f"{line1}\n{line2}")
+
+    logger.debug("fetch_tle_history_for_satno(%s): %d TLEs in %.0fh window", satno, len(tles), window_hours)
+    return tles
+
+
 async def fetch_tle_for_satno(
     satno: int, username: str, password: str,
     data_mode: str = "REAL",
@@ -794,4 +864,194 @@ async def search_catalog(
         "partials/catalog_results.html",
         {"results": results, "q": q,
          "status": status, "total": len(catalog)},
+    )
+
+
+@router.get("/notso", response_model=None)
+async def udl_notso(
+    satno: int,
+    request: Request,
+    current_user: User = Depends(require_login),
+):
+    """Attempt to fetch NOTSO records from UDL for a given SATNO.
+
+    Returns a JSON array of NOTSORecord-like dicts on success, or an empty
+    array with a 200 status when the endpoint is not available (404/405).
+    This graceful degradation allows the UI to fall back to paste-textarea
+    without treating a missing endpoint as a hard error.
+    """
+    from fastapi.responses import JSONResponse
+
+    state = get_session_state(current_user.username)
+    if not state.udl_username or not state.udl_password:
+        return JSONResponse({"error": "No active UDL session"}, status_code=401)
+
+    _UDL_BASE = "https://unifieddatalibrary.com/udl"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{_UDL_BASE}/notification",
+                params={"satNo": satno, "maxResults": 200},
+                auth=(state.udl_username, state.udl_password),
+            )
+        if resp.status_code in (404, 405, 501):
+            # Endpoint not available in this UDL instance — return empty list gracefully
+            logger.info("UDL /notification endpoint not available (HTTP %d) — returning []", resp.status_code)
+            return JSONResponse([])
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except Exception:
+            return JSONResponse([])
+
+        # Normalise to a consistent shape
+        records = data if isinstance(data, list) else [data]
+        normalised = []
+        for rec in records:
+            normalised.append({
+                "message_id":   str(rec.get("messageId") or rec.get("id") or ""),
+                "issue_date":   str(rec.get("issueDate") or rec.get("date") or ""),
+                "start":        str(rec.get("effectiveStart") or rec.get("startTime") or ""),
+                "end":          str(rec.get("effectiveEnd") or rec.get("stopTime") or ""),
+                "type":         str(rec.get("notificationType") or rec.get("type") or ""),
+                "description":  str(rec.get("description") or rec.get("remarks") or ""),
+                "raw":          str(rec.get("rawMessage") or rec.get("message") or ""),
+            })
+        return JSONResponse(normalised)
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (404, 405, 501):
+            return JSONResponse([])
+        logger.warning("UDL NOTSO fetch error for %d: %s", satno, exc)
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    except Exception as exc:
+        logger.warning("UDL NOTSO fetch failed for %d: %s", satno, exc)
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@router.post("/notso/sync", response_model=None)
+async def udl_notso_sync(
+    request: Request,
+    current_user: User = Depends(require_login),
+):
+    """Incrementally sync TACREP_NOTSO records from UDL into the local cache.
+
+    Uses ``createdAt`` of the newest cached record as the lower bound for each
+    pull.  Pages through the UDL ``/notification`` endpoint (500 records per
+    page) until no more results are returned, then writes everything to
+    ``sipc/data/notso_cache.json``.
+
+    Always returns an HTML partial suitable for ``hx-swap="innerHTML"`` on the
+    NOTSO sync status ``<div>``.
+    """
+    from fastapi.responses import HTMLResponse as _HTMLResponse
+
+    from sipc.data.notso_cache import get_notso_cache
+
+    state = get_session_state(current_user.username)
+    if not state.udl_username or not state.udl_password:
+        return _HTMLResponse(
+            '<p class="error-msg" style="font-size:0.72rem">No active UDL session — connect first.</p>'
+        )
+
+    cache = get_notso_cache()
+    latest = cache.latest_created_at()
+
+    # Build the createdAt lower-bound filter.  If the cache is empty, default
+    # to 2024-01-01 to pull reasonable history without hitting UDL too hard.
+    if latest is not None:
+        # Advance by 1 µs so we don't re-fetch the boundary record.
+        from datetime import timedelta
+        since = latest + timedelta(microseconds=1)
+    else:
+        from datetime import timedelta
+        since = datetime(2024, 1, 1, tzinfo=UTC)
+
+    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    base_params = {
+        "createdAt":  f">{since_str}",
+        "dataMode":   "REAL",
+        "msgType":    "TACREP_NOTSO",
+        "source":     "JCO",
+        "maxResults": 500,
+    }
+
+    total_added = 0
+    page = 0
+    errors: list[str] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while True:
+                params = dict(base_params)
+                if page > 0:
+                    params["offset"] = page * 500
+
+                resp = await client.get(
+                    f"{_UDL_BASE}/notification",
+                    params=params,
+                    auth=(state.udl_username, state.udl_password),
+                )
+
+                if resp.status_code in (404, 405, 501):
+                    errors.append(
+                        f"UDL /notification endpoint returned HTTP {resp.status_code} — "
+                        "TACREP_NOTSO may not be available on this instance."
+                    )
+                    break
+
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    errors.append(f"HTTP error on page {page}: {exc}")
+                    break
+
+                try:
+                    data = resp.json()
+                except Exception:
+                    errors.append(f"Non-JSON response on page {page}")
+                    break
+
+                records = data if isinstance(data, list) else ([data] if data else [])
+                if not records:
+                    break  # No more pages
+
+                added = cache.append(records)
+                total_added += added
+                page += 1
+
+                # If we got fewer records than a full page, we've reached the end.
+                if len(records) < 500:
+                    break
+
+    except Exception as exc:
+        errors.append(f"Sync failed: {exc}")
+        logger.warning("notso_sync failed: %s", exc)
+
+    state.append_log(
+        f"[NOTSO] Sync complete: +{total_added} new records "
+        f"(total {cache.total_records()}, {page} page(s) fetched)"
+    )
+
+    # Build status HTML
+    if errors and total_added == 0:
+        error_html = "".join(f'<p style="margin:0.1rem 0">{e}</p>' for e in errors)
+        return _HTMLResponse(
+            f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
+        )
+
+    warn_html = ""
+    if errors:
+        warn_html = "".join(
+            f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {e}</p>'
+            for e in errors
+        )
+
+    last_sync = cache.last_sync_utc() or "—"
+    total = cache.total_records()
+    return _HTMLResponse(
+        f'<div class="callout callout-green" style="font-size:0.72rem; padding:0.4rem 0.6rem">'
+        f'<strong>+{total_added}</strong> new records added &mdash; '
+        f'{total} total in cache. Last sync: {last_sync}.'
+        f'</div>{warn_html}'
     )

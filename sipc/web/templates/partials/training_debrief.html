@@ -1,0 +1,145 @@
+{# Post-scenario debrief screen #}
+{# Context: scenario, cr (ChallengeResult), total_score, passed, is_scored, points_earned,
+            axis_scores, level_up_events, newly_unlocked, cfg #}
+
+<div style="background:var(--panel-bg); border:2px solid {% if not is_scored %}rgba(107,114,128,0.4){% elif passed %}rgba(34,197,94,0.5){% else %}rgba(239,68,68,0.4){% endif %};
+            border-radius:6px; padding:0.75rem 0.9rem">
+
+  {# Explore-mode notice (replaces pass/fail banner) #}
+  {% if not is_scored %}
+  <div style="text-align:center; margin-bottom:0.6rem">
+    <div style="font-size:1.1rem; font-weight:800; color:#9ca3af">🔍 Exploration Complete</div>
+    <div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.15rem">
+      {{ scenario.title }} — no points awarded
+    </div>
+  </div>
+  {% else %}
+
+  {# Result banner #}
+  <div style="text-align:center; margin-bottom:0.6rem">
+    {% if passed %}
+    <div style="font-size:1.4rem; font-weight:800; color:#22c55e">✓ PASSED</div>
+    {% else %}
+    <div style="font-size:1.4rem; font-weight:800; color:#ef4444">✗ NOT PASSED</div>
+    {% endif %}
+    <div style="font-size:0.7rem; color:var(--text-dim); margin-top:0.15rem">{{ scenario.title }}</div>
+  </div>
+  {% endif %}
+
+  {# Score breakdown #}
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+    <div style="text-align:center; background:var(--bg-secondary); border-radius:5px; padding:0.5rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Your Score</div>
+      <div style="font-size:1.3rem; font-weight:800; color:{% if not is_scored %}#9ca3af{% elif passed %}#22c55e{% else %}#ef4444{% endif %}">
+        {{ total_score }}
+      </div>
+    </div>
+    <div style="text-align:center; background:var(--bg-secondary); border-radius:5px; padding:0.5rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Pass Threshold</div>
+      <div style="font-size:1.3rem; font-weight:800; color:var(--text-primary)">{{ scenario.scoring.passing_score }}</div>
+    </div>
+    <div style="text-align:center; background:var(--bg-secondary); border-radius:5px; padding:0.5rem">
+      <div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Optimal</div>
+      <div style="font-size:1.3rem; font-weight:800; color:#f59e0b">{{ scenario.scoring.optimal_score }}</div>
+    </div>
+  </div>
+
+  {# Gamification points earned — only shown for scored attempts #}
+  {% if is_scored %}
+  <div style="background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.3);
+              border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.65rem">
+    <strong style="color:#f59e0b">+{{ points_earned }} training points earned</strong>
+    {% if cr.first_try and passed %} — First Attempt Bonus included!{% endif %}
+  </div>
+  {% endif %}
+
+  {# Level up events — only possible on scored attempts #}
+  {% for lv in level_up_events %}
+  <div style="background:rgba(34,197,94,0.12); border:2px solid #22c55e;
+              border-radius:6px; padding:0.5rem 0.75rem; margin-bottom:0.4rem; text-align:center">
+    <div style="font-size:0.75rem; font-weight:800; color:#22c55e">
+      ★ LEVEL UP — Level {{ lv.level }}: {{ lv.title }} ★
+    </div>
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.1rem">{{ lv.description }}</div>
+  </div>
+  {% endfor %}
+
+  {# Newly unlocked content #}
+  {% if newly_unlocked %}
+  <div style="background:rgba(59,139,235,0.08); border:1px solid rgba(59,139,235,0.3);
+              border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.63rem">
+    <strong style="color:var(--ops-blue)">Newly unlocked:</strong>
+    {{ newly_unlocked | join(', ') }}
+  </div>
+  {% endif %}
+
+  {# Axis score breakdown #}
+  {% if axis_scores %}
+  <div style="margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.25rem">Skill Points Earned</div>
+    {% for axis_id, pts in axis_scores.items() %}
+    {% set axis_def = cfg.axes_by_id.get(axis_id) %}
+    <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.15rem">
+      <span style="width:130px; font-size:0.62rem; color:{% if axis_def %}{{ axis_def.colour }}{% else %}var(--text-dim){% endif %}; font-weight:600">
+        {{ axis_def.label if axis_def else axis_id | replace('_',' ') | title }}
+      </span>
+      <span style="font-size:0.62rem; font-family:monospace; color:var(--text-primary)">+{{ pts | int }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Debrief notes #}
+  {% set optimal_pct = ((total_score / scenario.scoring.optimal_score) * 100) | round(0) | int if scenario.scoring.optimal_score > 0 else 0 %}
+  <div style="background:var(--bg-secondary); border-radius:4px; padding:0.45rem 0.6rem;
+              margin-bottom:0.5rem; font-size:0.63rem; color:var(--text-dim)">
+    <strong style="color:var(--text-primary)">Debrief:</strong>
+    {% if not is_scored %}
+      Exploration run complete.  You ticked {{ total_score }} objective points worth of objectives
+      (pass threshold {{ scenario.scoring.passing_score }}, optimal {{ scenario.scoring.optimal_score }}).
+      When you're ready, start a scored attempt to have your performance recorded.
+    {% elif not passed %}
+      You scored {{ total_score }} of the {{ scenario.scoring.passing_score }} needed to pass.
+      Review the objectives above and retry — there is no penalty for re-attempting.
+      Focus on the objectives you missed to improve your score.
+    {% elif optimal_pct >= 95 %}
+      Excellent performance — {{ optimal_pct }}% of optimal score achieved.
+      You demonstrated strong command of all required skills.
+    {% elif optimal_pct >= 75 %}
+      Good performance — {{ optimal_pct }}% of optimal score.
+      Consider which objectives were missed and whether a faster approach is possible.
+    {% else %}
+      Passing performance — {{ optimal_pct }}% of optimal score.
+      You met the minimum standard.  To improve, review the optimal scenario path and
+      focus on the objectives that carry the most points.
+    {% endif %}
+  </div>
+
+  {# Actions #}
+  <div style="display:flex; gap:0.5rem">
+    {% if not is_scored %}
+    <button class="btn-primary" style="font-size:0.7rem"
+            hx-post="/training/scenario/{{ scenario.id }}/start"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML">
+      ▶ Start Scored Attempt
+    </button>
+    {% elif not passed %}
+    <button class="btn-primary" style="font-size:0.7rem"
+            hx-post="/training/scenario/{{ scenario.id }}/start"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML">
+      ↺ Retry Scenario
+    </button>
+    {% endif %}
+    <button class="btn-secondary" style="font-size:0.7rem"
+            hx-get="/training/dashboard"
+            hx-target="#tpanel-dashboard"
+            hx-swap="innerHTML"
+            onclick="trainingTab('dashboard')">
+      View Dashboard
+    </button>
+  </div>
+
+</div>

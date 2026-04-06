@@ -241,10 +241,6 @@ main:has(.console-layout) { padding: 0; }
 .console-layout.sidebar-collapsed .sidebar-brand,
 .console-layout.sidebar-collapsed .sidebar-tabs,
 .console-layout.sidebar-collapsed .sidebar-panels { display: none; }
-.console-layout.sidebar-collapsed .sidebar-collapse-btn {
-  writing-mode: vertical-lr;
-  padding: 0.5rem 0.2rem;
-}
 
 .sidebar-brand {
   display: flex;
@@ -358,22 +354,23 @@ main:has(.console-layout) { padding: 0; }
 .asset-panel { display: none; }
 .asset-panel.active { display: block; }
 
-/* Sidebar collapse button */
+/* Sidebar collapse button — lives in the hero tab bar, always visible */
 .sidebar-collapse-btn {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--navy);
+  background: transparent;
   border: none;
-  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 0.75rem;
-  padding: 0.35rem;
+  padding: 0 0.65rem;
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
+  align-self: stretch;
 }
-.sidebar-collapse-btn:hover { color: var(--text); background: var(--navy-light); }
+.sidebar-collapse-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
 
 /* ── Command Area ────────────────────────────────────────────── */
 .command-area {
@@ -449,7 +446,35 @@ main:has(.console-layout) { padding: 0; }
 .engine-hero .panel { border-left: 3px solid var(--gold); }
 .sweep-hero .panel  { border-left: 3px solid var(--red); }
 
-/* Lower tabs */
+/* ── Engine sub-tabs (Calculator / Trade-Space / History) ────────── */
+.engine-tab-bar {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--navy-deep);
+  border-bottom: 1px solid var(--border);
+}
+.etab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.5rem 1.2rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.etab:hover { color: var(--text); }
+.etab.active { color: var(--gold); border-bottom-color: var(--gold); }
+.engine-tab-panel { display: none; overflow-y: auto; flex: 1; padding: 0.75rem 1rem; }
+.engine-tab-panel.active { display: block; }
+.engine-hero { display: flex; flex-direction: column; padding: 0; }
+.engine-hero .engine-tab-panel.active { display: flex; flex-direction: column; }
+
+/* Lower tabs — kept for backwards compatibility, no longer rendered */
 .lower-tabs {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
@@ -498,6 +523,11 @@ main:has(.console-layout) { padding: 0; }
   padding: 0.6rem 1rem;
 }
 .lower-tab-panel.active { display: block; }
+
+/* ── Details/summary accordion ──────────────────────────────── */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] > summary span:first-child { display: inline-block; transform: rotate(90deg); }
 
 /* ── Engine flash animation ──────────────────────────────────── */
 @keyframes engine-flash {

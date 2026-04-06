@@ -1,0 +1,121 @@
+{# Scenario detail + briefing panel #}
+{# Context: scenario (TrainingScenario), progress, attempt_number #}
+
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
+            padding:0.75rem 0.9rem">
+
+  {# Training data notice #}
+  <div style="background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.3);
+              border-radius:4px; padding:0.35rem 0.6rem; margin-bottom:0.5rem; font-size:0.62rem;
+              color:#f59e0b; font-weight:600">
+    ⚠ TRAINING DATA — Synthetic scenario. SATNO values and orbital parameters are fictional.
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.5rem">
+    <div>
+      <div style="font-size:0.8rem; font-weight:700; color:var(--text-primary)">{{ scenario.title }}</div>
+      <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.05rem">
+        Level {{ scenario.level_required }} · {{ scenario.difficulty | replace('_',' ') | title }} ·
+        {{ scenario.horizon_hours }}h horizon
+        {% if scenario.time_limit_minutes %}· <strong style="color:#f59e0b">{{ scenario.time_limit_minutes }} min time limit</strong>{% endif %}
+      </div>
+    </div>
+    <span style="font-size:0.62rem; color:var(--text-dim)">Attempt #{{ attempt_number }}</span>
+  </div>
+
+  {# Briefing #}
+  <div style="background:rgba(59,139,235,0.06); border:1px solid rgba(59,139,235,0.2);
+              border-radius:4px; padding:0.5rem 0.65rem; margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase;
+                letter-spacing:0.06em; margin-bottom:0.2rem">Scenario Briefing</div>
+    <div style="font-size:0.65rem; color:var(--text-dim); line-height:1.5">{{ scenario.briefing }}</div>
+  </div>
+
+  {# Objects #}
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+    <div>
+      <div style="font-size:0.6rem; font-weight:700; color:#3b8beb; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.2rem">Blue Assets</div>
+      {% for obj in scenario.blue_objects %}
+      <div style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.15rem">
+        <strong style="color:var(--text-primary)">{{ obj.name }}</strong>
+        ({{ obj.regime }}) SATNO {{ obj.satno }}
+      </div>
+      {% endfor %}
+      {% if not scenario.blue_objects %}
+      <div style="font-size:0.62rem; color:var(--text-dim)">None</div>
+      {% endif %}
+    </div>
+    <div>
+      <div style="font-size:0.6rem; font-weight:700; color:#ef4444; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.2rem">Red Objects</div>
+      {% for obj in scenario.red_objects %}
+      <div style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.15rem">
+        <strong style="color:var(--text-primary)">{{ obj.name }}</strong>
+        ({{ obj.regime }}) SATNO {{ obj.satno }}
+      </div>
+      {% endfor %}
+      {% if not scenario.red_objects %}
+      <div style="font-size:0.62rem; color:var(--text-dim)">None</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Objectives #}
+  <div style="margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem">
+      Objectives ({{ scenario.scoring.passing_score }} pts to pass · {{ scenario.scoring.optimal_score }} pts optimal)
+    </div>
+    {% for obj in scenario.objectives %}
+    <div style="display:flex; align-items:flex-start; gap:0.4rem; margin-bottom:0.2rem">
+      <span style="font-size:0.6rem; font-weight:700; color:{{ cfg_axis_colour(obj.skill_axis) if cfg_axis_colour is defined else '#6b7280' }};
+                   white-space:nowrap; padding-top:0.05rem">+{{ obj.points }} pts</span>
+      <span style="font-size:0.63rem; color:var(--text-dim)">{{ obj.description }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# Manoeuvre options (if any) #}
+  {% if scenario.manoeuvre_options %}
+  <div style="margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem">
+      Manoeuvre Options
+    </div>
+    {% for opt in scenario.manoeuvre_options %}
+    <div style="background:var(--bg-secondary); border:1px solid {% if not opt.feasible %}rgba(239,68,68,0.4){% elif opt.optimal %}rgba(34,197,94,0.4){% else %}var(--border){% endif %};
+                border-radius:4px; padding:0.35rem 0.5rem; margin-bottom:0.2rem; font-size:0.62rem">
+      <div style="font-weight:600; color:{% if not opt.feasible %}#ef4444{% elif opt.optimal %}#22c55e{% else %}var(--text-primary){% endif %}">
+        {{ opt.label }}
+      </div>
+      <div style="color:var(--text-dim); margin-top:0.1rem">
+        ΔV: {{ opt.dv_ms }} m/s · Miss distance: {{ opt.miss_distance_km }} km ·
+        {% if not opt.feasible %}<strong style="color:#ef4444">INFEASIBLE</strong>
+        {% elif opt.optimal %}<strong style="color:#22c55e">OPTIMAL</strong>
+        {% else %}Valid{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Start / Explore buttons #}
+  <div style="display:flex; gap:0.5rem">
+    <form hx-post="/training/scenario/{{ scenario.id }}/start"
+          hx-target="#scenario-detail"
+          hx-swap="innerHTML"
+          style="flex:2">
+      <button type="submit" class="btn-primary" style="width:100%; font-size:0.72rem; font-weight:700">
+        ▶ Start Scenario{% if attempt_number > 1 %} (Attempt #{{ attempt_number }}){% endif %}
+      </button>
+    </form>
+    <form hx-post="/training/scenario/{{ scenario.id }}/explore"
+          hx-target="#scenario-detail"
+          hx-swap="innerHTML"
+          style="flex:1">
+      <button type="submit" class="btn-secondary"
+              style="width:100%; font-size:0.68rem; font-weight:600"
+              title="Practice without scoring — no points awarded, attempt counter unchanged">
+        🔍 Explore
+      </button>
+    </form>
+  </div>
+
+</div>
