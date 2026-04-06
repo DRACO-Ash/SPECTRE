@@ -1,0 +1,46 @@
+{# Tutorial reading panel — loaded via HTMX into #tutorial-detail #}
+<div style="max-width:680px">
+
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.75rem">
+    <div>
+      <div style="font-size:0.65rem; color:var(--ops-blue); text-transform:uppercase;
+                  letter-spacing:0.07em; font-weight:700; margin-bottom:0.15rem">Tutorial</div>
+      <div style="font-size:0.9rem; font-weight:800; color:var(--text-primary)">{{ tutorial.title }}</div>
+    </div>
+    <div style="font-size:0.65rem; color:#f59e0b; font-weight:700">
+      +{{ tutorial.points }} pts · {{ tutorial.skill_axis | replace('_',' ') | title }}
+    </div>
+  </div>
+
+  {# Steps #}
+  {% for step in tutorial.steps %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+              padding:0.65rem 0.8rem; margin-bottom:0.4rem">
+    <div style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); margin-bottom:0.25rem">
+      {{ loop.index }}. {{ step.heading }}
+    </div>
+    <div style="font-size:0.65rem; color:var(--text-dim); line-height:1.6">
+      {{ step.body }}
+    </div>
+  </div>
+  {% endfor %}
+
+  {# Complete button #}
+  <div style="margin-top:0.75rem">
+    {% if already_done %}
+    <div style="font-size:0.65rem; color:#22c55e; font-weight:700; padding:0.5rem 0">
+      ✓ Already completed — no additional points awarded.
+    </div>
+    {% else %}
+    <form hx-post="/training/tutorial/{{ tutorial.id }}/complete"
+          hx-target="#tutorial-detail"
+          hx-swap="innerHTML">
+      <button type="submit" class="btn-primary"
+              style="font-size:0.68rem; font-weight:700; padding:0.45rem 1rem">
+        Mark Complete &amp; Earn {{ tutorial.points }} pts
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+</div>

@@ -1,0 +1,58 @@
+{# Tutorial completion confirmation panel #}
+<div style="max-width:480px; text-align:center; padding:1.5rem 1rem">
+
+  {% if already_done %}
+  <div style="font-size:0.8rem; font-weight:700; color:var(--text-dim); margin-bottom:0.5rem">
+    Already completed
+  </div>
+  <div style="font-size:0.65rem; color:var(--text-dim)">
+    {{ tutorial.title }} was already in your completed list. No additional points awarded.
+  </div>
+
+  {% else %}
+  <div style="font-size:1.8rem; margin-bottom:0.4rem">&#10003;</div>
+  <div style="font-size:0.85rem; font-weight:800; color:var(--text-primary); margin-bottom:0.25rem">
+    Tutorial Complete
+  </div>
+  <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:0.75rem">
+    {{ tutorial.title }}
+  </div>
+  <div style="font-size:1.1rem; font-weight:800; color:#f59e0b; margin-bottom:0.4rem">
+    +{{ points_earned }} pts
+  </div>
+  {% endif %}
+
+  {# Level-up events #}
+  {% for ld in level_up_events %}
+  <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4);
+              border-radius:6px; padding:0.5rem 0.75rem; margin:0.5rem 0; text-align:left">
+    <div style="font-size:0.6rem; color:#f59e0b; font-weight:700; text-transform:uppercase;
+                letter-spacing:0.07em">Level Up!</div>
+    <div style="font-size:0.82rem; font-weight:800; color:var(--text-primary)">
+      Level {{ ld.level }} — {{ ld.title }}
+    </div>
+    <div style="font-size:0.62rem; color:var(--text-dim)">{{ ld.description }}</div>
+  </div>
+  {% endfor %}
+
+  {# Newly unlocked #}
+  {% if newly_unlocked %}
+  <div style="text-align:left; margin-top:0.5rem">
+    <div style="font-size:0.6rem; color:#22c55e; text-transform:uppercase; font-weight:700;
+                letter-spacing:0.06em; margin-bottom:0.25rem">Unlocked</div>
+    {% for item in newly_unlocked %}
+    <div style="font-size:0.63rem; color:var(--text-dim); padding:0.1rem 0">
+      &#8227; {{ item | replace('scenario:', 'Scenario: ') | replace('tutorial:', 'Tutorial: ') | replace('challenge:', 'Challenge: ') | replace('_', ' ') | title }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div style="margin-top:1rem">
+    <button class="btn-primary" style="font-size:0.65rem"
+            onclick="trainingTab('scenarios')">
+      View Scenarios
+    </button>
+  </div>
+
+</div>

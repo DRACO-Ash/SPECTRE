@@ -129,6 +129,7 @@ levels:
       type: default    # Always unlocked — starting level
     unlocks:
       - "scenario:cadet_01_geo_stationkeeping"
+      - "scenario:cadet_02_leo_debris_conjunction"
       - "tutorial:orientation"
       - "tutorial:scenario_loading"
 
@@ -140,7 +141,11 @@ levels:
       type: tutorial_complete
       tutorial_id: "orientation"
     unlocks:
+      - "scenario:cadet_03_inspection_approach"
       - "scenario:observer_02_proximity_threat"
+      - "scenario:observer_03_geo_cola_budget"
+      - "scenario:observer_04_decision_engine_intro"
+      - "scenario:observer_05_notso_correlation"
       - "tutorial:threat_assessment"
 
   - level: 3
@@ -163,6 +168,8 @@ levels:
       axis: decision_quality
       min_points: 300
     unlocks:
+      - "scenario:planner_04_covert_rendezvous"
+      - "scenario:planner_05_leo_phasing_campaign"
       - "tutorial:decision_evaluation"
       - "challenge:analyst_gauntlet"
 
@@ -174,6 +181,7 @@ levels:
       type: challenge_count
       count: 3
     unlocks:
+      - "scenario:planner_challenge_theatre_defence"
       - "challenge:operator_timed_full_cycle"
       - "tutorial:full_engagement_cycle"
 

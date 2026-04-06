@@ -36,6 +36,7 @@ from sipc.training.gamification import (
 )
 from sipc.training.models import ChallengeResult, TrainingProgress, TrainingSession
 from sipc.training.scenarios import get_scenario, load_scenarios, scenarios_for_level
+from sipc.training.tutorials import get_tutorial, tutorials_for_level
 from sipc.web.auth import require_login
 from sipc.web.database import get_db
 from sipc.web.deps import render
@@ -101,6 +102,7 @@ async def training_home(
     available = scenarios_for_level(progress.current_level)
     challenges = [s for s in available if s.challenge]
     free_play  = [s for s in available if not s.challenge]
+    unlocked_tutorials = tutorials_for_level(progress.unlocked)
 
     # Recent results (last 10)
     recent_results = (await db.execute(
@@ -131,6 +133,7 @@ async def training_home(
         "recommendation": recommendation,
         "free_play_scenarios": free_play,
         "challenge_scenarios": challenges,
+        "unlocked_tutorials": unlocked_tutorials,
         "recent_results": recent_results,
         "training_session_id": session.id,
     })
@@ -505,4 +508,93 @@ async def training_dashboard(
         "recommendation": recommendation,
         "recent_results": recent_results,
         "first_scenario": first_scenario,
+    })
+
+
+# ── Tutorial viewer ───────────────────────────────────────────────────────────
+
+@router.get("/tutorial/{tutorial_id}", response_class=HTMLResponse)
+async def training_tutorial_view(
+    request: Request,
+    tutorial_id: str,
+    current_user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Return a tutorial reading panel."""
+    tutorial = get_tutorial(tutorial_id)
+    if tutorial is None:
+        return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
+
+    progress = await _get_or_create_progress(current_user.username, db)
+    already_done = tutorial_id in progress.tutorials_completed
+
+    return render(request, "partials/training_tutorial.html", {
+        "tutorial": tutorial,
+        "already_done": already_done,
+    })
+
+
+@router.post("/tutorial/{tutorial_id}/complete", response_class=HTMLResponse)
+async def training_tutorial_complete(
+    request: Request,
+    tutorial_id: str,
+    current_user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Mark a tutorial complete, award points, check for level-up."""
+    tutorial = get_tutorial(tutorial_id)
+    if tutorial is None:
+        return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
+
+    progress = await _get_or_create_progress(current_user.username, db)
+
+    points_earned = 0
+    already_done  = tutorial_id in progress.tutorials_completed
+
+    if not already_done:
+        # Award points
+        current_axis = progress.axis_points.copy()
+        points_earned = tutorial.points
+        current_axis[tutorial.skill_axis] = current_axis.get(tutorial.skill_axis, 0.0) + points_earned
+        progress.axis_points   = current_axis
+        progress.total_points += points_earned
+        progress.tutorials_done += 1
+
+        done = progress.tutorials_completed[:]
+        done.append(tutorial_id)
+        progress.tutorials_completed = done
+
+    # Level-up check
+    level_up_events: list = []
+    newly_unlocked:  list = []
+    while True:
+        lu = check_level_up(
+            current_level=progress.current_level,
+            total_points=progress.total_points,
+            axis_points=progress.axis_points,
+            tutorials_completed=progress.tutorials_completed,
+            scenarios_passed=progress.scenarios_passed,
+            challenges_passed=progress.challenges_passed,
+        )
+        if not lu.levelled_up:
+            break
+        progress.current_level = lu.new_level
+        newly_unlocked.extend(lu.newly_unlocked)
+        cur_unlocked = progress.unlocked
+        cur_unlocked.extend([x for x in lu.newly_unlocked if x not in cur_unlocked])
+        progress.unlocked = cur_unlocked
+        if lu.new_level_def:
+            level_up_events.append(lu.new_level_def)
+
+    await db.commit()
+
+    cfg = get_config()
+    return render(request, "partials/training_tutorial_complete.html", {
+        "tutorial": tutorial,
+        "points_earned": points_earned,
+        "already_done": already_done,
+        "level_up_events": level_up_events,
+        "newly_unlocked": newly_unlocked,
+        "cfg": cfg,
+        "progress": progress,
     })
