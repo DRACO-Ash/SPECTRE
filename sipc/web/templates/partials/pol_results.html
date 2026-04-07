@@ -37,6 +37,19 @@
 
     {# Mission profile + narrative #}
     <div>
+      {# Object identity line #}
+      <div style="display:flex; align-items:baseline; gap:0.6rem; margin-bottom:0.35rem; flex-wrap:wrap">
+        <span style="font-size:0.95rem; font-weight:900; color:var(--text-primary); letter-spacing:0.02em">{{ pol.name }}</span>
+        <span style="font-size:0.7rem; font-weight:700; color:var(--ops-blue)">SATNO {{ pol.satno }}</span>
+        {% if pol.records %}
+        <span style="font-size:0.65rem; color:var(--text-dim)">
+          Latest TLE epoch:
+          <span style="color:var(--text-primary); font-family:var(--font-mono)">
+            {{ pol.records[-1].epoch.strftime('%Y-%m-%d %H:%MZ') }}
+          </span>
+        </span>
+        {% endif %}
+      </div>
       {% if pol.intel_assessment %}
       <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
         {{ pol.intel_assessment.mission_profile }}

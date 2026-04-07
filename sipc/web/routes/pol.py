@@ -34,34 +34,35 @@ _UDL_MAX_RESULTS = 5000
 
 def _parse_udl_elset_response(
     resp: httpx.Response,
-) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
     """Extract TLE text and provenance metadata from a UDL /elset response.
 
-    Returns ``(tle_text, metadata, rms_metadata)`` where *metadata* maps TLE
-    line-1 strings to ``(data_mode, source)`` pairs and *rms_metadata* maps
-    line-1 strings to RMS residuals (``None`` when not provided by UDL).
+    Returns ``(tle_text, metadata, rms_metadata, sat_name)`` where *metadata*
+    maps TLE line-1 strings to ``(data_mode, source)`` pairs, *rms_metadata*
+    maps line-1 strings to RMS residuals, and *sat_name* is the first non-empty
+    satellite name found in the JSON records (empty string if not available).
     """
     raw = resp.text.strip()
     if not raw:
-        return "", {}, {}
+        return "", {}, {}, ""
 
     try:
         data = resp.json()
     except Exception:
         # Plain TLE text — no provenance metadata available.
-        return raw, {}, {}
+        return raw, {}, {}, ""
 
     if isinstance(data, dict):
-        # Defensive: UDL spec returns a JSON array; wrap a stray single-record dict.
         records = [data]
     elif isinstance(data, list):
         records = data
     else:
-        return "", {}, {}
+        return "", {}, {}, ""
 
     lines: list[str] = []
     metadata: dict[str, tuple[str, str]] = {}
     rms_metadata: dict[str, float | None] = {}
+    sat_name: str = ""
     for rec in records:
         l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
         l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
@@ -71,17 +72,22 @@ def _parse_udl_elset_response(
             dm  = str(rec.get("dataMode") or rec.get("data_mode") or "").strip()
             src = str(rec.get("source") or "").strip()
             metadata[l1] = (dm, src)
-            # Extract RMS residual if UDL provides it (used for quality-based TLE selection)
             rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")
             rms_metadata[l1] = float(rms_raw) if rms_raw is not None else None
+            # Capture satellite name from first valid record that has one
+            if not sat_name:
+                sat_name = str(
+                    rec.get("satName") or rec.get("objectName") or
+                    rec.get("OBJECT_NAME") or rec.get("name") or ""
+                ).strip()
 
     logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
-    return "\n".join(lines), metadata, rms_metadata
+    return "\n".join(lines), metadata, rms_metadata, sat_name
 
 
 async def _fetch_udl_history(
     satno: int, username: str, password: str, data_mode: str, source: str = "",
-) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
     """Fetch historical TLEs from UDL elset endpoint (2015 → now, max 5 000).
 
     Returns ``(tle_text, metadata, rms_metadata)``.
@@ -110,14 +116,14 @@ async def _fetch_udl_history(
 
 async def _fetch_udl_latest(
     satno: int, username: str, password: str, data_mode: str, source: str = "",
-) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None]]:
+) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
     """Fetch the current/latest TLE from UDL ``/elset/current``.
 
     A satellite with many historical TLEs can exhaust the 5 000-record cap
     on ``/elset`` before reaching the present.  This second call guarantees
     the most recent elset is always included regardless of archive depth.
 
-    Returns ``(tle_text, metadata, rms_metadata)``.
+    Returns ``(tle_text, metadata, rms_metadata, sat_name)``.
     """
     params: dict = {"satNo": satno}
     if data_mode and data_mode != "REAL":
@@ -180,14 +186,15 @@ async def pol_analyse(
         if not udl_user.strip() or not udl_pass.strip():
             return _err("Enter UDL username and password.")
         try:
-            tle_text, meta, rms_meta = await _fetch_udl_history(
+            tle_text, meta, rms_meta, _hist_name = await _fetch_udl_history(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta, latest_rms = await _fetch_udl_latest(
+            latest_text, latest_meta, latest_rms, latest_name = await _fetch_udl_latest(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
                 source=state.udl_tle_source,
             )
+            name = latest_name or _hist_name or str(satno)
             logger.info("PoL: %d chars from UDL (direct) for %d", len(tle_text), satno)
         except Exception as exc:
             logger.warning("PoL: UDL direct failed: %s", exc)
@@ -198,16 +205,17 @@ async def pol_analyse(
         if not state.udl_username or not state.udl_password:
             return _err("No active UDL session. Connect UDL first, or choose 'UDL (credentials)'.")
         try:
-            tle_text, meta, rms_meta = await _fetch_udl_history(
+            tle_text, meta, rms_meta, _hist_name = await _fetch_udl_history(
                 satno, state.udl_username, state.udl_password,
                 state.udl_data_mode or "REAL",
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta, latest_rms = await _fetch_udl_latest(
+            latest_text, latest_meta, latest_rms, latest_name = await _fetch_udl_latest(
                 satno, state.udl_username, state.udl_password,
                 state.udl_data_mode or "REAL",
                 source=state.udl_tle_source,
             )
+            name = latest_name or _hist_name or str(satno)
             logger.info("PoL: %d chars from UDL (session) for %d", len(tle_text), satno)
         except Exception as exc:
             logger.warning("PoL: UDL session failed: %s", exc)
