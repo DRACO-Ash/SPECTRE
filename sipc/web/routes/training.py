@@ -168,7 +168,7 @@ async def training_leave(
             prog.time_in_training_minutes += elapsed
             await db.commit()
 
-    return RedirectResponse(url="/operator", status_code=303)
+    return RedirectResponse(url="/", status_code=303)
 
 
 # ── Scenario detail panel ─────────────────────────────────────────────────────
