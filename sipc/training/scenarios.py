@@ -80,6 +80,7 @@ class TrainingScenario:
     time_limit_minutes: int | None = None
     challenge: bool = False
     challenge_scenarios: list[str] = field(default_factory=list)
+    tool_workflow: str = ""
 
     @property
     def difficulty_colour(self) -> str:
@@ -158,6 +159,7 @@ def _parse_scenario(raw: dict[str, Any]) -> TrainingScenario:
         time_limit_minutes=raw.get("time_limit_minutes"),
         challenge=bool(raw.get("challenge", False)),
         challenge_scenarios=raw.get("challenge_scenarios", []),
+        tool_workflow=str(raw.get("tool_workflow", "")).strip(),
     )
 
 

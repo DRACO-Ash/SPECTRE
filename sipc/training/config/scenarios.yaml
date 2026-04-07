@@ -194,11 +194,20 @@ scenarios:
     challenge_scenarios:
       - observer_02_proximity_threat
       - planner_03_multi_constraint
+    objects: []
+    objectives:
+      - id: obj_scenario_1_pass
+        description: "Complete observer_02_proximity_threat above passing threshold"
+        skill_axis: decision_quality
+        points: 150
+      - id: obj_scenario_2_pass
+        description: "Complete planner_03_multi_constraint above passing threshold"
+        skill_axis: decision_quality
+        points: 200
     time_limit_minutes: 45
     scoring:
       passing_score: 350
       optimal_score: 500
-    objects: []
 
   - id: operator_timed_full_cycle
     title: "Full Engagement Cycle — Timed"
@@ -227,6 +236,39 @@ scenarios:
         regime: GEO
         tle_line1: "1 99005U 25005A   25244.50000000  .00000050  00000-0  00000-0 0  9991"
         tle_line2: "2 99005   0.0300  75.0300 0000200  90.0000   0.0000  1.00270000 00011"
+    tool_workflow: >
+      Full engagement cycle — 20 minutes.
+      1. DETECT: Assets panel → load RED-02 (SATNO 99005) and BLUE-03 (SATNO 99004).
+      Identify RED-02 as a threat within 3 minutes.
+      2. ASSESS: Pattern of Life or HRR panel → characterise RED-02 and produce a threat assessment.
+      3. PLAN: Intercept Engine → compute ≥2 response manoeuvre options for BLUE-03.
+      4. DECIDE: Decision Engine → evaluate options; select the robust response.
+      5. ACT: Submit your decision with justification before the 20-minute limit expires.
+    objectives:
+      - id: obj_detect
+        description: "Load RED-02 and BLUE-03; identify RED-02 as a GEO proximity threat"
+        skill_axis: situational_awareness
+        points: 60
+      - id: obj_assess
+        description: "Produce a threat assessment using PoL or the HRR panel"
+        skill_axis: situational_awareness
+        points: 80
+      - id: obj_plan
+        description: "Compute ≥2 response manoeuvre options in the Intercept Engine"
+        skill_axis: manoeuvre_planning
+        points: 90
+      - id: obj_decide
+        description: "Use the Decision Engine to evaluate options and select the robust response"
+        skill_axis: decision_quality
+        points: 100
+      - id: obj_act
+        description: "Submit decision with justification within the 20-minute time limit"
+        skill_axis: operational_tempo
+        points: 100
+      - id: obj_efficiency
+        description: "Selected manoeuvre ΔV is within 10% of the minimum feasible option"
+        skill_axis: efficiency
+        points: 70
     time_limit_minutes: 20
     scoring:
       passing_score: 400
@@ -263,6 +305,32 @@ scenarios:
         regime: LEO
         tle_line1: "1 99011U 19055C   25161.33333333  .00002500  00000-0  11000-3 0  9991"
         tle_line2: "2 99011  97.6100  80.0050 0001050  90.5000 269.5000 15.19000000 00016"
+    tool_workflow: >
+      1. Assets panel → add BLUE-LEO (SATNO 99010) as a Blue asset and DEBRIS-07 (SATNO 99011)
+      as a Red track using the TLEs provided in the briefing objects.
+      2. Intercept Engine → select BLUE-LEO (Blue) and DEBRIS-07 (Red).
+      3. Run the Hohmann or in-track solver — read the predicted closest approach distance.
+      4. Compare available options — select the one achieving >5 km miss distance at minimum ΔV.
+    objectives:
+      - id: obj_load_assets
+        description: "Load BLUE-LEO and DEBRIS-07 into the Assets panel"
+        skill_axis: situational_awareness
+        points: 15
+      - id: obj_read_ca
+        description: "Read the predicted closest approach distance (approximately 0.8 km)"
+        skill_axis: situational_awareness
+        points: 25
+        answer: "0.8"
+        tolerance: 0.3
+        unit: km
+      - id: obj_select_manoeuvre
+        description: "Select an avoidance manoeuvre achieving >5 km miss distance"
+        skill_axis: manoeuvre_planning
+        points: 50
+      - id: obj_min_dv
+        description: "Confirm your chosen manoeuvre uses the minimum ΔV of the feasible options"
+        skill_axis: efficiency
+        points: 40
     time_limit_minutes: null
     scoring:
       passing_score: 80
@@ -298,6 +366,33 @@ scenarios:
         regime: LEO
         tle_line1: "1 99021U 25021A   25196.43750000  .00000900  00000-0  45000-4 0  9991"
         tle_line2: "2 99021  51.6000 100.0200 0001800  45.2000 314.8000 15.49000000 00009"
+    tool_workflow: >
+      1. Assets panel → add BLUE-INS (SATNO 99020) as a Blue asset and UNKNOWN-RSO (SATNO 99021)
+      as a Red track.
+      2. Intercept Engine → select BLUE-INS (Blue) and UNKNOWN-RSO (Red).
+      3. Select the Clohessy-Wiltshire / Hill-frame relative motion solver.
+      4. Compute a standoff position at 1–3 km radial separation.
+      5. Verify the approach trajectory maintains >1 km separation at all times.
+    objectives:
+      - id: obj_load_assets
+        description: "Load BLUE-INS and UNKNOWN-RSO into the Assets panel"
+        skill_axis: situational_awareness
+        points: 15
+      - id: obj_select_cw
+        description: "Open the Clohessy-Wiltshire / Hill-frame solver in the Intercept Engine"
+        skill_axis: manoeuvre_planning
+        points: 20
+      - id: obj_standoff_range
+        description: "Compute a standoff position at 1–3 km radial separation (target: 2 km)"
+        skill_axis: manoeuvre_planning
+        points: 55
+        answer: "2.0"
+        tolerance: 1.0
+        unit: km
+      - id: obj_safety_check
+        description: "Confirm the approach path maintains >1 km separation at all points"
+        skill_axis: decision_quality
+        points: 50
     time_limit_minutes: null
     scoring:
       passing_score: 90
@@ -335,6 +430,36 @@ scenarios:
         regime: GEO
         tle_line1: "1 99031U 25031A   25232.00000000  .00000010  00000-0  00000-0 0  9991"
         tle_line2: "2 99031   0.0800  74.8500 0000500  10.5000   0.0000  1.00275000 00012"
+    tool_workflow: >
+      1. Assets panel → add GEO-COMM (SATNO 99030) as Blue and DRIFTER-09 (SATNO 99031) as Red.
+      2. Intercept Engine → select GEO-COMM and DRIFTER-09.
+      3. Run a GEO avoidance solver — read the predicted TCA and minimum miss distance.
+      4. Compare options: select the one achieving >5 km miss distance while keeping ΔV ≤ 2.5 m/s.
+      5. Document your selection rationale (minimum ΔV satisfying the miss-distance constraint).
+    objectives:
+      - id: obj_load_assets
+        description: "Load GEO-COMM and DRIFTER-09 into the Assets panel"
+        skill_axis: situational_awareness
+        points: 15
+      - id: obj_threat_window
+        description: "Identify TCA as approximately T+18 hours from scenario epoch"
+        skill_axis: situational_awareness
+        points: 35
+        answer: "18.0"
+        tolerance: 2.0
+        unit: hours
+      - id: obj_dv_within_budget
+        description: "Select a manoeuvre with ΔV ≤ 2.5 m/s (within the mission ΔV budget)"
+        skill_axis: efficiency
+        points: 60
+      - id: obj_miss_distance
+        description: "Confirm predicted miss distance >5 km after the selected manoeuvre"
+        skill_axis: decision_quality
+        points: 60
+      - id: obj_rationale
+        description: "Select the minimum-ΔV option that satisfies the miss-distance constraint"
+        skill_axis: manoeuvre_planning
+        points: 40
     time_limit_minutes: null
     scoring:
       passing_score: 150
@@ -370,6 +495,34 @@ scenarios:
         regime: GEO
         tle_line1: "1 99041U 25041A   25253.25000000  .00000005  00000-0  00000-0 0  9991"
         tle_line2: "2 99041   0.0400  90.2000 0000250  20.5000   0.0000  1.00270000 00014"
+    tool_workflow: >
+      1. Navigate to the Decision Engine panel (top tab bar → Decision Engine).
+      2. Enter three adversary actions: Proximity Approach (p=0.5), Electronic Interference
+      (p=0.3), No Action (p=0.2). Confidence: MEDIUM for all.
+      3. Enter four friendly responses: COLA Manoeuvre, Sensor Retask, Posture Change, Hold.
+      4. Click Evaluate Scenario — read the outcome matrix.
+      5. Select the Minimax strategy and identify the recommended robust response.
+    objectives:
+      - id: obj_open_de
+        description: "Open the Decision Engine panel and configure the adversary/response scenario"
+        skill_axis: situational_awareness
+        points: 20
+      - id: obj_enter_actions
+        description: "Enter all three adversary actions with probabilities summing to 1.0"
+        skill_axis: decision_quality
+        points: 35
+      - id: obj_run_evaluation
+        description: "Run the scenario evaluation and examine the outcome matrix"
+        skill_axis: manoeuvre_planning
+        points: 35
+      - id: obj_minimax
+        description: "Identify the minimax-optimal response (lowest worst-case composite score)"
+        skill_axis: decision_quality
+        points: 70
+      - id: obj_strategy_rationale
+        description: "Justify why Minimax is preferred over Expected Value given intelligence uncertainty"
+        skill_axis: decision_quality
+        points: 50
     time_limit_minutes: null
     scoring:
       passing_score: 140
@@ -399,6 +552,35 @@ scenarios:
         regime: GEO
         tle_line1: "1 99050U 25050A   25213.00000000  .00000000  00000-0  00000-0 0  9991"
         tle_line2: "2 99050   0.1000  60.0000 0000400  30.0000   0.0000  1.00270000 00008"
+    tool_workflow: >
+      1. Assets panel → add RSO-NOTSO (SATNO 99050) as a Red track.
+      2. Pattern of Life panel → enter SATNO 99050 and run analysis.
+      3. Identify the manoeuvre detected around 2025-08-05 — note the epoch and ΔV estimate.
+      4. NOTSO panel → paste the notification text from the scenario briefing.
+      5. Compare the detected manoeuvre epoch and ΔV against the NOTSO window (04:00–06:00Z,
+      ΔV 0.08–0.12 km/s). Record your transparency verdict.
+    objectives:
+      - id: obj_pol_run
+        description: "Run Pattern of Life on RSO-NOTSO and detect the August 2025 manoeuvre"
+        skill_axis: situational_awareness
+        points: 35
+      - id: obj_notso_parse
+        description: "Enter the NOTSO and confirm the parsed notification window (04:00–06:00Z)"
+        skill_axis: situational_awareness
+        points: 30
+      - id: obj_timing_match
+        description: "Confirm the detected manoeuvre epoch falls within the NOTSO window (±2h)"
+        skill_axis: decision_quality
+        points: 45
+      - id: obj_magnitude_match
+        description: "Confirm detected ΔV (0.08–0.12 km/s) matches the notification estimate"
+        skill_axis: decision_quality
+        points: 45
+      - id: obj_verdict
+        description: "Record transparency verdict: COMPLIANT — notification matched detection"
+        skill_axis: decision_quality
+        points: 45
+        answer: "compliant"
     time_limit_minutes: null
     scoring:
       passing_score: 130
@@ -437,6 +619,38 @@ scenarios:
         regime: GEO
         tle_line1: "1 99061U 25061A   25274.00000000  .00000015  00000-0  00000-0 0  9991"
         tle_line2: "2 99061   0.0600  50.3500 0000350  16.2000   0.0000  1.00271000 00019"
+    tool_workflow: >
+      1. Assets panel → add BLUE-HVA (SATNO 99060) as Blue and SHADOW-01 (SATNO 99061) as Red.
+      2. Pattern of Life panel → enter SATNO 99061 and run analysis over the past 10 days.
+      3. Identify at least two manoeuvre events — note the epochs, ΔV estimates, and manoeuvre types.
+      4. Characterise the most recent manoeuvre: is it a repositioning toward BLUE-HVA?
+      5. Use the analytic closest approach estimate (or Monte Carlo if available) to bound the
+      projected closest approach within 36 hours.
+      6. Recommend a defensive action (reposition, heightened awareness, or posture change).
+    objectives:
+      - id: obj_pol_run
+        description: "Run Pattern of Life on SHADOW-01 — detect ≥2 manoeuvres in the past 10 days"
+        skill_axis: situational_awareness
+        points: 40
+      - id: obj_manoeuvre_count
+        description: "Confirm two distinct manoeuvre epochs within the analysis window"
+        skill_axis: situational_awareness
+        points: 35
+        answer: "2"
+        tolerance: 1.0
+        unit: count
+      - id: obj_approach_characterise
+        description: "Characterise the most recent manoeuvre as repositioning toward BLUE-HVA"
+        skill_axis: situational_awareness
+        points: 50
+      - id: obj_ca_estimate
+        description: "Estimate projected closest approach ≤5 km within 36 hours"
+        skill_axis: decision_quality
+        points: 65
+      - id: obj_defensive_action
+        description: "Recommend and justify a defensible action for BLUE-HVA"
+        skill_axis: decision_quality
+        points: 80
     time_limit_minutes: null
     scoring:
       passing_score: 280
@@ -472,6 +686,35 @@ scenarios:
         regime: LEO
         tle_line1: "1 99071U 25071A   25305.25000000  .00000720  00000-0  36000-4 0  9991"
         tle_line2: "2 99071  63.4000 200.0000 0005100  60.2000 294.3000 14.91000000 00038"
+    tool_workflow: >
+      1. Assets panel → add BLUE-PH (SATNO 99070) as Blue and TARGET-LEO (SATNO 99071) as Red.
+      2. Intercept Engine → select BLUE-PH and TARGET-LEO.
+      3. Use the Hohmann / phasing solver — compute the phasing orbit SMA required to reduce
+      along-track separation by 1,810 km within 48 hours.
+      4. Design a 2–3 burn sequence (phasing orbit entry, drift, circularisation).
+      5. Calculate total ΔV across all burns.
+      6. Confirm the sequence places BLUE-PH 30 km behind TARGET-LEO within the 48-hour window.
+    objectives:
+      - id: obj_load_assets
+        description: "Load BLUE-PH and TARGET-LEO into the Assets panel"
+        skill_axis: situational_awareness
+        points: 15
+      - id: obj_phasing_orbit
+        description: "Compute the required phasing orbit SMA using the Intercept Engine"
+        skill_axis: manoeuvre_planning
+        points: 60
+      - id: obj_burn_sequence
+        description: "Design a valid 2–3 burn sequence achieving 30 km trailing position"
+        skill_axis: manoeuvre_planning
+        points: 80
+      - id: obj_total_dv
+        description: "Calculate and record total ΔV across all burns in the sequence"
+        skill_axis: efficiency
+        points: 55
+      - id: obj_timing_constraint
+        description: "Confirm the sequence completes within the 48-hour planning window"
+        skill_axis: operational_tempo
+        points: 50
     time_limit_minutes: null
     scoring:
       passing_score: 300
@@ -527,6 +770,38 @@ scenarios:
         regime: GEO
         tle_line1: "1 99084U 25084A   25335.00000000  .00000012  00000-0  00000-0 0  9991"
         tle_line2: "2 99084   0.0500  99.8000 0000300  10.2000   0.0000  1.00270000 00017"
+    tool_workflow: >
+      Theatre defence — 30 minutes, three simultaneous threats.
+      1. Assets panel → load all five objects (BLUE-A, BLUE-B, CRIMSON-01, -02, -03).
+      2. HRR / Threat Sweep → rank CRIMSON-01, -02, -03 by threat priority against each blue asset.
+      3. Intercept Engine → compute defensive responses for both BLUE-A and BLUE-B.
+      4. Decision Engine → allocate responses ensuring no resource conflict or orbital fratricide.
+      5. Submit all decisions before 30 minutes.
+    objectives:
+      - id: obj_triage
+        description: "Rank CRIMSON-01, -02, -03 by threat priority against the blue assets"
+        skill_axis: situational_awareness
+        points: 80
+      - id: obj_asset_a_response
+        description: "Select and justify a defensive response for BLUE-A"
+        skill_axis: decision_quality
+        points: 100
+      - id: obj_asset_b_response
+        description: "Select and justify a defensive response for BLUE-B"
+        skill_axis: decision_quality
+        points: 100
+      - id: obj_resource_allocation
+        description: "Allocate responses without exceeding stated response resource constraints"
+        skill_axis: efficiency
+        points: 90
+      - id: obj_time_limit
+        description: "Submit all decisions within the 30-minute time limit"
+        skill_axis: operational_tempo
+        points: 80
+      - id: obj_coordinated_defence
+        description: "Justify that both responses are mutually compatible — no orbital fratricide"
+        skill_axis: decision_quality
+        points: 100
     time_limit_minutes: 30
     scoring:
       passing_score: 500

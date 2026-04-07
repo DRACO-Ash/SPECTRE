@@ -3,7 +3,6 @@
 DATA ISOLATION CONTRACT
 -----------------------
 These routes NEVER:
-  - Read or write to SessionState (operational planning state)
   - Access UDL credentials or operational TLEs
   - Touch the operational log queue
 
@@ -11,6 +10,8 @@ They ONLY:
   - Read training_* database tables via get_db()
   - Read static YAML configs via sipc.training.*
   - Write to training_* database tables
+  - Pre-load synthetic scenario TLEs into SessionState on scenario start
+    (intentional bridge: training TLEs are fully synthetic, never from UDL)
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sipc.domain.models import BlueAsset, RedTrack
+from sipc.web.planning_state import get_session_state
 from sipc.training.gamification import (
     GamificationConfig,
     award_points,
@@ -222,6 +225,23 @@ async def _start_scenario(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
+    # Pre-load synthetic scenario TLE objects into planning state so SIPC panels
+    # can work with them immediately.  Training TLEs are fully synthetic — they
+    # never come from UDL and cannot be confused with operational data.
+    try:
+        state = get_session_state(username)
+        for obj in scenario.objects:
+            if obj.side == "blue":
+                if not any(obj.satno == getattr(b, "satno", None) or obj.name == b.name
+                           for b in state.blue_assets):
+                    state.blue_assets.append(BlueAsset(name=obj.name, tle=obj.tle))
+            else:
+                if not any(obj.satno == getattr(r, "satno", None) or obj.name == r.name
+                           for r in state.red_tracks):
+                    state.red_tracks.append(RedTrack(name=obj.name, tle=obj.tle))
+    except Exception as _tl_exc:
+        logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)
+
     progress = await _get_or_create_progress(username, db)
 
     if scored:
@@ -371,7 +391,15 @@ async def training_scenario_submit(
     except (ValueError, TypeError):
         completed_ids = []
 
-    # Score objectives
+    # Collect operator-supplied answers for answer-type objectives
+    form_data = await request.form()
+    operator_answers: dict[str, str] = {
+        key[len("answer_"):]: str(value)
+        for key, value in form_data.items()
+        if key.startswith("answer_")
+    }
+
+    # Score objectives — validate answer-type objectives against expected answer
     obj_by_id = {o.id: o for o in scenario.objectives}
     axis_scores: dict[str, float] = {}
     total_score = 0
@@ -379,6 +407,25 @@ async def training_scenario_submit(
         obj = obj_by_id.get(obj_id)
         if obj is None:
             continue
+        # Validate answer if the objective has one
+        if obj.answer:
+            op_ans = operator_answers.get(obj.id, "").strip().lower()
+            expected = obj.answer.strip().lower()
+            answer_ok = False
+            if obj.tolerance is not None:
+                # Numeric comparison with tolerance
+                try:
+                    op_val = float(op_ans)
+                    ex_val = float(expected)
+                    answer_ok = abs(op_val - ex_val) <= float(obj.tolerance)
+                except (ValueError, TypeError):
+                    answer_ok = False
+            else:
+                # Exact string match (case-insensitive)
+                answer_ok = op_ans == expected
+            if not answer_ok:
+                # Checkbox was ticked but answer is wrong — skip the points
+                continue
         total_score += obj.points
         axis_scores[obj.skill_axis] = axis_scores.get(obj.skill_axis, 0.0) + obj.points
 

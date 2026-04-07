@@ -41,12 +41,16 @@
               border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.62rem;
               color:var(--text-dim); line-height:1.5">
     <strong style="color:var(--ops-blue); display:block; margin-bottom:0.15rem">How to complete objectives</strong>
+    {% if scenario.tool_workflow %}
+    <pre style="white-space:pre-wrap; font-family:inherit; font-size:inherit; margin:0">{{ scenario.tool_workflow }}</pre>
+    {% else %}
     Read each objective carefully, then work through the scenario using the briefing above and your orbital
     mechanics knowledge — no live system access is needed, all data is provided in the briefing.
     <strong style="color:var(--text-primary)">Tick each objective once you have reasoned through it</strong>
     and arrived at a confident answer.  Submit when you are done.
+    {% endif %}
     {% if not scored %}
-    In exploration mode your ticks are not recorded — you can safely try everything.
+    <span style="color:#9ca3af">In exploration mode your ticks are not recorded — you can safely try everything.</span>
     {% endif %}
   </div>
 
@@ -64,19 +68,45 @@
     </div>
 
     {% for obj in scenario.objectives %}
-    <label style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.3rem;
-                  padding:0.35rem 0.5rem; background:var(--bg-secondary); border-radius:4px;
-                  cursor:pointer; font-size:0.63rem; text-align:left">
-      <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
-             style="margin-top:0.1rem; accent-color:#f59e0b"
-             onchange="updateObjectivesJson()">
-      <div>
-        <div style="color:var(--text-primary); font-weight:600">{{ obj.description }}</div>
-        <div style="color:var(--text-dim); font-size:0.58rem">
-          +{{ obj.points }} pts ({{ obj.skill_axis | replace('_',' ') | title }})
+    {# Determine objective type #}
+    {% set is_verdict = obj.answer in ["compliant", "partially_compliant", "non_compliant"] %}
+    {% set has_answer = obj.answer is not none and obj.answer != "" %}
+    <div style="margin-bottom:0.35rem; padding:0.35rem 0.5rem; background:var(--bg-secondary);
+                border-radius:4px; font-size:0.63rem">
+      <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer">
+        <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
+               style="margin-top:0.1rem; accent-color:#f59e0b; flex-shrink:0"
+               onchange="updateObjectivesJson()">
+        <div style="flex:1">
+          <div style="color:var(--text-primary); font-weight:600">{{ obj.description }}</div>
+          <div style="color:var(--text-dim); font-size:0.58rem">
+            +{{ obj.points }} pts ({{ obj.skill_axis | replace('_',' ') | title }})
+            {% if obj.unit %} · answer in {{ obj.unit }}{% endif %}
+          </div>
         </div>
+      </label>
+      {# Answer input — only shown for objectives with an answer field #}
+      {% if is_verdict %}
+      {# Verdict radio group #}
+      <div style="margin-top:0.3rem; margin-left:1.4rem; display:flex; gap:0.6rem; flex-wrap:wrap">
+        {% for verdict_val, verdict_label in [("compliant", "COMPLIANT"), ("partially_compliant", "PARTIAL"), ("non_compliant", "NON-COMPLIANT")] %}
+        <label style="display:flex; align-items:center; gap:0.25rem; cursor:pointer; font-size:0.6rem;
+                      color:{% if verdict_val == 'compliant' %}#22c55e{% elif verdict_val == 'partially_compliant' %}#f59e0b{% else %}#ef4444{% endif %}; font-weight:600">
+          <input type="radio" name="answer_{{ obj.id }}" value="{{ verdict_val }}"
+                 style="accent-color:#f59e0b">
+          {{ verdict_label }}
+        </label>
+        {% endfor %}
       </div>
-    </label>
+      {% elif has_answer %}
+      {# Numeric / text answer input #}
+      <div style="margin-top:0.25rem; margin-left:1.4rem">
+        <input type="text" name="answer_{{ obj.id }}" placeholder="Enter your answer{% if obj.unit %} ({{ obj.unit }}){% endif %}"
+               style="background:var(--panel-bg); border:1px solid var(--border); border-radius:3px;
+                      padding:0.2rem 0.4rem; font-size:0.6rem; color:var(--text-primary); width:12rem">
+      </div>
+      {% endif %}
+    </div>
     {% endfor %}
 
     {# Hidden field for completed objectives as JSON #}
