@@ -88,23 +88,23 @@
 </div>
 
 
-{# ── TLE Cadence Filter Quality Flags — sorted newest first ── #}
+{# ── TLE Cadence Filter Quality Flags — collapsed by default ── #}
 {% if pol.quality_flags %}
-<div style="background:rgba(245,158,11,0.04); border:1px solid rgba(245,158,11,0.35); border-radius:5px;
-            padding:0.6rem 0.8rem; margin-bottom:0.7rem">
-  <div style="font-size:0.65rem; font-weight:700; color:#f59e0b; text-transform:uppercase;
-              letter-spacing:0.07em; margin-bottom:0.5rem">
+<details style="border:1px solid rgba(245,158,11,0.35); border-radius:5px; margin-bottom:0.7rem">
+  <summary style="cursor:pointer; padding:0.5rem 0.8rem; font-size:0.65rem; font-weight:700;
+                  color:#f59e0b; text-transform:uppercase; letter-spacing:0.07em;
+                  list-style:none; display:flex; align-items:center; gap:0.4rem;
+                  background:rgba(245,158,11,0.04); border-radius:5px; user-select:none">
+    <span style="font-size:0.6rem; transition:transform 0.15s">&#9654;</span>
     TLE Cadence Filter — {{ pol.quality_flags | length }} quality flag{{ 's' if pol.quality_flags | length != 1 else '' }}
-  </div>
-  <div style="display:flex; flex-direction:column; gap:0.3rem">
+  </summary>
+  <div style="padding:0.5rem 0.8rem 0.6rem; display:flex; flex-direction:column; gap:0.3rem">
     {% for flag in pol.quality_flags %}
     <div style="display:flex; align-items:flex-start; gap:0.5rem; font-size:0.67rem; line-height:1.5">
-      {# Date stamp #}
       <span style="flex-shrink:0; font-family:var(--font-mono); font-size:0.62rem;
                    color:var(--text-muted); padding-top:0.05rem; min-width:5.5rem">
         {{ flag.epoch.strftime('%Y-%m-%d') }}
       </span>
-      {# Type badge #}
       {% if flag.flag_type == 'gap' %}
         <span style="flex-shrink:0; font-size:0.58rem; font-weight:700; text-transform:uppercase;
                      letter-spacing:0.06em; background:rgba(251,191,36,0.15); color:#fbbf24;
@@ -122,12 +122,11 @@
                      letter-spacing:0.06em; background:rgba(148,163,184,0.12); color:var(--text-dim);
                      border:1px solid rgba(148,163,184,0.25); border-radius:3px; padding:0.1rem 0.35rem">INFO</span>
       {% endif %}
-      {# Message #}
       <span style="color:var(--text-dim)">{{ flag.message }}</span>
     </div>
     {% endfor %}
   </div>
-</div>
+</details>
 {% endif %}
 
 {# ── PAIR Intelligence Record (if available for this SATNO) ── #}
