@@ -159,8 +159,11 @@ async def training_leave(
         ts = result.scalar_one_or_none()
         if ts and ts.ended_at is None:
             ts.ended_at = datetime.now(UTC)
-            # Accrue time
-            elapsed = (ts.ended_at - ts.started_at).total_seconds() / 60.0
+            # Accrue time — normalise started_at to UTC-aware in case SQLite returns naive
+            started = ts.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            elapsed = (ts.ended_at - started).total_seconds() / 60.0
             prog = await _get_or_create_progress(current_user.username, db)
             prog.time_in_training_minutes += elapsed
             await db.commit()
