@@ -1,0 +1,21 @@
+# CODEOWNERS — aligned to docs/SECURITY.md
+# Security-sensitive paths require review by designated maintainers before merge.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for all files not matched below
+*                                   @Higgy-843
+
+# CI/CD pipeline — any workflow change is security-sensitive
+.github/                            @Higgy-843
+
+# Authentication and session management
+sipc/web/auth.py                    @Higgy-843
+sipc/web/routes/login.py            @Higgy-843
+sipc/web/database.py                @Higgy-843
+
+# Runtime configuration and secrets handling
+sipc/config/                        @Higgy-843
+
+# Security policy and documentation
+docs/SECURITY.md                    @Higgy-843
+CODEOWNERS                          @Higgy-843
