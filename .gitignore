@@ -115,3 +115,10 @@ docs/*
 
 # Claude Code memory
 memory/
+
+# Claude persona / prompt scratch files
+Claude Craft Prompt to create a persona.txt
+Claude Craft prompt to create a Persona for a UI_UX Developer for OW Applications
+Claude Persona
+Persona Spec Orbital Warfare Analyst with STK.txt
+persona Spec Orbital Warfare Analyst with Python Only
