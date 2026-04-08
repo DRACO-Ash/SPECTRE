@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from tests.unit.tle_clustering.conftest import make_tle_pair, make_tle_strings
 from tle_clustering.parser import group_by_norad, parse_tle_pair, parse_tle_strings
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import numpy as np
-import pytest
 
 from spectre.astro.monte_carlo import (
     MANOEUVRE_ARCHETYPES,
@@ -17,7 +16,6 @@ from spectre.astro.monte_carlo import (
     generate_samples,
     run_monte_carlo,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

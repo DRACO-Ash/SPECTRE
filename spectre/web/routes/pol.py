@@ -300,7 +300,6 @@ async def pol_monte_carlo(
 
     from spectre.astro.monte_carlo import (
         MANOEUVRE_ARCHETYPES,
-        ManoeuvreHypothesis,
         hypothesis_from_tle_record,
         run_monte_carlo,
     )
@@ -456,7 +455,6 @@ async def pol_notso_correlate(
     """
     from spectre.astro.notso import (
         NOTSORecord,
-        NOTSOType,
         correlate_notsos_with_manoeuvres,
         extract_behaviour_profile,
         parse_notso_text,

@@ -20,7 +20,6 @@ from spectre.domain.decision import (
     rank_responses,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _epoch() -> datetime:

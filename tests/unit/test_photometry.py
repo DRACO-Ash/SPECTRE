@@ -9,21 +9,19 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from spectre.astro.photometry import (
-    PhotometryObservation,
     CorrectedObservation,
     PhotometryBaseline,
-    PhotometryChangeAssessment,
+    PhotometryObservation,
+    _regularised_incomplete_beta,
     _rozenberg_airmass,
     _t_test_two_sample,
-    _regularised_incomplete_beta,
     apply_geometric_corrections,
-    fit_baseline,
-    detect_change,
-    correlate_with_manoeuvres,
     assess_photometry,
+    correlate_with_manoeuvres,
+    detect_change,
+    fit_baseline,
     parse_photometry_csv,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

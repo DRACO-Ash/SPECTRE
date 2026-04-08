@@ -7,20 +7,19 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from spectre.astro.notso import (
-    NOTSOType,
-    NOTSORecord,
     NOTSOManoeuvreCorrelation,
+    NOTSORecord,
+    NOTSOType,
     OperatorBehaviourProfile,
-    _parse_dt,
-    _infer_notso_type,
-    _extract_norad_id,
     _extract_delta_v,
+    _extract_norad_id,
+    _infer_notso_type,
+    _parse_dt,
     _split_messages,
-    parse_notso_text,
     correlate_notsos_with_manoeuvres,
     extract_behaviour_profile,
+    parse_notso_text,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -79,7 +78,7 @@ class TestParseDt:
 
     def test_date_time_utc(self):
         dt = _parse_dt("2025-03-14 12:00 UTC")
-        assert dt is not None or True  # format may not match exactly but shouldn't crash
+        assert dt is not None  # format may not match exactly but shouldn't crash
 
     def test_invalid_returns_none(self):
         assert _parse_dt("not a date") is None

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from spectre.astro.pattern_of_life import TLERecord
 from spectre.astro.tle_filter import (
     QualityFlag,
     TLECluster,
@@ -14,8 +15,6 @@ from spectre.astro.tle_filter import (
     quality_flag_sequence,
     select_representative,
 )
-from spectre.astro.pattern_of_life import TLERecord
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

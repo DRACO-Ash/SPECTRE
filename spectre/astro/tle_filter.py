@@ -18,9 +18,9 @@ physically meaningless for SGP4 mean elements).
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Sequence
 
 from spectre.astro.pattern_of_life import TLERecord
 from spectre.config.constants import TLE_FILTER

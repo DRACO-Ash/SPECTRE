@@ -27,9 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.domain.models import BlueAsset, RedTrack
-from spectre.web.planning_state import get_session_state
 from spectre.training.gamification import (
-    GamificationConfig,
     award_points,
     check_level_up,
     get_config,
@@ -38,12 +36,13 @@ from spectre.training.gamification import (
     recommended_next_step,
 )
 from spectre.training.models import ChallengeResult, TrainingProgress, TrainingSession
-from spectre.training.scenarios import get_scenario, load_scenarios, scenarios_for_level
+from spectre.training.scenarios import get_scenario, scenarios_for_level
 from spectre.training.tutorials import get_tutorial, tutorials_for_level
 from spectre.web.auth import require_login
 from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.models import User
+from spectre.web.planning_state import get_session_state
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +217,7 @@ async def _start_scenario(
     username: str,
     db: AsyncSession,
     scored: bool,
-    request: "Request",
+    request: Request,
 ) -> HTMLResponse:
     """Shared logic for scored and explore-mode scenario starts."""
     scenario = get_scenario(scenario_id)

@@ -21,10 +21,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
-from typing import Annotated
 
 from spectre.astro.cw_geometry import RelativeGeometryError, compute_relative_geometry
 from spectre.web.auth import require_login

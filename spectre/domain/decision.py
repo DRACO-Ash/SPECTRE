@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -281,7 +281,7 @@ def rank_responses(
 
     Best = lowest composite score.
     """
-    pairs = [(fr, om.composite_score) for fr, om in zip(friendly_responses, outcome_row)]
+    pairs = [(fr, om.composite_score) for fr, om in zip(friendly_responses, outcome_row, strict=True)]
     return sorted(pairs, key=lambda x: x[1])
 
 

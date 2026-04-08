@@ -502,9 +502,12 @@ def extract_behaviour_profile(
     # Window accuracy: manoeuvre fell inside (not just within tolerance)
     window_hits = 0
     for c in matched:
-        if c.notso and c.manoeuvre:
-            if c.notso.effective_start_utc <= c.manoeuvre.epoch <= c.notso.effective_end_utc:
-                window_hits += 1
+        if (
+            c.notso
+            and c.manoeuvre
+            and c.notso.effective_start_utc <= c.manoeuvre.epoch <= c.notso.effective_end_utc
+        ):
+            window_hits += 1
     window_acc = window_hits / len(matched) if matched else 0.0
 
     # Phantom NOTSOs by type

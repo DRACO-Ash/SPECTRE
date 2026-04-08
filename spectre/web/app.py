@@ -17,14 +17,14 @@ from spectre.config.settings import get_settings
 from spectre.web.database import init_db
 from spectre.web.planning_state import set_default_hrr_objects
 from spectre.web.routes.decision import router as decision_router
-from spectre.web.routes.geometry import router as geometry_router
-from spectre.web.routes.training import router as training_router
 from spectre.web.routes.gcat import router as gcat_router
+from spectre.web.routes.geometry import router as geometry_router
 from spectre.web.routes.login import router as login_router
 from spectre.web.routes.maneuver import router as maneuver_router
 from spectre.web.routes.operator import router as operator_router
 from spectre.web.routes.pol import router as pol_router
 from spectre.web.routes.threat import router as threat_router
+from spectre.web.routes.training import router as training_router
 from spectre.web.routes.udl import _parse_created_at, parse_hrr_notification
 from spectre.web.routes.udl import router as udl_router
 

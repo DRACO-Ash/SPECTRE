@@ -17,7 +17,7 @@ Coverage
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -35,7 +35,6 @@ from spectre.astro.cw_geometry import (
     _sanitise_name,
     compute_relative_geometry,
 )
-
 
 # ── Shared test fixtures ───────────────────────────────────────────────────────
 

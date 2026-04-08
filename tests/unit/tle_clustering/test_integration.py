@@ -7,8 +7,6 @@ passthrough.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.unit.tle_clustering.conftest import make_tle_strings
 from tle_clustering import ClusteringConfig, cluster_tle_strings
 

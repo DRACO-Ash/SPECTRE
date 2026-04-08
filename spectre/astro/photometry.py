@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +223,8 @@ def _fit_least_squares_quadratic(
     sx3 = sum(x * x * x for x in phases)
     sx4 = sum(x * x * x * x for x in phases)
     sy0 = sum(y for y in mags)
-    sy1 = sum(x * y for x, y in zip(phases, mags))
-    sy2 = sum(x * x * y for x, y in zip(phases, mags))
+    sy1 = sum(x * y for x, y in zip(phases, mags, strict=True))
+    sy2 = sum(x * x * y for x, y in zip(phases, mags, strict=True))
 
     # 3×3 normal matrix
     A = [
@@ -585,7 +585,6 @@ def assess_photometry(
     except ValueError as exc:
         logger.warning("Baseline fitting failed: %s", exc)
         # Return a degenerate assessment
-        dummy_epoch = observations[0].epoch_utc
         return PhotometryChangeAssessment(
             baseline_mean=0.0, baseline_std=0.0,
             recent_mean=0.0, recent_std=0.0,
@@ -684,8 +683,6 @@ def parse_photometry_csv(
     reader = csv.DictReader(io.StringIO(csv_text.strip()))
     if reader.fieldnames is None:
         raise ValueError("Empty CSV or missing header row")
-
-    cols = [c.strip().lower() for c in reader.fieldnames]
 
     def _get(row: dict, key: str, default: float) -> float:
         for k, v in row.items():

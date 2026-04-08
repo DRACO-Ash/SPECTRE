@@ -16,7 +16,6 @@ import pytest
 
 from spectre.training.gamification import (
     GamificationConfig,
-    LevelUpResult,
     PointAward,
     award_points,
     check_level_up,
@@ -31,7 +30,6 @@ from spectre.training.scenarios import (
     load_scenarios,
     scenarios_for_level,
 )
-
 
 # ── Gamification config loading ────────────────────────────────────────────────
 
@@ -377,7 +375,7 @@ class TestDataIsolation:
         assert not hasattr(sc, "get_session_state")
 
     def test_training_models_do_not_reference_operational_tables(self):
-        from spectre.training.models import TrainingProgress, TrainingSession, ChallengeResult
+        from spectre.training.models import ChallengeResult, TrainingProgress, TrainingSession
         table_names = {
             TrainingProgress.__tablename__,
             TrainingSession.__tablename__,

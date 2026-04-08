@@ -42,18 +42,18 @@ async def decision_evaluate(
     scenario_name: Annotated[str, Form()] = "Unnamed Scenario",
     horizon_hours: Annotated[float, Form()] = 72.0,
     # Adversary actions (up to 4, passed as parallel form arrays)
-    adv_ids:    Annotated[list[str], Form(alias="adv_id")] = [],
-    adv_names:  Annotated[list[str], Form(alias="adv_name")] = [],
-    adv_types:  Annotated[list[str], Form(alias="adv_type")] = [],
-    adv_probs:  Annotated[list[float], Form(alias="adv_prob")] = [],
-    adv_confs:  Annotated[list[float], Form(alias="adv_conf")] = [],
+    adv_ids:    Annotated[list[str] | None, Form(alias="adv_id")] = None,
+    adv_names:  Annotated[list[str] | None, Form(alias="adv_name")] = None,
+    adv_types:  Annotated[list[str] | None, Form(alias="adv_type")] = None,
+    adv_probs:  Annotated[list[float] | None, Form(alias="adv_prob")] = None,
+    adv_confs:  Annotated[list[float] | None, Form(alias="adv_conf")] = None,
     # Friendly responses (up to 4)
-    fr_ids:    Annotated[list[str], Form(alias="fr_id")] = [],
-    fr_names:  Annotated[list[str], Form(alias="fr_name")] = [],
-    fr_types:  Annotated[list[str], Form(alias="fr_type")] = [],
-    fr_costs:  Annotated[list[float], Form(alias="fr_cost")] = [],
-    fr_revs:   Annotated[list[float], Form(alias="fr_rev")] = [],
-    fr_times:  Annotated[list[float], Form(alias="fr_time")] = [],
+    fr_ids:    Annotated[list[str] | None, Form(alias="fr_id")] = None,
+    fr_names:  Annotated[list[str] | None, Form(alias="fr_name")] = None,
+    fr_types:  Annotated[list[str] | None, Form(alias="fr_type")] = None,
+    fr_costs:  Annotated[list[float] | None, Form(alias="fr_cost")] = None,
+    fr_revs:   Annotated[list[float] | None, Form(alias="fr_rev")] = None,
+    fr_times:  Annotated[list[float] | None, Form(alias="fr_time")] = None,
     # Scoring weights
     w_custody:  Annotated[float, Form()] = 0.35,
     w_ca:       Annotated[float, Form()] = 0.25,
@@ -72,7 +72,19 @@ async def decision_evaluate(
         SelectorStrategy,
         evaluate_scenario,
     )
-
+    # Normalise None defaults to empty lists
+    adv_ids    = adv_ids    or []
+    adv_names  = adv_names  or []
+    adv_types  = adv_types  or []
+    adv_probs  = adv_probs  or []
+    adv_confs  = adv_confs  or []
+    fr_ids     = fr_ids     or []
+    fr_names   = fr_names   or []
+    fr_types   = fr_types   or []
+    fr_costs   = fr_costs   or []
+    fr_revs    = fr_revs    or []
+    fr_times   = fr_times   or []
+    
     def _err(msg: str) -> HTMLResponse:
         return HTMLResponse(f'<p class="error-msg">{msg}</p>')
 

@@ -322,8 +322,8 @@ async def fetch_targets(
             "fetched": None, "total": 0, "failed": 0,
         })
 
-    from spectre.web.routes.udl import fetch_tle_for_satno, fetch_tle_history_for_satno
     from spectre.config.constants import TLE_CLUSTERING
+    from spectre.web.routes.udl import fetch_tle_for_satno, fetch_tle_history_for_satno
 
     # Clear the multi-TLE cache so this fetch starts clean; prevents stale TLEs
     # from a prior group selection contaminating clustering for the new group.
