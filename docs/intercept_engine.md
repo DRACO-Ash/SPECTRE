@@ -1,168 +1,140 @@
 # Intercept Engine
 
-The `sipc/intercept_engine/` package provides four orbit-mechanics algorithms for computing
-intercept trajectories.  Each algorithm generates a **dict-based sequence plan** that is
-translated into an STK Astrogator Mission Control Sequence (MCS) by `MCSBuilder`.
+The SIPC intercept engine is implemented entirely in pure Python across `sipc/astro/` and dispatched by `sipc/web/routes/maneuver.py`. It provides 23 solver methods grouped into four categories.
+
+> **Historical note:** An earlier version of SIPC used STK Astrogator COM integration for intercept planning (`sipc/intercept_engine/`, `sipc/stk_adapter/`). That architecture was removed when the codebase migrated to pure-Python astrodynamics. This document describes the current implementation.
 
 ---
 
-## Algorithms
+## Method Categories
 
-### Lambert (`LambertPlanner`)
-Classic two-impulse Lambert's problem solver.
+### Classical Transfers
 
-| Step | Type | Description |
-|------|------|-------------|
-| 1 | `propagate` | Coast from current epoch to burn epoch (`coast_hours`) |
-| 2 | `maneuver` | Intercept burn (DC solves ΔV) |
-| 3 | `propagate` | Coast from burn to intercept (`intercept_hours`) |
-| 4 | `target` | DC constraint: Range to blue = 0 km |
+| Method | Key input | Output |
+|--------|-----------|--------|
+| **Lambert** | coast_h, tof_h | Δv₁ (VNB), Δv₂ (VNB), miss distance |
+| **Hohmann** | — | Δv₁, Δv₂, transfer time |
+| **Bi-elliptic** | intermediate SMA | Δv₁, Δv₂, Δv₃, transfer time |
+| **Rendezvous** | coast_h | Δv (VNB), relative velocity at arrival |
+| **Proximity** | coast_h, stand-off km | Δv (VNB), range at arrival |
 
-```python
-plan = LambertPlanner(logger).generate_plan(coast_hours=1.0, intercept_hours=6.0)
-```
+### Tactical Manoeuvres
 
-### Rendezvous (`RendezvousPlanner`)
-Close approach with matching velocity — used when the red satellite must station-keep near blue.
+| Method | Description |
+|--------|-------------|
+| **Phasing** | Phasing orbit to advance/retard along-track position by a target angle |
+| **CW Radial** | Clohessy-Wiltshire radial separation — set a prescribed radial offset |
+| **CW Along-Track** | Clohessy-Wiltshire along-track drift — controlled drift in the Hill frame |
+| **Plane Change** | Combined or pure plane change; node-crossing timing |
+| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target; coast or active |
+| **COLA** | Collision avoidance manoeuvre — minimum ΔV to achieve a target miss distance |
+| **Evasion** | Optimal defensive evasion — maximise miss distance per ΔV unit |
 
-| Step | Type | Description |
-|------|------|-------------|
-| 1 | `propagate` | Coast to burn epoch |
-| 2 | `maneuver` | Intercept burn |
-| 3 | `target` | DC constraints: Range = 0 km **and** Relative Velocity = 0 km/s |
+### Advanced Analysis
 
-```python
-plan = RendezvousPlanner(logger).generate_plan(coast_hours=1.0)
-```
+| Method | Description |
+|--------|-------------|
+| **GEO Drift** | Longitude relocation via drift orbit; east/west drift rate; station acquisition epoch |
+| **NMC** | Natural Motion Circumnavigation — passive safety ellipse sizing and phasing |
+| **Manoeuvre Detect** | Classify a TLE-pair delta as manoeuvre type (Hohmann, plane change, combined, drag) |
+| **Detectability** | Assess observability of an intercept given ground-based sensor geometry |
 
-### Proximity (`ProximityInterceptPlanner`)
-Fly to a specified stand-off distance (e.g. 1000 m) rather than zero range.
+### Decision Support
 
-| Step | Type | Description |
-|------|------|-------------|
-| 1 | `propagate` | Coast to burn epoch |
-| 2 | `maneuver` | Intercept burn |
-| 3 | `target` | DC constraint: Range = `target_distance_m` (converted to km for STK) |
-
-```python
-plan = ProximityInterceptPlanner(logger).generate_plan(coast_hours=1.0, target_distance_m=1000.0)
-```
-
-### Optimal (`OptimalInterceptPlanner`)
-Fuel-optimal multi-burn solution via Astrogator Optimizer.
-
-| Step | Type | Description |
-|------|------|-------------|
-| 1 | `propagate` | Initial coast |
-| 2–N+1 | `maneuver` | N impulsive burns (DC/Optimizer controls all ΔV components) |
-| N+2 | `propagate` | Post-burn coast to intercept epoch |
-| N+3 | `target` | Optimizer: minimise total ΔV subject to Range ≤ `target_distance_m` |
-
-```python
-plan = OptimalInterceptPlanner(logger).generate_plan(
-    initial_coast_hours=1.0,
-    intercept_time_hours=6.0,
-    number_of_burns=2,
-    target_distance_m=0.0,
-    minimize_delta_v=True,
-)
-```
+| Method | Description |
+|--------|-------------|
+| **Intent Predict** | Adversary intent prediction from approach geometry, ΔV budget, and NOTSO history |
+| **Intercept Envelope** | Reachability analysis — ΔV-feasible intercept positions over the planning horizon |
+| **Stability** | Relative motion stability classification (bounded, drifting, diverging) |
+| **Fingerprint** | Behavioural classification of a manoeuvre sequence against known archetypes |
+| **Formation Defence** | Formation-aware COLA — simultaneous protection of multiple Blue assets |
+| **Terrain** | Orbital regime risk mapping — identify crowded altitude/inclination bands |
+| **Min-Time** | Minimum-time intercept — fastest feasible transfer given a ΔV budget |
 
 ---
 
-## Dict Plan Format
+## Module Map
 
-Each planner returns a `list[dict]` where each dict has a `"type"` key:
+| Module | Responsibility |
+|--------|---------------|
+| `sipc/astro/maneuvers.py` | Hohmann, bi-elliptic, rendezvous, proximity |
+| `sipc/astro/transfers.py` | Lambert solver (universal variable method) |
+| `sipc/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
+| `sipc/astro/tactical.py` | All 17 tactical and decision-support categories |
+| `sipc/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
+| `sipc/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
+| `sipc/astro/events.py` | Orbital event detection (apogee, perigee, nodes) |
+| `sipc/web/routes/maneuver.py` | Route dispatcher — maps HTTP form fields → solver calls → HTML partial |
 
-```python
-# propagate step
-{"type": "propagate", "name": "Coast", "duration": 3600.0}  # duration in seconds
+---
 
-# maneuver step
-{"type": "maneuver", "name": "Intercept Burn"}
+## Result Format
 
-# target step (last in plan)
-{
-    "type": "target",
-    "name": "Target Intercept",
-    "controls": ["dvx", "dvy", "dvz"],   # components to control (per burn)
-    "results": [
-        {"name": "R", "target_value": 0.0},        # range in metres
-        {"name": "V", "target_value": 0.0},        # rel velocity in km/s
-        {"name": "MinimizeFuel"},                   # Optimizer cost (Optimal only)
-    ],
-}
+Every method returns an `InterceptResult` dataclass:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `method` | `InterceptMethod` | Enum value identifying the solver |
+| `total_delta_v_km_s` | `float` | Total ΔV magnitude (km/s) |
+| `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
+| `intercept_range_km` | `float` | Miss distance at arrival epoch (km) |
+| `transfer_time_h` | `float` | Coast time from burn to intercept (hours) |
+| `notes` | `str` | Human-readable summary |
+
+Each `BurnResult`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `burn_epoch` | `datetime` | UTC time of burn |
+| `delta_v_km_s` | `float` | Burn magnitude (km/s) |
+| `dv_radial` | `float` | Radial (R) component in VNB frame |
+| `dv_along_track` | `float` | Along-track (T) / in-track component |
+| `dv_cross_track` | `float` | Cross-track (N) component |
+| `location_label` | `str` | Human label (e.g. "Apogee", "Ascending Node") |
+
+---
+
+## Route Dispatch (`maneuver.py`)
+
+`POST /plan/maneuver/calculate` — main intercept solver route:
+
+1. Parse form fields: `red_satno`, `blue_satno`, `method`, `coast_h`, `tof_h`, plus method-specific params
+2. Fetch TLEs from `SessionState` (assets must already be loaded)
+3. Resolve `InterceptMethod` enum → dispatch to the appropriate `sipc.astro` function
+4. Wrap result in `InterceptResult`; append to `state.intercept_history`
+5. Return `partials/intercept_result.html` fragment via HTMX swap
+
+`GET /plan/maneuver/tradespace` — trade-space scatter data:
+
+- Returns all `InterceptResult` objects from `state.intercept_history` as a Chart.js dataset
+- Called automatically after the second intercept result is added (HTMX trigger)
+
+---
+
+## Trade-Space Plot
+
+After two or more intercept results are computed, a scatter plot appears automatically showing all results in ΔV vs transfer-time space, colour-coded by method. Zoom/pan is enabled via `hammer.min.js` + `chartjs-plugin-zoom.min.js`.
+
+Use this to identify the optimal trade-off between fuel cost and time of arrival. Methods that appear in the lower-left quadrant (low ΔV, short time) are the most efficient under the current orbital geometry.
+
+---
+
+## Solver Implementation Notes
+
+### Lambert (universal variable method)
+
+The Lambert solver in `transfers.py` uses the universal variable (Battin) formulation. It iterates on the universal variable `x` using Halley's method until the desired time of flight is matched. The solution is always computed for the prograde direction; retrograde and multi-revolution solutions are available via `lambert.py`.
+
+### J2 RAAN drift
+
+The J2 RAAN precession rate is:
+
+```
+dΩ/dt = −(3/2) n J2 (Rₑ/p)² cos(i)
 ```
 
----
+where `n` is the mean motion, `J2 = 1.08263×10⁻³`, `Rₑ = 6378.137 km`, `p = a(1−e²)` is the semi-latus rectum, and `i` is inclination. SIPC uses this to compute how many days of natural RAAN drift are needed before a plane-change manoeuvre can be reduced to a specified ΔV.
 
-## MCSBuilder Translation
+### SGP4 propagation
 
-`MCSBuilder.build(mcs, plan, blue_sat_path, max_dv_km_s)` in `sipc/stk_adapter/mcs_builder.py`
-translates the dict plan into STK COM calls:
-
-1. Separate the `target` step from inner steps.
-2. Insert a **Target Sequence** segment into the MCS.
-3. Insert all `propagate` and `maneuver` steps **inside** the Target Sequence (the DC needs
-   to observe their final states).
-4. Add a **Differential Corrector** or **Optimizer** profile depending on whether a
-   `MinimizeFuel` result is present.
-5. Map controls to Cartesian ΔV paths: `"{seg_name}.ImpulsiveMnvr.Cartesian.X/Y/Z"`.
-6. Map results to Range / RelativeVelocity data providers on `blue_sat_path`.
-
----
-
-## Integration with STK Adapter
-
-### Search flow (`compute_maneuver_options`)
-If `ManeuverSearchConfig.intercept_methods` is non-empty, `StkComSession` runs
-`_solve_via_intercept_engine` for each method after the standard burn-location loop.
-Results appear in the same sorted table.  SGP4 is always restored.
-
-### Direct apply flow (`apply_intercept_plan`)
-`POST /plan/maneuver/apply-intercept` → `StkComSession.apply_intercept_plan(config: InterceptConfig)`:
-1. Build targeting MCS → run DC/Optimizer → extract solved ΔV.
-2. Build fixed MCS encoding the solved burn as literal ΔV values → propagate.
-3. Red satellite remains on Astrogator in STK (permanently moved).
-4. Returns `ManeuverOption` stored in `state.selected_maneuver`.
-
-This is the **recommended operator workflow** when timing parameters are known in advance.
-Use the "Generate Options" search flow only when exploring burn locations.
-
----
-
-## UI — Intercept Engine Panel
-
-Located in the operator console below the Maneuver Search section.
-
-| Input | Description |
-|-------|-------------|
-| Red satellite | Aggressor satellite (Astrogator will be applied to this object) |
-| Blue satellite | Target satellite (DC/Optimizer targets range to this object) |
-| Algorithm | Lambert / Rendezvous / Proximity / Optimal |
-| Manoeuvre start | UTC epoch for Initial State; blank = use scenario epoch |
-| Coast hours | Duration from manoeuvre start to burn epoch |
-| Intercept TOF | Coast duration after burn (Lambert, Optimal only) |
-| Target distance (m) | Stand-off range for Proximity / Optimal |
-| Burns | Number of impulses (Optimal only) |
-| Max ΔV (km/s) | Upper bound on total ΔV; result discarded if exceeded |
-| Minimise ΔV | Use Optimizer instead of DC (Optimal only) |
-
-The `ieUpdate()` JavaScript function hides irrelevant inputs for the selected algorithm.
-
----
-
-## Logger Compatibility
-
-The four planner classes use `.log(msg: str, tag: str = "")` instead of the standard Python
-logging API. `_EngineLogger` in `com_session.py` bridges them:
-
-```python
-class _EngineLogger:
-    def __init__(self, py_logger: logging.Logger) -> None:
-        self._log = py_logger
-    def log(self, msg: str, tag: str = "") -> None:
-        self._log.debug("[%s] %s", tag, msg)
-```
-
-Pass `_EngineLogger(logger)` when instantiating any planner.
+All propagation uses the `sgp4` Python library (Vallado algorithm, `WGS72` constants by default, `WGS84` available). Epoch handling uses the SGP4 built-in `jday()` conversion to avoid timezone ambiguity.

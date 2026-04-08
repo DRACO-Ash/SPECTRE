@@ -1,26 +1,23 @@
-# SIPC — Satellite Intercept Planning Console
+# SIPC — Space Intercept Planning Console
 
 Real-time orbital manoeuvre planning console for space defence operators.
 Accessed through a browser-based operator interface built on FastAPI + HTMX.
+
+---
 
 ## Overview
 
 SIPC provides analysts with a web console for:
 
-- Defining blue/red asset sets (satellites) with TLE propagators
-- Computing intercept trajectories using Lambert, Hohmann, and bi-elliptic transfer solvers
-- Executing tactical manoeuvres: phasing orbits, CW relative motion (radial separation / along-track drift), plane changes, J2 RAAN drift planning, collision avoidance, and optimal defensive evasion
-- Advanced analysis: GEO drift orbit (longitude relocation), NMC passive safety ellipse (proximity ops), manoeuvre classification (space intelligence), and intercept detectability metrics
-- Decision support tools: adversary intent prediction, intercept envelope analysis, relative motion stability, manoeuvre fingerprinting, formation defence, orbital terrain mapping, and minimum-time intercept optimisation
-- Comparing solutions via a ΔV vs transfer-time trade-space scatter plot
-- Detecting orbital events (apogee, perigee, node crossings) via SGP4 propagation
-- Reviewing per-burn ΔV breakdowns (VNB frame), miss distances, and scrolling run logs — all without page reloads
+- **Asset Management** — define Blue (friendly) and Red (adversary) satellite sets with TLE propagators; fetch live TLEs from UDL; one-click import from the HRR watchlist
+- **Intercept Engine** (23 methods) — Lambert, Hohmann, bi-elliptic, rendezvous, proximity; tactical manoeuvres (phasing, CW relative motion, plane change, J2 RAAN drift, COLA, evasion); advanced analysis (GEO drift, NMC, manoeuvre classification, detectability); decision support (intent prediction, intercept envelope, stability, fingerprinting, formation defence, orbital terrain, minimum-time intercept)
+- **Threat Sweep** — batch Hohmann evaluation across HRR target groups at 5 orbital epochs; Lambert refinement of top results; TLE clustering and de-duplication via DBSCAN; per-object uncertainty flagging
+- **Pattern of Life (PoL)** — historical TLE sequence analysis: manoeuvre detection, activity classification, behavioural baseline; TLE cadence filtering and de-duplication; NOTSO message correlation with detected manoeuvres; Monte Carlo simulation of adversary manoeuvre hypotheses; historical photometry change assessment
+- **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Maximin); robust recommendation banner
+- **GCAT Browser** — interactive browser for the General Catalog of Artificial Space Objects (J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, paginated; on-demand download with in-session caching
+- **Training Mode** — full gamification system for operator skill development: six proficiency levels, 13 structured scenarios (Cadet through Expert), timed challenges, step-by-step tutorials, live SIPC console embed, XP/points progression, session tracking
 
 All orbital mechanics computations use the pure-Python `sipc.astro` package — no external astrodynamics software required.
-
-- Browsing the **GCAT** (General Catalog of Artificial Space Objects — J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, and paginated, with on-demand download and in-session caching
-- Analysing **Pattern of Life** from historical TLE sequences: manoeuvre detection, activity classification, and behavioural baseline
-- **TLE Clustering & De-duplication**: DBSCAN-based multi-provider TLE reduction, automatically run before each Threat Sweep to select the best representative TLE per satellite and flag objects with divergent orbit solutions (elevated uncertainty indicator)
 
 ---
 
@@ -108,19 +105,21 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 
 ## Operator Walkthrough
 
-Once logged in, the operator console has a collapsible sidebar (default 500 px) on the left and an intelligence panel on the right. The nav bar exposes a UDL connection chip:
+Once logged in, the operator console has a collapsible sidebar on the left and an intelligence panel on the right. The nav bar exposes a UDL connection chip and a Training Mode button:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  [≡] SIPC    [UDL ●]                         [operator] [Logout] │
+│  [≡] SIPC    [UDL ●]   [Training]           [operator] [Logout]  │
 ├────────────────────────┬─────────────────────────────────────────┤
-│  SIDEBAR (500px)       │  HERO TABS                              │
-│  ┌ Assets ───────────┐ │  [Engine] [Sweep] [PoL] [GCAT]         │
-│  │ [Red][Blue][HRR]  │ ├─────────────────────────────────────────┤
-│  │  sub-tabs          │ │  Intercept Engine  (23 methods)        │
-│  └───────────────────┘ │  Threat Sweep      (batch HRR eval)    │
-│  Scenario Time          │  Pattern of Life   (TLE history)       │
-│  UDL Catalogue Search   │  GCAT Browser      (28 datasets)       │
+│  SIDEBAR               │  HERO TABS                              │
+│  ┌ Assets ───────────┐ │  [Engine] [Sweep] [PoL] [Decision]      │
+│  │ [Red][Blue][HRR]  │ │  [GCAT]                                 │
+│  │  sub-tabs          │ ├─────────────────────────────────────────┤
+│  └───────────────────┘ │  Intercept Engine  (23 methods)         │
+│  Scenario Time          │  Threat Sweep      (batch HRR eval)    │
+│  UDL Catalogue Search   │  Pattern of Life   (TLE history + MC)  │
+│                         │  Decision Engine   (what-if analysis)  │
+│                         │  GCAT Browser      (28 datasets)       │
 │                         │  Trade-Space Plot  (ΔV vs time)        │
 │                         │  Session Log                           │
 └────────────────────────┴─────────────────────────────────────────┘
@@ -136,8 +135,6 @@ Once logged in, the operator console has a collapsible sidebar (default 500 px) 
    - **→ Blue** — fetches the TLE from UDL and immediately adds the satellite as a Blue Asset
    - **→ Red** — fetches the TLE from UDL and immediately adds the satellite as a Red Track
 
-   The button is replaced by a confirmation badge on success.
-
 4. **Add assets manually** — use the **Blue** and **Red** sub-tabs in the Assets panel to enter a NORAD catalogue number (Fetch TLE) or paste a TLE directly.
 
 5. **Set scenario time** — define the analysis window (start/stop times) in the Scenario Time panel. Defaults to current UTC + 24 hours.
@@ -147,31 +144,77 @@ Once logged in, the operator console has a collapsible sidebar (default 500 px) 
 7. **Run intercept calculations** — in the **Intercept Engine** panel, select a red target, a blue asset, and choose a method. Methods are grouped into:
    - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Rendezvous, Proximity
    - **Tactical Manoeuvres**: Phasing, CW Radial Separation, CW Along-Track Drift, Plane Change, J2 Drift, COLA, Evasion
-   - **Advanced Analysis**: GEO Drift (longitude relocation), NMC (safety ellipse), Manoeuvre Detect (classify TLE changes), Detectability (intercept observability)
-   - **Decision Support**: Intent Predict (adversary assessment), Intercept Envelope (reachability analysis), Stability (relative motion), Fingerprint (behavioural classification), Formation Defence (formation-aware COLA), Terrain (orbital regime risk), Min-Time (fastest transfer)
+   - **Advanced Analysis**: GEO Drift, NMC (safety ellipse), Manoeuvre Detect, Detectability
+   - **Decision Support**: Intent Predict, Intercept Envelope, Stability, Fingerprint, Formation Defence, Terrain, Min-Time
 
    Set coast and time-of-flight parameters, then click **Calculate Intercept**. The per-burn ΔV breakdown appears with VNB components, arrival epoch, and miss distance.
 
 8. **Run a Threat Sweep** — in the **Threat Sweep** panel:
    - Select a **Target Group** from the dropdown (Blue HRR or Red HRR, by rank 0–5)
-   - The dropdown automatically pre-fetches TLEs for the selected group; multi-provider TLE history is fetched concurrently and clustered via DBSCAN to select the best representative per satellite before the sweep runs
+   - TLEs are pre-fetched and clustered via DBSCAN; multi-provider duplicates are reduced to one representative per satellite
    - Click **Sweep Targets** to batch-evaluate all objects at 5 orbital epochs (now, apogee, perigee, ascending node, descending node) using Hohmann transfers, then auto-refine the top 5 with Lambert for VNB components
-   - Results are ranked by ΔV with one-click refinement per entry
-   - A **TLE Clustering** accordion in the results shows per-object reduction statistics; objects with multiple divergent clusters (possible recent manoeuvre) are flagged with an elevated-uncertainty warning
+   - Objects with multiple DBSCAN clusters (possible recent manoeuvre or poor tracking) are flagged with a red ▲ elevated-uncertainty warning
 
-9. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method. Use this to identify the optimal trade-off.
+9. **Pattern of Life** — open the **PoL** hero tab, enter a NORAD catalogue number, and fetch a historical TLE sequence. SIPC analyses the sequence for:
+   - Manoeuvre detections and activity classification
+   - Cadence filtering (remove temporally clumped duplicate TLEs)
+   - NOTSO message correlation (paste NOTSO text or fetch from UDL) — matches notifications against detected manoeuvres and derives operator behaviour profile
+   - Monte Carlo simulation — select any detected manoeuvre, define a `ManoeuvreHypothesis` (ΔV, pointing uncertainty, archetype), and run N samples to get P5/P50/P95 closest-approach bands and regime probability distribution
+   - Photometry assessment — paste or upload historical magnitude observations; SIPC fits a phase-function baseline and runs a Student's t-test to detect statistically significant brightness changes, correlated with manoeuvre epochs
 
-10. **Pattern of Life** — open the **PoL** hero tab, enter a NORAD catalogue number, and fetch a historical TLE sequence. SIPC analyses the sequence for period anomalies, manoeuvre detections, and activity classification, displaying a timeline of inferred events.
+10. **Decision Engine** — open the **Decision** hero tab:
+    - Define 1–5 adversary action rows (type, probability, confidence)
+    - Define 1–5 friendly response rows (type, cost, reversibility, time-to-execute)
+    - Click **Evaluate** — the engine computes an N × M outcome matrix with composite scores, custody indicators, and closest-approach estimates
+    - Choose selector strategy: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), or **Maximin** (maximise best-case)
+    - The robust recommendation banner shows the best response across all adversary action probabilities
 
-11. **GCAT** — open the **GCAT** hero tab for instant access to the General Catalog of Artificial Space Objects. The panel skeleton loads immediately; click any dataset in the left-hand navigator to fetch and display it (first access ~2–5 s, cached for the session thereafter):
-    - **Derived**: Current Satellite Catalog, Launch Log, Active Satellites, Geosync Catalog, Full Launch Log
-    - **Objects**: SatCat, AuxCat, EventCat, DeepCat, and more
-    - **Payloads**: Mission metadata, classification, end-of-life data
-    - **Supporting**: Organisations, Sites, Launch Vehicles, Engines
+11. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method.
 
-    Use the search box to filter all columns, click any column header to sort, and navigate pages with the pagination bar. Use **↻ Refresh All** to force a fresh download of all 28 datasets from planet4589.org.
+12. **GCAT** — open the **GCAT** hero tab. Click any dataset in the left-hand navigator to fetch and display it (~2–5 s on first access, cached thereafter). Use the search box, column sort, and pagination bar to explore the 28 datasets.
 
-12. **Review and repeat** — use **Clear History** to reset the trade-space plot. Click × on any asset to remove it. All panel updates are HTMX partial swaps — the page never fully reloads.
+13. **Training Mode** — click the **Training** button in the nav bar. A dedicated training console opens with:
+    - **Dashboard** — XP progress, level badge, recommended next step
+    - **Free-Play** — 13 structured scenarios from Cadet (level 1) to Expert (level 6); each includes a briefing, objectives, and tool workflow guidance
+    - **Challenges** — timed scenarios that unlock at Level 4+
+    - **Tutorials** — step-by-step skill-axis tutorials; mark complete for XP
+    - **SIPC Console** — live SIPC operator console embedded in the training session; use real tools against scenario data
+
+---
+
+## Training System
+
+### Levels and progression
+
+| Level | Title | Min Points |
+|-------|-------|-----------|
+| 1 | Cadet | 0 |
+| 2 | Trainee | 200 |
+| 3 | Operator | 500 |
+| 4 | Senior Operator | 1 000 |
+| 5 | Analyst | 2 000 |
+| 6 | Expert | 4 000 |
+
+### Skill axes
+
+Scenarios and tutorials each contribute points to one or more of five skill axes:
+
+| Axis | Description |
+|------|-------------|
+| `intercept_planning` | Intercept Engine and transfer methods |
+| `threat_assessment` | Threat Sweep, HRR, detectability |
+| `pattern_analysis` | Pattern of Life, NOTSO, photometry |
+| `decision_making` | Decision Engine, what-if analysis |
+| `situational_awareness` | GCAT, regime identification, data literacy |
+
+### Scenario design rules
+
+All 13 training scenarios require only tools available in SIPC without a live UDL connection:
+- Assets panel (manual TLE entry or paste)
+- Intercept Engine (requires both Blue and Red assets)
+- Decision Engine (fully manual entry, no UDL dependency)
+
+Pattern of Life, NOTSO, Monte Carlo, and HRR-auto-fetch are not used in scenarios because they require live UDL data for real SATNOs; training uses synthetic TLEs.
 
 ---
 
@@ -191,6 +234,58 @@ pytest tests/integration/test_web_routes.py
 pytest
 ```
 
+### Test modules
+
+| Module | Contents |
+|--------|---------|
+| `test_astro.py` | Hohmann, Lambert, bi-elliptic, SGP4 propagation |
+| `test_tactical.py` | 74 parametrised tactical solver cases |
+| `test_cw_geometry.py` | Clohessy-Wiltshire relative motion |
+| `test_monte_carlo.py` | MC sampling, convergence, regime classification |
+| `test_notso.py` | NOTSO parser, correlation algorithm, behaviour profile |
+| `test_photometry.py` | Geometric corrections, baseline fitting, change detection |
+| `test_tle_filter.py` | TLE cadence clustering and quality flags |
+| `test_decision.py` | Decision Engine models, minimax/EV/maximin selectors |
+| `test_training_gamification.py` | XP/level progression, scenario unlocks |
+| `test_threat_sweep.py` | Threat Sweep solver dispatch |
+| `test_domain_models.py` | Data model validation |
+| `test_planning_state.py` | Session state management |
+| `tests/unit/tle_clustering/` | TLE DBSCAN clustering pipeline |
+| `tests/integration/` | FastAPI TestClient routes; opt-in network tests |
+
+---
+
+## Security Tooling
+
+The following tools are configured and run in CI:
+
+| Tool | Purpose | Config |
+|------|---------|--------|
+| `ruff` | Linting + import sorting | `pyproject.toml [tool.ruff]` |
+| `mypy` | Static type checking | `pyproject.toml [tool.mypy]` |
+| `bandit` | SAST — Python AST security scan | `pyproject.toml [tool.bandit]` |
+| `pip-audit` | SCA — CVE scan of dependencies | CI `sca` job |
+| `gitleaks` | Secret scanning — prevent credential leakage | `.pre-commit-config.yaml` + CI `secrets` job |
+
+Pre-commit hooks (`.pre-commit-config.yaml`) run `gitleaks`, `ruff`, `bandit`, and `mypy` on every commit.
+
+`CODEOWNERS` gates security-sensitive paths (`sipc/web/auth.py`, `sipc/web/database.py`, `sipc/config/`, `docs/SECURITY.md`) to `@Higgy-843`.
+
+`.github/dependabot.yml` schedules weekly pip and GitHub Actions dependency updates.
+
+To run security checks locally:
+
+```powershell
+# SAST
+bandit -c pyproject.toml -r sipc
+
+# SCA
+pip-audit
+
+# Secret scan
+gitleaks detect --source=. --no-git
+```
+
 ---
 
 ## Generating the Operator Guide
@@ -199,64 +294,95 @@ pytest
 python docs/generate_guide.py
 ```
 
-Outputs `docs/SIPC_Operator_Guide.docx` — a comprehensive 15-section guide formatted per the Bluestaq document style guide (Segoe UI, navy/gold headings, data tables, callout boxes). Covers classical transfers, tactical manoeuvres, advanced analysis (GEO drift, NMC, manoeuvre classification, detectability, evasion), trade-space analysis, and 9 operator scenarios.
+Outputs `docs/SIPC_Operator_Guide.docx` — a comprehensive guide formatted per the Bluestaq document style guide (Segoe UI, navy/gold headings, data tables, callout boxes). Covers classical transfers, tactical manoeuvres, advanced analysis, decision engine, trade-space analysis, and operator scenarios.
 
 ---
 
 ## Project Structure
 
 ```
-sipc/                       ← repo root
-├── sipc/                   ← importable package
-│   ├── astro/              ← pure-Python orbital mechanics
-│   │   ├── tle_preprocessing.py  ← TLE clustering integration bridge;
-│   │   │                            cluster_and_reduce_tle_cache() + ClusteringSummary
-│   │   └── ...             ← transfers, tactical manoeuvres, advanced analysis, SGP4, events
-│   ├── domain/             ← intercept planning logic
-│   │   ├── models.py       ← BlueAsset, RedTrack, RunConfig, InterceptResult,
-│   │   │                      BurnResult, ManeuverOption, ManeuverSearchConfig
-│   │   ├── scenario.py     ← ScenarioPlanner orchestrator
-│   │   └── geometry.py     ← geometry helpers
-│   ├── web/                ← FastAPI web console
-│   │   ├── app.py          ← application factory + startup, Jinja2 filters
-│   │   ├── auth.py         ← session cookies + require_login dependency
-│   │   ├── database.py     ← async SQLAlchemy engine + admin bootstrap
-│   │   ├── models.py       ← User ORM model
-│   │   ├── planning_state.py ← per-session in-memory state (assets, TLE caches, intercept history)
-│   │   ├── routes/
-│   │   │   ├── login.py    ← GET/POST /login, POST /logout
-│   │   │   ├── operator.py ← dashboard, asset CRUD, log, orbital events
-│   │   │   ├── udl.py      ← UDL login/logout, TLE fetch, multi-provider history fetch,
-│   │   │   │                  catalogue search, HRR watchlist, NOTSO cache sync
-│   │   │   ├── maneuver.py ← 23-method intercept engine, trade-space data
-│   │   │   ├── threat.py   ← Threat Sweep (batch Hohmann + Lambert refinement, TLE clustering)
-│   │   │   ├── pol.py      ← Pattern of Life (historical TLE analysis, NOTSO correlation)
-│   │   │   └── gcat.py     ← GCAT browser (28 datasets, on-demand fetch, in-memory cache)
-│   │   ├── templates/      ← Jinja2 HTML (base, login, operator, partials)
-│   │   └── static/         ← style.css (Bluestaq dark ops theme), Chart.js, hammer.min.js,
-│   │                          chartjs-plugin-zoom.min.js, SIPC_logo.svg
-│   ├── app_logging/        ← structlog setup + run_id correlation
-│   └── config/             ← constants and runtime settings (TLE_CLUSTERING, TLE_FILTER)
-├── tle_clustering/         ← standalone TLE de-duplication package (scikit-learn DBSCAN)
-│   ├── __init__.py         ← cluster_tle_strings() — primary entry point
-│   ├── config.py           ← ClusteringConfig (tolerances, DBSCAN hyper-parameters)
-│   ├── models.py           ← TLERecord, Cluster, NoiseTLE, ClusteringResult
-│   ├── parser.py           ← TLE string parser → TLERecord list (sgp4 backed)
-│   ├── clustering.py       ← DBSCAN clustering (Chebyshev / L-∞ metric, normalised space)
-│   └── selection.py        ← representative selection (min Chebyshev distance, recency tie-break)
+sipc/                           ← repo root
+├── sipc/                       ← importable package
+│   ├── astro/                  ← pure-Python orbital mechanics
+│   │   ├── constants.py        ← μ, R_Earth, J2, sidereal rate, unit conversions
+│   │   ├── maneuvers.py        ← Hohmann, bi-elliptic, rendezvous, proximity
+│   │   ├── transfers.py        ← Lambert solver (universal variable method)
+│   │   ├── lambert.py          ← Lambert targeting (multi-rev, batched)
+│   │   ├── tactical.py         ← 17 solver categories (phasing, CW, J2, COLA, evasion…)
+│   │   ├── cw_geometry.py      ← Clohessy-Wiltshire relative motion geometry
+│   │   ├── propagator.py       ← TLEOrbit: SGP4 propagation, state-to-Keplerian
+│   │   ├── events.py           ← Orbital event detection (apogee, perigee, nodes)
+│   │   ├── pattern_of_life.py  ← Historical TLE analysis, manoeuvre detection
+│   │   ├── tle_filter.py       ← Cadence clustering, representative selection, quality flags
+│   │   ├── tle_preprocessing.py← TLE DBSCAN clustering bridge (Threat Sweep integration)
+│   │   ├── monte_carlo.py      ← ManoeuvreHypothesis MC sampling, RK45 propagation, results
+│   │   ├── notso.py            ← NOTSO parser, manoeuvre correlation, behaviour profile
+│   │   └── photometry.py       ← Photometry baseline fitting, change detection, correlation
+│   ├── domain/                 ← intercept planning logic
+│   │   ├── models.py           ← BlueAsset, RedTrack, RunConfig, InterceptResult, BurnResult…
+│   │   ├── scenario.py         ← ScenarioPlanner orchestrator
+│   │   ├── decision.py         ← Decision Engine: ActionType, AdversaryAction,
+│   │   │                          FriendlyResponse, OutcomeMetrics, evaluate_scenario()
+│   │   ├── geometry.py         ← AER, closure rate, orbital elements from TLE
+│   │   ├── maneuver_planner.py ← ManeuverPlanner: validates config, sorts options
+│   │   └── exceptions.py       ← Domain exception types
+│   ├── training/               ← Gamification and training mode
+│   │   ├── gamification.py     ← XP engine, level unlock rules, progress tracking
+│   │   ├── scenarios.py        ← Scenario loader and unlock logic
+│   │   ├── tutorials.py        ← Tutorial loader and completion tracking
+│   │   ├── models.py           ← TrainingSession, TrainingProgress ORM models
+│   │   └── config/
+│   │       ├── scenarios.yaml  ← 13 scenarios (Cadet → Expert)
+│   │       ├── gamification.yaml ← 6 levels, point thresholds, skill axes
+│   │       └── tutorials.yaml  ← Tutorial definitions per skill axis
+│   ├── web/                    ← FastAPI web console
+│   │   ├── app.py              ← Application factory, lifespan startup, Jinja2 filters
+│   │   ├── auth.py             ← Session cookies, require_login dependency, 8 hr expiry
+│   │   ├── database.py         ← Async SQLAlchemy engine, admin bootstrap
+│   │   ├── models.py           ← User ORM model
+│   │   ├── deps.py             ← Shared FastAPI dependencies (templates, state)
+│   │   ├── planning_state.py   ← Per-session in-memory state (assets, history, log)
+│   │   └── routes/
+│   │       ├── login.py        ← GET/POST /login, POST /logout
+│   │       ├── operator.py     ← Dashboard, asset CRUD, log, orbital events
+│   │       ├── udl.py          ← UDL login/TLE fetch/HRR watchlist/NOTSO cache sync
+│   │       ├── maneuver.py     ← 23-method intercept engine, trade-space data
+│   │       ├── threat.py       ← Threat Sweep (batch Hohmann + Lambert, TLE clustering)
+│   │       ├── pol.py          ← PoL, TLE filter, NOTSO correlation, MC, photometry
+│   │       ├── decision.py     ← GET /plan/decision/panel, POST /plan/decision/evaluate
+│   │       ├── geometry.py     ← CW geometry visualiser, Hill-frame plots
+│   │       ├── gcat.py         ← GCAT browser (28 datasets, cache, search/sort/paginate)
+│   │       └── training.py     ← Training mode: session, scenarios, tutorials, progress
+│   ├── data/
+│   │   ├── intel.py            ← Intelligence data helpers
+│   │   └── notso_cache.py      ← NOTSO record persistence and retrieval
+│   ├── app_logging/            ← structlog setup, run_id correlation
+│   └── config/                 ← Constants and runtime settings
+├── tle_clustering/             ← Standalone TLE de-duplication package (DBSCAN)
+│   ├── __init__.py             ← cluster_tle_strings() — primary entry point
+│   ├── config.py               ← ClusteringConfig (tolerances, DBSCAN hyper-parameters)
+│   ├── models.py               ← TLERecord, Cluster, NoiseTLE, ClusteringResult
+│   ├── parser.py               ← TLE string parser → TLERecord list (sgp4 backed)
+│   ├── clustering.py           ← DBSCAN clustering (Chebyshev / L-∞ metric)
+│   └── selection.py            ← Representative selection (min Chebyshev, recency tie-break)
 ├── tests/
-│   ├── unit/               ← fast tests (auth helpers, state, domain models, tle_clustering/)
-│   └── integration/        ← FastAPI TestClient routes + TLE clustering pipeline tests
-├── docs/                   ← operator guide generator, architecture notes, reference PDFs
-├── Dockerfile              ← production container (uvicorn, Python slim)
+│   ├── unit/                   ← Fast tests (astro, domain, training, tle_clustering)
+│   └── integration/            ← FastAPI TestClient + TLE clustering pipeline tests
+├── docs/                       ← Architecture notes, planning docs, reference PDFs
+├── .github/
+│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets jobs
+│   └── dependabot.yml          ← Weekly pip + Actions dependency updates
+├── .pre-commit-config.yaml     ← gitleaks, ruff, bandit, mypy on every commit
+├── CODEOWNERS                  ← Security-path review gates
+├── Dockerfile                  ← Production container (uvicorn, Python slim)
 └── pyproject.toml
 ```
 
 ### TLE Clustering
 
-The `tle_clustering/` package is a standalone, dependency-free (except `sgp4` + `scikit-learn`) module that clusters near-duplicate TLEs from multiple tracking providers into a single best representative per satellite.
+The `tle_clustering/` package clusters near-duplicate TLEs from multiple tracking providers into a single best representative per satellite.
 
-**Why this matters:** Satellites on the HRR watchlist can attract dozens of TLEs per day from different providers (18 SDS, SpaceTrack, commercial SSA networks). Each provider fits from different observation sets, producing slightly different orbital elements. Feeding all of them into the threat sweep is redundant and misleads the solver — the same orbit re-appears under different labels.
+**Why this matters:** Satellites on the HRR watchlist can attract dozens of TLEs per day from different providers (18 SDS, SpaceTrack, commercial SSA networks). Each provider fits from different observation sets, producing slightly different orbital elements. Feeding all of them into the threat sweep is redundant and misleads the solver.
 
 **How it works:**
 
@@ -285,7 +411,7 @@ raw TLE history (N TLEs per sat)
 | RAAN | 0.05° | Provider epoch offsets of minutes → ~0.05° J2 drift |
 | Eccentricity | 1×10⁻⁴ | Typical inter-provider LEO variation |
 
-**Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite (e.g. after an unannounced manoeuvre, or during poor tracking coverage), the first cluster representative is used and the sweep results show a red ▲ warning. This is the system's automatic indicator that the orbit is not well-determined.
+**Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite, the sweep results show a red ▲ warning — the orbit is not well-determined (possible recent unannounced manoeuvre or poor tracking coverage).
 
 ---
 
@@ -294,21 +420,22 @@ raw TLE history (N TLEs per sat)
 SIPC does not currently expose a web UI for user management. To add or modify users, connect to the SQLite database directly:
 
 ```powershell
-# Open the database (install sqlite3 CLI if needed)
 sqlite3 sipc.db
+```
 
+```sql
 -- List users
 SELECT id, username, role, created_at FROM users;
-
--- Add a new operator (hash must be a bcrypt hash — use a Python snippet below)
 ```
+
+To generate a bcrypt hash for a new password:
 
 ```python
 import bcrypt
 print(bcrypt.hashpw(b"operator-password-here", bcrypt.gensalt()).decode())
 ```
 
-Then insert the hash:
+Then insert:
 
 ```sql
 INSERT INTO users (username, hashed_password, role) VALUES ('newuser', '<hash>', 'operator');
@@ -325,4 +452,8 @@ Coordinate frame: ICRF/J2000.
 
 ## Architecture
 
-See `docs/architecture.md` for architecture design decisions and adapter pattern details.
+See `docs/architecture.md` for architecture design decisions and module details.
+
+## Security Policy
+
+See `docs/SECURITY.md` for the full security policy (UK NCSC / SSCoP aligned).

@@ -1,0 +1,124 @@
+SIPC TODO List — last updated 2026-04-08
+========================================
+
+Items are grouped by priority. Implemented items are marked [DONE].
+
+
+IMPLEMENTED
+-----------
+[DONE] Monte Carlo simulation — ManoeuvreHypothesis, RK45+J2+drag, P5/P50/P95 bands (sipc/astro/monte_carlo.py)
+[DONE] Decision Engine Phase 1 — deterministic what-if analysis, Minimax/EV/Maximin selectors (sipc/domain/decision.py)
+[DONE] TLE cadence filtering — cluster/select/quality-flag pipeline (sipc/astro/tle_filter.py)
+[DONE] NOTSO correlation — parser, manoeuvre matching, operator behaviour profile (sipc/astro/notso.py)
+[DONE] Historical photometry analysis — phase function, t-test change detection, manoeuvre correlation (sipc/astro/photometry.py)
+[DONE] Training Mode — 6 levels, 13 scenarios, tutorials, challenges, gamification (sipc/training/)
+[DONE] Security hardening — CODEOWNERS, pre-commit, dependabot, bandit, pip-audit, gitleaks, CI rewrite
+[DONE] UDL datatype separation — design decision documented; per-panel filter is open backlog (P1-B below)
+
+
+PRIORITY 1 — Security / Operational Gaps
+-----------------------------------------
+P1-A  CSRF middleware + rate limiting on /udl/* routes
+      - Add CSRF double-submit cookie middleware to sipc/web/app.py
+      - Add per-user rate limit on UDL proxy routes (prevent credential hammering)
+      - Source: docs/SECURITY.md SSCoP Theme 3 / Cyber Essentials
+
+P1-B  UDL datatype filter (REAL / SIMULATED / EXERCISE / TEST)
+      - Add 'datatype' query param selector per panel so operators explicitly choose data mode
+      - Prevents accidental exercise data in live ops or vice versa
+      - Extends existing UDL routes (sipc/web/routes/udl.py)
+
+P1-C  User management UI (/admin/users)
+      - GET /admin/users (list), POST /admin/users (add), POST /admin/users/{id}/delete (remove)
+      - Currently users can only be managed by direct DB access
+      - Source: docs/phased_plan.md Phase 3.4
+
+
+PRIORITY 2 — High-Value Features
+----------------------------------
+P2-A  Decision Engine Phase 2 — Monte Carlo integration
+      - Wire sipc/astro/monte_carlo.py into the Decision Engine
+      - AdversaryAction gains optional ManoeuvreHypothesis field
+      - Outcome matrix cells show P5/P50/P95 bands instead of single estimate
+      - See docs/decision_engine_phases.md Phase 2 for full spec
+      - Dependency: sipc/astro/monte_carlo.py [DONE]
+
+P2-B  UDL conjunction + observation endpoints
+      - GET /udl/conjunction?satno=<N> returning CDM/close-approach warnings
+      - GET /udl/observation?satno=<N> returning sensor observation history
+      - Source: docs/phased_plan.md Phase 3.2
+
+P2-C  Intercept results export
+      - GET /plan/export?run_id=<id> returning CSV of intercept results
+      - Or: copy-to-clipboard button on the results table
+      - Source: docs/phased_plan.md Phase 3.3
+
+P2-D  UDL route integration tests
+      - TestClient tests for web/routes/udl.py: POST /udl/login, GET /udl/tle, GET /udl/statevector
+      - Mock httpx for network calls
+      - Currently zero integration test coverage on UDL routes
+
+
+PRIORITY 3 — Significant Features
+------------------------------------
+P3-A  Decision Engine Phase 3 — SGP4-propagated outcomes
+      - Replace analytic closest-approach with full SGP4 propagation
+      - TCA timestamp per outcome cell
+      - Dependency: Decision Engine Phase 2 (P2-A) must be complete
+      - See docs/decision_engine_phases.md Phase 3
+
+P3-B  Roll-up reporting dashboard
+      - Operational summary: hourly/12h/daily/weekly trend data
+      - Scenarios attempted, threat detections, manoeuvre planning activity, session history
+      - Dependency: requires persistent event logging design
+
+P3-C  Decision Engine Phase 5 — NOTSO-informed priors
+      - Seed AdversaryAction.probability from historical NOTSO type distribution
+      - "Load from NOTSO" button in adversary action rows
+      - Dependency: sipc/data/notso_cache.py [DONE], sipc/astro/notso.py [DONE]
+      - See docs/decision_engine_phases.md Phase 5
+
+
+PRIORITY 4 — Complex / Architectural
+---------------------------------------
+P4-A  Decision Engine Phase 4 — multi-turn game tree
+      - 2-3 turn sequential scenarios; recursive minimax; D3.js game tree visualisation
+      - Dependency: Decision Engine Phase 3 (P3-A) must be complete
+      - See docs/decision_engine_phases.md Phase 4
+
+P4-B  Orekit migration evaluation
+      - Evaluate replacing sipc/astro/ with Orekit Python bindings
+      - Higher-fidelity force models; better manoeuvre planning accuracy
+      - Requires licence review, orekit bindings evaluation, full regression suite
+      - Should not start until Decision Engine Phases 2-3 are stable
+
+
+ASPIRATIONAL / REQUIRES DESIGN FIRST
+---------------------------------------
+- AI pattern learning: feed historical SIPC data into a model to learn operator patterns
+  and flag anomalous RSO behaviour. No design doc yet.
+- Cohort comparison in training dashboard: anonymised team/quartile comparison.
+  Requires multi-user tracking design and privacy review.
+- Daily/weekly challenge mechanics: rotating challenge scenarios on a schedule.
+  Low complexity once training system is mature.
+- SBOM generation in CI: add Syft (or Trivy) to CI for CycloneDX artefact.
+  Required by docs/SECURITY.md supply chain policy.
+- Lockfile: adopt uv lock or pip-compile for reproducible builds.
+- Session TTL eviction: background asyncio task to evict stale SessionState objects.
+
+
+SECURITY TECHNICAL DEBT (from UK Principal Engineer review, 2026-04-08)
+------------------------------------------------------------------------
+SEC-01  Cookie secure=True flag — tie to non-debug mode in sipc/web/app.py
+        (httponly and samesite already set; secure flag missing)
+SEC-02  Dynamic SQL f-strings in sipc/web/database.py lines 57/60
+        — replace with whitelist-validated ORM expressions
+SEC-03  17 bare 'except Exception:' across route handlers (11 in threat.py)
+        — replace with specific exception types
+SEC-04  No lockfile — add uv lock or pip-compile output; CI should install from lock
+SEC-05  hypothesis installed but zero property-based tests exist
+        — add to sipc/astro/propagator.py, lambert.py, maneuvers.py
+SEC-06  Test naming convention: migrate to should_<expected>_when_<condition> format
+        — apply to new tests; existing tests migrate incrementally
+SEC-07  No Assertion Manifest — implement conftest plugin to record assertions as JSON
+SEC-08  No SBOM generation in CI (Syft/CycloneDX) — required by SECURITY.md policy
