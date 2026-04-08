@@ -95,7 +95,7 @@ def solve_lambert(
         raise ValueError("Degenerate Lambert geometry (A ≈ 0)")
 
     # Solve via Stumpff functions with Newton–Raphson iteration.
-    z = _solve_z(r1_mag, r2_mag, A, tof, mu)
+    z = _solve_z(float(r1_mag), float(r2_mag), A, tof, mu)
 
     # Lagrange coefficients.
     sz = _stumpff_S(z)

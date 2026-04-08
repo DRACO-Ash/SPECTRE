@@ -29,6 +29,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -289,7 +290,7 @@ def _j2_drag_ode(
     return np.concatenate([v_vec, a_total])
 
 
-def _state_to_keplerian(r_vec: np.ndarray, v_vec: np.ndarray) -> tuple:
+def _state_to_keplerian(r_vec: np.ndarray, v_vec: np.ndarray) -> tuple[float, ...]:
     """Compute (sma_km, ecc, inc_deg, raan_deg, argp_deg, ta_deg) from state.
 
     Returns (sma_km, ecc, inc_deg) — sufficient for MC classification.
@@ -398,7 +399,7 @@ def propagate_single_sample(
     ric_to_eci: np.ndarray,
     bstar_base: float,
     horizon_hours: float,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Propagate one MC sample and return key orbital elements at horizon.
 
     Returns None on numerical failure.
@@ -513,7 +514,7 @@ def run_monte_carlo(
     # Generate all samples
     samples = generate_samples(hypothesis)  # (N, 5)
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     n_diverged = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -615,8 +616,8 @@ def run_monte_carlo(
 # ── Convenience factory ───────────────────────────────────────────────────────
 
 def hypothesis_from_tle_record(
-    tle_record,  # TLERecord from pattern_of_life
-    manoeuvre,   # Manoeuvre from pattern_of_life
+    tle_record: Any,  # TLERecord from pattern_of_life
+    manoeuvre: Any,   # Manoeuvre from pattern_of_life
     n_samples: int = 500,
     archetype_override: str | None = None,
 ) -> ManoeuvreHypothesis:

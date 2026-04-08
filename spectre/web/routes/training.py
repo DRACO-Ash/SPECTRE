@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -614,8 +614,8 @@ async def training_tutorial_complete(
         progress.tutorials_completed = done
 
     # Level-up check
-    level_up_events: list = []
-    newly_unlocked:  list = []
+    level_up_events: list[Any] = []
+    newly_unlocked:  list[Any] = []
     while True:
         lu = check_level_up(
             current_level=progress.current_level,

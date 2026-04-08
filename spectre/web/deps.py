@@ -7,13 +7,14 @@ creates ``templates`` and also imports the routers.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 
-def get_templates() -> object:
+def get_templates() -> Jinja2Templates:
     """Return the Jinja2Templates instance from the application factory.
 
     The lazy import avoids the circular import that would occur if routes
@@ -39,4 +40,4 @@ def render(
     """
     tmpl = get_templates()
     ctx = context or {}
-    return tmpl.TemplateResponse(request, name, ctx, status_code=status_code)  # type: ignore[attr-defined]
+    return cast(HTMLResponse, tmpl.TemplateResponse(request, name, ctx, status_code=status_code))

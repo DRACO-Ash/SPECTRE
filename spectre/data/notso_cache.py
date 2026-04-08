@@ -40,6 +40,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -67,17 +68,17 @@ class NotsoCache:
 
     def __init__(self, path: Path = _CACHE_PATH) -> None:
         self._path = path
-        self._data: dict = self._load()
+        self._data: dict[str, Any] = self._load()
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
-    def _load(self) -> dict:
+    def _load(self) -> dict[str, Any]:
         if self._path.exists():
             try:
                 with open(self._path, encoding="utf-8") as fh:
                     data = json.load(fh)
                 if "records" in data and "metadata" in data:
-                    return data
+                    return cast(dict[str, Any], data)
             except Exception as exc:
                 logger.warning("notso_cache: corrupt cache file, resetting. %s", exc)
         return {"metadata": {"last_sync_utc": None, "total_records": 0,
@@ -106,9 +107,9 @@ class NotsoCache:
         return len(self._data["records"])
 
     def last_sync_utc(self) -> str | None:
-        return self._data["metadata"].get("last_sync_utc")
+        return cast(str | None, self._data["metadata"].get("last_sync_utc"))
 
-    def append(self, new_records: list[dict]) -> int:
+    def append(self, new_records: list[dict[str, Any]]) -> int:
         """Append *new_records* (dicts from UDL) to the cache, deduplicating by msgId.
 
         Records are sorted by ``createdAt`` ascending before writing.
@@ -140,7 +141,7 @@ class NotsoCache:
 
         return added
 
-    def get_for_satno(self, satno: int | str) -> list[dict]:
+    def get_for_satno(self, satno: int | str) -> list[dict[str, Any]]:
         """Return all cached records whose satNo matches *satno*."""
         target = str(satno).strip()
         return [
@@ -148,7 +149,7 @@ class NotsoCache:
             if str(r.get("satNo") or "").strip() == target
         ]
 
-    def all_records(self) -> list[dict]:
+    def all_records(self) -> list[dict[str, Any]]:
         return list(self._data["records"])
 
 

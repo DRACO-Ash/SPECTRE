@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
@@ -25,15 +25,15 @@ router = APIRouter()
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 
-def _list_response(request: Request, template: str, context: dict) -> HTMLResponse:
+def _list_response(request: Request, template: str, context: dict[str, Any]) -> HTMLResponse:
     """Render a list partial plus OOB satellite-select updates for HTMX.
 
     On HTMX requests the response includes out-of-band ``<select>`` swaps
     so the Maneuver Options and Intercept Engine dropdowns stay in sync.
     """
     tmpl = get_templates()
-    list_html = tmpl.get_template(template).render(context)  # type: ignore[union-attr]
-    oob_html = tmpl.get_template("partials/sat_select_oob.html").render(context)  # type: ignore[union-attr]
+    list_html = tmpl.get_template(template).render(context)
+    oob_html = tmpl.get_template("partials/sat_select_oob.html").render(context)
     return HTMLResponse(list_html + oob_html)
 
 
@@ -144,7 +144,9 @@ async def quick_add_blue_asset(
             f'<span id="{btn_id}" hx-swap-oob="true"'
             f' class="badge-ok" style="font-size:0.68rem">&#10003; Added</span>'
         )
-    return HTMLResponse(resp_html.body.decode() + oob_badge)
+    body = resp_html.body
+    list_html = bytes(body).decode() if not isinstance(body, bytes) else body.decode()
+    return HTMLResponse(list_html + oob_badge)
 
 
 @router.post("/assets/red/quick-add", response_class=HTMLResponse)
@@ -201,7 +203,9 @@ async def quick_add_red_track(
             f'<span id="{btn_id}" hx-swap-oob="true"'
             f' class="badge-red" style="font-size:0.68rem">&#10003; Added</span>'
         )
-    return HTMLResponse(resp_html.body.decode() + oob_badge)
+    body2 = resp_html.body
+    list_html2 = bytes(body2).decode() if not isinstance(body2, bytes) else body2.decode()
+    return HTMLResponse(list_html2 + oob_badge)
 
 
 @router.delete("/assets/blue/{name}", response_class=HTMLResponse)
@@ -305,7 +309,9 @@ async def log_stream(
 
     state = get_session_state(current_user.username)
 
-    async def _event_generator() -> object:
+    from collections.abc import AsyncGenerator  # noqa: PLC0415
+
+    async def _event_generator() -> AsyncGenerator[str, None]:
         while True:
             if await request.is_disconnected():
                 break

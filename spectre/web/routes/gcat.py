@@ -331,7 +331,7 @@ async def _load_all() -> None:
 
     loaded = failed = 0
     for result in results:
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             log.error("[GCAT] gather exception: %s", result)
             _FETCH_ERRORS.append(str(result))
             failed += 1

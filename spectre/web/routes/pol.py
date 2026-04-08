@@ -7,7 +7,7 @@ rendered partials for the Historical PoL hero tab.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
@@ -93,7 +93,7 @@ async def _fetch_udl_history(
     Returns ``(tle_text, metadata, rms_metadata)``.
     Records may arrive in any order — the parser will sort chronologically.
     """
-    params: dict = {
+    params: dict[str, Any] = {
         "satNo": satno,
         "epoch": ">2015-01-01T00:00:00.000000Z",
         "maxResults": _UDL_MAX_RESULTS,
@@ -125,7 +125,7 @@ async def _fetch_udl_latest(
 
     Returns ``(tle_text, metadata, rms_metadata, sat_name)``.
     """
-    params: dict = {"satNo": satno}
+    params: dict[str, Any] = {"satNo": satno}
     if data_mode and data_mode != "REAL":
         params["dataMode"] = data_mode
     if source:
@@ -247,7 +247,7 @@ async def pol_analyse(
                 "error": f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             })
 
-        quality_flags = []
+        quality_flags: list[Any] = []
         if apply_filter:
             raw_count = len(records)
             records, quality_flags = filter_tle_history(records)

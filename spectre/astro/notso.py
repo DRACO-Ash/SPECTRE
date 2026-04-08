@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +374,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
 
 def correlate_notsos_with_manoeuvres(
     notsos: list[NOTSORecord],
-    manoeuvres: list,     # list[Manoeuvre] from pattern_of_life
+    manoeuvres: list[Any],     # list[Manoeuvre] from pattern_of_life
     norad_id: int,
     time_tolerance_hours: float = 24.0,
 ) -> list[NOTSOManoeuvreCorrelation]:
@@ -485,27 +486,31 @@ def extract_behaviour_profile(
     lead_times = [c.time_offset_hours for c in matched if c.time_offset_hours is not None]
     mean_lt = sum(lead_times) / len(lead_times) if lead_times else None
     std_lt  = None
-    if len(lead_times) >= 2:
+    if len(lead_times) >= 2 and mean_lt is not None:
         import math
-        variance = sum((x - mean_lt) ** 2 for x in lead_times) / (len(lead_times) - 1)  # type: ignore[arg-type]
+        _mean_lt: float = mean_lt
+        variance = sum((x - _mean_lt) ** 2 for x in lead_times) / (len(lead_times) - 1)
         std_lt = math.sqrt(variance)
 
     # Magnitude accuracy
     ratios = [c.magnitude_ratio for c in matched if c.magnitude_ratio is not None]
     mean_mr = sum(ratios) / len(ratios) if ratios else None
     std_mr  = None
-    if len(ratios) >= 2:
+    if len(ratios) >= 2 and mean_mr is not None:
         import math
-        var_mr = sum((x - mean_mr) ** 2 for x in ratios) / (len(ratios) - 1)  # type: ignore[arg-type]
+        _mean_mr: float = mean_mr
+        var_mr = sum((x - _mean_mr) ** 2 for x in ratios) / (len(ratios) - 1)
         std_mr = math.sqrt(var_mr)
 
     # Window accuracy: manoeuvre fell inside (not just within tolerance)
     window_hits = 0
     for c in matched:
+        mnv_epoch = getattr(c.manoeuvre, "epoch", None)
         if (
             c.notso
             and c.manoeuvre
-            and c.notso.effective_start_utc <= c.manoeuvre.epoch <= c.notso.effective_end_utc
+            and mnv_epoch is not None
+            and c.notso.effective_start_utc <= mnv_epoch <= c.notso.effective_end_utc
         ):
             window_hits += 1
     window_acc = window_hits / len(matched) if matched else 0.0

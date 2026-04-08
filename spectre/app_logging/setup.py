@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 import structlog
+from typing import cast
 
 
 def configure_logging(run_id: str, log_level: str = "INFO", log_dir: str = "logs") -> None:
@@ -72,4 +73,4 @@ def get_logger(name: str) -> structlog.BoundLogger:
     Returns:
         A structlog BoundLogger with the current contextvars (including run_id) pre-bound.
     """
-    return structlog.get_logger(name)  # type: ignore[return-value]
+    return cast(structlog.BoundLogger, structlog.get_logger(name))

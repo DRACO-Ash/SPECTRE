@@ -46,10 +46,10 @@ def _find_tle(state: object, name: str) -> str | None:
     """Locate a TLE in session state by stk_name."""
     for a in state.blue_assets:  # type: ignore[attr-defined]
         if a.stk_name == name:
-            return a.tle
+            return str(a.tle)
     for t in state.red_tracks:  # type: ignore[attr-defined]
         if t.stk_name == name:
-            return t.tle
+            return str(t.tle)
     return None
 
 

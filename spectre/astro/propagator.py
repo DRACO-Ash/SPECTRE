@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import numpy as np
 from sgp4.api import Satrec, jday
@@ -249,4 +250,4 @@ def regime_from_tle(tle: str) -> str:
 def _datetime_to_jd(dt: datetime) -> tuple[float, float]:
     """Convert a datetime to Julian date (jd, fraction) for sgp4."""
     sec = dt.second + dt.microsecond / 1e6
-    return jday(dt.year, dt.month, dt.day, dt.hour, dt.minute, sec)
+    return cast(tuple[float, float], jday(dt.year, dt.month, dt.day, dt.hour, dt.minute, sec))

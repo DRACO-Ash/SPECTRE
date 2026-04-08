@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class ClusteringSummary:
 def cluster_and_reduce_tle_cache(
     tle_multiset: dict[str, list[str]],
     existing_cache: dict[str, str],
-    config_dict: dict,
+    config_dict: dict[str, Any],
 ) -> tuple[dict[str, str], ClusteringSummary]:
     """Cluster multi-provider TLEs and return a reduced single-TLE cache.
 

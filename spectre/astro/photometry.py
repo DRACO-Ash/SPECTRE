@@ -30,6 +30,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -520,7 +521,7 @@ def _estimate_change_epoch(
 
 def correlate_with_manoeuvres(
     change_epoch: datetime | None,
-    manoeuvres: list,        # list[Manoeuvre]
+    manoeuvres: list[Any],        # list[Manoeuvre]
     window_hours: float = 48.0,
 ) -> list[datetime]:
     """Return epochs of manoeuvres within ±window_hours of change_epoch."""
@@ -537,7 +538,7 @@ def correlate_with_manoeuvres(
 
 def assess_photometry(
     observations: Sequence[PhotometryObservation],
-    manoeuvres: list | None = None,
+    manoeuvres: list[Any] | None = None,
     extinction_coeff: float = 0.12,
     reference_range_km: float = 1000.0,
     sigma_clip: float = 3.0,
@@ -684,7 +685,7 @@ def parse_photometry_csv(
     if reader.fieldnames is None:
         raise ValueError("Empty CSV or missing header row")
 
-    def _get(row: dict, key: str, default: float) -> float:
+    def _get(row: dict[str, Any], key: str, default: float) -> float:
         for k, v in row.items():
             if k.strip().lower() == key and v.strip():
                 try:
@@ -693,10 +694,11 @@ def parse_photometry_csv(
                     pass
         return default
 
-    def _get_str(row: dict, key: str, default: str) -> str:
+    def _get_str(row: dict[str, Any], key: str, default: str) -> str:
         for k, v in row.items():
-            if k.strip().lower() == key and v.strip():
-                return v.strip()
+            vs = str(v).strip() if v is not None else ""
+            if k.strip().lower() == key and vs:
+                return vs
         return default
 
     observations: list[PhotometryObservation] = []

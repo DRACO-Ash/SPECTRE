@@ -67,11 +67,11 @@ class TLECluster:
         ).total_seconds()
 
     @property
-    def earliest_epoch(self):
+    def earliest_epoch(self) -> datetime:
         return min(t.epoch for t in self.tles)
 
     @property
-    def latest_epoch(self):
+    def latest_epoch(self) -> datetime:
         return max(t.epoch for t in self.tles)
 
 

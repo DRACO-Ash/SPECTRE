@@ -49,7 +49,7 @@ TIME_SYSTEM: str = "UTC"
 #   How many hours back to look when fetching multi-provider TLE history for
 #   an object. Longer windows capture more providers but increase UDL load.
 #   Default: 24 h (one full day of TLE generation cadence).
-TLE_CLUSTERING: dict = {
+TLE_CLUSTERING: dict[str, float | int] = {
     "inclination_tolerance_deg": 0.01,
     "raan_tolerance_deg":        0.05,
     "eccentricity_tolerance":    1e-4,
@@ -58,7 +58,7 @@ TLE_CLUSTERING: dict = {
 }
 
 # ── TLE cadence filter thresholds ────────────────────────────────────────────
-TLE_FILTER: dict = {
+TLE_FILTER: dict[str, float | int] = {
     "min_spacing_leo_s": 900,       # 15 min  — LEO / HEO / GTO
     "min_spacing_meo_s": 1800,      # 30 min  — MEO
     "min_spacing_geo_s": 3600,      # 60 min  — GEO / DEEP

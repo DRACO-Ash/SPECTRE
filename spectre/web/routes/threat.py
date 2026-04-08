@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
@@ -139,9 +139,9 @@ def _interceptor_regime(state: object, red_sat_name: str) -> str | None:
         try:
             orbit = TLEOrbit(track.tle)
             t = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-            rv = orbit.propagate(t)
-            kep = state_to_keplerian(rv[0], rv[1])
-            return classify_orbit_regime(kep["semi_major_axis"], kep["eccentricity"])
+            sv = orbit.propagate(t)
+            kep = state_to_keplerian(sv)
+            return classify_orbit_regime(kep.a, kep.ecc)
         except Exception:
             return None
     return None
@@ -181,11 +181,11 @@ def _hrr_group_counts(
 
 def _objects_for_group(
     state: object, side: str, rank: int, regime: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Return HRR objects matching *side* ('blue'|'red'), *rank*, and optionally *regime*."""
     from spectre.astro.constants import normalise_regime
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
         obj_rank = obj.get("rank")
         if obj_rank is None:
@@ -339,6 +339,9 @@ async def fetch_targets(
         if satno_str in state.hrr_tle_cache:
             fetched += 1
             return
+        if not state.udl_username or not state.udl_password:
+            failed += 1
+            return
         async with sem:
             _result = await fetch_tle_for_satno(
                 int(satno_str), state.udl_username, state.udl_password,
@@ -401,7 +404,7 @@ def _build_target_list(
     """
     targets: list[ThreatTarget] = []
 
-    raw_objects: list[dict]
+    raw_objects: list[dict[str, Any]]
     if side == "all":
         raw_objects = list(state.hrr_objects)  # type: ignore[attr-defined]
     else:
@@ -427,10 +430,10 @@ def _find_tle(state: object, sat_name: str) -> str | None:
     """Look up a satellite TLE from session state by object name."""
     for a in state.blue_assets:  # type: ignore[attr-defined]
         if a.stk_name == sat_name:
-            return a.tle
+            return str(a.tle)
     for t in state.red_tracks:  # type: ignore[attr-defined]
         if t.stk_name == sat_name:
-            return t.tle
+            return str(t.tle)
     return None
 
 
@@ -584,7 +587,7 @@ def _sweep_all_methods(
     return entries
 
 
-def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict | None:
+def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict[str, Any] | None:
     """Identify and describe the most dangerous course of action from sweep entries.
 
     The "most dangerous" entry is the one with the lowest ΔV — it is the most
@@ -701,7 +704,7 @@ def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict | None:
     }
 
 
-def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
+def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
     """Group flat entries by target name for the collapsed-row UI.
 
     Returns a list of dicts sorted by best (lowest) delta-V, each containing:
@@ -715,7 +718,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict]:
         key = entry.target.target_name
         buckets.setdefault(key, []).append((flat_idx, entry))
 
-    groups: list[dict] = []
+    groups: list[dict[str, Any]] = []
     for _name, items in buckets.items():
         items.sort(key=lambda t: t[1].delta_v_km_s)
         best = items[0][1]
@@ -785,6 +788,7 @@ async def threat_sweep(
         })
 
     # Find red TLE — manual override takes precedence over the registered track.
+    red_tle: str | None
     if manual_red_tle:
         red_tle = manual_red_tle
     else:
@@ -836,11 +840,13 @@ async def threat_sweep(
         from spectre.web.routes.udl import fetch_tle_for_satno
 
         sem = asyncio.Semaphore(10)
+        _udl_user: str = state.udl_username
+        _udl_pass: str = state.udl_password
 
         async def _fetch_one(t: ThreatTarget) -> None:
             async with sem:
                 _result = await fetch_tle_for_satno(
-                    int(t.target_satno), state.udl_username, state.udl_password,
+                    int(t.target_satno), _udl_user, _udl_pass,
                     data_mode=state.udl_data_mode or "REAL",
                     source=state.udl_tle_source,
                 )

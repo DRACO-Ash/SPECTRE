@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
 
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -55,7 +57,7 @@ def _load_hrr_from_disk() -> None:
         return
     try:
         with open(_HRR_LIST_PATH, encoding="utf-8") as fh:
-            notifications: list[dict] = json.load(fh)
+            notifications: list[dict[str, Any]] = json.load(fh)
         if not notifications:
             return
         newest = max(notifications, key=_parse_created_at)

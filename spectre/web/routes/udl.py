@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from math import inf
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
@@ -88,7 +88,7 @@ async def fetch_tle_history_for_satno(
     since = datetime.now(UTC) - timedelta(hours=window_hours)
     since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
-    params: dict = {
+    params: dict[str, Any] = {
         "satNo":  satno,
         "epoch":  f">{since_str}",
     }
@@ -136,7 +136,7 @@ async def fetch_tle_for_satno(
     """
     try:
         async with httpx.AsyncClient() as client:
-            params: dict = {"satNo": satno}
+            params: dict[str, Any] = {"satNo": satno}
             if data_mode != "REAL":
                 params["dataMode"] = data_mode
             if source:
@@ -413,7 +413,7 @@ async def fetch_tle(
             dm = state.udl_data_mode or "REAL"
             if mode == "epoch":
                 epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
-                params: dict = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
+                params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
                 if dm != "REAL":
                     params["dataMode"] = dm
                 resp = await client.get(
@@ -423,7 +423,7 @@ async def fetch_tle(
                     timeout=10.0,
                 )
             else:
-                latest_params: dict = {"satNo": satno}
+                latest_params: dict[str, Any] = {"satNo": satno}
                 if dm != "REAL":
                     latest_params["dataMode"] = dm
                 if state.udl_tle_source:
@@ -458,7 +458,7 @@ async def fetch_tle(
 
     # Normalise: /elset/current may return a single dict or a list
     if isinstance(data, dict):
-        records: list = [data]
+        records: list[Any] = [data]
     elif isinstance(data, list):
         records = data
     else:
@@ -679,7 +679,7 @@ async def fetch_statevector(
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
 
-def _parse_created_at(rec: dict) -> datetime:
+def _parse_created_at(rec: dict[str, Any]) -> datetime:
     """Parse the UDL notification createdAt field to a UTC datetime.
 
     Returns datetime.min (UTC) if the field is absent or unparseable so the
@@ -698,7 +698,7 @@ async def fetch_hrr_objects(
     username: str,
     password: str,
     data_mode: str = "REAL",
-) -> tuple[list[dict], list[dict], int, str | None]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, str | None]:
     """Fetch HRR satellites from UDL and return (blue, red, lookback_days, error).
 
     Reusable by both the HRR panel route and the threat sweep.  On success the
@@ -707,7 +707,7 @@ async def fetch_hrr_objects(
     contains a human-readable message.
     """
     _HRR_MAX_LOOKBACK_DAYS = 3
-    notifications: list[dict] = []
+    notifications: list[dict[str, Any]] = []
     days_used = 0
 
     try:
@@ -747,16 +747,16 @@ async def fetch_hrr_objects(
     return hrr_blue, hrr_red, days_used, None
 
 
-def parse_hrr_notification(notification: dict) -> tuple[list[dict], list[dict]]:
+def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse a single HRR notification dict into (blue, red) normalised satellite lists.
 
     Shared by the live UDL fetch and the startup loader (HRR_List.json).
     """
-    msg_body: list[dict] = notification.get("msgBody") or []
+    msg_body: list[dict[str, Any]] = notification.get("msgBody") or []
     created_at = str(notification.get("createdAt") or "").strip()
 
-    hrr_blue: list[dict] = []
-    hrr_red: list[dict] = []
+    hrr_blue: list[dict[str, Any]] = []
+    hrr_red: list[dict[str, Any]] = []
 
     for sat in msg_body:
         satno = str(sat.get("satNo") or sat.get("satno") or "").strip()
@@ -844,7 +844,7 @@ async def search_catalog(
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     if q.strip():
         q_lower = q.strip().lower()
         for obj in catalog:
@@ -872,7 +872,7 @@ async def udl_notso(
     satno: int,
     request: Request,
     current_user: User = Depends(require_login),
-):
+) -> Any:
     """Attempt to fetch NOTSO records from UDL for a given SATNO.
 
     Returns a JSON array of NOTSORecord-like dicts on success, or an empty
@@ -933,7 +933,7 @@ async def udl_notso(
 async def udl_notso_sync(
     request: Request,
     current_user: User = Depends(require_login),
-):
+) -> Any:
     """Incrementally sync TACREP_NOTSO records from UDL into the local cache.
 
     Uses ``createdAt`` of the newest cached record as the lower bound for each
@@ -968,7 +968,7 @@ async def udl_notso_sync(
         since = datetime(2024, 1, 1, tzinfo=UTC)
 
     since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-    base_params = {
+    base_params: dict[str, str | int] = {
         "createdAt":  f">{since_str}",
         "dataMode":   "REAL",
         "msgType":    "TACREP_NOTSO",
@@ -983,7 +983,7 @@ async def udl_notso_sync(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             while True:
-                params = dict(base_params)
+                params: dict[str, str | int] = dict(base_params)
                 if page > 0:
                     params["offset"] = page * 500
 

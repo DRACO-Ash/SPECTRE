@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import numpy as np
 from sgp4.api import Satrec
@@ -246,7 +247,7 @@ class PolAnalysis:
     pol_low_interval:       float | None
 
     # TLE cadence filter — populated when cadence filtering was applied
-    quality_flags:          list = field(default_factory=list)  # list[QualityFlag]
+    quality_flags:          list[Any] = field(default_factory=list)  # list[QualityFlag]
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -360,7 +361,7 @@ def _estimate_dv(r_prev: TLERecord, r_cur: TLERecord) -> float:
         return math.hypot(dv_alt, dv_inc)
 
 
-def _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime):
+def _classify_manoeuvre(dv: float, d_alt: float, d_inc: float, d_ecc: float, regime: str) -> tuple[str, str, str]:
     sk_limit = _SK_DV_LIMIT.get(regime, 0.050)
     scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100, "eccentricity": abs(d_ecc) * 1000}
     dominant = max(scores, key=lambda k: scores[k])
@@ -381,7 +382,7 @@ def _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime):
     return dominant, mtype, sk_sub
 
 
-def _percentile(data, p):
+def _percentile(data: list[float], p: float) -> float:
     if not data:
         return 0.0
     s = sorted(data)
@@ -390,7 +391,7 @@ def _percentile(data, p):
     return s[lo] + (s[hi] - s[lo]) * (idx - lo)
 
 
-def _pol_stats(values):
+def _pol_stats(values: list[float]) -> PolStats | None:
     if len(values) < 2:
         return None
     mu  = sum(values) / len(values)
@@ -399,7 +400,7 @@ def _pol_stats(values):
                     low_2sigma=mu - 2*std, high_2sigma=mu + 2*std, n=len(values))
 
 
-def _downsample(records, max_pts=500):
+def _downsample(records: list[Any], max_pts: int = 500) -> list[Any]:
     if len(records) <= max_pts:
         return records
     step = len(records) / max_pts
@@ -423,8 +424,8 @@ def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
 
     phases: list[DriftPhase] = []
     phase_start = geo_recs[0]
-    cur_dir     = _dir(geo_recs[0].geo_drift_rate_deg_day)  # type: ignore[arg-type]
-    rates_in_phase = [geo_recs[0].geo_drift_rate_deg_day]   # type: ignore[list-item]
+    cur_dir     = _dir(geo_recs[0].geo_drift_rate_deg_day or 0.0)
+    rates_in_phase: list[float] = [geo_recs[0].geo_drift_rate_deg_day or 0.0]
 
     def _flush(start: TLERecord, end: TLERecord, rates: list[float], direction: str) -> None:
         dur = (end.epoch - start.epoch).total_seconds() / 86400.0
@@ -445,14 +446,14 @@ def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
         ))
 
     for rec in geo_recs[1:]:
-        d = _dir(rec.geo_drift_rate_deg_day)  # type: ignore[arg-type]
+        d = _dir(rec.geo_drift_rate_deg_day or 0.0)
         if d != cur_dir:
             _flush(phase_start, rec, rates_in_phase, cur_dir)
             phase_start    = rec
             cur_dir        = d
-            rates_in_phase = [rec.geo_drift_rate_deg_day]  # type: ignore[list-item]
+            rates_in_phase = [rec.geo_drift_rate_deg_day or 0.0]
         else:
-            rates_in_phase.append(rec.geo_drift_rate_deg_day)  # type: ignore[arg-type]
+            rates_in_phase.append(rec.geo_drift_rate_deg_day or 0.0)
 
     _flush(phase_start, geo_recs[-1], rates_in_phase, cur_dir)
     return phases
@@ -767,7 +768,7 @@ def analyse_pattern_of_life(
     satno: int = 0,
     name: str = "UNKNOWN",
     dv_threshold: float = _DV_NOISE_FLOOR,
-    quality_flags: list[str] | None = None,
+    quality_flags: list[Any] | None = None,
 ) -> PolAnalysis:
     """Run the full PoL analysis on a sorted list of TLERecords.
 

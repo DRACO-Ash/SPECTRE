@@ -217,11 +217,12 @@ def compute_outcome_metrics(
             red_orbit  = TLEOrbit(red_tle)
             # Use propagation difference at horizon midpoint as geometry hint
             t_mid_min  = scenario.horizon_hours * 30.0
-            blue_sv = blue_orbit.propagate(scenario.epoch_utc, t_mid_min)
-            red_sv  = red_orbit.propagate(scenario.epoch_utc, t_mid_min)
+            t_mid_dt   = scenario.epoch_utc + __import__("datetime").timedelta(minutes=t_mid_min)
+            blue_sv = blue_orbit.propagate(t_mid_dt)
+            red_sv  = red_orbit.propagate(t_mid_dt)
             import math
             sep = math.sqrt(sum(
-                (blue_sv.position_km[i] - red_sv.position_km[i]) ** 2
+                (blue_sv.r[i] - red_sv.r[i]) ** 2
                 for i in range(3)
             ))
             if sep > 0:

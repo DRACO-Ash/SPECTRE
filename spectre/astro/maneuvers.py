@@ -912,7 +912,7 @@ def manoeuvre_detect_intercept(
 
     # Time between TLE epochs
     import math as _m
-    dt_s = abs((blue_orbit._satrec.jdsatepoch - red_orbit._satrec.jdsatepoch) * 86400.0)
+    dt_s = abs((blue_orbit._sat.jdsatepoch - red_orbit._sat.jdsatepoch) * 86400.0)
     if dt_s < 1.0:
         dt_s = 86400.0  # default 1 day if epochs are same
 

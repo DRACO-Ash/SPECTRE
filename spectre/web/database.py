@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -41,7 +42,7 @@ async def init_db() -> None:
     await _bootstrap_admin()
 
 
-async def _apply_migrations(conn) -> None:  # type: ignore[type-arg]
+async def _apply_migrations(conn: Any) -> None:
     """Apply additive ALTER TABLE migrations that are safe to re-run.
 
     SQLite does not support IF NOT EXISTS on ADD COLUMN, so we query

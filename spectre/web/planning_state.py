@@ -13,6 +13,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from spectre.domain.models import (
     BlueAsset,
@@ -75,13 +76,13 @@ class SessionState:
     # Parallel data-mode cache: SATNO → UDL dataMode tag for the cached TLE.
     hrr_tle_data_mode: dict[str, str] = field(default_factory=dict)
     # Cached HRR satellite list from UDL.
-    hrr_objects: list[dict] = field(default_factory=list)
+    hrr_objects: list[dict[str, Any]] = field(default_factory=list)
     # TLE source filter — empty string means "UDL default" (no filter).
     udl_tle_source: str = ""
     # Available TLE sources discovered from UDL after login.
     udl_available_sources: list[str] = field(default_factory=list)
     # Manually added TLE targets for threat sweep: [{name, tle, confidence}]
-    manual_sweep_tles: list[dict] = field(default_factory=list)
+    manual_sweep_tles: list[dict[str, Any]] = field(default_factory=list)
     # Multi-TLE cache for clustering: SATNO → [TLE strings] from all providers.
     # Populated by fetch-targets alongside hrr_tle_cache; consumed by the
     # clustering step at sweep time. A satno absent from this dict means only
@@ -133,11 +134,11 @@ def clear_session_state(username: str) -> None:
 
 # ── App-level on-orbit catalog (shared across all operator sessions) ─────────
 # Fetched in the background on first successful UDL login.
-_onorbit_catalog: list[dict] = []
+_onorbit_catalog: list[dict[str, Any]] = []
 _catalog_status: str = "not_loaded"  # "not_loaded" | "loading" | "ready" | "error"
 
 
-def get_onorbit_catalog() -> list[dict]:
+def get_onorbit_catalog() -> list[dict[str, Any]]:
     """Return the cached on-orbit catalog records."""
     return _onorbit_catalog
 
@@ -147,7 +148,7 @@ def get_catalog_status() -> str:
     return _catalog_status
 
 
-def set_onorbit_catalog(records: list[dict]) -> None:
+def set_onorbit_catalog(records: list[dict[str, Any]]) -> None:
     """Replace the catalog cache and mark status ready."""
     global _onorbit_catalog, _catalog_status
     _onorbit_catalog = records
@@ -164,16 +165,16 @@ def set_catalog_status(status: str) -> None:
 # ── App-level HRR default (loaded from HRR_List.json at startup) ─────────────
 # Pre-populates new operator sessions so the threat sweep works immediately,
 # before the operator connects to UDL for a live refresh.
-_default_hrr_objects: list[dict] = []
+_default_hrr_objects: list[dict[str, Any]] = []
 
 
-def set_default_hrr_objects(objects: list[dict]) -> None:
+def set_default_hrr_objects(objects: list[dict[str, Any]]) -> None:
     """Store the parsed HRR list loaded from the local cache file at startup."""
     global _default_hrr_objects
     _default_hrr_objects = objects
     logger.info("Default HRR objects loaded: %d satellites", len(objects))
 
 
-def get_default_hrr_objects() -> list[dict]:
+def get_default_hrr_objects() -> list[dict[str, Any]]:
     """Return the default HRR object list (loaded at startup)."""
     return _default_hrr_objects

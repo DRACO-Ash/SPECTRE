@@ -12,7 +12,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -124,7 +124,7 @@ _INTENT_LABELS: dict[InterceptMethod, str] = {
 }
 
 
-def _compute_intercept_intel(result: InterceptResult) -> dict:
+def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
     """Pre-compute all intelligence analysis data for the intercept result template.
 
     Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
@@ -500,8 +500,8 @@ async def orbital_events(
     sc_start = state.scenario_start or datetime.now(tz=UTC)
     sc_stop = state.scenario_stop or (sc_start + _timedelta(hours=24))
 
-    red_events: list = []
-    blue_events: list = []
+    red_events: list[Any] = []
+    blue_events: list[Any] = []
 
     if red_sat.strip():
         tle = _find_tle(state, red_sat.strip())
@@ -775,7 +775,7 @@ async def apply_all_intercepts(
     loop = asyncio.get_running_loop()
 
     def _run_all() -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
-        out = []
+        out: list[tuple[InterceptMethod, InterceptResult | None, str | None]] = []
         for method in _ALL_METHODS_SEQUENCE:
             try:
                 sol = _run_intercept(
@@ -790,7 +790,7 @@ async def apply_all_intercepts(
 
     raw = await loop.run_in_executor(None, _run_all)
 
-    items: list[dict] = []
+    items: list[dict[str, Any]] = []
     for method, result, error in raw:
         if result is not None:
             intel = _compute_intercept_intel(result)
@@ -798,7 +798,7 @@ async def apply_all_intercepts(
         else:
             items.append({"method": method, "result": None, "intel": None, "error": error})
 
-    def _sort_key(item: dict) -> tuple[int, float]:
+    def _sort_key(item: dict[str, Any]) -> tuple[int, float]:
         if item["result"] is None:
             return (99, 0.0)
         level = item["intel"]["threat_level"]
@@ -880,10 +880,10 @@ def _find_tle(state: object, sat_name: str) -> str | None:
     """Look up a satellite TLE from session state by object name."""
     for a in state.blue_assets:  # type: ignore[attr-defined]
         if a.stk_name == sat_name:
-            return a.tle
+            return str(a.tle)
     for t in state.red_tracks:  # type: ignore[attr-defined]
         if t.stk_name == sat_name:
-            return t.tle
+            return str(t.tle)
     return None
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -61,7 +62,7 @@ class TrainingProgress(Base):
     @property
     def axis_points(self) -> dict[str, float]:
         try:
-            return json.loads(self.axis_points_json)
+            return dict(json.loads(self.axis_points_json))
         except (ValueError, TypeError):
             return {}
 
@@ -72,7 +73,7 @@ class TrainingProgress(Base):
     @property
     def tutorials_completed(self) -> list[str]:
         try:
-            return json.loads(self.tutorials_completed_json)
+            return list(json.loads(self.tutorials_completed_json))
         except (ValueError, TypeError):
             return []
 
@@ -83,7 +84,7 @@ class TrainingProgress(Base):
     @property
     def unlocked(self) -> list[str]:
         try:
-            return json.loads(self.unlocked_json)
+            return list(json.loads(self.unlocked_json))
         except (ValueError, TypeError):
             return []
 
@@ -144,7 +145,7 @@ class ChallengeResult(Base):
     @property
     def axis_scores(self) -> dict[str, float]:
         try:
-            return json.loads(self.axis_scores_json)
+            return dict(json.loads(self.axis_scores_json))
         except (ValueError, TypeError):
             return {}
 
@@ -155,7 +156,7 @@ class ChallengeResult(Base):
     @property
     def objectives_completed(self) -> list[str]:
         try:
-            return json.loads(self.objectives_json)
+            return list(json.loads(self.objectives_json))
         except (ValueError, TypeError):
             return []
 
@@ -164,12 +165,12 @@ class ChallengeResult(Base):
         self.objectives_json = json.dumps(value)
 
     @property
-    def debrief(self) -> dict:
+    def debrief(self) -> dict[str, Any]:
         try:
-            return json.loads(self.debrief_json)
+            return dict(json.loads(self.debrief_json))
         except (ValueError, TypeError):
             return {}
 
     @debrief.setter
-    def debrief(self, value: dict) -> None:
+    def debrief(self, value: dict[str, Any]) -> None:
         self.debrief_json = json.dumps(value)
