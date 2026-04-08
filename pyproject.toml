@@ -57,7 +57,7 @@ packages = ["spectre"]
 # ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 120
-target-version = "py314"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -75,7 +75,7 @@ ignore = [
 # Mypy
 # ---------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 
