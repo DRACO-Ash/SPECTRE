@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sipc.domain.exceptions import (
+from spectre.domain.exceptions import (
     DomainError,
     InvalidTleError,
     NoInterceptWindowError,
@@ -13,7 +13,7 @@ from sipc.domain.exceptions import (
 
 
 class TestDomainExceptions:
-    """Tests for sipc.domain.exceptions."""
+    """Tests for spectre.domain.exceptions."""
 
     def test_domain_error_is_exception(self) -> None:
         with pytest.raises(DomainError):

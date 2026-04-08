@@ -3,7 +3,7 @@
 Accepts raw two-line element strings and extracts the mean orbital elements
 needed for clustering: inclination, RAAN, and eccentricity.  The ``sgp4``
 library's ``Satrec.twoline2rv()`` is used for parsing so that element
-extraction is consistent with the SGP4 propagator used elsewhere in SIPC.
+extraction is consistent with the SGP4 propagator used elsewhere in SPECTRE.
 
 Usage::
 

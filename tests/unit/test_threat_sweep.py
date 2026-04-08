@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sipc.domain.models import (
+from spectre.domain.models import (
     ThreatAssessment,
     ThreatSweepEntry,
     ThreatTarget,
@@ -120,7 +120,7 @@ class TestSweepHelpers:
 
     def test_build_target_list_blue_rank1(self) -> None:
         """Blue-side HRR Rank 1 objects are returned."""
-        from sipc.web.routes.threat import _build_target_list
+        from spectre.web.routes.threat import _build_target_list
 
         class FakeState:
             hrr_objects = [
@@ -136,7 +136,7 @@ class TestSweepHelpers:
 
     def test_build_target_list_red_rank1(self) -> None:
         """Red-side HRR Rank 1 objects are returned."""
-        from sipc.web.routes.threat import _build_target_list
+        from spectre.web.routes.threat import _build_target_list
 
         class FakeState:
             hrr_objects = [
@@ -152,7 +152,7 @@ class TestSweepHelpers:
 
     def test_build_target_list_no_match(self) -> None:
         """Empty list when no objects match the requested side/rank."""
-        from sipc.web.routes.threat import _build_target_list
+        from spectre.web.routes.threat import _build_target_list
 
         class FakeState:
             hrr_objects = [
@@ -165,7 +165,7 @@ class TestSweepHelpers:
 
     def test_build_target_list_multiple_ranks_separate(self) -> None:
         """Each call returns only the requested rank."""
-        from sipc.web.routes.threat import _build_target_list
+        from spectre.web.routes.threat import _build_target_list
 
         class FakeState:
             hrr_objects = [
@@ -179,7 +179,7 @@ class TestSweepHelpers:
         assert len(_build_target_list(FakeState(), "blue", 5)) == 1
 
     def test_compute_epochs(self) -> None:
-        from sipc.web.routes.threat import _compute_epochs
+        from spectre.web.routes.threat import _compute_epochs
 
         now = datetime(2024, 1, 1, tzinfo=UTC)
         epochs = _compute_epochs(_ISS_TLE, now)
@@ -189,7 +189,7 @@ class TestSweepHelpers:
         assert epochs[0][1] == now
 
     def test_sweep_all_methods(self) -> None:
-        from sipc.web.routes.threat import _sweep_all_methods
+        from spectre.web.routes.threat import _sweep_all_methods
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
@@ -209,7 +209,7 @@ class TestSweepHelpers:
         assert entries[0].delta_v_km_s > 0
 
     def test_sweep_all_methods_filters_by_max_dv(self) -> None:
-        from sipc.web.routes.threat import _sweep_all_methods
+        from spectre.web.routes.threat import _sweep_all_methods
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
@@ -227,7 +227,7 @@ class TestSweepHelpers:
 
     def test_group_entries(self) -> None:
         """_group_entries groups by target and sorts by best delta-V."""
-        from sipc.web.routes.threat import _group_entries
+        from spectre.web.routes.threat import _group_entries
 
         now = datetime(2024, 1, 1, tzinfo=UTC)
         t_a = ThreatTarget("SAT_A", "111", "hrr", 1)
@@ -260,7 +260,7 @@ class TestSweepHelpers:
 
     def test_hrr_group_counts(self) -> None:
         """_hrr_group_counts returns correct breakdowns by side and rank."""
-        from sipc.web.routes.threat import _hrr_group_counts
+        from spectre.web.routes.threat import _hrr_group_counts
 
         class FakeState:
             hrr_objects = [

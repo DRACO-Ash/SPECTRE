@@ -1,0 +1,202 @@
+# SPECTRE Gamification Configuration
+# Edit this file to tune points, level thresholds, and unlock conditions
+# without changing any Python code.
+
+# ── Skill Axes ─────────────────────────────────────────────────────────────────
+# These are the five dimensions of operator competence tracked independently.
+skill_axes:
+  - id: situational_awareness
+    label: "Situational Awareness"
+    description: "Speed and accuracy of reading a threat scenario"
+    icon: "eye"
+    colour: "#3b8beb"
+
+  - id: manoeuvre_planning
+    label: "Manoeuvre Planning"
+    description: "Ability to compute effective orbital responses"
+    icon: "route"
+    colour: "#22c55e"
+
+  - id: decision_quality
+    label: "Decision Quality"
+    description: "Selecting the optimal option, not merely a valid one"
+    icon: "brain"
+    colour: "#f59e0b"
+
+  - id: operational_tempo
+    label: "Operational Tempo"
+    description: "Working at mission-required speed"
+    icon: "clock"
+    colour: "#ef4444"
+
+  - id: efficiency
+    label: "Efficiency"
+    description: "Minimising resource expenditure (ΔV, sensor tasking)"
+    icon: "gauge"
+    colour: "#a855f7"
+
+
+# ── Point-Earning Actions ──────────────────────────────────────────────────────
+# Each entry maps an action_id to a base point award and the skill axes it feeds.
+# axis_weights must sum to 1.0.
+point_actions:
+
+  - action_id: tutorial_step_complete
+    label: "Complete a tutorial step"
+    base_points: 5
+    axis_weights:
+      situational_awareness: 0.5
+      manoeuvre_planning: 0.3
+      decision_quality: 0.2
+
+  - action_id: tutorial_complete
+    label: "Complete a full tutorial"
+    base_points: 50
+    axis_weights:
+      situational_awareness: 0.4
+      manoeuvre_planning: 0.4
+      decision_quality: 0.2
+
+  - action_id: manoeuvre_planned_valid
+    label: "Plan a valid manoeuvre meeting all constraints"
+    base_points: 100
+    axis_weights:
+      manoeuvre_planning: 0.6
+      situational_awareness: 0.2
+      efficiency: 0.2
+
+  - action_id: manoeuvre_planned_optimal
+    label: "Plan the optimal manoeuvre (minimum ΔV, correct geometry)"
+    base_points: 200
+    axis_weights:
+      manoeuvre_planning: 0.4
+      decision_quality: 0.4
+      efficiency: 0.2
+
+  - action_id: threat_assessed_timed
+    label: "Correct threat assessment within time window"
+    base_points: 75
+    # Multiplied by speed_factor (0.5–1.5) at award time
+    speed_multiplier: true
+    axis_weights:
+      situational_awareness: 0.7
+      operational_tempo: 0.3
+
+  - action_id: scenario_completed
+    label: "Complete a full scenario"
+    base_points: 150
+    axis_weights:
+      situational_awareness: 0.2
+      manoeuvre_planning: 0.3
+      decision_quality: 0.3
+      operational_tempo: 0.2
+
+  - action_id: efficiency_bonus
+    label: "Complete scenario with minimal ΔV (< threshold)"
+    base_points: 100
+    axis_weights:
+      efficiency: 0.7
+      decision_quality: 0.3
+
+  - action_id: challenge_passed
+    label: "Pass a challenge scenario"
+    base_points: 250
+    axis_weights:
+      situational_awareness: 0.2
+      manoeuvre_planning: 0.2
+      decision_quality: 0.3
+      operational_tempo: 0.2
+      efficiency: 0.1
+
+  - action_id: challenge_passed_first_try
+    label: "Pass a challenge on first attempt"
+    base_points: 100
+    axis_weights:
+      decision_quality: 0.5
+      operational_tempo: 0.5
+
+
+# ── Level Definitions ──────────────────────────────────────────────────────────
+# Levels unlock progressively.  unlock_condition defines what must be satisfied.
+# condition types: tutorial_complete, axis_threshold, scenario_count, challenge_count
+levels:
+
+  - level: 1
+    title: "Cadet"
+    description: "Can navigate the interface and load scenarios"
+    total_points_required: 0
+    unlock_condition:
+      type: default    # Always unlocked — starting level
+    unlocks:
+      - "scenario:cadet_01_geo_stationkeeping"
+      - "scenario:cadet_02_leo_debris_conjunction"
+      - "tutorial:orientation"
+      - "tutorial:scenario_loading"
+
+  - level: 2
+    title: "Observer"
+    description: "Can read and interpret threat scenarios"
+    total_points_required: 100
+    unlock_condition:
+      type: tutorial_complete
+      tutorial_id: "orientation"
+    unlocks:
+      - "scenario:cadet_03_inspection_approach"
+      - "scenario:observer_02_proximity_threat"
+      - "scenario:observer_03_geo_cola_budget"
+      - "scenario:observer_04_decision_engine_intro"
+      - "scenario:observer_05_notso_correlation"
+      - "tutorial:threat_assessment"
+
+  - level: 3
+    title: "Planner"
+    description: "Can compute valid manoeuvre responses"
+    total_points_required: 400
+    unlock_condition:
+      type: scenario_count
+      count: 3
+    unlocks:
+      - "scenario:planner_03_multi_constraint"
+      - "tutorial:manoeuvre_planning"
+
+  - level: 4
+    title: "Analyst"
+    description: "Can evaluate multiple options and choose optimally"
+    total_points_required: 1200
+    unlock_condition:
+      type: axis_threshold
+      axis: decision_quality
+      min_points: 300
+    unlocks:
+      - "scenario:planner_04_covert_rendezvous"
+      - "scenario:planner_05_leo_phasing_campaign"
+      - "tutorial:decision_evaluation"
+      - "challenge:analyst_gauntlet"
+
+  - level: 5
+    title: "Operator"
+    description: "Can execute the full engagement cycle under time pressure"
+    total_points_required: 3000
+    unlock_condition:
+      type: challenge_count
+      count: 3
+    unlocks:
+      - "scenario:planner_challenge_theatre_defence"
+      - "challenge:operator_timed_full_cycle"
+      - "tutorial:full_engagement_cycle"
+
+  - level: 6
+    title: "Instructor"
+    description: "Mastery — handles edge cases and degraded conditions"
+    total_points_required: 8000
+    unlock_condition:
+      type: axis_threshold
+      axis: operational_tempo
+      min_points: 1000
+    unlocks:
+      - "challenge:instructor_degraded_sensors"
+      - "challenge:instructor_multi_threat"
+
+
+# ── Efficiency Bonus Threshold ─────────────────────────────────────────────────
+efficiency_bonus_dv_threshold_ms: 50.0  # metres/second — award bonus if ΔV < this

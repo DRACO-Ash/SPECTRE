@@ -1,0 +1,73 @@
+{# OSINT Intelligence Card — rendered when adversary intel is available for a satellite.
+   Context variable: osint (dict | None) from spectre.data.intel.get_intel()
+   Optional: osint_label (str) — e.g. "RED TRACK", "TARGET", "SUBJECT"
+#}
+{% if osint %}
+{% set LEVEL_COLOR = {"CRITICAL": "#ef4444", "HIGH": "#f59e0b", "MEDIUM": "#eab308", "LOW": "#3b8beb"} %}
+{% set LEVEL_BG    = {"CRITICAL": "rgba(239,68,68,0.07)", "HIGH": "rgba(245,158,11,0.07)", "MEDIUM": "rgba(234,179,8,0.07)", "LOW": "rgba(59,139,235,0.07)"} %}
+{% set COUNTRY_FULL = {"CHN": "People's Republic of China", "RUS": "Russian Federation", "IRN": "Islamic Republic of Iran"} %}
+{% set STATUS_COLOR = {"Operational": "#22c55e", "Degraded": "#f59e0b", "Unknown": "#6b7280"} %}
+{% set lc = LEVEL_COLOR.get(osint.threat_level, "#6b7280") %}
+{% set lb = LEVEL_BG.get(osint.threat_level, "rgba(107,114,128,0.07)") %}
+{% set sc = STATUS_COLOR.get(osint.status, "#6b7280") %}
+
+<div style="border-left:3px solid {{ lc }}; background:{{ lb }};
+            border-radius:5px; padding:0.55rem 0.8rem; margin-top:0.5rem">
+
+  {# ── Header row ── #}
+  <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.3rem">
+
+    <span style="font-size:0.5rem; font-weight:900; letter-spacing:0.12em;
+                 color:#ef4444; text-transform:uppercase; white-space:nowrap">
+      UNCLASS // OSINT
+    </span>
+
+    <span style="font-size:0.6rem; font-weight:800; background:{{ lc }}; color:#fff;
+                 padding:0.1rem 0.4rem; border-radius:3px; text-transform:uppercase;
+                 letter-spacing:0.06em; white-space:nowrap">
+      {{ osint.threat_level }}
+    </span>
+
+    <span style="font-size:0.62rem; font-weight:700; color:var(--ops-gold);
+                 text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap">
+      {{ osint.assessed_threat }}
+    </span>
+
+    <span style="font-size:0.6rem; font-weight:600; color:var(--text-dim); white-space:nowrap">
+      {{ osint.orbit }} &bull; {{ osint.country }}
+    </span>
+
+    <span style="font-size:0.6rem; color:{{ sc }}; white-space:nowrap">
+      &#9679; {{ osint.status }}
+    </span>
+
+    {% if osint_label %}
+    <span style="margin-left:auto; font-size:0.55rem; font-weight:700;
+                 color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em">
+      {{ osint_label }}
+    </span>
+    {% endif %}
+
+  </div>
+
+  {# ── Satellite name + country ── #}
+  <div style="font-size:0.72rem; font-weight:700; color:var(--text-bright); margin-bottom:0.2rem">
+    {{ osint.name }}
+    <span style="font-size:0.62rem; font-weight:400; color:var(--text-dim)">
+      &mdash; {{ COUNTRY_FULL.get(osint.country, osint.country) }}
+    </span>
+  </div>
+
+  {# ── Significance ── #}
+  <div style="font-size:0.68rem; color:var(--text-dim); line-height:1.45; margin-bottom:0.2rem">
+    {{ osint.significance }}
+  </div>
+
+  {# ── Source footnote ── #}
+  <div style="font-size:0.57rem; color:var(--text-muted);
+              border-top:1px solid var(--border); padding-top:0.18rem; margin-top:0.18rem">
+    Source: {{ osint.source }}
+  </div>
+
+</div>
+{% endif %}

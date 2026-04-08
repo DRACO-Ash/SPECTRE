@@ -1,0 +1,218 @@
+# SPECTRE Training Tutorials
+# Each tutorial has a title, a list of content steps, a skill axis, and a point award.
+# Completing a tutorial marks it in progress.tutorials_completed and awards points.
+
+tutorials:
+
+  - id: orientation
+    title: "Orientation — Welcome to SPECTRE"
+    points: 50
+    skill_axis: situational_awareness
+    steps:
+
+      - heading: "What is SPECTRE?"
+        body: >
+          SPECTRE (Space Planning, Evaluation & Counter-Threat Response Engine) is your operational interface for
+          space domain awareness, manoeuvre planning, and threat assessment.
+          In Training Mode all data is synthetic — no operational systems are accessed.
+          You can experiment freely without any real-world consequences.
+
+      - heading: "The Main Panels"
+        body: >
+          The operator console is organised into hero panels accessed via the tabs at the top:
+          Assets (Blue & Red force tracking), Pattern of Life (historical TLE analysis),
+          Intercept Engine (manoeuvre planning), Decision Engine (what-if scenario evaluation),
+          Threat Sweep (batch threat ranking), and GCAT (satellite catalogue browser).
+          Switch between panels by clicking the tab labels.
+
+      - heading: "Blue and Red Forces"
+        body: >
+          Blue assets are your friendly satellites.  Red tracks are adversary or unknown objects.
+          You add assets manually via the Assets panel or import them from the UDL catalogue.
+          The High-Risk Register (HRR) shows the most threatening objects against each blue asset.
+
+      - heading: "Pattern of Life"
+        body: >
+          The PoL panel fetches a satellite's TLE history and detects manoeuvres by looking
+          for step-changes in orbital elements — particularly semi-major axis and inclination.
+          Use it to characterise an object's behaviour before planning a response.
+
+      - heading: "The Intercept Engine"
+        body: >
+          The Intercept Engine computes orbital manoeuvres: Hohmann transfers, Lambert arcs,
+          Clohessy-Wiltshire proximity operations, and more.  Select a Blue and Red object,
+          choose a manoeuvre type, and the engine computes ΔV cost and geometry.
+
+      - heading: "Training Scenarios"
+        body: >
+          Scenarios give you a structured exercise with objectives and a scoring rubric.
+          Free-Play scenarios let you explore with no time pressure.  Challenges are scored
+          and timed.  Complete objectives to earn points; pass enough to advance your level.
+
+      - heading: "Levels and Progression"
+        body: >
+          You start as a Cadet (Level 1).  Earn points by completing scenarios and tutorials.
+          Each level unlocks more complex scenarios and new capabilities.
+          The progress bar in the sidebar shows how far you are toward the next level.
+          You are now ready to start your first scenario — good luck, Cadet.
+
+  - id: scenario_loading
+    title: "Loading and Running Scenarios"
+    points: 30
+    skill_axis: situational_awareness
+    steps:
+
+      - heading: "Finding a Scenario"
+        body: >
+          Click "Free-Play" in the left sidebar to see available scenarios.
+          Each card shows the difficulty, a description, and the level required to access it.
+          Click "View Scenario" to read the full briefing before committing to an attempt.
+
+      - heading: "Starting a Scored Attempt"
+        body: >
+          Click "Start Scored Attempt" on the scenario detail page to begin.
+          Your objectives will be listed — tick each one off as you complete it using
+          the SPECTRE panels.  Points are only awarded on scored attempts.
+
+      - heading: "Explore Mode"
+        body: >
+          Not sure how to approach a scenario?  Use "Explore (Unscored)" instead.
+          You can interact with all the same panels and tick objectives, but no points
+          are recorded and the attempt counter does not increment.  Use it to practice.
+
+      - heading: "Submitting"
+        body: >
+          When you have completed your objectives (or run out of time), click "Submit".
+          The debrief screen shows your score, which objectives you met, and any points
+          or level-up events.  Review the debrief before starting the next scenario.
+
+  - id: threat_assessment
+    title: "Threat Assessment Fundamentals"
+    points: 75
+    skill_axis: situational_awareness
+    steps:
+
+      - heading: "What Makes an Object a Threat?"
+        body: >
+          A red object is considered threatening if it is manoeuvring toward a blue asset,
+          closing range faster than a natural drift rate, or has a recent NOTSO indicating
+          proximity operations.  Context is everything — a geostationary satellite drifting
+          at 0.001°/day is very different from a LEO object with a sudden SMA change.
+
+      - heading: "Using the HRR"
+        body: >
+          The High-Risk Register ranks red objects by a composite score that includes
+          closing velocity, estimated intercept time, and ΔV cost.  Objects are grouped
+          by rank (0 = highest threat).  Use it as your first triage tool.
+
+      - heading: "Pattern of Life for Context"
+        body: >
+          Before acting on an HRR alert, run PoL on the threatening object.
+          Look for: recent manoeuvres (SMA steps), unusual B* changes (attitude change),
+          and data gaps (possible hidden manoeuvre).  These inform whether the threat
+          is genuine, routine station-keeping, or a catalogue artefact.
+
+      - heading: "Confidence and Uncertainty"
+        body: >
+          Every assessment has uncertainty.  A single TLE epoch is a point estimate, not
+          a trajectory.  Use the Monte Carlo tool to bound the uncertainty on a manoeuvre
+          hypothesis.  Report your confidence level alongside your recommendation.
+
+  - id: manoeuvre_planning
+    title: "Manoeuvre Planning with the Intercept Engine"
+    points: 100
+    skill_axis: manoeuvre_planning
+    steps:
+
+      - heading: "Choosing the Right Manoeuvre Type"
+        body: >
+          The Intercept Engine offers 23 solver categories.  For collision avoidance,
+          start with Hohmann (plane-preserving, minimum ΔV) or a CW offset manoeuvre
+          (maintains relative geometry).  For rapid response, consider a Lambert arc —
+          higher ΔV but shorter time-of-flight.
+
+      - heading: "ΔV Budget"
+        body: >
+          Every manoeuvre costs propellant.  Your blue asset has a finite ΔV budget for
+          its mission life.  The efficiency score in your debrief rewards low-ΔV solutions.
+          Always check: is the avoidance worth the propellant cost given the threat confidence?
+
+      - heading: "Geometry and Timing"
+        body: >
+          Manoeuvre timing matters.  A radial burn at the wrong point in an orbit can
+          increase closing rate rather than decrease it.  The Intercept Engine shows
+          time-to-intercept and closest approach — use the Hill-frame visualiser to
+          check that your chosen response actually opens the miss distance.
+
+      - heading: "Reversibility"
+        body: >
+          Some manoeuvres are hard to undo.  A large plane change permanently alters
+          RAAN and may make future station-keeping more expensive.  Prefer in-plane
+          manoeuvres when the threat geometry allows it.
+
+  - id: decision_evaluation
+    title: "Multi-Option Decision Evaluation"
+    points: 125
+    skill_axis: decision_quality
+    steps:
+
+      - heading: "The Decision Engine Panel"
+        body: >
+          The Decision Engine lets you evaluate a grid of adversary actions versus
+          friendly responses.  Each cell in the outcome matrix shows the composite score
+          for that (adversary, response) pairing — lower is better for the friendly side.
+
+      - heading: "Adversary Actions"
+        body: >
+          Enter the adversary actions you think are plausible: proximity approach,
+          electronic interference, no action, etc.  Assign a probability and a confidence
+          level to each.  These feed the Expected Value selector.
+
+      - heading: "Friendly Responses"
+        body: >
+          Define your available responses: collision avoidance manoeuvre, sensor retask,
+          posture change, hold.  Assign ΔV cost and reversibility.  The engine scores
+          each response against each adversary action.
+
+      - heading: "Selecting a Strategy"
+        body: >
+          Three selectors are available.  Minimax minimises your worst-case outcome —
+          conservative, suitable for high-stakes situations.  Expected Value weights by
+          adversary probabilities — suitable when intelligence is reliable.
+          Maximin maximises your best-case — only use if you can afford to gamble.
+
+  - id: full_engagement_cycle
+    title: "Full Engagement Cycle"
+    points: 200
+    skill_axis: operational_tempo
+    steps:
+
+      - heading: "Detect"
+        body: >
+          The engagement cycle starts with cueing.  Load the HRR, identify the highest-ranked
+          threat, and confirm it with a PoL run.  You are looking for: manoeuvre history,
+          closing rate, and intent indicators.
+
+      - heading: "Assess"
+        body: >
+          Quantify the threat.  Run Monte Carlo if you have a manoeuvre hypothesis.
+          Note uncertainty bounds.  Assign a threat level (routine / elevated / critical).
+          Document your reasoning — this is your assessment record.
+
+      - heading: "Plan"
+        body: >
+          Open the Intercept Engine.  Compute at least two candidate responses.
+          Compare ΔV cost, miss distance achieved, and reversibility.
+          Use the Decision Engine if multiple adversary actions are plausible.
+
+      - heading: "Decide"
+        body: >
+          Select the response that best balances effectiveness, cost, and reversibility
+          given your threat assessment confidence.  Record the decision rationale.
+
+      - heading: "Act"
+        body: >
+          In live operations the manoeuvre parameters would be uploaded to the spacecraft.
+          In SPECTRE training, "act" means submitting your completed scenario with the
+          selected manoeuvre option and documented reasoning.  The debrief scores all five
+          skill axes — speed, accuracy, efficiency, decision quality, and situational awareness.

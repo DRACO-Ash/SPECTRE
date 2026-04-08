@@ -1,4 +1,4 @@
-# SIPC — Space Intercept Planning Console
+# SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine
 
 Real-time orbital manoeuvre planning console for space defence operators.
 Accessed through a browser-based operator interface built on FastAPI + HTMX.
@@ -7,7 +7,7 @@ Accessed through a browser-based operator interface built on FastAPI + HTMX.
 
 ## Overview
 
-SIPC provides analysts with a web console for:
+SPECTRE provides analysts with a web console for:
 
 - **Asset Management** — define Blue (friendly) and Red (adversary) satellite sets with TLE propagators; fetch live TLEs from UDL; one-click import from the HRR watchlist
 - **Intercept Engine** (23 methods) — Lambert, Hohmann, bi-elliptic, rendezvous, proximity; tactical manoeuvres (phasing, CW relative motion, plane change, J2 RAAN drift, COLA, evasion); advanced analysis (GEO drift, NMC, manoeuvre classification, detectability); decision support (intent prediction, intercept envelope, stability, fingerprinting, formation defence, orbital terrain, minimum-time intercept)
@@ -15,9 +15,9 @@ SIPC provides analysts with a web console for:
 - **Pattern of Life (PoL)** — historical TLE sequence analysis: manoeuvre detection, activity classification, behavioural baseline; TLE cadence filtering and de-duplication; NOTSO message correlation with detected manoeuvres; Monte Carlo simulation of adversary manoeuvre hypotheses; historical photometry change assessment
 - **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Maximin); robust recommendation banner
 - **GCAT Browser** — interactive browser for the General Catalog of Artificial Space Objects (J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, paginated; on-demand download with in-session caching
-- **Training Mode** — full gamification system for operator skill development: six proficiency levels, 13 structured scenarios (Cadet through Expert), timed challenges, step-by-step tutorials, live SIPC console embed, XP/points progression, session tracking
+- **Training Mode** — full gamification system for operator skill development: six proficiency levels, 13 structured scenarios (Cadet through Expert), timed challenges, step-by-step tutorials, live SPECTRE console embed, XP/points progression, session tracking
 
-All orbital mechanics computations use the pure-Python `sipc.astro` package — no external astrodynamics software required.
+All orbital mechanics computations use the pure-Python `spectre.astro` package — no external astrodynamics software required.
 
 ---
 
@@ -42,20 +42,20 @@ pip install -e ".[dev]"
 
 # 3. Set required environment variables
 $env:SECRET_KEY      = "change-me-to-a-long-random-string"
-$env:SIPC_ADMIN_USER = "admin"
-$env:SIPC_ADMIN_PASS = "change-me"
+$env:SPECTRE_ADMIN_USER = "admin"
+$env:SPECTRE_ADMIN_PASS = "change-me"
 
 # 4. Start the server
-sipc-serve
+spectre-serve
 # or equivalently:
-uvicorn sipc.web.app:app --reload
+uvicorn spectre.web.app:app --reload
 ```
 
 Then open **http://localhost:8000** in your browser.
 
 ### First Login
 
-On first run, SIPC creates the database and inserts a single admin account using the values from `SIPC_ADMIN_USER` / `SIPC_ADMIN_PASS`. Sign in with those credentials.
+On first run, SPECTRE creates the database and inserts a single admin account using the values from `SPECTRE_ADMIN_USER` / `SPECTRE_ADMIN_PASS`. Sign in with those credentials.
 
 > If neither env var is set, no bootstrap account is created. You must insert a user manually (see [User Management](#user-management)).
 
@@ -65,17 +65,17 @@ On first run, SIPC creates the database and inserts a single admin account using
 
 ```bash
 # Build the image
-docker build -t sipc:latest .
+docker build -t spectre:latest .
 
 # Run with a named volume for the database
 docker run -d \
   -p 8000:8000 \
-  -v sipc_data:/app/data \
+  -v spectre_data:/app/data \
   -e SECRET_KEY="change-me-to-a-long-random-string" \
-  -e SIPC_ADMIN_USER="admin" \
-  -e SIPC_ADMIN_PASS="change-me" \
-  --name sipc \
-  sipc:latest
+  -e SPECTRE_ADMIN_USER="admin" \
+  -e SPECTRE_ADMIN_PASS="change-me" \
+  --name spectre \
+  spectre:latest
 ```
 
 Then open **http://localhost:8000** in your browser.
@@ -83,7 +83,7 @@ Then open **http://localhost:8000** in your browser.
 To use PostgreSQL instead of SQLite, add:
 
 ```bash
-  -e DATABASE_URL="postgresql+asyncpg://user:pass@host/sipc_db"
+  -e DATABASE_URL="postgresql+asyncpg://user:pass@host/spectre_db"
 ```
 
 No code changes are required — the adapter swap is entirely via `DATABASE_URL`.
@@ -95,11 +95,11 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SECRET_KEY` | **Yes** | — | Signs session cookies. Use a long random string in production. |
-| `DATABASE_URL` | No | `sqlite+aiosqlite:///./sipc.db` | SQLAlchemy async connection string. |
-| `SIPC_ADMIN_USER` | No | `admin` | Bootstrap admin username (first run only). |
-| `SIPC_ADMIN_PASS` | No | — | Bootstrap admin password (first run only). Omit to skip bootstrap. |
-| `SIPC_LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `SIPC_LOG_DIR` | No | `logs` | Directory for structlog output files. |
+| `DATABASE_URL` | No | `sqlite+aiosqlite:///./spectre.db` | SQLAlchemy async connection string. |
+| `SPECTRE_ADMIN_USER` | No | `admin` | Bootstrap admin username (first run only). |
+| `SPECTRE_ADMIN_PASS` | No | — | Bootstrap admin password (first run only). Omit to skip bootstrap. |
+| `SPECTRE_LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `SPECTRE_LOG_DIR` | No | `logs` | Directory for structlog output files. |
 
 ---
 
@@ -109,7 +109,7 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  [≡] SIPC    [UDL ●]   [Training]           [operator] [Logout]  │
+│  [≡] SPECTRE    [UDL ●]   [Training]           [operator] [Logout]  │
 ├────────────────────────┬─────────────────────────────────────────┤
 │  SIDEBAR               │  HERO TABS                              │
 │  ┌ Assets ───────────┐ │  [Engine] [Sweep] [PoL] [Decision]      │
@@ -155,12 +155,12 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
    - Click **Sweep Targets** to batch-evaluate all objects at 5 orbital epochs (now, apogee, perigee, ascending node, descending node) using Hohmann transfers, then auto-refine the top 5 with Lambert for VNB components
    - Objects with multiple DBSCAN clusters (possible recent manoeuvre or poor tracking) are flagged with a red ▲ elevated-uncertainty warning
 
-9. **Pattern of Life** — open the **PoL** hero tab, enter a NORAD catalogue number, and fetch a historical TLE sequence. SIPC analyses the sequence for:
+9. **Pattern of Life** — open the **PoL** hero tab, enter a NORAD catalogue number, and fetch a historical TLE sequence. SPECTRE analyses the sequence for:
    - Manoeuvre detections and activity classification
    - Cadence filtering (remove temporally clumped duplicate TLEs)
    - NOTSO message correlation (paste NOTSO text or fetch from UDL) — matches notifications against detected manoeuvres and derives operator behaviour profile
    - Monte Carlo simulation — select any detected manoeuvre, define a `ManoeuvreHypothesis` (ΔV, pointing uncertainty, archetype), and run N samples to get P5/P50/P95 closest-approach bands and regime probability distribution
-   - Photometry assessment — paste or upload historical magnitude observations; SIPC fits a phase-function baseline and runs a Student's t-test to detect statistically significant brightness changes, correlated with manoeuvre epochs
+   - Photometry assessment — paste or upload historical magnitude observations; SPECTRE fits a phase-function baseline and runs a Student's t-test to detect statistically significant brightness changes, correlated with manoeuvre epochs
 
 10. **Decision Engine** — open the **Decision** hero tab:
     - Define 1–5 adversary action rows (type, probability, confidence)
@@ -178,7 +178,7 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
     - **Free-Play** — 13 structured scenarios from Cadet (level 1) to Expert (level 6); each includes a briefing, objectives, and tool workflow guidance
     - **Challenges** — timed scenarios that unlock at Level 4+
     - **Tutorials** — step-by-step skill-axis tutorials; mark complete for XP
-    - **SIPC Console** — live SIPC operator console embedded in the training session; use real tools against scenario data
+    - **SPECTRE Console** — live SPECTRE operator console embedded in the training session; use real tools against scenario data
 
 ---
 
@@ -209,7 +209,7 @@ Scenarios and tutorials each contribute points to one or more of five skill axes
 
 ### Scenario design rules
 
-All 13 training scenarios require only tools available in SIPC without a live UDL connection:
+All 13 training scenarios require only tools available in SPECTRE without a live UDL connection:
 - Assets panel (manual TLE entry or paste)
 - Intercept Engine (requires both Blue and Red assets)
 - Decision Engine (fully manual entry, no UDL dependency)
@@ -225,7 +225,7 @@ Pattern of Life, NOTSO, Monte Carlo, and HRR-auto-fetch are not used in scenario
 pytest tests/unit/
 
 # Unit tests with coverage report
-pytest tests/unit/ --cov=sipc --cov-report=term-missing
+pytest tests/unit/ --cov=spectre --cov-report=term-missing
 
 # Web integration tests (FastAPI TestClient, in-memory DB)
 pytest tests/integration/test_web_routes.py
@@ -269,7 +269,7 @@ The following tools are configured and run in CI:
 
 Pre-commit hooks (`.pre-commit-config.yaml`) run `gitleaks`, `ruff`, `bandit`, and `mypy` on every commit.
 
-`CODEOWNERS` gates security-sensitive paths (`sipc/web/auth.py`, `sipc/web/database.py`, `sipc/config/`, `docs/SECURITY.md`) to `@Higgy-843`.
+`CODEOWNERS` gates security-sensitive paths (`spectre/web/auth.py`, `spectre/web/database.py`, `spectre/config/`, `docs/SECURITY.md`) to `@Higgy-843`.
 
 `.github/dependabot.yml` schedules weekly pip and GitHub Actions dependency updates.
 
@@ -277,7 +277,7 @@ To run security checks locally:
 
 ```powershell
 # SAST
-bandit -c pyproject.toml -r sipc
+bandit -c pyproject.toml -r spectre
 
 # SCA
 pip-audit
@@ -294,15 +294,15 @@ gitleaks detect --source=. --no-git
 python docs/generate_guide.py
 ```
 
-Outputs `docs/SIPC_Operator_Guide.docx` — a comprehensive guide formatted per the Bluestaq document style guide (Segoe UI, navy/gold headings, data tables, callout boxes). Covers classical transfers, tactical manoeuvres, advanced analysis, decision engine, trade-space analysis, and operator scenarios.
+Outputs `docs/SPECTRE_Operator_Guide.docx` — a comprehensive guide formatted per the Bluestaq document style guide (Segoe UI, navy/gold headings, data tables, callout boxes). Covers classical transfers, tactical manoeuvres, advanced analysis, decision engine, trade-space analysis, and operator scenarios.
 
 ---
 
 ## Project Structure
 
 ```
-sipc/                           ← repo root
-├── sipc/                       ← importable package
+spectre/                           ← repo root
+├── spectre/                       ← importable package
 │   ├── astro/                  ← pure-Python orbital mechanics
 │   │   ├── constants.py        ← μ, R_Earth, J2, sidereal rate, unit conversions
 │   │   ├── maneuvers.py        ← Hohmann, bi-elliptic, rendezvous, proximity
@@ -403,7 +403,7 @@ raw TLE history (N TLEs per sat)
          └─ noise TLEs ──────▶ flagged in ClusteringSummary
 ```
 
-**Tolerances** (configurable in `sipc/config/constants.py → TLE_CLUSTERING`):
+**Tolerances** (configurable in `spectre/config/constants.py → TLE_CLUSTERING`):
 
 | Element | Default | Rationale |
 |---------|---------|-----------|
@@ -417,10 +417,10 @@ raw TLE history (N TLEs per sat)
 
 ## User Management
 
-SIPC does not currently expose a web UI for user management. To add or modify users, connect to the SQLite database directly:
+SPECTRE does not currently expose a web UI for user management. To add or modify users, connect to the SQLite database directly:
 
 ```powershell
-sqlite3 sipc.db
+sqlite3 spectre.db
 ```
 
 ```sql

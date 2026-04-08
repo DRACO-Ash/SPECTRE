@@ -25,10 +25,10 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 | File | Role |
 |------|------|
-| `sipc/domain/decision.py` | Core data model + `evaluate_scenario()` |
-| `sipc/web/routes/decision.py` | `GET /plan/decision/panel`, `POST /plan/decision/evaluate` |
-| `sipc/web/templates/partials/decision_panel.html` | Scenario builder form |
-| `sipc/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
+| `spectre/domain/decision.py` | Core data model + `evaluate_scenario()` |
+| `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `POST /plan/decision/evaluate` |
+| `spectre/web/templates/partials/decision_panel.html` | Scenario builder form |
+| `spectre/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
 
 ### Known Phase 1 limitations
 
@@ -43,7 +43,7 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 **Status: Next sprint**
 
-**Dependency:** `sipc/astro/monte_carlo.py` (already built and tested)
+**Dependency:** `spectre/astro/monte_carlo.py` (already built and tested)
 
 ### What changes
 
@@ -140,13 +140,13 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 **Status: Parallel development alongside Phase 3/4**
 
-**Dependency:** `sipc/data/notso_cache.py` (already built); `sipc/astro/notso.py` (already built)
+**Dependency:** `spectre/data/notso_cache.py` (already built); `spectre/astro/notso.py` (already built)
 
 ### What changes
 
 - If NOTSO records exist for the adversary satellite (via `notso_cache.py`), prior probabilities on adversary actions are seeded from historical NOTSO type distribution
   - e.g. 8 of last 10 NOTSOs for this object were `MANOEUVRE` → P(manoeuvre) = 0.8 as default
-- `OperatorBehaviourProfile` (from `sipc/astro/notso.py`) feeds `AdversaryAction.probability` defaults
+- `OperatorBehaviourProfile` (from `spectre/astro/notso.py`) feeds `AdversaryAction.probability` defaults
 - After scenario evaluation, NOTSO-derived confidence intervals shown in results
 
 ### UI additions

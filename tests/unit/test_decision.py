@@ -1,4 +1,4 @@
-"""Unit tests for sipc.domain.decision — Phase 1 deterministic scenario evaluation."""
+"""Unit tests for spectre.domain.decision — Phase 1 deterministic scenario evaluation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from sipc.domain.decision import (
+from spectre.domain.decision import (
     ActionType,
     AdversaryAction,
     FriendlyResponse,

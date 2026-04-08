@@ -1,11 +1,11 @@
-"""Unit tests for sipc.domain.models."""
+"""Unit tests for spectre.domain.models."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sipc.config.constants import BLUE_PREFIX, RED_PREFIX
-from sipc.domain.models import (
+from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
+from spectre.domain.models import (
     AccessInterval,
     BlueAsset,
     InterceptWindow,

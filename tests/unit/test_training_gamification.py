@@ -1,4 +1,4 @@
-"""Unit tests for the SIPC training gamification engine and scenario loader.
+"""Unit tests for the SPECTRE training gamification engine and scenario loader.
 
 Tests cover:
   - Gamification config loading
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from sipc.training.gamification import (
+from spectre.training.gamification import (
     GamificationConfig,
     LevelUpResult,
     PointAward,
@@ -25,7 +25,7 @@ from sipc.training.gamification import (
     points_to_next_level,
     recommended_next_step,
 )
-from sipc.training.scenarios import (
+from spectre.training.scenarios import (
     TrainingScenario,
     get_scenario,
     load_scenarios,
@@ -367,17 +367,17 @@ class TestDataIsolation:
     """Verify that training modules do not import operational state."""
 
     def test_gamification_does_not_import_session_state(self):
-        import sipc.training.gamification as gm
+        import spectre.training.gamification as gm
         assert not hasattr(gm, "SessionState")
         assert not hasattr(gm, "get_session_state")
 
     def test_scenarios_does_not_import_session_state(self):
-        import sipc.training.scenarios as sc
+        import spectre.training.scenarios as sc
         assert not hasattr(sc, "SessionState")
         assert not hasattr(sc, "get_session_state")
 
     def test_training_models_do_not_reference_operational_tables(self):
-        from sipc.training.models import TrainingProgress, TrainingSession, ChallengeResult
+        from spectre.training.models import TrainingProgress, TrainingSession, ChallengeResult
         table_names = {
             TrainingProgress.__tablename__,
             TrainingSession.__tablename__,

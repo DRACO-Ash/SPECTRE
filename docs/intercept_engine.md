@@ -1,8 +1,8 @@
 # Intercept Engine
 
-The SIPC intercept engine is implemented entirely in pure Python across `sipc/astro/` and dispatched by `sipc/web/routes/maneuver.py`. It provides 23 solver methods grouped into four categories.
+The SPECTRE intercept engine is implemented entirely in pure Python across `spectre/astro/` and dispatched by `spectre/web/routes/maneuver.py`. It provides 23 solver methods grouped into four categories.
 
-> **Historical note:** An earlier version of SIPC used STK Astrogator COM integration for intercept planning (`sipc/intercept_engine/`, `sipc/stk_adapter/`). That architecture was removed when the codebase migrated to pure-Python astrodynamics. This document describes the current implementation.
+> **Historical note:** An earlier version of SPECTRE used STK Astrogator COM integration for intercept planning (`spectre/intercept_engine/`, `spectre/stk_adapter/`). That architecture was removed when the codebase migrated to pure-Python astrodynamics. This document describes the current implementation.
 
 ---
 
@@ -57,14 +57,14 @@ The SIPC intercept engine is implemented entirely in pure Python across `sipc/as
 
 | Module | Responsibility |
 |--------|---------------|
-| `sipc/astro/maneuvers.py` | Hohmann, bi-elliptic, rendezvous, proximity |
-| `sipc/astro/transfers.py` | Lambert solver (universal variable method) |
-| `sipc/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
-| `sipc/astro/tactical.py` | All 17 tactical and decision-support categories |
-| `sipc/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
-| `sipc/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
-| `sipc/astro/events.py` | Orbital event detection (apogee, perigee, nodes) |
-| `sipc/web/routes/maneuver.py` | Route dispatcher — maps HTTP form fields → solver calls → HTML partial |
+| `spectre/astro/maneuvers.py` | Hohmann, bi-elliptic, rendezvous, proximity |
+| `spectre/astro/transfers.py` | Lambert solver (universal variable method) |
+| `spectre/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
+| `spectre/astro/tactical.py` | All 17 tactical and decision-support categories |
+| `spectre/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
+| `spectre/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
+| `spectre/astro/events.py` | Orbital event detection (apogee, perigee, nodes) |
+| `spectre/web/routes/maneuver.py` | Route dispatcher — maps HTTP form fields → solver calls → HTML partial |
 
 ---
 
@@ -100,7 +100,7 @@ Each `BurnResult`:
 
 1. Parse form fields: `red_satno`, `blue_satno`, `method`, `coast_h`, `tof_h`, plus method-specific params
 2. Fetch TLEs from `SessionState` (assets must already be loaded)
-3. Resolve `InterceptMethod` enum → dispatch to the appropriate `sipc.astro` function
+3. Resolve `InterceptMethod` enum → dispatch to the appropriate `spectre.astro` function
 4. Wrap result in `InterceptResult`; append to `state.intercept_history`
 5. Return `partials/intercept_result.html` fragment via HTMX swap
 
@@ -133,7 +133,7 @@ The J2 RAAN precession rate is:
 dΩ/dt = −(3/2) n J2 (Rₑ/p)² cos(i)
 ```
 
-where `n` is the mean motion, `J2 = 1.08263×10⁻³`, `Rₑ = 6378.137 km`, `p = a(1−e²)` is the semi-latus rectum, and `i` is inclination. SIPC uses this to compute how many days of natural RAAN drift are needed before a plane-change manoeuvre can be reduced to a specified ΔV.
+where `n` is the mean motion, `J2 = 1.08263×10⁻³`, `Rₑ = 6378.137 km`, `p = a(1−e²)` is the semi-latus rectum, and `i` is inclination. SPECTRE uses this to compute how many days of natural RAAN drift are needed before a plane-change manoeuvre can be reduced to a specified ΔV.
 
 ### SGP4 propagation
 

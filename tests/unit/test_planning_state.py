@@ -1,9 +1,9 @@
-"""Unit tests for sipc.web.planning_state — per-session state isolation."""
+"""Unit tests for spectre.web.planning_state — per-session state isolation."""
 
 from __future__ import annotations
 
-from sipc.domain.models import BlueAsset
-from sipc.web.planning_state import clear_session_state, get_session_state
+from spectre.domain.models import BlueAsset
+from spectre.web.planning_state import clear_session_state, get_session_state
 
 
 class TestSessionStateIsolation:
@@ -51,7 +51,7 @@ class TestSessionStateLog:
         assert "RUN started" in state.log_entries
 
     def test_log_evicts_oldest_when_full(self) -> None:
-        from sipc.web.planning_state import _MAX_LOG_ENTRIES
+        from spectre.web.planning_state import _MAX_LOG_ENTRIES
 
         state = get_session_state("tester")
         for i in range(_MAX_LOG_ENTRIES + 5):

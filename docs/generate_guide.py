@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the SIPC Operator Guide as a formatted .docx document.
+"""Generate the SPECTRE Operator Guide as a formatted .docx document.
 
 Follows the Bluestaq Ltd Document Style Guide — A4, Segoe UI, navy/gold
 colour scheme, accent bar, metric cards, data tables, and callout boxes.
@@ -8,7 +8,7 @@ Usage::
 
     python docs/generate_guide.py
 
-Outputs ``docs/SIPC_Operator_Guide.docx``.
+Outputs ``docs/SPECTRE_Operator_Guide.docx``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ CALLOUT_BG = "FFF9E6"
 GREEN = RGBColor(0x27, 0xAE, 0x60)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
-OUTPUT_PATH = Path(__file__).parent / "SIPC_Operator_Guide.docx"
+OUTPUT_PATH = Path(__file__).parent / "SPECTRE_Operator_Guide.docx"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -302,7 +302,7 @@ def _add_metric_card(doc: Document, metric: str, label: str) -> None:
     run2.font.color.rgb = RGBColor(0x5A, 0x7A, 0x9A)
 
 
-def _add_footer(doc: Document, title: str = "SIPC Operator Guide") -> None:
+def _add_footer(doc: Document, title: str = "SPECTRE Operator Guide") -> None:
     """Add footer with title left and page numbers right."""
     footer = doc.sections[0].footer
     p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
@@ -362,18 +362,18 @@ def _add_page_break(doc: Document) -> None:
 
 
 def _section_01_introduction(doc: Document) -> None:
-    """Section 1: Introduction to SIPC."""
+    """Section 1: Introduction to SPECTRE."""
     _add_eyebrow(doc, "Section 1")
-    _add_heading_h1(doc, "Introduction to SIPC")
+    _add_heading_h1(doc, "Introduction to SPECTRE")
 
     _add_body(doc,
-        "The Satellite Intercept Planning Console (SIPC) is a real-time orbital "
+        "The Satellite Intercept Planning Console (SPECTRE) is a real-time orbital "
         "manoeuvre planning tool designed for space defence operators. It enables "
         "rapid assessment of intercept trajectories, conjunction analysis, and "
         "defensive repositioning of space assets."
     )
     _add_body(doc,
-        "SIPC provides a fully self-contained, pure-Python orbital mechanics engine. "
+        "SPECTRE provides a fully self-contained, pure-Python orbital mechanics engine. "
         "Operators can compute classical transfers (Lambert, Hohmann, bi-elliptic), "
         "tactical manoeuvres (phasing, CW relative motion, plane changes, J2 drift "
         "planning, collision avoidance), and decision-support analyses (intent prediction, "
@@ -382,7 +382,7 @@ def _section_01_introduction(doc: Document) -> None:
         "(TLE) data, without requiring any external astrodynamics software."
     )
     _add_callout(doc,
-        "Key design principle: SIPC is designed for speed-of-relevance decision-making. "
+        "Key design principle: SPECTRE is designed for speed-of-relevance decision-making. "
         "All computations run in-browser with sub-second response times, enabling "
         "operators to evaluate multiple intercept options before a conjunction window closes."
     )
@@ -396,9 +396,9 @@ def _section_02_system_overview(doc: Document) -> None:
 
     _add_heading_h2(doc, "Architecture")
     _add_body(doc,
-        "SIPC follows a server-side rendering architecture with HTMX for dynamic "
+        "SPECTRE follows a server-side rendering architecture with HTMX for dynamic "
         "partial updates. The backend is built on FastAPI (Python 3.14+) with Jinja2 "
-        "templates. All orbital mechanics computations are performed by the sipc.astro "
+        "templates. All orbital mechanics computations are performed by the spectre.astro "
         "package — a pure-Python library providing classical transfer solvers (Lambert, "
         "Hohmann, bi-elliptic), tactical manoeuvre solvers (phasing, CW relative motion, "
         "plane change, J2 drift, collision avoidance, evasion), advanced analysis "
@@ -415,9 +415,9 @@ def _section_02_system_overview(doc: Document) -> None:
             ["Web Framework", "FastAPI + Uvicorn", "Async HTTP server with ASGI"],
             ["Templates", "Jinja2 + HTMX", "Server-side rendering with partial swaps"],
             ["Orbit Propagation", "SGP4 (via sgp4 library)", "TLE-based satellite position/velocity"],
-            ["Classical Solvers", "sipc.astro.maneuvers", "Lambert, Hohmann, bi-elliptic transfers"],
-            ["Tactical Solvers", "sipc.astro.tactical", "Phasing, CW, plane change, J2 drift, COLA"],
-            ["Event Detection", "sipc.astro.events", "Apogee, perigee, node crossings"],
+            ["Classical Solvers", "spectre.astro.maneuvers", "Lambert, Hohmann, bi-elliptic transfers"],
+            ["Tactical Solvers", "spectre.astro.tactical", "Phasing, CW, plane change, J2 drift, COLA"],
+            ["Event Detection", "spectre.astro.events", "Apogee, perigee, node crossings"],
             ["Authentication", "SQLAlchemy + bcrypt", "Operator credential management"],
             ["TLE Source", "UDL (Unified Data Library)", "Authoritative TLE retrieval via HTTPS"],
             ["Charting", "Chart.js 4.x", "Trade-space scatter plots in the browser"],
@@ -434,7 +434,7 @@ def _section_03_getting_started(doc: Document) -> None:
 
     _add_heading_h2(doc, "Login")
     _add_body(doc,
-        "Navigate to the SIPC URL in your browser. Enter your operator username and "
+        "Navigate to the SPECTRE URL in your browser. Enter your operator username and "
         "password on the login screen. Credentials are managed by the system administrator "
         "and stored as bcrypt hashes — plaintext passwords are never retained."
     )
@@ -474,7 +474,7 @@ def _section_03_getting_started(doc: Document) -> None:
     _add_heading_h2(doc, "TLE Source Provider")
     _add_body(doc,
         "UDL aggregates TLEs from multiple source providers (e.g., 18 SDS, LeoLabs). "
-        "When you connect, SIPC automatically discovers available sources for your "
+        "When you connect, SPECTRE automatically discovers available sources for your "
         "account by probing the ISS elset. A 'TLE Source' selector appears in the "
         "UDL panel. Leave it blank to accept UDL's default, or select a specific "
         "provider to pin all subsequent TLE fetches to that source."
@@ -484,7 +484,7 @@ def _section_03_getting_started(doc: Document) -> None:
     _add_body(doc,
         "Use the Scenario Time panel to define the analysis window. Enter start and stop "
         "times in ISO 8601 format (e.g., 2026-03-15T00:00:00Z). If no scenario time is "
-        "set, SIPC defaults to the current UTC time plus 24 hours."
+        "set, SPECTRE defaults to the current UTC time plus 24 hours."
     )
 
 
@@ -528,7 +528,7 @@ def _section_05_assets(doc: Document) -> None:
     _add_body(doc,
         "There are three modes for adding a satellite to your session:"
     )
-    _add_bullet(doc, "UDL Fetch — Enter the NORAD catalogue number and SIPC fetches the latest TLE from UDL automatically. Requires an active UDL connection.")
+    _add_bullet(doc, "UDL Fetch — Enter the NORAD catalogue number and SPECTRE fetches the latest TLE from UDL automatically. Requires an active UDL connection.")
     _add_bullet(doc, "Catalogue Search — Search the on-orbit catalogue by name or NORAD ID. Select from results to add with a single click.")
     _add_bullet(doc, "Manual TLE — Paste a two-line or three-line TLE directly into the text area. Useful for objects not yet in the public catalogue.")
 
@@ -602,7 +602,7 @@ def _section_07_manoeuvre_theory(doc: Document) -> None:
     _add_heading_h1(doc, "Classical Orbital Transfers")
 
     _add_body(doc,
-        "SIPC implements three fundamental orbital transfer methods as its classical "
+        "SPECTRE implements three fundamental orbital transfer methods as its classical "
         "solver set. Each has distinct trade-offs between ΔV cost, transfer time, "
         "and geometric constraints. Understanding these trade-offs is essential for "
         "selecting the optimal intercept strategy."
@@ -613,7 +613,7 @@ def _section_07_manoeuvre_theory(doc: Document) -> None:
     _add_body(doc,
         "The Lambert problem is the boundary-value problem of two-body orbital "
         "mechanics: given two position vectors and a time of flight, determine the "
-        "orbit connecting them. SIPC uses the Izzo algorithm (2015) — a robust, "
+        "orbit connecting them. SPECTRE uses the Izzo algorithm (2015) — a robust, "
         "Householder-iteration solver with guaranteed convergence."
     )
     _add_bullet(doc, "Inputs: departure position, arrival position, time of flight.")
@@ -685,7 +685,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_heading_h1(doc, "Tactical Manoeuvres")
 
     _add_body(doc,
-        "Beyond classical orbital transfers, SIPC provides tactical manoeuvres "
+        "Beyond classical orbital transfers, SPECTRE provides tactical manoeuvres "
         "designed for space control operations. These are computationally lightweight, "
         "operationally focused, and optimised for rapid threat response rather than "
         "textbook optimal transfers."
@@ -713,7 +713,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_heading_h2(doc, "Relative Motion (Hill / Clohessy-Wiltshire)")
     _add_body(doc,
         "The CW equations describe linearised relative motion near a circular "
-        "reference orbit. SIPC uses them to compute precise impulses for "
+        "reference orbit. SPECTRE uses them to compute precise impulses for "
         "controlled proximity operations."
     )
     _add_heading_h3(doc, "Radial Separation")
@@ -738,20 +738,20 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_heading_h2(doc, "Plane Change")
     _add_body(doc,
         "Many tactical intercepts require orbital plane alignment before a transfer "
-        "can be executed. SIPC evaluates two strategies:"
+        "can be executed. SPECTRE evaluates two strategies:"
     )
     _add_bullet(doc, "Pure plane change: ΔV = 2v sin(Δi/2). Evaluated at both the equatorial node and apogee — apogee is cheaper for eccentric orbits.")
     _add_bullet(doc, "Combined altitude + plane change: Uses the cosine rule to fold the inclination change into a Hohmann-like transfer. Always cheaper than performing them separately.")
     _add_callout(doc,
         "Key question for operators: 'Is it cheaper to change plane first, or during "
-        "the transfer?' SIPC answers this automatically by comparing pure and combined costs."
+        "the transfer?' SPECTRE answers this automatically by comparing pure and combined costs."
     )
 
     # J2 Drift.
     _add_heading_h2(doc, "J2 Drift Planner")
     _add_body(doc,
         "Earth's oblateness (J2) causes the right ascension of the ascending node "
-        "(RAAN) to precess secularly. SIPC exploits this for fuel-free orbital "
+        "(RAAN) to precess secularly. SPECTRE exploits this for fuel-free orbital "
         "plane alignment."
     )
     _add_body(doc,
@@ -762,7 +762,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_bullet(doc, "Polar orbits (i = 90°): No RAAN drift — J2 cannot help.")
     _add_bullet(doc, "Different altitudes produce different drift rates → natural convergence.")
     _add_body(doc,
-        "SIPC computes the natural convergence time between two satellites and the "
+        "SPECTRE computes the natural convergence time between two satellites and the "
         "small altitude change that would accelerate convergence — trading a tiny ΔV "
         "for days or weeks of waiting time."
     )
@@ -775,7 +775,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     # COLA.
     _add_heading_h2(doc, "Collision Avoidance (COLA)")
     _add_body(doc,
-        "When a conjunction is predicted, SIPC computes the minimum ΔV to move the "
+        "When a conjunction is predicted, SPECTRE computes the minimum ΔV to move the "
         "satellite outside the collision probability envelope. Three strategies are "
         "evaluated simultaneously:"
     )
@@ -783,7 +783,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_bullet(doc, "In-track drift — along-track impulse creates growing separation via differential period.")
     _add_bullet(doc, "Out-of-plane burn — normal impulse shifts the orbit plane slightly.")
     _add_body(doc,
-        "SIPC selects the cheapest strategy automatically. The operator sees all three "
+        "SPECTRE selects the cheapest strategy automatically. The operator sees all three "
         "options and their ΔV costs in the result notes."
     )
     _add_callout(doc,
@@ -797,7 +797,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     _add_body(doc,
         "The evasion planner extends COLA into a full defensive manoeuvre "
         "generator. Given an incoming threat, a fuel budget, and available "
-        "warning time, SIPC evaluates multiple burn strategies across multiple "
+        "warning time, SPECTRE evaluates multiple burn strategies across multiple "
         "timing offsets to find the optimal evasion burn."
     )
     _add_bullet(doc, "Respects fuel budget constraints — will not exceed available ΔV.")
@@ -813,7 +813,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     # GEO Drift.
     _add_heading_h2(doc, "GEO Drift Orbit")
     _add_body(doc,
-        "For geostationary satellites, SIPC computes east-west longitude "
+        "For geostationary satellites, SPECTRE computes east-west longitude "
         "relocation via drift orbits. A small SMA change induces a secular "
         "longitude drift, and a symmetric burn at the target longitude "
         "re-circularises the orbit."
@@ -852,8 +852,8 @@ def _section_08_tactical_theory(doc: Document) -> None:
     # Manoeuvre Classification.
     _add_heading_h2(doc, "Manoeuvre Classification Engine")
     _add_body(doc,
-        "Given two TLEs of the same satellite at different epochs, SIPC "
-        "estimates what manoeuvre occurred between them. This transforms SIPC "
+        "Given two TLEs of the same satellite at different epochs, SPECTRE "
+        "estimates what manoeuvre occurred between them. This transforms SPECTRE "
         "from a planning tool into a space intelligence tool."
     )
     _add_bullet(doc, "Compares Keplerian elements (Δa, Δe, Δi, ΔRAAN) between epochs.")
@@ -865,7 +865,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
     # Detectability.
     _add_heading_h2(doc, "Intercept Detectability Metric")
     _add_body(doc,
-        "For any computed intercept, SIPC assesses how detectable the "
+        "For any computed intercept, SPECTRE assesses how detectable the "
         "manoeuvre would be by ground-based space surveillance networks. "
         "This enables counter-space analysis and operational security planning."
     )
@@ -1060,13 +1060,13 @@ def _section_09_threat_sweep(doc: Document) -> None:
     _add_bullet(doc, "1. Connect to UDL and fetch the HRR watchlist (Assets \u2192 HRR tab).")
     _add_bullet(doc, "2. Open the Threat Sweep hero tab.")
     _add_bullet(doc, "3. Select a Target Group from the dropdown (e.g. 'Red HRR \u2013 Rank 1').")
-    _add_bullet(doc, "4. Click Fetch TLEs \u2014 SIPC retrieves TLEs for all objects in the group and displays a readiness badge (N/M TLEs ready).")
+    _add_bullet(doc, "4. Click Fetch TLEs \u2014 SPECTRE retrieves TLEs for all objects in the group and displays a readiness badge (N/M TLEs ready).")
     _add_bullet(doc, "5. Click Sweep Targets \u2014 the batch assessment runs and the ranked results table appears.")
     _add_bullet(doc, "6. Optionally click Refine on any row for a full Lambert refinement of that target.")
 
     _add_heading_h2(doc, "Sweep Algorithm")
     _add_body(doc,
-        "For each target in the selected group, SIPC computes Hohmann \u0394V at five "
+        "For each target in the selected group, SPECTRE computes Hohmann \u0394V at five "
         "canonical epochs: T+0 (now), apogee passage, perigee passage, ascending node, "
         "and descending node. All N\u00D75 entries are ranked by \u0394V; the five unique "
         "lowest-cost targets are then refined with Lambert solvers for precision \u0394V "
@@ -1148,7 +1148,7 @@ def _section_10_intercept_calculations(doc: Document) -> None:
 
     _add_heading_h2(doc, "VNB Reference Frame")
     _add_body(doc,
-        "SIPC decomposes all ΔV vectors into the VNB (Velocity-Normal-Binormal) frame, "
+        "SPECTRE decomposes all ΔV vectors into the VNB (Velocity-Normal-Binormal) frame, "
         "also known as the local orbital frame. This is the standard frame used by "
         "spacecraft operators for manoeuvre planning:"
     )
@@ -1203,7 +1203,7 @@ def _section_12_scenario_planning(doc: Document) -> None:
 
     _add_heading_h2(doc, "Access Windows")
     _add_body(doc,
-        "SIPC detects orbital events — apogee, perigee, ascending node, and "
+        "SPECTRE detects orbital events — apogee, perigee, ascending node, and "
         "descending node — for both red and blue satellites within the scenario "
         "time window. These events define natural manoeuvre opportunities."
     )
@@ -1213,7 +1213,7 @@ def _section_12_scenario_planning(doc: Document) -> None:
 
     _add_heading_h2(doc, "Conjunction Detection")
     _add_body(doc,
-        "When both a red track and a blue asset are loaded, SIPC can identify "
+        "When both a red track and a blue asset are loaded, SPECTRE can identify "
         "close-approach windows by propagating both TLEs through the scenario "
         "period. Events are displayed as clickable badges that auto-populate "
         "the manoeuvre start time field."
@@ -1295,7 +1295,7 @@ def _section_13_scenarios(doc: Document) -> None:
     _add_bullet(doc, "Add the blue asset and the red threat object.")
     _add_bullet(doc, "Run Orbital Events to confirm the conjunction geometry and timing.")
     _add_bullet(doc, "Select COLA and set the required miss distance (e.g., 5 km).")
-    _add_bullet(doc, "SIPC evaluates all three strategies (radial, in-track, out-of-plane) and recommends the cheapest.")
+    _add_bullet(doc, "SPECTRE evaluates all three strategies (radial, in-track, out-of-plane) and recommends the cheapest.")
     _add_bullet(doc, "Review the result notes to see all three strategy costs and the selected option.")
     _add_bullet(doc, "If time permits (> 1 hour to conjunction), the in-track burn is usually cheapest. For urgent conjunctions, radial or cross-track may be the only option.")
 
@@ -1313,7 +1313,7 @@ def _section_13_scenarios(doc: Document) -> None:
     _add_body(doc, "Objective: Classify an observed manoeuvre by an adversary satellite.")
     _add_bullet(doc, "Obtain two TLEs for the same satellite at different epochs (before and after suspected manoeuvre).")
     _add_bullet(doc, "Add the earlier TLE as a red track and the later TLE as a blue asset.")
-    _add_bullet(doc, "Select Manoeuvre Detect — SIPC compares the orbital elements and classifies the manoeuvre.")
+    _add_bullet(doc, "Select Manoeuvre Detect — SPECTRE compares the orbital elements and classifies the manoeuvre.")
     _add_bullet(doc, "Review: manoeuvre type (altitude change, plane change, phasing, etc.), estimated ΔV, burn direction, and confidence level.")
     _add_bullet(doc, "Use the classification to assess intent — altitude changes suggest repositioning, plane changes suggest target tracking.")
 
@@ -1411,7 +1411,7 @@ def _section_15_pattern_of_life(doc: Document) -> None:
     _add_bullet(doc, "2. Enter the SATNO to analyse.")
     _add_bullet(doc, "3. Adjust the \u0394V Detection Threshold (default 2.0 m/s) — lower values detect smaller station-keeping manoeuvres; raise it to focus on significant repositioning events.")
     _add_bullet(doc, "4. Choose the data source: UDL session (uses active credentials) or enter UDL credentials directly.")
-    _add_bullet(doc, "5. Click Analyse \u2014 SIPC fetches TLE history and the current elset, merges and sorts them chronologically, then runs the PoL engine.")
+    _add_bullet(doc, "5. Click Analyse \u2014 SPECTRE fetches TLE history and the current elset, merges and sorts them chronologically, then runs the PoL engine.")
     _add_bullet(doc, "6. Review the results: manoeuvre timeline, orbital element charts, drift phase analysis, and PoL status.")
 
     _add_heading_h2(doc, "Results Panels")
@@ -1562,14 +1562,14 @@ def _section_17_appendices(doc: Document) -> None:
 
 
 def generate() -> Path:
-    """Generate the complete SIPC Operator Guide and return the output path."""
+    """Generate the complete SPECTRE Operator Guide and return the output path."""
     doc = _setup_document()
     _add_accent_bar(doc)
     _add_footer(doc)
 
     # Title page.
     _add_eyebrow(doc, "Bluestaq Ltd")
-    _add_heading_h1(doc, "SIPC Operator Guide")
+    _add_heading_h1(doc, "SPECTRE Operator Guide")
     _add_body(doc, "Satellite Intercept Planning Console")
     _add_body(doc, "Comprehensive Operator Reference \u2014 v6.0")
     _add_body(doc, "")

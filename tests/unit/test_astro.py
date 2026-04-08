@@ -1,4 +1,4 @@
-"""Tests for sipc.astro — transfers, Lambert, propagator, events, maneuvers."""
+"""Tests for spectre.astro — transfers, Lambert, propagator, events, maneuvers."""
 
 from __future__ import annotations
 
@@ -8,17 +8,17 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from sipc.astro.constants import MU_EARTH, R_EARTH
-from sipc.astro.events import find_orbital_events
-from sipc.astro.lambert import solve_lambert
-from sipc.astro.maneuvers import hohmann_intercept, lambert_intercept
-from sipc.astro.propagator import (
+from spectre.astro.constants import MU_EARTH, R_EARTH
+from spectre.astro.events import find_orbital_events
+from spectre.astro.lambert import solve_lambert
+from spectre.astro.maneuvers import hohmann_intercept, lambert_intercept
+from spectre.astro.propagator import (
     KeplerianElements,
     TLEOrbit,
     keplerian_to_state,
     state_to_keplerian,
 )
-from sipc.astro.transfers import bielliptic, hohmann
+from spectre.astro.transfers import bielliptic, hohmann
 
 # ── ISS TLE for propagation tests ──────────────────────────────────────────
 

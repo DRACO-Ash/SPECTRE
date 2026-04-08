@@ -1,6 +1,6 @@
 # Security Policy
 
-SIPC is a restricted-access operational planning tool. This document sets out the supported version policy and the vulnerability reporting process.
+SPECTRE is a restricted-access operational planning tool. This document sets out the supported version policy and the vulnerability reporting process.
 
 For the full internal security policy (UK NCSC / SSCoP aligned), see [`docs/SECURITY.md`](docs/SECURITY.md).
 
@@ -13,7 +13,7 @@ For the full internal security policy (UK NCSC / SSCoP aligned), see [`docs/SECU
 | Current (`master`) | Yes |
 | All prior releases | No — patch to latest |
 
-SIPC follows a rolling-release model on `master`. There are no long-term support branches. All security fixes are applied to `master` only.
+SPECTRE follows a rolling-release model on `master`. There are no long-term support branches. All security fixes are applied to `master` only.
 
 ---
 

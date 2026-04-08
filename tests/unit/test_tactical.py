@@ -1,4 +1,4 @@
-"""Tests for sipc.astro.tactical — tactical manoeuvre solvers."""
+"""Tests for spectre.astro.tactical — tactical manoeuvre solvers."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import math
 
 import pytest
 
-from sipc.astro.constants import MU_EARTH, R_EARTH
-from sipc.astro.tactical import (
+from spectre.astro.constants import MU_EARTH, R_EARTH
+from spectre.astro.tactical import (
     assess_intercept_intent,
     classify_manoeuvre,
     collision_avoidance,
@@ -139,7 +139,7 @@ class TestCombinedAltitudePlaneChange:
 
     def test_cheaper_than_separate(self) -> None:
         """Combined should be cheaper than Hohmann + separate plane change."""
-        from sipc.astro.transfers import hohmann
+        from spectre.astro.transfers import hohmann
         h = hohmann(LEO_R, LEO_R + 200)
         pc = plane_change(LEO_R + 200, 10.0)
         separate_dv = h.total_delta_v + pc.optimal_delta_v

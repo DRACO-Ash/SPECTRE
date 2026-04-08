@@ -1,9 +1,9 @@
-# SIPC Architecture
+# SPECTRE Architecture
 
 ## Overview
 
-SIPC is a **pure-Python** orbital analysis console. All astrodynamics computations
-are performed by the `sipc.astro` package — no external tools, COM interfaces, or
+SPECTRE is a **pure-Python** orbital analysis console. All astrodynamics computations
+are performed by the `spectre.astro` package — no external tools, COM interfaces, or
 licensed astrodynamics software are required.
 
 ```
@@ -24,7 +24,7 @@ licensed astrodynamics software are required.
 └──────────────────────────┬──────────────────────────────────────────┘
                            │ calls
 ┌──────────────────────────▼──────────────────────────────────────────┐
-│                      sipc.astro Layer                               │
+│                      spectre.astro Layer                               │
 │   Pure-Python orbital mechanics — no external dependencies          │
 │   constants · maneuvers · transfers · lambert · tactical            │
 │   cw_geometry · propagator · events                                 │
@@ -37,7 +37,7 @@ licensed astrodynamics software are required.
 
 ## Packages
 
-### `sipc/astro/`
+### `spectre/astro/`
 
 Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 
@@ -53,14 +53,14 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 | `events.py` | Orbital event detection: apogee, perigee, ascending/descending node crossings (sign-change scan over SGP4 trajectory) |
 | `pattern_of_life.py` | Historical TLE sequence analysis: period tracking, manoeuvre detection, activity classification, behavioural baseline; `PolAnalysis` result dataclass |
 | `tle_filter.py` | Cadence-based TLE clustering: `cluster_tles()`, `select_representative()`, `quality_flag_sequence()`, `filter_tle_history()` |
-| `tle_preprocessing.py` | Bridge between `tle_clustering/` (DBSCAN) and `sipc.astro`; `cluster_and_reduce_tle_cache()` used by Threat Sweep |
+| `tle_preprocessing.py` | Bridge between `tle_clustering/` (DBSCAN) and `spectre.astro`; `cluster_and_reduce_tle_cache()` used by Threat Sweep |
 | `monte_carlo.py` | `ManoeuvreHypothesis`, `ManoeuvreType`, `MANOEUVRE_ARCHETYPES`; `run_monte_carlo()` (ProcessPoolExecutor, RK45 + J2 + drag); `MonteCarloResult` with P5/P50/P95 and regime probabilities |
 | `notso.py` | `NOTSORecord` parser (USSPACECOM format), `correlate_notsos_with_manoeuvres()`, `OperatorBehaviourProfile` |
 | `photometry.py` | `PhotometryObservation`, geometric corrections (range normalisation, Rozenberg airmass), `fit_baseline()` (quadratic phase function, sigma-clipping), `detect_change()` (Student's t-test), `PhotometryChangeAssessment` |
 
 SGP4 propagation uses the [`sgp4`](https://pypi.org/project/sgp4/) library (Vallado algorithm).
 
-### `sipc/domain/`
+### `spectre/domain/`
 
 Pure Python. No I/O. Contains:
 
@@ -68,7 +68,7 @@ Pure Python. No I/O. Contains:
   `RunConfig`, `AccessInterval`, `BurnType`, `BurnLocation`, `ManeuverOption`,
   `ManeuverSearchConfig`, `InterceptMethod`, `InterceptConfig`, `InterceptResult`, `BurnResult`
 - **scenario.py** — `ScenarioPlanner`: orchestrates planning runs, manages asset state,
-  dispatches to `sipc.astro` solvers
+  dispatches to `spectre.astro` solvers
 - **decision.py** — Decision Engine Phase 1: `ActionType`, `AdversaryAction`, `FriendlyResponse`,
   `OutcomeMetrics`, `Scenario`, `ScenarioResult`, `compute_outcome_metrics()`,
   `rank_responses()`, `find_robust_response()`, `evaluate_scenario()`
@@ -76,7 +76,7 @@ Pure Python. No I/O. Contains:
 - **maneuver_planner.py** — `ManeuverPlanner`: validates search config, sorts options by ΔV
 - **exceptions.py** — domain exception types
 
-### `sipc/training/`
+### `spectre/training/`
 
 Gamification and training mode. YAML-driven configuration with a DB-backed progress model.
 
@@ -90,7 +90,7 @@ Gamification and training mode. YAML-driven configuration with a DB-backed progr
 | `config/gamification.yaml` | 6 levels with XP thresholds, skill axes, point values per action |
 | `config/tutorials.yaml` | Tutorial definitions per skill axis, with point awards and unlock rules |
 
-### `sipc/web/`
+### `spectre/web/`
 
 FastAPI application. All operator access via browser — no desktop install required.
 
@@ -112,21 +112,21 @@ FastAPI application. All operator access via browser — no desktop install requ
   - `gcat.py` — GCAT panel: 28 TSV datasets from planet4589.org, in-memory cache, on-demand per-dataset download, search/sort/paginate
   - `training.py` — Training mode: session management, scenario dispatch, tutorial progress, gamification XP awards
 - **templates/** — Jinja2 HTML: `base.html`, `login.html`, `operator.html`, `training.html`, and HTMX partials for every panel and result type
-- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, `SIPC_logo.svg`
+- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, `SPECTRE_logo.svg`
 
-### `sipc/data/`
+### `spectre/data/`
 
 - **notso_cache.py** — `NOTSOCache`: persistent NOTSO record storage keyed by NORAD ID; retrieval for Decision Engine Phase 5 priors
 - **intel.py** — Intelligence data helpers (OOB lookup, nation classification)
 
-### `sipc/app_logging/`
+### `spectre/app_logging/`
 
 Configures `structlog` with:
 - Console renderer (human-readable) for terminal output
 - JSON-lines file renderer for post-run analysis
 - `run_id` UUID bound to all log records via `structlog.contextvars`
 
-### `sipc/config/`
+### `spectre/config/`
 
 - **constants.py** — naming prefixes (`B_SAT_`, `R_SAT_`), units, step sizes; `TLE_CLUSTERING` and `TLE_FILTER` threshold dicts
 - **settings.py** — `Settings` dataclass populated from environment variables
@@ -163,7 +163,7 @@ Each dataset is a TSV fetched from `https://planet4589.org/space/gcat/tsv/`.
 
 ### Pure-Python astrodynamics
 
-All orbital mechanics — Lambert solver, Hohmann/bi-elliptic transfers, CW equations, J2 secular drift, SGP4 propagation — are implemented in `sipc/astro/`. No licensed tools, no COM objects, no platform-native dependencies. The application runs identically on Windows, Linux, and in Docker.
+All orbital mechanics — Lambert solver, Hohmann/bi-elliptic transfers, CW equations, J2 secular drift, SGP4 propagation — are implemented in `spectre/astro/`. No licensed tools, no COM objects, no platform-native dependencies. The application runs identically on Windows, Linux, and in Docker.
 
 ### HTMX partial swap pattern
 
@@ -179,9 +179,9 @@ Downloads and compute-intensive solvers that would block FastAPI's async event l
 
 ### Database
 
-SQLite by default (`sipc.db`). Switch to PostgreSQL by setting:
+SQLite by default (`spectre.db`). Switch to PostgreSQL by setting:
 ```
-DATABASE_URL=postgresql+asyncpg://user:pass@host/sipc_db
+DATABASE_URL=postgresql+asyncpg://user:pass@host/spectre_db
 ```
 No code changes required — the async SQLAlchemy adapter handles the swap.
 
@@ -191,7 +191,7 @@ Every planning run is assigned a `run_id` (UUID) bound to `structlog` context at
 
 ### Training session isolation
 
-Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and scenario completions survive server restarts. The training console embeds the live SIPC operator interface in an iframe; the training session record is passed as a session variable so the operator tools behave normally.
+Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and scenario completions survive server restarts. The training console embeds the live SPECTRE operator interface in an iframe; the training session record is passed as a session variable so the operator tools behave normally.
 
 ---
 
@@ -199,18 +199,18 @@ Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and 
 
 | Layer | Test type | Notes |
 |-------|-----------|-------|
-| `sipc/astro/` | unit | No external deps; fast; 74+ parametrised tactical cases |
-| `sipc/astro/monte_carlo.py` | unit | Smoke (100 samples), convergence, regime classification, RIC→ECI |
-| `sipc/astro/notso.py` | unit | Parser, all four correlation match cases, behaviour profile |
-| `sipc/astro/photometry.py` | unit | Geometric corrections, sigma-clipping, t-test significance |
-| `sipc/astro/tle_filter.py` | unit | Cadence clustering, representative selection, quality flags |
+| `spectre/astro/` | unit | No external deps; fast; 74+ parametrised tactical cases |
+| `spectre/astro/monte_carlo.py` | unit | Smoke (100 samples), convergence, regime classification, RIC→ECI |
+| `spectre/astro/notso.py` | unit | Parser, all four correlation match cases, behaviour profile |
+| `spectre/astro/photometry.py` | unit | Geometric corrections, sigma-clipping, t-test significance |
+| `spectre/astro/tle_filter.py` | unit | Cadence clustering, representative selection, quality flags |
 | `domain/` | unit | Pure-Python models; decision engine minimax/EV/maximin selectors |
 | `training/` | unit | XP progression, level unlock gates, scenario unlock logic |
 | `web/routes/` | integration (TestClient) | In-memory SQLite; covers login, operator, UDL, maneuver, training |
 | `tle_clustering/` | unit + integration | DBSCAN pipeline: parser → clustering → selection; full pipeline |
 
 Integration tests that require a live network (UDL, GCAT) are guarded by
-`@pytest.mark.integration` and skipped unless `SIPC_INTEGRATION_TESTS=1` is set.
+`@pytest.mark.integration` and skipped unless `SPECTRE_INTEGRATION_TESTS=1` is set.
 
 ---
 

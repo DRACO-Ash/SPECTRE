@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "sipc"
+name = "spectre"
 version = "0.1.0"
-description = "Space Intercept Planning Console — orbital mechanics, threat assessment, and manoeuvre planning"
+description = "Space Planning, Evaluation & Counter-Threat Response Engine — orbital mechanics, threat assessment, and manoeuvre planning"
 readme = "README.md"
 license = { text = "Proprietary" }
 requires-python = ">=3.14"
@@ -44,13 +44,13 @@ dev = [
 ]
 
 [project.scripts]
-sipc-serve = "sipc.web._entrypoint:main"
+spectre-serve = "spectre.web._entrypoint:main"
 
 # ---------------------------------------------------------------------------
 # Hatch
 # ---------------------------------------------------------------------------
 [tool.hatch.build.targets.wheel]
-packages = ["sipc"]
+packages = ["spectre"]
 
 # ---------------------------------------------------------------------------
 # Ruff
@@ -83,7 +83,7 @@ ignore_missing_imports = true
 # Bandit
 # ---------------------------------------------------------------------------
 [tool.bandit]
-targets = ["sipc"]
+targets = ["spectre"]
 severity = "medium"   # gate on medium+; high+ will always block
 confidence = "medium"
 exclude_dirs = ["tests", ".venv"]
@@ -103,8 +103,8 @@ asyncio_mode = "auto"
 # Coverage
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
-source = ["sipc"]
-omit = ["tests/*", "sipc/app_logging/setup.py"]
+source = ["spectre"]
+omit = ["tests/*", "spectre/app_logging/setup.py"]
 
 [tool.coverage.report]
 fail_under = 70

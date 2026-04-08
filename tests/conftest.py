@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the SIPC test suite."""
+"""Shared pytest fixtures for the SPECTRE test suite."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from sipc.domain.models import AccessInterval, RunConfig
+from spectre.domain.models import AccessInterval, RunConfig
 
 
 @pytest.fixture()

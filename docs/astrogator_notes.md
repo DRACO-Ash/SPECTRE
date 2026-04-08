@@ -221,7 +221,7 @@ finally:
 
 ## MCSBuilder — intercept engine dict-plan translation
 
-`MCSBuilder` in `sipc/stk_adapter/mcs_builder.py` translates the `list[dict]` plans produced by
+`MCSBuilder` in `spectre/stk_adapter/mcs_builder.py` translates the `list[dict]` plans produced by
 the four intercept engine planners into STK Astrogator COM calls.
 
 Key design rule: **all non-target segments (propagate, maneuver) are inserted inside the Target

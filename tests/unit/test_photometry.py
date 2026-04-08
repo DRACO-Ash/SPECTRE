@@ -1,4 +1,4 @@
-"""Unit tests for sipc.astro.photometry — geometric corrections, baseline fitting,
+"""Unit tests for spectre.astro.photometry — geometric corrections, baseline fitting,
 change detection, and manoeuvre correlation."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sipc.astro.photometry import (
+from spectre.astro.photometry import (
     PhotometryObservation,
     CorrectedObservation,
     PhotometryBaseline,

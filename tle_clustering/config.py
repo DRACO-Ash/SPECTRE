@@ -72,9 +72,9 @@ class ClusteringConfig:
 
     @classmethod
     def from_constants(cls, config_dict: dict) -> ClusteringConfig:
-        """Construct a :class:`ClusteringConfig` from a SIPC constants dict.
+        """Construct a :class:`ClusteringConfig` from a SPECTRE constants dict.
 
-        This factory keeps the clustering package decoupled from SIPC's config
+        This factory keeps the clustering package decoupled from SPECTRE's config
         module — the caller reads ``TLE_CLUSTERING`` from ``constants.py`` and
         passes the dict in.  Unknown keys in *config_dict* are silently ignored
         so that adding future constants keys (e.g. ``fetch_window_hours``) does
@@ -83,7 +83,7 @@ class ClusteringConfig:
         Parameters
         ----------
         config_dict:
-            Dict sourced from ``sipc.config.constants.TLE_CLUSTERING``.
+            Dict sourced from ``spectre.config.constants.TLE_CLUSTERING``.
 
         Returns
         -------

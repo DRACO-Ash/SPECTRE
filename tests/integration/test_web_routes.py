@@ -1,4 +1,4 @@
-"""Integration tests for SIPC web routes using FastAPI TestClient.
+"""Integration tests for SPECTRE web routes using FastAPI TestClient.
 
 Requires the web dependencies (httpx, fastapi, etc.) to be installed.
 These tests use an in-memory SQLite database and a test SECRET_KEY.
@@ -13,8 +13,8 @@ import pytest
 # Must be set before importing anything that calls get_settings().
 os.environ["SECRET_KEY"] = "integration-test-secret"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["SIPC_ADMIN_USER"] = "testadmin"
-os.environ["SIPC_ADMIN_PASS"] = "testpass123"
+os.environ["SPECTRE_ADMIN_USER"] = "testadmin"
+os.environ["SPECTRE_ADMIN_PASS"] = "testpass123"
 
 pytest_plugins = ("anyio",)
 
@@ -27,8 +27,8 @@ def anyio_backend() -> str:
 @pytest.fixture(scope="module")
 async def initialized_app() -> object:
     """Return the FastAPI app with DB tables created."""
-    from sipc.web.app import app
-    from sipc.web.database import init_db
+    from spectre.web.app import app
+    from spectre.web.database import init_db
 
     await init_db()
     return app
@@ -47,7 +47,7 @@ class TestLoginFlow:
     def test_get_login_page(self, client: object) -> None:
         resp = client.get("/login")  # type: ignore[attr-defined]
         assert resp.status_code == 200
-        assert b"SIPC" in resp.content and b"login" in resp.content.lower()
+        assert b"SPECTRE" in resp.content and b"login" in resp.content.lower()
 
     def test_login_wrong_password(self, client: object) -> None:
         resp = client.post(  # type: ignore[attr-defined]
@@ -76,7 +76,7 @@ class TestLoginFlow:
             data={"username": "testadmin", "password": "testpass123"},
             follow_redirects=False,
         )
-        assert "sipc_session" in resp.cookies
+        assert "spectre_session" in resp.cookies
 
 
 class TestProtectedRoutes:
@@ -96,8 +96,8 @@ class TestProtectedRoutes:
             data={"username": "testadmin", "password": "testpass123"},
             follow_redirects=False,
         )
-        session_cookie = login.cookies["sipc_session"]
-        resp = client.get("/", cookies={"sipc_session": session_cookie})  # type: ignore[attr-defined]
+        session_cookie = login.cookies["spectre_session"]
+        resp = client.get("/", cookies={"spectre_session": session_cookie})  # type: ignore[attr-defined]
         assert resp.status_code == 200
         assert b"Blue Assets" in resp.content
 
@@ -110,13 +110,13 @@ class TestAssetManagement:
             data={"username": "testadmin", "password": "testpass123"},
             follow_redirects=False,
         )
-        return login.cookies["sipc_session"]
+        return login.cookies["spectre_session"]
 
     def test_add_blue_asset_returns_partial(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/assets/blue",
             data={"name": "Alpha", "tle": "line1\nline2"},
-            cookies={"sipc_session": auth_cookie},
+            cookies={"spectre_session": auth_cookie},
         )
         assert resp.status_code == 200
         assert b"Alpha" in resp.content
@@ -125,7 +125,7 @@ class TestAssetManagement:
         resp = client.post(  # type: ignore[attr-defined]
             "/assets/red",
             data={"name": "Track01", "tle": "line1\nline2"},
-            cookies={"sipc_session": auth_cookie},
+            cookies={"spectre_session": auth_cookie},
         )
         assert resp.status_code == 200
         assert b"Track01" in resp.content
@@ -139,13 +139,13 @@ class TestScenarioTime:
             data={"username": "testadmin", "password": "testpass123"},
             follow_redirects=False,
         )
-        return login.cookies["sipc_session"]
+        return login.cookies["spectre_session"]
 
     def test_set_scenario_time(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/scenario/time",
             data={"scenario_start": "2026-01-01T00:00", "scenario_stop": "2026-01-02T00:00"},
-            cookies={"sipc_session": auth_cookie},
+            cookies={"spectre_session": auth_cookie},
         )
         assert resp.status_code == 200
         assert b"Scenario" in resp.content
@@ -154,7 +154,7 @@ class TestScenarioTime:
         resp = client.post(  # type: ignore[attr-defined]
             "/scenario/time",
             data={"scenario_start": "bad", "scenario_stop": "bad"},
-            cookies={"sipc_session": auth_cookie},
+            cookies={"spectre_session": auth_cookie},
         )
         assert resp.status_code == 200
         assert b"Invalid" in resp.content or b"error" in resp.content.lower()

@@ -1,4 +1,4 @@
-"""TLE Clustering and De-duplication for SIPC.
+"""TLE Clustering and De-duplication for SPECTRE.
 
 Satellites on the HRR can attract ~100 TLEs per day from multiple providers.
 Because each provider fits TLEs from whatever observations are available at

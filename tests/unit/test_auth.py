@@ -1,4 +1,4 @@
-"""Unit tests for sipc.web.auth — password hashing and session cookie helpers."""
+"""Unit tests for spectre.web.auth — password hashing and session cookie helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-unit-tests")
 
 
-from sipc.web.auth import (  # noqa: E402
+from spectre.web.auth import (  # noqa: E402
     decode_session_cookie,
     hash_password,
     make_session_cookie,

@@ -1,10 +1,10 @@
-"""Unit tests for sipc.domain.geometry — pure math helpers."""
+"""Unit tests for spectre.domain.geometry — pure math helpers."""
 
 from __future__ import annotations
 
 import math
 
-from sipc.domain.geometry import (
+from spectre.domain.geometry import (
     azimuth_elevation_range,
     closure_rate_ms,
     degrees_to_radians,

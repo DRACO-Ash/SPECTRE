@@ -1,0 +1,1235 @@
+{% extends "base.html" %}
+{% block title %}SPECTRE — Operator Console{% endblock %}
+
+{% block nav_brand %}
+<div>
+  <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Operator Console</span>
+  <div class="nav-subtitle">Space Intercept Planning Console</div>
+</div>
+{% endblock %}
+
+{% block nav_actions %}
+<div class="nav-right">
+
+  <div class="nav-connections">
+    <!-- UDL connection chip + dropdown -->
+    <details class="nav-dropdown" id="udl-dropdown">
+      <summary class="nav-chip" title="Unified Data Library — click to manage connection">
+        <span class="chip-dot {% if udl_user %}dot-green{% else %}dot-grey{% endif %}"></span>
+        <span class="chip-label">UDL{% if udl_user %} &#10003;{% endif %}</span>
+        <span class="chip-caret">&#9660;</span>
+      </summary>
+      <div class="nav-dropdown-panel">
+        <div id="udl-status">
+          {% include "partials/udl_status.html" %}
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="nav-user-group">
+
+    <!-- Theme selector -->
+    <select id="theme-picker"
+            title="Change interface theme"
+            onchange="spectreSetTheme(this.value)"
+            style="font-size:0.68rem; padding:0.2rem 0.4rem; border-radius:4px;
+                   background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15);
+                   color:var(--text-dim); cursor:pointer; outline:none">
+      <option value="ops">Ops (Default)</option>
+      <option value="steel">Steel (Light)</option>
+    </select>
+
+    <a href="/training"
+       style="font-size:0.72rem; font-weight:700; padding:0.25rem 0.65rem;
+              background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5);
+              border-radius:4px; color:#f59e0b; text-decoration:none; white-space:nowrap"
+       title="Enter the sandboxed training environment — no operational data is affected">
+      ⚡ Training
+    </a>
+    <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
+    <form method="post" action="/logout" class="inline-form">
+      <button type="submit" class="btn-logout" title="End your SPECTRE session">Logout</button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- ══════════════════════════════════════════════════════════════
+     CONSOLE LAYOUT — Sidebar + Command Area
+     ══════════════════════════════════════════════════════════════ -->
+<div class="console-layout">
+
+  <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-resize" id="sidebar-resize"></div>
+
+    <div class="sidebar-tabs">
+      <button class="stab active" data-panel="sb-assets" onclick="sbTab(this)">Assets</button>
+      <button class="stab" data-panel="sb-intel" onclick="sbTab(this)">Intel</button>
+      <button class="stab" data-panel="sb-log" onclick="sbTab(this)">Log</button>
+    </div>
+
+    <div class="sidebar-panels">
+
+      <!-- ── Assets Panel ──────────────────────────────────── -->
+      <div class="sidebar-panel active" id="sb-assets">
+
+        <!-- Inner asset sub-tabs: Red | Blue | HRR -->
+        <div class="asset-tabs">
+          <button class="atab active" data-panel="at-red" onclick="assetTab(this)">Red</button>
+          <button class="atab" data-panel="at-blue" onclick="assetTab(this)">Blue</button>
+          <button class="atab" data-panel="at-hrr" onclick="assetTab(this)">HRR</button>
+        </div>
+
+        <div class="asset-panels">
+
+          <!-- ── Red sub-panel ─────────────────────────── -->
+          <div class="asset-panel active" id="at-red">
+            <section class="panel">
+              <h2>Red Tracks</h2>
+              <div id="red-list">
+                {% include "partials/red_list.html" %}
+              </div>
+              <div id="red-fetch-controls">
+                <div class="satno-row">
+                  <input id="red-satno" name="satno"
+                         placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                         title="NORAD catalog number — press Enter or click Fetch TLE"
+                         hx-get="/udl/tle"
+                         hx-trigger="keyup[key=='Enter']"
+                         hx-include="#red-fetch-controls [name]"
+                         hx-target="#red-tle-fields"
+                         hx-swap="innerHTML"
+                         hx-indicator="#red-tle-indicator" />
+                  <button type="button"
+                          hx-get="/udl/tle"
+                          hx-include="#red-fetch-controls [name]"
+                          hx-target="#red-tle-fields"
+                          hx-swap="innerHTML"
+                          hx-indicator="#red-tle-indicator"
+                          hx-disabled-elt="this"
+                          title="Query UDL for the latest TLE for this catalog number"
+                          class="btn-secondary btn-sm">Fetch TLE</button>
+                  <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+                </div>
+                <div class="tle-mode-row">
+                  <span class="tle-mode-select">
+                    <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
+                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
+                      <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
+                      Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
+                    </label>
+                  </span>
+                </div>
+              </div>
+              <form id="red-track-form"
+                    hx-post="/assets/red"
+                    hx-target="#red-list"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="find button[type=submit]"
+                    hx-on::after-settle="if(event.detail.elt===this){document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
+                    class="asset-form">
+                  <div id="red-tle-fields">
+                    {% include "partials/tle_fields.html" %}
+                  </div>
+                  <div class="submit-row">
+                    <button type="submit" class="btn-primary" title="Add this satellite as a Red Force track">Add Red Track</button>
+                    <span class="htmx-indicator"><span class="spinner"></span>Adding&hellip;</span>
+                  </div>
+              </form>
+            </section>
+          </div><!-- end at-red -->
+
+          <!-- ── Blue sub-panel ────────────────────────── -->
+          <div class="asset-panel" id="at-blue">
+            <section class="panel">
+              <h2>Blue Assets</h2>
+              <div id="blue-list">
+                {% include "partials/blue_list.html" %}
+              </div>
+              <div id="blue-fetch-controls">
+                <div class="satno-row">
+                  <input id="blue-satno" name="satno"
+                         placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                         title="NORAD catalog number — press Enter or click Fetch TLE"
+                         hx-get="/udl/tle"
+                         hx-trigger="keyup[key=='Enter']"
+                         hx-include="#blue-fetch-controls [name]"
+                         hx-target="#blue-tle-fields"
+                         hx-swap="innerHTML"
+                         hx-indicator="#blue-tle-indicator" />
+                  <button type="button"
+                          hx-get="/udl/tle"
+                          hx-include="#blue-fetch-controls [name]"
+                          hx-target="#blue-tle-fields"
+                          hx-swap="innerHTML"
+                          hx-indicator="#blue-tle-indicator"
+                          hx-disabled-elt="this"
+                          title="Query UDL for the latest TLE for this catalog number"
+                          class="btn-secondary btn-sm">Fetch TLE</button>
+                  <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
+                </div>
+                <div class="tle-mode-row">
+                  <span class="tle-mode-select">
+                    <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
+                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
+                      <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
+                      Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
+                    </label>
+                  </span>
+                </div>
+              </div>
+              <form id="blue-asset-form"
+                    hx-post="/assets/blue"
+                    hx-target="#blue-list"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="find button[type=submit]"
+                    hx-on::after-settle="if(event.detail.elt===this){document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
+                    class="asset-form">
+                  <div id="blue-tle-fields">
+                    {% include "partials/tle_fields.html" %}
+                  </div>
+                  <div class="submit-row">
+                    <button type="submit" class="btn-primary" title="Add this satellite as a Blue Force asset">Add Blue Asset</button>
+                    <span class="htmx-indicator"><span class="spinner"></span>Adding&hellip;</span>
+                  </div>
+              </form>
+            </section>
+          </div><!-- end at-blue -->
+
+          <!-- ── HRR sub-panel ─────────────────────────── -->
+          <div class="asset-panel" id="at-hrr">
+            <section class="panel">
+              <div class="panel-header-row">
+                <h2>HRR Watchlist</h2>
+                <div class="panel-header-actions">
+                  <button class="btn-secondary btn-sm"
+                          hx-get="/udl/hrr"
+                          hx-target="#blue-hrr-list"
+                          hx-swap="innerHTML"
+                          hx-indicator="#hrr-indicator"
+                          hx-disabled-elt="this"
+                          title="Query UDL notification feed for High Rate Revisit watchlist satellites">Refresh</button>
+                  <span id="hrr-indicator" class="htmx-indicator"><span class="spinner"></span>Loading&hellip;</span>
+                </div>
+              </div>
+              <div class="hrr-search-wrap" id="hrr-search-wrap">
+                <input type="search" id="hrr-search-input"
+                       placeholder="Search HRR by name, SATNO, country&hellip;"
+                       autocomplete="off"
+                       class="catalog-search-input"
+                       oninput="_hrrSearch(this.value)"
+                       onfocus="_hrrSearch(this.value)"
+                       title="Type to filter the HRR watchlist — select from the dropdown" />
+                <div id="hrr-search-dropdown" class="hrr-search-dropdown"></div>
+              </div>
+              <h3 style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.05em; margin:0.4rem 0 0.2rem">Blue HRR</h3>
+              <div id="blue-hrr-list">
+                <p class="empty-msg">Click Refresh to load HRR watchlist.</p>
+              </div>
+              <h3 style="font-size:0.65rem; font-weight:700; color:var(--red); text-transform:uppercase; letter-spacing:0.05em; margin:0.5rem 0 0.2rem">Red HRR</h3>
+              <div id="red-hrr-list">
+                <p class="empty-msg">Click Refresh to load.</p>
+              </div>
+            </section>
+          </div><!-- end at-hrr -->
+
+        </div><!-- end asset-panels -->
+
+      </div><!-- end sb-assets -->
+
+      <!-- ── Intel Panel ───────────────────────────────────── -->
+      <div class="sidebar-panel" id="sb-intel">
+
+        <!-- UDL Data Mode -->
+        <section class="panel">
+          <h2>UDL Data Classification</h2>
+          <form hx-post="/udl/data-mode"
+                hx-target="#data-mode-status"
+                hx-swap="innerHTML"
+                style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
+            <select name="data_mode" style="width:auto; flex:1"
+                    title="Select the UDL data classification — determines which data products are returned">
+              <option value="REAL"{% if udl_data_mode == 'REAL' %} selected{% endif %}>REAL</option>
+              <option value="SIMULATED"{% if udl_data_mode == 'SIMULATED' %} selected{% endif %}>SIMULATED</option>
+              <option value="TEST"{% if udl_data_mode == 'TEST' %} selected{% endif %}>TEST</option>
+              <option value="EXERCISE"{% if udl_data_mode == 'EXERCISE' %} selected{% endif %}>EXERCISE</option>
+            </select>
+            <button type="submit" class="btn-secondary btn-sm" hx-disabled-elt="this">Set</button>
+          </form>
+          <div id="data-mode-status" style="margin-top:0.3rem">
+            <span class="badge-ok">Data Mode: {{ udl_data_mode }}</span>
+          </div>
+        </section>
+
+        <!-- TLE Source -->
+        <section class="panel">
+          <h2>TLE Source</h2>
+          <div id="tle-source-panel">
+            {% if udl_available_sources %}
+            {% set tle_source = udl_tle_source %}
+            {% set available = udl_available_sources %}
+            {% include "partials/tle_source_panel.html" %}
+            {% else %}
+            <span class="label-dim" style="font-size:0.75rem">Connect UDL to discover available sources.</span>
+            {% endif %}
+          </div>
+        </section>
+
+        <!-- Scenario Configuration -->
+        <section class="panel">
+          <h2>Scenario Configuration</h2>
+          <form hx-post="/scenario/time"
+                hx-target="#scenario-status"
+                hx-swap="innerHTML"
+                hx-indicator="#scenario-indicator"
+                class="scenario-time-form">
+            <label title="Start of the analysis time window (UTC)">Window Start (UTC)
+              <input type="datetime-local" name="scenario_start" step="1"
+                     value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M:%S') if scenario_start else '' }}" />
+            </label>
+            <label title="End of the analysis time window (UTC)">Window Stop (UTC)
+              <input type="datetime-local" name="scenario_stop" step="1" />
+            </label>
+            <div class="submit-row" style="grid-column:1/-1">
+              <button type="submit" class="btn-gold" hx-disabled-elt="this" title="Set the scenario time window for event detection and intercept planning">Set Time Window</button>
+              <span id="scenario-indicator" class="htmx-indicator"><span class="spinner"></span>Setting&hellip;</span>
+            </div>
+          </form>
+          <div id="scenario-status" style="margin-top:0.4rem">
+            {% if scenario_start %}
+            <p class="badge-ok">Scenario: {{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC</p>
+            {% endif %}
+          </div>
+        </section>
+
+        <!-- Orbit Catalog -->
+        <section class="panel">
+          <div class="panel-header-row">
+            <h2>Orbit Catalog</h2>
+            <span id="catalog-badge" class="catalog-badge"
+                  hx-get="/udl/catalog/search"
+                  hx-trigger="load"
+                  hx-target="#catalog-results"
+                  hx-swap="innerHTML"></span>
+          </div>
+          <input type="search"
+                 name="q"
+                 placeholder="Search by name or SATNO&hellip;"
+                 autocomplete="off"
+                 title="Search the on-orbit catalog by satellite name or NORAD catalog number"
+                 hx-get="/udl/catalog/search"
+                 hx-trigger="input changed delay:400ms, search"
+                 hx-target="#catalog-results"
+                 hx-swap="innerHTML"
+                 class="catalog-search-input" />
+          <div id="catalog-results" style="margin-top:0.5rem">
+            <p class="empty-msg">Type to search the on-orbit catalog.</p>
+          </div>
+        </section>
+
+      </div><!-- end sb-intel -->
+
+      <!-- ── Log Panel ─────────────────────────────────────── -->
+      <div class="sidebar-panel" id="sb-log">
+        <section class="panel">
+          <div class="log-header">
+            <h2>Operations Log</h2>
+            <div class="log-actions">
+              <button class="btn-secondary btn-sm"
+                      hx-get="/log/entries"
+                      hx-target="#log-pane"
+                      hx-swap="innerHTML"
+                      title="Reload the operations log">Refresh</button>
+              <button class="btn-secondary btn-sm"
+                      hx-post="/log/clear"
+                      hx-target="#log-pane"
+                      hx-swap="innerHTML"
+                      title="Clear all log entries for this session">Clear</button>
+            </div>
+          </div>
+          <div id="log-pane" class="log-pane"
+               hx-get="/log/entries"
+               hx-trigger="every 5s"
+               hx-swap="innerHTML">
+            {% include "partials/run_log.html" %}
+          </div>
+        </section>
+      </div><!-- end sb-log -->
+
+    </div><!-- end sidebar-panels -->
+
+  </aside><!-- end sidebar -->
+
+  <!-- ── COMMAND AREA ────────────────────────────────────────── -->
+  <div class="command-area">
+
+    <!-- Hero Tab Bar -->
+    <div class="hero-tab-bar">
+      <button class="sidebar-collapse-btn" id="sidebar-collapse-btn"
+              onclick="toggleSidebar()" title="Collapse / expand sidebar">&#9664;</button>
+      <button class="htab active" data-panel="hero-sweep" onclick="heroTab(this)">
+        <span class="htab-icon htab-icon-red"></span>Threat Sweep
+      </button>
+      <button class="htab" data-panel="hero-engine" onclick="heroTab(this)">
+        <span class="htab-icon htab-icon-gold"></span>Intercept Engine
+      </button>
+      <button class="htab" data-panel="hero-pol" onclick="heroTab(this)">
+        <span class="htab-icon htab-icon-gold"></span>Historical PoL
+      </button>
+      <button class="htab" data-panel="hero-decision" onclick="heroTab(this)"
+              title="Decision Engine — What-If scenario evaluation, adversary action vs friendly response matrix">
+        <span class="htab-icon htab-icon-blue"></span>Decision Engine
+      </button>
+      <button class="htab" data-panel="hero-gcat" onclick="heroTab(this)"
+              title="GCAT — General Catalog of Artificial Space Objects (McDowell / planet4589.org, CC-BY)">
+        <span class="htab-icon htab-icon-blue"></span>GCAT
+      </button>
+    </div>
+
+    <!-- Hero Panels -->
+    <div class="hero-panels">
+
+      <!-- ── INTERCEPT ENGINE ──────────────────────────────── -->
+      <div class="hero-panel engine-hero" id="hero-engine">
+
+        <!-- Engine sub-tab bar -->
+        <div class="engine-tab-bar">
+          <button class="etab active" data-panel="et-calculator" onclick="engineTab(this)">Calculator</button>
+          <button class="etab" data-panel="et-trade" onclick="engineTab(this)">Trade-Space <span id="ts-badge" class="ltab-badge"></span></button>
+          <button class="etab" data-panel="et-history" onclick="engineTab(this)">History</button>
+        </div>
+
+        <!-- Calculator -->
+        <div class="engine-tab-panel active" id="et-calculator">
+          <section class="panel panel-gold">
+            <h2>Intercept Engine</h2>
+            <p class="callout callout-gold" style="margin-bottom:0.6rem">
+              Calculate intercept manoeuvres between red and blue satellites using all 23 methods simultaneously. Configure timing and compute a ranked comparison of every trajectory solver.
+            </p>
+
+            <form id="intercept-engine-form"
+                  hx-post="/plan/maneuver/apply-all-intercepts"
+                  hx-target="#intercept-result"
+                  hx-swap="innerHTML"
+                  hx-indicator="#intercept-indicator"
+                  hx-disabled-elt="find button[type=submit]">
+
+              <div class="mnv-search-grid">
+                <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red Satellite
+                  <select name="red_sat" id="ie-red-sat">
+                    {% include "partials/red_options.html" %}
+                  </select>
+                </label>
+                <label title="The blue (friendly) satellite to intercept">Blue Target
+                  <select name="blue_sat" id="ie-blue-sat">
+                    {% include "partials/blue_options.html" %}
+                  </select>
+                </label>
+
+                <label title="Re-fetch red and blue TLEs from UDL using this classification before computing — overrides the session-wide data mode for this calculation only">Intercept Data Mode
+                  <select name="intercept_data_mode">
+                    <option value="">Session default ({{ udl_data_mode or 'REAL' }})</option>
+                    <option value="REAL">REAL</option>
+                    <option value="SIMULATED">SIMULATED</option>
+                    <option value="TEST">TEST</option>
+                    <option value="EXERCISE">EXERCISE</option>
+                  </select>
+                </label>
+
+                <label title="When to start the intercept sequence — click Events to query orbital events">Manoeuvre Start (UTC)
+                  <div style="display:flex; gap:0.3rem; align-items:center">
+                    <input type="datetime-local" name="manoeuvre_start" step="1"
+                           value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M:%S') if scenario_start else '' }}"
+                           title="Initial epoch for the intercept calculation"
+                           style="flex:1" />
+                    <button type="button" class="btn-sm btn-secondary" id="ie-events-btn"
+                            title="Query orbital events (apogee, perigee, nodes) for the selected satellites"
+                            onclick="fetchOrbitalEvents()">Events</button>
+                  </div>
+                </label>
+              </div>
+
+              <div id="orbital-events" style="margin:0.3rem 0"></div>
+
+              <div class="mnv-search-grid">
+                <label title="Pre-burn coast duration in hours">Coast (hr)
+                  <input type="number" name="coast_hours" value="1.000" min="0.001" step="any" />
+                </label>
+                <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
+                  <input type="number" name="intercept_hours" value="6.000" min="0.001" step="any" />
+                </label>
+                <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
+                  <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
+                </label>
+                <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
+                  <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
+                </label>
+                <label title="Maximum delta-V budget (km/s)">Max &#916;V (km/s)
+                  <input type="number" name="max_dv" value="3.000" min="0.001" step="any" />
+                </label>
+              </div>
+
+              <div id="ie-minimize-row" class="mnv-check-group" style="margin-top:0.3rem">
+                <label title="Minimise total delta-V (Optimal only)">
+                  <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise &#916;V
+                </label>
+              </div>
+
+              <div class="mnv-actions" style="margin-top:0.6rem">
+                <button type="submit" class="btn-gold"
+                        title="Run all 23 intercept methods and return a ranked comparison table">
+                  Calculate All Intercepts
+                </button>
+                <span id="intercept-indicator" class="htmx-indicator">
+                  <span class="spinner"></span>Computing all trajectories&hellip;
+                </span>
+              </div>
+            </form>
+
+            <div id="intercept-result" style="margin-top:0.5rem"></div>
+          </section>
+        </div><!-- end et-calculator -->
+
+        <!-- Trade-Space -->
+        <div class="engine-tab-panel" id="et-trade">
+          <section class="panel">
+            <div class="trade-space-bar">
+              <div class="trade-space-bar-left">
+                <h2 style="margin-bottom:0;padding-bottom:0;border-bottom:none">Trade-Space Analysis</h2>
+                <span id="ts-chart-status" class="label-dim">Run 2+ intercepts to enable</span>
+              </div>
+              <div class="trade-space-bar-actions">
+                <button id="ts-chart-btn" class="btn-gold btn-sm" disabled
+                        onclick="_spectreToggleTradeSpace()" title="Show or hide the trade-space scatter plot">
+                  View Chart
+                </button>
+                <button id="ts-chart-clear" class="btn-danger btn-sm" style="display:none"
+                        hx-post="/plan/maneuver/clear-history"
+                        hx-target="#intercept-result"
+                        hx-swap="innerHTML"
+                        onclick="_spectreResetTradeSpace()">Clear History</button>
+              </div>
+            </div>
+            <div id="trade-space-canvas-wrap" class="trade-space-canvas-wrap" style="display:none">
+              <canvas id="tradeSpaceChart" height="400"></canvas>
+            </div>
+          </section>
+        </div><!-- end et-trade -->
+
+        <!-- History -->
+        <div class="engine-tab-panel" id="et-history">
+          <section class="panel">
+            <h2>Intercept Results</h2>
+            <div id="results-section">
+              {% include "partials/results_table.html" %}
+            </div>
+          </section>
+        </div><!-- end et-history -->
+
+      </div><!-- end hero-engine -->
+
+      <!-- ── THREAT SWEEP ──────────────────────────────────── -->
+      <div class="hero-panel sweep-hero active" id="hero-sweep">
+        <section class="panel panel-red">
+          <h2>Threat Sweep</h2>
+          <p class="callout callout-gold" style="margin-bottom:0.6rem">
+            Select a Blue or Red HRR target group, fetch their TLEs, then sweep against the red satellite to identify reachable intercept threats ranked by &#916;V.
+          </p>
+
+          <form id="threat-sweep-form">
+            <div class="mnv-search-grid">
+              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Red Satellite
+                <select name="red_sat" id="ts-red-sat"
+                        hx-get="/plan/threat/target-config"
+                        hx-target="#ts-target-config"
+                        hx-swap="innerHTML"
+                        hx-trigger="change"
+                        hx-include="this">
+                  {% include "partials/red_options.html" %}
+                </select>
+              </label>
+              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Max &#916;V (km/s)
+                <input type="number" name="max_dv" value="3.0" step="0.1" min="0.1" />
+              </label>
+            </div>
+            <div id="ts-red-orbit-info" style="margin-bottom:0.3rem"></div>
+
+            {# ── Manual Red TLE override ── #}
+            <details id="ts-manual-red-tle-toggle" style="margin-bottom:0.4rem">
+              <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+                <span style="display:inline-block; transition:transform 0.15s; font-size:0.65rem">&#9654;</span>
+                Manual Red TLE Override
+                <span style="font-size:0.65rem; font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0">— paste a post-manoeuvre TLE to override the registered track for this sweep</span>
+              </summary>
+              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:4px">
+                <div style="display:grid; grid-template-columns:1fr auto; gap:0.5rem; align-items:end; margin-bottom:0.4rem">
+                  <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+                    TLE (lines 1 &amp; 2)
+                    <textarea name="manual_red_tle" id="ts-manual-red-tle"
+                              rows="2"
+                              placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
+                              style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)"></textarea>
+                  </label>
+                  <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); white-space:nowrap">
+                    Confidence
+                    <select name="manual_red_confidence" id="ts-manual-red-conf"
+                            style="display:block; margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)">
+                      <option value="HIGH">HIGH</option>
+                      <option value="MEDIUM" selected>MEDIUM</option>
+                      <option value="LOW">LOW</option>
+                      <option value="UNCONFIRMED">UNCONFIRMED</option>
+                    </select>
+                  </label>
+                </div>
+                <p style="margin:0; font-size:0.68rem; color:var(--text-dim); font-style:italic">
+                  If set, this TLE is used <strong>instead of</strong> the registered red track for all orbital mechanics in the sweep. Leave blank to use the registered TLE.
+                </p>
+              </div>
+            </details>
+
+            <div id="ts-target-config" style="margin-top:0.3rem"
+                 hx-get="/plan/threat/target-config"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 hx-include="[name='red_sat']">
+              <p class="label-dim" style="font-size:0.72rem">Loading target config&hellip;</p>
+            </div>
+          </form>
+
+          <div id="threat-sweep-results" style="margin-top:0.5rem">
+            <p class="empty-msg">No threat sweep run yet — select a target group, then click Sweep Targets.</p>
+          </div>
+        </section>
+      </div><!-- end hero-sweep -->
+
+      <!-- ── HISTORICAL PATTERN OF LIFE ───────────────────── -->
+      <div class="hero-panel" id="hero-pol"
+           hx-get="/pol/panel"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Historical PoL&hellip;</p>
+      </div><!-- end hero-pol -->
+
+      <!-- ── DECISION ENGINE ───────────────────────────────────── -->
+      <div class="hero-panel" id="hero-decision"
+           hx-get="/plan/decision/panel"
+           hx-trigger="intersect once"
+           hx-swap="innerHTML">
+        <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Decision Engine&hellip;</p>
+      </div><!-- end hero-decision -->
+
+      <!-- ── GCAT ─────────────────────────────────────────────── -->
+      <div class="hero-panel gcat-hero" id="hero-gcat"
+           hx-get="/gcat/panel"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:1.5rem;color:var(--text-dim);font-size:0.8rem">
+          <span class="spinner"></span>
+          Connecting to GCAT &mdash; downloading datasets from planet4589.org&hellip;
+        </div>
+      </div><!-- end hero-gcat -->
+
+    </div><!-- end hero-panels -->
+
+  </div><!-- end command-area -->
+
+</div><!-- end console-layout -->
+
+<!-- ── Orbital events fetcher ────────────────────────────────────────── -->
+<script>
+function fetchOrbitalEvents() {
+  var redSel = document.getElementById('ie-red-sat');
+  var blueSel = document.getElementById('ie-blue-sat');
+  var redSat = redSel ? redSel.value : '';
+  var blueSat = blueSel ? blueSel.value : '';
+  if (!redSat && !blueSat) {
+    document.getElementById('orbital-events').innerHTML =
+      '<p class="error-msg">Select at least one satellite first.</p>';
+    return;
+  }
+  var btn = document.getElementById('ie-events-btn');
+  btn.disabled = true;
+  btn.textContent = 'Loading\u2026';
+  var params = new URLSearchParams();
+  if (redSat) params.set('red_sat', redSat);
+  if (blueSat) params.set('blue_sat', blueSat);
+  fetch('/plan/maneuver/orbital-events?' + params.toString())
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.text();
+    })
+    .then(function(html) {
+      document.getElementById('orbital-events').innerHTML = html;
+    })
+    .catch(function(err) {
+      document.getElementById('orbital-events').innerHTML =
+        '<p class="error-msg">Query failed: ' + err.message + '</p>';
+    })
+    .finally(function() {
+      btn.disabled = false;
+      btn.textContent = 'Events';
+    });
+}
+</script>
+
+
+
+<!-- ── Tab switching controllers ─────────────────────────────────────── -->
+<script>
+/* Sidebar tabs */
+function sbTab(btn) {
+  var tabs = document.querySelectorAll('.stab');
+  var panels = document.querySelectorAll('.sidebar-panel');
+  var target = btn.getAttribute('data-panel');
+  tabs.forEach(function(t) { t.classList.remove('active'); });
+  panels.forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  var panel = document.getElementById(target);
+  if (panel) panel.classList.add('active');
+}
+
+/* Asset inner sub-tabs */
+function assetTab(btn) {
+  var tabs = document.querySelectorAll('.atab');
+  var panels = document.querySelectorAll('.asset-panel');
+  var target = btn.getAttribute('data-panel');
+  tabs.forEach(function(t) { t.classList.remove('active'); });
+  panels.forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  var panel = document.getElementById(target);
+  if (panel) panel.classList.add('active');
+}
+
+/* Hero tabs */
+function heroTab(btn) {
+  var tabs = document.querySelectorAll('.htab');
+  var panels = document.querySelectorAll('.hero-panel');
+  var target = btn.getAttribute('data-panel');
+  tabs.forEach(function(t) { t.classList.remove('active'); });
+  panels.forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  var panel = document.getElementById(target);
+  if (panel) {
+    panel.classList.add('active');
+    /* Lazy-load panels declared with hx-get (loads once on first reveal) */
+    if (panel.getAttribute('hx-get') && !panel.dataset.htmxLoaded) {
+      panel.dataset.htmxLoaded = '1';
+      htmx.process(panel);
+      htmx.trigger(panel, 'load');
+    }
+    /* When switching to Threat Sweep, refresh target-config with current red_sat */
+    if (target === 'hero-sweep') {
+      var sel = document.getElementById('ts-red-sat');
+      var val = sel ? (sel.value || '') : '';
+      var url = '/plan/threat/target-config' + (val ? '?red_sat=' + encodeURIComponent(val) : '');
+      htmx.ajax('GET', url, {target: '#ts-target-config', swap: 'innerHTML'});
+    }
+  }
+}
+
+/* Engine sub-tabs (Calculator / Trade-Space / History) */
+function engineTab(btn) {
+  var tabs = document.querySelectorAll('.etab');
+  var panels = document.querySelectorAll('.engine-tab-panel');
+  var target = btn.getAttribute('data-panel');
+  tabs.forEach(function(t) { t.classList.remove('active'); });
+  panels.forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  var panel = document.getElementById(target);
+  if (panel) panel.classList.add('active');
+  if (target === 'et-trade' && window._tsChartInstance) {
+    setTimeout(function() { window._tsChartInstance.resize(); }, 50);
+  }
+}
+
+/* Sidebar collapse — must clear inline style set by drag-resize */
+var _sidebarSavedWidth = null;
+function toggleSidebar() {
+  var layout = document.querySelector('.console-layout');
+  var btn = document.getElementById('sidebar-collapse-btn');
+  if (!layout) return;
+  if (!layout.classList.contains('sidebar-collapsed')) {
+    /* Collapsing: save any inline width then remove it so the class rule wins */
+    _sidebarSavedWidth = layout.style.gridTemplateColumns || null;
+    layout.style.gridTemplateColumns = '';
+    layout.classList.add('sidebar-collapsed');
+    btn.innerHTML = '&#9654;';
+    btn.title = 'Expand sidebar';
+  } else {
+    /* Expanding: restore inline width if there was one */
+    layout.classList.remove('sidebar-collapsed');
+    if (_sidebarSavedWidth) {
+      layout.style.gridTemplateColumns = _sidebarSavedWidth;
+    }
+    btn.innerHTML = '&#9664;';
+    btn.title = 'Collapse sidebar';
+  }
+  if (window._tsChartInstance) {
+    setTimeout(function() { window._tsChartInstance.resize(); }, 300);
+  }
+}
+
+/* Switch to Intercept Engine hero tab programmatically */
+function switchToEngine() {
+  var btn = document.querySelector('.htab[data-panel="hero-engine"]');
+  if (btn) heroTab(btn);
+  var panel = document.getElementById('hero-engine');
+  if (panel) {
+    panel.classList.add('engine-flash');
+    setTimeout(function() { panel.classList.remove('engine-flash'); }, 1300);
+  }
+}
+
+/* Switch to Trade-Space engine sub-tab programmatically */
+function switchToTradeSpace() {
+  switchToEngine();
+  var btn = document.querySelector('.etab[data-panel="et-trade"]');
+  if (btn) engineTab(btn);
+}
+</script>
+
+<!-- ── Auto-fetch red orbit info when ts-red-sat changes ──────────── -->
+<script>
+(function() {
+  var _lastRedSat = '';
+
+  document.body.addEventListener('htmx:afterSettle', function() {
+    var sel = document.getElementById('ts-red-sat');
+    if (!sel) return;
+    var val = sel.value || '';
+    if (val && val !== _lastRedSat) {
+      _lastRedSat = val;
+      htmx.ajax('GET', '/plan/threat/red-orbit-info?red_sat=' + encodeURIComponent(val),
+                {target: '#ts-red-orbit-info', swap: 'innerHTML'});
+    } else if (!val && _lastRedSat) {
+      _lastRedSat = '';
+      var tgt = document.getElementById('ts-red-orbit-info');
+      if (tgt) tgt.innerHTML = '';
+    }
+  });
+})();
+</script>
+
+<!-- ── Sweep target config helpers ──────────────────────────────────── -->
+<script>
+/* Refresh target-config after UDL login, HRR fetch, or any OOB swap that may
+   have changed the red satellite list (asset add/remove).  Uses the current
+   value of #ts-red-sat so the config always reflects the active selection. */
+(function() {
+  var _lastConfigSat = '';
+
+  function _refreshTargetConfig() {
+    var sel = document.getElementById('ts-red-sat');
+    var val = sel ? (sel.value || '') : '';
+    if (val === _lastConfigSat) return;           /* no change — skip */
+    _lastConfigSat = val;
+    var url = '/plan/threat/target-config' + (val ? '?red_sat=' + encodeURIComponent(val) : '');
+    htmx.ajax('GET', url, {target: '#ts-target-config', swap: 'innerHTML'});
+  }
+
+  document.body.addEventListener('htmx:afterSettle', function(e) {
+    var id = (e.detail.target || {}).id || '';
+    /* Always re-check after events that could change the select list or session state */
+    if (id === 'udl-status' || id === 'blue-hrr-list' ||
+        id === 'blue-list'  || id === 'red-list') {
+      _refreshTargetConfig();
+    }
+  });
+
+  /* Also fire on direct user selection (hx-trigger="change" on #ts-red-sat
+     handles the HTMX update, but we track _lastConfigSat here too). */
+  document.body.addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'ts-red-sat') {
+      _lastConfigSat = '';   /* reset so next afterSettle re-evaluates */
+    }
+  });
+})();
+</script>
+
+<!-- ── Sidebar resize controller ──────────────────────────────────────── -->
+<script>
+(function() {
+  var handle = document.getElementById('sidebar-resize');
+  var layout = document.querySelector('.console-layout');
+  if (!handle || !layout) return;
+
+  var startX, startW;
+
+  handle.addEventListener('mousedown', function(e) {
+    if (layout.classList.contains('sidebar-collapsed')) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startW = parseInt(getComputedStyle(layout).gridTemplateColumns) || 500;
+    handle.classList.add('dragging');
+    layout.classList.add('resizing');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  function onMove(e) {
+    var newW = Math.max(280, Math.min(700, startW + (e.clientX - startX)));
+    layout.style.gridTemplateColumns = newW + 'px 1fr';
+  }
+
+  function onUp() {
+    handle.classList.remove('dragging');
+    layout.classList.remove('resizing');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    /* Resize chart if visible */
+    if (window._tsChartInstance) {
+      setTimeout(function() { window._tsChartInstance.resize(); }, 50);
+    }
+  }
+})();
+</script>
+
+<!-- ── Trade-Space chart controller ──────────────────────────────────── -->
+<script>
+(function() {
+  var _tsChartInstance = null;
+  window._tsChartInstance = null;
+  var _tsVisible = false;
+
+  var METHOD_COLOURS = {
+    'lambert':'#00659E','proximity':'#00659E','hohmann':'#C8A415',
+    'rendezvous':'#C8A415','bielliptic':'#27AE60','phasing':'#E67E22',
+    'rbar_hop':'#8E44AD','vbar_hop':'#6C3483','hbar_hop':'#4A235A',
+    'cw_drift':'#9B59B6','plane_change':'#2ECC71',
+    'j2_drift':'#1ABC9C','cola':'#E74C3C','evasion':'#C0392B',
+    'geo_drift':'#F39C12','nmc':'#16A085','manoeuvre_detect':'#7F8C8D',
+    'detectability':'#95A5A6','fingerprint':'#BDC3C7','terrain':'#D35400',
+    'intent_predict':'#E84393','intercept_envelope':'#6C5CE7',
+    'stability':'#00CEC9','formation':'#FD79A8','min_time':'#FDCB6E'
+  };
+
+  function fmtTime(min) {
+    if (min < 60)   return min.toFixed(1) + ' min';
+    if (min < 1440) return (min / 60).toFixed(1) + ' hr';
+    return (min / 1440).toFixed(1) + ' days';
+  }
+
+  /** Called from intercept_result partial after each new solve. */
+  window._spectreRenderTradeSpace = function() {
+    var btn = document.getElementById('ts-chart-btn');
+    var status = document.getElementById('ts-chart-status');
+    var clearBtn = document.getElementById('ts-chart-clear');
+    var badge = document.getElementById('ts-badge');
+    if (!btn) return;
+
+    /* Set button to loading state */
+    btn.disabled = true;
+    btn.textContent = 'Rendering\u2026';
+    if (status) status.textContent = 'Loading chart data\u2026';
+
+    fetch('/plan/maneuver/trade-space-data')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        data = data.filter(function(pt) { return pt.transfer_time_min > 0 && pt.delta_v > 0; });
+        if (!data.length) {
+          btn.disabled = true;
+          btn.textContent = 'View Chart';
+          if (status) status.textContent = 'No plottable data (need positive \u0394V and transfer time)';
+          if (badge) badge.textContent = '';
+          return;
+        }
+
+        /* Build datasets */
+        var datasets = {};
+        data.forEach(function(pt) {
+          var key = pt.method;
+          if (!datasets[key]) {
+            datasets[key] = {
+              label: key.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }),
+              backgroundColor: METHOD_COLOURS[key] || '#999',
+              borderColor: METHOD_COLOURS[key] || '#999',
+              pointRadius: 7, pointHoverRadius: 10, data: []
+            };
+          }
+          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km });
+        });
+
+        var allX = data.map(function(p) { return p.transfer_time_min; });
+        var allY = data.map(function(p) { return p.delta_v; });
+        var xSpread = Math.max.apply(null, allX) / Math.min.apply(null, allX);
+        var ySpread = Math.max.apply(null, allY) / Math.min.apply(null, allY);
+        var useLogX = allX.length > 1 && xSpread > 50;
+        var useLogY = allY.length > 1 && ySpread > 50;
+
+        /* Render into the canvas */
+        var canvas = document.getElementById('tradeSpaceChart');
+        if (!canvas || typeof Chart === 'undefined') {
+          btn.disabled = true;
+          btn.textContent = 'View Chart';
+          if (status) status.textContent = 'Chart library not loaded';
+          return;
+        }
+
+        if (_tsChartInstance) { _tsChartInstance.destroy(); _tsChartInstance = null; }
+
+        _tsChartInstance = new Chart(canvas, {
+          type: 'scatter',
+          data: { datasets: Object.values(datasets) },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#D0D8E8', font: { family: 'Segoe UI', size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    var pt = ctx.raw;
+                    return [pt.label, '\u0394V: ' + pt.y.toFixed(4) + ' km/s',
+                            'Transfer: ' + fmtTime(pt.x), 'Miss: ' + pt.miss.toFixed(1) + ' km'];
+                  }
+                },
+                backgroundColor: '#001529', titleColor: '#C8A415',
+                bodyColor: '#D0D8E8', borderColor: '#0A3355', borderWidth: 1
+              }
+            },
+            scales: {
+              x: {
+                type: useLogX ? 'logarithmic' : 'linear',
+                title: { display: true, text: 'Transfer Time', color: '#5A7A9A', font: { size: 11 } },
+                ticks: { color: '#5A7A9A', callback: function(v) { return fmtTime(v); } },
+                grid: { color: 'rgba(10,51,85,0.4)' }
+              },
+              y: {
+                type: useLogY ? 'logarithmic' : 'linear',
+                title: { display: true, text: '\u0394V (km/s)', color: '#5A7A9A', font: { size: 11 } },
+                ticks: { color: '#5A7A9A' },
+                grid: { color: 'rgba(10,51,85,0.4)' }
+              }
+            }
+          }
+        });
+        window._tsChartInstance = _tsChartInstance;
+
+        /* Chart ready — activate button, update badge, auto-switch to Trade-Space tab */
+        btn.disabled = false;
+        btn.textContent = _tsVisible ? 'Hide Chart' : 'View Chart (' + data.length + ' pts)';
+        if (status) status.textContent = data.length + ' solutions plotted';
+        if (badge) badge.textContent = '(' + data.length + ' pts)';
+        if (clearBtn) clearBtn.style.display = '';
+        switchToTradeSpace();
+      })
+      .catch(function(err) {
+        btn.disabled = true;
+        btn.textContent = 'View Chart';
+        if (status) status.textContent = 'Chart render failed: ' + err.message;
+      });
+  };
+
+  /** Toggle chart panel visibility. */
+  window._spectreToggleTradeSpace = function() {
+    var wrap = document.getElementById('trade-space-canvas-wrap');
+    var btn = document.getElementById('ts-chart-btn');
+    if (!wrap) return;
+    _tsVisible = !_tsVisible;
+    wrap.style.display = _tsVisible ? '' : 'none';
+    if (btn) btn.textContent = _tsVisible ? 'Hide Chart' : 'View Chart';
+    if (_tsVisible && _tsChartInstance) _tsChartInstance.resize();
+  };
+
+  /** Reset after history clear. */
+  window._spectreResetTradeSpace = function() {
+    var wrap = document.getElementById('trade-space-canvas-wrap');
+    var btn = document.getElementById('ts-chart-btn');
+    var status = document.getElementById('ts-chart-status');
+    var clearBtn = document.getElementById('ts-chart-clear');
+    var badge = document.getElementById('ts-badge');
+    if (_tsChartInstance) { _tsChartInstance.destroy(); _tsChartInstance = null; }
+    window._tsChartInstance = null;
+    _tsVisible = false;
+    if (wrap) wrap.style.display = 'none';
+    if (btn) { btn.disabled = true; btn.textContent = 'View Chart'; }
+    if (status) status.textContent = 'Run 2+ intercepts to enable';
+    if (badge) badge.textContent = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+  };
+})();
+</script>
+
+<!-- ── HRR search controller ─────────────────────────────────────────── -->
+<script>
+(function() {
+  /**
+   * Gather every row from both blue and red HRR tables into a flat array.
+   * Each entry = {name, satno, country, orbit, rank, row, side}.
+   */
+  function _hrrGatherRows() {
+    var entries = [];
+    var tables = [
+      { id: 'blue-hrr-list', side: 'blue' },
+      { id: 'red-hrr-list',  side: 'red'  }
+    ];
+    tables.forEach(function(t) {
+      var wrap = document.getElementById(t.id);
+      if (!wrap) return;
+      var tbl = wrap.querySelector('table.hrr-table');
+      if (!tbl || !tbl.tBodies[0]) return;
+      Array.from(tbl.tBodies[0].rows).forEach(function(row) {
+        var cells = row.cells;
+        if (cells.length < 5) return;
+        entries.push({
+          name:    (cells[0].textContent || '').trim(),
+          satno:   (cells[1].textContent || '').trim(),
+          country: (cells[2].textContent || '').trim(),
+          orbit:   (cells[3].textContent || '').trim(),
+          rank:    (cells[4].textContent || '').trim(),
+          row:     row,
+          side:    t.side
+        });
+      });
+    });
+    return entries;
+  }
+
+  var _hrrTimeout = null;
+
+  window._hrrSearch = function(query) {
+    clearTimeout(_hrrTimeout);
+    _hrrTimeout = setTimeout(function() { _hrrDoSearch(query); }, 120);
+  };
+
+  function _hrrDoSearch(query) {
+    var dropdown = document.getElementById('hrr-search-dropdown');
+    if (!dropdown) return;
+
+    query = (query || '').trim().toLowerCase();
+    if (!query) {
+      dropdown.innerHTML = '';
+      dropdown.style.display = 'none';
+      _hrrClearHighlight();
+      return;
+    }
+
+    var entries = _hrrGatherRows();
+    if (!entries.length) {
+      dropdown.innerHTML = '<div class="hrr-dd-empty">No HRR data loaded — click Refresh first</div>';
+      dropdown.style.display = '';
+      return;
+    }
+
+    /* Score each entry: prefer prefix matches, then substring. */
+    var scored = [];
+    entries.forEach(function(e) {
+      var haystack = (e.name + ' ' + e.satno + ' ' + e.country + ' ' + e.orbit).toLowerCase();
+      var nameL = e.name.toLowerCase();
+      var satnoL = e.satno.toLowerCase();
+      var score = -1;
+      if (nameL.indexOf(query) === 0)  score = 100;  /* name starts with */
+      else if (satnoL.indexOf(query) === 0) score = 90; /* satno starts with */
+      else if (nameL.indexOf(query) >= 0) score = 70;  /* name contains */
+      else if (haystack.indexOf(query) >= 0) score = 50; /* any field contains */
+      if (score > 0) scored.push({ e: e, score: score });
+    });
+
+    scored.sort(function(a, b) { return b.score - a.score; });
+    var matches = scored.slice(0, 12);
+
+    if (!matches.length) {
+      dropdown.innerHTML = '<div class="hrr-dd-empty">No matches</div>';
+      dropdown.style.display = '';
+      return;
+    }
+
+    var html = '';
+    matches.forEach(function(m, i) {
+      var e = m.e;
+      var sideClass = e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue';
+      html += '<div class="hrr-dd-item ' + sideClass + '" data-idx="' + i + '" '
+            + 'onmousedown="_hrrSelect(' + i + ')">'
+            + '<span class="hrr-dd-name">' + _hrrHighlightText(e.name, query) + '</span>'
+            + '<span class="hrr-dd-meta">' + e.satno + ' &middot; ' + e.country
+            + ' &middot; ' + e.orbit + ' &middot; Rank ' + e.rank
+            + ' &middot; <em>' + e.side + '</em></span>'
+            + '</div>';
+    });
+    dropdown.innerHTML = html;
+    dropdown.style.display = '';
+
+    /* Stash matches for select handler. */
+    window._hrrMatches = matches;
+  }
+
+  function _hrrHighlightText(text, query) {
+    var idx = text.toLowerCase().indexOf(query);
+    if (idx < 0) return text;
+    return text.substring(0, idx)
+         + '<mark>' + text.substring(idx, idx + query.length) + '</mark>'
+         + text.substring(idx + query.length);
+  }
+
+  window._hrrSelect = function(idx) {
+    var matches = window._hrrMatches;
+    if (!matches || !matches[idx]) return;
+    var entry = matches[idx].e;
+    var row = entry.row;
+
+    /* Close dropdown and fill input with selection. */
+    var dropdown = document.getElementById('hrr-search-dropdown');
+    var input = document.getElementById('hrr-search-input');
+    if (dropdown) dropdown.style.display = 'none';
+    if (input) input.value = entry.name + ' (' + entry.satno + ')';
+
+    /* Clear previous highlight, apply new one. */
+    _hrrClearHighlight();
+    row.classList.add('hrr-row-selected');
+
+    /* Scroll the row into view within its scroll container. */
+    var scrollParent = row.closest('.hrr-scroll');
+    if (scrollParent) {
+      scrollParent.scrollTop = row.offsetTop - scrollParent.offsetTop - 30;
+    }
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
+  function _hrrClearHighlight() {
+    document.querySelectorAll('.hrr-row-selected').forEach(function(el) {
+      el.classList.remove('hrr-row-selected');
+    });
+  }
+
+  /* Close dropdown when clicking outside. */
+  document.addEventListener('click', function(e) {
+    var wrap = document.getElementById('hrr-search-wrap');
+    var dropdown = document.getElementById('hrr-search-dropdown');
+    if (wrap && dropdown && !wrap.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
+})();
+</script>
+
+<!-- ── Theme switcher ─────────────────────────────────────────────── -->
+<script>
+(function () {
+  var THEMES = ['ops', 'steel'];
+  var KEY    = 'spectre-theme';
+
+  function spectreSetTheme(theme) {
+    if (THEMES.indexOf(theme) === -1) return;        // only allow known themes
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem(KEY, theme); } catch (_) {}
+    var picker = document.getElementById('theme-picker');
+    if (picker && picker.value !== theme) picker.value = theme;
+  }
+
+  window.spectreSetTheme = spectreSetTheme;
+
+  /* Sync the dropdown to whatever theme is active (set from localStorage
+     by the inline script in <head> before first paint) */
+  (function syncPicker() {
+    var current = document.documentElement.getAttribute('data-theme') || 'ops';
+    var picker  = document.getElementById('theme-picker');
+    if (picker) picker.value = current;
+  })();
+})();
+</script>
+
+{% endblock %}

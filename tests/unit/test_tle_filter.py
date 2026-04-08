@@ -1,4 +1,4 @@
-"""Unit tests for sipc.astro.tle_filter — TLE cadence filtering & deduplication."""
+"""Unit tests for spectre.astro.tle_filter — TLE cadence filtering & deduplication."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sipc.astro.tle_filter import (
+from spectre.astro.tle_filter import (
     QualityFlag,
     TLECluster,
     cluster_tles,
@@ -14,7 +14,7 @@ from sipc.astro.tle_filter import (
     quality_flag_sequence,
     select_representative,
 )
-from sipc.astro.pattern_of_life import TLERecord
+from spectre.astro.pattern_of_life import TLERecord
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-# SIPC — Phased Development Plan
+# SPECTRE — Phased Development Plan
 
 Last updated: 2026-04-08
 
@@ -14,19 +14,19 @@ Last updated: 2026-04-08
 
 | Capability | Modules | Notes |
 |-----------|---------|-------|
-| Pure-Python intercept engine (23 methods) | `sipc/astro/maneuvers.py`, `transfers.py`, `lambert.py`, `tactical.py`, `cw_geometry.py` | Replaces all STK solver paths |
-| SGP4 propagation + orbital events | `sipc/astro/propagator.py`, `events.py` | sgp4 library (Vallado) |
-| Threat Sweep + TLE clustering | `sipc/web/routes/threat.py`, `sipc/astro/tle_preprocessing.py`, `tle_clustering/` | DBSCAN per-satellite de-duplication |
-| Pattern of Life — base analysis | `sipc/astro/pattern_of_life.py`, `sipc/web/routes/pol.py` | Manoeuvre detection, activity baseline |
-| Pattern of Life — TLE cadence filter | `sipc/astro/tle_filter.py` | Cluster/select/flag pipeline |
-| Pattern of Life — NOTSO correlation | `sipc/astro/notso.py` | Parser, correlation, behaviour profile |
-| Pattern of Life — Monte Carlo | `sipc/astro/monte_carlo.py` | RK45 + J2 + drag, P5/P50/P95, regime probs |
-| Pattern of Life — Photometry | `sipc/astro/photometry.py` | Phase function baseline, t-test change detection |
-| Decision Engine (Phase 1) | `sipc/domain/decision.py`, `sipc/web/routes/decision.py` | Deterministic analytic scoring |
-| GCAT Browser | `sipc/web/routes/gcat.py` | 28 datasets, DBSCAN search/sort/paginate |
-| HRR Watchlist | `sipc/web/routes/udl.py` | One-click → Blue/Red asset import |
-| Training Mode | `sipc/training/`, `sipc/web/routes/training.py` | 6 levels, 13 scenarios, tutorials, challenges |
-| Session auth + DB bootstrap | `sipc/web/auth.py`, `sipc/web/database.py` | bcrypt, itsdangerous, 8 hr expiry |
+| Pure-Python intercept engine (23 methods) | `spectre/astro/maneuvers.py`, `transfers.py`, `lambert.py`, `tactical.py`, `cw_geometry.py` | Replaces all STK solver paths |
+| SGP4 propagation + orbital events | `spectre/astro/propagator.py`, `events.py` | sgp4 library (Vallado) |
+| Threat Sweep + TLE clustering | `spectre/web/routes/threat.py`, `spectre/astro/tle_preprocessing.py`, `tle_clustering/` | DBSCAN per-satellite de-duplication |
+| Pattern of Life — base analysis | `spectre/astro/pattern_of_life.py`, `spectre/web/routes/pol.py` | Manoeuvre detection, activity baseline |
+| Pattern of Life — TLE cadence filter | `spectre/astro/tle_filter.py` | Cluster/select/flag pipeline |
+| Pattern of Life — NOTSO correlation | `spectre/astro/notso.py` | Parser, correlation, behaviour profile |
+| Pattern of Life — Monte Carlo | `spectre/astro/monte_carlo.py` | RK45 + J2 + drag, P5/P50/P95, regime probs |
+| Pattern of Life — Photometry | `spectre/astro/photometry.py` | Phase function baseline, t-test change detection |
+| Decision Engine (Phase 1) | `spectre/domain/decision.py`, `spectre/web/routes/decision.py` | Deterministic analytic scoring |
+| GCAT Browser | `spectre/web/routes/gcat.py` | 28 datasets, DBSCAN search/sort/paginate |
+| HRR Watchlist | `spectre/web/routes/udl.py` | One-click → Blue/Red asset import |
+| Training Mode | `spectre/training/`, `spectre/web/routes/training.py` | 6 levels, 13 scenarios, tutorials, challenges |
+| Session auth + DB bootstrap | `spectre/web/auth.py`, `spectre/web/database.py` | bcrypt, itsdangerous, 8 hr expiry |
 | CI pipeline | `.github/workflows/ci.yml` | lint, test, sast, sca, secrets jobs |
 | Pre-commit security hooks | `.pre-commit-config.yaml` | gitleaks, ruff, bandit, mypy |
 | CODEOWNERS | `CODEOWNERS` | Security-path review gates |
@@ -55,7 +55,7 @@ See `memory/project_todo_backlog.md` for full detail and dependencies.
 
 ## Historical — STK-Era Phases (v0.1.0)
 
-The sections below describe the original development plan when SIPC used STK COM integration. They are retained for historical context only. All STK-specific items are obsolete.
+The sections below describe the original development plan when SPECTRE used STK COM integration. They are retained for historical context only. All STK-specific items are obsolete.
 
 ---
 
@@ -83,7 +83,7 @@ Core scaffold, architecture, and live STK wiring.
 
 Min-range query, SEZ geometry, asset pair labels in results.
 
-**Status:** Superseded — replaced by pure-Python propagation and geometry in `sipc/astro/`.
+**Status:** Superseded — replaced by pure-Python propagation and geometry in `spectre/astro/`.
 
 ---
 
@@ -107,7 +107,7 @@ UDL route tests, CSRF/rate limiting, structured logging review, CI pipeline.
 
 STK Astrogator MCS-based manoeuvre search with differential corrector.
 
-**Status:** Superseded and removed. All manoeuvre planning is now pure-Python via `sipc/astro/tactical.py` and `sipc/web/routes/maneuver.py` (23 methods). The `sipc/stk_adapter/` and `sipc/intercept_engine/` packages have been deleted.
+**Status:** Superseded and removed. All manoeuvre planning is now pure-Python via `spectre/astro/tactical.py` and `spectre/web/routes/maneuver.py` (23 methods). The `spectre/stk_adapter/` and `spectre/intercept_engine/` packages have been deleted.
 
 ---
 
@@ -125,7 +125,7 @@ See `docs/decision_engine_phases.md` for the Decision Engine phase roadmap (Phas
 
 ### Aspirational items (no design doc yet)
 
-- **AI pattern learning** — feed historical SIPC data into a model to learn operator patterns and anomalous RSO behaviour
+- **AI pattern learning** — feed historical SPECTRE data into a model to learn operator patterns and anomalous RSO behaviour
 - **Cohort comparison in training dashboard** — anonymised team/quartile comparison (requires multi-user tracking design and privacy review)
 - **Daily/weekly challenge mechanics** — rotating challenge scenarios on a schedule
-- **Orekit migration** — replace `sipc/astro/` with Orekit Python bindings for higher-fidelity force models (see P4-B above)
+- **Orekit migration** — replace `spectre/astro/` with Orekit Python bindings for higher-fidelity force models (see P4-B above)

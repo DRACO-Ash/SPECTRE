@@ -1,4 +1,4 @@
-SIPC TODO List — last updated 2026-04-08
+SPECTRE TODO List — last updated 2026-04-08
 ========================================
 
 Items are grouped by priority. Implemented items are marked [DONE].
@@ -6,12 +6,12 @@ Items are grouped by priority. Implemented items are marked [DONE].
 
 IMPLEMENTED
 -----------
-[DONE] Monte Carlo simulation — ManoeuvreHypothesis, RK45+J2+drag, P5/P50/P95 bands (sipc/astro/monte_carlo.py)
-[DONE] Decision Engine Phase 1 — deterministic what-if analysis, Minimax/EV/Maximin selectors (sipc/domain/decision.py)
-[DONE] TLE cadence filtering — cluster/select/quality-flag pipeline (sipc/astro/tle_filter.py)
-[DONE] NOTSO correlation — parser, manoeuvre matching, operator behaviour profile (sipc/astro/notso.py)
-[DONE] Historical photometry analysis — phase function, t-test change detection, manoeuvre correlation (sipc/astro/photometry.py)
-[DONE] Training Mode — 6 levels, 13 scenarios, tutorials, challenges, gamification (sipc/training/)
+[DONE] Monte Carlo simulation — ManoeuvreHypothesis, RK45+J2+drag, P5/P50/P95 bands (spectre/astro/monte_carlo.py)
+[DONE] Decision Engine Phase 1 — deterministic what-if analysis, Minimax/EV/Maximin selectors (spectre/domain/decision.py)
+[DONE] TLE cadence filtering — cluster/select/quality-flag pipeline (spectre/astro/tle_filter.py)
+[DONE] NOTSO correlation — parser, manoeuvre matching, operator behaviour profile (spectre/astro/notso.py)
+[DONE] Historical photometry analysis — phase function, t-test change detection, manoeuvre correlation (spectre/astro/photometry.py)
+[DONE] Training Mode — 6 levels, 13 scenarios, tutorials, challenges, gamification (spectre/training/)
 [DONE] Security hardening — CODEOWNERS, pre-commit, dependabot, bandit, pip-audit, gitleaks, CI rewrite
 [DONE] UDL datatype separation — design decision documented; per-panel filter is open backlog (P1-B below)
 
@@ -19,14 +19,14 @@ IMPLEMENTED
 PRIORITY 1 — Security / Operational Gaps
 -----------------------------------------
 P1-A  CSRF middleware + rate limiting on /udl/* routes
-      - Add CSRF double-submit cookie middleware to sipc/web/app.py
+      - Add CSRF double-submit cookie middleware to spectre/web/app.py
       - Add per-user rate limit on UDL proxy routes (prevent credential hammering)
       - Source: docs/SECURITY.md SSCoP Theme 3 / Cyber Essentials
 
 P1-B  UDL datatype filter (REAL / SIMULATED / EXERCISE / TEST)
       - Add 'datatype' query param selector per panel so operators explicitly choose data mode
       - Prevents accidental exercise data in live ops or vice versa
-      - Extends existing UDL routes (sipc/web/routes/udl.py)
+      - Extends existing UDL routes (spectre/web/routes/udl.py)
 
 P1-C  User management UI (/admin/users)
       - GET /admin/users (list), POST /admin/users (add), POST /admin/users/{id}/delete (remove)
@@ -37,11 +37,11 @@ P1-C  User management UI (/admin/users)
 PRIORITY 2 — High-Value Features
 ----------------------------------
 P2-A  Decision Engine Phase 2 — Monte Carlo integration
-      - Wire sipc/astro/monte_carlo.py into the Decision Engine
+      - Wire spectre/astro/monte_carlo.py into the Decision Engine
       - AdversaryAction gains optional ManoeuvreHypothesis field
       - Outcome matrix cells show P5/P50/P95 bands instead of single estimate
       - See docs/decision_engine_phases.md Phase 2 for full spec
-      - Dependency: sipc/astro/monte_carlo.py [DONE]
+      - Dependency: spectre/astro/monte_carlo.py [DONE]
 
 P2-B  UDL conjunction + observation endpoints
       - GET /udl/conjunction?satno=<N> returning CDM/close-approach warnings
@@ -75,7 +75,7 @@ P3-B  Roll-up reporting dashboard
 P3-C  Decision Engine Phase 5 — NOTSO-informed priors
       - Seed AdversaryAction.probability from historical NOTSO type distribution
       - "Load from NOTSO" button in adversary action rows
-      - Dependency: sipc/data/notso_cache.py [DONE], sipc/astro/notso.py [DONE]
+      - Dependency: spectre/data/notso_cache.py [DONE], spectre/astro/notso.py [DONE]
       - See docs/decision_engine_phases.md Phase 5
 
 
@@ -87,7 +87,7 @@ P4-A  Decision Engine Phase 4 — multi-turn game tree
       - See docs/decision_engine_phases.md Phase 4
 
 P4-B  Orekit migration evaluation
-      - Evaluate replacing sipc/astro/ with Orekit Python bindings
+      - Evaluate replacing spectre/astro/ with Orekit Python bindings
       - Higher-fidelity force models; better manoeuvre planning accuracy
       - Requires licence review, orekit bindings evaluation, full regression suite
       - Should not start until Decision Engine Phases 2-3 are stable
@@ -95,7 +95,7 @@ P4-B  Orekit migration evaluation
 
 ASPIRATIONAL / REQUIRES DESIGN FIRST
 ---------------------------------------
-- AI pattern learning: feed historical SIPC data into a model to learn operator patterns
+- AI pattern learning: feed historical SPECTRE data into a model to learn operator patterns
   and flag anomalous RSO behaviour. No design doc yet.
 - Cohort comparison in training dashboard: anonymised team/quartile comparison.
   Requires multi-user tracking design and privacy review.
@@ -109,15 +109,15 @@ ASPIRATIONAL / REQUIRES DESIGN FIRST
 
 SECURITY TECHNICAL DEBT (from UK Principal Engineer review, 2026-04-08)
 ------------------------------------------------------------------------
-SEC-01  Cookie secure=True flag — tie to non-debug mode in sipc/web/app.py
+SEC-01  Cookie secure=True flag — tie to non-debug mode in spectre/web/app.py
         (httponly and samesite already set; secure flag missing)
-SEC-02  Dynamic SQL f-strings in sipc/web/database.py lines 57/60
+SEC-02  Dynamic SQL f-strings in spectre/web/database.py lines 57/60
         — replace with whitelist-validated ORM expressions
 SEC-03  17 bare 'except Exception:' across route handlers (11 in threat.py)
         — replace with specific exception types
 SEC-04  No lockfile — add uv lock or pip-compile output; CI should install from lock
 SEC-05  hypothesis installed but zero property-based tests exist
-        — add to sipc/astro/propagator.py, lambert.py, maneuvers.py
+        — add to spectre/astro/propagator.py, lambert.py, maneuvers.py
 SEC-06  Test naming convention: migrate to should_<expected>_when_<condition> format
         — apply to new tests; existing tests migrate incrementally
 SEC-07  No Assertion Manifest — implement conftest plugin to record assertions as JSON

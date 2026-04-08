@@ -1,4 +1,4 @@
-"""Unit tests for sipc.astro.monte_carlo — Monte Carlo manoeuvre simulation."""
+"""Unit tests for spectre.astro.monte_carlo — Monte Carlo manoeuvre simulation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from sipc.astro.monte_carlo import (
+from spectre.astro.monte_carlo import (
     MANOEUVRE_ARCHETYPES,
     ManoeuvreHypothesis,
     MonteCarloResult,

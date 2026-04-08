@@ -9,12 +9,12 @@
 .github/                            @Higgy-843
 
 # Authentication and session management
-sipc/web/auth.py                    @Higgy-843
-sipc/web/routes/login.py            @Higgy-843
-sipc/web/database.py                @Higgy-843
+spectre/web/auth.py                    @Higgy-843
+spectre/web/routes/login.py            @Higgy-843
+spectre/web/database.py                @Higgy-843
 
 # Runtime configuration and secrets handling
-sipc/config/                        @Higgy-843
+spectre/config/                        @Higgy-843
 
 # Security policy and documentation
 docs/SECURITY.md                    @Higgy-843

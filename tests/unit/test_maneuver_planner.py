@@ -1,4 +1,4 @@
-"""Unit tests for sipc.domain.maneuver_planner validation."""
+"""Unit tests for spectre.domain.maneuver_planner validation."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sipc.domain.maneuver_planner import ManeuverPlannerError, validate_search_config
-from sipc.domain.models import (
+from spectre.domain.maneuver_planner import ManeuverPlannerError, validate_search_config
+from spectre.domain.models import (
     BurnLocation,
     BurnType,
     ManeuverSearchConfig,

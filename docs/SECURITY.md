@@ -1,6 +1,6 @@
 # Security Policy
 
-> **Project:** Space Intercept Planning Console  
+> **Project:** Space Planning, Evaluation & Counter-Threat Response Engine  
 > **Classification:** UNCLASSIFIED  
 > **Policy Version:** 1.0  
 > **Last Reviewed:** 2026-04-08  

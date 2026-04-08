@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}SPECTRE — Operator Login{% endblock %}
+
+{% block nav_brand %}
+<div>
+  <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Space Planning, Evaluation &amp; Counter-Threat Response Engine</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="login-page">
+  <div class="login-container">
+    <div class="login-logo">
+      <img src="/static/spectre_logo_primary.svg" alt="SPECTRE" />
+    </div>
+    <p class="login-title">Operator Authentication</p>
+    <p class="login-subtitle">SPECTRE Console Access</p>
+    {% if error %}
+    <p class="error-msg" style="text-align:center">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="/login" class="login-form">
+      <label for="username">Username
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus
+               placeholder="Enter operator username"
+               title="Your SPECTRE operator account username" />
+      </label>
+      <label for="password">Password
+        <input id="password" name="password" type="password" autocomplete="current-password" required
+               placeholder="Enter password"
+               title="Your SPECTRE operator account password" />
+      </label>
+      <button type="submit" class="btn-primary" title="Authenticate to access the SPECTRE operator console">Sign In</button>
+    </form>
+    <p class="login-footer">Space Planning, Evaluation &amp; Counter-Threat Response Engine &middot; Orbital Warfare M&amp;S</p>
+  </div>
+</div>
+{% endblock %}

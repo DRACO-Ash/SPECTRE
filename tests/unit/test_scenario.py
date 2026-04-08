@@ -1,13 +1,13 @@
-"""Unit tests for sipc.domain.scenario.ScenarioPlanner."""
+"""Unit tests for spectre.domain.scenario.ScenarioPlanner."""
 
 from __future__ import annotations
 
-from sipc.domain.models import BlueAsset, RedTrack, RunConfig
-from sipc.domain.scenario import ScenarioPlanner
+from spectre.domain.models import BlueAsset, RedTrack, RunConfig
+from spectre.domain.scenario import ScenarioPlanner
 
 
 class TestScenarioPlanner:
-    """Tests for ScenarioPlanner using sipc.astro propagation."""
+    """Tests for ScenarioPlanner using spectre.astro propagation."""
 
     def test_plan_accepts_empty_assets(self, run_config: RunConfig) -> None:
         """plan() should handle empty asset lists gracefully."""

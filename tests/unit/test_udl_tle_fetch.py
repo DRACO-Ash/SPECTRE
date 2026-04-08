@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sipc.web.routes.udl import _parse_tle_epoch
+from spectre.web.routes.udl import _parse_tle_epoch
 
 # ── _parse_tle_epoch ──────────────────────────────────────────────────────────
 
@@ -120,8 +120,8 @@ class TestFetchTleLatestMode:
         record = _make_udl_record(39034)
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state),
+            patch("spectre.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -135,7 +135,7 @@ class TestFetchTleLatestMode:
 
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -155,12 +155,12 @@ class TestFetchTleLatestMode:
         mock_state.udl_username = None
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state),
+            patch("spectre.web.routes.udl.render") as render_mock,
         ):
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -180,12 +180,12 @@ class TestFetchTleEpochMode:
     async def test_epoch_mode_no_scenario_returns_error(self, mock_state) -> None:
         """epoch mode without scenario_start must return a clear error."""
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state),
+            patch("spectre.web.routes.udl.render") as render_mock,
         ):
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -205,8 +205,8 @@ class TestFetchTleEpochMode:
         record = _make_udl_record(39034, epoch_str="26025.79842163")
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
+            patch("spectre.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -220,7 +220,7 @@ class TestFetchTleEpochMode:
 
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -243,8 +243,8 @@ class TestFetchTleEpochMode:
         far_record = _make_udl_record(39034, epoch_str="26001.00000000")
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
+            patch("spectre.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -258,7 +258,7 @@ class TestFetchTleEpochMode:
 
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -278,8 +278,8 @@ class TestFetchTleEpochMode:
         future_record = _make_udl_record(39034, epoch_str="26030.00000000")
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
+            patch("spectre.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -293,7 +293,7 @@ class TestFetchTleEpochMode:
 
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,
@@ -311,8 +311,8 @@ class TestFetchTleEpochMode:
         record = _make_udl_record(39034, epoch_str="26025.00000000")
 
         with (
-            patch("sipc.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
-            patch("sipc.web.routes.udl.render") as render_mock,
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state_with_scenario),
+            patch("spectre.web.routes.udl.render") as render_mock,
             patch("httpx.AsyncClient") as mock_client_cls,
         ):
             mock_resp = MagicMock()
@@ -326,7 +326,7 @@ class TestFetchTleEpochMode:
 
             render_mock.return_value = MagicMock()
 
-            from sipc.web.routes.udl import fetch_tle
+            from spectre.web.routes.udl import fetch_tle
             await fetch_tle(
                 request=_make_request(),
                 satno=39034,

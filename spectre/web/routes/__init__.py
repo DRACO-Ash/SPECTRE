@@ -1,0 +1,1 @@
+"""SPECTRE web routes package."""

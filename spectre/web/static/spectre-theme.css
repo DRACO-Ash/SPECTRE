@@ -1,0 +1,900 @@
+/* ============================================================================
+ * SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine
+ * Design System & Theme v2.0.0
+ * Classification: UNCLASSIFIED
+ *
+ * Typography:  JetBrains Mono (headings, data, code) + IBM Plex Sans (body, UI)
+ * Palette:     Dark-first operational console, light mode for reports/print
+ * Licence:     All referenced fonts are SIL Open Font License
+ * ============================================================================ */
+
+
+/* ---------------------------------------------------------------------------
+ * 1. FONT IMPORTS
+ * Using variable-weight imports for smaller payload.
+ * Self-host in production — these CDN links are for development convenience.
+ * --------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+
+
+/* ---------------------------------------------------------------------------
+ * 2. DESIGN TOKENS — CSS Custom Properties
+ *
+ * All colour, spacing, typography, and elevation values are defined here.
+ * Components reference ONLY these tokens — never raw hex values.
+ *
+ * Naming convention:
+ *   --spectre-{category}-{property}-{variant}
+ *
+ * Categories: color, font, size, space, radius, shadow, border, transition
+ * --------------------------------------------------------------------------- */
+
+:root {
+
+  /* -- Colour: Core Palette ------------------------------------------------ */
+  --spectre-color-console-black:    #0A0C10;
+  --spectre-color-deep-space:       #141820;
+  --spectre-color-orbital-grey:     #1E2430;
+  --spectre-color-panel-grey:       #252B38;
+  --spectre-color-sensor-grey:      #7A8BA6;
+  --spectre-color-ice-white:        #D0D4DC;
+  --spectre-color-pure-white:       #ECEEF2;
+
+  /* -- Colour: Semantic ----------------------------------------------------- */
+  --spectre-color-threat-red:       #E24B4A;
+  --spectre-color-threat-red-dim:   #A32D2D;
+  --spectre-color-threat-red-glow:  rgba(226, 75, 74, 0.15);
+  --spectre-color-threat-red-bg:    rgba(226, 75, 74, 0.08);
+
+  --spectre-color-caution-amber:    #EF9F27;
+  --spectre-color-caution-amber-dim:#BA7517;
+  --spectre-color-caution-amber-bg: rgba(239, 159, 39, 0.08);
+
+  --spectre-color-nominal-green:    #1D9E75;
+  --spectre-color-nominal-green-dim:#0F6E56;
+  --spectre-color-nominal-green-bg: rgba(29, 158, 117, 0.08);
+
+  --spectre-color-intel-blue:       #378ADD;
+  --spectre-color-intel-blue-dim:   #185FA5;
+  --spectre-color-intel-blue-bg:    rgba(55, 138, 221, 0.08);
+
+  /* -- Colour: Surfaces (Dark mode — default) ------------------------------- */
+  --spectre-surface-base:           var(--spectre-color-console-black);
+  --spectre-surface-raised:         var(--spectre-color-deep-space);
+  --spectre-surface-overlay:        var(--spectre-color-orbital-grey);
+  --spectre-surface-panel:          var(--spectre-color-panel-grey);
+  --spectre-surface-input:          rgba(255, 255, 255, 0.04);
+  --spectre-surface-input-hover:    rgba(255, 255, 255, 0.07);
+  --spectre-surface-input-focus:    rgba(255, 255, 255, 0.10);
+
+  /* -- Colour: Text (Dark mode — default) ----------------------------------- */
+  --spectre-text-primary:           var(--spectre-color-ice-white);
+  --spectre-text-secondary:         var(--spectre-color-sensor-grey);
+  --spectre-text-tertiary:          #4B5563;
+  --spectre-text-disabled:          #374151;
+  --spectre-text-inverse:           var(--spectre-color-console-black);
+  --spectre-text-link:              var(--spectre-color-intel-blue);
+
+  /* -- Colour: Borders (Dark mode — default) -------------------------------- */
+  --spectre-border-default:         rgba(122, 139, 166, 0.15);
+  --spectre-border-hover:           rgba(122, 139, 166, 0.30);
+  --spectre-border-active:          rgba(122, 139, 166, 0.45);
+  --spectre-border-focus:           var(--spectre-color-intel-blue);
+  --spectre-border-threat:          var(--spectre-color-threat-red);
+
+  /* -- Typography: Font Families -------------------------------------------- */
+  --spectre-font-display:           'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --spectre-font-mono:              'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --spectre-font-body:              'IBM Plex Sans', 'Source Sans Pro', 'Segoe UI', sans-serif;
+
+  /* -- Typography: Size Scale ----------------------------------------------- */
+  --spectre-size-display:           36px;    /* App title, splash screen           */
+  --spectre-size-h1:                24px;    /* Page headings                      */
+  --spectre-size-h2:                20px;    /* Section / panel headings           */
+  --spectre-size-h3:                16px;    /* Sub-section headings               */
+  --spectre-size-body:              14px;    /* Primary body text                  */
+  --spectre-size-data:              13px;    /* Orbital elements, readouts, tables */
+  --spectre-size-small:             12px;    /* Tooltips, help text                */
+  --spectre-size-caption:           11px;    /* Tags, metadata, classification     */
+  --spectre-size-micro:             10px;    /* Status bar, timestamps             */
+
+  /* -- Typography: Weight --------------------------------------------------- */
+  --spectre-weight-light:           300;
+  --spectre-weight-regular:         400;
+  --spectre-weight-medium:          500;
+  --spectre-weight-semibold:        600;
+  --spectre-weight-bold:            700;
+
+  /* -- Typography: Line Height ---------------------------------------------- */
+  --spectre-leading-tight:          1.2;     /* Headings, data readouts            */
+  --spectre-leading-normal:         1.5;     /* Body text                          */
+  --spectre-leading-relaxed:        1.7;     /* Long-form text, reports            */
+
+  /* -- Typography: Letter Spacing ------------------------------------------- */
+  --spectre-tracking-tight:         -0.01em;
+  --spectre-tracking-normal:        0;
+  --spectre-tracking-wide:          0.05em;
+  --spectre-tracking-wider:         0.1em;
+  --spectre-tracking-widest:        0.25em;  /* Wordmark, classification banners   */
+  --spectre-tracking-display:       0.4em;   /* SPECTRE wordmark only              */
+
+  /* -- Spacing -------------------------------------------------------------- */
+  --spectre-space-1:                4px;
+  --spectre-space-2:                8px;
+  --spectre-space-3:                12px;
+  --spectre-space-4:                16px;
+  --spectre-space-5:                20px;
+  --spectre-space-6:                24px;
+  --spectre-space-8:                32px;
+  --spectre-space-10:               40px;
+  --spectre-space-12:               48px;
+  --spectre-space-16:               64px;
+
+  /* -- Border Radius -------------------------------------------------------- */
+  --spectre-radius-sm:              4px;     /* Small pills, tags                  */
+  --spectre-radius-md:              8px;     /* Buttons, inputs, cards             */
+  --spectre-radius-lg:              12px;    /* Panels, modals                     */
+  --spectre-radius-xl:              16px;    /* Major containers                   */
+  --spectre-radius-full:            9999px;  /* Circular elements                  */
+
+  /* -- Shadows (minimal — operational tool, not a marketing site) ----------- */
+  --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.3);
+  --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.4);
+  --spectre-shadow-lg:              0 4px 16px rgba(0, 0, 0, 0.5);
+  --spectre-shadow-focus:           0 0 0 2px var(--spectre-color-intel-blue);
+  --spectre-shadow-threat:          0 0 0 2px var(--spectre-color-threat-red);
+
+  /* -- Transitions ---------------------------------------------------------- */
+  --spectre-transition-fast:        100ms ease;
+  --spectre-transition-normal:      200ms ease;
+  --spectre-transition-slow:        400ms ease;
+
+  /* -- Z-Index Scale -------------------------------------------------------- */
+  --spectre-z-base:                 0;
+  --spectre-z-raised:               10;
+  --spectre-z-overlay:              100;
+  --spectre-z-modal:                200;
+  --spectre-z-toast:                300;
+  --spectre-z-tooltip:              400;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 3. LIGHT MODE OVERRIDES
+ *
+ * SPECTRE is dark-first. Light mode is for reports, print, and high-ambient
+ * environments. Toggle via class="spectre-light" on the root or body element,
+ * or via the system preference media query.
+ * --------------------------------------------------------------------------- */
+
+.spectre-light,
+[data-spectre-theme="light"] {
+  --spectre-surface-base:           #F3F4F6;
+  --spectre-surface-raised:         #FFFFFF;
+  --spectre-surface-overlay:        #FFFFFF;
+  --spectre-surface-panel:          #E5E7EB;
+  --spectre-surface-input:          #FFFFFF;
+  --spectre-surface-input-hover:    #F9FAFB;
+  --spectre-surface-input-focus:    #FFFFFF;
+
+  --spectre-text-primary:           #111827;
+  --spectre-text-secondary:         #4B5563;
+  --spectre-text-tertiary:          #9CA3AF;
+  --spectre-text-disabled:          #D1D5DB;
+  --spectre-text-inverse:           var(--spectre-color-ice-white);
+
+  --spectre-border-default:         rgba(0, 0, 0, 0.10);
+  --spectre-border-hover:           rgba(0, 0, 0, 0.20);
+  --spectre-border-active:          rgba(0, 0, 0, 0.30);
+
+  --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.06);
+  --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.08);
+  --spectre-shadow-lg:              0 4px 16px rgba(0, 0, 0, 0.10);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-spectre-theme="dark"]):not(.spectre-dark) {
+    --spectre-surface-base:           #F3F4F6;
+    --spectre-surface-raised:         #FFFFFF;
+    --spectre-surface-overlay:        #FFFFFF;
+    --spectre-surface-panel:          #E5E7EB;
+    --spectre-surface-input:          #FFFFFF;
+    --spectre-surface-input-hover:    #F9FAFB;
+    --spectre-surface-input-focus:    #FFFFFF;
+
+    --spectre-text-primary:           #111827;
+    --spectre-text-secondary:         #4B5563;
+    --spectre-text-tertiary:          #9CA3AF;
+    --spectre-text-disabled:          #D1D5DB;
+    --spectre-text-inverse:           var(--spectre-color-ice-white);
+
+    --spectre-border-default:         rgba(0, 0, 0, 0.10);
+    --spectre-border-hover:           rgba(0, 0, 0, 0.20);
+    --spectre-border-active:          rgba(0, 0, 0, 0.30);
+
+    --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.06);
+    --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.08);
+    --spectre-shadow-lg:              0 4px 16px rgba(0, 0, 0, 0.10);
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 4. RESET & BASE
+ * --------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-body);
+  font-weight: var(--spectre-weight-regular);
+  line-height: var(--spectre-leading-normal);
+  color: var(--spectre-text-primary);
+  background-color: var(--spectre-surface-base);
+  letter-spacing: var(--spectre-tracking-normal);
+}
+
+::selection {
+  background: var(--spectre-color-intel-blue);
+  color: var(--spectre-color-pure-white);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 5. TYPOGRAPHY
+ * --------------------------------------------------------------------------- */
+
+/* -- Headings: JetBrains Mono ---------------------------------------------- */
+
+h1, h2, h3, h4, h5, h6,
+.spectre-heading {
+  font-family: var(--spectre-font-display);
+  font-weight: var(--spectre-weight-medium);
+  line-height: var(--spectre-leading-tight);
+  color: var(--spectre-text-primary);
+  letter-spacing: var(--spectre-tracking-wide);
+}
+
+h1, .spectre-h1 { font-size: var(--spectre-size-h1); }
+h2, .spectre-h2 { font-size: var(--spectre-size-h2); }
+h3, .spectre-h3 { font-size: var(--spectre-size-h3); }
+
+/* -- Display: Wordmark & splash -------------------------------------------- */
+
+.spectre-display {
+  font-family: var(--spectre-font-display);
+  font-size: var(--spectre-size-display);
+  font-weight: var(--spectre-weight-bold);
+  letter-spacing: var(--spectre-tracking-display);
+  line-height: 1;
+}
+
+/* -- Body text: IBM Plex Sans ---------------------------------------------- */
+
+p, li, td, th, label,
+.spectre-body {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-body);
+  line-height: var(--spectre-leading-normal);
+  color: var(--spectre-text-primary);
+}
+
+.spectre-body-relaxed {
+  line-height: var(--spectre-leading-relaxed);
+}
+
+/* -- Data readouts: JetBrains Mono ----------------------------------------- */
+
+.spectre-data,
+.spectre-readout,
+code, pre, kbd, samp {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-data);
+  font-weight: var(--spectre-weight-regular);
+  line-height: var(--spectre-leading-tight);
+  letter-spacing: var(--spectre-tracking-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- Small text ------------------------------------------------------------ */
+
+.spectre-small,
+small {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-small);
+  color: var(--spectre-text-secondary);
+}
+
+/* -- Captions & classification markers ------------------------------------- */
+
+.spectre-caption {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-caption);
+  font-weight: var(--spectre-weight-regular);
+  letter-spacing: var(--spectre-tracking-widest);
+  text-transform: uppercase;
+  color: var(--spectre-text-tertiary);
+}
+
+/* -- Micro text: status bar, timestamps ------------------------------------ */
+
+.spectre-micro {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-micro);
+  letter-spacing: var(--spectre-tracking-wider);
+  color: var(--spectre-text-tertiary);
+}
+
+/* -- Links ----------------------------------------------------------------- */
+
+a,
+.spectre-link {
+  color: var(--spectre-text-link);
+  text-decoration: none;
+  transition: color var(--spectre-transition-fast);
+}
+
+a:hover,
+.spectre-link:hover {
+  color: var(--spectre-color-ice-white);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 6. LAYOUT UTILITIES
+ * --------------------------------------------------------------------------- */
+
+.spectre-container {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--spectre-space-6);
+}
+
+.spectre-grid {
+  display: grid;
+  gap: var(--spectre-space-4);
+}
+
+.spectre-grid-2  { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.spectre-grid-3  { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.spectre-grid-4  { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.spectre-flex {
+  display: flex;
+  align-items: center;
+  gap: var(--spectre-space-3);
+}
+
+.spectre-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spectre-space-4);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 7. COMPONENTS
+ * --------------------------------------------------------------------------- */
+
+/* -- Panel (primary container for dashboard sections) ---------------------- */
+
+.spectre-panel {
+  background: var(--spectre-surface-raised);
+  border: 0.5px solid var(--spectre-border-default);
+  border-radius: var(--spectre-radius-lg);
+  padding: var(--spectre-space-5);
+}
+
+.spectre-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spectre-space-4);
+  padding-bottom: var(--spectre-space-3);
+  border-bottom: 0.5px solid var(--spectre-border-default);
+}
+
+.spectre-panel-title {
+  font-family: var(--spectre-font-display);
+  font-size: var(--spectre-size-h3);
+  font-weight: var(--spectre-weight-medium);
+  letter-spacing: var(--spectre-tracking-wide);
+}
+
+/* -- Card (smaller bounded object — readout, metric, record) --------------- */
+
+.spectre-card {
+  background: var(--spectre-surface-overlay);
+  border: 0.5px solid var(--spectre-border-default);
+  border-radius: var(--spectre-radius-md);
+  padding: var(--spectre-space-4);
+  transition: border-color var(--spectre-transition-fast);
+}
+
+.spectre-card:hover {
+  border-color: var(--spectre-border-hover);
+}
+
+.spectre-card-threat {
+  border-color: var(--spectre-color-threat-red-dim);
+  background: var(--spectre-color-threat-red-bg);
+}
+
+.spectre-card-caution {
+  border-color: var(--spectre-color-caution-amber-dim);
+  background: var(--spectre-color-caution-amber-bg);
+}
+
+.spectre-card-nominal {
+  border-color: var(--spectre-color-nominal-green-dim);
+  background: var(--spectre-color-nominal-green-bg);
+}
+
+.spectre-card-info {
+  border-color: var(--spectre-color-intel-blue-dim);
+  background: var(--spectre-color-intel-blue-bg);
+}
+
+/* -- Metric card (single KPI readout) -------------------------------------- */
+
+.spectre-metric {
+  background: var(--spectre-surface-overlay);
+  border-radius: var(--spectre-radius-md);
+  padding: var(--spectre-space-4);
+}
+
+.spectre-metric-label {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-small);
+  color: var(--spectre-text-secondary);
+  margin-bottom: var(--spectre-space-1);
+}
+
+.spectre-metric-value {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-h1);
+  font-weight: var(--spectre-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.spectre-metric-unit {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-data);
+  color: var(--spectre-text-secondary);
+  margin-left: var(--spectre-space-1);
+}
+
+/* -- Buttons --------------------------------------------------------------- */
+
+.spectre-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spectre-space-2);
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-body);
+  font-weight: var(--spectre-weight-medium);
+  line-height: 1;
+  padding: var(--spectre-space-2) var(--spectre-space-4);
+  min-height: 36px;
+  border: 0.5px solid var(--spectre-border-default);
+  border-radius: var(--spectre-radius-md);
+  background: transparent;
+  color: var(--spectre-text-primary);
+  cursor: pointer;
+  transition: all var(--spectre-transition-fast);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.spectre-btn:hover {
+  background: var(--spectre-surface-input-hover);
+  border-color: var(--spectre-border-hover);
+}
+
+.spectre-btn:active {
+  transform: scale(0.98);
+}
+
+.spectre-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--spectre-shadow-focus);
+}
+
+.spectre-btn-primary {
+  background: var(--spectre-color-intel-blue);
+  border-color: var(--spectre-color-intel-blue);
+  color: #FFFFFF;
+}
+
+.spectre-btn-primary:hover {
+  background: var(--spectre-color-intel-blue-dim);
+  border-color: var(--spectre-color-intel-blue-dim);
+}
+
+.spectre-btn-threat {
+  background: var(--spectre-color-threat-red);
+  border-color: var(--spectre-color-threat-red);
+  color: #FFFFFF;
+}
+
+.spectre-btn-threat:hover {
+  background: var(--spectre-color-threat-red-dim);
+  border-color: var(--spectre-color-threat-red-dim);
+}
+
+.spectre-btn-sm {
+  font-size: var(--spectre-size-small);
+  padding: var(--spectre-space-1) var(--spectre-space-3);
+  min-height: 28px;
+}
+
+.spectre-btn-lg {
+  font-size: var(--spectre-size-h3);
+  padding: var(--spectre-space-3) var(--spectre-space-6);
+  min-height: 44px;
+}
+
+.spectre-btn:disabled,
+.spectre-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* -- Form Inputs ----------------------------------------------------------- */
+
+.spectre-input,
+.spectre-select,
+.spectre-textarea {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-body);
+  color: var(--spectre-text-primary);
+  background: var(--spectre-surface-input);
+  border: 0.5px solid var(--spectre-border-default);
+  border-radius: var(--spectre-radius-md);
+  padding: var(--spectre-space-2) var(--spectre-space-3);
+  min-height: 36px;
+  width: 100%;
+  transition: all var(--spectre-transition-fast);
+}
+
+.spectre-input:hover,
+.spectre-select:hover,
+.spectre-textarea:hover {
+  background: var(--spectre-surface-input-hover);
+  border-color: var(--spectre-border-hover);
+}
+
+.spectre-input:focus,
+.spectre-select:focus,
+.spectre-textarea:focus {
+  outline: none;
+  background: var(--spectre-surface-input-focus);
+  border-color: var(--spectre-border-focus);
+  box-shadow: var(--spectre-shadow-focus);
+}
+
+.spectre-input::placeholder {
+  color: var(--spectre-text-tertiary);
+}
+
+/* Monospace input for orbital elements, coordinates, etc. */
+.spectre-input-data {
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.spectre-label {
+  display: block;
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-small);
+  font-weight: var(--spectre-weight-medium);
+  color: var(--spectre-text-secondary);
+  margin-bottom: var(--spectre-space-1);
+}
+
+/* -- Data Table ------------------------------------------------------------ */
+
+.spectre-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.spectre-table th {
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-small);
+  font-weight: var(--spectre-weight-medium);
+  color: var(--spectre-text-secondary);
+  text-align: left;
+  padding: var(--spectre-space-2) var(--spectre-space-3);
+  border-bottom: 0.5px solid var(--spectre-border-active);
+  letter-spacing: var(--spectre-tracking-wide);
+  white-space: nowrap;
+}
+
+.spectre-table td {
+  padding: var(--spectre-space-2) var(--spectre-space-3);
+  border-bottom: 0.5px solid var(--spectre-border-default);
+  color: var(--spectre-text-primary);
+  white-space: nowrap;
+}
+
+.spectre-table tbody tr {
+  transition: background var(--spectre-transition-fast);
+}
+
+.spectre-table tbody tr:hover {
+  background: var(--spectre-surface-input);
+}
+
+/* Row-level status highlighting */
+.spectre-table tr.threat   td { background: var(--spectre-color-threat-red-bg); }
+.spectre-table tr.caution  td { background: var(--spectre-color-caution-amber-bg); }
+.spectre-table tr.nominal  td { background: var(--spectre-color-nominal-green-bg); }
+.spectre-table tr.info     td { background: var(--spectre-color-intel-blue-bg); }
+
+/* -- Badge / Tag ----------------------------------------------------------- */
+
+.spectre-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spectre-space-1);
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-caption);
+  font-weight: var(--spectre-weight-medium);
+  letter-spacing: var(--spectre-tracking-wider);
+  text-transform: uppercase;
+  padding: 2px var(--spectre-space-2);
+  border-radius: var(--spectre-radius-sm);
+  white-space: nowrap;
+}
+
+.spectre-badge-threat {
+  background: var(--spectre-color-threat-red-bg);
+  color: var(--spectre-color-threat-red);
+  border: 0.5px solid rgba(226, 75, 74, 0.3);
+}
+
+.spectre-badge-caution {
+  background: var(--spectre-color-caution-amber-bg);
+  color: var(--spectre-color-caution-amber);
+  border: 0.5px solid rgba(239, 159, 39, 0.3);
+}
+
+.spectre-badge-nominal {
+  background: var(--spectre-color-nominal-green-bg);
+  color: var(--spectre-color-nominal-green);
+  border: 0.5px solid rgba(29, 158, 117, 0.3);
+}
+
+.spectre-badge-info {
+  background: var(--spectre-color-intel-blue-bg);
+  color: var(--spectre-color-intel-blue);
+  border: 0.5px solid rgba(55, 138, 221, 0.3);
+}
+
+.spectre-badge-neutral {
+  background: rgba(122, 139, 166, 0.08);
+  color: var(--spectre-color-sensor-grey);
+  border: 0.5px solid rgba(122, 139, 166, 0.2);
+}
+
+/* -- Classification Banner ------------------------------------------------- */
+
+.spectre-classification-banner {
+  position: sticky;
+  top: 0;
+  z-index: var(--spectre-z-toast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spectre-space-1) 0;
+  font-family: var(--spectre-font-mono);
+  font-size: var(--spectre-size-caption);
+  font-weight: var(--spectre-weight-bold);
+  letter-spacing: var(--spectre-tracking-widest);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.spectre-classification-banner.unclassified {
+  background: var(--spectre-color-nominal-green);
+  color: #FFFFFF;
+}
+
+.spectre-classification-banner.official {
+  background: var(--spectre-color-intel-blue);
+  color: #FFFFFF;
+}
+
+.spectre-classification-banner.secret {
+  background: var(--spectre-color-threat-red);
+  color: #FFFFFF;
+}
+
+/* -- Tooltip --------------------------------------------------------------- */
+
+.spectre-tooltip {
+  position: relative;
+}
+
+.spectre-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--spectre-font-body);
+  font-size: var(--spectre-size-small);
+  color: var(--spectre-text-primary);
+  background: var(--spectre-surface-panel);
+  border: 0.5px solid var(--spectre-border-default);
+  border-radius: var(--spectre-radius-sm);
+  padding: var(--spectre-space-1) var(--spectre-space-2);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--spectre-transition-fast);
+  z-index: var(--spectre-z-tooltip);
+}
+
+.spectre-tooltip:hover::after {
+  opacity: 1;
+}
+
+/* -- Divider --------------------------------------------------------------- */
+
+.spectre-divider {
+  height: 0;
+  border: 0;
+  border-top: 0.5px solid var(--spectre-border-default);
+  margin: var(--spectre-space-4) 0;
+}
+
+/* -- Scrollbar (dark mode) ------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--spectre-border-default);
+  border-radius: var(--spectre-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--spectre-border-hover);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 8. STATUS INDICATOR UTILITIES
+ *
+ * Use these on any element to apply consistent semantic colouring.
+ * Prefer badges for labels, these classes for text or icon colouring.
+ * --------------------------------------------------------------------------- */
+
+.spectre-threat   { color: var(--spectre-color-threat-red);    }
+.spectre-caution  { color: var(--spectre-color-caution-amber); }
+.spectre-nominal  { color: var(--spectre-color-nominal-green); }
+.spectre-info     { color: var(--spectre-color-intel-blue);    }
+.spectre-muted    { color: var(--spectre-text-secondary);      }
+.spectre-disabled { color: var(--spectre-text-disabled);       }
+
+/* Pulsing dot for live status indicators */
+.spectre-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--spectre-radius-full);
+  background: currentColor;
+}
+
+.spectre-status-dot.live {
+  animation: spectre-pulse 2s ease-in-out infinite;
+}
+
+@keyframes spectre-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 9. ANIMATION UTILITIES
+ *
+ * All animations respect prefers-reduced-motion.
+ * --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.spectre-fade-in {
+  animation: spectre-fade-in 400ms ease-out both;
+}
+
+@keyframes spectre-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.spectre-slide-in-left {
+  animation: spectre-slide-left 300ms ease-out both;
+}
+
+@keyframes spectre-slide-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 10. PRINT STYLES
+ *
+ * Forces light mode, hides interactive chrome, and optimises for paper.
+ * --------------------------------------------------------------------------- */
+
+@media print {
+  :root {
+    --spectre-surface-base:     #FFFFFF;
+    --spectre-surface-raised:   #FFFFFF;
+    --spectre-surface-overlay:  #F9FAFB;
+    --spectre-text-primary:     #000000;
+    --spectre-text-secondary:   #4B5563;
+    --spectre-border-default:   rgba(0, 0, 0, 0.15);
+  }
+
+  body {
+    background: #FFFFFF;
+    color: #000000;
+    font-size: 11pt;
+  }
+
+  .spectre-btn,
+  .spectre-tooltip::after,
+  .spectre-status-dot.live {
+    animation: none !important;
+  }
+
+  .spectre-panel,
+  .spectre-card {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 0.5pt solid #D1D5DB;
+  }
+}

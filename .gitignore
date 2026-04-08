@@ -107,7 +107,7 @@ HRR_List.json
 
 # Reference documents (PDFs, Word docs) — exclude binaries but track Markdown/text docs
 docs/*
-!docs/SIPC_Operator_Guide.docx
+!docs/SPECTRE_Operator_Guide.docx
 !docs/*.md
 !docs/*.txt
 !docs/*.py

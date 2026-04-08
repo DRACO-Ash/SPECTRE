@@ -1,4 +1,4 @@
-"""Unit tests for sipc.astro.cw_geometry — CW relative motion geometry.
+"""Unit tests for spectre.astro.cw_geometry — CW relative motion geometry.
 
 Coverage
 --------
@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timezone
 import numpy as np
 import pytest
 
-from sipc.astro.cw_geometry import (
+from spectre.astro.cw_geometry import (
     CWState,
     RelativeGeometryError,
     TrajectoryPoint,
@@ -370,7 +370,7 @@ class TestComputeRelativeGeometry:
         return compute_relative_geometry(**defaults)
 
     def test_returns_relative_geometry(self):
-        from sipc.astro.cw_geometry import RelativeGeometry
+        from spectre.astro.cw_geometry import RelativeGeometry
         result = self._call()
         assert isinstance(result, RelativeGeometry)
 
@@ -518,12 +518,12 @@ class TestComputeRelativeGeometry:
 
 class TestDataIsolation:
     def test_no_session_state_import(self):
-        import sipc.astro.cw_geometry as m
+        import spectre.astro.cw_geometry as m
         assert not hasattr(m, "SessionState")
         assert not hasattr(m, "get_session_state")
 
     def test_no_web_imports(self):
-        import sipc.astro.cw_geometry as m
+        import spectre.astro.cw_geometry as m
         # Should not import FastAPI or any web layer
         assert not hasattr(m, "APIRouter")
         assert not hasattr(m, "HTMLResponse")

@@ -28,9 +28,9 @@ jobs:
       - name: Install linting tools
         run: pip install ruff mypy
       - name: ruff — style and import checks
-        run: ruff check sipc/ tests/
+        run: ruff check spectre/ tests/
       - name: mypy — strict type checking
-        run: mypy sipc/ --ignore-missing-imports
+        run: mypy spectre/ --ignore-missing-imports
 
   # ── Unit + integration tests ─────────────────────────────────────────────────
   test:
@@ -50,7 +50,7 @@ jobs:
             pytest pytest-asyncio "anyio[trio]" pytest-cov hypothesis
           pip install -e . --no-deps
       - name: Run tests with coverage
-        run: pytest tests/ -q --cov=sipc --cov-report=term-missing --cov-fail-under=70
+        run: pytest tests/ -q --cov=spectre --cov-report=term-missing --cov-fail-under=70
 
   # ── SAST — bandit ────────────────────────────────────────────────────────────
   sast:
@@ -65,7 +65,7 @@ jobs:
         run: pip install "bandit[toml]"
       - name: bandit — medium+ severity gate
         # -ll = medium severity and above; fails CI on any medium/high finding.
-        run: bandit -r sipc/ -ll -c pyproject.toml -q
+        run: bandit -r spectre/ -ll -c pyproject.toml -q
 
   # ── SCA — dependency vulnerability audit ─────────────────────────────────────
   sca:

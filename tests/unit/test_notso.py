@@ -1,4 +1,4 @@
-"""Unit tests for sipc.astro.notso — NOTSO parsing, correlation, behaviour profile."""
+"""Unit tests for spectre.astro.notso — NOTSO parsing, correlation, behaviour profile."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sipc.astro.notso import (
+from spectre.astro.notso import (
     NOTSOType,
     NOTSORecord,
     NOTSOManoeuvreCorrelation,

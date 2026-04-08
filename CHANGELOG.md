@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to SIPC will be documented in this file.
+All notable changes to SPECTRE will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,33 +11,33 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Training Mode** (`sipc/training/`, `sipc/web/routes/training.py`, `sipc/web/templates/training.html`)
+- **Training Mode** (`spectre/training/`, `spectre/web/routes/training.py`, `spectre/web/templates/training.html`)
   - Full gamification system: 6 proficiency levels (Cadet → Expert), XP/points engine, five skill axes
   - 13 structured training scenarios covering all 6 levels; each defines Blue+Red assets (synthetic TLEs), objectives, tool workflow, and answer specification
   - Timed challenge scenarios that unlock at Level 4+
   - Step-by-step tutorials per skill axis with XP awards on completion
-  - Live SIPC console embed via iframe (lazy-loaded) — operators use real tools against scenario data inside the training session
+  - Live SPECTRE console embed via iframe (lazy-loaded) — operators use real tools against scenario data inside the training session
   - DB-persisted training sessions and progress (`TrainingSession`, `TrainingProgress`, `TrainingChallengeResult` ORM models)
   - Training mode banner with sticky amber warning strip; persistent "Return to Operations" control
   - Training session metrics: scenarios passed, tutorials completed, challenges passed, time in training, total points
   - Recommended next step widget based on current level and skill-axis gaps
   - All 13 scenarios designed for tool-only use (Assets panel + Intercept Engine + Decision Engine); no UDL dependency in training
 
-- **Decision Engine Phase 1** (`sipc/domain/decision.py`, `sipc/web/routes/decision.py`)
+- **Decision Engine Phase 1** (`spectre/domain/decision.py`, `spectre/web/routes/decision.py`)
   - Deterministic what-if analysis: define a grid of N adversary actions × M friendly responses
   - Outcome matrix: each cell computes `composite_score`, `custody_maintained`, `custody_gap_h`, `closest_approach_km`, `time_to_intercept_h`, `delta_v_cost_km_s`
   - Three selector strategies: Minimax (minimise worst-case), Expected Value (probability-weighted), Maximin (maximise best-case)
   - Robust recommendation banner + per-adversary ranked response cards
   - `GET /plan/decision/panel` scenario builder; `POST /plan/decision/evaluate` evaluator
 
-- **Pattern of Life — NOTSO Correlation** (`sipc/astro/notso.py`, `sipc/web/routes/pol.py`)
+- **Pattern of Life — NOTSO Correlation** (`spectre/astro/notso.py`, `spectre/web/routes/pol.py`)
   - `NOTSORecord` parser for USSPACECOM free-text and structured message formats
   - `correlate_notsos_with_manoeuvres()`: temporal matching of NOTSO windows against detected manoeuvre epochs
   - `OperatorBehaviourProfile`: aggregated statistics on notification lead time, ΔV magnitude accuracy, phantom NOTSO rate
   - `/pol/notso-panel` and `/pol/notso-correlate` routes; graceful fallback when UDL has no NOTSO endpoint
   - Results partial: three-column matched/notso-only/manoeuvre-only table + behaviour profile card
 
-- **Pattern of Life — Monte Carlo Simulation** (`sipc/astro/monte_carlo.py`, `sipc/web/routes/pol.py`)
+- **Pattern of Life — Monte Carlo Simulation** (`spectre/astro/monte_carlo.py`, `spectre/web/routes/pol.py`)
   - `ManoeuvreHypothesis` and `ManoeuvreType` dataclasses; `MANOEUVRE_ARCHETYPES` dict (park, shadow, inspection, rendezvous, evasion)
   - Vectorised NumPy sample generation: Gaussian/uniform ΔV magnitude, Rayleigh pointing cone, Gaussian timing, Gaussian B*
   - RIC→ECI rotation via pre-manoeuvre state unit vectors
@@ -46,7 +46,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `/pol/monte-carlo` route; per-manoeuvre `[Monte Carlo ▶]` button in PoL results; regime probability bar chart and percentile table
   - Added `scipy>=1.11` dependency
 
-- **Pattern of Life — Photometry Analysis** (`sipc/astro/photometry.py`, `sipc/web/routes/pol.py`)
+- **Pattern of Life — Photometry Analysis** (`spectre/astro/photometry.py`, `spectre/web/routes/pol.py`)
   - `PhotometryObservation` dataclass with observer geometry fields (airmass, elevation, range, solar phase, lunar phase)
   - Geometric corrections: range normalisation (reduced magnitude), Rozenberg airmass, lunar quality flagging
   - `fit_baseline()`: quadratic phase function via `scipy.optimize.curve_fit` + iterative sigma-clipping
@@ -54,29 +54,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Manoeuvre correlation: for each detected brightness change, search for manoeuvres within ±48 h
   - `/pol/photometry-panel` and `/pol/photometry-analyse` routes; "Photometry" tab in PoL results
 
-- **Pattern of Life — TLE Cadence Filtering** (`sipc/astro/tle_filter.py`)
+- **Pattern of Life — TLE Cadence Filtering** (`spectre/astro/tle_filter.py`)
   - `TLECluster` dataclass with `span_seconds` property
   - `cluster_tles()`: groups sorted `TLERecord` list by regime-aware minimum spacing threshold
   - `select_representative()`: best TLE per cluster — lowest RMS residual → latest epoch → highest element set number
   - `quality_flag_sequence()`: staleness, B* discontinuity, and element-jump flags across the representative sequence
   - `filter_tle_history()`: top-level pipeline returning `(representatives, flags)` tuple
   - Cadence-filter checkbox in PoL panel; quality flags summary in PoL results
-  - `TLE_FILTER` thresholds added to `sipc/config/constants.py`
+  - `TLE_FILTER` thresholds added to `spectre/config/constants.py`
 
-- **CW Geometry Module** (`sipc/astro/cw_geometry.py`)
+- **CW Geometry Module** (`spectre/astro/cw_geometry.py`)
   - Clohessy-Wiltshire equations for Hill-frame relative motion
   - Relative state vector computation; NMC (natural motion circumnavigation) safety ellipse parameters
 
-- **CW Geometry Route** (`sipc/web/routes/geometry.py`)
+- **CW Geometry Route** (`spectre/web/routes/geometry.py`)
   - `GET /plan/geometry/panel` — Hill-frame visualiser
   - `POST /plan/geometry/intercept` — compute Hill-frame trajectory for given (blue, red, response) parameters
 
-- **NOTSO Cache** (`sipc/data/notso_cache.py`)
+- **NOTSO Cache** (`spectre/data/notso_cache.py`)
   - Persistent NOTSO record storage keyed by NORAD ID; retrieval interface for Decision Engine Phase 5 priors (planned)
 
 - **Security hardening**
   - `.pre-commit-config.yaml`: `gitleaks` v8.18.4, `ruff`, `bandit[toml]`, `mypy`, standard hooks (large files, YAML/TOML validation, no-commit-to-branch master)
-  - `CODEOWNERS`: `@Higgy-843` owns `.github/`, `sipc/web/auth.py`, `sipc/web/routes/login.py`, `sipc/web/database.py`, `sipc/config/`, `docs/SECURITY.md`
+  - `CODEOWNERS`: `@Higgy-843` owns `.github/`, `spectre/web/auth.py`, `spectre/web/routes/login.py`, `spectre/web/database.py`, `spectre/config/`, `docs/SECURITY.md`
   - `.github/dependabot.yml`: weekly pip + GitHub Actions dependency updates; Europe/London schedule; labels: `dependencies`, `security`, `ci`
   - `pyproject.toml`: `[tool.bandit]` configuration section added; `hypothesis>=6.0`, `bandit[toml]>=1.7`, `pip-audit>=2.7` added to dev extras
   - `docs/SECURITY.md`: full UK NCSC / SSCoP aligned security policy (classification, incident response, secure development, supply chain)
@@ -105,7 +105,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `pyproject.toml`: added `numpy>=2.0`, `python-dotenv>=1.0`, `scipy>=1.11`, `scikit-learn>=1.4` to runtime dependencies (previously undeclared but used); removed `pywin32` (no imports in codebase)
 - All 13 training scenarios rebuilt — removed all PoL/NOTSO/Monte Carlo/HRR auto-fetch references; scenarios now require only Assets panel, Intercept Engine, and Decision Engine so they are usable without a live UDL connection
-- `sipc/training/config/scenarios.yaml`: added comment block documenting tool capabilities and design rules for future scenario authors
+- `spectre/training/config/scenarios.yaml`: added comment block documenting tool capabilities and design rules for future scenario authors
 - Training mode `tpanel-console` iframe: lazy-loaded on first tab activation; `training-main` switches to `position:relative` / `overflow:hidden` when console tab is active so the iframe fills the panel correctly
 
 ### Fixed
@@ -120,7 +120,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **GCAT Browser** (`sipc/web/routes/gcat.py`)
+- **GCAT Browser** (`spectre/web/routes/gcat.py`)
   - Fully interactive browser for the General Catalog of Artificial Space Objects (J. McDowell, planet4589.org/space/gcat; CC-BY)
   - 28 TSV datasets across four categories: Derived, Objects, Payloads, Supporting
   - `GET /gcat/panel` returns the panel skeleton instantly (< 50 ms, no network I/O)
@@ -132,12 +132,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Fixed loading overlay always-visible bug: `.gcat-load-overlay` defaulted to `display: flex` — corrected to `display: none` with `.gcat-load-overlay.htmx-request { display: flex }`
   - Added `pandas>=2.0` dependency
 
-- **Pattern of Life panel** (`sipc/astro/pattern_of_life.py`, `sipc/web/routes/pol.py`)
+- **Pattern of Life panel** (`spectre/astro/pattern_of_life.py`, `spectre/web/routes/pol.py`)
   - Historical TLE sequence analysis: period tracking, manoeuvre detection, activity classification, and behavioural baseline
   - Hero tab lazy-loaded via HTMX; Chart.js zoom/pan via `hammer.min.js` + `chartjs-plugin-zoom.min.js`
   - Dual-fetch strategy: `/elset/current` for latest TLE + `/elset` with epoch for history
 
-- **Threat Sweep redesign** (`sipc/web/routes/threat.py`)
+- **Threat Sweep redesign** (`spectre/web/routes/threat.py`)
   - HRR group dropdown (Blue/Red HRR by rank 0–5) with TLE pre-fetch on selection
   - Batch Hohmann evaluation across 5 orbital epochs; top 5 auto-refined with Lambert for VNB components
   - TLE clustering via DBSCAN before sweep run; elevated-uncertainty flag (▲) for multi-cluster objects
@@ -148,14 +148,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Blue HRR and Red HRR tables with one-click **→ Blue** / **→ Red** buttons
   - Button replaced by OOB confirmation badge on success
 
-- **Intercept engine expansion** (`sipc/web/routes/maneuver.py`, `sipc/astro/tactical.py`)
+- **Intercept engine expansion** (`spectre/web/routes/maneuver.py`, `spectre/astro/tactical.py`)
   - 23 total methods across Classical, Tactical, Advanced Analysis, and Decision Support categories
   - All-intercepts comparison result partial
   - Trade-space ΔV vs transfer-time scatter plot with zoom/pan
 
 ### Changed
 
-- Architecture completely migrated from STK-dependent hexagonal adapter pattern to pure-Python astrodynamics; `sipc/stk_adapter/` and `sipc/intercept_engine/` packages removed; `sipc/astro/` package now provides all orbital mechanics
+- Architecture completely migrated from STK-dependent hexagonal adapter pattern to pure-Python astrodynamics; `spectre/stk_adapter/` and `spectre/intercept_engine/` packages removed; `spectre/astro/` package now provides all orbital mechanics
 - `docs/architecture.md` rewritten to reflect current pure-Python stack
 
 ---

@@ -1,0 +1,217 @@
+{# Active scenario UI — shown while operator is working through objectives #}
+{# Context: scenario (TrainingScenario), result_id (int), attempt_num (int), scored (bool) #}
+
+<div style="background:var(--panel-bg); border:2px solid rgba(245,158,11,0.5); border-radius:6px;
+            padding:0.75rem 0.9rem" id="active-scenario">
+
+  {# ── Header row ───────────────────────────────────────────────────────────── #}
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem">
+    <div style="display:flex; align-items:baseline; gap:0.5rem; flex-wrap:wrap">
+      <span style="font-size:0.62rem; font-weight:700; letter-spacing:0.07em; text-transform:uppercase;
+                   color:{% if scored %}#f59e0b{% else %}#9ca3af{% endif %}">
+        {% if scored %}&#9654; Active{% else %}&#128269; Exploring{% endif %}
+      </span>
+      <span style="font-size:0.72rem; font-weight:800; color:var(--text-primary)">
+        {{ scenario.title }}
+      </span>
+      {% if not scored %}
+      <span style="font-size:0.58rem; font-weight:600; color:#9ca3af;
+                   background:rgba(107,114,128,0.12); border:1px solid rgba(107,114,128,0.3);
+                   border-radius:3px; padding:0.1rem 0.35rem">
+        No points awarded in exploration mode
+      </span>
+      {% endif %}
+    </div>
+    {% if scenario.time_limit_minutes %}
+    <div style="font-size:0.68rem; font-weight:800; color:#ef4444; white-space:nowrap"
+         id="scenario-timer" data-limit="{{ scenario.time_limit_minutes * 60 }}">
+      &#9201; <span id="timer-display">{{ scenario.time_limit_minutes }}:00</span>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Scenario briefing ────────────────────────────────────────────────────── #}
+  <div style="background:rgba(59,139,235,0.06); border:1px solid rgba(59,139,235,0.2);
+              border-radius:4px; padding:0.5rem 0.65rem; margin-bottom:0.5rem">
+    <div style="font-size:0.58rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase;
+                letter-spacing:0.07em; margin-bottom:0.2rem">Scenario Briefing</div>
+    <div style="font-size:0.65rem; color:var(--text-dim); line-height:1.6">{{ scenario.briefing }}</div>
+  </div>
+
+  {# ── Tool workflow — scenario-specific step-by-step guide ─────────────────── #}
+  <div style="background:rgba(34,197,94,0.05); border:1px solid rgba(34,197,94,0.25);
+              border-radius:4px; padding:0.5rem 0.65rem; margin-bottom:0.6rem">
+    <div style="font-size:0.58rem; font-weight:700; color:#22c55e; text-transform:uppercase;
+                letter-spacing:0.07em; margin-bottom:0.3rem">How to Complete This Scenario</div>
+    <div style="font-size:0.63rem; color:var(--text-dim); line-height:1.7">
+      {% if scenario.tool_workflow %}
+        {{ scenario.tool_workflow | replace('\n', '<br>') | safe }}
+      {% else %}
+        Work through the objectives below using the SPECTRE panels.
+        Tick each objective once you have completed the required action and are confident in your answer.
+        Submit when all objectives are done.
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Objective checklist ──────────────────────────────────────────────────── #}
+  <form hx-post="/training/scenario/{{ scenario.id }}/submit"
+        hx-target="#scenario-detail"
+        hx-swap="innerHTML"
+        id="scenario-submit-form">
+    <input type="hidden" name="result_id" value="{{ result_id }}">
+    <input type="hidden" name="time_taken_minutes" id="time-taken-input" value="0">
+    <input type="hidden" name="objectives_completed" id="objectives-json" value="[]">
+
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.06em; margin-bottom:0.4rem; display:flex; align-items:center; gap:0.4rem">
+      <span>Objectives</span>
+      <span style="font-weight:400; text-transform:none; letter-spacing:0">
+        — {{ scenario.scoring.passing_score }} pts to pass · {{ scenario.scoring.optimal_score }} pts optimal
+      </span>
+    </div>
+
+    {% for obj in scenario.objectives %}
+    {% set is_verdict = obj.answer in ["compliant", "partially_compliant", "non_compliant"] %}
+    {% set has_answer = obj.answer is not none and obj.answer != "" and not is_verdict %}
+
+    {# Axis colour lookup #}
+    {% set axis_colour = {
+      "situational_awareness": "#3b8beb",
+      "manoeuvre_planning":    "#22c55e",
+      "decision_quality":      "#f59e0b",
+      "operational_tempo":     "#ef4444",
+      "efficiency":            "#a855f7"
+    }.get(obj.skill_axis, "#6b7280") %}
+
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:5px;
+                margin-bottom:0.4rem; overflow:hidden">
+
+      {# Coloured left stripe + main content row #}
+      <div style="display:flex; align-items:stretch">
+
+        {# Left axis stripe #}
+        <div style="width:3px; flex-shrink:0; background:{{ axis_colour }}; border-radius:5px 0 0 5px"></div>
+
+        {# Checkbox + content #}
+        <div style="flex:1; padding:0.4rem 0.55rem 0.4rem 0.5rem">
+          <label style="display:flex; align-items:flex-start; gap:0.55rem; cursor:pointer; width:100%">
+            <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
+                   style="margin-top:0.15rem; accent-color:#f59e0b; flex-shrink:0; width:0.85rem; height:0.85rem"
+                   onchange="updateObjectivesJson()">
+            <div style="flex:1; min-width:0">
+              <div style="font-size:0.67rem; font-weight:600; color:var(--text-primary); line-height:1.4">
+                {{ obj.description }}
+              </div>
+              <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.15rem; flex-wrap:wrap">
+                <span style="font-size:0.58rem; font-weight:700; color:{{ axis_colour }}">
+                  +{{ obj.points }} pts
+                </span>
+                <span style="font-size:0.57rem; color:var(--text-dim)">
+                  {{ obj.skill_axis | replace('_',' ') | title }}
+                </span>
+                {% if obj.unit %}
+                <span style="font-size:0.56rem; color:var(--text-dim); font-style:italic">
+                  answer in {{ obj.unit }}
+                </span>
+                {% endif %}
+              </div>
+            </div>
+          </label>
+
+          {# ── Answer input — only for objectives that require one ── #}
+          {% if is_verdict %}
+          <div style="margin-top:0.3rem; margin-left:1.4rem; display:flex; gap:0.75rem; flex-wrap:wrap">
+            {% for v_val, v_label, v_colour in [
+              ("compliant",           "Compliant",           "#22c55e"),
+              ("partially_compliant", "Partially Compliant", "#f59e0b"),
+              ("non_compliant",       "Non-Compliant",       "#ef4444")
+            ] %}
+            <label style="display:flex; align-items:center; gap:0.25rem; cursor:pointer; font-size:0.6rem;
+                          font-weight:700; color:{{ v_colour }}">
+              <input type="radio" name="answer_{{ obj.id }}" value="{{ v_val }}"
+                     style="accent-color:{{ v_colour }}">
+              {{ v_label }}
+            </label>
+            {% endfor %}
+          </div>
+
+          {% elif has_answer %}
+          <div style="margin-top:0.3rem; margin-left:1.4rem; display:flex; align-items:center; gap:0.4rem">
+            <span style="font-size:0.58rem; color:var(--text-dim)">Your answer:</span>
+            <input type="text" name="answer_{{ obj.id }}"
+                   placeholder="{% if obj.unit %}value in {{ obj.unit }}{% else %}enter answer{% endif %}"
+                   style="background:var(--panel-bg); border:1px solid var(--border); border-radius:3px;
+                          padding:0.2rem 0.45rem; font-size:0.62rem; color:var(--text-primary);
+                          width:10rem; font-family:var(--font-mono)">
+            {% if obj.tolerance %}
+            <span style="font-size:0.56rem; color:var(--text-dim)">±{{ obj.tolerance }}</span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+
+    {# ── Action buttons ───────────────────────────────────────────────────────── #}
+    <div style="margin-top:0.6rem; display:flex; gap:0.5rem; align-items:center">
+      <button type="submit" class="btn-primary"
+              style="flex:1; font-size:0.7rem; font-weight:700; padding:0.45rem 0">
+        {% if scored %}Submit &amp; Score{% else %}Finish Exploration{% endif %}
+      </button>
+      <form hx-post="/training/scenario/{{ scenario.id }}/reset"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML"
+            style="display:inline">
+        <input type="hidden" name="result_id" value="{{ result_id }}">
+        <button type="submit" class="btn-secondary" style="font-size:0.68rem"
+                title="Return to briefing — this attempt is cancelled with no side effects">
+          &#8635; Reset
+        </button>
+      </form>
+      <button type="button" class="btn-secondary"
+              style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
+              onclick="document.getElementById('scenario-detail').innerHTML=''"
+              title="Abandon this attempt">
+        Abandon
+      </button>
+    </div>
+
+  </form>
+
+</div>
+
+<script>
+(function() {
+  {% if scenario.time_limit_minutes %}
+  var remaining = {{ scenario.time_limit_minutes * 60 }};
+  var startTime = Date.now();
+  var timerInterval = setInterval(function() {
+    remaining--;
+    if (remaining < 0) {
+      clearInterval(timerInterval);
+      document.getElementById('timer-display').textContent = '0:00';
+      return;
+    }
+    var m = Math.floor(remaining / 60);
+    var s = remaining % 60;
+    document.getElementById('timer-display').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+    if (remaining < 120) document.getElementById('timer-display').style.color = '#ef4444';
+  }, 1000);
+  document.getElementById('scenario-submit-form').addEventListener('submit', function() {
+    var elapsed = (Date.now() - startTime) / 60000;
+    document.getElementById('time-taken-input').value = elapsed.toFixed(2);
+    clearInterval(timerInterval);
+  });
+  {% endif %}
+
+  window.updateObjectivesJson = function() {
+    var checked = Array.from(
+      document.querySelectorAll('#scenario-submit-form input[type=checkbox]:checked')
+    ).map(function(cb) { return cb.value; });
+    document.getElementById('objectives-json').value = JSON.stringify(checked);
+  };
+})();
+</script>
