@@ -7,9 +7,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote_plus
-
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

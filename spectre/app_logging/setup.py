@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 import structlog
-from typing import cast
 
 
 def configure_logging(run_id: str, log_level: str = "INFO", log_dir: str = "logs") -> None:

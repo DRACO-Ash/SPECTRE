@@ -30,7 +30,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
