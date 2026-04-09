@@ -35,7 +35,8 @@ def _serializer() -> URLSafeTimedSerializer:
 
 def hash_password(plaintext: str) -> str:
     """Return the bcrypt hash of *plaintext*."""
-    return bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt()).decode()
+    hashed: bytes = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt())
+    return hashed.decode()
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
