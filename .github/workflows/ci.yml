@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install linting tools
-        run: pip install ruff mypy
+        run: pip install ruff mypy types-PyYAML types-bcrypt sqlalchemy[mypy] fastapi
       - name: ruff — style and import checks
         run: ruff check spectre/ tests/
       - name: mypy — strict type checking

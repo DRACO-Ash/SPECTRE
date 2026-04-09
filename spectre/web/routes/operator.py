@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
@@ -303,9 +303,9 @@ async def set_scenario_time(
 async def log_stream(
     request: Request,
     current_user: User = Depends(require_login),
-) -> HTMLResponse:
+) -> StreamingResponse:
     """Server-Sent Events endpoint streaming per-session log entries."""
-    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
 
     state = get_session_state(current_user.username)
 
@@ -321,7 +321,7 @@ async def log_stream(
             except TimeoutError:
                 yield ": heartbeat\n\n"
 
-    return StreamingResponse(  # type: ignore[return-value]
+    return StreamingResponse(
         _event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

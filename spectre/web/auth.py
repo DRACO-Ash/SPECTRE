@@ -40,7 +40,7 @@ def hash_password(plaintext: str) -> str:
 
 def verify_password(plaintext: str, hashed: str) -> bool:
     """Return ``True`` if *plaintext* matches *hashed*."""
-    return bcrypt.checkpw(plaintext.encode(), hashed.encode())
+    return bool(bcrypt.checkpw(plaintext.encode(), hashed.encode()))
 
 
 # ── Cookie helpers ────────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ async def require_login(
         )
 
     result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user: User | None = result.scalar_one_or_none()
     if user is None:
         logger.warning("Session for unknown user: %s", username)
         raise HTTPException(

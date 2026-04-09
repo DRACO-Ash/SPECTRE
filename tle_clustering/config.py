@@ -18,6 +18,7 @@ Override inclination tolerance only::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -71,7 +72,7 @@ class ClusteringConfig:
     dbscan_metric: str = "chebyshev"
 
     @classmethod
-    def from_constants(cls, config_dict: dict) -> ClusteringConfig:
+    def from_constants(cls, config_dict: dict[str, Any]) -> ClusteringConfig:
         """Construct a :class:`ClusteringConfig` from a SPECTRE constants dict.
 
         This factory keeps the clustering package decoupled from SPECTRE's config

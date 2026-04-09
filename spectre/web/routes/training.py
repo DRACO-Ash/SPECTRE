@@ -57,7 +57,7 @@ async def _get_or_create_progress(
     result = await db.execute(
         select(TrainingProgress).where(TrainingProgress.username == username)
     )
-    progress = result.scalar_one_or_none()
+    progress: TrainingProgress | None = result.scalar_one_or_none()
     if progress is None:
         cfg   = get_config()
         init_unlocks = []
