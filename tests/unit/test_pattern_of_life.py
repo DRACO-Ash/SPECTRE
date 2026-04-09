@@ -7,16 +7,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from spectre.astro.pattern_of_life import (
-    AnomalyScore,
-    DriftPhase,
-    IntelAssessment,
     Manoeuvre,
-    PolAnalysis,
     PropellantBudget,
     TLERecord,
     _angle_diff,
-    _classify_manoeuvre,
     _clamp01,
+    _classify_manoeuvre,
     _compute_anomaly_score,
     _compute_drift_phases,
     _compute_propellant_budget,
