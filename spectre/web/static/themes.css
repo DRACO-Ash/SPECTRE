@@ -61,6 +61,42 @@
   --bar-mid:       #0077cc;
   --bar-gold:      #c8a415;
 
+  /* ── Alpha tints for light mode ────────────────────────────────── */
+  --ops-blue-a05:    rgba(0, 119, 204, 0.05);
+  --ops-blue-a06:    rgba(0, 119, 204, 0.06);
+  --ops-blue-a08:    rgba(0, 119, 204, 0.08);
+  --ops-blue-a10:    rgba(0, 119, 204, 0.10);
+  --ops-blue-a12:    rgba(0, 119, 204, 0.12);
+  --ops-blue-a15:    rgba(0, 119, 204, 0.15);
+  --ops-blue-a25:    rgba(0, 119, 204, 0.25);
+  --ops-blue-a35:    rgba(0, 119, 204, 0.35);
+  --alliance-a04:    rgba(0, 90, 170, 0.04);
+  --alliance-a06:    rgba(0, 90, 170, 0.06);
+  --alliance-a08:    rgba(0, 90, 170, 0.08);
+  --alliance-a15:    rgba(0, 90, 170, 0.15);
+  --gold-a04:        rgba(160, 122, 0, 0.04);
+  --gold-a05:        rgba(160, 122, 0, 0.05);
+  --gold-a06:        rgba(160, 122, 0, 0.06);
+  --gold-a08:        rgba(160, 122, 0, 0.08);
+  --gold-a12:        rgba(160, 122, 0, 0.12);
+  --gold-a15:        rgba(160, 122, 0, 0.15);
+  --gold-a20:        rgba(160, 122, 0, 0.20);
+  --gold-a25:        rgba(160, 122, 0, 0.25);
+  --red-a25:         rgba(192, 57, 43, 0.25);
+  --red-a30:         rgba(192, 57, 43, 0.30);
+  --red-a50:         rgba(192, 57, 43, 0.50);
+  --amber-a04:       rgba(192, 120, 0, 0.04);
+  --amber-a08:       rgba(192, 120, 0, 0.08);
+  --amber-a10:       rgba(192, 120, 0, 0.10);
+  --amber-a12:       rgba(192, 120, 0, 0.12);
+  --amber-a30:       rgba(192, 120, 0, 0.30);
+  --amber-a35:       rgba(192, 120, 0, 0.35);
+  --amber-a70:       rgba(192, 120, 0, 0.70);
+  --green-a30:       rgba(26, 122, 60, 0.30);
+  --green-a70:       rgba(26, 122, 60, 0.70);
+  --navy-border-a40: rgba(36, 53, 72, 0.20);
+  --bg-overlay-a75:  rgba(240, 244, 248, 0.90);
+
   color-scheme: light;
 }
 
