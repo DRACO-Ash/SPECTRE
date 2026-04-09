@@ -1,7 +1,10 @@
 /* SPECTRE — Operator Theme Overrides
    Themes applied via [data-theme] on <html>.
-   Each block overrides only the CSS custom properties defined in style.css.
-   Theme "ops" is the default (deep-night Bluestaq) — no override needed.
+   Each block overrides spectre-theme.css design tokens so the full
+   component library re-skins automatically.
+   Theme "ops" is the default (deep-night) — no override needed.
+   Note: spectre-theme.css also matches [data-theme="steel"] in its
+   light-mode selector block for full component coverage.
    ─────────────────────────────────────────────────────────────────────── */
 
 
@@ -11,34 +14,48 @@
    environments and briefing rooms where dark screens look washed out.
    ══════════════════════════════════════════════════════════════════════ */
 [data-theme="steel"] {
+  /* ── spectre-theme surface & text tokens (primary source of truth) ── */
+  --spectre-surface-base:           #f0f4f8;
+  --spectre-surface-raised:         #ffffff;
+  --spectre-surface-overlay:        #e8eef5;
+  --spectre-surface-panel:          #e0e8f2;
+  --spectre-surface-input:          #ffffff;
+  --spectre-surface-input-hover:    #f5f8fb;
+  --spectre-surface-input-focus:    #ffffff;
+
+  --spectre-text-primary:           #1c2b3a;
+  --spectre-text-secondary:         #5a7080;
+  --spectre-text-tertiary:          #8a9faf;
+  --spectre-text-disabled:          #c0cdd8;
+  --spectre-text-link:              #0077cc;
+
+  --spectre-border-default:         rgba(0, 0, 0, 0.10);
+  --spectre-border-hover:           rgba(0, 0, 0, 0.20);
+  --spectre-border-active:          rgba(0, 0, 0, 0.30);
+
+  --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.06);
+  --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.08);
+  --spectre-shadow-lg:              0 4px 16px rgba(0, 0, 0, 0.10);
+
+  /* ── Operational status — lighter variants for daylight readability ── */
+  --spectre-color-threat-red:       #c0392b;
+  --spectre-color-threat-red-dim:   #922b21;
+  --spectre-color-threat-red-bg:    rgba(192, 57, 43, 0.08);
+  --spectre-color-nominal-green:    #1a7a3c;
+  --spectre-color-nominal-green-bg: rgba(26, 122, 60, 0.08);
+  --spectre-color-caution-amber:    #c07800;
+  --spectre-color-caution-amber-bg: rgba(192, 120, 0, 0.08);
+  --spectre-color-intel-blue:       #0077cc;
+  --spectre-color-intel-blue-dim:   #005aaa;
+  --spectre-color-intel-blue-bg:    rgba(0, 119, 204, 0.08);
+
+  /* ── Bluestaq brand overrides for light mode ── */
   --navy:          #1a2a3a;
   --navy-deep:     #0f1e2e;
   --navy-light:    #243548;
-  --alliance-blue: #005aaa;
-  --ops-blue:      #0077cc;
   --gold:          #a07a00;
-  --gold-dim:      rgba(160,122,0,0.12);
-  --gold-mid:      rgba(160,122,0,0.30);
-  --green:         #1a7a3c;
-  --green-dim:     rgba(26,122,60,0.12);
-  --red:           #c0392b;
-  --red-dim:       rgba(192,57,43,0.12);
-  --amber:         #c07800;
-
-  --bg:            #f0f4f8;
-  --surface:       #ffffff;
-  --surface-raised:#e8eef5;
-  --border:        #c2cede;
-  --border-light:  #d8e3ee;
-  --panel-bg:      #ffffff;
-  --bg-secondary:  #edf1f6;
-
-  --text:          #1c2b3a;
-  --text-dim:      #5a7080;
-  --text-bright:   #0a1a28;
-  --text-primary:  #1c2b3a;
-  --text-muted:    #7a8fa0;
-
+  --gold-dim:      rgba(160, 122, 0, 0.12);
+  --gold-mid:      rgba(160, 122, 0, 0.30);
   --bar-navy:      #1a2a3a;
   --bar-blue:      #005aaa;
   --bar-mid:       #0077cc;
@@ -47,24 +64,29 @@
   color-scheme: light;
 }
 
-/* Nav needs explicit background in light mode */
-[data-theme="steel"] .nav-bar         { background: #1a2a3a; border-bottom-color: #243548; }
-[data-theme="steel"] .nav-user        { color: #a0b8cc; }
-[data-theme="steel"] .sidebar         { background: #e8eef5; border-right: 1px solid #c2cede; }
-[data-theme="steel"] .sidebar-tabs    { background: #dde5ef; border-bottom-color: #c2cede; }
-[data-theme="steel"] .stab            { color: #4a6070; }
-[data-theme="steel"] .stab.active     { background: #ffffff; color: #0077cc; border-bottom-color: #ffffff; }
-[data-theme="steel"] .panel           { background: #ffffff; border-color: #c2cede; }
-[data-theme="steel"] input,
-[data-theme="steel"] select,
-[data-theme="steel"] textarea         { background: #f5f8fb; border-color: #c2cede; color: #1c2b3a; }
-[data-theme="steel"] .btn-secondary   { background: #edf1f6; border-color: #c2cede; color: #1c2b3a; }
-[data-theme="steel"] .btn-logout      { background: transparent; border-color: #c2cede; color: #a0b8cc; }
-[data-theme="steel"] .hrr-table th    { background: #e0e8f0; color: #3a5060; }
-[data-theme="steel"] .hrr-table tr:hover { background: #f0f5fa; }
+/* ── Component overrides that can't be expressed via tokens alone ── */
+
+/* Nav stays dark even in steel theme (Bluestaq identity requirement) */
+[data-theme="steel"] .nav-bar            { background: #1a2a3a; border-bottom-color: #243548; }
+[data-theme="steel"] .nav-user           { color: #a0b8cc; }
 [data-theme="steel"] .nav-dropdown-panel { background: #1a2a3a; border-color: #243548; }
-[data-theme="steel"] .hero-tab-bar    { background: #e8eef5; border-bottom-color: #c2cede; }
-[data-theme="steel"] .htab            { color: #4a6070; }
-[data-theme="steel"] .htab.active     { background: #0077cc; }
-[data-theme="steel"] .hero-panel      { background: #f5f8fb; }
-[data-theme="steel"] details summary  { color: #4a6070; }
+[data-theme="steel"] .btn-logout         { background: transparent; border-color: #c2cede; color: #a0b8cc; }
+
+/* Sidebar */
+[data-theme="steel"] .sidebar            { background: #e8eef5; border-right: 1px solid rgba(0,0,0,0.10); }
+[data-theme="steel"] .sidebar-tabs       { background: #dde5ef; border-bottom-color: rgba(0,0,0,0.10); }
+[data-theme="steel"] .stab              { color: #4a6070; }
+[data-theme="steel"] .stab.active        { background: #ffffff; color: #0077cc; border-bottom-color: #ffffff; }
+
+/* Hero tab bar */
+[data-theme="steel"] .hero-tab-bar       { background: #e8eef5; border-bottom-color: rgba(0,0,0,0.10); }
+[data-theme="steel"] .htab              { color: #4a6070; }
+[data-theme="steel"] .htab.active        { background: #0077cc; }
+[data-theme="steel"] .hero-panel         { background: #f5f8fb; }
+
+/* Tables */
+[data-theme="steel"] .hrr-table th       { background: #e0e8f0; color: #3a5060; }
+[data-theme="steel"] .hrr-table tr:hover { background: #f0f5fa; }
+
+/* Misc */
+[data-theme="steel"] details summary     { color: #4a6070; }

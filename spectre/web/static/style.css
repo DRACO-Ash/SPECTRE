@@ -1,44 +1,49 @@
 /* SPECTRE — Bluestaq Design System (Dark Operational Mode)
    Based on Bluestaq Ltd Document Style Guide
-   Adapted for dark-mode defence C2 interface                              */
+   Adapted for dark-mode defence C2 interface
+   v3: Variables bridge to spectre-theme.css design tokens.       */
 
 :root {
-  /* ── Bluestaq Core Palette ──────────────────────────────────── */
+  /* ── Surfaces — mapped to spectre-theme tokens ──────────────── */
+  --bg:            var(--spectre-surface-base);
+  --surface:       var(--spectre-surface-raised);
+  --surface-raised:var(--spectre-surface-overlay);
+  --border:        var(--spectre-border-default);
+  --border-light:  var(--spectre-border-hover);
+
+  /* ── Text — mapped to spectre-theme tokens ──────────────────── */
+  --text:          var(--spectre-text-primary);
+  --text-dim:      var(--spectre-text-secondary);
+  --text-bright:   var(--spectre-color-pure-white);
+
+  /* ── Operational status — mapped to spectre-theme tokens ─────── */
+  --green:         var(--spectre-color-nominal-green);
+  --green-dim:     var(--spectre-color-nominal-green-bg);
+  --red:           var(--spectre-color-threat-red);
+  --red-dim:       var(--spectre-color-threat-red-bg);
+  --amber:         var(--spectre-color-caution-amber);
+  --ops-blue:      var(--spectre-color-intel-blue);
+  --alliance-blue: var(--spectre-color-intel-blue-dim);
+
+  /* ── Typography — mapped to spectre-theme tokens ────────────── */
+  --font-ui:       var(--spectre-font-body);
+  --font-mono:     var(--spectre-font-mono);
+
+  /* ── Bluestaq brand palette (kept verbatim for identity) ──────
+     The four-segment accent bar, nav, and wordmark always use
+     the official Bluestaq navy + gold regardless of theme.       */
   --navy:          #002244;
   --navy-deep:     #001529;
   --navy-light:    #003366;
-  --alliance-blue: #004990;
-  --ops-blue:      #00659E;
   --gold:          #C8A415;
   --gold-dim:      rgba(200, 164, 21, 0.15);
   --gold-mid:      rgba(200, 164, 21, 0.35);
-  --green:         #27AE60;
-  --green-dim:     rgba(39, 174, 96, 0.12);
-  --red:           #E74C3C;
-  --red-dim:       rgba(231, 76, 60, 0.12);
-  --amber:         #F39C12;
 
-  /* ── Surfaces ───────────────────────────────────────────────── */
-  --bg:            #000D1A;
-  --surface:       #001529;
-  --surface-raised:#002040;
-  --border:        #0A3355;
-  --border-light:  #104070;
-
-  /* ── Text ───────────────────────────────────────────────────── */
-  --text:          #D0D8E8;
-  --text-dim:      #5A7A9A;
-  --text-bright:   #E8F0FA;
-
-  /* ── Accent bar segments (proportional) ─────────────────────── */
+  /* ── Accent bar segments (Bluestaq four-segment signature) ───── */
   --bar-navy:      #002244;
   --bar-blue:      #004990;
   --bar-mid:       #00659E;
   --bar-gold:      #C8A415;
-
-  /* ── Typography ─────────────────────────────────────────────── */
-  --font-ui:       "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono:     "Courier New", "Consolas", monospace;
 
   /* ── Layout ─────────────────────────────────────────────────── */
   --sidebar-width: 250px;

@@ -170,7 +170,8 @@
  * --------------------------------------------------------------------------- */
 
 .spectre-light,
-[data-spectre-theme="light"] {
+[data-spectre-theme="light"],
+[data-theme="steel"] {
   --spectre-surface-base:           #F3F4F6;
   --spectre-surface-raised:         #FFFFFF;
   --spectre-surface-overlay:        #FFFFFF;
@@ -195,7 +196,7 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-spectre-theme="dark"]):not(.spectre-dark) {
+  :root:not([data-spectre-theme="dark"]):not(.spectre-dark):not([data-theme="ops"]) {
     --spectre-surface-base:           #F3F4F6;
     --spectre-surface-raised:         #FFFFFF;
     --spectre-surface-overlay:        #FFFFFF;
