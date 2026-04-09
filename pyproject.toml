@@ -38,7 +38,6 @@ dev = [
     "pytest-cov>=6.0",
     "mypy>=1.14",
     "types-PyYAML",
-    "types-bcrypt",
     "ruff>=0.9",
     "hypothesis>=6.0",
     "bandit[toml]>=1.7",
