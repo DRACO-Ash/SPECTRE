@@ -36,6 +36,12 @@ CALLOUT_BG = "FFF9E6"
 GREEN = RGBColor(0x27, 0xAE, 0x60)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
+# ── SPECTRE theme colours ────────────────────────────────────────────────────
+THREAT_RED    = RGBColor(0xE2, 0x4B, 0x4A)
+NOMINAL_GREEN = RGBColor(0x1D, 0x9E, 0x75)
+INTEL_BLUE    = RGBColor(0x37, 0x8A, 0xDD)
+SENSOR_GREY   = RGBColor(0x7A, 0x8B, 0xA6)
+
 OUTPUT_PATH = Path(__file__).parent / "SPECTRE_Operator_Guide.docx"
 
 
@@ -367,24 +373,46 @@ def _section_01_introduction(doc: Document) -> None:
     _add_heading_h1(doc, "Introduction to SPECTRE")
 
     _add_body(doc,
-        "The Satellite Intercept Planning Console (SPECTRE) is a real-time orbital "
-        "manoeuvre planning tool designed for space defence operators. It enables "
-        "rapid assessment of intercept trajectories, conjunction analysis, and "
-        "defensive repositioning of space assets."
+        "SPECTRE — the Space Planning, Evaluation & Counter-Threat Response Engine — is a "
+        "real-time orbital manoeuvre planning and space intelligence tool designed for space "
+        "defence operators. It enables rapid assessment of intercept trajectories, conjunction "
+        "analysis, adversary intent evaluation, and defensive repositioning of space assets, "
+        "all from a single browser-based interface."
     )
     _add_body(doc,
-        "SPECTRE provides a fully self-contained, pure-Python orbital mechanics engine. "
-        "Operators can compute classical transfers (Lambert, Hohmann, bi-elliptic), "
-        "tactical manoeuvres (phasing, CW relative motion, plane changes, J2 drift "
-        "planning, collision avoidance), and decision-support analyses (intent prediction, "
-        "intercept envelopes, stability assessment, fingerprinting, formation defence, "
-        "orbital terrain mapping, min-time intercept) directly from Two-Line Element "
-        "(TLE) data, without requiring any external astrodynamics software."
+        "SPECTRE is built on a fully self-contained, pure-Python orbital mechanics engine "
+        "with no dependency on external astrodynamics software. Operators can compute 23 "
+        "distinct intercept and manoeuvre methods spanning classical transfers (Lambert, "
+        "Hohmann, bi-elliptic), tactical manoeuvres (phasing, CW relative motion, plane "
+        "changes, J2 drift, collision avoidance, evasion), advanced analysis (GEO drift, "
+        "NMC safety ellipse, manoeuvre classification, detectability), and decision-support "
+        "tools (intent prediction, intercept envelopes, stability assessment, fingerprinting, "
+        "formation defence, orbital terrain mapping, min-time intercept)."
+    )
+    _add_body(doc,
+        "Beyond manoeuvre planning, SPECTRE provides a suite of space intelligence "
+        "capabilities: Historical Pattern of Life (PoL) analysis detects past manoeuvres "
+        "and characterises operator behaviour from TLE history; NOTSO Correlation cross-"
+        "references Notice to Space Operators messages against detected manoeuvres to build "
+        "operator behavioural profiles; Photometry Analysis detects brightness anomalies "
+        "from light-curve data that may indicate attitude changes or physical alterations. "
+        "The Decision Engine applies game-theoretic scenario evaluation to support "
+        "commander-level response selection, and the Training Environment provides a "
+        "sandboxed gamified environment for operator skill development across five "
+        "progressive levels."
+    )
+    _add_body(doc,
+        "Integration with the Unified Data Library (UDL) provides authoritative live TLE "
+        "data from authorised source providers. The GCAT Browser gives instant access to "
+        "28 of Jonathan McDowell's General Catalogue datasets spanning the full history "
+        "of orbital activity."
     )
     _add_callout(doc,
         "Key design principle: SPECTRE is designed for speed-of-relevance decision-making. "
         "All computations run in-browser with sub-second response times, enabling "
-        "operators to evaluate multiple intercept options before a conjunction window closes."
+        "operators to evaluate multiple intercept options before a conjunction window closes. "
+        "No external astrodynamics libraries are required — SPECTRE runs on any system "
+        "with a modern browser and network access to the SPECTRE server."
     )
 
 
@@ -1224,10 +1252,440 @@ def _section_12_scenario_planning(doc: Document) -> None:
     )
 
 
-def _section_13_scenarios(doc: Document) -> None:
-    """Section 13: Operator Scenarios."""
+def _section_13_decision_engine(doc: Document) -> None:
+    """Section 13: Decision Engine & Scenario Evaluation."""
     _add_page_break(doc)
     _add_eyebrow(doc, "Section 13")
+    _add_heading_h1(doc, "Decision Engine & Scenario Evaluation")
+
+    _add_body(doc,
+        "The SPECTRE Decision Engine applies game-theoretic analysis to space control "
+        "scenarios. Operators define a grid of adversary courses of action (COAs) against "
+        "a set of friendly response options, and the engine evaluates every combination "
+        "using deterministic SGP4 propagation and a weighted composite scoring function. "
+        "The result is a ranked response recommendation with an expected utility score "
+        "and risk-adjusted analysis."
+    )
+    _add_body(doc,
+        "The Decision Engine panel is accessible from the Intelligence column of the main "
+        "dashboard. It is designed for commander-level use after the initial threat "
+        "assessment is complete — it answers the question 'Given what the adversary might "
+        "do, what is our best response?' rather than 'How do we intercept?'"
+    )
+
+    _add_heading_h2(doc, "Adversary Action Modelling")
+    _add_body(doc,
+        "The operator defines up to four adversary actions, each representing a distinct "
+        "course of action the adversary could take. Each action is characterised by:"
+    )
+    _add_data_table(doc,
+        ["Field", "Description"],
+        [
+            ["Action ID / Name", "Short identifier and descriptive label"],
+            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
+            ["Probability", "Operator-assessed likelihood [0–1] that this COA is executed"],
+            ["Confidence", "Intelligence confidence in the probability estimate [0–1]"],
+            ["Description", "Free-text tactical description for context"],
+        ],
+    )
+    _add_body(doc,
+        "The probability and confidence fields allow the operator to express both the "
+        "likelihood of an action and the quality of the intelligence supporting that "
+        "estimate. Low-confidence high-probability assessments receive reduced weighting "
+        "under the probabilistic selector strategy."
+    )
+
+    _add_heading_h2(doc, "Friendly Response Options")
+    _add_body(doc,
+        "Up to four friendly response options are defined in parallel. Each response "
+        "describes what the blue force would do in reaction to the adversary action:"
+    )
+    _add_data_table(doc,
+        ["Field", "Description"],
+        [
+            ["Response ID / Name", "Short identifier and descriptive label"],
+            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
+            ["Cost", "Normalised resource cost [0–1] — propellant, ops tempo, personnel"],
+            ["Reversibility", "How easily the action can be undone [0–1]; 1 = fully reversible"],
+            ["Time to Execute (h)", "Latency from decision to execution in hours"],
+            ["Description", "Tactical description of the friendly action"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Scoring Weights")
+    _add_body(doc,
+        "The composite outcome score for each (adversary action, friendly response) pair "
+        "is computed from five weighted components. The default weights reflect a "
+        "balanced space control posture; operators can adjust them before running the "
+        "evaluation:"
+    )
+    _add_data_table(doc,
+        ["Weight", "Default", "Meaning"],
+        [
+            ["w_custody", "0.35", "Penalty for losing track custody of the adversary asset"],
+            ["w_closest_approach", "0.25", "Reward for maximising closest-approach distance"],
+            ["w_dv_cost", "0.20", "Penalty for friendly ΔV expenditure"],
+            ["w_time_to_exec", "0.10", "Penalty for slow response latency"],
+            ["w_reversibility", "0.10", "Reward for selecting reversible, de-escalatory actions"],
+        ],
+    )
+    _add_callout(doc,
+        "Increasing w_custody above 0.5 reflects a high-value asset protection posture "
+        "where losing track of the adversary is unacceptable. Increasing w_reversibility "
+        "reflects a de-escalation preference — the engine will favour manoeuvres that can "
+        "be recalled or reversed if the threat assessment changes."
+    )
+
+    _add_heading_h2(doc, "Selector Strategies")
+    _add_body(doc,
+        "After the outcome matrix is computed, SPECTRE applies a selector strategy to "
+        "identify the recommended response:"
+    )
+    _add_data_table(doc,
+        ["Strategy", "Logic", "Best For"],
+        [
+            ["MINIMAX", "Minimise worst-case composite score across all adversary actions",
+             "Conservative — guarantees a floor on worst-case outcome"],
+            ["MAXIMIN", "Maximise worst-case benefit (minimum gain across all actions)",
+             "Optimistic — focuses on preserving upside in best case"],
+            ["EXPECTED_VALUE", "Minimise expected composite score weighted by adversary action probabilities",
+             "Probabilistic — optimal when probability estimates are trustworthy"],
+        ],
+    )
+    _add_body(doc,
+        "The MINIMAX strategy is the default and is appropriate when intelligence "
+        "confidence is low and the operator wants to hedge against the worst plausible "
+        "adversary action. Switch to EXPECTED_VALUE when high-confidence probability "
+        "estimates are available from all-source intelligence."
+    )
+
+    _add_heading_h2(doc, "Output & Recommended Response")
+    _add_body(doc,
+        "The Decision Engine produces an outcome matrix table showing the composite score "
+        "for every (adversary, friendly) cell. Lower scores are better for the friendly "
+        "force. The recommended response is highlighted with its strategy label and "
+        "rationale. Key outputs include:"
+    )
+    _add_bullet(doc, "Recommended response — the friendly COA selected by the chosen strategy.")
+    _add_bullet(doc, "Robust strategy label — which decision rule was applied (MINIMAX / MAXIMIN / EXPECTED_VALUE).")
+    _add_bullet(doc, "Per-adversary ranking — for each adversary action, the friendly responses are ranked best-to-worst.")
+    _add_bullet(doc, "Computation time — confirms the engine ran to completion.")
+    _add_callout(doc,
+        "The Decision Engine output is a recommendation, not an order. Operators retain "
+        "full authority over response selection. The engine is a structured decision-support "
+        "tool — it enforces analytical rigour and surfaces non-obvious trade-offs, but "
+        "context, rules of engagement, and commander intent always take precedence."
+    )
+
+
+def _section_14_training(doc: Document) -> None:
+    """Section 14: Training Environment."""
+    _add_page_break(doc)
+    _add_eyebrow(doc, "Section 14")
+    _add_heading_h1(doc, "Training Environment")
+
+    _add_body(doc,
+        "SPECTRE includes a fully sandboxed Training Environment that allows operators "
+        "to develop and maintain proficiency without touching operational data. The "
+        "training mode uses synthetic TLEs and scenario parameters entirely; no "
+        "real satellite tracking data is used or accessible within a training session."
+    )
+    _add_body(doc,
+        "Access the Training Environment by clicking the Training button (shown as "
+        "a lightning bolt icon) in the navigation bar. Training sessions are isolated "
+        "from the main operational workspace — any assets, results, or UDL data from "
+        "the operational session remain unaffected."
+    )
+
+    _add_heading_h2(doc, "Level-Based Progression")
+    _add_body(doc,
+        "Operators progress through five levels, each unlocking more complex scenarios "
+        "and analysis tools. Advancement requires accumulating points on the relevant "
+        "skill axes and meeting specific unlock conditions:"
+    )
+    _add_data_table(doc,
+        ["Level", "Title", "Unlock Condition", "Focus Area"],
+        [
+            ["1", "Observer", "Default — available on first login", "Basic TLE handling, orbital events, Lambert transfers"],
+            ["2", "Analyst", "Complete the introductory tutorial", "Threat assessment, manoeuvre classification, PoL basics"],
+            ["3", "Planner", "100+ points in manoeuvre_planning axis", "Tactical manoeuvres, COLA, evasion, trade-space analysis"],
+            ["4", "Commander", "5 scenarios completed + 50+ decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
+            ["5", "Strategist", "3 challenge scenarios completed", "Full capability — all methods, gauntlet challenges, adversary modelling"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Skill Axes")
+    _add_body(doc,
+        "Points earned in training are distributed across skill axes, providing a "
+        "multi-dimensional view of operator proficiency:"
+    )
+    _add_data_table(doc,
+        ["Skill Axis", "Description"],
+        [
+            ["manoeuvre_planning", "Accuracy and efficiency of orbital transfer and manoeuvre solutions"],
+            ["threat_assessment", "Quality of threat identification, classification, and prioritisation"],
+            ["decision_quality", "Soundness of response selection in decision-engine scenarios"],
+            ["situational_awareness", "Speed and accuracy of orbital event detection and conjunction analysis"],
+            ["system_proficiency", "Breadth of SPECTRE features used correctly across a session"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Scenario Types")
+    _add_body(doc,
+        "Three scenario types are available, each testing a different operational "
+        "skill set:"
+    )
+    _add_bullet(doc,
+        "Analyst scenarios — present a threat object and a TLE history; the operator "
+        "must correctly classify the manoeuvre type, estimate the ΔV, and assess "
+        "intent. These scenarios develop threat_assessment and situational_awareness."
+    )
+    _add_bullet(doc,
+        "Planner scenarios — provide a blue asset and a threat object; the operator "
+        "must select the optimal manoeuvre method and parameterise it correctly to "
+        "meet mission objectives within a fuel budget. These develop manoeuvre_planning."
+    )
+    _add_bullet(doc,
+        "Challenge scenarios (Gauntlet) — multi-stage scenarios that combine threat "
+        "assessment, manoeuvre planning, and decision support. All tools are available; "
+        "points are awarded for optimal solutions across each stage. Gauntlets are only "
+        "accessible at Level 5."
+    )
+
+    _add_heading_h2(doc, "Points System")
+    _add_body(doc,
+        "Points are awarded per completed objective within a scenario. Objectives "
+        "have a base point value and may include a speed multiplier — completing the "
+        "objective in under half the allotted time doubles the point award. Axis "
+        "weights determine how base points are distributed across skill axes:"
+    )
+    _add_bullet(doc, "Correct manoeuvre method selection — base 50 pts, 80% manoeuvre_planning, 20% system_proficiency.")
+    _add_bullet(doc, "ΔV within 5% of optimal — base 100 pts with speed multiplier, 100% manoeuvre_planning.")
+    _add_bullet(doc, "Correct threat classification — base 75 pts, 80% threat_assessment, 20% situational_awareness.")
+    _add_bullet(doc, "Decision Engine response selection matching recommended COA — base 100 pts, 100% decision_quality.")
+    _add_callout(doc,
+        "Tutorial completion is a prerequisite for Level 2 unlock. The introductory "
+        "tutorial walks through adding assets, fetching TLEs from the synthetic UDL "
+        "endpoint, running a Lambert intercept, and reading the burn table. It takes "
+        "approximately 10 minutes and can be re-run at any time from the Training menu."
+    )
+
+
+def _section_15_notso_correlation(doc: Document) -> None:
+    """Section 15: NOTSO Correlation."""
+    _add_page_break(doc)
+    _add_eyebrow(doc, "Section 15")
+    _add_heading_h1(doc, "NOTSO Correlation")
+
+    _add_body(doc,
+        "NOTSO (Notice to Space Operators) messages are formal notifications issued "
+        "by spacecraft operators to USSPACECOM prior to planned manoeuvres, proximity "
+        "operations, launches, or deorbits. SPECTRE's NOTSO Correlation engine parses "
+        "these free-text messages, temporally correlates them with manoeuvres detected "
+        "by the Pattern of Life engine, and builds operator behavioural profiles that "
+        "inform intent assessment."
+    )
+    _add_body(doc,
+        "The correlation analysis answers a fundamental intelligence question: does "
+        "this operator file NOTSOs before manoeuvring? If so, how reliably and how "
+        "far in advance? Operators who consistently file precise NOTSOs exhibit "
+        "predictable, transparent behaviour; those who never file NOTSOs for detected "
+        "manoeuvres are classified as stealth operators — a significant intelligence indicator."
+    )
+
+    _add_heading_h2(doc, "Parsing NOTSO Messages")
+    _add_body(doc,
+        "NOTSO data may be sourced from the UDL notification endpoint (if available "
+        "for the operator's account) or pasted directly into the NOTSO panel as free "
+        "text. Both paths produce structured NOTSO records. The parser handles the "
+        "standard USSPACECOM template format (field: value line structure) and "
+        "reasonable variants, extracting:"
+    )
+    _add_bullet(doc, "Message ID and issuing entity.")
+    _add_bullet(doc, "NORAD catalogue number (from SATNO, NORAD ID, or COSPAR fields).")
+    _add_bullet(doc, "Effective window: start and end UTC datetime (defaulting to a 24-hour window if end is not specified).")
+    _add_bullet(doc, "NOTSO type: MANOEUVRE, DEORBIT, LAUNCH, PROXIMITY_OPS, TEST, or OTHER (inferred from free text).")
+    _add_bullet(doc, "Predicted ΔV magnitude (km/s) if stated in the message.")
+    _add_bullet(doc, "Predicted burn direction if stated.")
+
+    _add_heading_h2(doc, "Correlation Logic")
+    _add_body(doc,
+        "Each NOTSO is matched against PoL-detected manoeuvres for the same NORAD ID "
+        "using a configurable tolerance window (default 24 hours):"
+    )
+    _add_bullet(doc,
+        "Matched — the manoeuvre epoch falls within [NOTSO effective_start − tolerance, "
+        "NOTSO effective_end + tolerance]. If multiple manoeuvres qualify, the one "
+        "closest to the NOTSO window midpoint is selected."
+    )
+    _add_bullet(doc,
+        "NOTSO-only (phantom) — a NOTSO was filed but no corresponding manoeuvre was "
+        "detected in the TLE analysis. May indicate a cancelled manoeuvre, a manoeuvre "
+        "below the ΔV detection threshold, or a false notification."
+    )
+    _add_bullet(doc,
+        "Manoeuvre-only (silent) — a manoeuvre was detected but no NOTSO was filed. "
+        "This is the most intelligence-significant outcome: the operator executed a "
+        "manoeuvre without notification."
+    )
+    _add_data_table(doc,
+        ["Metric", "Description"],
+        [
+            ["Time offset (h)", "NOTSO effective_start minus manoeuvre epoch — positive = NOTSO led the manoeuvre"],
+            ["Magnitude ratio", "Predicted ΔV from NOTSO divided by detected ΔV — close to 1.0 indicates accurate prediction"],
+            ["Window accuracy", "Fraction of matched manoeuvres that fell inside the NOTSO window (not just the tolerance band)"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Operator Behaviour Profiles")
+    _add_body(doc,
+        "The correlation results are aggregated into an OperatorBehaviourProfile for "
+        "each analysed NORAD ID. The profile captures notification reliability, timing "
+        "patterns, and predictability:"
+    )
+    _add_data_table(doc,
+        ["Profile Field", "Description"],
+        [
+            ["Notification rate", "Fraction of detected manoeuvres with a corresponding NOTSO [0–1]"],
+            ["Mean lead time (h)", "Average hours between NOTSO effective_start and detected manoeuvre epoch"],
+            ["Lead time std (h)", "Standard deviation of lead time — measures timing consistency"],
+            ["Phantom NOTSO count", "NOTSOs filed with no detected manoeuvre — may indicate deception"],
+            ["consistent_notifier", "Flag: notification rate > 90%"],
+            ["stealth_operator", "Flag: notification rate < 30% — significant intelligence indicator"],
+            ["predictable_timing", "Flag: lead time standard deviation < 6 hours — highly regular behaviour"],
+        ],
+    )
+    _add_callout(doc,
+        "A stealth_operator classification (rate < 30%) combined with an increasing "
+        "intent score from the Intent Predictor is a high-confidence composite indicator "
+        "of adversarial activity. Escalate immediately to command for all-source "
+        "intelligence corroboration. Never rely on NOTSO behaviour alone as a basis "
+        "for operational response."
+    )
+
+
+def _section_16_photometry(doc: Document) -> None:
+    """Section 16: Photometry Analysis."""
+    _add_page_break(doc)
+    _add_eyebrow(doc, "Section 16")
+    _add_heading_h1(doc, "Photometry Analysis")
+
+    _add_body(doc,
+        "SPECTRE's Photometry Analysis module detects anomalous brightness changes "
+        "in space objects from ground-based optical observations. Brightness "
+        "anomalies may indicate attitude changes, panel deployments, physical damage, "
+        "or reflectivity alterations — all of which can be correlated with manoeuvres "
+        "detected by the Pattern of Life engine to provide a richer characterisation "
+        "of object behaviour."
+    )
+    _add_body(doc,
+        "The pipeline accepts CSV-format light-curve data, applies geometric and "
+        "atmospheric corrections, fits a solar-phase-angle baseline using iterative "
+        "sigma-clipping, and compares a recent observation window against the baseline "
+        "using a two-sample Welch's t-test. All computations are performed in pure "
+        "Python with no external scientific library dependency."
+    )
+
+    _add_heading_h2(doc, "Data Ingestion")
+    _add_body(doc,
+        "Photometric observations are provided as a CSV file with the following "
+        "column structure:"
+    )
+    _add_data_table(doc,
+        ["Column", "Required?", "Description"],
+        [
+            ["epoch_utc", "Yes", "ISO 8601 observation timestamp (UTC)"],
+            ["apparent_magnitude", "Yes", "Observed brightness in magnitudes"],
+            ["uncertainty", "No (default 0.05)", "1-sigma magnitude measurement uncertainty"],
+            ["filter_band", "No (default 'unfiltered')", "Photometric filter (V, R, unfiltered, etc.)"],
+            ["range_km", "No (default 1000)", "Observer–object distance for range normalisation"],
+            ["solar_phase_angle_deg", "No (default 45°)", "Sun–object–observer angle for phase correction"],
+            ["elevation_deg", "No (default 45°)", "Object elevation above horizon for airmass correction"],
+            ["lunar_phase_fraction", "No (default 0.0)", "Lunar illumination [0=new, 1=full] for quality flagging"],
+            ["lunar_separation_deg", "No (default 90°)", "Angular separation from Moon for quality flagging"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Geometric Corrections")
+    _add_body(doc,
+        "Before baseline fitting, each observation is corrected for two geometric "
+        "effects that would otherwise mask intrinsic brightness changes:"
+    )
+    _add_bullet(doc,
+        "Range normalisation — apparent magnitude is reduced to a standard range "
+        "(default 1,000 km) using: reduced_mag = apparent_mag − 5·log10(range/ref_range)."
+    )
+    _add_bullet(doc,
+        "Atmospheric extinction — Rozenberg (1966) airmass is used below 10° elevation "
+        "for accuracy; the correction is relative to zenith: Δmag = k·(airmass − 1)."
+    )
+    _add_bullet(doc,
+        "Quality flagging — observations near the lunar limb (separation < 20° or "
+        "phase > 0.8) are flagged 'lunar'; low-elevation observations (< 15°) are "
+        "flagged 'low_elevation'; both together produce 'reject' flags."
+    )
+
+    _add_heading_h2(doc, "Baseline Fitting & Change Detection")
+    _add_body(doc,
+        "The analysis fits a quadratic solar-phase-angle model "
+        "(mag = a₀ + a₁·phase + a₂·phase²) to the corrected observations using "
+        "iterative 3σ sigma-clipping. This establishes the object's nominal brightness "
+        "as a function of viewing geometry. The baseline is then used to compute "
+        "per-epoch residuals."
+    )
+    _add_body(doc,
+        "Change detection compares residuals from the recent window (default last 30 days) "
+        "against residuals from the historical baseline window (default 30–120 days ago). "
+        "A Welch two-sample t-test determines statistical significance:"
+    )
+    _add_data_table(doc,
+        ["Output Field", "Description"],
+        [
+            ["baseline_mean / baseline_std", "Mean and std of residuals in the historical baseline window"],
+            ["recent_mean / recent_std", "Mean and std of residuals in the recent window"],
+            ["magnitude_change (Δmag)", "recent_mean − baseline_mean; positive = object is fainter"],
+            ["change_direction", "'brightening' (Δmag < 0), 'fading' (Δmag > 0), or 'none'"],
+            ["significant_at_95 / significant_at_99", "Whether the change is statistically significant at 95% / 99% confidence"],
+            ["p_value", "Two-tailed p-value from the Welch t-test"],
+            ["estimated_change_epoch", "First epoch where the residual exceeded 2σ of the baseline scatter"],
+            ["confidence", "Composite confidence score [0–1] based on p-value and sample sizes"],
+        ],
+    )
+
+    _add_heading_h2(doc, "Manoeuvre Correlation & Interpretation")
+    _add_body(doc,
+        "If a statistically significant brightness change is detected, SPECTRE "
+        "automatically searches for PoL-detected manoeuvres within ±48 hours of the "
+        "estimated change epoch. Any correlated manoeuvre epochs are reported in the "
+        "assessment output."
+    )
+    _add_bullet(doc,
+        "Brightening correlated with a manoeuvre may indicate panel deployment, "
+        "attitude reorientation to a more reflective aspect, or removal of a "
+        "protective cover."
+    )
+    _add_bullet(doc,
+        "Fading correlated with a manoeuvre may indicate panel loss or damage, "
+        "attitude change to a less reflective aspect, or insertion into shadow."
+    )
+    _add_bullet(doc,
+        "Brightness change without a correlated manoeuvre may indicate a passive "
+        "attitude evolution, tumbling onset, or environmental damage not yet "
+        "large enough to produce a detectable TLE change."
+    )
+    _add_callout(doc,
+        "Photometry is a complementary intelligence layer. A confident brightening "
+        "detection (p < 0.01) that correlates with a NOTSO-silent manoeuvre (stealth "
+        "operator profile) and an elevated Intent Predict score represents a high-"
+        "confidence composite indicator of adversarial activity. Treat each layer as "
+        "corroborating evidence, not proof in isolation."
+    )
+
+
+def _section_17_scenarios(doc: Document) -> None:
+    """Section 17: Operator Scenarios."""
+    _add_page_break(doc)
+    _add_eyebrow(doc, "Section 17")
     _add_heading_h1(doc, "Operator Scenarios")
 
     # Scenario 1.
@@ -1330,10 +1788,10 @@ def _section_13_scenarios(doc: Document) -> None:
     _add_bullet(doc, "If immediate response is required, run Min-Time Intercept to find the fastest achievable defensive repositioning within the fuel budget.")
 
 
-def _section_14_glossary(doc: Document) -> None:
-    """Section 14: Glossary of Terms."""
+def _section_18_glossary(doc: Document) -> None:
+    """Section 18: Glossary of Terms."""
     _add_page_break(doc)
-    _add_eyebrow(doc, "Section 14")
+    _add_eyebrow(doc, "Section 18")
     _add_heading_h1(doc, "Glossary of Terms")
 
     terms = [
@@ -1388,14 +1846,31 @@ def _section_14_glossary(doc: Document) -> None:
         ["PoL Status", "Classification of a satellite's historical behaviour: NOMINAL (routine station-keeping), ANOMALOUS (unusual or large manoeuvres), or SUSPICIOUS (evasive or targeting behaviour)."],
         ["TLE Source", "The UDL data provider (e.g. 18 SDS, LeoLabs) whose elsets are used for TLE fetches."],
         ["Drift Phase", "A continuous period of east-west longitude drift at a measurable rate, detected from successive GEO elsets."],
+        ["NOTSO", "Notice to Space Operators — formal pre-manoeuvre notification filed with USSPACECOM by spacecraft operators."],
+        ["Phantom NOTSO", "A NOTSO filed but for which no corresponding manoeuvre was detected in TLE analysis."],
+        ["Consistent Notifier", "Operator behavioural flag: notification rate above 90% — reliable pre-manoeuvre notification behaviour."],
+        ["Stealth Operator", "Operator behavioural flag: notification rate below 30% — significant intelligence indicator."],
+        ["Predictable Timing", "Operator behavioural flag: lead-time standard deviation below 6 hours — highly regular notification pattern."],
+        ["Decision Engine", "SPECTRE's game-theoretic scenario evaluation module; computes outcome matrices for adversary × friendly COA grids."],
+        ["MINIMAX", "Decision strategy that selects the friendly response minimising the worst-case composite score across all adversary actions."],
+        ["MAXIMIN", "Decision strategy that selects the response maximising the worst-case benefit."],
+        ["Expected Value", "Decision strategy that selects the response minimising the expected composite score weighted by adversary action probabilities."],
+        ["Composite Score", "Weighted sum of custody, closest-approach, ΔV cost, time-to-execute, and reversibility metrics — lower is better for blue force."],
+        ["Photometry", "Measurement of the brightness of a space object over time; used to detect attitude changes, physical alterations, or reflectivity anomalies."],
+        ["Reduced Magnitude", "Apparent magnitude corrected for range and atmospheric extinction; enables like-for-like comparison across different observing geometries."],
+        ["Phase Function Baseline", "Quadratic model of brightness vs solar phase angle fitted to historical observations; the reference against which changes are detected."],
+        ["Welch t-test", "Two-sample t-test that does not assume equal variance; used by SPECTRE to compare recent vs historical photometric residuals."],
+        ["Training Environment", "SPECTRE's sandboxed training mode using synthetic data; supports five progression levels from Observer to Strategist."],
+        ["Skill Axis", "One of five proficiency dimensions tracked in the Training Environment: manoeuvre_planning, threat_assessment, decision_quality, situational_awareness, system_proficiency."],
+        ["Gauntlet", "Multi-stage challenge scenario in the Training Environment, accessible at Level 5 (Strategist) only."],
     ]
     _add_data_table(doc, ["Term", "Definition"], terms)
 
 
-def _section_15_pattern_of_life(doc: Document) -> None:
-    """Section 15: Historical Pattern of Life Analysis."""
+def _section_19_pattern_of_life(doc: Document) -> None:
+    """Section 19: Historical Pattern of Life Analysis."""
     _add_page_break(doc)
-    _add_eyebrow(doc, "Section 15")
+    _add_eyebrow(doc, "Section 19")
     _add_heading_h1(doc, "Historical Pattern of Life Analysis")
 
     _add_body(doc,
@@ -1446,10 +1921,10 @@ def _section_15_pattern_of_life(doc: Document) -> None:
     )
 
 
-def _section_16_gcat_browser(doc: Document) -> None:
-    """Section 16: GCAT Browser."""
+def _section_20_gcat_browser(doc: Document) -> None:
+    """Section 20: GCAT Browser."""
     _add_page_break(doc)
-    _add_eyebrow(doc, "Section 16")
+    _add_eyebrow(doc, "Section 20")
     _add_heading_h1(doc, "GCAT Browser")
 
     _add_body(doc,
@@ -1493,10 +1968,10 @@ def _section_16_gcat_browser(doc: Document) -> None:
     )
 
 
-def _section_17_appendices(doc: Document) -> None:
-    """Section 17: Appendices."""
+def _section_21_appendices(doc: Document) -> None:
+    """Section 21: Appendices."""
     _add_page_break(doc)
-    _add_eyebrow(doc, "Section 17")
+    _add_eyebrow(doc, "Section 21")
     _add_heading_h1(doc, "Appendices")
 
     _add_heading_h2(doc, "A. Keyboard Shortcuts & UI Tips")
@@ -1570,12 +2045,13 @@ def generate() -> Path:
     # Title page.
     _add_eyebrow(doc, "Bluestaq Ltd")
     _add_heading_h1(doc, "SPECTRE Operator Guide")
-    _add_body(doc, "Satellite Intercept Planning Console")
-    _add_body(doc, "Comprehensive Operator Reference \u2014 v6.0")
+    _add_body(doc, "Space Planning, Evaluation & Counter-Threat Response Engine")
+    _add_body(doc, "Comprehensive Operator Reference \u2014 v2.0.0")
     _add_body(doc, "")
     _add_metric_card(doc, "23", "MANOEUVRE METHODS")
-    _add_metric_card(doc, "17", "GUIDE SECTIONS")
+    _add_metric_card(doc, "21", "GUIDE SECTIONS")
     _add_metric_card(doc, "28", "GCAT DATASETS")
+    _add_metric_card(doc, "5", "TRAINING LEVELS")
 
     # Content sections.
     _section_01_introduction(doc)
@@ -1590,11 +2066,15 @@ def generate() -> Path:
     _section_10_intercept_calculations(doc)
     _section_11_trade_space(doc)
     _section_12_scenario_planning(doc)
-    _section_13_scenarios(doc)
-    _section_14_glossary(doc)
-    _section_15_pattern_of_life(doc)
-    _section_16_gcat_browser(doc)
-    _section_17_appendices(doc)
+    _section_13_decision_engine(doc)
+    _section_14_training(doc)
+    _section_15_notso_correlation(doc)
+    _section_16_photometry(doc)
+    _section_17_scenarios(doc)
+    _section_18_glossary(doc)
+    _section_19_pattern_of_life(doc)
+    _section_20_gcat_browser(doc)
+    _section_21_appendices(doc)
 
     doc.save(str(OUTPUT_PATH))
     return OUTPUT_PATH

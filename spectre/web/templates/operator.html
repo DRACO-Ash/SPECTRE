@@ -2,9 +2,12 @@
 {% block title %}SPECTRE — Operator Console{% endblock %}
 
 {% block nav_brand %}
-<div>
-  <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Operator Console</span>
-  <div class="nav-subtitle">Space Intercept Planning Console</div>
+<div class="nav-brand-group">
+  <img src="/static/spectre_icon_mark.svg" alt="SPECTRE" class="nav-logo" />
+  <div>
+    <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Operator Console</span>
+    <div class="nav-subtitle">Space Planning, Evaluation &amp; Counter-Threat Response Engine</div>
+  </div>
 </div>
 {% endblock %}
 
@@ -57,6 +60,8 @@
 {% endblock %}
 
 {% block content %}
+
+{% include "partials/splash_overlay.html" %}
 
 <!-- ══════════════════════════════════════════════════════════════
      CONSOLE LAYOUT — Sidebar + Command Area
