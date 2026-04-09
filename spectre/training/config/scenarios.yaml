@@ -210,6 +210,28 @@ scenarios:
         description: "Submit decision within the 10-minute time limit"
         skill_axis: operational_tempo
         points: 30
+    manoeuvre_options:
+      - id: opt_hohmann_intrack
+        label: "Hohmann In-Track (+30 m/s)"
+        dv_ms: 30.0
+        miss_distance_km: 4.2
+        feasible: false
+        optimal: false
+        reason: "Miss distance 4.2 km < 5 km threshold — constraint 1 failure"
+      - id: opt_lambert_radial
+        label: "Lambert Radial (+18 m/s)"
+        dv_ms: 18.0
+        miss_distance_km: 7.8
+        feasible: true
+        optimal: false
+        reason: "Feasible — satisfies both constraints but higher ΔV than optimal"
+      - id: opt_lambert_intrack
+        label: "Lambert In-Track (+12 m/s)"
+        dv_ms: 12.0
+        miss_distance_km: 6.1
+        feasible: true
+        optimal: true
+        reason: "Optimal — minimum ΔV solution that satisfies both constraints"
     time_limit_minutes: 10
     scoring:
       passing_score: 100

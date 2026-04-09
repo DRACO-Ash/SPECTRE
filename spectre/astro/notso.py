@@ -156,7 +156,12 @@ _DT_FORMATS = [
 
 
 def _parse_dt(s: str) -> datetime | None:
-    s = s.strip().rstrip("Z").strip()
+    s = s.strip()
+    # Strip timezone suffixes before trying strptime formats
+    for suffix in (" UTC", " utc", "Z"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].strip()
+            break
     for fmt in _DT_FORMATS:
         try:
             return datetime.strptime(s, fmt).replace(tzinfo=UTC)
