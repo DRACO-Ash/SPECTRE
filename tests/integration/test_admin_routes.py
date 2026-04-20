@@ -140,9 +140,6 @@ class TestCreateUser:
 class TestEditUser:
     def test_edit_row_returns_form(self, client: object) -> None:
         """GET /admin/users/{id}/edit returns inline edit form HTML."""
-        from spectre.web.models import User
-        from sqlalchemy import select
-
         cookies = _admin_session(client)
         # Fetch user id for new_op
         resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
