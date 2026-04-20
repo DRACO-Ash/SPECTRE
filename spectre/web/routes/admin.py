@@ -93,6 +93,7 @@ async def create_user(
     """Create a new user; return the updated tbody rows via HTMX."""
     username = username.strip()
 
+    error: str | None = None
     if role not in _VALID_ROLES:
         error = "Invalid role selected."
     elif not username:
@@ -103,7 +104,8 @@ async def create_user(
         error = "Password is required."
     else:
         existing = await db.execute(select(User).where(User.username == username))
-        error = f"Username '{username}' is already taken." if existing.scalar_one_or_none() else None
+        if existing.scalar_one_or_none():
+            error = f"Username '{username}' is already taken."
 
     users = await _all_users(db)
     if error:
