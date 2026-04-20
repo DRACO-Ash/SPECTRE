@@ -1,0 +1,48 @@
+<tr id="user-row-{{ u.id }}"
+    style="border-bottom:1px solid var(--spectre-color-border);
+           background:var(--spectre-color-surface-2)">
+  <td style="padding:var(--spectre-space-3) var(--spectre-space-4)">
+    <span style="font-weight:500">{{ u.username }}</span>
+    {% if u.id == current_user.id %}
+    <span class="spectre-badge spectre-badge-neutral" style="margin-left:var(--spectre-space-2)">you</span>
+    {% endif %}
+  </td>
+  <td colspan="3" style="padding:var(--spectre-space-3) var(--spectre-space-4)">
+    <form hx-post="/admin/users/{{ u.id }}"
+          hx-target="#user-row-{{ u.id }}"
+          hx-swap="outerHTML"
+          style="display:flex; flex-wrap:wrap; gap:var(--spectre-space-3); align-items:flex-end">
+      <div>
+        <label class="spectre-label" for="edit-role-{{ u.id }}">Role</label>
+        <select class="spectre-input" id="edit-role-{{ u.id }}" name="role"
+                title="Account role" style="min-width:120px">
+          <option value="operator" {% if u.role == "operator" %}selected{% endif %}>Operator</option>
+          <option value="admin" {% if u.role == "admin" %}selected{% endif %}>Admin</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:160px">
+        <label class="spectre-label" for="edit-pw-{{ u.id }}">
+          New Password <span style="color:var(--spectre-color-text-muted)">(leave blank to keep)</span>
+        </label>
+        <input class="spectre-input" id="edit-pw-{{ u.id }}" name="new_password"
+               type="password" autocomplete="new-password" placeholder="New password (optional)"
+               title="Enter a new password to reset it, or leave blank to keep the current password" />
+      </div>
+      <div style="display:flex; gap:var(--spectre-space-2)">
+        <button type="submit" class="spectre-btn spectre-btn-primary"
+                style="font-size:var(--spectre-size-xsmall)"
+                title="Save changes">
+          Save
+        </button>
+        <button type="button" class="spectre-btn spectre-btn-ghost"
+                style="font-size:var(--spectre-size-xsmall)"
+                hx-get="/admin/users/{{ u.id }}/cancel"
+                hx-target="#user-row-{{ u.id }}"
+                hx-swap="outerHTML"
+                title="Cancel editing">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </td>
+</tr>

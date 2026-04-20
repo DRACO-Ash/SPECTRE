@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}SPECTRE — User Management{% endblock %}
+
+{% block nav_actions %}
+<div style="display:flex; align-items:center; gap:var(--spectre-space-3)">
+  <a href="/" class="spectre-btn spectre-btn-ghost" title="Return to operator console">← Console</a>
+  <span class="spectre-caption" style="color:var(--spectre-color-text-muted)">
+    {{ current_user.username }} &middot; admin
+  </span>
+  <form method="post" action="/logout" style="margin:0">
+    <button type="submit" class="spectre-btn spectre-btn-ghost">Sign Out</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="padding:var(--spectre-space-6); max-width:960px; margin:0 auto">
+
+  <!-- Page header -->
+  <div class="spectre-panel-header" style="margin-bottom:var(--spectre-space-5)">
+    <div style="display:flex; align-items:center; gap:var(--spectre-space-3)">
+      <svg class="spectre-icon" aria-hidden="true"><use href="/static/spectre-theme/icons/icon-operator.svg#icon"/></svg>
+      <span class="spectre-panel-title">User Management</span>
+    </div>
+    <span class="spectre-badge spectre-badge-neutral">{{ users|length }} user{% if users|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <!-- Flash message area (updated via HTMX OOB) -->
+  <div id="admin-flash">
+    {% if flash %}
+    <div class="spectre-card {% if flash.type == 'error' %}spectre-card-threat{% else %}spectre-card-custody{% endif %}"
+         style="margin-bottom:var(--spectre-space-4)">
+      <p style="font-size:var(--spectre-size-small);
+                color:{% if flash.type == 'error' %}var(--spectre-color-threat-red){% else %}var(--spectre-color-custody-green){% endif %}">
+        {{ flash.message }}
+      </p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Create user form -->
+  <div class="spectre-panel" style="margin-bottom:var(--spectre-space-5)">
+    <div class="spectre-panel-header">
+      <span class="spectre-panel-title" style="font-size:var(--spectre-size-small)">Add New User</span>
+    </div>
+    <form hx-post="/admin/users"
+          hx-target="#user-tbody"
+          hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()"
+          style="display:flex; flex-wrap:wrap; gap:var(--spectre-space-3); align-items:flex-end;
+                 padding:var(--spectre-space-4)">
+      <div style="flex:1; min-width:160px">
+        <label class="spectre-label" for="new-username">Username</label>
+        <input class="spectre-input" id="new-username" name="username" type="text"
+               required maxlength="64" autocomplete="off" placeholder="e.g. jsmith"
+               title="Unique login username, up to 64 characters" />
+      </div>
+      <div style="flex:1; min-width:160px">
+        <label class="spectre-label" for="new-password">Password</label>
+        <input class="spectre-input" id="new-password" name="password" type="password"
+               required autocomplete="new-password" placeholder="Initial password"
+               title="Initial password for this account" />
+      </div>
+      <div style="min-width:130px">
+        <label class="spectre-label" for="new-role">Role</label>
+        <select class="spectre-input" id="new-role" name="role" title="Account role">
+          <option value="operator">Operator</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div>
+        <button type="submit" class="spectre-btn spectre-btn-primary"
+                title="Create the new user account">
+          Create User
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- User table -->
+  <div class="spectre-panel">
+    <table style="width:100%; border-collapse:collapse; font-size:var(--spectre-size-small)">
+      <thead>
+        <tr style="border-bottom:1px solid var(--spectre-color-border)">
+          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Username</th>
+          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Role</th>
+          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Created</th>
+          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:right;
+                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="user-tbody">
+        {% include "partials/admin_user_table.html" %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

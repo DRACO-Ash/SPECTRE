@@ -1,0 +1,11 @@
+<div id="admin-flash" hx-swap-oob="true">
+  {% if flash %}
+  <div class="spectre-card {% if flash.type == 'error' %}spectre-card-threat{% else %}spectre-card-custody{% endif %}"
+       style="margin-bottom:var(--spectre-space-4)">
+    <p style="font-size:var(--spectre-size-small);
+              color:{% if flash.type == 'error' %}var(--spectre-color-threat-red){% else %}var(--spectre-color-custody-green){% endif %}">
+      {{ flash.message }}
+    </p>
+  </div>
+  {% endif %}
+</div>

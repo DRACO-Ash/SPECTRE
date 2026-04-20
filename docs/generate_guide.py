@@ -2019,6 +2019,12 @@ def _section_21_appendices(doc: Document) -> None:
             ["POST", "/red/add", "Add a red track to the session"],
             ["POST", "/blue/remove", "Remove a blue asset"],
             ["POST", "/red/remove", "Remove a red track"],
+            ["GET", "/admin/users", "List all users (admin only)"],
+            ["POST", "/admin/users", "Create a new user (admin only)"],
+            ["GET", "/admin/users/{id}/edit", "Open inline edit form for a user (admin only)"],
+            ["GET", "/admin/users/{id}/cancel", "Cancel inline edit, return display row (admin only)"],
+            ["POST", "/admin/users/{id}", "Save role / password change for a user (admin only)"],
+            ["DELETE", "/admin/users/{id}", "Delete a user account (admin only)"],
             ["POST", "/udl/login", "Connect to UDL with credentials"],
             ["POST", "/udl/logout", "Disconnect from UDL"],
             ["POST", "/udl/data-mode", "Set session UDL data mode"],
@@ -2028,6 +2034,85 @@ def _section_21_appendices(doc: Document) -> None:
             ["GET", "/udl/hrr", "Fetch HRR satellite list from UDL"],
             ["GET", "/udl/catalog/search", "Search cached on-orbit catalogue"],
         ],
+    )
+
+
+def _section_22_user_management(doc: Document) -> None:
+    """Section 22: User Management."""
+    _add_page_break(doc)
+    _add_eyebrow(doc, "Section 22")
+    _add_heading_h1(doc, "User Management")
+
+    _add_body(doc,
+        "SPECTRE provides a web-based user management console at /admin/users. "
+        "This interface is restricted to accounts with the admin role. Operators "
+        "do not have access to this area."
+    )
+
+    _add_heading_h2(doc, "Accessing the Admin Console")
+    _add_body(doc,
+        "Navigate to /admin/users in your browser while logged in as an admin. "
+        "Non-admin accounts receive an HTTP 403 Forbidden response. Unauthenticated "
+        "sessions are redirected to the login page."
+    )
+    _add_callout(doc,
+        "The bootstrap admin account is created from the SPECTRE_ADMIN_USER and "
+        "SPECTRE_ADMIN_PASS environment variables on first run (only if the users "
+        "table is empty). Set these before starting the server for the first time."
+    )
+
+    _add_heading_h2(doc, "User Roles")
+    _add_data_table(doc,
+        ["Role", "Permissions"],
+        [
+            ["operator", "Full access to all operator console features. Cannot access /admin/*."],
+            ["admin", "All operator permissions plus /admin/users account management."],
+        ],
+    )
+
+    _add_heading_h2(doc, "Creating a User")
+    _add_body(doc,
+        "At the top of the /admin/users page, complete the Add New User form:"
+    )
+    _add_bullet(doc, "Username — unique login name, up to 64 characters.")
+    _add_bullet(doc, "Password — initial password. The account holder should change this on first login.")
+    _add_bullet(doc, "Role — select Operator or Admin.")
+    _add_body(doc,
+        "Click Create User. The new account appears immediately in the user table below. "
+        "A confirmation banner confirms success or describes any validation error "
+        "(e.g. duplicate username)."
+    )
+
+    _add_heading_h2(doc, "Editing a User")
+    _add_body(doc,
+        "Click Edit on any user row to open an inline edit form. Two fields are available:"
+    )
+    _add_bullet(doc, "Role — change between Operator and Admin.")
+    _add_bullet(doc, "New Password — enter a new password to reset it. Leave blank to keep the existing password.")
+    _add_body(doc,
+        "Click Save to apply changes, or Cancel to discard and return to the display row. "
+        "Username cannot be changed; create a new account and delete the old one if a "
+        "username change is required."
+    )
+
+    _add_heading_h2(doc, "Deleting a User")
+    _add_body(doc,
+        "Click Delete on any user row. A confirmation prompt is shown before the account "
+        "is permanently removed. The following constraints apply:"
+    )
+    _add_bullet(doc, "An admin cannot delete their own account.")
+    _add_bullet(doc, "An admin cannot delete or demote the last remaining admin account.")
+    _add_callout(doc,
+        "Deletion is permanent and immediate. There is no soft-delete or recycle bin. "
+        "Ensure the correct account is selected before confirming."
+    )
+
+    _add_heading_h2(doc, "Fallback — Direct Database Access")
+    _add_body(doc,
+        "If all admin accounts are lost (e.g. deleted via direct SQL), access can be "
+        "restored by stopping the server and either: (a) deleting spectre.db and restarting "
+        "with SPECTRE_ADMIN_PASS set — this re-runs the bootstrap — or (b) for PostgreSQL, "
+        "truncating the users table and restarting."
     )
 
 
@@ -2049,7 +2134,7 @@ def generate() -> Path:
     _add_body(doc, "Comprehensive Operator Reference \u2014 v2.0.0")
     _add_body(doc, "")
     _add_metric_card(doc, "23", "MANOEUVRE METHODS")
-    _add_metric_card(doc, "21", "GUIDE SECTIONS")
+    _add_metric_card(doc, "22", "GUIDE SECTIONS")
     _add_metric_card(doc, "28", "GCAT DATASETS")
     _add_metric_card(doc, "5", "TRAINING LEVELS")
 
@@ -2075,6 +2160,7 @@ def generate() -> Path:
     _section_19_pattern_of_life(doc)
     _section_20_gcat_browser(doc)
     _section_21_appendices(doc)
+    _section_22_user_management(doc)
 
     doc.save(str(OUTPUT_PATH))
     return OUTPUT_PATH

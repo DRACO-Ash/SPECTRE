@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from spectre.config.settings import get_settings
 from spectre.web.database import init_db
 from spectre.web.planning_state import set_default_hrr_objects
+from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
 from spectre.web.routes.geometry import router as geometry_router
@@ -94,6 +95,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 app.include_router(login_router)
+app.include_router(admin_router)
 app.include_router(operator_router)
 app.include_router(udl_router)
 app.include_router(maneuver_router)

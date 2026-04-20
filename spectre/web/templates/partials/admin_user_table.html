@@ -1,0 +1,10 @@
+{% for u in users %}
+{% include "partials/admin_user_row.html" %}
+{% else %}
+<tr>
+  <td colspan="4" style="padding:var(--spectre-space-5); text-align:center;
+                          color:var(--spectre-color-text-muted); font-size:var(--spectre-size-small)">
+    No users found.
+  </td>
+</tr>
+{% endfor %}

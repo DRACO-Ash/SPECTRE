@@ -417,29 +417,47 @@ raw TLE history (N TLEs per sat)
 
 ## User Management
 
-SPECTRE does not currently expose a web UI for user management. To add or modify users, connect to the SQLite database directly:
+Admins can manage user accounts at **`/admin/users`** — no direct database access required.
+
+### Accessing the admin console
+
+Navigate to `http://<host>/admin/users` while logged in as an admin. Non-admin accounts receive HTTP 403. Unauthenticated requests are redirected to `/login`.
+
+### Operations
+
+| Operation | How |
+|-----------|-----|
+| **Create user** | Fill in Username, Password, and Role in the form at the top; click **Create User** |
+| **Change role** | Click **Edit** on any row, select the new role, click **Save** |
+| **Reset password** | Click **Edit** on any row, enter a new password, click **Save** (leave blank to keep current password) |
+| **Delete user** | Click **Delete** on any row; confirm the prompt |
+
+### Roles
+
+| Role | Permissions |
+|------|-------------|
+| `operator` | Full access to all operator console features; cannot access `/admin/*` |
+| `admin` | All operator permissions plus `/admin/users` management |
+
+### Safety constraints
+
+- An admin cannot delete their own account.
+- An admin cannot delete or demote the last remaining admin account.
+
+### Bootstrap admin (first run)
+
+On first start, SPECTRE creates a single admin account from:
 
 ```powershell
-sqlite3 spectre.db
+$env:SPECTRE_ADMIN_USER = "admin"      # default: "admin"
+$env:SPECTRE_ADMIN_PASS = "change-me"  # required; bootstrap is skipped if blank
 ```
 
-```sql
--- List users
-SELECT id, username, role, created_at FROM users;
-```
+This runs only once — if the `users` table is empty at startup. Use the web UI or change the env vars before first run to set the initial credentials.
 
-To generate a bcrypt hash for a new password:
+### Fallback: direct database access
 
-```python
-import bcrypt
-print(bcrypt.hashpw(b"operator-password-here", bcrypt.gensalt()).decode())
-```
-
-Then insert:
-
-```sql
-INSERT INTO users (username, hashed_password, role) VALUES ('newuser', '<hash>', 'operator');
-```
+If the admin account is lost (e.g. all admins deleted via direct SQL), restore access by stopping the server, deleting `spectre.db`, and restarting with `SPECTRE_ADMIN_PASS` set — this re-runs the bootstrap. For PostgreSQL, truncate the `users` table and restart instead.
 
 ---
 

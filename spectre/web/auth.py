@@ -100,3 +100,19 @@ async def require_login(
         )
 
     return user
+
+
+async def require_admin(
+    current_user: User = Depends(require_login),
+) -> User:
+    """FastAPI dependency that requires admin role.
+
+    Wraps :func:`require_login`; raises HTTP 403 if the authenticated user is
+    not an admin.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
+    return current_user
