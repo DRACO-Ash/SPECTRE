@@ -1,0 +1,168 @@
+/* ============================================================================
+ * SPECTRE Icon System
+ * Utility classes for inline SVG icons
+ *
+ * Usage:
+ *   <svg class="spectre-icon spectre-icon-md"><use href="icons/icon-track.svg#root"/></svg>
+ *
+ *   Or via <img>:
+ *   <img class="spectre-icon spectre-icon-md" src="icons/icon-track.svg" alt="Track">
+ *
+ *   Or as background (for buttons/labels):
+ *   <span class="spectre-icon-bg spectre-icon-bg-track"></span>
+ *
+ * All icons use currentColor, so they inherit the parent element's text colour.
+ * Apply .spectre-threat, .spectre-caution, etc. from the theme to recolour.
+ * ============================================================================ */
+
+
+/* ---------------------------------------------------------------------------
+ * 1. BASE ICON STYLES
+ * --------------------------------------------------------------------------- */
+
+.spectre-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: inherit;
+  fill: none;
+  stroke: currentColor;
+}
+
+/* When used as <img>, currentColor won't work. Use filter for theming. */
+img.spectre-icon {
+  /* Default: no filter (works with dark icons on light bg or vice versa) */
+  /* Apply .spectre-icon-invert on dark backgrounds if icons are dark-stroke */
+}
+
+.spectre-icon-invert {
+  filter: invert(1) brightness(0.85);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 2. SIZE VARIANTS
+ * --------------------------------------------------------------------------- */
+
+.spectre-icon-xs {
+  width: 14px;
+  height: 14px;
+}
+
+.spectre-icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.spectre-icon-md {
+  width: 20px;
+  height: 20px;
+}
+
+.spectre-icon-lg {
+  width: 24px;
+  height: 24px;
+}
+
+.spectre-icon-xl {
+  width: 32px;
+  height: 32px;
+}
+
+.spectre-icon-2xl {
+  width: 48px;
+  height: 48px;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 3. SEMANTIC COLOUR OVERRIDES
+ *
+ * Apply alongside .spectre-icon to colour the icon semantically.
+ * These use the design tokens from spectre-theme.css.
+ * --------------------------------------------------------------------------- */
+
+.spectre-icon.threat,
+.spectre-icon-threat {
+  color: var(--spectre-color-threat-red, #E24B4A);
+}
+
+.spectre-icon.caution,
+.spectre-icon-caution {
+  color: var(--spectre-color-caution-amber, #EF9F27);
+}
+
+.spectre-icon.nominal,
+.spectre-icon-nominal {
+  color: var(--spectre-color-nominal-green, #1D9E75);
+}
+
+.spectre-icon.info,
+.spectre-icon-info {
+  color: var(--spectre-color-intel-blue, #378ADD);
+}
+
+.spectre-icon.muted,
+.spectre-icon-muted {
+  color: var(--spectre-text-secondary, #7A8BA6);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 4. ICON IN BUTTON HELPER
+ *
+ * Use inside .spectre-btn for icon+label buttons:
+ *   <button class="spectre-btn">
+ *     <img class="spectre-icon spectre-icon-sm" src="icons/icon-track.svg" alt="">
+ *     Track Object
+ *   </button>
+ * --------------------------------------------------------------------------- */
+
+.spectre-btn .spectre-icon {
+  margin-right: 4px;
+  margin-left: -2px;
+}
+
+.spectre-btn .spectre-icon:only-child {
+  margin: 0;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 5. ICON REGISTRY
+ *
+ * Reference of all available icons and their intended usage context.
+ *
+ *  File                      Name            Context
+ *  ─────────────────────────────────────────────────────────────────
+ *  icon-track.svg            Track           Object tracking / surveillance
+ *  icon-threat.svg           Threat          Threat indicators, hostile actors
+ *  icon-manoeuvre.svg        Manoeuvre        Delta-V events, orbit changes
+ *  icon-decision.svg         Decision        What-if evaluation, COA selection
+ *  icon-sensor.svg           Sensor          Sensor tasking, radar/optical
+ *  icon-custody.svg          Custody         Custody chain, observation status
+ *  icon-pattern-of-life.svg  Pattern of Life Behavioural baseline analysis
+ *  icon-intercept.svg        Intercept       Approach trajectory, engagement
+ *  icon-monte-carlo.svg      Monte Carlo     Probability simulation, scatter
+ *  icon-report.svg           Report          Reporting, summaries, exports
+ *  icon-import.svg           Import          Data ingest, TLE download
+ *  icon-export.svg           Export          Data export, file share
+ *  icon-operator.svg         Operator        User / analyst identity
+ *  icon-notso.svg            NOTSO           Notice to Space Operators
+ *  icon-photometry.svg       Photometry      Brightness / light measurement
+ *  icon-tle.svg              TLE             Two-Line Element data
+ *  icon-settings.svg         Settings        Configuration, preferences
+ *  icon-dashboard.svg        Dashboard       Overview panel layout
+ *  icon-filter.svg           Filter          Data filtering controls
+ *  icon-search.svg           Search          Object / catalogue search
+ *  icon-clock.svg            Clock           Time, scheduling, cadence
+ *  icon-orbit.svg            Orbit           Orbital path / trajectory
+ *  icon-alert.svg            Alert           Critical warning
+ *  icon-chevron-right.svg    Chevron Right   Navigation, expand
+ *  icon-chevron-down.svg     Chevron Down    Dropdown, collapse
+ *  icon-close.svg            Close           Dismiss, close panel
+ *  icon-menu.svg             Menu            Hamburger / navigation menu
+ *
+ * ─────────────────────────────────────────────────────────────────────────── */

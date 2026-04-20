@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 280" fill="none">
+  <!--
+    SPECTRE Primary Logo
+    Usage: Headers, about screens, documentation covers
+    Colour: Adapts via currentColor for text; red accent is fixed #E24B4A
+    Min width: 200px
+  -->
+
+  <!-- Orbital eye mark -->
+  <g transform="translate(300, 100)">
+    <!-- Tracking ellipses -->
+    <ellipse cx="0" cy="0" rx="75" ry="37" fill="none" stroke="currentColor" stroke-width="2" opacity="0.9"/>
+    <ellipse cx="0" cy="0" rx="56" ry="27" fill="none" stroke="currentColor" stroke-width="1" opacity="0.5"/>
+    <ellipse cx="0" cy="0" rx="37" ry="18" fill="none" stroke="currentColor" stroke-width="0.5" opacity="0.3"/>
+
+    <!-- Threat cross-track arcs -->
+    <g transform="rotate(35)">
+      <ellipse cx="0" cy="0" rx="72" ry="20" fill="none" stroke="#E24B4A" stroke-width="1.6" opacity="0.85"/>
+    </g>
+    <g transform="rotate(-35)">
+      <ellipse cx="0" cy="0" rx="72" ry="20" fill="none" stroke="#E24B4A" stroke-width="1.6" opacity="0.85"/>
+    </g>
+
+    <!-- Focal diamond -->
+    <g transform="rotate(45)">
+      <rect x="-7" y="-7" width="14" height="14" fill="#E24B4A" opacity="0.95"/>
+    </g>
+    <g transform="rotate(45)">
+      <rect x="-3.5" y="-3.5" width="7" height="7" fill="currentColor" opacity="0.9"/>
+    </g>
+
+    <!-- Crosshair ticks -->
+    <line x1="-92" y1="0" x2="-80" y2="0" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+    <line x1="80" y1="0" x2="92" y2="0" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+    <line x1="0" y1="-48" x2="0" y2="-42" stroke="currentColor" stroke-width="0.8" opacity="0.3"/>
+    <line x1="0" y1="42" x2="0" y2="48" stroke="currentColor" stroke-width="0.8" opacity="0.3"/>
+
+    <!-- Tracking dots -->
+    <circle cx="-54" cy="-25" r="2.2" fill="#E24B4A" opacity="0.7"/>
+    <circle cx="43" cy="30" r="1.8" fill="currentColor" opacity="0.4"/>
+    <circle cx="65" cy="-11" r="1.5" fill="currentColor" opacity="0.3"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="300" y="200" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace"
+        font-size="38" font-weight="500" letter-spacing="16" fill="currentColor">
+    SPECTRE
+  </text>
+
+  <!-- Subtitle -->
+  <text x="300" y="226" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace"
+        font-size="9" font-weight="400" letter-spacing="4" fill="currentColor" opacity="0.5">
+    SPACE PLANNING, EVALUATION &amp; COUNTER-THREAT RESPONSE ENGINE
+  </text>
+
+  <!-- Divider -->
+  <line x1="150" y1="242" x2="450" y2="242" stroke="currentColor" stroke-width="0.5" opacity="0.15"/>
+
+  <!-- Tagline -->
+  <text x="300" y="264" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace"
+        font-size="9" font-weight="400" letter-spacing="3" fill="currentColor" opacity="0.3">
+    PROTECT &amp; DEFEND
+  </text>
+</svg>

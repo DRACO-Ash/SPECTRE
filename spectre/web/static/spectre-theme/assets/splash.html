@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPECTRE — Initialising</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --console-black: #0A0C10;
+    --deep-space: #141820;
+    --sensor-grey: #7A8BA6;
+    --ice-white: #D0D4DC;
+    --threat-red: #E24B4A;
+    --threat-red-dim: #A32D2D;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  body {
+    background: var(--console-black);
+    color: var(--ice-white);
+    font-family: var(--font-mono);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Scan line effect */
+  .scanline {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(226, 75, 74, 0.12), transparent);
+    animation: scan 4s linear infinite;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Subtle grid overlay */
+  .grid-overlay {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(122, 139, 166, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(122, 139, 166, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* Logo container */
+  .logo-mark {
+    margin-bottom: 32px;
+    animation: fade-in 0.8s ease-out both;
+  }
+
+  .logo-mark svg {
+    width: 240px;
+    height: 240px;
+  }
+
+  /* Orbit animations */
+  .orbit-slow  { animation: spin 30s linear infinite; transform-origin: center; }
+  .orbit-rev   { animation: spin-rev 22s linear infinite; transform-origin: center; }
+  .core-pulse  { animation: pulse-core 3s ease-in-out infinite; }
+
+  /* Wordmark */
+  .wordmark {
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: 16px;
+    color: var(--ice-white);
+    margin-bottom: 8px;
+    animation: fade-in 1s ease-out 0.3s both, flicker 8s linear 2s infinite;
+  }
+
+  .subtitle {
+    font-size: 10px;
+    letter-spacing: 4.5px;
+    color: #4B5563;
+    margin-bottom: 40px;
+    animation: fade-in 1s ease-out 0.6s both;
+  }
+
+  /* Version / classification bar */
+  .meta-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: #374151;
+    margin-bottom: 24px;
+    animation: fade-in 1s ease-out 1.0s both;
+  }
+
+  .meta-bar .dot {
+    width: 4px;
+    height: 4px;
+    background: var(--threat-red);
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Loading status */
+  .status-text {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: #4B5563;
+    animation: fade-in 1s ease-out 1.4s both;
+  }
+
+  /* Progress bar */
+  .progress-track {
+    width: 200px;
+    height: 2px;
+    background: var(--deep-space);
+    border-radius: 1px;
+    margin-top: 16px;
+    overflow: hidden;
+    animation: fade-in 1s ease-out 1.6s both;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--threat-red-dim), var(--threat-red));
+    border-radius: 1px;
+    animation: fill-progress 3s ease-in-out 2s forwards;
+  }
+
+  /* Corner system info */
+  .sys-info {
+    position: absolute;
+    bottom: 20px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: #1F2937;
+  }
+  .sys-info.left  { left: 24px; }
+  .sys-info.right { right: 24px; }
+
+  /* Keyframes */
+  @keyframes scan {
+    from { transform: translateY(-100%); }
+    to   { transform: translateY(100vh); }
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes spin-rev {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(-360deg); }
+  }
+  @keyframes pulse-core {
+    0%, 100% { opacity: 0.9; }
+    50%      { opacity: 0.5; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes flicker {
+    0%, 91%, 94%, 97%, 100% { opacity: 1; }
+    92%  { opacity: 0.4; }
+    95%  { opacity: 0.6; }
+  }
+  @keyframes fill-progress {
+    0%   { width: 0%; }
+    100% { width: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+    .progress-fill { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="scanline"></div>
+<div class="grid-overlay"></div>
+
+<!-- Logo mark -->
+<div class="logo-mark">
+  <svg viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g transform="translate(120, 120)">
+      <!-- Outer orbit rings (decorative, rotating) -->
+      <g class="orbit-slow" style="opacity: 0.12">
+        <circle cx="0" cy="0" r="105" fill="none" stroke="#E24B4A" stroke-width="0.5" stroke-dasharray="4 8"/>
+      </g>
+      <g class="orbit-rev" style="opacity: 0.08">
+        <circle cx="0" cy="0" r="88" fill="none" stroke="#7A8BA6" stroke-width="0.5" stroke-dasharray="2 6"/>
+      </g>
+
+      <!-- Main tracking ellipse -->
+      <ellipse cx="0" cy="0" rx="62" ry="31" fill="none" stroke="#7A8BA6" stroke-width="1.2" opacity="0.6"/>
+
+      <!-- Threat arcs (rotating) -->
+      <g class="orbit-slow">
+        <ellipse cx="0" cy="0" rx="60" ry="17" fill="none" stroke="#E24B4A" stroke-width="1.4" opacity="0.7" transform="rotate(35)"/>
+      </g>
+      <g class="orbit-rev">
+        <ellipse cx="0" cy="0" rx="60" ry="17" fill="none" stroke="#E24B4A" stroke-width="1.4" opacity="0.7" transform="rotate(-35)"/>
+      </g>
+
+      <!-- Core diamond -->
+      <g class="core-pulse">
+        <g transform="rotate(45)">
+          <rect x="-8" y="-8" width="16" height="16" fill="#E24B4A"/>
+        </g>
+        <g transform="rotate(45)">
+          <rect x="-3.5" y="-3.5" width="7" height="7" fill="#D0D4DC"/>
+        </g>
+      </g>
+
+      <!-- Orbiting dots -->
+      <g class="orbit-slow">
+        <circle cx="52" cy="-24" r="2.2" fill="#E24B4A" opacity="0.8"/>
+      </g>
+      <g class="orbit-rev">
+        <circle cx="-44" cy="30" r="1.6" fill="#7A8BA6" opacity="0.5"/>
+      </g>
+
+      <!-- Crosshair ticks -->
+      <line x1="-78" y1="0" x2="-67" y2="0" stroke="#7A8BA6" stroke-width="0.5" opacity="0.25"/>
+      <line x1="67" y1="0" x2="78" y2="0" stroke="#7A8BA6" stroke-width="0.5" opacity="0.25"/>
+      <line x1="0" y1="-44" x2="0" y2="-37" stroke="#7A8BA6" stroke-width="0.5" opacity="0.2"/>
+      <line x1="0" y1="37" x2="0" y2="44" stroke="#7A8BA6" stroke-width="0.5" opacity="0.2"/>
+    </g>
+  </svg>
+</div>
+
+<div class="wordmark">SPECTRE</div>
+<div class="subtitle">SPACE PLANNING, EVALUATION &amp; COUNTER-THREAT RESPONSE ENGINE</div>
+
+<div class="meta-bar">
+  <span>v2.0.0</span>
+  <span class="dot"></span>
+  <span>UNCLASSIFIED</span>
+  <span class="dot"></span>
+  <span>PROTECT &amp; DEFEND</span>
+</div>
+
+<div class="status-text" id="status">INITIALISING ORBITAL AWARENESS...</div>
+
+<div class="progress-track">
+  <div class="progress-fill" id="progress"></div>
+</div>
+
+<span class="sys-info left">SYS.OK</span>
+<span class="sys-info right" id="timestamp"></span>
+
+<script>
+  // Set current date
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  document.getElementById('timestamp').textContent = `${y}.${m}.${d}`;
+
+  // Status text cycling
+  const messages = [
+    'INITIALISING ORBITAL AWARENESS...',
+    'LOADING TLE CATALOGUE...',
+    'CONNECTING TO UDL...',
+    'CALIBRATING SENSOR FEEDS...',
+    'BUILDING PATTERN OF LIFE BASELINES...',
+    'SPECTRE READY'
+  ];
+
+  let idx = 0;
+  const statusEl = document.getElementById('status');
+
+  const interval = setInterval(() => {
+    idx++;
+    if (idx < messages.length) {
+      statusEl.textContent = messages[idx];
+    }
+    if (idx >= messages.length - 1) {
+      clearInterval(interval);
+      statusEl.style.color = '#1D9E75';
+    }
+  }, 600);
+</script>
+
+</body>
+</html>
