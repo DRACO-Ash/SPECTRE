@@ -1,37 +1,52 @@
 {% extends "base.html" %}
 {% block title %}SPECTRE — Operator Login{% endblock %}
 
-{% block nav_brand %}
-<div>
-  <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Space Planning, Evaluation &amp; Counter-Threat Response Engine</span>
-</div>
-{% endblock %}
-
 {% block content %}
-<div class="login-page">
-  <div class="login-container">
-    <div class="login-logo">
-      <img src="/static/spectre_logo_primary.svg" alt="SPECTRE" />
+<div style="min-height: calc(100vh - 84px); display: flex; align-items: center; justify-content: center; padding: var(--spectre-space-6)">
+  <div class="spectre-panel spectre-fade-in" style="width: 100%; max-width: 420px">
+
+    <div style="text-align: center; margin-bottom: var(--spectre-space-6)">
+      <img src="/static/spectre-theme/assets/logo-primary.svg" alt="SPECTRE"
+           style="width: 200px; height: auto;" />
     </div>
-    <p class="login-title">Operator Authentication</p>
-    <p class="login-subtitle">SPECTRE Console Access</p>
+
+    <div class="spectre-panel-header">
+      <span class="spectre-panel-title">Operator Authentication</span>
+      <span class="spectre-badge spectre-badge-neutral">CONSOLE ACCESS</span>
+    </div>
+
     {% if error %}
-    <p class="error-msg" style="text-align:center">{{ error }}</p>
+    <div class="spectre-card spectre-card-threat" style="margin: var(--spectre-space-4) 0">
+      <p style="font-size: var(--spectre-size-small); color: var(--spectre-color-threat-red)">{{ error }}</p>
+    </div>
     {% endif %}
-    <form method="post" action="/login" class="login-form">
-      <label for="username">Username
-        <input id="username" name="username" type="text" autocomplete="username" required autofocus
+
+    <form method="post" action="/login"
+          style="display: flex; flex-direction: column; gap: var(--spectre-space-4); margin-top: var(--spectre-space-4)">
+      <div>
+        <label class="spectre-label" for="username">Username</label>
+        <input class="spectre-input" id="username" name="username" type="text"
+               autocomplete="username" required autofocus
                placeholder="Enter operator username"
                title="Your SPECTRE operator account username" />
-      </label>
-      <label for="password">Password
-        <input id="password" name="password" type="password" autocomplete="current-password" required
+      </div>
+      <div>
+        <label class="spectre-label" for="password">Password</label>
+        <input class="spectre-input" id="password" name="password" type="password"
+               autocomplete="current-password" required
                placeholder="Enter password"
                title="Your SPECTRE operator account password" />
-      </label>
-      <button type="submit" class="btn-primary" title="Authenticate to access the SPECTRE operator console">Sign In</button>
+      </div>
+      <button type="submit" class="spectre-btn spectre-btn-primary spectre-btn-lg"
+              style="width: 100%; margin-top: var(--spectre-space-2)"
+              title="Authenticate to access the SPECTRE operator console">
+        Sign In
+      </button>
     </form>
-    <p class="login-footer">Space Planning, Evaluation &amp; Counter-Threat Response Engine &middot; Orbital Warfare M&amp;S</p>
+
+    <p class="spectre-caption" style="text-align: center; margin-top: var(--spectre-space-6)">
+      Space Planning, Evaluation &amp; Counter-Threat Response Engine &middot; Orbital Warfare M&amp;S
+    </p>
   </div>
 </div>
 {% endblock %}

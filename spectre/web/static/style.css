@@ -87,6 +87,12 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* spectre-theme.css sets td/th/li/label to an absolute 14px body size.
+   App tables size themselves via the <table> element; cells should inherit. */
+td, th { font-size: inherit; }
+li     { font-size: inherit; }
+label  { font-size: inherit; }
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -96,29 +102,27 @@ html, body {
   line-height: 1.55;
 }
 
-/* ── Four-segment accent bar (Bluestaq signature) ────────────── */
-.accent-bar {
-  display: flex;
-  height: 4px;
-  width: 100%;
+/* ── App chrome: sticky wrapper for classification banner + nav ── */
+.app-chrome {
+  position: sticky;
+  top: 0;
+  z-index: var(--spectre-z-overlay, 100);
 }
-.accent-bar-navy { flex: 3; background: var(--bar-navy); }
-.accent-bar-blue { flex: 2; background: var(--bar-blue); }
-.accent-bar-mid  { flex: 2; background: var(--bar-mid); }
-.accent-bar-gold { flex: 3; background: var(--bar-gold); }
+
+/* Classification banner is non-sticky inside the chrome wrapper */
+.app-chrome .spectre-classification-banner {
+  position: relative;
+}
 
 /* ── Nav bar ─────────────────────────────────────────────────── */
 .nav-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--navy);
-  border-bottom: 1px solid var(--border);
+  background: var(--spectre-surface-raised);
+  border-bottom: 1px solid var(--spectre-border-default);
   padding: 0 1.5rem;
   height: 48px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
 }
 .nav-brand {
   display: flex;
@@ -313,7 +317,7 @@ main:has(.console-layout) { padding: 0; }
 /* Sidebar tab bar */
 .sidebar-tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--spectre-border-default);
   flex-shrink: 0;
 }
 .stab {
@@ -321,7 +325,7 @@ main:has(.console-layout) { padding: 0; }
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--text-dim);
+  color: var(--spectre-text-secondary);
   font-family: var(--font-ui);
   font-size: 0.68rem;
   font-weight: 700;
@@ -331,10 +335,10 @@ main:has(.console-layout) { padding: 0; }
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
-.stab:hover { color: var(--text); }
+.stab:hover { color: var(--spectre-text-primary); }
 .stab.active {
-  color: var(--gold);
-  border-bottom-color: var(--gold);
+  color: var(--spectre-color-intel-blue);
+  border-bottom-color: var(--spectre-color-intel-blue);
 }
 
 /* Sidebar panels */
@@ -371,10 +375,10 @@ main:has(.console-layout) { padding: 0; }
 /* ── Asset inner sub-tabs ──────────────────────────────────── */
 .asset-tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--spectre-border-default);
   margin: 0 -0.65rem 0;   /* bleed to panel edges */
   padding: 0 0.65rem;
-  background: var(--navy-deep);
+  background: var(--spectre-surface-overlay);
   flex-shrink: 0;
 }
 .atab {
@@ -382,7 +386,7 @@ main:has(.console-layout) { padding: 0; }
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--text-dim);
+  color: var(--spectre-text-secondary);
   font-family: var(--font-ui);
   font-size: 0.66rem;
   font-weight: 700;
@@ -392,10 +396,10 @@ main:has(.console-layout) { padding: 0; }
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
-.atab:hover { color: var(--text); }
+.atab:hover { color: var(--spectre-text-primary); }
 .atab.active {
-  color: var(--ops-blue);
-  border-bottom-color: var(--ops-blue);
+  color: var(--spectre-color-intel-blue);
+  border-bottom-color: var(--spectre-color-intel-blue);
 }
 .asset-panels { flex: 1; min-height: 0; }
 .asset-panel { display: none; }
@@ -409,15 +413,15 @@ main:has(.console-layout) { padding: 0; }
   justify-content: center;
   background: transparent;
   border: none;
-  border-right: 1px solid var(--border);
-  color: var(--text-dim);
+  border-right: 1px solid var(--spectre-border-default);
+  color: var(--spectre-text-secondary);
   font-size: 0.75rem;
   padding: 0 0.65rem;
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
   align-self: stretch;
 }
-.sidebar-collapse-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.sidebar-collapse-btn:hover { color: var(--spectre-text-primary); background: var(--spectre-surface-input-hover); }
 
 /* ── Command Area ────────────────────────────────────────────── */
 .command-area {
@@ -429,15 +433,15 @@ main:has(.console-layout) { padding: 0; }
 /* Hero tab bar */
 .hero-tab-bar {
   display: flex;
-  border-bottom: 2px solid var(--border);
-  background: var(--navy);
+  border-bottom: 1px solid var(--spectre-border-default);
+  background: var(--spectre-surface-panel);
   flex-shrink: 0;
 }
 .htab {
   position: relative;
   background: transparent;
   border: none;
-  color: var(--text-dim);
+  color: var(--spectre-text-secondary);
   font-family: var(--font-ui);
   font-size: 0.82rem;
   font-weight: 700;
@@ -448,21 +452,21 @@ main:has(.console-layout) { padding: 0; }
   transition: color 0.15s, background 0.15s;
 }
 .htab:hover {
-  color: var(--text);
-  background: var(--alliance-a08);
+  color: var(--spectre-text-primary);
+  background: var(--spectre-surface-input-hover);
 }
 .htab.active {
-  color: var(--gold);
-  background: var(--gold-a06);
+  color: var(--spectre-color-intel-blue);
+  background: var(--spectre-color-intel-blue-bg);
 }
 .htab.active::after {
   content: "";
   position: absolute;
-  bottom: -2px;
+  bottom: -1px;
   left: 0;
   right: 0;
-  height: 3px;
-  background: var(--gold);
+  height: 2px;
+  background: var(--spectre-color-intel-blue);
   border-radius: 2px 2px 0 0;
 }
 .htab-icon {
@@ -473,8 +477,8 @@ main:has(.console-layout) { padding: 0; }
   margin-right: 0.4rem;
   vertical-align: middle;
 }
-.htab-icon-gold { background: var(--gold); }
-.htab-icon-red  { background: var(--red); }
+.htab-icon-gold { background: var(--spectre-color-intel-blue); }
+.htab-icon-red  { background: var(--spectre-color-threat-red); }
 
 /* Hero panels */
 .hero-panels {
@@ -891,15 +895,15 @@ textarea { resize: vertical; }
 .hrr-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
 .hrr-table th {
   position: sticky; top: 0;
-  background: var(--navy);
+  background: var(--spectre-surface-panel);
   text-align: left;
   padding: 0.3rem 0.4rem;
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-bright);
-  border-bottom: 2px solid var(--alliance-blue);
+  color: var(--spectre-text-secondary);
+  border-bottom: 1px solid var(--spectre-border-active);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
