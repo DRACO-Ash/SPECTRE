@@ -1,4 +1,4 @@
-SPECTRE TODO List — last updated 2026-04-08
+SPECTRE TODO List — last updated 2026-05-05
 ========================================
 
 Items are grouped by priority. Implemented items are marked [DONE].
@@ -14,24 +14,27 @@ IMPLEMENTED
 [DONE] Training Mode — 6 levels, 13 scenarios, tutorials, challenges, gamification (spectre/training/)
 [DONE] Security hardening — CODEOWNERS, pre-commit, dependabot, bandit, pip-audit, gitleaks, CI rewrite
 [DONE] UDL datatype separation — design decision documented; per-panel filter is open backlog (P1-B below)
+[DONE] P1-C  User management UI (/admin/users) — commit d1270fc
+              GET/POST /admin/users (list + add), POST /admin/users/{id} (edit), DELETE /admin/users/{id}
+[DONE] P1-A  CSRF middleware + rate limiting on /udl/* routes
+              - Double-submit CSRF token via itsdangerous (spectre/web/csrf.py)
+              - Global require_csrf FastAPI dependency applied to all state-changing routes
+              - hx-headers on <body> sends X-CSRF-Token on every HTMX request
+              - Sliding-window per-user rate limiters for UDL auth (5/min), data (60/min), sync (3/10min)
+[DONE] P2-C  Intercept results export
+              - GET /plan/export — CSV download of session intercept history (spectre/web/routes/plan.py)
+              - Optional ?run_id=<option_id> to export a single run
+              - Copy-to-clipboard button on single-run result panel
+              - Export CSV link on all-methods batch result panel
 
 
 PRIORITY 1 — Security / Operational Gaps
 -----------------------------------------
-P1-A  CSRF middleware + rate limiting on /udl/* routes
-      - Add CSRF double-submit cookie middleware to spectre/web/app.py
-      - Add per-user rate limit on UDL proxy routes (prevent credential hammering)
-      - Source: docs/SECURITY.md SSCoP Theme 3 / Cyber Essentials
-
 P1-B  UDL datatype filter (REAL / SIMULATED / EXERCISE / TEST)
       - Add 'datatype' query param selector per panel so operators explicitly choose data mode
       - Prevents accidental exercise data in live ops or vice versa
       - Extends existing UDL routes (spectre/web/routes/udl.py)
-
-P1-C  User management UI (/admin/users)
-      - GET /admin/users (list), POST /admin/users (add), POST /admin/users/{id}/delete (remove)
-      - Currently users can only be managed by direct DB access
-      - Source: docs/phased_plan.md Phase 3.4
+      - Note: session-level data mode toggle already exists; this adds per-request override UI
 
 
 PRIORITY 2 — High-Value Features
@@ -47,11 +50,6 @@ P2-B  UDL conjunction + observation endpoints
       - GET /udl/conjunction?satno=<N> returning CDM/close-approach warnings
       - GET /udl/observation?satno=<N> returning sensor observation history
       - Source: docs/phased_plan.md Phase 3.2
-
-P2-C  Intercept results export
-      - GET /plan/export?run_id=<id> returning CSV of intercept results
-      - Or: copy-to-clipboard button on the results table
-      - Source: docs/phased_plan.md Phase 3.3
 
 P2-D  UDL route integration tests
       - TestClient tests for web/routes/udl.py: POST /udl/login, GET /udl/tle, GET /udl/statevector

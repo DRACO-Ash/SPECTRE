@@ -3,11 +3,8 @@
 
 {% block nav_brand %}
 <div class="nav-brand-group">
-  <img src="/static/spectre_icon_mark.svg" alt="SPECTRE" class="nav-logo" />
-  <div>
-    <span class="nav-title"><span class="nav-title-accent">SPECTRE</span> Operator Console</span>
-    <div class="nav-subtitle">Space Planning, Evaluation &amp; Counter-Threat Response Engine</div>
-  </div>
+  <img class="nav-logo" src="/static/spectre-theme/assets/logo-horizontal.svg" alt="SPECTRE" />
+  <span class="spectre-badge spectre-badge-nominal" style="margin-left: var(--spectre-space-2)">OPERATOR CONSOLE</span>
 </div>
 {% endblock %}
 
@@ -52,6 +49,7 @@
     </a>
     <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
     <form method="post" action="/logout" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button type="submit" class="btn-logout" title="End your SPECTRE session">Logout</button>
     </form>
   </div>
@@ -1220,6 +1218,7 @@ function switchToTradeSpace() {
   function spectreSetTheme(theme) {
     if (THEMES.indexOf(theme) === -1) return;        // only allow known themes
     document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-spectre-theme', theme === 'steel' ? 'light' : 'dark');
     try { localStorage.setItem(KEY, theme); } catch (_) {}
     var picker = document.getElementById('theme-picker');
     if (picker && picker.value !== theme) picker.value = theme;

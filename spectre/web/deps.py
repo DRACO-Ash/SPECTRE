@@ -36,8 +36,15 @@ def render(
     """Render a Jinja2 template with the modern TemplateResponse signature.
 
     Wraps ``Jinja2Templates.TemplateResponse`` using the non-deprecated
-    ``(request, name, context)`` argument order.
+    ``(request, name, context)`` argument order.  Automatically injects
+    ``csrf_token`` into the context so every template can render the hidden
+    CSRF field and meta tag without explicit wiring.
     """
+    from spectre.web.csrf import make_csrf_token  # noqa: PLC0415
+
     tmpl = get_templates()
     ctx = context or {}
+    if "csrf_token" not in ctx:
+        session_cookie = request.cookies.get("spectre_session", "")
+        ctx["csrf_token"] = make_csrf_token(session_cookie) if session_cookie else ""
     return cast(HTMLResponse, tmpl.TemplateResponse(request, name, ctx, status_code=status_code))

@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from spectre.config.settings import get_settings
+from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.planning_state import set_default_hrr_objects
 from spectre.web.routes.admin import router as admin_router
@@ -24,6 +25,7 @@ from spectre.web.routes.geometry import router as geometry_router
 from spectre.web.routes.login import router as login_router
 from spectre.web.routes.maneuver import router as maneuver_router
 from spectre.web.routes.operator import router as operator_router
+from spectre.web.routes.plan import router as plan_router
 from spectre.web.routes.pol import router as pol_router
 from spectre.web.routes.threat import router as threat_router
 from spectre.web.routes.training import router as training_router
@@ -90,11 +92,13 @@ app = FastAPI(
     title="SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine",
     version="0.4.0",
     lifespan=lifespan,
+    dependencies=[Depends(require_csrf)],
 )
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 app.include_router(login_router)
+app.include_router(plan_router)
 app.include_router(admin_router)
 app.include_router(operator_router)
 app.include_router(udl_router)

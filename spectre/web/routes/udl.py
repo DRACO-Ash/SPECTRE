@@ -28,6 +28,7 @@ from spectre.web.planning_state import (
     set_catalog_status,
     set_onorbit_catalog,
 )
+from spectre.web.rate_limit import udl_auth_rate_limit, udl_data_rate_limit, udl_sync_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,7 @@ async def udl_login(
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_auth_rate_limit),
 ) -> HTMLResponse:
     """Validate UDL credentials and store them in the operator session.
 
@@ -379,6 +381,7 @@ async def fetch_tle(
     mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
     name_override: Annotated[str, Query(description="Pre-populated name (e.g. from HRR watchlist commonName)")] = "",
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch a TLE for *satno* from UDL and return a pre-filled form partial.
 
@@ -585,6 +588,7 @@ async def fetch_statevector(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch the latest Cartesian state vector for *satno* from UDL.
 
@@ -784,6 +788,7 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
 async def fetch_hrr(
     request: Request,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial."""
     state = get_session_state(current_user.username)
@@ -872,6 +877,7 @@ async def udl_notso(
     satno: int,
     request: Request,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> Any:
     """Attempt to fetch NOTSO records from UDL for a given SATNO.
 
@@ -933,6 +939,7 @@ async def udl_notso(
 async def udl_notso_sync(
     request: Request,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_sync_rate_limit),
 ) -> Any:
     """Incrementally sync TACREP_NOTSO records from UDL into the local cache.
 

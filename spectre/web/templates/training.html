@@ -2,13 +2,12 @@
 {% block title %}SPECTRE — Training Mode{% endblock %}
 
 {% block nav_brand %}
-<div>
-  <span class="nav-title">
-    <span class="nav-title-accent">SPECTRE</span> Training
+<div class="nav-brand-group">
+  <img class="nav-logo" src="/static/spectre-theme/assets/logo-horizontal.svg" alt="SPECTRE" />
+  <span class="spectre-badge spectre-badge-caution" style="margin-left: var(--spectre-space-2)">
+    <img class="spectre-icon spectre-icon-xs" src="/static/spectre-theme/icons/icon-alert.svg" alt="" />
+    TRAINING MODE
   </span>
-  <div class="nav-subtitle" style="color:#f59e0b; font-weight:700; letter-spacing:0.05em">
-    ⚠ TRAINING MODE — Synthetic Data Only
-  </div>
 </div>
 {% endblock %}
 
@@ -16,7 +15,8 @@
 <div class="nav-right">
   <span class="nav-user" style="color:var(--text-dim)">{{ user.username }}</span>
   <form method="post" action="/training/leave" class="inline-form">
-    <input type="hidden" name="session_id" value="{{ training_session_id }}">
+    <input type="hidden" name="session_id" value="{{ training_session_id }}" />
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <button type="submit" class="btn-primary"
             style="background:#22c55e; border-color:#22c55e; font-weight:700"
             title="Return to the operational console">

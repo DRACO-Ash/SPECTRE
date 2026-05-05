@@ -160,6 +160,62 @@
 </div>
 
 
+{# ══════════════════════════════════════════════════════════════════════════════
+   § 2b — EXPORT / COPY ACTION BAR
+   ══════════════════════════════════════════════════════════════════════════════ #}
+<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.55rem; flex-wrap:wrap">
+
+  {# Copy to clipboard — formats key fields as plain text #}
+  {% set _clip_text %}SPECTRE INTERCEPT  {{ result.option_id }}
+Red:    {{ result.red_name }}
+Blue:   {{ result.blue_name }}
+Method: {{ result.method.value | upper }}
+Total ΔV:     {{ "%.4f" | format(result.total_delta_v_km_s) }} km/s
+Arrival:      {{ result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
+Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
+Threat:       {{ intel.threat_level }}
+Observability:{{ intel.obs_level }}
+{% for b in result.burns %}  Burn {{ b.burn_number }} ({{ b.segment_name }})  epoch={{ b.burn_epoch.strftime('%Y-%m-%dT%H:%M:%SZ') }}  ΔV={{ "%.4f"|format(b.delta_v_km_s) }} km/s  [P={{ "%.4f"|format(b.dv_prograde) }} N={{ "%.4f"|format(b.dv_normal) }} R={{ "%.4f"|format(b.dv_radial) }}]
+{% endfor %}Notes: {{ result.notes }}{% endset %}
+  <button type="button"
+          class="btn-secondary"
+          style="font-size:0.65rem; font-weight:700; padding:0.25rem 0.6rem;
+                 border-color:var(--ops-blue); color:var(--ops-blue)"
+          data-clip="{{ _clip_text | e }}"
+          onclick="(function(btn){
+            navigator.clipboard.writeText(btn.dataset.clip).then(function(){
+              var orig = btn.textContent;
+              btn.textContent = '\u2713 Copied';
+              setTimeout(function(){ btn.textContent = orig; }, 1600);
+            });
+          })(this)"
+          title="Copy intercept summary to clipboard">
+    &#8686; Copy
+  </button>
+
+  {# Download CSV — full session history #}
+  <a href="/plan/export"
+     class="btn-secondary"
+     style="font-size:0.65rem; font-weight:700; padding:0.25rem 0.6rem;
+            border-color:var(--text-dim); color:var(--text-dim);
+            text-decoration:none; display:inline-flex; align-items:center; gap:0.3rem"
+     title="Download all session intercept results as CSV">
+    &#8659; Export CSV
+  </a>
+
+  {# Download this run only #}
+  <a href="/plan/export?run_id={{ result.option_id }}"
+     class="btn-secondary"
+     style="font-size:0.65rem; font-weight:700; padding:0.25rem 0.6rem;
+            border-color:var(--text-dim); color:var(--text-dim);
+            text-decoration:none; display:inline-flex; align-items:center; gap:0.3rem"
+     title="Download only this run as CSV">
+    &#8659; Export this run
+  </a>
+
+</div>
+
+
 {# ── Relative Geometry trigger ── #}
 {% if result.burns %}
 {% set b0 = result.burns[0] %}

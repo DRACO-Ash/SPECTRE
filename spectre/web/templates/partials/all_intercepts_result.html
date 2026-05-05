@@ -22,6 +22,17 @@
     &#8594;
     <span style="color:var(--ops-blue)">{{ blue_name }}</span>
   </span>
+  {# Export all-methods batch as CSV #}
+  {% if ok_items %}
+  <a href="/plan/export"
+     style="font-size:0.65rem; font-weight:700; padding:0.2rem 0.55rem;
+            border:1px solid var(--text-dim); border-radius:4px;
+            color:var(--text-dim); text-decoration:none;
+            display:inline-flex; align-items:center; gap:0.3rem"
+     title="Download all {{ ok_items | length }} results as CSV">
+    &#8659; Export CSV
+  </a>
+  {% endif %}
 </div>
 
 {# ── Results table ── #}
