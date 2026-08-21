@@ -187,6 +187,51 @@ cosmetic one.
   parameter from a route signature is a behavioural change that belongs in its
   own commit with its own tests.
 
+## The submission package
+
+Built by `scripts/package-appstore.sh`, which is repeatable and fails closed:
+it refuses to produce a package containing a credential-shaped file, a
+populated secret, or a root `requirements.txt` (which would silently switch the
+platform to the python template).
+
+| | |
+|---|---|
+| Artefact | `dist/spectre-0.4.0-appstore.zip` |
+| Size | 2.0 MB (12 MB uncompressed, 258 files) |
+| Layout | Flat. `Dockerfile` at the root, no wrapping folder |
+| Template | docker-only (no root `requirements.txt`) |
+| Version | 0.4.0, matching the artifact stamp and the app's own version field |
+
+It ships a **testable source tree**, not a stripped runtime bundle: tests, their
+configuration, the lockfile, `sonar-project.properties` and the CI workflow all
+travel with it. Under docker-only the platform will not run the suite, but a
+reviewer can, and switching to the python template later then needs no
+repackaging.
+
+Excluded, each for a reason: `.git`, the virtualenv, every `.env` except the
+example, coverage output, local runtime data and databases, build caches, and
+`docs/openapi.json`, a 12 MB generated schema dump that is needed neither to
+build, test nor review and would slow every upload cycle.
+
+### Pipeline simulation against the artefact
+
+`scripts/simulate-pipeline.sh` reproduces what the platform actually does: it
+unzips the real package into a clean directory, adds the generated
+`.gitlab-ci.yml` the platform commits into its own checkout, runs the suite with
+`GITLAB_CI=true`, confirms `coverage.xml` is produced and non-empty, builds the
+image using the unzipped root as the build context, and exercises the runtime
+contract. All stages green:
+
+```
+Stage 1  checkout      flat, Dockerfile at the checkout root
+Stage 2  test          suite green under GITLAB_CI=true; coverage.xml 284,711 bytes
+Stage 3  containerize  builds from the unzipped root as context; suid sweep clean
+Stage 4  scan          non-root uid 10001, no suid paths, no package manager
+Stage 5  deploy        boots in 14s; GET /, /healthz, /readyz all 200
+```
+
+A green repository loop is not a green upload. This is the artefact.
+
 ## Remaining gaps
 
 **1. Whole-repository coverage is 74%, the Foundations standard is 80%.**
