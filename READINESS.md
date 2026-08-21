@@ -1,4 +1,4 @@
-# SPECTRE — Bluestaq App Store readiness report
+# SPECTRE: Bluestaq App Store readiness report
 
 **Band: Likely after fixes** · Weighted score **88%** (15 of 17 applicable dimensions pass)
 Archetype: server (container) · Template: **docker-only** · Version **0.4.0**
@@ -23,16 +23,16 @@ Each was, on its own, enough to fail the deploy. All are fixed and verified.
 
 | # | Blocker | Evidence | Fix |
 |---|---|---|---|
-| 1 | **Verification loop red.** 37 integration tests failed. Commit `d88cb69` added a global CSRF dependency but never updated the suite, so every authenticated POST returned 403. | `tests/integration/test_web_routes.py:150` — `assert 403 == 200` | `csrf_headers()` helper in `tests/conftest.py:34`; every non-safe request now mints a real token. The control is exercised, not disabled. |
+| 1 | **Verification loop red.** 37 integration tests failed. Commit `d88cb69` added a global CSRF dependency but never updated the suite, so every authenticated POST returned 403. | `tests/integration/test_web_routes.py:150`, `assert 403 == 200` | `csrf_headers()` helper in `tests/conftest.py:34`; every non-safe request now mints a real token. The control is exercised, not disabled. |
 | 2 | **CI red on `master` since 5 May 2026.** Run 43 (`b5621c2`): Tests and Lint both failed. Scored from the actual run conclusion, not the workflow file. | [run 29294546046](https://github.com/DRACO-Ash/SPECTRE/actions/runs/29294546046) | Blocker 1 fixes Tests. Lint failed on CI/local drift: the job installed a partial dependency set, so mypy disagreed with the local loop. It now runs `pip install -e ".[dev]"`. |
-| 3 | **`GET /` returned 302.** The platform router probes the root and treats a redirect as a failed deploy. | `spectre/web/routes/operator.py:43` — `Depends(require_login)` raised `302` | New `optional_login` dependency (`spectre/web/auth.py:121`); anonymous callers get the login page at **200**. A test asserts console state still never leaks. |
+| 3 | **`GET /` returned 302.** The platform router probes the root and treats a redirect as a failed deploy. | `spectre/web/routes/operator.py:43`, `Depends(require_login)` raised `302` | New `optional_login` dependency (`spectre/web/auth.py:121`); anonymous callers get the login page at **200**. A test asserts console state still never leaks. |
 | 4 | **No health or readiness endpoint.** The platform had no way to tell a live pod from a dead one. | no `/healthz` or `/readyz` anywhere in `spectre/web/routes/` | `spectre/web/health.py`. `/healthz` is liveness only; `/readyz` proves storage with a **real write**, races a 2 s timeout (shorter than the platform probe, so a stalled mount is a loud 503 rather than a silent liveness kill), and returns the resolved directory and exact errno in its 503 body. |
-| 5 | **Wrong port, hard-coded.** Listened on 8000; the platform sets `containerPort: 8080`. | `spectre/web/_entrypoint.py:12` — `port=8000` | Resolves `PORT` in code, defaulting to 8080 (`spectre/config/settings.py:74`). No `ENV PORT=` anywhere: a baked ENV always beats a code fallback and breaks the readiness probe. |
-| 6 | **Container ran as root**, shipped `gcc`, `apt` and `pip`, and carried the base image's setuid bits. The policy scan **stops** on `suid_or_guid_set`. | old `Dockerfile` — no `USER`, `apt-get install gcc` | Three-stage build. Runs `USER 10001:0`. Package managers and toolchain removed. The suid sweep is the **last** mutation of the prep stage and **fails the build closed** if anything remains. |
-| 7 | **Layer history would have failed the scan.** An in-place `chmod` leaves path-less (`N/A`) findings from earlier base layers. | n/a — absent by construction | Runtime flattened: `FROM scratch` with a single `COPY --from=prep / /`, all metadata (including `PATH`) re-declared. |
-| 8 | **Unpinned, unverifiable install.** The Dockerfile ran `pip install ".[standard]" \|\| pip install <hand-typed list>` — a fallback that silently installed a *different* dependency set. | old `Dockerfile` lines 16-20 | `requirements.lock`: 43 packages pinned with SHA-256 hashes, installed `--require-hashes --only-binary=:all:`. `pip-audit` over that exact file reports **no known vulnerabilities**. |
-| 9 | **Baked `ENV DATABASE_URL` pointing into the image.** Writes would have landed on the ephemeral layer and vanished on redeploy. | old `Dockerfile` — `ENV DATABASE_URL="sqlite+aiosqlite:////app/data/spectre.db"` | Removed. Resolution is in code: explicit variable, then the injected `STORAGE_MOUNT_PATH`, then a local default. Validated at boot. |
-| 10 | **No secret validation.** An empty or placeholder `SECRET_KEY` would boot and issue forgeable session and CSRF tokens. | `spectre/config/settings.py` — `secret_key` defaulted to `""` | `validate_secret_key` fails the boot closed on missing, placeholder or short keys. |
+| 5 | **Wrong port, hard-coded.** Listened on 8000; the platform sets `containerPort: 8080`. | `spectre/web/_entrypoint.py:12`, `port=8000` | Resolves `PORT` in code, defaulting to 8080 (`spectre/config/settings.py:74`). No `ENV PORT=` anywhere: a baked ENV always beats a code fallback and breaks the readiness probe. |
+| 6 | **Container ran as root**, shipped `gcc`, `apt` and `pip`, and carried the base image's setuid bits. The policy scan **stops** on `suid_or_guid_set`. | old `Dockerfile`, no `USER`, `apt-get install gcc` | Three-stage build. Runs `USER 10001:0`. Package managers and toolchain removed. The suid sweep is the **last** mutation of the prep stage and **fails the build closed** if anything remains. |
+| 7 | **Layer history would have failed the scan.** An in-place `chmod` leaves path-less (`N/A`) findings from earlier base layers. | n/a, absent by construction | Runtime flattened: `FROM scratch` with a single `COPY --from=prep / /`, all metadata (including `PATH`) re-declared. |
+| 8 | **Unpinned, unverifiable install.** The Dockerfile ran `pip install ".[standard]" \|\| pip install <hand-typed list>`, a fallback that silently installed a *different* dependency set. | old `Dockerfile` lines 16-20 | `requirements.lock`: 43 packages pinned with SHA-256 hashes, installed `--require-hashes --only-binary=:all:`. `pip-audit` over that exact file reports **no known vulnerabilities**. |
+| 9 | **Baked `ENV DATABASE_URL` pointing into the image.** Writes would have landed on the ephemeral layer and vanished on redeploy. | old `Dockerfile`, `ENV DATABASE_URL="sqlite+aiosqlite:////app/data/spectre.db"` | Removed. Resolution is in code: explicit variable, then the injected `STORAGE_MOUNT_PATH`, then a local default. Validated at boot. |
+| 10 | **No secret validation.** An empty or placeholder `SECRET_KEY` would boot and issue forgeable session and CSRF tokens. | `spectre/config/settings.py`, `secret_key` defaulted to `""` | `validate_secret_key` fails the boot closed on missing, placeholder or short keys. |
 
 ## Verified, not asserted
 
@@ -89,11 +89,11 @@ here it names itself and the remedy.
 | CI mirrors the loop, least privilege, latest run green | blocker if red | **PENDING** | Red on `master`; fixed on this branch, awaiting the first run |
 | Reproducible install from a committed lockfile | heavy | **PASS** | 43 packages, hash-pinned |
 | No unaddressed High or Critical CVE | heavy | **PASS** | `pip-audit`: no known vulnerabilities |
-| Coverage at least 80% | heavy | **FAIL** | 70.10% — see gap 1 |
+| Coverage at least 80% | heavy | **FAIL** | 70.10%, see gap 1 |
 | Coverage report at the gate's path | heavy | **PASS** | `coverage.xml` emitted; unread under docker-only |
 | Version stamp and audit row, generic client errors | medium | **PASS** | Single-sourced 0.4.0; boot logs its storage verdict |
 | Surgical structure, documented architecture | medium | **PASS** | Changes confined to config, auth, health, entrypoint and packaging |
-| Accessibility to WCAG AA | medium | **UNKNOWN** | Not assessed — see gap 3 |
+| Accessibility to WCAG AA | medium | **UNKNOWN** | Not assessed, see gap 3 |
 | House voice in user-facing copy | light | **PASS** | UK English throughout the new copy |
 
 SonarQube dimensions are **not applicable**: the docker-only template skips the
@@ -106,7 +106,7 @@ Owner: `testing-standards`. Under docker-only the SonarQube gate is skipped, so
 this does not fail the pipeline, but it is below the Foundations standard and it
 is the one thing that would block a later move to the python template. The
 shortfall is concentrated in the route layer: `threat.py` 29%, `udl.py` 27%,
-`pol.py` 21%, `training.py` 30%, `maneuver.py` 52% — roughly 1,400 uncovered
+`pol.py` 21%, `training.py` 30%, `maneuver.py` 52%: roughly 1,400 uncovered
 statements, nearly all of it HTMX partial handlers. *Fix:* extend the pattern in
 `tests/integration/test_plan_export.py` route by route, heaviest first. *Raises
 the band to Ready when combined with gap 2.*
@@ -115,11 +115,11 @@ the band to Ready when combined with gap 2.*
 Owner: `security-hardening`, `deploy-recipes`. `deb.debian.org` is blocked by
 this network's egress policy, so `apt-get upgrade` reported **SKIPPED**, loudly,
 naming its compensating control (the base image pinned by digest
-`sha256:a116514e…`). It is written to distinguish "applied" from "skipped" and
+`sha256:a116514e...`). It is written to distinguish "applied" from "skipped" and
 never to report patched when nothing was checked. *Fix:* run
 `scripts/verify-container.sh` once from a network that can reach the Debian
 security repository and confirm the log reads `OS PATCH: applied`. If the
-platform runner also cannot reach it, bump the pinned digest instead — that is
+platform runner also cannot reach it, bump the pinned digest instead. That is
 the patch mechanism. *Residual risk:* the container scan may report base-OS CVEs
 that an upgrade would have cleared.
 
@@ -153,10 +153,10 @@ guidance.
 
 ## Before you submit
 
-1. Run `scripts/verify-container.sh` — it must end **all checks passed**.
+1. Run `scripts/verify-container.sh`, it must end **all checks passed**.
 2. Confirm the App Store Environment Variables tab holds exactly `SECRET_KEY`,
    `SPECTRE_ADMIN_USER`, `SPECTRE_ADMIN_PASS`, saved as the complete set, then
-   applied. **Never type `PORT`** — the platform injects it and any value in the
+   applied. **Never type `PORT`**, the platform injects it and any value in the
    tab overrides it and breaks the readiness probe.
 3. Attach the **FILE_STORAGE** add-on and raise an operations request for
    `securityContext.fsGroup`. Without it the non-root container cannot write to

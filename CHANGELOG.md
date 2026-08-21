@@ -7,7 +7,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.4.0] — 2026-08-21
+## [0.4.0] - 2026-08-21
 
 Bluestaq App Store readiness. SPECTRE is packaged for the docker-only template
 and meets the platform runtime contract. See `READINESS.md` for the scored
@@ -38,15 +38,15 @@ report and the remaining gaps.
 - **Fail-closed startup validation.** A missing, placeholder or short
   `SECRET_KEY` stops the boot. So does a data directory that will not accept a
   write, with the `securityContext.fsGroup` remedy named in the message.
-- **`requirements.lock`** — 43 dependencies pinned with SHA-256 hashes,
+- **`requirements.lock`**, 43 dependencies pinned with SHA-256 hashes,
   installed with `--require-hashes --only-binary=:all:`.
-- **`scripts/verify-container.sh`** — builds the image and asserts every
+- **`scripts/verify-container.sh`**, builds the image and asserts every
   contract property against it. POSIX `sh`, no bashisms. Run before every upload.
-- **`tests/unit/test_deployment_contract.py`** — pins the deployment contract as
+- **`tests/unit/test_deployment_contract.py`**, pins the deployment contract as
   tests so it cannot silently regress.
 - Test suites for configuration resolution, the health endpoints, the CSRF and
   session controls, the logout flow and the intercept CSV export.
-- **Container contract job in CI** — builds the image and verifies non-root, no
+- **Container contract job in CI**, builds the image and verifies non-root, no
   setuid paths, no package manager, 200 at `/` and the health paths, and
   fail-closed boot.
 
@@ -58,7 +58,7 @@ report and the remaining gaps.
   the build closed, and the runtime flattened to `FROM scratch` with a single
   `COPY --from=prep / /` so the policy scan finds no layer history.
 - **Port 8080.** Resolved from `PORT` in code, never baked with `ENV`.
-- **`DATABASE_URL` and the data directory resolve at runtime** — explicit
+- **`DATABASE_URL` and the data directory resolve at runtime**, explicit
   variable, then the platform-injected value, then a local default. The baked
   `ENV DATABASE_URL` that would have sent writes to the ephemeral layer is gone.
 - Container runs as `USER 10001:0`.
