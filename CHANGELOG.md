@@ -7,6 +7,72 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.0] — 2026-08-21
+
+Bluestaq App Store readiness. SPECTRE is packaged for the docker-only template
+and meets the platform runtime contract. See `READINESS.md` for the scored
+report and the remaining gaps.
+
+### Fixed
+
+- **37 failing integration tests.** Commit `d88cb69` added a global CSRF
+  dependency without updating the suite, so every authenticated POST returned
+  403 and `master` CI had been red since 5 May 2026. Tests now mint a real
+  token via `csrf_headers()`, exercising the control rather than disabling it.
+- **`GET /` returned 302 to anonymous callers.** The App Store router probes the
+  root and treats a redirect as a failed deploy. It now serves the login page at
+  200 via the new `optional_login` dependency; console state still never renders
+  without a valid session.
+- **Lint job disagreed with the local loop.** It installed a partial dependency
+  set, so mypy failed in CI while passing locally. It now installs `.[dev]`.
+- **`HRR_List.json` resolved to a path that cannot exist in a container.** It is
+  now read from the data volume first, so a deployed instance can be given fresh
+  data without a rebuild.
+
+### Added
+
+- **Health and readiness endpoints** (`spectre/web/health.py`). `/healthz` is
+  liveness only. `/readyz` proves storage with a real write, races a hard 2 s
+  timeout so a stalled mount cannot become a silent liveness kill, and returns
+  the resolved data directory and the exact errno in its 503 body.
+- **Fail-closed startup validation.** A missing, placeholder or short
+  `SECRET_KEY` stops the boot. So does a data directory that will not accept a
+  write, with the `securityContext.fsGroup` remedy named in the message.
+- **`requirements.lock`** — 43 dependencies pinned with SHA-256 hashes,
+  installed with `--require-hashes --only-binary=:all:`.
+- **`scripts/verify-container.sh`** — builds the image and asserts every
+  contract property against it. POSIX `sh`, no bashisms. Run before every upload.
+- **`tests/unit/test_deployment_contract.py`** — pins the deployment contract as
+  tests so it cannot silently regress.
+- Test suites for configuration resolution, the health endpoints, the CSRF and
+  session controls, the logout flow and the intercept CSV export.
+- **Container contract job in CI** — builds the image and verifies non-root, no
+  setuid paths, no package manager, 200 at `/` and the health paths, and
+  fail-closed boot.
+
+### Changed
+
+- **Dockerfile rewritten** as a three-stage hardened build: no compiler (every
+  dependency ships a manylinux wheel), base pinned by digest, package managers
+  and toolchain stripped, the setuid/setgid sweep as the last mutation failing
+  the build closed, and the runtime flattened to `FROM scratch` with a single
+  `COPY --from=prep / /` so the policy scan finds no layer history.
+- **Port 8080.** Resolved from `PORT` in code, never baked with `ENV`.
+- **`DATABASE_URL` and the data directory resolve at runtime** — explicit
+  variable, then the platform-injected value, then a local default. The baked
+  `ENV DATABASE_URL` that would have sent writes to the ephemeral layer is gone.
+- Container runs as `USER 10001:0`.
+- Version single-sourced from `spectre/__init__.py`; `pyproject.toml` reads it
+  dynamically and the FastAPI app stamps it. Previously 0.1.0 and 0.4.0 disagreed.
+- `pip-audit` in CI now scans `requirements.lock` rather than a hand-maintained
+  duplicate list, so CI and the image can never disagree about what was scanned.
+
+### Removed
+
+- `bluestaq-foundations-server-python-tailored.zip` (456 KB), committed in error.
+
+---
+
 ## [Unreleased]
 
 ### Added

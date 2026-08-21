@@ -27,3 +27,18 @@ def sample_access_interval() -> AccessInterval:
         start=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC),
         end=datetime(2026, 3, 4, 12, 10, 0, tzinfo=UTC),
     )
+
+
+def csrf_headers(session: str | dict[str, str]) -> dict[str, str]:
+    """Return the CSRF header a browser (or HTMX) would send for *session*.
+
+    Accepts either the raw ``spectre_session`` cookie value or the cookies dict
+    a login response yields. The application enforces CSRF globally via
+    ``spectre.web.csrf.require_csrf``, so every non-safe request in the suite
+    must carry a valid token. Minting it here exercises the real control rather
+    than disabling it under test.
+    """
+    from spectre.web.csrf import make_csrf_token  # noqa: PLC0415
+
+    cookie = session if isinstance(session, str) else session.get("spectre_session", "")
+    return {"X-CSRF-Token": make_csrf_token(cookie)}

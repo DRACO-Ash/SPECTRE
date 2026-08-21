@@ -1,0 +1,46 @@
+# Image build context. This is a SEPARATE contract from the upload package
+# allowlist: this shapes the image, that shapes what the platform checks out.
+
+.git
+.github
+.gitignore
+.pre-commit-config.yaml
+
+# Tests, docs and development tooling never ship in the runtime image.
+tests/
+docs/
+SPECTRE-1/
+tle_clustering/
+*.md
+!README.md
+
+# Local environments and caches
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+coverage/
+.coverage
+coverage.xml
+
+# Build output and stray artefacts
+dist/
+build/
+*.egg-info/
+data/
+logs/
+*.zip
+*.db
+
+# Design sources kept in the repo but not needed at runtime
+*.svg
+!spectre/web/static/**/*.svg
+spectre_splash_screen.html
+query_UDL_Data.py

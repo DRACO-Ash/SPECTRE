@@ -6,6 +6,8 @@ import os
 
 import pytest
 
+from tests.conftest import csrf_headers
+
 os.environ.setdefault("SECRET_KEY", "integration-test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("SPECTRE_ADMIN_USER", "testadmin")
@@ -72,6 +74,7 @@ class TestAdminAccess:
             "/admin/users",
             data={"username": "op_forbidden", "password": "pass123", "role": "operator"},
             cookies=admin_cookies,
+            headers=csrf_headers(admin_cookies),
         )
         op_cookies = _operator_session(client, "op_forbidden", "pass123")
         resp = client.get("/admin/users", cookies=op_cookies, follow_redirects=False)  # type: ignore[attr-defined]
@@ -92,6 +95,7 @@ class TestCreateUser:
             "/admin/users",
             data={"username": "new_op", "password": "hunter2", "role": "operator"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200
         assert b"new_op" in resp.content
@@ -102,6 +106,7 @@ class TestCreateUser:
             "/admin/users",
             data={"username": "second_admin", "password": "hunter2", "role": "admin"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200
         assert b"second_admin" in resp.content
@@ -112,6 +117,7 @@ class TestCreateUser:
             "/admin/users",
             data={"username": "new_op", "password": "whatever", "role": "operator"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200
         assert b"already taken" in resp.content.lower()
@@ -122,6 +128,7 @@ class TestCreateUser:
             "/admin/users",
             data={"username": "   ", "password": "pass", "role": "operator"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200
         assert b"required" in resp.content.lower()
@@ -132,6 +139,7 @@ class TestCreateUser:
             "/admin/users",
             data={"username": "rogue", "password": "pass", "role": "superuser"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200
         assert b"invalid role" in resp.content.lower()
@@ -187,6 +195,7 @@ class TestEditUser:
                     f"/admin/users/{uid}",
                     data={"role": "operator", "new_password": ""},
                     cookies=cookies,
+                    headers=csrf_headers(cookies),
                 )
                 assert update_resp.status_code == 200
                 found = True
@@ -206,6 +215,7 @@ class TestEditUser:
                     f"/admin/users/{uid}",
                     data={"role": "operator", "new_password": "newpassword99"},
                     cookies=cookies,
+                    headers=csrf_headers(cookies),
                 )
                 assert reset_resp.status_code == 200
                 assert b"updated" in reset_resp.content.lower()
@@ -228,6 +238,7 @@ class TestDeleteUser:
             "/admin/users",
             data={"username": "throwaway", "password": "pass", "role": "operator"},
             cookies=cookies,
+            headers=csrf_headers(cookies),
         )
         resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
         import re
@@ -236,7 +247,7 @@ class TestDeleteUser:
             edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
             if b"throwaway" in edit_resp.content:
                 del_resp = client.delete(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}", cookies=cookies
+                    f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
                 )
                 assert del_resp.status_code == 200
                 # Username appears in flash message but must not appear in any user row
@@ -254,7 +265,7 @@ class TestDeleteUser:
             edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
             if b"testadmin" in edit_resp.content:
                 del_resp = client.delete(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}", cookies=cookies
+                    f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
                 )
                 assert del_resp.status_code == 200
                 assert b"cannot delete your own" in del_resp.content.lower()
@@ -274,7 +285,7 @@ class TestDeleteUser:
                 second_admin_id = uid
                 break
         if second_admin_id:
-            client.delete(f"/admin/users/{second_admin_id}", cookies=cookies)  # type: ignore[attr-defined]
+            client.delete(f"/admin/users/{second_admin_id}", cookies=cookies, headers=csrf_headers(cookies))  # type: ignore[attr-defined]
 
         # Now try to delete testadmin — should fail (cannot delete self)
         # Instead create a second admin and try to delete it when it's the last one:
@@ -290,6 +301,7 @@ class TestDeleteUser:
                     f"/admin/users/{uid}",
                     data={"role": "operator", "new_password": ""},
                     cookies=cookies,
+                    headers=csrf_headers(cookies),
                 )
                 assert demote_resp.status_code == 200
                 assert b"last admin" in demote_resp.content.lower()

@@ -14,9 +14,11 @@ from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from spectre.config.settings import get_settings
+from spectre import __version__
+from spectre.config.settings import get_settings, validate_data_dir, validate_secret_key
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
+from spectre.web.health import router as health_router
 from spectre.web.planning_state import set_default_hrr_objects
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
@@ -43,9 +45,23 @@ templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL
 templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 
 
-_HRR_LIST_PATH = Path(__file__).parent.parent.parent / "HRR_List.json"
-
 logger = logging.getLogger(__name__)
+
+_HRR_FILENAME = "HRR_List.json"
+
+
+def _hrr_candidate_paths() -> list[Path]:
+    """Return the places HRR_List.json may live, in priority order.
+
+    The operator-supplied copy on the data volume wins, so a deployed instance
+    can be given fresh data without rebuilding the image. The source-tree
+    location is kept for local development; it does not exist once the package
+    is installed into a container.
+    """
+    return [
+        Path(get_settings().data_dir) / _HRR_FILENAME,
+        Path(__file__).parent.parent.parent / _HRR_FILENAME,
+    ]
 
 
 def _load_hrr_from_disk() -> None:
@@ -53,12 +69,18 @@ def _load_hrr_from_disk() -> None:
 
     Picks the newest notification in the file (same selection logic as the
     live UDL fetch) so the pre-loaded data is as current as the cached file.
+    Absence is not an error: the threat sweep then requires a UDL login.
     """
-    if not _HRR_LIST_PATH.exists():
-        logger.warning("HRR_List.json not found at %s — threat sweep will require UDL login", _HRR_LIST_PATH)
+    hrr_path = next((p for p in _hrr_candidate_paths() if p.exists()), None)
+    if hrr_path is None:
+        logger.warning(
+            "%s not found in %s — threat sweep will require UDL login",
+            _HRR_FILENAME,
+            " or ".join(str(p.parent) for p in _hrr_candidate_paths()),
+        )
         return
     try:
-        with open(_HRR_LIST_PATH, encoding="utf-8") as fh:
+        with open(hrr_path, encoding="utf-8") as fh:
             notifications: list[dict[str, Any]] = json.load(fh)
         if not notifications:
             return
@@ -76,27 +98,47 @@ def _load_hrr_from_disk() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Initialise database tables, configure logging, and pre-load HRR data."""
+    """Validate configuration, then initialise logging, storage and the database.
+
+    Fails closed. A missing or placeholder ``SECRET_KEY``, or a data directory
+    that will not accept a write, stops the boot with a named error rather than
+    letting the process start in a silently broken or insecure state.
+    """
     settings = get_settings()
     numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    # Fail closed on an unusable signing key before anything can issue a token.
+    validate_secret_key(settings.secret_key)
+
+    # Prove storage with a real write and record the verdict exactly once, so a
+    # pod that is later killed still leaves a diagnosable narrative in its log.
+    resolved_data_dir = validate_data_dir(settings.data_dir)
+    logger.info(
+        "SPECTRE %s boot — storage verdict: WRITABLE at %s", __version__, resolved_data_dir
+    )
+
     await init_db()
     _load_hrr_from_disk()
+    logger.info("SPECTRE %s ready — listening for requests", __version__)
     yield
+    logger.info("SPECTRE %s shutting down", __version__)
 
 
 app = FastAPI(
     title="SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine",
-    version="0.4.0",
+    version=__version__,
     lifespan=lifespan,
     dependencies=[Depends(require_csrf)],
 )
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+# Health first: unauthenticated probe paths the platform calls before any session exists.
+app.include_router(health_router)
 app.include_router(login_router)
 app.include_router(plan_router)
 app.include_router(admin_router)

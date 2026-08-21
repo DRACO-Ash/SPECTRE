@@ -116,3 +116,26 @@ async def require_admin(
             detail="Admin access required.",
         )
     return current_user
+
+
+async def optional_login(
+    spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Return the authenticated user, or ``None`` when there is no valid session.
+
+    Unlike :func:`require_login` this never raises, so a route can serve a
+    public response to an anonymous caller. It exists for ``GET /``: the App
+    Store router probes the root and requires 200, not the 302 that
+    :func:`require_login` produces, while the console itself stays private.
+    """
+    if not spectre_session:
+        return None
+
+    username = decode_session_cookie(spectre_session)
+    if not username:
+        return None
+
+    result = await db.execute(select(User).where(User.username == username))
+    user: User | None = result.scalar_one_or_none()
+    return user

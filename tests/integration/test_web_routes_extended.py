@@ -10,6 +10,8 @@ import os
 
 import pytest
 
+from tests.conftest import csrf_headers
+
 # Must be set before importing anything that calls get_settings().
 os.environ.setdefault("SECRET_KEY", "integration-test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -70,11 +72,13 @@ def _add_assets(client: object, auth: str) -> None:
         "/assets/blue",
         data={"name": "ISS-BLUE", "tle": _ISS_TLE},
         cookies={"spectre_session": auth},
+        headers=csrf_headers(auth),
     )
     client.post(  # type: ignore[attr-defined]
         "/assets/red",
         data={"name": "ISS-RED", "tle": _ISS_TLE_2},
         cookies={"spectre_session": auth},
+        headers=csrf_headers(auth),
     )
 
 
@@ -98,6 +102,7 @@ class TestTrainingRoutes:
             "/training/leave",
             data={"session_id": "0"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
             follow_redirects=False,
         )
         # Should redirect back to /
@@ -107,6 +112,7 @@ class TestTrainingRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/training/scenario/nonexistent_scenario_xyz",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 404
         assert b"not found" in resp.content.lower()
@@ -115,6 +121,7 @@ class TestTrainingRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/training/scenario/cadet_01_geo_stationkeeping",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code in (200, 403)
 
@@ -122,6 +129,7 @@ class TestTrainingRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/scenario/cadet_01_geo_stationkeeping/start",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code in (200, 404)
 
@@ -129,6 +137,7 @@ class TestTrainingRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/scenario/cadet_01_geo_stationkeeping/explore",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code in (200, 404)
 
@@ -136,6 +145,7 @@ class TestTrainingRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/training/tutorial/nonexistent_tutorial_xyz",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 404
 
@@ -143,6 +153,7 @@ class TestTrainingRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/training/tutorial/orientation",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -150,6 +161,7 @@ class TestTrainingRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/tutorial/orientation/complete",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -157,6 +169,7 @@ class TestTrainingRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/tutorial/nonexistent_xyz/complete",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 404
 
@@ -165,6 +178,7 @@ class TestTrainingRoutes:
             "/training/scenario/nonexistent_xyz/submit",
             data={"result_id": "999", "objectives_completed": "[]", "time_taken_minutes": "0"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 404
 
@@ -173,6 +187,7 @@ class TestTrainingRoutes:
             "/training/scenario/cadet_01_geo_stationkeeping/submit",
             data={"result_id": "99999", "objectives_completed": "[]", "time_taken_minutes": "5"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         # result_id 99999 won't exist → 404
         assert resp.status_code == 404
@@ -182,6 +197,7 @@ class TestTrainingRoutes:
             "/training/scenario/nonexistent_xyz/reset",
             data={"result_id": "99999"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 404
 
@@ -204,6 +220,7 @@ class TestDecisionRoutes:
             "/plan/decision/evaluate",
             data={"scenario_name": "Test", "horizon_hours": "72"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"Define" in resp.content
@@ -228,6 +245,7 @@ class TestDecisionRoutes:
                 "strategy": "minimax",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -256,6 +274,7 @@ class TestGeometryRoutes:
                 "method": "hohmann",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"No TLE" in resp.content
@@ -275,6 +294,7 @@ class TestGeometryRoutes:
                 "method": "hohmann",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"outside" in resp.content.lower()
@@ -295,6 +315,7 @@ class TestGeometryRoutes:
                 "method": "hohmann",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower()
@@ -315,6 +336,7 @@ class TestGeometryRoutes:
                 "method": "hohmann",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         # May succeed or fail with geometry error — just not a 500
         assert resp.status_code == 200
@@ -332,6 +354,7 @@ class TestManeuverRoutes:
                 "method": "totally_unknown_method",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"Unknown" in resp.content or b"error" in resp.content.lower()
@@ -345,6 +368,7 @@ class TestManeuverRoutes:
                 "method": "hohmann",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"No TLE" in resp.content or b"error" in resp.content.lower()
@@ -361,6 +385,7 @@ class TestManeuverRoutes:
                 "intercept_hours": "2.0",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -376,6 +401,7 @@ class TestManeuverRoutes:
                 "intercept_hours": "1.5",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -383,6 +409,7 @@ class TestManeuverRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/plan/maneuver/orbital-events",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"Select" in resp.content or b"error" in resp.content.lower()
@@ -392,6 +419,7 @@ class TestManeuverRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/plan/maneuver/orbital-events?red_sat=ISS-RED&blue_sat=ISS-BLUE",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -399,6 +427,7 @@ class TestManeuverRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/plan/maneuver/trade-space-data",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         import json
@@ -409,6 +438,7 @@ class TestManeuverRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/plan/maneuver/clear-history",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -420,6 +450,7 @@ class TestManeuverRoutes:
                 "blue_sat": "GHOST-BLUE-2",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"No TLE" in resp.content or b"error" in resp.content.lower()
@@ -443,6 +474,7 @@ class TestGcatRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/gcat/table?dataset=currentcat",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
 
@@ -450,6 +482,7 @@ class TestGcatRoutes:
         resp = client.get(  # type: ignore[attr-defined]
             "/gcat/table?dataset=doesnotexist",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         # Unknown dataset returns 404
         assert resp.status_code in (200, 404)
@@ -474,6 +507,7 @@ class TestPolRoutes:
             "/pol/analyse",
             data={"satno": "25544", "pol_source": "udl"},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"No active UDL" in resp.content or b"Connect" in resp.content
@@ -484,6 +518,7 @@ class TestPolRoutes:
             "/pol/analyse",
             data={"satno": "25544", "pol_source": "udl_direct", "udl_user": "", "udl_pass": ""},
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"Enter UDL" in resp.content or b"username" in resp.content.lower()
@@ -505,6 +540,7 @@ class TestTrainingFullWorkflow:
         start_resp = client.post(  # type: ignore[attr-defined]
             "/training/scenario/cadet_01_geo_stationkeeping/start",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         if start_resp.status_code == 404:
             pytest.skip("Scenario not available at current level")
@@ -533,6 +569,7 @@ class TestTrainingFullWorkflow:
                 "time_taken_minutes": "10.0",
             },
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert submit_resp.status_code == 200
 
@@ -541,10 +578,12 @@ class TestTrainingFullWorkflow:
         resp1 = client.post(  # type: ignore[attr-defined]
             "/training/tutorial/scenario_loading/complete",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         resp2 = client.post(  # type: ignore[attr-defined]
             "/training/tutorial/scenario_loading/complete",
             cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
         )
         assert resp1.status_code == 200
         assert resp2.status_code == 200

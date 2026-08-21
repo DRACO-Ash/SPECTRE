@@ -25,8 +25,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install linting tools
-        run: pip install ruff mypy types-PyYAML sqlalchemy[mypy] fastapi
+      - name: Install the full dev environment
+        # The same install the test job and a developer use. A partial set here
+        # let mypy disagree with the local loop and kept master red.
+        run: pip install -e ".[dev]"
       - name: ruff — style and import checks
         run: ruff check spectre/ tests/
       - name: mypy — strict type checking
@@ -45,7 +47,18 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run tests with coverage
-        run: pytest tests/ -q --cov=spectre --cov-report=term-missing --cov-fail-under=70
+        env:
+          # Boot now fails closed on a missing or placeholder signing key.
+          SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+        run: >
+          pytest tests/ -q --cov=spectre --cov-report=term-missing
+          --cov-report=xml --cov-fail-under=70
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
 
   # ── SAST — bandit ────────────────────────────────────────────────────────────
   sast:
@@ -72,13 +85,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies and pip-audit
-        run: |
-          pip install fastapi "uvicorn[standard]" jinja2 python-multipart \
-            "sqlalchemy[asyncio]" aiosqlite "bcrypt>=4.0" itsdangerous \
-            structlog sgp4 numpy scipy httpx python-dotenv pip-audit
-      - name: pip-audit — dependency vulnerability scan
-        run: pip-audit --desc on
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: pip-audit — scan the committed lockfile
+        # Audits requirements.lock, the same pinned set the image installs, so
+        # CI and the container can never disagree about what was scanned.
+        run: pip-audit --desc on --requirement requirements.lock
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:
@@ -95,3 +107,60 @@ jobs:
             | tar -xz -C /usr/local/bin gitleaks
       - name: gitleaks — scan repository history for secrets
         run: gitleaks detect --source . --redact -v
+
+  # ── Container — build and verify the App Store runtime contract ──────────────
+  container:
+    name: Container Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t spectre:ci .
+      - name: Must run as a non-root numeric user
+        run: |
+          uid=$(docker run --rm --entrypoint /opt/venv/bin/python spectre:ci -c 'import os;print(os.getuid())')
+          echo "runtime uid=$uid"
+          [ "$uid" != "0" ]
+      - name: Must ship no setuid or setgid paths
+        # The container-scan policy stops, not warns, on suid_or_guid_set.
+        run: |
+          count=$(docker run --rm --entrypoint /bin/sh spectre:ci -c \
+            'find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l')
+          echo "suid/sgid paths=$count"
+          [ "$count" -eq 0 ]
+      - name: Must ship no package manager
+        run: |
+          for b in pip pip3 apt apt-get dpkg; do
+            if docker run --rm --entrypoint /bin/sh spectre:ci -c "command -v $b" >/dev/null 2>&1; then
+              echo "FAIL: $b ships in the runtime image"; exit 1
+            fi
+          done
+          echo "no package manager present"
+      - name: Must serve 200 at / and the health paths on port 8080
+        run: |
+          docker run -d --name spectre-ci -p 8080:8080 \
+            -e SECRET_KEY=ci-only-ephemeral-signing-key-not-a-secret \
+            -e SPECTRE_ADMIN_USER=admin -e SPECTRE_ADMIN_PASS=ci-only-password \
+            spectre:ci
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          echo "--- container log ---"; docker logs spectre-ci
+          # The platform router probes the root and treats a 302 as a failed deploy.
+          root=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)
+          echo "GET / -> $root"; [ "$root" = "200" ]
+          for path in healthz readyz; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/$path")
+            echo "GET /$path -> $code"; [ "$code" = "200" ]
+          done
+      - name: Must refuse to boot without a real SECRET_KEY
+        run: |
+          if docker run --rm spectre:ci 2>&1 | grep -q "ConfigurationError"; then
+            echo "fails closed as required"
+          else
+            echo "FAIL: booted without a valid SECRET_KEY"; exit 1
+          fi
+      - name: Tear down
+        if: always()
+        run: docker rm -f spectre-ci || true

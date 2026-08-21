@@ -122,3 +122,23 @@ Claude Craft prompt to create a Persona for a UI_UX Developer for OW Application
 Claude Persona
 Persona Spec Orbital Warfare Analyst with STK.txt
 persona Spec Orbital Warfare Analyst with Python Only
+
+# ── App Store deployment artefacts ───────────────────────────────────────────
+# Additional .env spellings the base pattern misses
+.env.local
+.env.*.local
+.env.production
+
+# Local runtime data directory (the container uses the FILE_STORAGE mount)
+data/
+
+# Coverage output directory
+coverage/
+htmlcov/
+
+# Local container verification scratch
+Dockerfile.verify
+.proxy-ca.crt
+
+# Packaged upload artefacts
+*.zip

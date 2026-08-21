@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spectre"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Space Planning, Evaluation & Counter-Threat Response Engine — orbital mechanics, threat assessment, and manoeuvre planning"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -50,6 +50,9 @@ spectre-serve = "spectre.web._entrypoint:main"
 # ---------------------------------------------------------------------------
 # Hatch
 # ---------------------------------------------------------------------------
+[tool.hatch.version]
+path = "spectre/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["spectre"]
 

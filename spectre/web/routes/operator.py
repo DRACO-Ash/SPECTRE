@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
-from spectre.web.auth import require_login
+from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
@@ -43,9 +43,18 @@ def _list_response(request: Request, template: str, context: dict[str, Any]) -> 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: User | None = Depends(optional_login),
 ) -> HTMLResponse:
-    """Render the main operator console."""
+    """Render the main operator console, or the login page when anonymous.
+
+    Returns 200 in both cases. The App Store router probes ``GET /`` and treats
+    a 302 as a failed deploy, so an anonymous caller is served the login page
+    directly rather than redirected. No console state is rendered without a
+    valid session.
+    """
+    if current_user is None:
+        return render(request, "login.html", {"error": None})
+
     state = get_session_state(current_user.username)
     return render(request, "operator.html", {
         "user": current_user,
