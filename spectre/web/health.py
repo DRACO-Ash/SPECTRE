@@ -69,8 +69,6 @@ async def check_storage(data_dir: str) -> tuple[bool, str | None]:
         )
     except OSError as exc:
         return False, f"storage write to {data_dir} failed: [errno {exc.errno}] {exc.strerror}"
-    except Exception as exc:  # pragma: no cover — defensive
-        return False, f"storage write to {data_dir} failed: {exc.__class__.__name__}: {exc}"
     return True, None
 
 

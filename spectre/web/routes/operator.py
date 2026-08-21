@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -317,8 +318,6 @@ async def log_stream(
 
 
     state = get_session_state(current_user.username)
-
-    from collections.abc import AsyncGenerator  # noqa: PLC0415
 
     async def _event_generator() -> AsyncGenerator[str, None]:
         while True:

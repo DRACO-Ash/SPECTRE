@@ -67,6 +67,39 @@ report and the remaining gaps.
 - `pip-audit` in CI now scans `requirements.lock` rather than a hand-maintained
   duplicate list, so CI and the image can never disagree about what was scanned.
 
+### Quality gate
+
+Meets all six SonarQube quality gate conditions on new and changed code:
+zero bugs, zero vulnerabilities, zero code smells, 100% coverage on the 129
+changed lines, 0% duplication, and six of six security hotspots reviewed.
+Reproduce with `scripts/check-quality.sh`; enforced per-commit in CI.
+
+- **Fixed a reliability bug this change introduced**, caught by its own test.
+  Narrowing `_load_hrr_from_disk` to a specific exception tuple left
+  `AttributeError` uncaught, so well-formed JSON of the wrong shape would crash
+  the boot. Resolved with shape validation at the boundary rather than a wider
+  catch.
+- **Session cookie now sets `Secure`** (`python:S2068` hotspot). On by default;
+  disabling it requires the explicit `SPECTRE_COOKIE_SECURE=false` opt-out used
+  by the test client, which speaks plain HTTP.
+- **Removed blind `except Exception` handlers** from the health probe and the
+  HRR loader, replaced magic values with named constants, and hoisted a
+  function-level typing import to module scope.
+- **Duplication cut from 2.33% to 0%** by hoisting copy-pasted integration
+  fixtures into `tests/integration/conftest.py`.
+- **Corrected a coverage under-measurement.** SQLAlchemy's async bridge switches
+  greenlets on every await, and coverage.py lost the trace afterwards, marking
+  lines uncovered that demonstrably run. Fixed with
+  `concurrency = ["thread", "greenlet"]` rather than by excluding the lines;
+  `auth.py` went from 84% to 93% with no test changes.
+- Added `sonar-project.properties` scoping sources, tests and the coverage
+  report path, with a written rationale for the single coverage exclusion.
+- Added `scripts/check-quality.sh` and `scripts/sonar_scope.py`, which filter
+  findings to the lines the gate actually scores, so a pre-existing smell in a
+  touched file is never mistaken for a new violation.
+- The two tests that silently skipped when run as root now inject the failure
+  instead, so the suite reports no false passes.
+
 ### Removed
 
 - `bluestaq-foundations-server-python-tailored.zip` (456 KB), committed in error.

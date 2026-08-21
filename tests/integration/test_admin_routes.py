@@ -2,40 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from tests.conftest import csrf_headers
-
-os.environ.setdefault("SECRET_KEY", "integration-test-secret")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("SPECTRE_ADMIN_USER", "testadmin")
-os.environ.setdefault("SPECTRE_ADMIN_PASS", "testpass123")
-
-pytest_plugins = ("anyio",)
-
-
-@pytest.fixture(scope="module")
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture(scope="module")
-async def initialized_app() -> object:
-    from spectre.web.app import app
-    from spectre.web.database import init_db
-
-    await init_db()
-    return app
-
-
-@pytest.fixture(scope="module")
-def client(initialized_app: object) -> object:
-    from fastapi.testclient import TestClient
-
-    with TestClient(initialized_app, raise_server_exceptions=True) as c:  # type: ignore[arg-type]
-        yield c
 
 
 def _admin_session(client: object) -> dict[str, str]:  # type: ignore[type-arg]

@@ -109,7 +109,11 @@ asyncio_mode = "auto"
 # Coverage
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
-source = ["spectre"]
+source = ["spectre", "tle_clustering"]
+# SQLAlchemy's async bridge switches greenlets on every await. Without this,
+# coverage loses the trace after `await session.execute(...)` and under-reports
+# lines that demonstrably run, which would understate coverage to SonarQube.
+concurrency = ["thread", "greenlet"]
 omit = ["tests/*", "spectre/app_logging/setup.py"]
 
 [tool.coverage.report]

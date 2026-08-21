@@ -7,7 +7,7 @@ silently by kubelet, and a 503 without an errno cannot be diagnosed.
 
 from __future__ import annotations
 
-import os
+import time
 from pathlib import Path
 
 import pytest
@@ -32,17 +32,32 @@ class TestStorageProbe:
         assert detail is not None
         assert "errno" in detail
 
-    @pytest.mark.skipif(os.getuid() == 0, reason="root bypasses filesystem permissions")
-    async def test_reports_errno_for_an_unwritable_directory(self, tmp_path: Path) -> None:
-        locked = tmp_path / "locked"
-        locked.mkdir()
-        locked.chmod(0o555)
-        try:
-            healthy, detail = await check_storage(str(locked))
-            assert healthy is False
-            assert detail is not None and "errno" in detail
-        finally:
-            locked.chmod(0o755)
+    async def test_reports_errno_for_an_unwritable_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Injected rather than chmod-based: the suite also runs as root."""
+        def deny_write(self: Path, *args: object, **kwargs: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "write_text", deny_write)
+        healthy, detail = await check_storage(str(tmp_path))
+        assert healthy is False
+        assert detail is not None and "errno 13" in detail
+
+    async def test_reports_a_stalled_mount_rather_than_hanging(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hanging probe is killed silently by kubelet; it must time out loudly."""
+        import spectre.web.health as health_module
+
+        def hang(self: Path, *args: object, **kwargs: object) -> None:
+            time.sleep(5)
+
+        monkeypatch.setattr(health_module, "_STORAGE_PROBE_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(Path, "write_text", hang)
+        healthy, detail = await check_storage(str(tmp_path))
+        assert healthy is False
+        assert detail is not None and "stalled" in detail
 
     def test_timeout_is_shorter_than_a_platform_probe(self) -> None:
         """A probe that outlives the platform's timeout becomes a silent kill."""
@@ -71,7 +86,7 @@ class TestHealthEndpoints:
         self, client: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A screenshot of the 503 must be a complete diagnosis on its own."""
-        import spectre.web.health as health
+        from spectre.web import health
 
         async def broken(_data_dir: str) -> tuple[bool, str | None]:
             return False, "storage write to /data failed: [errno 13] Permission denied"

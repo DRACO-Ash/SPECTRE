@@ -6,43 +6,9 @@ These tests use an in-memory SQLite database and a test SECRET_KEY.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from tests.conftest import csrf_headers
-
-# Must be set before importing anything that calls get_settings().
-os.environ["SECRET_KEY"] = "integration-test-secret"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["SPECTRE_ADMIN_USER"] = "testadmin"
-os.environ["SPECTRE_ADMIN_PASS"] = "testpass123"
-
-pytest_plugins = ("anyio",)
-
-
-@pytest.fixture(scope="module")
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture(scope="module")
-async def initialized_app() -> object:
-    """Return the FastAPI app with DB tables created."""
-    from spectre.web.app import app
-    from spectre.web.database import init_db
-
-    await init_db()
-    return app
-
-
-@pytest.fixture(scope="module")
-def client(initialized_app: object) -> object:
-    """Synchronous TestClient wrapping the initialized app."""
-    from fastapi.testclient import TestClient
-
-    with TestClient(initialized_app, raise_server_exceptions=True) as c:  # type: ignore[arg-type]
-        yield c
 
 
 class TestLoginFlow:

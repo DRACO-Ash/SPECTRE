@@ -7,7 +7,6 @@ unwritable volume stops the boot rather than degrading silently.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -114,19 +113,35 @@ class TestDataDirValidation:
         with pytest.raises(ConfigurationError, match="filesystem root"):
             validate_data_dir("/")
 
-    @pytest.mark.skipif(os.getuid() == 0, reason="root bypasses filesystem permissions")
-    def test_rejects_unwritable_directory_with_errno_and_remedy(self, tmp_path: Path) -> None:
-        """The 503/boot message must carry the errno and the fsGroup remedy."""
-        locked = tmp_path / "locked"
-        locked.mkdir()
-        locked.chmod(0o555)
-        try:
-            with pytest.raises(ConfigurationError) as exc:
-                validate_data_dir(str(locked))
-            assert "errno" in str(exc.value)
-            assert "fsGroup" in str(exc.value)
-        finally:
-            locked.chmod(0o755)
+    def test_rejects_unwritable_directory_with_errno_and_remedy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The boot message must carry the errno and the fsGroup remedy.
+
+        The failure is injected rather than produced by chmod, because the test
+        suite also runs as root in the container image, where filesystem
+        permissions are bypassed and a chmod-based test silently skips.
+        """
+        def deny_write(self: Path, *args: object, **kwargs: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "write_text", deny_write)
+        with pytest.raises(ConfigurationError) as exc:
+            validate_data_dir(str(tmp_path))
+        message = str(exc.value)
+        assert "errno 13" in message
+        assert "fsGroup" in message
+
+    def test_rejects_a_directory_that_cannot_be_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A read-only parent must fail the boot, not be silently ignored."""
+        def deny_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "mkdir", deny_mkdir)
+        with pytest.raises(ConfigurationError, match="cannot be created"):
+            validate_data_dir(str(tmp_path / "nope"))
 
 
 class TestSettings:

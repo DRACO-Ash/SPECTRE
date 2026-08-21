@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from spectre.config.settings import get_settings
 from spectre.web.auth import _COOKIE_NAME, make_session_cookie, verify_password
 from spectre.web.database import get_db
 from spectre.web.deps import render
@@ -18,6 +19,9 @@ from spectre.web.models import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Session lifetime in seconds (8 hours), matching auth._SESSION_MAX_AGE.
+_SESSION_COOKIE_MAX_AGE = 28_800
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -47,9 +51,10 @@ async def post_login(
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
-        httponly=True,
+        httponly=True,   # not readable from JavaScript
+        secure=get_settings().session_cookie_secure,  # HTTPS only unless explicitly opted out
         samesite="lax",
-        max_age=28_800,
+        max_age=_SESSION_COOKIE_MAX_AGE,
     )
     return response
 

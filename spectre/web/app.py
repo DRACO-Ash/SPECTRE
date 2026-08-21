@@ -80,8 +80,19 @@ def _load_hrr_from_disk() -> None:
         )
         return
     try:
-        with open(hrr_path, encoding="utf-8") as fh:
-            notifications: list[dict[str, Any]] = json.load(fh)
+        with hrr_path.open(encoding="utf-8") as fh:
+            parsed: Any = json.load(fh)
+
+        # Validate the shape at the boundary. Well-formed JSON of the wrong
+        # shape (an object rather than a list of notifications) would otherwise
+        # reach the parser as bare strings and fail the boot.
+        if not isinstance(parsed, list):
+            logger.error(
+                "%s contains %s, expected a list of notifications; ignoring",
+                _HRR_FILENAME, type(parsed).__name__,
+            )
+            return
+        notifications: list[dict[str, Any]] = [n for n in parsed if isinstance(n, dict)]
         if not notifications:
             return
         newest = max(notifications, key=_parse_created_at)
@@ -92,8 +103,11 @@ def _load_hrr_from_disk() -> None:
             len(hrr_blue), len(hrr_red), len(hrr_blue) + len(hrr_red),
             newest.get("createdAt", "unknown date"),
         )
-    except Exception as exc:
-        logger.error("Failed to pre-load HRR_List.json: %s", exc)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # Malformed or unreadable cached data must not stop the boot: the threat
+        # sweep falls back to requiring a UDL login. json.JSONDecodeError is a
+        # ValueError, so a corrupt file lands here too.
+        logger.exception("Failed to pre-load %s", _HRR_FILENAME)
 
 
 @asynccontextmanager

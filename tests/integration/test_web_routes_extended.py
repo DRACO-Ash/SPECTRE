@@ -6,19 +6,9 @@ using the same in-memory SQLite DB and TestClient pattern as test_web_routes.py.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from tests.conftest import csrf_headers
-
-# Must be set before importing anything that calls get_settings().
-os.environ.setdefault("SECRET_KEY", "integration-test-secret")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("SPECTRE_ADMIN_USER", "testadmin")
-os.environ.setdefault("SPECTRE_ADMIN_PASS", "testpass123")
-
-pytest_plugins = ("anyio",)
 
 # ── Sample LEO TLE (ISS-like) ─────────────────────────────────────────────────
 
@@ -31,38 +21,6 @@ _ISS_TLE_2 = (
     "1 25544U 98067A   26065.50000000  .00016717  00000-0  10270-3 0  9994\n"
     "2 25544  51.6420 195.0000 0001207 86.9689 273.1630 15.54320000365490"
 )
-
-
-@pytest.fixture(scope="module")
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture(scope="module")
-async def initialized_app() -> object:
-    from spectre.web.app import app
-    from spectre.web.database import init_db
-
-    await init_db()
-    return app
-
-
-@pytest.fixture(scope="module")
-def client(initialized_app: object) -> object:
-    from fastapi.testclient import TestClient
-
-    with TestClient(initialized_app, raise_server_exceptions=True) as c:  # type: ignore[arg-type]
-        yield c
-
-
-@pytest.fixture(scope="module")
-def auth_cookie(client: object) -> str:
-    resp = client.post(  # type: ignore[attr-defined]
-        "/login",
-        data={"username": "testadmin", "password": "testpass123"},
-        follow_redirects=False,
-    )
-    return resp.cookies["spectre_session"]
 
 
 # ── Helper to add assets to session ──────────────────────────────────────────

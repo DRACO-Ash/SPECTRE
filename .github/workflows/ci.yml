@@ -164,3 +164,33 @@ jobs:
       - name: Tear down
         if: always()
         run: docker rm -f spectre-ci || true
+
+  # ── Quality gate — SonarQube-equivalent checks on changed code ───────────────
+  quality:
+    name: Quality Gate (changed code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # diff-cover and the scope filter need the base branch to compare against.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install the full dev environment
+        run: pip install -e ".[dev]" diff-cover
+      - name: Produce the coverage report the gate reads
+        env:
+          SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+        run: pytest tests/ -q --cov --cov-report=xml:coverage.xml
+      - name: Coverage report must exist and be non-empty
+        # A comprehensive suite that emits no report scores 0% at the gate.
+        run: test -s coverage.xml
+      - name: Zero new bugs, vulnerabilities, smells; coverage >=80%; duplication <=3%
+        run: |
+          git fetch origin ${{ github.base_ref || 'master' }}:${{ github.base_ref || 'master' }} || true
+          sh scripts/check-quality.sh "${{ github.base_ref || 'master' }}"

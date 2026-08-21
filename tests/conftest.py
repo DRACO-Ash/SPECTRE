@@ -38,7 +38,8 @@ def csrf_headers(session: str | dict[str, str]) -> dict[str, str]:
     must carry a valid token. Minting it here exercises the real control rather
     than disabling it under test.
     """
-    from spectre.web.csrf import make_csrf_token  # noqa: PLC0415
+    # Deferred so the import happens after the test environment is configured.
+    from spectre.web.csrf import make_csrf_token
 
     cookie = session if isinstance(session, str) else session.get("spectre_session", "")
     return {"X-CSRF-Token": make_csrf_token(cookie)}

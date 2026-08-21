@@ -42,6 +42,10 @@ _PLACEHOLDER_SECRETS = frozenset({
 # Minimum acceptable length for a session-signing key.
 _MIN_SECRET_LENGTH = 16
 
+# Valid TCP port range, per RFC 6335.
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
 
 def _resolve_data_dir() -> str:
     """Return the writable data directory, resolved at runtime.
@@ -71,6 +75,19 @@ def _resolve_database_url() -> str:
     return f"sqlite+aiosqlite:///{Path(_resolve_data_dir()) / 'spectre.db'}"
 
 
+def _resolve_cookie_secure() -> bool:
+    """Return whether the session cookie carries the ``Secure`` attribute.
+
+    Secure by default. Without it the session cookie can be sent over plain
+    HTTP and captured in transit. The only reason to disable it is a local
+    HTTP development server or a test client, which is why turning it off
+    requires an explicit opt-out rather than being inferred.
+    """
+    return os.environ.get("SPECTRE_COOKIE_SECURE", "true").strip().lower() not in {
+        "false", "0", "no", "off",
+    }
+
+
 def _resolve_port() -> int:
     """Return the listen port: ``PORT`` if injected and valid, else 8080."""
     raw = os.environ.get("PORT", "").strip()
@@ -80,7 +97,7 @@ def _resolve_port() -> int:
         port = int(raw)
     except ValueError:
         return DEFAULT_PORT
-    return port if 1 <= port <= 65535 else DEFAULT_PORT
+    return port if _MIN_PORT <= port <= _MAX_PORT else DEFAULT_PORT
 
 
 @dataclass
@@ -103,6 +120,7 @@ class Settings:
     database_url: str = field(default_factory=_resolve_database_url)
     data_dir: str = field(default_factory=_resolve_data_dir)
     port: int = field(default_factory=_resolve_port)
+    session_cookie_secure: bool = field(default_factory=_resolve_cookie_secure)
     spectre_admin_user: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_USER", "admin")
     )
