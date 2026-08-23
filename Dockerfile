@@ -103,14 +103,23 @@ RUN set -eu; \
 # LAST mutation: strip every setuid and setgid bit from files AND directories.
 # The policy scan stops (not warns) on suid_or_guid_set, so this fails the build
 # closed rather than shipping a violation. Nothing may follow this instruction.
-RUN find / -xdev -perm /6000 \( -type f -o -type d \) -exec chmod a-s {} + 2>/dev/null || true; \
-    remaining="$(find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l)"; \
-    if [ "$remaining" -ne 0 ]; then \
-      echo "FAIL: $remaining setuid/setgid paths remain after the sweep:"; \
-      find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null; \
+#
+# Deliberately no pipe. `find ... | wc -l` would be fail-OPEN: if find errored
+# with its stderr suppressed, wc would still exit 0 and print 0, the check would
+# pass, and setuid bits would ship. `set -eu` plus a direct capture means a
+# failing find aborts the build instead of silently reporting a clean sweep.
+# (This is also why the hadolint DL4006 remedy is not applied here: /bin/sh on
+# Debian is dash, which has no pipefail, so setting that SHELL would break the
+# build. Removing the pipe resolves the warning at its cause.)
+RUN set -eu; \
+    find / -xdev -perm /6000 \( -type f -o -type d \) -exec chmod a-s {} + 2>/dev/null || true; \
+    remaining="$(find / -xdev -perm /6000 \( -type f -o -type d \) -print)"; \
+    if [ -n "$remaining" ]; then \
+      echo "FAIL: setuid/setgid paths remain after the sweep:"; \
+      echo "$remaining"; \
       exit 1; \
     fi; \
-    echo "SUID SWEEP: clean — no setuid or setgid paths remain"
+    echo "SUID SWEEP: clean, no setuid or setgid paths remain"
 
 ################################################################################
 # Stage 3 — final: one flattened layer

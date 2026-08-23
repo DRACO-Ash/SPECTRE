@@ -67,6 +67,25 @@ report and the remaining gaps.
 - `pip-audit` in CI now scans `requirements.lock` rather than a hand-maintained
   duplicate list, so CI and the image can never disagree about what was scanned.
 
+### Platform feedback
+
+- **Fixed the failing Dependencies stage.** The package carried no root
+  `requirements.txt`, so the platform's dependency install had no manifest it
+  recognised and failed before any later stage ran. Added it, which moves the
+  app to the python template; the quality gate conditions were already met.
+  `requirements.txt` (88 packages, pinned, what the platform installs) and
+  `requirements.lock` (43 packages, hash-pinned, what the image installs) are
+  generated from one resolution, and a test asserts their runtime pins never
+  drift. Verified by installing into a clean interpreter: 800 tests pass.
+- **Removed a fail-open from the setuid sweep** (hadolint DL4006). The
+  verification piped `find` into `wc -l`; had find errored with stderr
+  suppressed, wc would still have exited 0 and printed 0, reporting a clean
+  sweep over a dirty image. The pipe is gone and the check runs under `set -eu`,
+  so a failing find aborts the build. The suggested `SHELL` remedy was not
+  applied because `/bin/sh` on Debian is dash, which has no `pipefail` and would
+  have broken the build.
+- Pipeline simulation now covers the dependency-install stage.
+
 ### Quality gate
 
 Meets all six SonarQube quality gate conditions on new and changed code:

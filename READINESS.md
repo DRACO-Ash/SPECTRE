@@ -1,7 +1,7 @@
 # SPECTRE: Bluestaq App Store readiness report
 
 **Band: Likely after fixes** · Weighted score **94%** (17 of 18 applicable dimensions pass)
-Archetype: server (container) · Template: **docker-only** · Version **0.4.0**
+Archetype: server (container) · Template: **python** · Version **0.4.0**
 Assessed 21 August 2026 against branch `claude/app-store-readiness-09re0q`.
 All six SonarQube quality gate conditions are met on changed code.
 
@@ -187,6 +187,46 @@ cosmetic one.
   parameter from a route signature is a behavioural change that belongs in its
   own commit with its own tests.
 
+## Platform feedback, first upload
+
+The first submission surfaced two items. Both are closed.
+
+**Dependencies stage failed (blocker).** The package had no root
+`requirements.txt`. It was omitted deliberately to hold docker-only detection,
+but the platform's dependency install looks for exactly that file and fails
+before any later stage runs. `pyproject.toml` alone is not enough.
+
+The fix accepts the **python template**, which is now the right call: all six
+quality gate conditions were already met. Two manifests are committed, generated
+from one resolution so they cannot drift:
+
+● `requirements.txt`, 88 packages, fully pinned, no hashes. What the platform
+  installs. Includes the test tooling, because the python template runs the
+  suite.
+● `requirements.lock`, 43 packages, hash-pinned. What the **image** installs,
+  with `--require-hashes --only-binary=:all:`, so the runtime stays
+  hash-verified and carries no test tooling.
+
+A test asserts their runtime pins never diverge. It earned its place
+immediately: the first generation put `scipy` at 1.18.0 in one file and 1.18.1
+in the other, because the two resolutions ran minutes apart. Verified by
+installing `requirements.txt` into a clean interpreter and running the suite
+there: **800 passed**.
+
+**Dockerfile warning, hadolint DL4006 at line 106.** A `RUN` containing a pipe
+without `pipefail`. Not a release blocker, but it pointed at something real: the
+pipe was `find ... | wc -l` inside the **setuid sweep**, the one check designed
+to fail closed. Had `find` errored with its stderr suppressed, `wc` would still
+have exited 0 and printed 0, the check would have reported a clean sweep, and
+setuid bits would have shipped to a scan that stops on them. A fail-open in the
+guard against a hard failure.
+
+The remedy hadolint suggests would have broken the build: `/bin/sh` on Debian is
+dash, which has no `pipefail`. The pipe was removed instead, and the
+verification now captures paths directly under `set -eu`, so a failing `find`
+aborts the build rather than silently passing. Two contract tests pin it: no
+pipe in the sweep, and `set -eu` present.
+
 ## The submission package
 
 Built by `scripts/package-appstore.sh`, which is repeatable and fails closed:
@@ -199,7 +239,7 @@ platform to the python template).
 | Artefact | `dist/spectre-0.4.0-appstore.zip` |
 | Size | 2.0 MB (12 MB uncompressed, 258 files) |
 | Layout | Flat. `Dockerfile` at the root, no wrapping folder |
-| Template | docker-only (no root `requirements.txt`) |
+| Template | python (root `requirements.txt` present; the Dockerfile still builds the image) |
 | Version | 0.4.0, matching the artifact stamp and the app's own version field |
 
 It ships a **testable source tree**, not a stripped runtime bundle: tests, their
@@ -224,6 +264,7 @@ contract. All stages green:
 
 ```
 Stage 1  checkout      flat, Dockerfile at the checkout root
+Stage 1b dependencies  requirements.txt present, 88 packages pinned, resolves
 Stage 2  test          suite green under GITLAB_CI=true; coverage.xml 284,711 bytes
 Stage 3  containerize  builds from the unzipped root as context; suid sweep clean
 Stage 4  scan          non-root uid 10001, no suid paths, no package manager

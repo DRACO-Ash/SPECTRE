@@ -40,6 +40,7 @@ PATHS="
 Dockerfile
 .dockerignore
 requirements.lock
+requirements.txt
 pyproject.toml
 sonar-project.properties
 README.md
@@ -84,9 +85,12 @@ rm -rf "$STAGE/.git" "$STAGE/.venv" "$STAGE/venv" "$STAGE/dist" "$STAGE/htmlcov"
 # ── Fail-closed checks on the staged tree ─────────────────────────────────────
 [ -f "$STAGE/Dockerfile" ] || { echo "FAIL: Dockerfile must be at the package root"; exit 1; }
 
-if [ -f "$STAGE/requirements.txt" ]; then
-    echo "FAIL: a root requirements.txt switches the platform to the python template."
-    echo "      Remove it, or make that switch deliberately."
+# The platform's Dependencies stage installs from requirements.txt. Without it
+# the stage fails before anything else runs. Its presence selects the python
+# template, which is deliberate; the Dockerfile still drives the image build.
+if [ ! -f "$STAGE/requirements.txt" ]; then
+    echo "FAIL: no requirements.txt at the package root."
+    echo "      The platform's dependency install has nothing to read and will fail."
     exit 1
 fi
 

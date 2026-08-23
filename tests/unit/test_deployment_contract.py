@@ -77,6 +77,24 @@ class TestImageHardening:
         """A residual bit must stop the build, not ship a scan violation."""
         assert "exit 1" in dockerfile.split("perm /6000", 1)[1]
 
+    def test_sweep_verification_uses_no_pipe(self, dockerfile: str) -> None:
+        """`find ... | wc -l` would be fail-open, and hadolint DL4006 flags it.
+
+        If find errored with stderr suppressed, wc would still exit 0 and print
+        0, so the check would report a clean sweep over a dirty image. The
+        verification therefore captures paths directly under `set -eu`.
+        """
+        sweep = dockerfile.split("# LAST mutation", 1)[1].split("FROM scratch", 1)[0]
+        # Comments explain the trap and quote the banned form, so judge the
+        # instructions only.
+        instructions = "\n".join(
+            line for line in sweep.splitlines() if not line.lstrip().startswith("#")
+        )
+        # `||` is logical OR, not a pipe; strip it before looking for a real one.
+        piped = instructions.replace("||", "")
+        assert "|" not in piped, "the suid verification must not pipe; a pipe is fail-open"
+        assert "set -eu" in instructions, "the sweep must abort the build if find itself fails"
+
     def test_base_image_is_pinned_by_digest(self, dockerfile: str) -> None:
         assert re.search(r"BASE_IMAGE=\S+@sha256:[0-9a-f]{64}", dockerfile)
 
@@ -96,10 +114,46 @@ class TestPackaging:
         assert "--hash=sha256:" in body, "the lockfile must pin hashes"
         assert re.search(r"^[a-z0-9_.-]+==", body, re.MULTILINE), "every dependency must be pinned"
 
-    def test_docker_only_template_detection_is_unambiguous(self) -> None:
-        """A root requirements.txt would switch the platform to the python template."""
-        assert not (_REPO_ROOT / "requirements.txt").exists()
-        assert (_REPO_ROOT / "Dockerfile").exists()
+    def test_python_template_manifest_is_present(self) -> None:
+        """The platform's Dependencies stage installs from requirements.txt.
+
+        Without it the stage fails before anything else runs. Its presence also
+        selects the python template, which is deliberate: the quality gate is
+        met, and the Dockerfile still drives the container build.
+        """
+        assert (_REPO_ROOT / "requirements.txt").is_file()
+        assert (_REPO_ROOT / "Dockerfile").is_file()
+
+    def test_manifests_do_not_drift(self) -> None:
+        """Every runtime pin in the lock must match requirements.txt exactly.
+
+        The image installs from requirements.lock and the pipeline installs from
+        requirements.txt. If they disagree, the tested set is not the shipped
+        set, which is the kind of gap that only surfaces in production.
+        """
+        import re
+
+        def pins(name: str) -> dict[str, str]:
+            found = {}
+            for line in (_REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
+                match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)", line)
+                if match:
+                    found[match.group(1).lower().replace("_", "-")] = match.group(2)
+            return found
+
+        lock = pins("requirements.lock")
+        manifest = pins("requirements.txt")
+        assert lock, "requirements.lock has no pins"
+        drifted = {k: (v, manifest.get(k)) for k, v in lock.items() if manifest.get(k) != v}
+        assert not drifted, f"runtime pins disagree between the manifests: {drifted}"
+
+    def test_lockfile_is_the_hash_verified_one(self) -> None:
+        """Only the lock carries hashes; it is what the image installs."""
+        lock = (_REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
+        dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "--hash=sha256:" in lock
+        assert "--require-hashes" in dockerfile
+        assert "requirements.lock" in dockerfile
 
 
 class TestVersionStamp:

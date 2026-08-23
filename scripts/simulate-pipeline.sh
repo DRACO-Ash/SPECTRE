@@ -51,14 +51,32 @@ pass "unzipped flat, Dockerfile at the checkout root"
 printf 'stages:\n  - test\n' > "$WORK/.gitlab-ci.yml"
 pass "platform .gitlab-ci.yml added to the checkout"
 
-printf '\n== Stage 2: test the artefact in the platform environment ==\n'
-# Reuses the developer virtualenv if present; the platform installs from the
-# lockfile, which the image build exercises separately in stage 3.
 if [ -x "$PWD/.venv/bin/python" ]; then
     PY="$PWD/.venv/bin/python"
 else
     PY=python3
 fi
+
+printf '\n== Stage 1b: dependency install ==\n'
+# The stage that fails first if the platform cannot find a manifest it knows.
+# For Python that is requirements.txt at the checkout root; pyproject.toml alone
+# is not enough and the stage dies before anything else runs.
+[ -f "$WORK/requirements.txt" ] || fail "no requirements.txt at the checkout root; the dependency install has nothing to read"
+pass "requirements.txt present at the checkout root"
+
+UNPINNED=$(grep -E '^[A-Za-z0-9]' "$WORK/requirements.txt" | grep -vE '==' || true)
+[ -z "$UNPINNED" ] || { echo "$UNPINNED"; fail "unpinned requirements above; the install is not reproducible"; }
+pass "every requirement pinned ($(grep -cE '^[A-Za-z0-9]' "$WORK/requirements.txt") packages)"
+
+# Resolve without downloading the world; catches an unsatisfiable set quickly.
+if "$PY" -m pip install --dry-run --quiet -r "$WORK/requirements.txt" >/tmp/sim-deps.out 2>&1; then
+    pass "dependency set resolves"
+else
+    tail -20 /tmp/sim-deps.out
+    fail "dependency resolution failed; the platform's install stage would fail here"
+fi
+
+printf '\n== Stage 2: test the artefact in the platform environment ==\n'
 ( cd "$WORK" && GITLAB_CI=true SECRET_KEY=pipeline-sim-ephemeral-signing-key \
     "$PY" -m pytest tests/ -q --cov --cov-report=xml:coverage.xml >/tmp/sim-test.out 2>&1 ) \
     || { tail -30 /tmp/sim-test.out; fail "the suite is red on the artefact under GITLAB_CI=true"; }

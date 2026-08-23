@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess  # noqa: S404
+import subprocess
 import sys
 from pathlib import Path
 

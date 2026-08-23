@@ -22,7 +22,9 @@ os.environ.setdefault("SPECTRE_ADMIN_PASS", "testpass123")
 os.environ.setdefault("SPECTRE_COOKIE_SECURE", "false")
 
 _TEST_USER = "testadmin"
-_TEST_PASSWORD = "testpass123"  # noqa: S105  # test fixture credential, not a secret
+# Fixture credential for an in-memory database created and destroyed inside
+# the test process. It authenticates against nothing that outlives the run.
+_TEST_PASSWORD = "testpass123"
 
 
 @pytest.fixture(scope="module")
