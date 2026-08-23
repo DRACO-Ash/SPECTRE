@@ -18,6 +18,7 @@ validity.  Validation failures are logged at WARNING.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -104,13 +105,21 @@ async def intercept_geometry(
     """
 
     def _err(msg: str) -> HTMLResponse:
+        """Render a validation error. The message is escaped, never trusted.
+
+        Callers interpolate user-supplied values (satellite names, epoch
+        strings) into *msg*, and this response bypasses Jinja, so escaping here
+        is the only thing standing between a crafted form field and reflected
+        script execution in the operator's browser.
+        """
         logger.warning(
             "geometry/intercept validation error for %r: %s",
             current_user.username, msg,
         )
+        safe = html.escape(msg, quote=True)
         return HTMLResponse(
             f'<div class="callout callout-amber" style="font-size:0.75rem;padding:0.5rem">'
-            f"&#9888; Geometry error: {msg}</div>"
+            f"&#9888; Geometry error: {safe}</div>"
         )
 
     # ── Validate numeric inputs ───────────────────────────────────────────────

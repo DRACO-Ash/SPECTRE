@@ -6,6 +6,7 @@ rendered partials for the Historical PoL hero tab.
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import Annotated, Any
 
@@ -320,7 +321,7 @@ async def pol_monte_carlo(
     ]
     if not matching:
         return HTMLResponse(
-            f'<p class="error-msg">Manoeuvre at {manoeuvre_epoch} not found in PoL results.</p>'
+            f'<p class="error-msg">Manoeuvre at {html.escape(manoeuvre_epoch)} not found in PoL results.</p>'
         )
 
     manoeuvre = matching[0]
@@ -341,7 +342,7 @@ async def pol_monte_carlo(
         )
     except Exception as exc:
         logger.exception("Monte Carlo failed for %d", satno)
-        return HTMLResponse(f'<p class="error-msg">Monte Carlo error: {exc}</p>')
+        return HTMLResponse(f'<p class="error-msg">Monte Carlo error: {html.escape(str(exc))}</p>')
 
     return render(request, "partials/pol_mc_results.html", {
         "mc": result,
@@ -538,7 +539,7 @@ async def pol_notso_correlate(
         )
     except Exception as exc:
         logger.exception("NOTSO correlation failed for %d", pol.satno)
-        return HTMLResponse(f'<p class="error-msg">Correlation error: {exc}</p>')
+        return HTMLResponse(f'<p class="error-msg">Correlation error: {html.escape(str(exc))}</p>')
 
     return render(request, "partials/notso_results.html", {
         "correlations": correlations,
@@ -604,7 +605,7 @@ async def pol_photometry_analyse(
         )
     except Exception as exc:
         logger.exception("Photometry analysis failed")
-        return HTMLResponse(f'<p class="error-msg">Analysis error: {exc}</p>')
+        return HTMLResponse(f'<p class="error-msg">Analysis error: {html.escape(str(exc))}</p>')
 
     return render(request, "partials/photometry_results.html", {
         "result": result,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -150,8 +151,10 @@ async def quick_add_blue_asset(
 
     oob_badge = ""
     if btn_id:
+        # btn_id arrives from a form field and is written into an id
+        # attribute, so it must be escaped before it reaches the browser.
         oob_badge = (
-            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f'<span id="{html.escape(btn_id, quote=True)}" hx-swap-oob="true"'
             f' class="badge-ok" style="font-size:0.68rem">&#10003; Added</span>'
         )
     body = resp_html.body
@@ -209,8 +212,10 @@ async def quick_add_red_track(
 
     oob_badge = ""
     if btn_id:
+        # btn_id arrives from a form field and is written into an id
+        # attribute, so it must be escaped before it reaches the browser.
         oob_badge = (
-            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f'<span id="{html.escape(btn_id, quote=True)}" hx-swap-oob="true"'
             f' class="badge-red" style="font-size:0.68rem">&#10003; Added</span>'
         )
     body2 = resp_html.body

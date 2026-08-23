@@ -116,3 +116,5 @@ class TestPasswordHashing:
         from spectre.web.auth import hash_password
 
         assert "s3cret-value" not in hash_password("s3cret-value")
+
+

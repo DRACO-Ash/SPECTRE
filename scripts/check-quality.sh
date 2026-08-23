@@ -53,7 +53,10 @@ changed_in() {
     # $1 = space-separated directories
     # shellcheck disable=SC2086
     git diff --name-only "$BASE...HEAD" -- $1 2>/dev/null | while read -r f; do
-        case "$f" in *.py) [ -f "$f" ] && printf '%s\n' "$f" ;; esac
+        case "$f" in
+            *.py) [ -f "$f" ] && printf '%s\n' "$f" ;;
+            *) ;;  # non-Python paths are not analysed
+        esac
     done
 }
 

@@ -62,7 +62,10 @@ printf '\n== Image hardening ==\n'
 
 uid="$(docker run --rm --entrypoint /opt/venv/bin/python "$IMAGE" -c 'import os;print(os.getuid())')"
 [ "$uid" = "0" ] && fail "runs as root (uid 0)"
-case "$uid" in ''|*[!0-9]*) fail "uid is not numeric: $uid" ;; esac
+case "$uid" in
+    ''|*[!0-9]*) fail "uid is not numeric: $uid" ;;
+    *) ;;  # numeric, which is what the platform requires
+esac
 pass "runs as non-root numeric uid $uid"
 
 suid="$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \

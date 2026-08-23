@@ -25,6 +25,7 @@ Citation: data from GCAT (J. McDowell, planet4589.org/space/gcat)
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import logging
 import time
@@ -485,7 +486,7 @@ async def gcat_table(
         return HTMLResponse(
             '<div class="gcat-error-state">'
             f'<span class="gcat-error-icon">⚠</span>'
-            f'Unknown dataset: <code>{dataset}</code>'
+            f'Unknown dataset: <code>{html.escape(dataset)}</code>'
             '</div>',
             status_code=404,
         )
