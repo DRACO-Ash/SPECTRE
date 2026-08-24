@@ -167,3 +167,63 @@ class TestVersionStamp:
         body = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert 'dynamic = ["version"]' in body
         assert 'path = "spectre/__init__.py"' in body
+
+
+class TestDatabasePortability:
+    """The app must run on SQLite and on the PostgreSQL add-on alike."""
+
+    def test_no_sqlite_only_sql_in_the_data_layer(self) -> None:
+        """`PRAGMA` is SQLite-only and failed the whole boot on PostgreSQL.
+
+        The migration helper used `PRAGMA table_info(...)` to check for a
+        column. On PostgreSQL that is a bare syntax error, so attaching the
+        add-on turned a working app into a crash loop. Schema inspection must
+        go through SQLAlchemy's dialect-agnostic inspector instead.
+        """
+        import ast
+
+        source = (_REPO_ROOT / "spectre" / "web" / "database.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        # Judge executable string literals only. Docstrings and comments discuss
+        # the bug on purpose, and matching those would make this test unfixable.
+        # Match docstring nodes by identity. Comparing values fails because
+        # ast.get_docstring normalises whitespace.
+        docstring_nodes = set()
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ):
+                continue
+            body = getattr(node, "body", [])
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docstring_nodes.add(id(body[0].value))
+
+        literals = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstring_nodes
+        ]
+        offenders = [lit for lit in literals if "PRAGMA" in lit.upper()]
+        assert not offenders, f"dialect-specific SQL in the data layer: {offenders}"
+        assert "inspect(" in source, "schema checks must use the SQLAlchemy inspector"
+
+    def test_async_postgres_driver_is_pinned(self) -> None:
+        """The add-on is useless without a driver the async engine can use."""
+        lock = (_REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
+        assert "asyncpg==" in lock
+
+    def test_sqlite_is_never_placed_on_the_injected_mount(self) -> None:
+        """Guards the two-cycle deploy failure at the source level."""
+        settings = (_REPO_ROOT / "spectre" / "config" / "settings.py").read_text(encoding="utf-8")
+        sqlite_dir = settings.split("def _resolve_sqlite_dir", 1)[1].split("def ", 1)[0]
+        assert "STORAGE_MOUNT_PATH" not in sqlite_dir, (
+            "the SQLite directory must not derive from the object-storage mount"
+        )

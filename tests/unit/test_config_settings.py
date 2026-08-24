@@ -73,12 +73,18 @@ class TestDatabaseUrlResolution:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://host/db")
         assert _resolve_database_url() == "postgresql+asyncpg://host/db"
 
-    def test_sqlite_lands_inside_the_data_directory(
+    def test_sqlite_does_not_land_on_the_persistent_volume(
         self, clean_env: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """SQLite must sit on the persistent volume, not the ephemeral layer."""
+        """This asserted the opposite until it caused a failed deploy.
+
+        Putting SQLite on the injected mount looks right (durable storage) and
+        is wrong: the App Store volume is object-storage backed and provides no
+        POSIX byte-range locking, so the first transaction fails with an opaque
+        disk I/O error. Durability comes from the POSTGRESQL add-on instead.
+        """
         monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
-        assert _resolve_database_url() == "sqlite+aiosqlite:////data/spectre.db"
+        assert _resolve_database_url() != "sqlite+aiosqlite:////data/spectre.db"
 
 
 class TestSecretKeyValidation:
@@ -224,3 +230,59 @@ class TestSqliteSupportProbe:
         assert "disk I/O error" in message
         assert "POSTGRESQL" in message, "the message must name the remedy"
         assert "locking" in message, "the message must name the cause"
+
+
+class TestSqliteNeverLandsOnTheObjectStore:
+    """The deploy failure that cost two cycles: SQLite on an S3-backed mount.
+
+    The database location and the persistent volume are separate concerns. The
+    volume is object storage and cannot host SQLite at all, so the two must
+    never be derived from the same variable again.
+    """
+
+    def test_sqlite_dir_ignores_the_injected_mount(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from spectre.config.settings import _resolve_sqlite_dir
+
+        monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
+        assert _resolve_sqlite_dir() != "/data"
+        assert not _resolve_sqlite_dir().startswith("/data")
+
+    def test_sqlite_url_is_not_placed_on_the_injected_mount(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
+        url = _resolve_database_url()
+        assert url.startswith("sqlite+aiosqlite:///")
+        # Compare the actual parent directory. A substring test would match any
+        # path ending ".../data/spectre.db", including the correct local one.
+        db_path = Path(url.split("sqlite+aiosqlite:///", 1)[1])
+        assert db_path.parent != Path("/data"), "the database must not sit on object storage"
+
+    def test_data_dir_still_follows_the_injected_mount(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The volume is still used, just not for the database."""
+        monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
+        assert _resolve_data_dir() == "/data"
+
+    def test_an_injected_database_url_wins_over_sqlite(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db:5432/spectre")
+        from spectre.config.settings import uses_sqlite
+
+        url = _resolve_database_url()
+        assert uses_sqlite(url) is False
+        assert url.startswith("postgresql+asyncpg://")
+
+    def test_sqlite_dir_can_be_overridden_explicitly(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from spectre.config.settings import _resolve_sqlite_dir
+
+        monkeypatch.setenv("SPECTRE_SQLITE_DIR", "/srv/db")
+        monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
+        assert _resolve_sqlite_dir() == "/srv/db"

@@ -103,9 +103,12 @@ done
 [ "$i" -lt 60 ] || { docker logs "$CONTAINER"; fail "container never became healthy"; }
 pass "boots and serves within ${i}s"
 
-docker logs "$CONTAINER" 2>&1 | grep -q "storage verdict" \
-    || fail "boot did not log its storage verdict"
-pass "boot logs its storage verdict"
+# Boot must narrate which storage backend it proved, so a pod that is later
+# killed still leaves a diagnosable record. Matches both branches: the durable
+# external database and the ephemeral SQLite fallback.
+docker logs "$CONTAINER" 2>&1 | grep -qE "storage: (SQLite|external database)" \
+    || fail "boot did not narrate its storage backend"
+pass "boot narrates its storage backend"
 
 # The platform router probes the root and treats a 302 as a failed deploy.
 root="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HOST_PORT/")"

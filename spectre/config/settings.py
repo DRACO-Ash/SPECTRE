@@ -83,21 +83,40 @@ def _normalise_database_url(url: str) -> str:
     return url
 
 
+def _resolve_sqlite_dir() -> str:
+    """Return the directory that holds the SQLite file.
+
+    Deliberately NOT the FILE_STORAGE mount. That volume is object-storage
+    backed and cannot host a SQLite database at all: it accepts file writes but
+    provides no POSIX byte-range locking, so the first transaction dies with an
+    opaque disk I/O error. The database therefore lives on the container's own
+    filesystem, which is a real POSIX filesystem where SQLite works correctly.
+
+    The consequence is that SQLite data is EPHEMERAL: it does not survive a
+    redeploy or a restart. That is the correct trade for a fallback, because the
+    alternative is a pod that cannot start. Attach the POSTGRESQL add-on for
+    durable storage; boot logs a warning whenever this fallback is in use.
+    """
+    explicit = os.environ.get("SPECTRE_SQLITE_DIR", "").strip()
+    if explicit:
+        return explicit
+    return str(Path.cwd() / "data")
+
+
 def _resolve_database_url() -> str:
     """Return the database URL, resolved at runtime.
 
     An explicit ``DATABASE_URL`` wins (the POSTGRESQL add-on injects one).
     Otherwise SQLite is placed inside the resolved data directory.
 
-    Note that SQLite on the FILE_STORAGE add-on does NOT work: that volume is
-    object-storage backed, and SQLite needs POSIX byte-range locking which such
-    mounts do not provide. Boot validation checks for this explicitly rather
-    than letting it surface as an opaque "disk I/O error".
+    Without one, SQLite is used on the container's own filesystem, never on the
+    FILE_STORAGE mount: see :func:`_resolve_sqlite_dir` for why that mount
+    cannot host a database.
     """
     explicit = os.environ.get("DATABASE_URL", "").strip()
     if explicit:
         return _normalise_database_url(explicit)
-    return f"sqlite+aiosqlite:///{Path(_resolve_data_dir()) / 'spectre.db'}"
+    return f"sqlite+aiosqlite:///{Path(_resolve_sqlite_dir()) / 'spectre.db'}"
 
 
 def uses_sqlite(database_url: str) -> bool:
@@ -150,6 +169,7 @@ class Settings:
     database_url: str = field(default_factory=_resolve_database_url)
     data_dir: str = field(default_factory=_resolve_data_dir)
     port: int = field(default_factory=_resolve_port)
+    sqlite_dir: str = field(default_factory=_resolve_sqlite_dir)
     session_cookie_secure: bool = field(default_factory=_resolve_cookie_secure)
     spectre_admin_user: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_USER", "admin")
@@ -246,7 +266,8 @@ def validate_sqlite_support(data_dir: str | Path) -> None:
     So this exercises the real operation: create a database, create a table
     inside a transaction, and roll it back.
     """
-    import sqlite3  # noqa: PLC0415 — stdlib, imported here to keep boot cost local
+    # stdlib, imported here to keep the boot cost local to this check
+    import sqlite3
 
     probe = Path(data_dir) / ".spectre-sqlite-probe.db"
     try:

@@ -144,14 +144,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # partway through table creation. So when the database is SQLite, prove
     # SQLite itself before claiming the storage is usable.
     if uses_sqlite(settings.database_url):
-        validate_sqlite_support(resolved_data_dir)
-        backend = "SQLite"
+        # The database never lives on the injected mount: that volume is object
+        # storage and cannot host SQLite. It goes on the container filesystem,
+        # which works but does not survive a redeploy.
+        sqlite_dir = validate_data_dir(settings.sqlite_dir)
+        validate_sqlite_support(sqlite_dir)
+        logger.warning(
+            "SPECTRE %s storage: SQLite at %s. This is EPHEMERAL and will be lost on "
+            "redeploy or restart. Attach the POSTGRESQL add-on for durable storage; "
+            "its injected DATABASE_URL is picked up automatically.",
+            __version__, sqlite_dir,
+        )
     else:
-        backend = "external database"
-    logger.info(
-        "SPECTRE %s boot, storage verdict: USABLE at %s (%s)",
-        __version__, resolved_data_dir, backend,
-    )
+        logger.info(
+            "SPECTRE %s storage: external database, durable. Data volume at %s",
+            __version__, resolved_data_dir,
+        )
 
     await init_db()
     _load_hrr_from_disk()

@@ -42,21 +42,39 @@ async def init_db() -> None:
     await _bootstrap_admin()
 
 
+def _existing_columns(sync_conn: Any, table: str) -> set[str]:
+    """Return the column names of *table*, or an empty set if it does not exist.
+
+    Uses SQLAlchemy's inspector rather than a dialect-specific query. The
+    previous implementation issued ``PRAGMA table_info``, which is SQLite-only
+    and made the whole boot fail on PostgreSQL with a bare syntax error.
+    """
+    from sqlalchemy import inspect  # noqa: PLC0415
+
+    inspector = inspect(sync_conn)
+    if table not in inspector.get_table_names():
+        return set()
+    return {column["name"] for column in inspector.get_columns(table)}
+
+
 async def _apply_migrations(conn: Any) -> None:
     """Apply additive ALTER TABLE migrations that are safe to re-run.
 
-    SQLite does not support IF NOT EXISTS on ADD COLUMN, so we query
-    the pragma first and skip columns that already exist.
+    These exist only for databases created before a column was added. A fresh
+    database gets the column from ``create_all``, so on a new PostgreSQL
+    instance every migration here is already satisfied and none of the
+    SQLite-flavoured DDL below ever executes.
     """
     from sqlalchemy import text  # noqa: PLC0415
 
     migrations: list[tuple[str, str, str]] = [
         # (table, column, column_definition)
-        ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ]
     for table, column, definition in migrations:
-        pragma = await conn.execute(text(f"PRAGMA table_info({table})"))
-        existing = {row[1] for row in pragma.fetchall()}
+        existing = await conn.run_sync(_existing_columns, table)
+        if not existing:
+            continue  # table absent, so create_all will build it complete
         if column not in existing:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
 
