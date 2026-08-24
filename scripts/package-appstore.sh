@@ -16,22 +16,43 @@
 #
 # POSIX sh only: the platform runs build steps under a minimal shell.
 #
-# Usage:  scripts/package-appstore.sh [output-directory]     (default: dist)
+# Usage:
+#   scripts/package-appstore.sh [output-dir]                  python template
+#   scripts/package-appstore.sh [output-dir] --docker-only    docker-only template
+#
+# TEMPLATE SELECTION IS DECIDED BY WHAT IS IN THE PACKAGE, NOT BY A SETTING.
+# The platform detects Python from a recognised manifest at the package root.
+# Evidence: the first upload had pyproject.toml and no requirements.txt, and a
+# Dependencies stage still ran and failed; a docker-only app has no such stage.
+# So docker-only requires that NO recognised manifest ships: no pyproject.toml
+# and no requirements.txt. requirements.lock is not a recognised name, so
+# dependency pinning survives, and Dockerfile.docker-only runs the app via
+# `python -m` instead of installing it.
 
 set -eu
 
 OUT_DIR="${1:-dist}"
+MODE="python"
+case "${2:-}" in
+    --docker-only) MODE="docker-only" ;;
+    "") ;;
+    *) echo "FAIL: unknown option ${2}"; exit 1 ;;
+esac
 VERSION=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' spectre/__init__.py)
 [ -n "$VERSION" ] || { echo "FAIL: could not read __version__ from spectre/__init__.py"; exit 1; }
 
 STAGE=$(mktemp -d)
-PKG_NAME="spectre-${VERSION}-appstore"
+if [ "$MODE" = "docker-only" ]; then
+    PKG_NAME="spectre-${VERSION}-appstore-docker-only"
+else
+    PKG_NAME="spectre-${VERSION}-appstore"
+fi
 ZIP_PATH="${OUT_DIR}/${PKG_NAME}.zip"
 
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT INT TERM
 
-echo "Packaging SPECTRE ${VERSION} for the App Store (docker-only template)"
+echo "Packaging SPECTRE ${VERSION} for the App Store (${MODE} template)"
 
 # ── Allowlist ─────────────────────────────────────────────────────────────────
 # Everything the platform needs to detect the template, build the image, run the
@@ -57,6 +78,14 @@ tle_clustering
 scripts
 .github
 "
+
+if [ "$MODE" = "docker-only" ]; then
+    # A recognised manifest anywhere at the root would flip the template back to
+    # python, so pyproject.toml, requirements.txt and the Sonar config all go.
+    # tests/ goes with them: without pyproject.toml there is no pytest config,
+    # so shipping an unrunnable suite would mislead a reviewer.
+    PATHS=$(printf '%s\n' $PATHS | grep -vxE 'pyproject.toml|requirements.txt|sonar-project.properties|tests|tle_clustering|.github|.pre-commit-config.yaml')
+fi
 
 for p in $PATHS; do
     [ -e "$p" ] || { echo "FAIL: allowlisted path missing: $p"; exit 1; }
@@ -85,16 +114,30 @@ rm -rf "$STAGE/docs" "$STAGE/.git" "$STAGE/.venv" "$STAGE/venv" "$STAGE/dist" "$
        "$STAGE/coverage" "$STAGE/.pytest_cache" "$STAGE/.mypy_cache" "$STAGE/.ruff_cache" \
        "$STAGE/data" "$STAGE/logs" "$STAGE/docs/openapi.json"
 
+if [ "$MODE" = "docker-only" ]; then
+    [ -f Dockerfile.docker-only ] || { echo "FAIL: Dockerfile.docker-only is missing"; exit 1; }
+    cp Dockerfile.docker-only "$STAGE/Dockerfile"
+fi
+
 # ── Fail-closed checks on the staged tree ─────────────────────────────────────
 [ -f "$STAGE/Dockerfile" ] || { echo "FAIL: Dockerfile must be at the package root"; exit 1; }
 
-# The platform's Dependencies stage installs from requirements.txt. Without it
-# the stage fails before anything else runs. Its presence selects the python
-# template, which is deliberate; the Dockerfile still drives the image build.
-if [ ! -f "$STAGE/requirements.txt" ]; then
-    echo "FAIL: no requirements.txt at the package root."
-    echo "      The platform's dependency install has nothing to read and will fail."
-    exit 1
+if [ "$MODE" = "python" ]; then
+    # The Dependencies stage installs from requirements.txt. Without it the
+    # stage fails before anything else runs.
+    if [ ! -f "$STAGE/requirements.txt" ]; then
+        echo "FAIL: no requirements.txt at the package root."
+        echo "      The platform's dependency install has nothing to read and will fail."
+        exit 1
+    fi
+else
+    # Any recognised manifest would flip detection back to the python template.
+    for manifest in pyproject.toml requirements.txt setup.py setup.cfg Pipfile poetry.lock; do
+        if [ -f "$STAGE/$manifest" ]; then
+            echo "FAIL: $manifest at the root would select the python template, not docker-only."
+            exit 1
+        fi
+    done
 fi
 
 LEAKS=$(find "$STAGE" \( -name '.env' -o -name '*.pem' -o -name '*.key' -o -name 'id_rsa*' \) 2>/dev/null | grep -v '\.env\.example' || true)
