@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -21,6 +22,9 @@ engine = create_async_engine(_url, echo=False, connect_args=_connect_args)
 AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine, expire_on_commit=False
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -87,25 +91,67 @@ async def _apply_migrations(conn: Any) -> None:
 
 
 async def _bootstrap_admin() -> None:
-    """Insert a default admin user when the users table is empty."""
-    from spectre.web.auth import hash_password  # noqa: PLC0415
-    from spectre.web.models import User  # noqa: PLC0415
+    """Create the first admin account, and say plainly what happened.
+
+    Every branch logs. A silent skip here produces the worst possible outcome:
+    a container that passes every health check while nobody on earth can log
+    in, with nothing in the log to explain it.
+    """
+    # Deferred: keeps the import cost on the boot path only.
+    from sqlalchemy import select
+
+    from spectre.web.auth import hash_password
+    from spectre.web.models import User
 
     settings = get_settings()
-    if not settings.spectre_admin_user or not settings.spectre_admin_pass:
-        return
+    username = settings.spectre_admin_user.strip()
+    password = settings.spectre_admin_pass
 
     async with AsyncSessionLocal() as session:
-        from sqlalchemy import select  # noqa: PLC0415
+        existing = (await session.execute(select(User))).scalars().all()
 
-        result = await session.execute(select(User).limit(1))
-        if result.scalar_one_or_none() is not None:
-            return  # table already has at least one user
+        if existing:
+            if settings.admin_reset and username and password:
+                # Break-glass recovery. Without it, a forgotten password means
+                # dropping the database, because bootstrap only runs on an
+                # empty table.
+                target = next((u for u in existing if u.username == username), None)
+                if target is None:
+                    target = User(username=username, hashed_password="", role="admin")
+                    session.add(target)
+                target.hashed_password = hash_password(password)
+                target.role = "admin"
+                await session.commit()
+                logger.warning(
+                    "ADMIN RESET APPLIED for %r because SPECTRE_ADMIN_RESET is set. "
+                    "Unset it and redeploy: leaving it on resets the password every boot.",
+                    username,
+                )
+                return
+            logger.info(
+                "Admin bootstrap skipped: %d account(s) already exist. "
+                "Set SPECTRE_ADMIN_RESET=true to reset %r if the password is lost.",
+                len(existing), username or "the admin account",
+            )
+            return
 
-        admin = User(
-            username=settings.spectre_admin_user,
-            hashed_password=hash_password(settings.spectre_admin_pass),
-            role="admin",
+        if not username or not password:
+            logger.error(
+                "NO USERS EXIST AND NO ADMIN CREDENTIALS WERE SUPPLIED, so nobody can "
+                "log in. Set SPECTRE_ADMIN_USER and SPECTRE_ADMIN_PASS in the "
+                "environment and redeploy. Currently: SPECTRE_ADMIN_USER=%s, "
+                "SPECTRE_ADMIN_PASS=%s.",
+                f"{username!r}" if username else "unset",
+                "set" if password else "UNSET",
+            )
+            return
+
+        session.add(
+            User(
+                username=username,
+                hashed_password=hash_password(password),
+                role="admin",
+            )
         )
-        session.add(admin)
         await session.commit()
+        logger.info("Admin bootstrap: created the initial admin account %r.", username)

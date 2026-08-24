@@ -244,6 +244,12 @@ class Settings:
     spectre_admin_pass: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_PASS", "")
     )
+    # Break-glass: reset the admin password on the next boot. Off unless set
+    # explicitly, because leaving it on resets the password every restart.
+    admin_reset: bool = field(
+        default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET", "").strip().lower()
+        in {"true", "1", "yes", "on"}
+    )
 
 
 def get_settings() -> Settings:
