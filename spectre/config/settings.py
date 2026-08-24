@@ -13,6 +13,7 @@ platform-injected variable, then a safe local default.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,17 +63,46 @@ def _resolve_data_dir() -> str:
     return str(Path.cwd() / "data")
 
 
+def _normalise_database_url(url: str) -> str:
+    """Return *url* with an async driver, whatever dialect spelling arrives.
+
+    The POSTGRESQL add-on injects a synchronous URL (``postgresql://`` or the
+    older ``postgres://``). SQLAlchemy's async engine cannot use either, so the
+    driver is filled in here rather than requiring the operator to hand-edit a
+    value the platform generated.
+    """
+    for prefix in ("postgresql+asyncpg://", "sqlite+aiosqlite://"):
+        if url.startswith(prefix):
+            return url
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://"):]
+    if url.startswith("sqlite://"):
+        return "sqlite+aiosqlite://" + url[len("sqlite://"):]
+    return url
+
+
 def _resolve_database_url() -> str:
     """Return the database URL, resolved at runtime.
 
     An explicit ``DATABASE_URL`` wins (the POSTGRESQL add-on injects one).
-    Otherwise SQLite is placed inside the resolved data directory so the
-    database lands on the persistent volume rather than the ephemeral layer.
+    Otherwise SQLite is placed inside the resolved data directory.
+
+    Note that SQLite on the FILE_STORAGE add-on does NOT work: that volume is
+    object-storage backed, and SQLite needs POSIX byte-range locking which such
+    mounts do not provide. Boot validation checks for this explicitly rather
+    than letting it surface as an opaque "disk I/O error".
     """
     explicit = os.environ.get("DATABASE_URL", "").strip()
     if explicit:
-        return explicit
+        return _normalise_database_url(explicit)
     return f"sqlite+aiosqlite:///{Path(_resolve_data_dir()) / 'spectre.db'}"
+
+
+def uses_sqlite(database_url: str) -> bool:
+    """Return True when *database_url* points at a SQLite database."""
+    return database_url.startswith("sqlite")
 
 
 def _resolve_cookie_secure() -> bool:
@@ -202,3 +232,42 @@ def validate_data_dir(data_dir: str) -> Path:
         ) from exc
 
     return path
+
+
+def validate_sqlite_support(data_dir: str | Path) -> None:
+    """Raise :class:`ConfigurationError` if SQLite cannot operate in *data_dir*.
+
+    A plain write probe is not sufficient and gives a false pass. An
+    object-storage backed volume (the App Store FILE_STORAGE add-on is
+    S3-backed) happily accepts ``write_text`` on a small file, then fails the
+    moment SQLite needs POSIX byte-range locking or a rollback journal, which
+    surfaces as an opaque ``disk I/O error`` partway through table creation.
+
+    So this exercises the real operation: create a database, create a table
+    inside a transaction, and roll it back.
+    """
+    import sqlite3  # noqa: PLC0415 — stdlib, imported here to keep boot cost local
+
+    probe = Path(data_dir) / ".spectre-sqlite-probe.db"
+    try:
+        connection = sqlite3.connect(probe, timeout=5)
+        try:
+            connection.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, value TEXT)")
+            connection.execute("INSERT INTO probe (value) VALUES ('ok')")
+            connection.commit()
+            connection.execute("DROP TABLE probe")
+            connection.commit()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ConfigurationError(
+            f"SQLite cannot operate in {data_dir}: {exc}. "
+            "This is the expected result on an object-storage backed volume such as "
+            "the App Store FILE_STORAGE add-on, which does not support the POSIX "
+            "file locking SQLite requires. Attach the POSTGRESQL add-on instead and "
+            "let it inject DATABASE_URL; SPECTRE normalises the driver automatically."
+        ) from exc
+    finally:
+        for leftover in (probe, Path(f"{probe}-journal"), Path(f"{probe}-wal"), Path(f"{probe}-shm")):
+            with contextlib.suppress(OSError):  # best effort cleanup
+                leftover.unlink(missing_ok=True)

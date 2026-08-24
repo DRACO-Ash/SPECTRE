@@ -15,7 +15,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from spectre import __version__
-from spectre.config.settings import get_settings, validate_data_dir, validate_secret_key
+from spectre.config.settings import (
+    get_settings,
+    uses_sqlite,
+    validate_data_dir,
+    validate_secret_key,
+    validate_sqlite_support,
+)
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.health import router as health_router
@@ -131,8 +137,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Prove storage with a real write and record the verdict exactly once, so a
     # pod that is later killed still leaves a diagnosable narrative in its log.
     resolved_data_dir = validate_data_dir(settings.data_dir)
+
+    # A plain write probe is not proof the store works. An object-storage backed
+    # volume accepts a small file write and then fails SQLite's locking, which
+    # previously surfaced as "WRITABLE" immediately followed by a disk I/O error
+    # partway through table creation. So when the database is SQLite, prove
+    # SQLite itself before claiming the storage is usable.
+    if uses_sqlite(settings.database_url):
+        validate_sqlite_support(resolved_data_dir)
+        backend = "SQLite"
+    else:
+        backend = "external database"
     logger.info(
-        "SPECTRE %s boot — storage verdict: WRITABLE at %s", __version__, resolved_data_dir
+        "SPECTRE %s boot, storage verdict: USABLE at %s (%s)",
+        __version__, resolved_data_dir, backend,
     )
 
     await init_db()

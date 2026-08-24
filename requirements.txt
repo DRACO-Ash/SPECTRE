@@ -1,30 +1,10 @@
 # SPECTRE dependency manifest for the Bluestaq App Store pipeline.
 #
-# WHAT IS IN HERE
-#   The runtime dependencies, plus exactly the tooling needed to RUN the test
-#   suite with coverage. Nothing else.
-#
-# WHY IT IS DELIBERATELY SMALL
-#   The platform's dependency scanner reads this file, so every package listed
-#   becomes attack surface it must assess. Lint, type-check and SAST tooling
-#   (ruff, mypy, bandit, pip-audit) never run on the platform, only in our own
-#   CI, so they are kept out of this manifest and live in the dev extra. That
-#   removed 35 packages, including the requests, urllib3, cachecontrol and rich
-#   chains, none of which SPECTRE runs.
-#
-# WHAT THE CONTAINER USES
-#   NOT this file. The image installs from requirements.lock with
-#   --require-hashes --only-binary=:all:, so the runtime is hash-verified and
-#   carries no test tooling at all.
-#
-# REGENERATE BOTH TOGETHER
-#   pip-compile --generate-hashes --strip-extras -o requirements.lock pyproject.toml
-#   pip-compile --extra test --strip-extras -o requirements.txt pyproject.toml
-#
 aiosqlite==0.22.1
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
+asyncpg==0.31.0
 bcrypt==5.0.0
 certifi==2026.7.22
 click==8.4.2

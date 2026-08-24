@@ -154,3 +154,73 @@ class TestSettings:
         assert isinstance(settings, Settings)
         assert settings.secret_key == "s" * 32
         assert settings.port == 8080
+
+
+class TestDatabaseUrlNormalisation:
+    """The POSTGRESQL add-on injects a synchronous URL; the async engine needs a driver."""
+
+    @pytest.mark.parametrize(
+        ("injected", "expected"),
+        [
+            ("postgresql://u:p@host:5432/db", "postgresql+asyncpg://u:p@host:5432/db"),
+            ("postgres://u:p@host:5432/db", "postgresql+asyncpg://u:p@host:5432/db"),
+            ("postgresql+asyncpg://u:p@host/db", "postgresql+asyncpg://u:p@host/db"),
+            ("sqlite:///./local.db", "sqlite+aiosqlite:///./local.db"),
+            ("sqlite+aiosqlite:///./local.db", "sqlite+aiosqlite:///./local.db"),
+        ],
+    )
+    def test_driver_is_filled_in(self, injected: str, expected: str) -> None:
+        from spectre.config.settings import _normalise_database_url
+
+        assert _normalise_database_url(injected) == expected
+
+    def test_injected_url_is_normalised_end_to_end(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pw@db.internal:5432/spectre")
+        assert _resolve_database_url().startswith("postgresql+asyncpg://")
+
+    def test_uses_sqlite_detects_the_backend(self) -> None:
+        from spectre.config.settings import uses_sqlite
+
+        assert uses_sqlite("sqlite+aiosqlite:////data/spectre.db") is True
+        assert uses_sqlite("postgresql+asyncpg://u@h/db") is False
+
+
+class TestSqliteSupportProbe:
+    """A write probe alone gives a false pass on an object-storage volume."""
+
+    def test_accepts_a_normal_filesystem(self, tmp_path: Path) -> None:
+        from spectre.config.settings import validate_sqlite_support
+
+        validate_sqlite_support(tmp_path)
+
+    def test_leaves_no_probe_files_behind(self, tmp_path: Path) -> None:
+        from spectre.config.settings import validate_sqlite_support
+
+        validate_sqlite_support(tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_fails_closed_when_sqlite_cannot_operate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reproduces the deploy failure: writes succeed, SQLite does not.
+
+        The App Store FILE_STORAGE volume is S3-backed and does not provide the
+        POSIX byte-range locking SQLite needs, so table creation died with an
+        opaque disk I/O error after the boot log had already said WRITABLE.
+        """
+        import sqlite3
+
+        from spectre.config.settings import ConfigurationError, validate_sqlite_support
+
+        def no_locking(*args: object, **kwargs: object) -> None:
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(sqlite3, "connect", no_locking)
+        with pytest.raises(ConfigurationError) as exc:
+            validate_sqlite_support(tmp_path)
+        message = str(exc.value)
+        assert "disk I/O error" in message
+        assert "POSTGRESQL" in message, "the message must name the remedy"
+        assert "locking" in message, "the message must name the cause"
