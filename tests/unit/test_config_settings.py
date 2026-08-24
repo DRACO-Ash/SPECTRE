@@ -286,3 +286,112 @@ class TestSqliteNeverLandsOnTheObjectStore:
         monkeypatch.setenv("SPECTRE_SQLITE_DIR", "/srv/db")
         monkeypatch.setenv("STORAGE_MOUNT_PATH", "/data")
         assert _resolve_sqlite_dir() == "/srv/db"
+
+
+class TestLibpqParameterTranslation:
+    """asyncpg rejects libpq query parameters with a bare TypeError.
+
+    The managed PostgreSQL add-on injects a libpq-style URL, typically carrying
+    ``?sslmode=require``. Passing that through crashed the pod at connect time
+    with `connect() got an unexpected keyword argument 'sslmode'`, which reads
+    as a code defect rather than a configuration mismatch.
+    """
+
+    def test_sslmode_require_encrypts_without_verifying(self) -> None:
+        """libpq's `require` means encrypt, NOT verify.
+
+        asyncpg's ssl=True builds a verifying context, which rejects the
+        private certificate authorities managed databases normally use. The
+        translation must follow libpq, or a correct URL fails to connect.
+        """
+        import ssl as ssl_module
+
+        from spectre.config.settings import split_database_url
+
+        url, args = split_database_url(
+            "postgresql+asyncpg://u:p@host:5432/db?sslmode=require"
+        )
+        assert "sslmode" not in url
+        context = args["ssl"]
+        assert isinstance(context, ssl_module.SSLContext)
+        assert context.check_hostname is False
+        assert context.verify_mode == ssl_module.CERT_NONE
+
+    def test_sslmode_disable_turns_tls_off(self) -> None:
+        from spectre.config.settings import split_database_url
+
+        _url, args = split_database_url(
+            "postgresql+asyncpg://u:p@host/db?sslmode=disable"
+        )
+        assert args["ssl"] is False
+
+    @pytest.mark.parametrize("mode", ["allow", "prefer"])
+    def test_negotiating_modes_leave_the_default_alone(self, mode: str) -> None:
+        from spectre.config.settings import split_database_url
+
+        _url, args = split_database_url(
+            f"postgresql+asyncpg://u:p@host/db?sslmode={mode}"
+        )
+        assert "ssl" not in args, "asyncpg negotiates by default; do not override"
+
+    @pytest.mark.parametrize("mode", ["verify-ca", "verify-full"])
+    def test_verifying_modes_build_an_ssl_context(self, mode: str) -> None:
+        import ssl as ssl_module
+
+        from spectre.config.settings import split_database_url
+
+        _url, args = split_database_url(
+            f"postgresql+asyncpg://u:p@host/db?sslmode={mode}"
+        )
+        context = args["ssl"]
+        assert isinstance(context, ssl_module.SSLContext)
+        assert context.check_hostname is (mode == "verify-full")
+        assert context.verify_mode == ssl_module.CERT_REQUIRED
+
+    def test_every_libpq_only_parameter_is_stripped(self) -> None:
+        from spectre.config.settings import split_database_url
+
+        url, _args = split_database_url(
+            "postgresql+asyncpg://u:p@host/db"
+            "?sslmode=require&target_session_attrs=read-write"
+            "&application_name=spectre&options=-c%20statement_timeout%3D0"
+        )
+        for banned in ("sslmode", "target_session_attrs", "application_name", "options"):
+            assert banned not in url, f"{banned} would raise TypeError in asyncpg"
+
+    def test_non_libpq_parameters_survive(self) -> None:
+        from spectre.config.settings import split_database_url
+
+        url, _args = split_database_url(
+            "postgresql+asyncpg://u:p@host/db?sslmode=require&prepared_statement_cache_size=0"
+        )
+        assert "prepared_statement_cache_size=0" in url
+
+    def test_connect_timeout_is_translated_not_dropped(self) -> None:
+        from spectre.config.settings import split_database_url
+
+        _url, args = split_database_url(
+            "postgresql+asyncpg://u:p@host/db?connect_timeout=15"
+        )
+        assert args["timeout"] == 15.0
+
+    def test_sqlite_urls_are_untouched(self) -> None:
+        from spectre.config.settings import split_database_url
+
+        url, args = split_database_url("sqlite+aiosqlite:////app/data/spectre.db")
+        assert url == "sqlite+aiosqlite:////app/data/spectre.db"
+        assert args == {}
+
+    def test_the_add_on_url_shape_end_to_end(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exactly what the platform injected, from raw value to connect args."""
+        from spectre.config.settings import split_database_url
+
+        monkeypatch.setenv(
+            "DATABASE_URL", "postgresql://spectre:pw@pg.internal:5432/spectre?sslmode=require"
+        )
+        url, args = split_database_url(_resolve_database_url())
+        assert url.startswith("postgresql+asyncpg://")
+        assert "sslmode" not in url
+        assert args["ssl"] is not None, "TLS intent must survive the translation"

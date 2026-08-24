@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
@@ -117,6 +120,70 @@ def _resolve_database_url() -> str:
     if explicit:
         return _normalise_database_url(explicit)
     return f"sqlite+aiosqlite:///{Path(_resolve_sqlite_dir()) / 'spectre.db'}"
+
+
+# libpq understands these query parameters; asyncpg does not, and passing one
+# through raises TypeError at connect time. The managed PostgreSQL add-on
+# injects a libpq-style URL, so they are translated or dropped here.
+_LIBPQ_ONLY_PARAMS = frozenset({
+    "sslmode", "sslrootcert", "sslcert", "sslkey", "sslcrl",
+    "target_session_attrs", "options", "channel_binding", "gssencmode",
+    "connect_timeout", "application_name", "fallback_application_name",
+})
+
+# sslmode values that mean "do not use TLS", "negotiate", and "require TLS".
+_SSLMODE_DISABLED = frozenset({"disable"})
+_SSLMODE_NEGOTIATE = frozenset({"allow", "prefer"})
+_SSLMODE_VERIFYING = frozenset({"verify-ca", "verify-full"})
+
+
+def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
+    """Return *url* stripped of libpq-only parameters, plus asyncpg connect args.
+
+    The POSTGRESQL add-on hands over a URL written for libpq, typically with
+    ``?sslmode=require``. asyncpg has no such keyword and fails the connection
+    with a bare ``TypeError``, which surfaces as a crash-looping pod rather than
+    anything resembling a configuration error. The TLS intent is preserved by
+    translating it into asyncpg's ``ssl`` argument.
+    """
+    if not url.startswith("postgresql+asyncpg://"):
+        return url, {}
+
+    parts = urlsplit(url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in query if k.lower() not in _LIBPQ_ONLY_PARAMS]
+    dropped = {k.lower(): v for k, v in query if k.lower() in _LIBPQ_ONLY_PARAMS}
+
+    connect_args: dict[str, Any] = {}
+    sslmode = dropped.get("sslmode", "").strip().lower()
+    cafile = dropped.get("sslrootcert") or None
+
+    if sslmode in _SSLMODE_DISABLED:
+        connect_args["ssl"] = False
+    elif sslmode in _SSLMODE_VERIFYING:
+        # verify-ca checks the chain; verify-full also checks the hostname.
+        context = ssl.create_default_context(cafile=cafile)
+        context.check_hostname = sslmode == "verify-full"
+        context.verify_mode = ssl.CERT_REQUIRED
+        connect_args["ssl"] = context
+    elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
+        # "require" means encrypt, and explicitly does NOT mean verify. Passing
+        # asyncpg ssl=True would build a verifying context instead, which
+        # rejects the private certificate authorities managed databases
+        # normally use. Match libpq's semantics rather than asyncpg's default.
+        context = ssl.create_default_context(cafile=cafile)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        connect_args["ssl"] = context
+
+    if "connect_timeout" in dropped:
+        with contextlib.suppress(ValueError):
+            connect_args["timeout"] = float(dropped["connect_timeout"])
+
+    cleaned = urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(kept, doseq=True), parts.fragment)
+    )
+    return cleaned, connect_args
 
 
 def uses_sqlite(database_url: str) -> bool:

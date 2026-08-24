@@ -8,11 +8,15 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from spectre.config.settings import get_settings
+from spectre.config.settings import get_settings, split_database_url
 
 _settings = get_settings()
 
-engine = create_async_engine(_settings.database_url, echo=False)
+# The add-on hands over a libpq-style URL; asyncpg needs those parameters
+# translated into connect arguments or it fails with a bare TypeError.
+_url, _connect_args = split_database_url(_settings.database_url)
+
+engine = create_async_engine(_url, echo=False, connect_args=_connect_args)
 
 AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine, expire_on_commit=False
@@ -49,7 +53,8 @@ def _existing_columns(sync_conn: Any, table: str) -> set[str]:
     previous implementation issued ``PRAGMA table_info``, which is SQLite-only
     and made the whole boot fail on PostgreSQL with a bare syntax error.
     """
-    from sqlalchemy import inspect  # noqa: PLC0415
+    # Deferred: keeps the import cost on the boot path only.
+    from sqlalchemy import inspect
 
     inspector = inspect(sync_conn)
     if table not in inspector.get_table_names():
@@ -65,10 +70,11 @@ async def _apply_migrations(conn: Any) -> None:
     instance every migration here is already satisfied and none of the
     SQLite-flavoured DDL below ever executes.
     """
-    from sqlalchemy import text  # noqa: PLC0415
+    # Deferred: keeps the import cost on the boot path only.
+    from sqlalchemy import text
 
+    # Each entry is a table, a column, and the definition used to add it.
     migrations: list[tuple[str, str, str]] = [
-        # (table, column, column_definition)
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ]
     for table, column, definition in migrations:
