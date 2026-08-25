@@ -7,6 +7,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.1] - 2026-08-25
+
+Quality-gate clean-up following the first successful App Store analysis. That
+run laid down a baseline, so SonarQube now scores changed lines only and the
+count fell from 436 issues to three.
+
+### Fixed
+
+- **Three code smells in `tle_clustering`.** `parser.py` collapsed two chained
+  `startswith` calls into the tuple form; `clustering.py` lost an empty
+  `if TYPE_CHECKING: pass` block along with the import that existed only to
+  feed it, and now uses a set comprehension instead of `set()` over a
+  generator. No behavioural change.
+- **Unused `noqa: F401` directive** in `tests/integration/test_admin_bootstrap.py`,
+  flagged by the changed-lines scoper.
+- **`scripts/package-appstore.sh` argument parsing.** The mode flag was read
+  from `$2` only, so a bare `--docker-only` was taken as the output directory
+  and the run died in `mkdir`. Arguments are now parsed in a loop, the flag and
+  the optional output directory may appear in either order, and unknown options
+  are rejected rather than silently treated as a path.
+
+### Added
+
+- **`scripts/bump-version.sh`.** Every submission from here on carries a
+  distinct version, so the platform, the pipeline log and the artefact on disk
+  cannot disagree about which build is which. Takes `patch`, `minor`, `major`
+  or an explicit version; updates the single source in `spectre/__init__.py`
+  and the literal references in the documentation.
+
 ## [0.4.0] - 2026-08-21
 
 Bluestaq App Store readiness. SPECTRE is packaged for the docker-only template
