@@ -34,7 +34,7 @@ async def clean_db(monkeypatch: pytest.MonkeyPatch) -> object:
 
     # Both modules must be imported before create_all, or their tables are
     # simply absent from the metadata and never created.
-    import spectre.training.models  # noqa: F401
+    import spectre.training.models
     import spectre.web.models  # noqa: F401
 
     async with engine.begin() as conn:

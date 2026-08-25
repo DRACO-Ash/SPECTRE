@@ -118,7 +118,7 @@ def parse_tle_strings(lines: list[str]) -> list[TLERecord]:
         s = raw.strip()
         if not s:
             continue
-        if s.startswith("1 ") or s.startswith("2 "):
+        if s.startswith(("1 ", "2 ")):
             filtered.append(s)
         else:
             logger.debug("parser: skipping name line: %r", s[:40])
