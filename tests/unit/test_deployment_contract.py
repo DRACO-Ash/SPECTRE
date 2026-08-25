@@ -297,3 +297,47 @@ class TestDependencyScannerContract:
         assert not offenders, (
             f"optional-dependency groups must not reference the project itself: {offenders}"
         )
+
+
+class TestPythonFloorContract:
+    """The interpreter floor has to be stated consistently in three places.
+
+    The App Store's Dependency Scanning analyser runs `pip download` against
+    requirements.txt before it can analyse anything, so it needs an interpreter
+    at least as new as the floor our pins actually require. When that mismatch
+    happens the job exits non-zero, writes no report, and the platform shows
+    "Vulnerable dependencies found" for a scan that never ran. See
+    docs/DEPENDENCY-SCANNING.md.
+
+    A test cannot resolve the manifest without network access, so this guards
+    the offline half: pyproject's declared floor and the Dockerfile base image
+    must agree. `scripts/audit-dependencies.sh` measures the real floor.
+    """
+
+    def _declared_floor(self) -> tuple[int, int]:
+        pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        m = re.search(r'requires-python\s*=\s*"[>=~^]*\s*(\d+)\.(\d+)', pyproject)
+        assert m, "pyproject.toml must declare requires-python"
+        return int(m.group(1)), int(m.group(2))
+
+    def _base_image_python(self, dockerfile: str) -> tuple[int, int]:
+        m = re.search(r"BASE_IMAGE=python:(\d+)\.(\d+)", dockerfile)
+        assert m, "the Dockerfile must pin a python:X.Y base image"
+        return int(m.group(1)), int(m.group(2))
+
+    def test_declared_floor_matches_base_image(self, dockerfile: str) -> None:
+        declared = self._declared_floor()
+        base = self._base_image_python(dockerfile)
+        assert declared == base, (
+            f"requires-python declares {declared[0]}.{declared[1]} but the Dockerfile builds on "
+            f"python:{base[0]}.{base[1]}. Whichever is right, a scanner told the wrong floor "
+            "cannot resolve the manifest."
+        )
+
+    def test_floor_is_documented_for_the_platform(self) -> None:
+        doc = _REPO_ROOT / "docs" / "DEPENDENCY-SCANNING.md"
+        assert doc.is_file(), "docs/DEPENDENCY-SCANNING.md must exist to explain the stage failure"
+        major, minor = self._declared_floor()
+        assert f"{major}.{minor}" in doc.read_text(encoding="utf-8"), (
+            "the diagnosis document must name the current interpreter floor"
+        )

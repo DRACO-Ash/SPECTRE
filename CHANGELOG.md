@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.4] - 2026-08-25
+
+Root-causes the Dependency Scanning stage failure. No vulnerable package was
+ever involved.
+
+### Added
+
+- **`docs/DEPENDENCY-SCANNING.md`.** The analyser runs `pip download` against
+  the manifest before it can analyse anything. SPECTRE pins resolve on Python
+  3.12 and above and on nothing older, so an analyser on an older interpreter
+  fails to resolve, exits non-zero and writes no report. The platform maps a
+  non-zero exit to "Vulnerable dependencies found", which is how a crashed
+  scan reaches the user as a finding. The document carries the evidence and
+  names the remedy: run the analyser on Python 3.12 or newer.
+- **`scripts/audit-dependencies.sh`.** Audits `requirements.txt`, emits a
+  CycloneDX SBOM, and measures the interpreter floor by attempting resolution
+  on 3.9 through 3.14.
+- **`TestPythonFloorContract`.** Guards the offline half of the invariant: the
+  floor declared in `requires-python` and the Dockerfile base image must
+  agree. Verified by drifting one and watching the guard name the mismatch.
+
+### Verified clean
+
+Checked against the scanner's own database rather than only our own tooling.
+`gemnasium-db` was cloned and matched offline against every pinned version
+with OR-aware range parsing: 54 runtime and test packages (94 advisories
+examined) and 43 development-only packages (54 advisories examined), zero
+affected. `pip-audit` reports no known vulnerabilities against
+`requirements.txt`, `requirements.lock` and full `pyproject.toml` resolution.
+The four vendored JavaScript libraries were fingerprinted by hand, since they
+ship without a manifest: htmx 1.9.12, Chart.js 4.4.7, chartjs-plugin-zoom
+2.0.1 and Hammer.js 2.0.7 are all outside every advisory on file.
+
 ## [0.4.3] - 2026-08-25
 
 ### Fixed
