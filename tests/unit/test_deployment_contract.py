@@ -276,3 +276,24 @@ class TestDependencyScannerContract:
             f"the scanner will resolve them INSTEAD of requirements.lock: {strays}. "
             "Rename them (a module named setup.py is the usual culprit) or move them to the root."
         )
+
+    def test_no_self_referencing_extra_in_pyproject(self) -> None:
+        """A self-referencing extra sends resolvers to an index for our own name.
+
+        `spectre[test]` inside an optional-dependency group means any tool that
+        reads pyproject.toml without our source tree must fetch a distribution
+        called `spectre` from PyPI, where an unrelated package of that name
+        already exists. List the packages explicitly instead.
+        """
+        pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        extras = pyproject.split("[project.optional-dependencies]", 1)
+        assert len(extras) == 2, "pyproject.toml must declare optional-dependencies"
+        block = extras[1].split("\n[", 1)[0]
+        offenders = [
+            line.strip()
+            for line in block.splitlines()
+            if not line.lstrip().startswith("#") and '"spectre' in line
+        ]
+        assert not offenders, (
+            f"optional-dependency groups must not reference the project itself: {offenders}"
+        )

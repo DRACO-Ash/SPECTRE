@@ -48,8 +48,16 @@ test = [
 
 # Everything a developer or our own CI needs on top of the test set. These do
 # not reach requirements.txt and so are never scanned as app dependencies.
+# NOTE: the test packages are listed explicitly rather than pulled in with a
+# `spectre[test]` self-reference. A self-referencing extra forces any resolver
+# that reads this file to fetch a distribution named `spectre` from an index,
+# and an unrelated `spectre` package already exists on PyPI. Installing from
+# source is unaffected; `pip install -e .[dev]` still works.
 dev = [
-    "spectre[test]",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.0",
     "anyio[trio]>=4.0",
     "mypy>=1.14",
     "types-PyYAML",

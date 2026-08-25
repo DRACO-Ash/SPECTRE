@@ -1,7 +1,7 @@
 # SPECTRE: Bluestaq App Store readiness report
 
 **Band: Likely after fixes** · Weighted score **94%** (17 of 18 applicable dimensions pass)
-Archetype: server (container) · Template: **python** · Version **0.4.2**
+Archetype: server (container) · Template: **python** · Version **0.4.3**
 Assessed 21 August 2026 against branch `claude/app-store-readiness-09re0q`.
 All six SonarQube quality gate conditions are met on changed code.
 
@@ -98,7 +98,7 @@ here it names itself and the remedy.
 | Duplication at most 3% | heavy | **PASS** | 0% |
 | Security hotspots reviewed | heavy | **PASS** | 6 of 6, register above |
 | Coverage report at the gate's path | heavy | **PASS** | `coverage.xml` emitted; unread under docker-only |
-| Version stamp and audit row, generic client errors | medium | **PASS** | Single-sourced 0.4.2; boot logs its storage verdict |
+| Version stamp and audit row, generic client errors | medium | **PASS** | Single-sourced 0.4.3; boot logs its storage verdict |
 | Surgical structure, documented architecture | medium | **PASS** | Changes confined to config, auth, health, entrypoint and packaging |
 | Accessibility to WCAG AA | medium | **UNKNOWN** | Not assessed, see gap 3 |
 | House voice in user-facing copy | light | **PASS** | UK English throughout the new copy |
@@ -236,11 +236,11 @@ platform to the python template).
 
 | | |
 |---|---|
-| Artefact | `dist/spectre-0.4.2-appstore.zip` |
+| Artefact | `dist/spectre-0.4.3-appstore.zip` |
 | Size | 1.8 MB (10 MB uncompressed, 271 files) |
 | Layout | Flat. `Dockerfile` at the root, no wrapping folder |
 | Template | python (root `requirements.txt` present; the Dockerfile still builds the image) |
-| Version | 0.4.2, matching the artifact stamp and the app's own version field |
+| Version | 0.4.3, matching the artifact stamp and the app's own version field |
 
 It ships a **testable source tree**, not a stripped runtime bundle: tests, their
 configuration, the lockfile, `sonar-project.properties` and the CI workflow all

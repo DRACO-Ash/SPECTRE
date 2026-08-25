@@ -7,6 +7,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.3] - 2026-08-25
+
+### Fixed
+
+- **Four shell code smells in `scripts/bump-version.sh`.** It was the only
+  script in the repository with a `bash` shebang, so SonarQube applied its
+  bash rule and asked for `[[` over `[`. The other four scripts are POSIX
+  `sh` and were correctly left alone. Rather than introduce a second shell
+  dialect, the script now uses `#!/bin/sh` like its neighbours. Verified
+  under dash, which is what `/bin/sh` resolves to on the base image: every
+  path exercised, including the documentation rewrite and both rejection
+  cases.
+- **Self-referencing extra in `pyproject.toml`.** The `dev` group pulled in
+  `spectre[test]`, which forces any resolver reading the file without our
+  source tree to fetch a distribution named `spectre` from an index. An
+  unrelated `spectre` package exists on PyPI at 0.0.1, so that is a
+  dependency-confusion path. The test packages are now listed explicitly.
+  `pip install -e .[dev]` still resolves to our own tree.
+
+### Added
+
+- **Two guards** in `TestDependencyScannerContract`: one rejecting any
+  self-referencing optional-dependency group, alongside the existing stray
+  manifest check. Both verified by reintroducing the fault.
+
 ## [0.4.2] - 2026-08-25
 
 ### Fixed
