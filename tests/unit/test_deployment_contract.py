@@ -227,3 +227,52 @@ class TestDatabasePortability:
         assert "STORAGE_MOUNT_PATH" not in sqlite_dir, (
             "the SQLite directory must not derive from the object-storage mount"
         )
+
+
+class TestDependencyScannerContract:
+    """The platform's dependency scanner picks ONE directory and skips the rest.
+
+    It detects a directory by the presence of a recognised manifest filename,
+    announces "Dependency files in other directories will be skipped", and
+    resolves only that one. A file merely *named* like a manifest anywhere below
+    the root therefore hijacks the scan: the real lockfile is never read, the
+    decoy resolves to nothing, and the stage exits non-zero with no report
+    artifact to explain why. `spectre/app_logging/setup.py` did exactly that -
+    a structlog configuration module with no `setup()` call in it.
+    """
+
+    # Names the scanner treats as a Python dependency manifest.
+    _MANIFEST_NAMES = frozenset(
+        {
+            "setup.py",
+            "setup.cfg",
+            "pyproject.toml",
+            "requirements.txt",
+            "requirements.lock",
+            "Pipfile",
+            "Pipfile.lock",
+            "poetry.lock",
+            "pdm.lock",
+            "uv.lock",
+        }
+    )
+
+    # Directories that never reach the scanner: not shipped, or not source.
+    _IGNORED = frozenset({".git", ".venv", "venv", "dist", "build", "node_modules", "__pycache__"})
+
+    def test_no_manifest_outside_the_repository_root(self) -> None:
+        strays = []
+        for path in _REPO_ROOT.rglob("*"):
+            if not path.is_file() or path.name not in self._MANIFEST_NAMES:
+                continue
+            if any(part in self._IGNORED for part in path.relative_to(_REPO_ROOT).parts):
+                continue
+            if path.parent == _REPO_ROOT:
+                continue
+            strays.append(str(path.relative_to(_REPO_ROOT)))
+
+        assert not strays, (
+            "these files sit below the root and are named like dependency manifests, so "
+            f"the scanner will resolve them INSTEAD of requirements.lock: {strays}. "
+            "Rename them (a module named setup.py is the usual culprit) or move them to the root."
+        )

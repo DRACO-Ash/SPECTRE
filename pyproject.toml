@@ -130,7 +130,7 @@ source = ["spectre", "tle_clustering"]
 # coverage loses the trace after `await session.execute(...)` and under-reports
 # lines that demonstrably run, which would understate coverage to SonarQube.
 concurrency = ["thread", "greenlet"]
-omit = ["tests/*", "spectre/app_logging/setup.py"]
+omit = ["tests/*", "spectre/app_logging/config.py"]
 
 [tool.coverage.report]
 fail_under = 70

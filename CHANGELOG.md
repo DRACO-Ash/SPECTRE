@@ -7,6 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.2] - 2026-08-25
+
+### Fixed
+
+- **Dependency Scanning stage failure.** `spectre/app_logging/setup.py` was a
+  structlog configuration module, not a packaging manifest: no `setup()` call,
+  no `install_requires`. The platform scanner detects a dependency directory by
+  filename, announced `Detected supported dependency files in
+  'spectre/app_logging'`, and per its own rule skipped every other directory,
+  so `requirements.lock` was never read. Resolving the decoy produced nothing,
+  the stage exited 1, and no `gl-dependency-scanning-report.json` was written -
+  a scan failure reported as if it were a vulnerability finding. The module is
+  renamed to `spectre/app_logging/config.py`; its two coverage-exclusion
+  references follow. No vulnerable dependency was ever involved: `pip-audit`
+  over `requirements.lock` reports no known vulnerabilities.
+
+### Added
+
+- **`TestDependencyScannerContract`** in `tests/unit/test_deployment_contract.py`.
+  Fails if any file below the repository root is named like a Python dependency
+  manifest, since one such file silently redirects the whole scan. Verified by
+  reintroducing the decoy and watching the guard name it.
+
 ## [0.4.1] - 2026-08-25
 
 Quality-gate clean-up following the first successful App Store analysis. That
