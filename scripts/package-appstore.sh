@@ -18,7 +18,7 @@
 #
 # Usage:
 #   scripts/package-appstore.sh [output-dir]                  python template
-#   scripts/package-appstore.sh [output-dir] --docker-only    docker-only template
+#   scripts/package-appstore.sh [--docker-only] [output-dir]   flag order is free
 #
 # TEMPLATE SELECTION IS DECIDED BY WHAT IS IN THE PACKAGE, NOT BY A SETTING.
 # The platform detects Python from a recognised manifest at the package root.
@@ -31,13 +31,22 @@
 
 set -eu
 
-OUT_DIR="${1:-dist}"
+# Positional output dir and the --docker-only flag may appear in either order,
+# so a bare `--docker-only` is not mistaken for a directory name.
+OUT_DIR=""
 MODE="python"
-case "${2:-}" in
-    --docker-only) MODE="docker-only" ;;
-    "") ;;
-    *) echo "FAIL: unknown option ${2}"; exit 1 ;;
-esac
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --docker-only) MODE="docker-only" ;;
+        -*) echo "FAIL: unknown option $1"; exit 1 ;;
+        *)
+            [ -z "$OUT_DIR" ] || { echo "FAIL: output dir given twice ($OUT_DIR, $1)"; exit 1; }
+            OUT_DIR="$1"
+            ;;
+    esac
+    shift
+done
+[ -n "$OUT_DIR" ] || OUT_DIR="dist"
 VERSION=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' spectre/__init__.py)
 [ -n "$VERSION" ] || { echo "FAIL: could not read __version__ from spectre/__init__.py"; exit 1; }
 
