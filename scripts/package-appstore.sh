@@ -180,4 +180,27 @@ echo "  size      $SIZE"
 echo "  sha256    $SHA"
 echo "  files     $(unzip -l "$ZIP_PATH" | tail -1 | awk '{print $2}')"
 echo
+# ── Post-build: run the suite from inside the package ─────────────────────────
+# The platform runs `pip install -r requirements.txt && pytest` against the
+# uploaded tree, not against this working copy. A test that passes here and
+# fails there costs a whole submission cycle - it has already cost one, when a
+# contract test asserted the presence of docs/, which the denylist above
+# deliberately strips. Run the suite where the platform will run it.
+if [ "$MODE" = "python" ] && [ "${SKIP_PACKAGE_TESTS:-0}" != "1" ]; then
+    echo
+    echo "  running the suite from inside the package..."
+    VERIFY=$(mktemp -d)
+    trap 'rm -rf "$STAGE" "$VERIFY"' EXIT INT TERM
+    unzip -q "$ZIP_PATH" -d "$VERIFY"
+    if (cd "$VERIFY" && SPECTRE_SECRET_KEY="package-verification-key-not-a-secret" \
+            python -m pytest -q > "$VERIFY/pytest.log" 2>&1); then
+        echo "  suite passes inside the package"
+    else
+        echo "  FAIL: the suite does not pass inside the package."
+        echo "  The platform Test stage will fail the same way. Tail of the run:"
+        tail -25 "$VERIFY/pytest.log" | sed 's/^/    /'
+        exit 1
+    fi
+fi
+
 echo "Verify the contents with:  unzip -l $ZIP_PATH"
