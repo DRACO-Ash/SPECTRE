@@ -1,144 +1,121 @@
+
+!docs/*.json
+!docs/*.md
+!docs/*.py
+!docs/*.txt
+!docs/SPECTRE_Operator_Guide.docx
+# Additional .env spellings the base pattern misses
+# Claude Code
+# Claude Code memory
+# Claude persona / prompt scratch files
+# Coverage output directory
+# Distribution / packaging
+# IDE / editors
+# Jupyter
+# Local container verification scratch
+# Local runtime data directory (the container uses the FILE_STORAGE mount)
+# Mypy
+# Packaged upload artefacts
+# PyInstaller
+# PySide6 / Qt
+# Pytest / coverage
 # Python
-__pycache__/
-*.py[cod]
+# Reference documents (PDFs, Word docs) — exclude binaries but track Markdown/text docs
+# Ruff
+# SQLite / local databases
+# STK scenario outputs and scratch files
+# Sample / reference data files
+# Virtual environments
+# Windows
+# ── App Store deployment artefacts ───────────────────────────────────────────
+$RECYCLE.BIN/
 *$py.class
-*.pyo
-*.pyd
-.Python
+*.cab
+*.cover
+*.db
 *.egg
 *.egg-info/
-dist/
-build/
-eggs/
-parts/
-var/
-sdist/
-wheels/
 *.egg-link
-.installed.cfg
-lib/
-lib64/
-pip-wheel-metadata/
-share/python-wheels/
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-.env
-
-# PyInstaller
-*.spec
-dist/
-build/
-
-# Pytest / coverage
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
-*.cover
-.hypothesis/
-
-# Mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Ruff
-.ruff_cache/
-
-# PySide6 / Qt
-*.qmlc
 *.jsc
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
 *.lnk
-*.cab
 *.msi
 *.msm
 *.msp
-
-# STK scenario outputs and scratch files
-OUT_*/
-logs/
-*.sc
+*.py[cod]
+*.pyd
+*.pyo
+*.qmlc
 *.sa
-*.vdf
-*.sp
-*.st
+*.sc
 *.sd
 *.sg
 *.sim
-
-# IDE / editors
-.vscode/
-.idea/
-*.suo
-*.user
 *.sln.docstates
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Claude Code
-.claude/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Distribution / packaging
-MANIFEST
-
-# SQLite / local databases
-*.db
+*.sp
+*.spec
 *.sqlite
 *.sqlite3
-
-# Sample / reference data files
-HRR_List.json
-
-# Reference documents (PDFs, Word docs) — exclude binaries but track Markdown/text docs
-docs/*
-!docs/SPECTRE_Operator_Guide.docx
-!docs/*.md
-!docs/*.txt
-!docs/*.py
-!docs/*.json
-
-# Claude Code memory
-memory/
-
-# Claude persona / prompt scratch files
+*.st
+*.suo
+*.swo
+*.swp
+*.user
+*.vdf
+*.zip
+*~
+.DS_Store
+.Python
+.cache/
+.claude/
+.coverage
+.coverage.*
+.dmypy.json
+.env
+.env.*.local
+.env.local
+.env.production
+.hypothesis/
+.idea/
+.installed.cfg
+.ipynb_checkpoints/
+.mypy_cache/
+.proxy-ca.crt
+.pytest_cache/
+.ruff_cache/
+.venv/
+.vscode/
 Claude Craft Prompt to create a persona.txt
 Claude Craft prompt to create a Persona for a UI_UX Developer for OW Applications
 Claude Persona
-Persona Spec Orbital Warfare Analyst with STK.txt
-persona Spec Orbital Warfare Analyst with Python Only
-
-# ── App Store deployment artefacts ───────────────────────────────────────────
-# Additional .env spellings the base pattern misses
-.env.local
-.env.*.local
-.env.production
-
-# Local runtime data directory (the container uses the FILE_STORAGE mount)
-data/
-
-# Coverage output directory
-coverage/
-htmlcov/
-
-# Local container verification scratch
+Desktop.ini
 Dockerfile.verify
-.proxy-ca.crt
-
-# Packaged upload artefacts
-*.zip
+ENV/
+HRR_List.json
+MANIFEST
+OUT_*/
+Persona Spec Orbital Warfare Analyst with STK.txt
+Thumbs.db
+__pycache__/
+build/
+coverage.xml
+coverage/
+data/
+dist/
+dmypy.json
+docs/*
+eggs/
+ehthumbs.db
+env/
+htmlcov/
+lib/
+lib64/
+logs/
+memory/
+parts/
+persona Spec Orbital Warfare Analyst with Python Only
+pip-wheel-metadata/
+sdist/
+share/python-wheels/
+var/
+venv/
+wheels/

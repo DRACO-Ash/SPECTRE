@@ -203,4 +203,14 @@ if [ "$MODE" = "python" ] && [ "${SKIP_PACKAGE_TESTS:-0}" != "1" ]; then
     fi
 fi
 
+# ── Post-build: run the real Dependency Scanning analyser ─────────────────────
+# Opt-in because it needs Go and network on first run. When it can run, it is
+# the only check that tells the truth about this stage: the platform hides the
+# analyser's fatal message and reports every non-zero exit as "Vulnerable
+# dependencies found".
+if [ "${SKIP_DS_VERIFY:-0}" != "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
+    echo
+    sh scripts/verify-dependency-scan.sh "$ZIP_PATH" || exit 1
+fi
+
 echo "Verify the contents with:  unzip -l $ZIP_PATH"

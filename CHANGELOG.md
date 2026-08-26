@@ -7,6 +7,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.6] - 2026-08-26
+
+Verifies the 0.4.5 fix by running the App Store's actual analyser, and makes
+that check part of every build.
+
+### Added
+
+- **`scripts/verify-dependency-scan.sh`.** Builds the open-source analyser
+  behind the platform's `dependency-scan-python` image and runs it against a
+  built package. It prints the fatal message the platform swallows. The
+  packager now calls it on every build and refuses to ship a package the
+  analyser rejects.
+
+### Verified
+
+Against the real analyser, not by inference:
+
+- 0.4.4 shape, with the hand-written banner: exit 1, no SBOM, reporting
+  `manifest fallback is disabled and no usable lock or dependency graph file
+  was found for: [requirements.txt]`. That is precisely the platform failure.
+- 0.4.5 onward: exit 0, `gl-sbom-pypi-pip.cdx.json` with 54 components and a
+  22-entry dependency graph.
+- docker-only: exit 0 with no manifest to scan, which is correct for that
+  template.
+
 ## [0.4.5] - 2026-08-26
 
 Fixes the Dependency Scanning failure at its real cause, and the Test stage
