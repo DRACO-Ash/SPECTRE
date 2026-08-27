@@ -1,0 +1,24 @@
+# Runtime-only inputs. Compiled to requirements-runtime.txt, which the image
+# installs under --require-hashes. Not a filename the analyser recognises, so
+# it is never scanned directly: it must stay a strict, version-identical
+# subset of requirements.txt, and scripts/check-quality.sh asserts that.
+structlog>=25.0
+fastapi>=0.111
+uvicorn[standard]>=0.29
+jinja2>=3.1
+python-multipart
+sqlalchemy[asyncio]>=2.0
+aiosqlite
+# Async PostgreSQL driver. Required for the App Store POSTGRESQL add-on:
+# SQLite cannot run on the object-storage backed FILE_STORAGE volume.
+asyncpg>=0.30
+bcrypt>=4.0
+itsdangerous>=2.1
+httpx>=0.27
+sgp4>=2.22
+numpy>=2.0
+python-dotenv>=1.0
+python-docx>=1.1
+pandas>=2.0
+scipy>=1.11
+scikit-learn>=1.4

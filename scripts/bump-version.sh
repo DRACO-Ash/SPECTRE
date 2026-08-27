@@ -50,6 +50,14 @@ esac
 # The single source of truth.
 sed -i "s/^__version__ = \"${CURRENT}\"$/__version__ = \"${NEXT}\"/" "$INIT"
 
+# pyproject.toml carries the version literally now: the App Store gate contract
+# wants a [project] table, and dropping hatch's dynamic version with it. This is
+# the only place it is rewritten, so it can never drift from spectre/__init__.py.
+sed -i "s/^version = \"${CURRENT}\"$/version = \"${NEXT}\"/" pyproject.toml
+PYPROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+[ "$PYPROJECT_VERSION" = "$NEXT" ] || {
+    echo "FAIL: pyproject.toml still reads '${PYPROJECT_VERSION}', expected ${NEXT}"; exit 1; }
+
 # Documentation quotes the version as literal text, so rewrite those too. Only
 # whole-version matches are replaced, guarded by a word boundary either side.
 DOCS="READINESS.md README.md"

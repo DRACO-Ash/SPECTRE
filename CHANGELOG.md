@@ -7,6 +7,52 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] - 2026-08-27
+
+Rebuilt the package to the App Store gate contract, from guidance calibrated
+against applications that actually clear this gate. Two changes made earlier in
+this branch were backwards and are reversed.
+
+### Fixed
+
+- **`pyproject.toml` restored, and now required.** 0.4.7 removed it to reduce
+  ambiguity. It is the single highest-value file to keep: the only root file
+  present in both known-passing packages and absent from the known failure, and
+  a documented resolution trigger. It is back in minimal form, a `[project]`
+  table with **no** `[project.dependencies]`, because declaring dependencies in
+  two places is what lets them drift.
+- **The local analyser is no longer treated as a gate.** Calibrated against
+  three control samples it disagreed with the platform on two, including
+  calling a passing package a failure. `verify-dependency-scan.sh` keeps the
+  calibration table in its header, is diagnostic only, and can no longer fail a
+  build.
+- **`scripts/package-appstore.sh` mishandled an absolute output directory**,
+  concatenating it onto the working directory and failing in `zip`.
+
+### Changed
+
+- **Three-way requirements split**, replacing the single collapsed manifest:
+  `requirements.in` and `requirements.txt` (scanned, runtime plus test),
+  `requirements-runtime.in` and `requirements-runtime.txt` (what the image
+  installs, under a name the analyser does not read), and `requirements-dev.txt`
+  for lint and SAST tooling, which never ships. All hash-locked and compiled as
+  a constrained set so the runtime file cannot drift from the scanned one. Same
+  54 packages at the same versions as 0.4.9; nothing added, removed or upgraded.
+- **The image installs the runtime set only**, reverting 0.4.8's install-then-
+  uninstall. Collapsing the split would count the test toolchain against the
+  Container Scan stage.
+- **`requirements.lock` is gone**, replaced by `requirements-runtime.txt`.
+- **`scripts/bump-version.sh` rewrites the version in `pyproject.toml`**, which
+  is now literal rather than derived by hatch.
+
+### Added
+
+- **`scripts/preflight-gate.py`**, the contract checker, run by the packager
+  against the staged package on every build. It blocks the build on a contract
+  violation. Currently: 0 blocking, 1 advisory, and that advisory is a false
+  positive (it cannot resolve the digest through the `BASE_IMAGE` build
+  argument, which a test already asserts).
+
 ## [0.4.9] - 2026-08-27
 
 0.4.8 failed identically. The package now carries exactly one manifest-shaped

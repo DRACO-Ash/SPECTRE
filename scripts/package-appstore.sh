@@ -69,7 +69,11 @@ echo "Packaging SPECTRE ${VERSION} for the App Store (${MODE} template)"
 PATHS="
 Dockerfile
 .dockerignore
+pyproject.toml
+requirements.in
 requirements.txt
+requirements-runtime.in
+requirements-runtime.txt
 pytest.ini
 .coveragerc
 sonar-project.properties
@@ -89,17 +93,22 @@ scripts
 "
 
 if [ "$MODE" = "docker-only" ]; then
-    # docker-only keeps requirements.lock: it needs pinned dependencies to build
-    # an image, and .lock is not a name the template detector recognises, so it
-    # cannot flip the template back to python.
-    PATHS="$PATHS
-requirements.lock"
     # A recognised manifest anywhere at the root would flip the template back to
     # python, so requirements.txt and the Sonar config go. tests/ goes with
     # them, along with pytest.ini and .coveragerc: docker-only has no Test
     # stage, so shipping a suite and its configuration would only add files a
     # reviewer must account for.
-    PATHS=$(printf '%s\n' $PATHS | grep -vxE 'requirements.txt|pytest.ini|.coveragerc|sonar-project.properties|tests|tle_clustering|.github|.pre-commit-config.yaml')
+    DROP="pyproject.toml requirements.in requirements.txt sonar-project.properties
+tests tle_clustering .github .pre-commit-config.yaml .coveragerc"
+    DROP="$DROP pytest.ini"
+    KEPT=""
+    for p in $PATHS; do
+        skip=0
+        for d in $DROP; do [ "$p" = "$d" ] && skip=1; done
+        [ "$skip" = "1" ] || KEPT="$KEPT
+$p"
+    done
+    PATHS="$KEPT"
 fi
 
 for p in $PATHS; do
@@ -108,14 +117,16 @@ for p in $PATHS; do
     cp -R "$p" "$STAGE/$(dirname "$p")/"
 done
 
-# pyproject.toml is deliberately ABSENT from the allowlist. It is a recognised
-# dependency manifest, and the platform's Dependency Scanning analyser
-# processes every manifest it finds in the directory it selects; pyproject.toml
-# maps to the poetry and uv package managers, both of which expect a lockfile
-# beside it that this project does not use. Its presence is the one constant
-# across every failed Dependency Scanning run. pytest.ini and .coveragerc carry
-# the configuration the Test stage needs in its place, and the Dockerfile
-# copies the package onto the path rather than pip-installing it.
+# pyproject.toml SHIPS, and must. The Dependency Scanning analyser treats a
+# non-Poetry pyproject.toml as a resolution trigger, and it is the only root
+# file present in both applications known to clear the gate and absent from the
+# one that failed. It carries a [project] table and no [project.dependencies];
+# a build-system-only file is skipped with a warning and buys nothing.
+#
+# requirements-runtime.txt is not a filename the analyser recognises, so the
+# gate never reads it. That is why it must stay a strict, version-identical
+# subset of requirements.txt: otherwise the image would ship a version no stage
+# examined. scripts/check-quality.sh asserts the subset.
 
 # ── Denylist ──────────────────────────────────────────────────────────────────
 # Removed after the copy so a nested match cannot survive. Each has a reason.
@@ -176,7 +187,10 @@ fi
 mkdir -p "$OUT_DIR"
 rm -f "$ZIP_PATH"
 # -X drops extra file attributes so the archive is reproducible across machines.
-( cd "$STAGE" && zip -q -r -X "$OLDPWD/$ZIP_PATH" . )
+# Resolve to an absolute path before the subshell changes directory, so an
+# absolute output directory is not concatenated onto the current one.
+ABS_ZIP=$(cd "$(dirname "$ZIP_PATH")" && pwd)/$(basename "$ZIP_PATH")
+( cd "$STAGE" && zip -q -r -X "$ABS_ZIP" . )
 
 # ── Integrity record ──────────────────────────────────────────────────────────
 SHA=$(sha256sum "$ZIP_PATH" | cut -d' ' -f1)
@@ -208,24 +222,34 @@ if [ "$MODE" = "python" ] && [ "${SKIP_PACKAGE_TESTS:-0}" != "1" ]; then
     trap 'rm -rf "$STAGE" "$VERIFY"' EXIT INT TERM
     unzip -q "$ZIP_PATH" -d "$VERIFY"
     if (cd "$VERIFY" && SPECTRE_SECRET_KEY="package-verification-key-not-a-secret" \
-            python -m pytest -q > "$VERIFY/pytest.log" 2>&1); then
+            python -m pytest -q > "$VERIFY/suite.log" 2>&1); then
         echo "  suite passes inside the package"
     else
         echo "  FAIL: the suite does not pass inside the package."
         echo "  The platform Test stage will fail the same way. Tail of the run:"
-        tail -25 "$VERIFY/pytest.log" | sed 's/^/    /'
+        tail -25 "$VERIFY/suite.log" > "$VERIFY/tail.txt"
+        sed 's/^/    /' "$VERIFY/tail.txt"
         exit 1
     fi
 fi
 
-# ── Post-build: run the real Dependency Scanning analyser ─────────────────────
-# Opt-in because it needs Go and network on first run. When it can run, it is
-# the only check that tells the truth about this stage: the platform hides the
-# analyser's fatal message and reports every non-zero exit as "Vulnerable
-# dependencies found".
+# ── Post-build: gate pre-flight, then the diagnostic analyser ─────────────────
+# preflight-gate.py is the check that decides whether to ship: it encodes the
+# package contract derived from applications that actually clear the gate.
+# verify-dependency-scan.sh is advisory only and cannot fail the build, because
+# the open-source analyser disagreed with the gate on two of three known
+# samples. Its header carries that calibration table.
+# python mode only: the contract it checks (pyproject.toml, a scannable
+# requirements.txt, a tests/ directory) is the python template's contract.
+# docker-only deliberately ships none of them, so running it there would report
+# the absences it is designed to cause.
+if [ "$MODE" = "python" ] && [ -f scripts/preflight-gate.py ]; then
+    echo
+    python3 scripts/preflight-gate.py "$STAGE" || exit 1
+fi
 if [ "${SKIP_DS_VERIFY:-0}" != "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
     echo
-    sh scripts/verify-dependency-scan.sh "$ZIP_PATH" || exit 1
+    sh scripts/verify-dependency-scan.sh "$ZIP_PATH" || true
 fi
 
 echo "Verify the contents with:  unzip -l $ZIP_PATH"

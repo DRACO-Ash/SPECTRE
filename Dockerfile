@@ -33,19 +33,16 @@ WORKDIR /src
 # Dependencies first: this layer stays cached until the lockfile changes.
 # --require-hashes makes the install reproducible and tamper-evident;
 # --only-binary=:all: guarantees no source build, so no compiler is needed.
-# requirements.txt is the ONLY dependency manifest this project ships. The
-# platform's Dependency Scanning analyser selects one directory and processes
-# every manifest in it, so a second file at the root is a second thing that can
-# go wrong. It carries the runtime set and the test set together, because the
-# platform's Test stage installs from it; the test-only packages are removed
-# again below so the runtime image is no larger than before.
-COPY requirements.txt ./
+# The image installs the runtime set only. requirements-runtime.txt is not a
+# filename the Dependency Scanning analyser recognises, so it is never scanned
+# directly; scripts/check-quality.sh asserts it stays a strict, version-
+# identical subset of requirements.txt, which is scanned. Keeping the two files
+# apart is what stops the test toolchain reaching the runtime image and being
+# counted against it at the Container Scan stage.
+COPY requirements-runtime.txt ./
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: \
-        -r requirements.txt \
- && /opt/venv/bin/pip uninstall --yes \
-        pytest pytest-asyncio pytest-cov coverage hypothesis \
-        pluggy iniconfig pygments sortedcontainers packaging
+        -r requirements-runtime.txt
 
 # The application itself is NOT installed here. Installing needs
 # pyproject.toml, and pyproject.toml does not ship in the submission package:

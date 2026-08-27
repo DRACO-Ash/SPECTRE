@@ -1,75 +1,77 @@
-# Dependency Scanning: elimination record and escalation
+# Dependency Scanning: the gate contract
 
-**There are no vulnerable dependencies.** The analyser crashes before it
-produces a report. Six submissions have now failed with six different root
-layouts and the same three-line log.
+**There are no vulnerable dependencies.** Every failed run crashed before it
+produced a report. This file records what the package now does about that, and
+corrects two things earlier revisions of it got wrong.
 
-## What the platform shows, every time
+## The contract
 
-```
-[INFO] [dependency-scan-python] analyzer v6.6.1
-[INFO] [dependency-scan-python] Detected supported dependency files in '.'.
-exit status 1
-WARNING: **/gl-sbom-*.cdx.json: no matching files.
-WARNING: gl-dependency-scanning-report.json: no matching files.
-```
+Shipped shape, derived from applications that clear this gate:
 
-Three to seven seconds, no error text, no report, no Software Bill of
-Materials (SBOM). A scan that finds vulnerabilities writes a report naming
-them. The platform maps a non-zero exit to "Vulnerable dependencies found", so
-a crashed scan is presented to the submitter as a finding.
+| File | Role |
+|---|---|
+| `pyproject.toml` | **Required.** `[project]` table, and deliberately **no** `[project.dependencies]`. A non-Poetry pyproject is a resolution trigger; one carrying only `[build-system]` is skipped with a warning and buys nothing. |
+| `requirements.in` | Input. Drives resolution; not itself scanned. |
+| `requirements.txt` | The scanned lockfile, and what the platform Test stage installs. Runtime plus test, hash-locked. |
+| `requirements-runtime.in` | Runtime-only input. |
+| `requirements-runtime.txt` | What the image installs. **Not** a filename the analyser reads. |
+| `requirements-dev.txt` | Lint and SAST tooling. Repository only; never shipped, never scanned. |
+| `Dockerfile` | Root level. A nested one breaks template detection. |
 
-## Eliminated, with evidence
+`requirements-runtime.txt` being invisible to the scanner is deliberate and has
+a consequence: the gate reads the **superset**, so it scans at least what the
+image ships. That only stays safe while the runtime set is a strict,
+version-identical subset. `scripts/check-quality.sh` and
+`TestPipCompileLockContract` both assert it; the platform does not.
 
-| # | Hypothesis | How it was ruled out |
-|---|---|---|
-| 1 | Vulnerable package | `gemnasium-db`, the scanner's own advisory database, cloned and matched offline against every pinned version: 54 runtime and test packages (94 advisories) and 43 development-only packages (54 advisories), **0 affected**. `pip-audit` clean against every manifest and against full `pyproject.toml` resolution. |
-| 2 | Vendored JavaScript | htmx 1.9.12, Chart.js 4.4.7, chartjs-plugin-zoom 2.0.1, Hammer.js 2.0.7 fingerprinted by hand. Only advisory on file is CVE-2020-7746 against Chart.js `<2.9.4`; we ship 4.4.7. |
-| 3 | Stray manifest in a subdirectory | `spectre/app_logging/setup.py` removed in 0.4.2. Detection moved to `.`; the stage still failed. |
-| 4 | `requirements.txt` not a pip-compile lockfile | Fixed in 0.4.5. The upstream analyser, built from source, goes from exit 1 to exit 0 and a 54-component SBOM on exactly this change. The platform still failed. |
-| 5 | Analyser on an older Python | Disproven by the platform's own Test log: Python 3.12.14, every wheel resolved. The scan job also exits in three seconds, far too fast to have attempted a download. |
-| 6 | `pyproject.toml` at the root | Removed from the package in 0.4.7. Still failed. |
-| 7 | `requirements.lock` at the root | Removed in 0.4.8. The package now contains exactly one manifest-shaped file at any depth. Still failed. |
-| 8 | Analyser needs network | Upstream builds the SBOM with all egress blocked. Not required. |
+Collapsing the split would drag the whole test toolchain into the runtime image
+and count it against Container Scan.
 
-## What the evidence points at
+## Two corrections
 
-The first failure was on `spectre/app_logging`, a directory whose only file was
-`setup.py`, with no requirements file and no pyproject in it. Every layout
-since has failed too, including one with a single, hash-pinned, correctly
-headed `requirements.txt` and nothing else.
+**The lockfile header was not the cause.** An earlier revision of this document
+concluded that `requirements.txt` had to carry the pip-compile header on line 2,
+and 0.4.5 changed it on that basis. Three header forms are known across three
+packages: a hand-written banner passes, a uv header passes, and a valid
+pip-compile header failed. The diagnosis was read off a different codebase and
+does not transfer. The header is still correct to have; it is not what the gate
+decides on.
 
-Six distinct inputs, one outcome. That is the signature of a failure that does
-not depend on our content.
+**Removing `pyproject.toml` was backwards.** 0.4.7 dropped it to reduce
+ambiguity. It is in fact the single highest-value file to keep: the only root
+file present in both known-passing packages and absent from the known failure.
+It is restored, in the minimal form above.
 
-The analyser is also a fork. Its line `Dependency files detected in this
-directory will be processed. Dependency files in other directories will be
-skipped.` appears in no public GitLab analyser, and no public analyser image
-carries a v6 tag. `registry.gitlab.com/security-products/dependency-scan-python`
-returns 403 to an anonymous pull that succeeds for public control images. So it
-cannot be reproduced outside the platform.
+**And the local analyser is not a pre-flight check.** `scripts/verify-dependency-scan.sh`
+builds the open-source GitLab analyser. Calibrated against three control
+samples it disagreed with the gate on two, including calling a passing package
+a failure. It is kept for reading the parse warnings the platform swallows, it
+can no longer fail a build, and its header carries the calibration table.
+`scripts/preflight-gate.py` is the check that decides whether to ship.
 
-## The ask
+## Evidence the tree is clean
 
-One of these ends it:
+● `gemnasium-db`, the scanner's own advisory database, cloned and matched
+  offline against every pinned version: 97 packages, 148 advisories, **0
+  affected**.
+● `pip-audit` clean against `requirements.txt`, `requirements-runtime.txt` and
+  `requirements-dev.txt`.
+● Vendored JavaScript fingerprinted by hand, since it ships without a manifest:
+  htmx 1.9.12, Chart.js 4.4.7, chartjs-plugin-zoom 2.0.1, Hammer.js 2.0.7. The
+  only advisory on file for any of them is CVE-2020-7746 against Chart.js
+  `<2.9.4`; we ship 4.4.7.
 
-1. **Re-run the job with `SECURE_LOG_LEVEL=debug`.** GitLab secure analysers
-   honour it and upstream prints the failing step, the file, and the reason.
-2. **Send the raw job stderr.** The analyser writes a fatal message on failure;
-   the interface is replacing it with "Vulnerable dependencies found".
-3. **Share the analyser image**, or confirm whether it can scan any Python
-   project on this instance today.
+## Still unknown
 
-## Separately, worth fixing on the platform
+The analyser's real error text. Nobody has seen it. `dependency-scan-python`
+v6.6.1 is not a public image, so it cannot be reproduced outside the platform.
+Until someone reads that text, every explanation here is reasoning from the
+outside.
 
-Mapping "analyser exited non-zero" to "Vulnerable dependencies found" is
-actively misleading. It has sent this submission hunting a CVE that provably
-does not exist across six cycles. "Dependency scan failed to complete" would
-have been accurate and would have saved all of them.
+Ask for `SECURE_LOG_LEVEL: debug` on the deployment repository's pipeline, or
+the raw job stderr. On the current analyser lineage the `.pre` resolution job
+runs with `allow_failure: true`, so a resolution failure is silent unless
+someone opens that job's log specifically.
 
-## Verification available locally
-
-`scripts/verify-dependency-scan.sh` builds the upstream analyser and runs it
-against a built package. On the current package it exits 0 and writes
-`gl-sbom-pypi-pip.cdx.json` with 54 components and a 22-entry dependency graph.
-The packager runs it on every build and refuses to ship a package it rejects.
+If you are the person who finally sees the error, put it in this file. That one
+paragraph would be worth more than the rest of it.

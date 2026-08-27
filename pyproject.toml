@@ -1,88 +1,24 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# Shaped to the App Store gate contract.
+#
+# The Dependency Scanning analyser treats a non-Poetry pyproject.toml as a
+# resolution trigger: it feeds a pip-compile run whose output is what actually
+# gets scanned. Both applications known to clear the gate ship a [project]
+# table and NO [project.dependencies]. Dependencies live in the pip-compile
+# inputs and their hash-locked outputs, which is what the platform Test stage
+# and the image actually install. Declaring them here as well lets the two
+# drift, and drift is what the gate punishes.
+#
+# A pyproject.toml carrying only [build-system] and no [project] table is
+# skipped with a warning, so the [project] table below is load-bearing.
+#
+# The version is rewritten by scripts/bump-version.sh. Never edit it by hand.
 
 [project]
 name = "spectre"
-dynamic = ["version"]
-description = "Space Planning, Evaluation & Counter-Threat Response Engine — orbital mechanics, threat assessment, and manoeuvre planning"
-readme = "README.md"
-license = { text = "Proprietary" }
+version = "0.5.0"
+description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
-dependencies = [
-    "structlog>=25.0",
-    "fastapi>=0.111",
-    "uvicorn[standard]>=0.29",
-    "jinja2>=3.1",
-    "python-multipart",
-    "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite",
-    # Async PostgreSQL driver. Required for the App Store POSTGRESQL add-on:
-    # SQLite cannot run on the object-storage backed FILE_STORAGE volume.
-    "asyncpg>=0.30",
-    "bcrypt>=4.0",
-    "itsdangerous>=2.1",
-    "httpx>=0.27",
-    "sgp4>=2.22",
-    "numpy>=2.0",
-    "python-dotenv>=1.0",
-    "python-docx>=1.1",
-    "pandas>=2.0",
-    "scipy>=1.11",
-    "scikit-learn>=1.4",
-]
 
-[project.optional-dependencies]
-# Exactly what is needed to RUN the suite with coverage, and nothing else.
-# requirements.txt is compiled from this, because the App Store's dependency
-# scanner reads that manifest: every package listed there is scanned and must be
-# defensible, so lint and SAST tooling (which never runs on the platform) is
-# deliberately kept out of it.
-test = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=6.0",
-    "hypothesis>=6.0",
-    "httpx>=0.27",
-]
-
-# Everything a developer or our own CI needs on top of the test set. These do
-# not reach requirements.txt and so are never scanned as app dependencies.
-# NOTE: the test packages are listed explicitly rather than pulled in with a
-# `spectre[test]` self-reference. A self-referencing extra forces any resolver
-# that reads this file to fetch a distribution named `spectre` from an index,
-# and an unrelated `spectre` package already exists on PyPI. Installing from
-# source is unaffected; `pip install -e .[dev]` still works.
-dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=6.0",
-    "hypothesis>=6.0",
-    "anyio[trio]>=4.0",
-    "mypy>=1.14",
-    "types-PyYAML",
-    "ruff>=0.9",
-    "bandit[toml]>=1.7",
-    "pip-audit>=2.7",
-    "pip-tools>=7.4",
-    "diff-cover>=9.0",
-]
-
-[project.scripts]
-spectre-serve = "spectre.web._entrypoint:main"
-
-# ---------------------------------------------------------------------------
-# Hatch
-# ---------------------------------------------------------------------------
-[tool.hatch.version]
-path = "spectre/__init__.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["spectre"]
-
-# ---------------------------------------------------------------------------
-# Ruff
-# ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 120
 target-version = "py312"

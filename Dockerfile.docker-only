@@ -52,10 +52,10 @@ WORKDIR /src
 # Dependencies first: this layer stays cached until the lockfile changes.
 # --require-hashes makes the install reproducible and tamper-evident;
 # --only-binary=:all: guarantees no source build, so no compiler is needed.
-COPY requirements.lock ./
+COPY requirements-runtime.txt ./
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: \
-        -r requirements.lock
+        -r requirements-runtime.txt
 
 # The application ships as a plain package directory rather than an installed
 # distribution. That keeps pyproject.toml out of the uploaded package, which is

@@ -1,0 +1,12 @@
+# Analyser and developer tooling. Never installed by the image and never by the
+# platform Test stage, so it is deliberately kept out of requirements.in: every
+# package in the scanned set has to be defensible, and lint and SAST tooling
+# does not run on the platform.
+ruff>=0.9
+mypy>=1.14
+types-PyYAML
+bandit[toml]>=1.7
+pip-audit>=2.7
+pip-tools>=7.4
+diff-cover>=9.0
+anyio[trio]>=4.0

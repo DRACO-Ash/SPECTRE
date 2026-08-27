@@ -2,22 +2,27 @@
 # ---------------------------------------------------------------------------
 # scripts/verify-dependency-scan.sh
 #
-# Run the App Store's actual Dependency Scanning analyser against a built
-# package, locally, before submitting.
+# DIAGNOSTIC ONLY. This is NOT a pre-flight check for the App Store gate.
 #
-# The platform reports this stage as "Vulnerable dependencies found" whenever
-# the analyser exits non-zero, including when it crashed and found nothing at
-# all. The job log is often unavailable and the analyser's own fatal message
-# never reaches the interface. Four submissions were spent guessing at it. The
-# analyser is open source, so run it here and read the real error.
+# It builds the open-source GitLab analyser and runs it against a package. That
+# analyser is not the one the platform runs, and calibrated against the three
+# known control samples it disagreed with the gate on two of them:
 #
-# The analyser is built from
-#   gitlab.com/gitlab-org/security-products/analyzers/dependency-scanning
-# which is the upstream of the platform's dependency-scan-python image.
-# Requires Go and network access on first run; the binary is then cached.
+#     Package               App Store gate     this script
+#     PSIRENS 1.5.3         passed             exit 1, no SBOM
+#     Enlightenment 0.23.3  passed             exit 0, 27 components
+#     Legion 0.4.3          FAILED             exit 0, 57 components
+#
+# So a pass here is not evidence you will clear the gate, and a failure here is
+# not a reason to change your package. The platform's analyser prints a line
+# that exists nowhere in this codebase; it is a different tool.
+#
+# What it IS good for: reading the parse warnings the platform swallows. Run it
+# to understand a package, never to decide whether to upload one. Use
+# scripts/preflight-gate.py for that.
 #
 # Usage:
-#   scripts/verify-dependency-scan.sh dist/spectre-0.4.6-appstore.zip
+#   scripts/verify-dependency-scan.sh dist/spectre-0.5.0-appstore.zip
 #
 # Environment:
 #   DS_ANALYZER_BIN   path to a prebuilt analyser binary, skipping the build
@@ -62,16 +67,17 @@ if (cd "$WORK" && GITLAB_FEATURES=dependency_scanning "$BIN" run > "$WORK/ds.log
         COMPONENTS=$(python3 -c "
 import glob,json
 print(sum(len(json.load(open(f)).get('components',[])) for f in glob.glob('$WORK/gl-sbom-*.cdx.json')))")
-        echo "  PASS  analyser exited 0 and wrote $SBOMS SBOM(s), $COMPONENTS components"
+        echo "  NOTE  analyser exited 0 and wrote $SBOMS SBOM(s), $COMPONENTS components"
     else
         # Correct and expected for docker-only, which ships no manifest.
-        echo "  PASS  analyser exited 0 with no manifest to scan"
+        echo "  NOTE  analyser exited 0 with no manifest to scan"
         grep -oE "No compatible file found[^\"]*" "$WORK/ds.log" | head -1 | sed 's/^/        /'
     fi
 else
-    echo "  FAIL  the analyser exited non-zero. The platform will report this as"
-    echo "        \"Vulnerable dependencies found\". Its real complaint:"
+    echo "  NOTE  the open-source analyser exited non-zero. This does NOT predict"
+    echo "        the gate: it was wrong on two of three known samples. Its output,"
+    echo "        which is still worth reading:"
     echo
     grep -E "FATA|ERRO|parsing error" "$WORK/ds.log" | sed 's/^/    /'
-    exit 1
+    exit 0
 fi

@@ -164,15 +164,19 @@ class TestPackaging:
         drifted = {k: (v, manifest.get(k)) for k, v in lock.items() if manifest.get(k) != v}
         assert not drifted, f"runtime pins disagree between the manifests: {drifted}"
 
-    def test_image_installs_the_hash_verified_manifest(self) -> None:
-        """The image must install the same hashed file the platform tests."""
-        manifest = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    def test_image_installs_the_runtime_lock_under_hashes(self) -> None:
+        """The image installs the runtime set only.
+
+        Collapsing the split would drag the whole test toolchain into the
+        runtime image and count it against the Container Scan stage.
+        """
+        runtime = (_REPO_ROOT / "requirements-runtime.txt").read_text(encoding="utf-8")
         dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-        assert "--hash=sha256:" in manifest
+        assert "--hash=sha256:" in runtime
         assert "--require-hashes" in dockerfile
-        assert "-r requirements.txt" in dockerfile
-        assert "requirements.lock" not in dockerfile, (
-            "the python image must not reference a second manifest"
+        assert "-r requirements-runtime.txt" in dockerfile
+        assert "-r requirements.txt" not in dockerfile, (
+            "the image must not install the test-inclusive set"
         )
 
 
@@ -183,10 +187,21 @@ class TestVersionStamp:
 
         assert app.version == __version__
 
-    def test_pyproject_takes_its_version_from_the_package(self) -> None:
+    def test_pyproject_version_matches_the_package(self) -> None:
+        """The gate contract wants a [project] table, which rules out a dynamic
+        version. The two literals must therefore agree, and only
+        scripts/bump-version.sh may write either of them.
+        """
+        from spectre import __version__
+
         body = _repo_only("pyproject.toml").read_text(encoding="utf-8")
-        assert 'dynamic = ["version"]' in body
-        assert 'path = "spectre/__init__.py"' in body
+        declared = re.search(r'^version = "([^"]+)"$', body, re.MULTILINE)
+        assert declared, "pyproject.toml must declare a literal version"
+        assert declared.group(1) == __version__, (
+            f"pyproject.toml says {declared.group(1)}, spectre/__init__.py says {__version__}"
+        )
+        bump = _repo_only("scripts/bump-version.sh").read_text(encoding="utf-8")
+        assert "pyproject.toml" in bump, "the bump script must rewrite pyproject.toml too"
 
 
 class TestDatabasePortability:
@@ -306,16 +321,12 @@ class TestDependencyScannerContract:
         already exists. List the packages explicitly instead.
         """
         pyproject = _repo_only("pyproject.toml").read_text(encoding="utf-8")
-        extras = pyproject.split("[project.optional-dependencies]", 1)
-        assert len(extras) == 2, "pyproject.toml must declare optional-dependencies"
-        block = extras[1].split("\n[", 1)[0]
-        offenders = [
-            line.strip()
-            for line in block.splitlines()
-            if not line.lstrip().startswith("#") and '"spectre' in line
-        ]
-        assert not offenders, (
-            f"optional-dependency groups must not reference the project itself: {offenders}"
+        assert "[project.optional-dependencies]" not in pyproject, (
+            "the gate contract declares no dependencies in pyproject.toml at all; "
+            "they belong in the pip-compile inputs and their locked outputs"
+        )
+        assert "dependencies = [" not in pyproject, (
+            "declaring dependencies here as well as in the lock files lets the two drift"
         )
 
 
@@ -428,33 +439,41 @@ class TestPipCompileLockContract:
         missing = sorted(set(lock) - set(txt))
         assert not missing, f"runtime packages absent from requirements.txt: {missing}"
 
-    def test_only_one_recognised_manifest_is_packaged(self) -> None:
-        """The submission must present exactly one dependency manifest.
+    def test_package_matches_the_gate_contract(self) -> None:
+        """The package root must carry the shape the gate actually accepts.
 
-        The analyser selects a single directory and processes every manifest in
-        it. Two manifests mean two package managers, and the pairing decides
-        which parser runs. pyproject.toml in particular maps to poetry and uv,
-        both of which expect a lockfile beside it that this project does not
-        use. requirements.txt alone is unambiguous.
+        Derived from the two applications known to clear this gate and the one
+        known to fail it. pyproject.toml with a [project] table is the only
+        root file present in both passers and absent from the failure, and it
+        is a documented resolution trigger. requirements.txt is the scanned
+        lockfile. The runtime pair must NOT use recognised names, so that the
+        gate reads the test-inclusive superset rather than the narrower runtime
+        set: it must scan at least what the image ships, never less.
         """
         packager = _repo_only("scripts/package-appstore.sh").read_text(encoding="utf-8")
         allowlist = packager.split('PATHS="', 1)[1].split('"', 1)[0].split()
-        recognised = {
-            "pyproject.toml",
-            "setup.py",
-            "setup.cfg",
+
+        for required in ("pyproject.toml", "requirements.txt"):
+            assert required in allowlist, f"{required} must ship: the gate contract requires it"
+
+        # Lockfile formats the analyser reads that this project does not use.
+        # Shipping one would hand it a second, unmaintained view of the set.
+        foreign = {
             "Pipfile",
             "Pipfile.lock",
             "poetry.lock",
             "uv.lock",
             "pdm.lock",
-            "requirements.in",
-            "requirements.pip",
-            "requires.txt",
+            "pylock.toml",
+            "setup.py",
+            "setup.cfg",
         }
-        packaged = sorted(recognised.intersection(allowlist))
-        assert not packaged, (
-            f"these manifests would ship beside requirements.txt: {packaged}. "
-            "The analyser processes every manifest in the directory it selects."
+        shipped = sorted(foreign.intersection(allowlist))
+        assert not shipped, f"these would give the analyser a competing view: {shipped}"
+
+        # The runtime lock ships, but under a name the analyser does not read.
+        assert "requirements-runtime.txt" in allowlist, "the image needs its pinned set"
+        recognised_names = {"requirements.txt", "requirements.pip", "requires.txt", "requirements.in"}
+        assert "requirements-runtime.txt" not in recognised_names, (
+            "the runtime lock must not use a name the analyser recognises"
         )
-        assert "requirements.txt" in allowlist, "the one manifest we do ship must be present"
