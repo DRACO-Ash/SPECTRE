@@ -71,7 +71,8 @@ Dockerfile
 .dockerignore
 requirements.lock
 requirements.txt
-pyproject.toml
+pytest.ini
+.coveragerc
 sonar-project.properties
 README.md
 CHANGELOG.md
@@ -90,10 +91,11 @@ scripts
 
 if [ "$MODE" = "docker-only" ]; then
     # A recognised manifest anywhere at the root would flip the template back to
-    # python, so pyproject.toml, requirements.txt and the Sonar config all go.
-    # tests/ goes with them: without pyproject.toml there is no pytest config,
-    # so shipping an unrunnable suite would mislead a reviewer.
-    PATHS=$(printf '%s\n' $PATHS | grep -vxE 'pyproject.toml|requirements.txt|sonar-project.properties|tests|tle_clustering|.github|.pre-commit-config.yaml')
+    # python, so requirements.txt and the Sonar config go. tests/ goes with
+    # them, along with pytest.ini and .coveragerc: docker-only has no Test
+    # stage, so shipping a suite and its configuration would only add files a
+    # reviewer must account for.
+    PATHS=$(printf '%s\n' $PATHS | grep -vxE 'requirements.txt|pytest.ini|.coveragerc|sonar-project.properties|tests|tle_clustering|.github|.pre-commit-config.yaml')
 fi
 
 for p in $PATHS; do
@@ -101,6 +103,15 @@ for p in $PATHS; do
     mkdir -p "$STAGE/$(dirname "$p")"
     cp -R "$p" "$STAGE/$(dirname "$p")/"
 done
+
+# pyproject.toml is deliberately ABSENT from the allowlist. It is a recognised
+# dependency manifest, and the platform's Dependency Scanning analyser
+# processes every manifest it finds in the directory it selects; pyproject.toml
+# maps to the poetry and uv package managers, both of which expect a lockfile
+# beside it that this project does not use. Its presence is the one constant
+# across every failed Dependency Scanning run. pytest.ini and .coveragerc carry
+# the configuration the Test stage needs in its place, and the Dockerfile
+# copies the package onto the path rather than pip-installing it.
 
 # ── Denylist ──────────────────────────────────────────────────────────────────
 # Removed after the copy so a nested match cannot survive. Each has a reason.

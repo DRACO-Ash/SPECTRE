@@ -7,6 +7,50 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.7] - 2026-08-27
+
+Removes the last ambiguity from the submission root. A reasoned probe, not a
+proven fix: the platform's analyser is not obtainable, so this cannot be
+verified against it here.
+
+### Changed
+
+- **`pyproject.toml` no longer ships in the submission package.** It is a
+  recognised dependency manifest, and the analyser processes every manifest in
+  the directory it selects. pyproject.toml maps to the poetry and uv package
+  managers, both of which expect a lockfile beside it that this project does
+  not use. It is the one constant across every failed Dependency Scanning run,
+  surviving three different `requirements.txt` formats. The package root now
+  presents exactly one recognised manifest: `requirements.txt`, in pip-compile
+  format.
+- **pytest and coverage configuration moved** to `pytest.ini` and
+  `.coveragerc`, which the analyser ignores. They are now the single source, so
+  they cannot drift from a pyproject copy. Verified with the platform's own
+  command, `pytest --cov --cov-report=xml:coverage.xml`, against a tree with
+  pyproject.toml absent: 845 passed, coverage 74.29%, `coverage.xml` written.
+- **The image copies the package onto the path instead of pip-installing it**,
+  since installing needs pyproject.toml. Nothing is lost: the lockfile was
+  already the single source of truth for dependencies and the install ran
+  `--no-deps`. `CMD` moves from the generated `spectre-serve` console script to
+  the equivalent `python -m spectre.web._entrypoint`, matching
+  `Dockerfile.docker-only`. Booted in that exact layout, with no install and no
+  pyproject.toml: binds 0.0.0.0:8080, and `/`, `/healthz` and `/readyz` all
+  return 200.
+
+### Fixed
+
+- **Three contract tests read `pyproject.toml`** and so failed inside a package
+  that no longer carries it. They now route through a shared `_repo_only`
+  helper that skips when a repository-only file is absent, the same rule the
+  docs test needed. Caught by the packager's in-package suite run before
+  shipping, which is what that gate is for.
+
+### Added
+
+- **A guard** asserting the packager ships no recognised manifest beside
+  `requirements.txt`. Verified by adding pyproject.toml back and watching it
+  name the file.
+
 ## [0.4.6] - 2026-08-26
 
 Verifies the 0.4.5 fix by running the App Store's actual analyser, and makes

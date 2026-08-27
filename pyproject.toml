@@ -117,29 +117,3 @@ targets = ["spectre"]
 severity = "medium"   # gate on medium+; high+ will always block
 confidence = "medium"
 exclude_dirs = ["tests", ".venv"]
-
-# ---------------------------------------------------------------------------
-# Pytest
-# ---------------------------------------------------------------------------
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
-]
-addopts = "-ra -q"
-asyncio_mode = "auto"
-
-# ---------------------------------------------------------------------------
-# Coverage
-# ---------------------------------------------------------------------------
-[tool.coverage.run]
-source = ["spectre", "tle_clustering"]
-# SQLAlchemy's async bridge switches greenlets on every await. Without this,
-# coverage loses the trace after `await session.execute(...)` and under-reports
-# lines that demonstrably run, which would understate coverage to SonarQube.
-concurrency = ["thread", "greenlet"]
-omit = ["tests/*", "spectre/app_logging/config.py"]
-
-[tool.coverage.report]
-fail_under = 70
-show_missing = true

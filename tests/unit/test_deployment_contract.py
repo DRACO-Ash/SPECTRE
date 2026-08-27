@@ -17,6 +17,22 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 
 
+
+def _repo_only(name: str) -> Path:
+    """Return a repository-only path, skipping the test when it is absent.
+
+    pyproject.toml and docs/ are excluded from the submission package on
+    purpose: pyproject.toml is a dependency manifest the platform's scanner
+    processes, and docs/ would be analysed as application code. The suite ships
+    inside that package and runs there, so an invariant about a file that does
+    not travel with it must skip, not fail. A test that cannot hold in the
+    artifact it travels in is a broken test, not a finding.
+    """
+    path = _REPO_ROOT / name
+    if not path.exists():
+        pytest.skip(f"{name} is excluded from the submission package")
+    return path
+
 @pytest.fixture(scope="module")
 def dockerfile() -> str:
     assert _DOCKERFILE.is_file(), "Dockerfile must sit at the package root for template detection"
@@ -164,7 +180,7 @@ class TestVersionStamp:
         assert app.version == __version__
 
     def test_pyproject_takes_its_version_from_the_package(self) -> None:
-        body = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        body = _repo_only("pyproject.toml").read_text(encoding="utf-8")
         assert 'dynamic = ["version"]' in body
         assert 'path = "spectre/__init__.py"' in body
 
@@ -285,7 +301,7 @@ class TestDependencyScannerContract:
         called `spectre` from PyPI, where an unrelated package of that name
         already exists. List the packages explicitly instead.
         """
-        pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        pyproject = _repo_only("pyproject.toml").read_text(encoding="utf-8")
         extras = pyproject.split("[project.optional-dependencies]", 1)
         assert len(extras) == 2, "pyproject.toml must declare optional-dependencies"
         block = extras[1].split("\n[", 1)[0]
@@ -315,7 +331,7 @@ class TestPythonFloorContract:
     """
 
     def _declared_floor(self) -> tuple[int, int]:
-        pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        pyproject = _repo_only("pyproject.toml").read_text(encoding="utf-8")
         m = re.search(r'requires-python\s*=\s*"[>=~^]*\s*(\d+)\.(\d+)', pyproject)
         assert m, "pyproject.toml must declare requires-python"
         return int(m.group(1)), int(m.group(2))
@@ -343,10 +359,7 @@ class TestPythonFloorContract:
         a test that cannot hold in the artifact it travels in is a broken test,
         not a finding.
         """
-        docs_dir = _REPO_ROOT / "docs"
-        if not docs_dir.is_dir():
-            pytest.skip("docs/ is excluded from the submission package")
-        doc = docs_dir / "DEPENDENCY-SCANNING.md"
+        doc = _repo_only("docs/DEPENDENCY-SCANNING.md")
         assert doc.is_file(), "docs/DEPENDENCY-SCANNING.md must exist to explain the stage failure"
         major, minor = self._declared_floor()
         assert f"{major}.{minor}" in doc.read_text(encoding="utf-8"), (
@@ -409,3 +422,34 @@ class TestPipCompileLockContract:
         assert not clashes, f"requirements.lock and requirements.txt disagree: {clashes}"
         missing = sorted(set(lock) - set(txt))
         assert not missing, f"runtime packages absent from requirements.txt: {missing}"
+
+    def test_only_one_recognised_manifest_is_packaged(self) -> None:
+        """The submission must present exactly one dependency manifest.
+
+        The analyser selects a single directory and processes every manifest in
+        it. Two manifests mean two package managers, and the pairing decides
+        which parser runs. pyproject.toml in particular maps to poetry and uv,
+        both of which expect a lockfile beside it that this project does not
+        use. requirements.txt alone is unambiguous.
+        """
+        packager = _repo_only("scripts/package-appstore.sh").read_text(encoding="utf-8")
+        allowlist = packager.split('PATHS="', 1)[1].split('"', 1)[0].split()
+        recognised = {
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "Pipfile",
+            "Pipfile.lock",
+            "poetry.lock",
+            "uv.lock",
+            "pdm.lock",
+            "requirements.in",
+            "requirements.pip",
+            "requires.txt",
+        }
+        packaged = sorted(recognised.intersection(allowlist))
+        assert not packaged, (
+            f"these manifests would ship beside requirements.txt: {packaged}. "
+            "The analyser processes every manifest in the directory it selects."
+        )
+        assert "requirements.txt" in allowlist, "the one manifest we do ship must be present"
