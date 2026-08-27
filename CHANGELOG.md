@@ -7,6 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.9] - 2026-08-27
+
+0.4.8 failed identically. The package now carries exactly one manifest-shaped
+file and the stage still crashes, so no remaining hypothesis about our content
+survives.
+
+### Changed
+
+- **`docs/DEPENDENCY-SCANNING.md` rewritten as an elimination record.** Eight
+  hypotheses, each with the evidence that ruled it out, and a three-line ask
+  for the platform team. Written to be handed over rather than re-derived.
+
+### Findings
+
+The first failure was on a directory whose only file was `setup.py`, with no
+requirements file in it. Every layout since has failed too, including one
+carrying a single hash-pinned, correctly headed `requirements.txt` and nothing
+else. Six distinct inputs, one outcome, in three to seven seconds with no error
+text. That is the signature of a failure independent of our content.
+
+The analyser is a fork: its directory-selection log line appears in no public
+GitLab analyser, no public analyser image carries a v6 tag, and its registry
+path returns 403 to an anonymous pull that succeeds for public control images.
+It cannot be reproduced outside the platform.
+
+Also ruled out this cycle: the analyser does not need network access. Upstream
+builds a complete SBOM with all egress blocked.
+
 ## [0.4.8] - 2026-08-27
 
 0.4.7 did not fix Dependency Scanning, so pyproject.toml was not the cause.
