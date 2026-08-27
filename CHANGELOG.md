@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.8] - 2026-08-27
+
+0.4.7 did not fix Dependency Scanning, so pyproject.toml was not the cause.
+This removes the last manifest-shaped file from the submission root. Still a
+probe: the platform's analyser is not obtainable, so it cannot be verified
+against it here.
+
+### Changed
+
+- **`requirements.lock` no longer ships in the python package.** With
+  pyproject.toml already gone, it was the only remaining manifest-shaped file
+  beside `requirements.txt`, and it has been present at the root in every
+  failed run. Upstream does not recognise a `.lock` name, but the platform's
+  analyser is demonstrably a fork with detection behaviour upstream does not
+  have, so the assumption is not safe to keep making.
+- **`requirements.txt` is now hash-pinned** and is the single manifest. Same 54
+  packages at the same versions, 1,513 hash lines, pip-compile header intact.
+  It gains hash verification in the platform Test stage, which previously
+  installed an unhashed file.
+- **The image installs from it and then removes the ten test-only packages**,
+  so the runtime image carries exactly what it carried before. Verified by
+  building that venv for real: hashed install, uninstall, then the app booted
+  from a bare package directory and answered 200 on `/`, `/healthz` and
+  `/readyz`.
+- **`Dockerfile.docker-only` keeps `requirements.lock`.** That template must
+  ship no recognised manifest, so it needs a pinned file under a name the
+  detector ignores. The lockfile stays in the repository for it, and the drift
+  guard keeps the two in step.
+- **Continuous integration audits `requirements.txt`**, the file the image now
+  installs.
+
 ## [0.4.7] - 2026-08-27
 
 Removes the last ambiguity from the submission root. A reasoned probe, not a

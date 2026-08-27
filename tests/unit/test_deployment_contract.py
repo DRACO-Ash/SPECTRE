@@ -123,11 +123,10 @@ class TestPackaging:
         assert ".env" in body
         assert ".git" in body
 
-    def test_lockfile_is_committed_and_hash_pinned(self) -> None:
-        lock = _REPO_ROOT / "requirements.lock"
-        assert lock.is_file(), "a committed lockfile makes the install reproducible"
-        body = lock.read_text(encoding="utf-8")
-        assert "--hash=sha256:" in body, "the lockfile must pin hashes"
+    def test_shipped_manifest_is_committed_and_hash_pinned(self) -> None:
+        """requirements.txt is the one manifest the submission carries."""
+        body = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        assert "--hash=sha256:" in body, "the manifest must pin hashes"
         assert re.search(r"^[a-z0-9_.-]+==", body, re.MULTILINE), "every dependency must be pinned"
 
     def test_python_template_manifest_is_present(self) -> None:
@@ -143,15 +142,17 @@ class TestPackaging:
     def test_manifests_do_not_drift(self) -> None:
         """Every runtime pin in the lock must match requirements.txt exactly.
 
-        The image installs from requirements.lock and the pipeline installs from
-        requirements.txt. If they disagree, the tested set is not the shipped
-        set, which is the kind of gap that only surfaces in production.
+        The python image and the platform Test stage both install
+        requirements.txt. requirements.lock survives for the docker-only
+        Dockerfile only and does not ship in the python package, so it is
+        repository-only here. If the two disagree, the tested set is not the
+        shipped set, which is the kind of gap that only surfaces in production.
         """
         import re
 
         def pins(name: str) -> dict[str, str]:
             found = {}
-            for line in (_REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
+            for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
                 match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)", line)
                 if match:
                     found[match.group(1).lower().replace("_", "-")] = match.group(2)
@@ -163,13 +164,16 @@ class TestPackaging:
         drifted = {k: (v, manifest.get(k)) for k, v in lock.items() if manifest.get(k) != v}
         assert not drifted, f"runtime pins disagree between the manifests: {drifted}"
 
-    def test_lockfile_is_the_hash_verified_one(self) -> None:
-        """Only the lock carries hashes; it is what the image installs."""
-        lock = (_REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
+    def test_image_installs_the_hash_verified_manifest(self) -> None:
+        """The image must install the same hashed file the platform tests."""
+        manifest = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
         dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-        assert "--hash=sha256:" in lock
+        assert "--hash=sha256:" in manifest
         assert "--require-hashes" in dockerfile
-        assert "requirements.lock" in dockerfile
+        assert "-r requirements.txt" in dockerfile
+        assert "requirements.lock" not in dockerfile, (
+            "the python image must not reference a second manifest"
+        )
 
 
 class TestVersionStamp:
@@ -233,8 +237,8 @@ class TestDatabasePortability:
 
     def test_async_postgres_driver_is_pinned(self) -> None:
         """The add-on is useless without a driver the async engine can use."""
-        lock = (_REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
-        assert "asyncpg==" in lock
+        manifest = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        assert "asyncpg==" in manifest
 
     def test_sqlite_is_never_placed_on_the_injected_mount(self) -> None:
         """Guards the two-cycle deploy failure at the source level."""
@@ -402,8 +406,9 @@ class TestPipCompileLockContract:
             "a banner above the generated header, the analyser's check is positional."
         )
 
-    def test_lockfile_is_a_recognisable_lockfile(self) -> None:
-        assert self._is_pip_compile_lock(_REPO_ROOT / "requirements.lock")
+    def test_docker_only_lockfile_is_a_recognisable_lockfile(self) -> None:
+        """Repository-only: requirements.lock exists for Dockerfile.docker-only."""
+        assert self._is_pip_compile_lock(_repo_only("requirements.lock"))
 
     def test_manifests_do_not_drift(self) -> None:
         """The image installs the lock; the platform Test stage installs the txt."""
@@ -411,7 +416,7 @@ class TestPipCompileLockContract:
 
         def pins(name: str) -> dict[str, str]:
             found = {}
-            for line in (_REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
+            for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
                 m = pin.match(line.strip())
                 if m:
                     found[m.group(1).lower().replace("_", "-")] = m.group(2)

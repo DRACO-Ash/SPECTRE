@@ -69,7 +69,6 @@ echo "Packaging SPECTRE ${VERSION} for the App Store (${MODE} template)"
 PATHS="
 Dockerfile
 .dockerignore
-requirements.lock
 requirements.txt
 pytest.ini
 .coveragerc
@@ -90,6 +89,11 @@ scripts
 "
 
 if [ "$MODE" = "docker-only" ]; then
+    # docker-only keeps requirements.lock: it needs pinned dependencies to build
+    # an image, and .lock is not a name the template detector recognises, so it
+    # cannot flip the template back to python.
+    PATHS="$PATHS
+requirements.lock"
     # A recognised manifest anywhere at the root would flip the template back to
     # python, so requirements.txt and the Sonar config go. tests/ goes with
     # them, along with pytest.ini and .coveragerc: docker-only has no Test

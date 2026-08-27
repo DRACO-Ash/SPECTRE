@@ -88,9 +88,9 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
       - name: pip-audit — scan the committed lockfile
-        # Audits requirements.lock, the same pinned set the image installs, so
+        # Audits requirements.txt, the same hash-pinned set the image installs, so
         # CI and the container can never disagree about what was scanned.
-        run: pip-audit --desc on --requirement requirements.lock
+        run: pip-audit --desc on --requirement requirements.txt
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:
