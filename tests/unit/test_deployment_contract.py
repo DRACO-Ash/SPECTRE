@@ -21,12 +21,16 @@ _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 def _repo_only(name: str) -> Path:
     """Return a repository-only path, skipping the test when it is absent.
 
-    pyproject.toml and docs/ are excluded from the submission package on
-    purpose: pyproject.toml is a dependency manifest the platform's scanner
-    processes, and docs/ would be analysed as application code. The suite ships
+    docs/, scripts/ generators and requirements-dev.txt do not travel in the
+    submission package: docs/ would be analysed as application code, and the
+    dev tooling is deliberately kept out of the scanned set. The suite ships
     inside that package and runs there, so an invariant about a file that does
     not travel with it must skip, not fail. A test that cannot hold in the
     artifact it travels in is a broken test, not a finding.
+
+    Use this only for genuinely repository-only files. Reaching for it to
+    silence a failure turns the test into a silent pass, which is worse than
+    no test at all.
     """
     path = _REPO_ROOT / name
     if not path.exists():
@@ -140,29 +144,34 @@ class TestPackaging:
         assert (_REPO_ROOT / "Dockerfile").is_file()
 
     def test_manifests_do_not_drift(self) -> None:
-        """Every runtime pin in the lock must match requirements.txt exactly.
+        """The runtime lock must be a version-identical subset of the scanned one.
 
-        The python image and the platform Test stage both install
-        requirements.txt. requirements.lock survives for the docker-only
-        Dockerfile only and does not ship in the python package, so it is
-        repository-only here. If the two disagree, the tested set is not the
-        shipped set, which is the kind of gap that only surfaces in production.
+        The gate reads requirements.txt and never requirements-runtime.txt,
+        which is not a filename it recognises. That is only safe while the
+        runtime set is a strict subset: otherwise the image would ship a
+        version no stage examined. Both files travel in the package, so this
+        holds there too.
         """
         import re
 
         def pins(name: str) -> dict[str, str]:
             found = {}
-            for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
+            for line in (_REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
                 match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)", line)
                 if match:
                     found[match.group(1).lower().replace("_", "-")] = match.group(2)
             return found
 
-        lock = pins("requirements.lock")
-        manifest = pins("requirements.txt")
-        assert lock, "requirements.lock has no pins"
-        drifted = {k: (v, manifest.get(k)) for k, v in lock.items() if manifest.get(k) != v}
-        assert not drifted, f"runtime pins disagree between the manifests: {drifted}"
+        runtime = pins("requirements-runtime.txt")
+        scanned = pins("requirements.txt")
+        assert runtime, "requirements-runtime.txt has no pins"
+        assert scanned, "requirements.txt has no pins"
+        missing = sorted(set(runtime) - set(scanned))
+        assert not missing, (
+            f"the image would install packages the gate never sees: {missing}"
+        )
+        drifted = {k: (v, scanned[k]) for k, v in runtime.items() if scanned[k] != v}
+        assert not drifted, f"runtime pins disagree with the scanned set: {drifted}"
 
     def test_image_installs_the_runtime_lock_under_hashes(self) -> None:
         """The image installs the runtime set only.
@@ -283,7 +292,9 @@ class TestDependencyScannerContract:
             "setup.cfg",
             "pyproject.toml",
             "requirements.txt",
-            "requirements.lock",
+            "requirements.in",
+            "requirements.pip",
+            "requires.txt",
             "Pipfile",
             "Pipfile.lock",
             "poetry.lock",
@@ -308,7 +319,7 @@ class TestDependencyScannerContract:
 
         assert not strays, (
             "these files sit below the root and are named like dependency manifests, so "
-            f"the scanner will resolve them INSTEAD of requirements.lock: {strays}. "
+            f"the scanner may select their directory instead of the root: {strays}. "
             "Rename them (a module named setup.py is the usual culprit) or move them to the root."
         )
 
@@ -413,31 +424,39 @@ class TestPipCompileLockContract:
         req = _REPO_ROOT / "requirements.txt"
         assert self._is_pip_compile_lock(req), (
             "requirements.txt line 2 must begin with "
-            f"{self._PIP_COMPILE_HEADER!r}. Regenerate it with pip-compile; do not add "
-            "a banner above the generated header, the analyser's check is positional."
+            f"{self._PIP_COMPILE_HEADER!r}, or line 1 with the uv marker. Regenerate "
+            "it with scripts/lock.sh; never add a banner above the generated header, "
+            "because the analyser's check is positional."
         )
 
-    def test_docker_only_lockfile_is_a_recognisable_lockfile(self) -> None:
-        """Repository-only: requirements.lock exists for Dockerfile.docker-only."""
-        assert self._is_pip_compile_lock(_repo_only("requirements.lock"))
+    def test_runtime_lock_is_generated_not_hand_written(self) -> None:
+        """The runtime lock ships in the package and drives the image build.
 
-    def test_manifests_do_not_drift(self) -> None:
-        """The image installs the lock; the platform Test stage installs the txt."""
-        pin = re.compile(r"^([A-Za-z0-9._-]+)==([^\s;\\]+)")
+        It is never scanned, but it must still be tool-generated: a hand-edited
+        pin with a stale hash fails the container build rather than installing
+        something unexpected, and only a generated file guarantees every entry
+        carries a hash.
+        """
+        runtime = _REPO_ROOT / "requirements-runtime.txt"
+        assert self._is_pip_compile_lock(runtime), (
+            "requirements-runtime.txt must be regenerated with scripts/lock.sh"
+        )
+        assert "--hash=sha256:" in runtime.read_text(encoding="utf-8")
 
-        def pins(name: str) -> dict[str, str]:
-            found = {}
-            for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
-                m = pin.match(line.strip())
-                if m:
-                    found[m.group(1).lower().replace("_", "-")] = m.group(2)
-            return found
-
-        lock, txt = pins("requirements.lock"), pins("requirements.txt")
-        clashes = {k: (lock[k], txt[k]) for k in lock if k in txt and lock[k] != txt[k]}
-        assert not clashes, f"requirements.lock and requirements.txt disagree: {clashes}"
-        missing = sorted(set(lock) - set(txt))
-        assert not missing, f"runtime packages absent from requirements.txt: {missing}"
+    def test_every_lock_file_is_fully_hashed(self) -> None:
+        """A single unhashed line silently disables verification for that package."""
+        for name in ("requirements.txt", "requirements-runtime.txt"):
+            body = (_REPO_ROOT / name).read_text(encoding="utf-8")
+            pinned = re.findall(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==", body, re.MULTILINE)
+            assert pinned, f"{name} has no pins"
+            # Every pin must be followed by at least one hash before the next pin.
+            blocks = re.split(r"^(?=[A-Za-z0-9][A-Za-z0-9._-]*==)", body, flags=re.MULTILINE)
+            unhashed = [
+                b.split("==", 1)[0].strip()
+                for b in blocks
+                if re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*==", b) and "--hash=" not in b
+            ]
+            assert not unhashed, f"{name} has unhashed pins: {unhashed}"
 
     def test_package_matches_the_gate_contract(self) -> None:
         """The package root must carry the shape the gate actually accepts.

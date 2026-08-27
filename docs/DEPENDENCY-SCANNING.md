@@ -18,6 +18,13 @@ Shipped shape, derived from applications that clear this gate:
 | `requirements-dev.txt` | Lint and SAST tooling. Repository only; never shipped, never scanned. |
 | `Dockerfile` | Root level. A nested one breaks template detection. |
 
+All three `.txt` files are produced by `scripts/lock.sh`, which runs
+`uv pip compile --python-version 3.12 --generate-hashes`. The interpreter
+version is not optional: a lock compiled for a different one resolves a
+different set. 3.12 matches `requires-python` in `pyproject.toml` and the
+`python:3.12-slim-bookworm` base image, and a contract test asserts those two
+agree.
+
 `requirements-runtime.txt` being invisible to the scanner is deliberate and has
 a consequence: the gate reads the **superset**, so it scans at least what the
 image ships. That only stays safe while the runtime set is a strict,
