@@ -44,6 +44,14 @@ no hypothesis". Say that instead of inventing one.
 | Code Quality | **CONFIRMED FIXED** | None needed | 0.5.2 passed. The evidenced fix in that version (not shipping `scripts/`) landed. | n/a |
 | Dependency Scanning | **NO HYPOTHESIS** | None | Nine failures. 8 of 9 stages now pass. Still no SBOM, no report, no error text. | n/a. Unchanged position: nothing ships for this gate without the analyser's error text, the `.pre` resolution job's log, or a diff against a passing package. |
 
+### 0.5.3 outcome
+
+● **Dependency Scanning: failed, as recorded.** Commit `35ede5b5`, MR 21. Tenth
+  identical failure. No change shipped for this gate, so no information gained,
+  which is the expected and correct outcome of holding the line.
+● **The runtime login fix cannot be observed from this log.** It needs a
+  successful deploy, which this gate is blocking.
+
 **Standing note on Dependency Scanning.** Do not add a change for this gate to a
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.
