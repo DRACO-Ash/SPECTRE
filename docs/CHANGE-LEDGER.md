@@ -52,6 +52,21 @@ no hypothesis". Say that instead of inventing one.
 ● **The runtime login fix cannot be observed from this log.** It needs a
   successful deploy, which this gate is blocking.
 
+## 0.5.4
+
+The standing note below was satisfied: a file listing arrived from PSIRENS, an
+application that clears this gate. This is the first entry in ten submissions
+with evidence for the Dependency Scanning gate.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Dependency Scanning | **EVIDENCED** | Stop shipping `requirements.in` and `requirements-runtime.in` | A root diff against PSIRENS. `requirements.in` is a recognised Python manifest, so our root offered the analyser **three** (`pyproject.toml`, `requirements.in`, `requirements.txt`) where PSIRENS offers **two**, leaving one lockfile paired with two candidate requirements sources. Our root is now identical to theirs, file for file. | Then manifest count at the root is not the discriminator, and the remaining differences are the `src/` layout and our second top-level package, `tle_clustering`. That would be the next diff to run, and it is a much larger change. |
+| Code Quality | **HYGIENE** | Stop shipping seven internal documents and local configs; move pytest and coverage config into `pyproject.toml` | PSIRENS ships seven root files; we shipped eighteen. Every file in the archive is analysed as application code, which already cost us five findings in 0.5.1. | Cannot fail the gate on its own: none of the removed files is a recognised manifest. |
+
+**Only one EVIDENCED change is being tested here.** The hygiene removals cannot
+affect the analyser, because none of those filenames is one it reads. So a
+failure still isolates cleanly to the manifest hypothesis.
+
 **Standing note on Dependency Scanning.** Do not add a change for this gate to a
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.

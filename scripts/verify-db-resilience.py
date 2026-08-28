@@ -1,8 +1,11 @@
 """Kill the backend server-side, then exercise the app's OWN engine and the
 real login query. Verifies the shipped configuration, not a reconstruction."""
-import asyncio, sys
+import asyncio
+import sys
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
 
 async def main() -> int:
     import spectre.web.database as db
@@ -16,6 +19,7 @@ async def main() -> int:
         await conn.run_sync(db.Base.metadata.create_all)
 
     from sqlalchemy import select
+
     from spectre.web.models import User
 
     async with db.AsyncSessionLocal() as s:           # warm the pool

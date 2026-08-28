@@ -7,6 +7,42 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.4] - 2026-08-28
+
+The package root is now identical, file for file, to PSIRENS, an application
+that clears this gate. First change to Dependency Scanning in ten submissions
+with evidence behind it.
+
+### Fixed
+
+- **`requirements.in` and `requirements-runtime.in` no longer ship.**
+  `requirements.in` is a recognised Python manifest. Shipping it gave the
+  analyser three recognised manifests at the root, against PSIRENS's two, and
+  left a single lockfile paired with two candidate requirements sources. The
+  `.in` files stay in the repository, because `scripts/lock.sh` compiles from
+  them; they simply do not travel in the archive.
+
+### Changed
+
+- **The root is trimmed to the seven files PSIRENS ships**: `Dockerfile`,
+  `.dockerignore`, `pyproject.toml`, `requirements.txt`,
+  `requirements-runtime.txt`, `sonar-project.properties` and `README.md`. Gone
+  are `CHANGELOG.md`, `SECURITY.md`, `READINESS.md`, `CODEOWNERS`,
+  `.env.example`, `.gitignore` and `.pre-commit-config.yaml`. Every file in the
+  archive is analysed by Code Quality as application code, which already cost
+  five findings in 0.5.1.
+- **pytest and coverage configuration moved back into `pyproject.toml`**, so
+  `pytest.ini` and `.coveragerc` leave the root as well. Verified with the
+  platform's own command: 846 passed, coverage 74.36%, `coverage.xml` written.
+
+### Not changed
+
+- **The `src/` layout and the second top-level package.** PSIRENS keeps its
+  application under `src/psirens/`; we have `spectre/` and `tle_clustering/` at
+  the root. Neither is a recognised manifest location, so neither can change
+  which files the analyser reads. If 0.5.4 fails, that is the next diff to run,
+  and the ledger records it as the remaining structural difference.
+
 ## [0.5.3] - 2026-08-28
 
 ### Fixed

@@ -15,9 +15,36 @@
 
 [project]
 name = "spectre"
-version = "0.5.3"
+version = "0.5.4"
 description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
+
+# ---------------------------------------------------------------------------
+# Pytest and coverage
+#
+# Held here rather than in pytest.ini and .coveragerc so the package root
+# carries no file the analyser has no reason to see. PSIRENS, which clears this
+# gate, ships seven files at its root and neither of those is among them.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
+]
+addopts = "-ra -q"
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["spectre", "tle_clustering"]
+# SQLAlchemy's async bridge switches greenlets on every await. Without this,
+# coverage loses the trace after `await session.execute(...)` and under-reports
+# lines that demonstrably run, which would understate coverage to SonarQube.
+concurrency = ["thread", "greenlet"]
+omit = ["tests/*", "spectre/app_logging/config.py"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
 
 [tool.ruff]
 line-length = 120
