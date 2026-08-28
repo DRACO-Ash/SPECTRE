@@ -694,3 +694,84 @@ class TestClusteringPackageTravels:
             "the Dockerfile must COPY tle_clustering, otherwise the guarded import "
             "fails inside the container and clustering is skipped without error"
         )
+
+
+class TestBuildContextContract:
+    """Every COPY source must survive .dockerignore.
+
+    These are two separate files that have to agree, and nothing checked that
+    they did. `.dockerignore` listed tle_clustering/ under "development
+    tooling" while the application imports it, so the package never reached the
+    image; the guarded import turned that into a silently disabled feature
+    rather than a failure. Adding the COPY without checking the exclusion then
+    turned it into a Container Build failure:
+
+        Error: building at STEP "COPY tle_clustering/ /app/tle_clustering/":
+        no items matching glob "..." copied (1 filtered out using .dockerignore)
+
+    Both Dockerfiles are checked, because they are maintained in parallel and a
+    fix applied to one is easy to forget in the other.
+    """
+
+    _DOCKERFILES = ("Dockerfile", "Dockerfile.docker-only")
+
+    def _exclusions(self) -> list[str]:
+        """Directory and exact-name exclusions, ignoring negations and globs.
+
+        Only the pattern forms this project actually uses are interpreted. A
+        pattern we cannot evaluate is skipped rather than guessed at, so the
+        test never invents a failure it cannot justify.
+        """
+        body = _repo_only(".dockerignore").read_text(encoding="utf-8")
+        patterns = []
+        for raw in body.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or line.startswith("!"):
+                continue
+            if "*" in line or "?" in line:
+                continue
+            patterns.append(line.rstrip("/"))
+        return patterns
+
+    def _copy_sources(self, body: str) -> list[str]:
+        """Local COPY sources only. --from=<stage> reads from an earlier stage."""
+        sources = []
+        for match in re.finditer(r"^\s*COPY\s+(.*)$", body, re.MULTILINE):
+            parts = match.group(1).split()
+            if any(part.startswith("--from=") for part in parts):
+                continue
+            parts = [part for part in parts if not part.startswith("--")]
+            if len(parts) < 2:
+                continue
+            sources.extend(parts[:-1])
+        return sources
+
+    def test_no_copy_source_is_excluded_from_the_build_context(self) -> None:
+        excluded = self._exclusions()
+        offenders = []
+        for name in self._DOCKERFILES:
+            path = _REPO_ROOT / name
+            if not path.is_file():
+                continue
+            for source in self._copy_sources(path.read_text(encoding="utf-8")):
+                head = source.rstrip("/").split("/", 1)[0]
+                if head in excluded:
+                    offenders.append(f"{name}: COPY {source} is excluded by .dockerignore")
+        assert not offenders, (
+            "the build context cannot supply these, so the build fails at that "
+            f"COPY: {offenders}"
+        )
+
+    def test_every_copy_source_exists(self) -> None:
+        """A COPY of a path that is not in the repository fails the same way."""
+        missing = []
+        for name in self._DOCKERFILES:
+            path = _REPO_ROOT / name
+            if not path.is_file():
+                continue
+            for source in self._copy_sources(path.read_text(encoding="utf-8")):
+                if source in (".", "./"):
+                    continue
+                if not (_REPO_ROOT / source.rstrip("/")).exists():
+                    missing.append(f"{name}: COPY {source}")
+        assert not missing, f"these COPY sources do not exist: {missing}"

@@ -7,6 +7,52 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.8] - 2026-08-28
+
+### Fixed
+
+- **Container Build failed on the `COPY` added in 0.5.7.** `.dockerignore`
+  excluded `tle_clustering/` under "Tests, docs and development tooling never
+  ship in the runtime image", so the path was filtered out of the build context
+  and the `COPY` had nothing to match:
+
+  ```
+  Error: building at STEP "COPY tle_clustering/ /app/tle_clustering/":
+  no items matching glob ".../spectre/tle_clustering" copied
+  (1 filtered out using .../.dockerignore): no such file or directory
+  ```
+
+  That exclusion is the true root cause of the clustering defect, one layer
+  below where 0.5.7 placed it. The package was not simply missing a `COPY`; it
+  was being stripped from the build context, and the absent `COPY` made the
+  stripping invisible. Classifying it as tooling was wrong, because the
+  application imports it.
+
+  `TestBuildContextContract` now reads both Dockerfiles and asserts that no
+  local `COPY` source is excluded by `.dockerignore` or missing from the
+  repository. Verified in both directions: restoring the exclusion fails the
+  test naming both Dockerfiles, removing it passes.
+
+  Container Scan was skipped and Deploy never ran, so 0.5.6 remained the
+  deployed version throughout.
+
+### Changed
+
+- **Test and Code Quality are template-gated. The question is settled.** 0.5.7
+  shipped `tests/`, `sonar-project.properties`, `pytest.ini`, `.coveragerc` and
+  a real `coverage.xml` to find out whether those stages were absent by
+  template or merely starved of input. Neither ran. Dockerfile Lint passed in
+  the same pipeline, and both stages precede it on the python template, so they
+  were not pending. Code Quality is decisive: it needs no dependency install
+  and had every input it reads.
+
+  The four gates docker-only gives up therefore cannot be bought back by
+  shipping their inputs. Only restoring a manifest brings them back, and that
+  brings Dependency Scanning with it.
+
+- Those five files no longer ship, and the packager machinery that generated
+  and validated them is removed. No stage reads them under this template.
+
 ## [0.5.7] - 2026-08-28
 
 ### Fixed

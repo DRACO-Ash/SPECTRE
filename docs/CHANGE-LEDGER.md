@@ -216,3 +216,56 @@ there, so the skip is not a hole.
 one of them flips the template and brings Dependency Scanning back with it.
 Do not attempt it until the analyser's real error text, the `.pre` resolution
 job's log, PSIRENS's `pyproject.toml`, or a fix arrives.
+
+### Outcome: FAILED at Container Build, and the probe answered
+
+Recorded 28 August 2026, merge request 25, commit 0108dc3.
+
+**The probe is discharged, and the answer is clean.** Test and Code Quality are
+template-gated. Neither ran, despite the archive carrying `tests/`,
+`sonar-project.properties`, `pytest.ini`, `.coveragerc` and a real
+`coverage.xml`. Dockerfile Lint passed in the same pipeline, and on the python
+template both stages run before it, so they were not merely pending. Code
+Quality is the decisive case: it needs no dependency install and it had every
+input it reads, and it still did not run.
+
+So the four gates docker-only gives up cannot be bought back by shipping their
+inputs. Only restoring a manifest brings them back, and that brings Dependency
+Scanning with it. The trade is fixed, and the question is closed.
+
+**The evidenced change failed the build, and the fault is mine.** Container
+Build stopped at the `COPY` I added:
+
+```
+Error: building at STEP "COPY tle_clustering/ /app/tle_clustering/":
+no items matching glob ".../spectre/tle_clustering" copied
+(1 filtered out using .../.dockerignore): no such file or directory
+```
+
+`.dockerignore` line 13 excluded `tle_clustering/`, listed under "Tests, docs
+and development tooling never ship in the runtime image". I added the `COPY`
+without reading the file that governs the build context.
+
+That exclusion is also the true root cause of the original defect, one layer
+below where I placed it. The package was not missing a `COPY`; it was being
+stripped from the build context, and the missing `COPY` merely made the
+stripping invisible. Classifying it as tooling was wrong: the application
+imports it.
+
+Container Scan skipped and Deploy never ran, so 0.5.6 remains the deployed
+version and the live app is unaffected.
+
+## 0.5.8
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Container Build | **EVIDENCED** | Remove `tle_clustering/` from `.dockerignore` | The build log names the file, the line and the effect: the path was filtered out of the build context by `.dockerignore`, so the `COPY` had nothing to match. Guarded by `TestBuildContextContract`, which reads both Dockerfiles and asserts no local `COPY` source is excluded or absent. Verified in both directions: re-adding the exclusion fails the test with exactly the two offending lines, removing it passes. | The failure would have to be a different `COPY`, and the test now names which one. |
+| - | **HYGIENE** | Stop shipping `tests/`, `sonar-project.properties`, `pytest.ini`, `.coveragerc` and `coverage.xml` in the docker-only archive; remove the packager machinery that generated them | The probe above answered. No stage reads any of them under this template, and files no stage reads do not belong in a submission archive. | Cannot fail a gate: none is a recognised manifest and none is read. |
+
+**No probe in this release.** The one open question was answered by 0.5.7 and
+the remaining change is a named, reproduced build failure.
+
+**Standing note, unchanged.** Phase 2, restoring the manifests, is atomic and
+stays parked until the analyser's real error text, the `.pre` resolution job's
+log, PSIRENS's `pyproject.toml`, or a fix arrives. The 0.5.7 result sharpens
+what it would buy: all four gates return together, or none does.

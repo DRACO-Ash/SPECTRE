@@ -7,10 +7,15 @@
 .pre-commit-config.yaml
 
 # Tests, docs and development tooling never ship in the runtime image.
+#
+# tle_clustering/ is NOT in this list, and must not be. It was, and that is the
+# root cause of TLE clustering being dead in every deployed build: the package
+# is imported by spectre/astro/tle_preprocessing.py, so excluding it from the
+# build context removed it from the image, where the guarded import swallowed
+# the failure. It is application code, not tooling.
 tests/
 docs/
 SPECTRE-1/
-tle_clustering/
 *.md
 !README.md
 
