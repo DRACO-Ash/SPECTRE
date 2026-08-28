@@ -26,6 +26,16 @@ no hypothesis". Say that instead of inventing one.
 | Code Quality | **EVIDENCED** | Stop shipping `scripts/` and `.github/` | The job log names `scripts/preflight-gate.py:213` (hotspot), `:34`, `:50`, `:234` and `scripts/package-appstore.sh:246`. All five findings are in files that are build tooling, not application code. `sonar-project.properties` declares `sonar.sources=spectre,tle_clustering`, so the platform is analysing the whole archive and ignoring our declaration. | Then the platform analyses files we do not ship, or `sonar-project.properties` is being honoured after all and the findings came from somewhere else. Either is a real, narrow answer. |
 | Dependency Scanning | **NO HYPOTHESIS** | None | Seven failures. The contract from the gate skill is satisfied and its preflight reports 0 blocking. Every content hypothesis I have held has been wrong: header form, pyproject presence, `requirements.lock`, manifest count, lock generator. | n/a. I am not shipping a change for this gate without evidence. The analyser image is not public and its error text has never been read. |
 
+### 0.5.2 outcome
+
+● **Dependency Scanning: failed, as recorded.** Commit `a8accac1`, MR 20. Same
+  signature: two INFO lines, `exit status 1` after seven seconds, no SBOM, no
+  report, no error text. No new information. The ledger predicted this before
+  the build, because no change shipped for this gate. Eight failures now, across
+  eight distinct package shapes.
+● **Code Quality: outcome not yet seen.** This is the one thing that would tell
+  us whether the evidenced fix in 0.5.2 landed. Needed before the next entry.
+
 **Standing note on Dependency Scanning.** Do not add a change for this gate to a
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.
