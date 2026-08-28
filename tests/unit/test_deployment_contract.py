@@ -37,6 +37,38 @@ def _repo_only(name: str) -> Path:
         pytest.skip(f"{name} is excluded from the submission package")
     return path
 
+def _is_docker_only_package() -> bool:
+    """True when the suite is running inside the docker-only submission archive.
+
+    The docker-only template deliberately ships no recognised Python manifest;
+    that absence is what stops the platform selecting the python template. The
+    suite travels inside that archive, so contract assertions about
+    requirements.txt and pyproject.toml cannot hold there and must skip.
+
+    Detected from BOTH manifests being absent rather than one, so a python
+    package that lost a manifest to a packaging bug still fails the assertion
+    instead of quietly skipping it. The repository and the python-template
+    package always carry both.
+    """
+    if not (_REPO_ROOT / "Dockerfile").is_file():
+        return False
+    return not (_REPO_ROOT / "pyproject.toml").is_file() and not (
+        _REPO_ROOT / "requirements.txt"
+    ).is_file()
+
+
+_DOCKER_ONLY = _is_docker_only_package()
+
+# Assertions about files only the python template ships. They still run in the
+# repository and in the python-template package; only the docker-only archive
+# skips them, and TestDockerOnlyContract below asserts the inverse there so the
+# skip is not a hole.
+_python_template_only = pytest.mark.skipif(
+    _DOCKER_ONLY,
+    reason="docker-only package: no recognised Python manifest ships, by design",
+)
+
+
 @pytest.fixture(scope="module")
 def dockerfile() -> str:
     assert _DOCKERFILE.is_file(), "Dockerfile must sit at the package root for template detection"
@@ -127,12 +159,14 @@ class TestPackaging:
         assert ".env" in body
         assert ".git" in body
 
+    @_python_template_only
     def test_shipped_manifest_is_committed_and_hash_pinned(self) -> None:
         """requirements.txt is the one manifest the submission carries."""
         body = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
         assert "--hash=sha256:" in body, "the manifest must pin hashes"
         assert re.search(r"^[a-z0-9_.-]+==", body, re.MULTILINE), "every dependency must be pinned"
 
+    @_python_template_only
     def test_python_template_manifest_is_present(self) -> None:
         """The platform's Dependencies stage installs from requirements.txt.
 
@@ -143,6 +177,7 @@ class TestPackaging:
         assert (_REPO_ROOT / "requirements.txt").is_file()
         assert (_REPO_ROOT / "Dockerfile").is_file()
 
+    @_python_template_only
     def test_manifests_do_not_drift(self) -> None:
         """The runtime lock must be a version-identical subset of the scanned one.
 
@@ -196,6 +231,7 @@ class TestVersionStamp:
 
         assert app.version == __version__
 
+    @_python_template_only
     def test_pyproject_version_matches_the_package(self) -> None:
         """The gate contract wants a [project] table, which rules out a dynamic
         version. The two literals must therefore agree.
@@ -266,6 +302,7 @@ class TestDatabasePortability:
         assert not offenders, f"dialect-specific SQL in the data layer: {offenders}"
         assert "inspect(" in source, "schema checks must use the SQLAlchemy inspector"
 
+    @_python_template_only
     def test_async_postgres_driver_is_pinned(self) -> None:
         """The add-on is useless without a driver the async engine can use."""
         manifest = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
@@ -311,7 +348,9 @@ class TestDependencyScannerContract:
     )
 
     # Directories that never reach the scanner: not shipped, or not source.
-    _IGNORED = frozenset({".git", ".venv", "venv", "dist", "build", "node_modules", "__pycache__"})
+    _IGNORED = frozenset(
+        {".git", ".venv", "venv", "dist", "build", "node_modules", "__pycache__", ".cache"}
+    )
 
     def test_no_manifest_outside_the_repository_root(self) -> None:
         strays = []
@@ -427,6 +466,7 @@ class TestPipCompileLockContract:
             return True
         return len(lines) > 1 and lines[1].startswith(self._PIP_COMPILE_HEADER)
 
+    @_python_template_only
     def test_requirements_txt_is_a_recognisable_lockfile(self) -> None:
         req = _REPO_ROOT / "requirements.txt"
         assert self._is_pip_compile_lock(req), (
@@ -452,8 +492,15 @@ class TestPipCompileLockContract:
 
     def test_every_lock_file_is_fully_hashed(self) -> None:
         """A single unhashed line silently disables verification for that package."""
+        checked = 0
         for name in ("requirements.txt", "requirements-runtime.txt"):
-            body = (_REPO_ROOT / name).read_text(encoding="utf-8")
+            path = _REPO_ROOT / name
+            if not path.is_file():
+                # requirements.txt does not travel in the docker-only archive.
+                # The runtime lock always does, so the loop still checks one.
+                continue
+            checked += 1
+            body = path.read_text(encoding="utf-8")
             pinned = re.findall(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==", body, re.MULTILINE)
             assert pinned, f"{name} has no pins"
             # Every pin must be followed by at least one hash before the next pin.
@@ -464,7 +511,9 @@ class TestPipCompileLockContract:
                 if re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*==", b) and "--hash=" not in b
             ]
             assert not unhashed, f"{name} has unhashed pins: {unhashed}"
+        assert checked, "no lock file was present to check"
 
+    @_python_template_only
     def test_package_matches_the_gate_contract(self) -> None:
         """The package root must carry the shape the gate actually accepts.
 
@@ -505,6 +554,7 @@ class TestPipCompileLockContract:
         )
 
 
+@_python_template_only
 class TestBuildBackendContract:
     """A resolver reading pyproject.toml must be able to build our metadata.
 
@@ -559,3 +609,88 @@ class TestBuildBackendContract:
         body = self._pyproject()
         include = body.split("[tool.setuptools.packages.find]", 1)[1].split("\n\n", 1)[0]
         assert '"tests' not in include, "tests/ must not be declared as a package"
+
+
+class TestDockerOnlyContract:
+    """The inverse contract, asserted only inside the docker-only archive.
+
+    Every assertion the python template makes about manifests skips here, so
+    without these the docker-only package would travel with a hole where its
+    contract should be. The property that matters is the absence that selects
+    the template, plus the presence of everything the image actually needs.
+    """
+
+    _RECOGNISED = frozenset(
+        {
+            "requirements.txt",
+            "requirements.in",
+            "requirements.pip",
+            "requires.txt",
+            "setup.py",
+            "setup.cfg",
+            "pyproject.toml",
+            "Pipfile",
+            "Pipfile.lock",
+            "poetry.lock",
+            "uv.lock",
+            "pdm.lock",
+            "pipdeptree.json",
+        }
+    )
+
+    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
+    def test_no_recognised_manifest_at_any_depth(self) -> None:
+        """A single one anywhere flips the template and restores the broken stage.
+
+        Checked at every depth, not just the root: the analyser walks the tree
+        and selects the first directory carrying a name it recognises.
+        """
+        strays = sorted(
+            str(path.relative_to(_REPO_ROOT))
+            for path in _REPO_ROOT.rglob("*")
+            if path.is_file() and path.name in self._RECOGNISED
+        )
+        assert not strays, (
+            f"these would select the python template: {strays}. The docker-only "
+            "archive must carry none of them."
+        )
+
+    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
+    def test_the_image_still_has_a_hashed_lock_to_install(self) -> None:
+        """Dropping the manifests must not drop the pinning with them."""
+        runtime = _REPO_ROOT / "requirements-runtime.txt"
+        assert runtime.is_file(), "the image has nothing to install from"
+        body = runtime.read_text(encoding="utf-8")
+        assert "--hash=sha256:" in body, "the runtime lock must stay hash-pinned"
+
+
+class TestClusteringPackageTravels:
+    """tle_clustering must ship, in both templates.
+
+    spectre/astro/tle_preprocessing.py imports it inside a try/except
+    ImportError that logs a warning and returns an empty result. That guard is
+    correct - the app should degrade rather than crash - but it also means an
+    archive built without the package deploys cleanly and silently performs no
+    TLE clustering at all. Version 0.5.6 shipped exactly that. Nothing in the
+    pipeline can catch it, because nothing fails.
+    """
+
+    def test_the_package_is_present(self) -> None:
+        package = _REPO_ROOT / "tle_clustering"
+        assert package.is_dir(), "tle_clustering must travel in the package"
+        assert (package / "__init__.py").is_file()
+
+    def test_the_guarded_import_actually_resolves(self) -> None:
+        """Assert the import the app performs, not merely that files exist."""
+        from tle_clustering import cluster_tle_strings
+        from tle_clustering.config import ClusteringConfig
+
+        assert callable(cluster_tle_strings)
+        assert ClusteringConfig is not None
+
+    def test_clustering_is_not_silently_disabled(self, dockerfile: str) -> None:
+        """The image must copy the package, or the import fails at runtime."""
+        assert "tle_clustering" in dockerfile, (
+            "the Dockerfile must COPY tle_clustering, otherwise the guarded import "
+            "fails inside the container and clustering is skipped without error"
+        )

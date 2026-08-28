@@ -80,14 +80,22 @@ tle_clustering
 "
 
 if [ "$MODE" = "docker-only" ]; then
-    # A recognised manifest anywhere at the root would flip the template back to
-    # python, so requirements.txt and the Sonar config go. tests/ goes with
-    # them, along with pytest.ini and .coveragerc: docker-only has no Test
-    # stage, so shipping a suite and its configuration would only add files a
-    # reviewer must account for.
-    DROP="pyproject.toml requirements.in requirements.txt sonar-project.properties
-tests tle_clustering .pre-commit-config.yaml .coveragerc"
-    DROP="$DROP pytest.ini"
+    # Only the recognised manifests are dropped. Those three filenames are what
+    # the analyser selects on, so shipping any of them flips detection back to
+    # the python template and restores the Dependency Scanning stage with it.
+    #
+    # Everything else stays. Version 0.5.6 also dropped tests/, tle_clustering/
+    # and sonar-project.properties, on the assumption that docker-only runs no
+    # Test or Code Quality stage. The 0.5.6 pipeline showed six stages rather
+    # than nine, which is consistent with that but does not prove it: we shipped
+    # neither the suite nor the Sonar config, so the observation cannot separate
+    # "the stage is template-gated" from "the stage had no input". Shipping them
+    # separates the two, and costs nothing if the stages stay absent.
+    #
+    # Dropping tle_clustering/ was a straightforward mistake. It is application
+    # code, imported under a try/except ImportError, so its absence disabled TLE
+    # clustering in the deployed build without failing anything.
+    DROP="pyproject.toml requirements.in requirements.txt .pre-commit-config.yaml"
     KEPT=""
     for p in $PATHS; do
         skip=0
@@ -166,6 +174,54 @@ rm -rf "$STAGE/docs" "$STAGE/.git" "$STAGE/.venv" "$STAGE/venv" "$STAGE/dist" "$
 if [ "$MODE" = "docker-only" ]; then
     [ -f Dockerfile.docker-only ] || { echo "FAIL: Dockerfile.docker-only is missing"; exit 1; }
     cp Dockerfile.docker-only "$STAGE/Dockerfile"
+
+    # pytest and coverage read their configuration from pyproject.toml, which
+    # cannot ship here. Without it the suite loses asyncio_mode = "auto" and
+    # every async test errors on collection. pytest.ini and .coveragerc carry
+    # the same settings under filenames the analyser does not recognise.
+    #
+    # Derived from pyproject.toml rather than duplicated, so the shipped
+    # configuration cannot drift away from the one the repository tests under.
+    python3 - "$STAGE" <<'PYCFG'
+import sys, tomllib, pathlib
+
+stage = pathlib.Path(sys.argv[1])
+conf = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+
+pytest_conf = conf["tool"]["pytest"]["ini_options"]
+lines = ["[pytest]"]
+for key, value in pytest_conf.items():
+    if isinstance(value, list):
+        lines.append(f"{key} =")
+        lines.extend(f"    {item}" for item in value)
+    else:
+        lines.append(f"{key} = {value}")
+(stage / "pytest.ini").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+cov = conf["tool"]["coverage"]
+out = []
+for section in ("run", "report"):
+    if section not in cov:
+        continue
+    out.append(f"[{section}]")
+    for key, value in cov[section].items():
+        if isinstance(value, list):
+            out.append(f"{key} =")
+            out.extend(f"    {item}" for item in value)
+        elif isinstance(value, bool):
+            out.append(f"{key} = {'True' if value else 'False'}")
+        else:
+            out.append(f"{key} = {value}")
+    out.append("")
+(stage / ".coveragerc").write_text("\n".join(out), encoding="utf-8")
+PYCFG
+fi
+
+# The Sonar project version is quoted literally and drifts silently otherwise.
+# Stamped in the staged copy so the repository file needs no bump-script rule.
+if [ -f "$STAGE/sonar-project.properties" ]; then
+    sed -i "s/^sonar.projectVersion=.*/sonar.projectVersion=${VERSION}/" \
+        "$STAGE/sonar-project.properties"
 fi
 
 # ── Fail-closed checks on the staged tree ─────────────────────────────────────
@@ -217,6 +273,54 @@ if [ -f "$LEDGER" ]; then
         echo "      cannot tell you which one mattered. Ship one at a time."
         exit 1
     fi
+fi
+
+# ── docker-only: run the suite in the staged tree, before the zip ─────────────
+# Two jobs at once. It proves the suite passes with pyproject.toml absent, which
+# is the condition it will meet inside the archive, and it produces the
+# coverage.xml that sonar-project.properties points at.
+#
+# On the python template the platform's own Test stage generates that file. A
+# docker-only archive has no Test stage to generate it, so a Code Quality stage
+# that did run would read a missing report and score zero coverage. The report
+# shipped here is generated from exactly the tree being zipped, in this build,
+# by actually running the suite - not carried over from the working copy.
+if [ "$MODE" = "docker-only" ] && [ "${SKIP_PACKAGE_TESTS:-0}" != "1" ]; then
+    echo "  running the suite in the staged tree..."
+    if (cd "$STAGE" && SPECTRE_SECRET_KEY="package-verification-key-not-a-secret" \
+            python -m pytest -q --cov --cov-report=xml:coverage.xml \
+            > "$STAGE/suite.log" 2>&1); then
+        echo "  suite passes with no pyproject.toml present"
+    else
+        echo "  FAIL: the suite does not pass in the staged tree. Tail of the run:"
+        tail -25 "$STAGE/suite.log" | sed 's/^/    /'
+        exit 1
+    fi
+    [ -f "$STAGE/coverage.xml" ] || { echo "FAIL: no coverage.xml was produced"; exit 1; }
+    # The run happens after the denylist sweep, so anything the suite creates
+    # would otherwise travel. It created an empty data/ on the first build.
+    rm -f "$STAGE/suite.log" "$STAGE/.coverage"
+    find "$STAGE" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$STAGE" \( -name '*.pyc' -o -name '*.pyo' -o -name '*.db' \) -delete 2>/dev/null || true
+    rm -rf "$STAGE/.pytest_cache" "$STAGE/.mypy_cache" "$STAGE/.ruff_cache" \
+           "$STAGE/data" "$STAGE/logs" "$STAGE/htmlcov"
+
+    # Fail closed on anything else the suite leaves behind. Naming the expected
+    # root turns a future stray artifact into a build failure rather than a file
+    # a reviewer has to ask about.
+    EXPECTED=".coveragerc .dockerignore Dockerfile README.md coverage.xml pytest.ini
+requirements-runtime.txt sonar-project.properties spectre tests tle_clustering"
+    for entry in $(ls -A "$STAGE"); do
+        ok=0
+        for allowed in $EXPECTED; do [ "$entry" = "$allowed" ] && ok=1; done
+        if [ "$ok" = "0" ]; then
+            echo "FAIL: unexpected entry at the docker-only package root: $entry"
+            echo "      The suite run creates files after the denylist sweep."
+            echo "      Remove it above, or add it to EXPECTED if it belongs."
+            exit 1
+        fi
+    done
+    echo
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────

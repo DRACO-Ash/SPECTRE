@@ -7,6 +7,61 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.7] - 2026-08-28
+
+### Fixed
+
+- **TLE clustering has been silently disabled in every deployed build.**
+  `spectre/astro/tle_preprocessing.py:150` imports `tle_clustering` inside a
+  `try/except ImportError` that logs a warning and returns an empty result.
+  Neither `Dockerfile` nor `Dockerfile.docker-only` ever carried a `COPY` for
+  the package, so the import has always failed inside the container and the
+  clustering step has always been skipped. Nothing failed, because the guard is
+  correct: the feature degrades rather than crashing. That is precisely why no
+  pipeline stage could catch it.
+
+  Both Dockerfiles now copy the package, and the docker-only packager no longer
+  drops it. Three tests pin it, one of which performs the application's own
+  import rather than checking that files exist.
+
+### Changed
+
+- **The docker-only archive now drops only the recognised manifests.**
+  `pyproject.toml`, `requirements.txt` and `requirements.in` are the three
+  filenames the analyser selects on; those still go. `tests/`,
+  `tle_clustering/` and `sonar-project.properties` were dropped in 0.5.6 on the
+  assumption that docker-only runs no Test or Code Quality stage. The 0.5.6
+  pipeline did show six stages rather than nine, but we shipped neither the
+  suite nor the Sonar config, so that observation cannot distinguish a stage
+  that does not exist from a stage with no input. Shipping them distinguishes
+  the two and costs nothing if the stages stay absent.
+
+- **`pytest.ini` and `.coveragerc` are generated into the docker-only archive.**
+  pytest and coverage read their configuration from `pyproject.toml`, which
+  cannot ship. Without it the suite loses `asyncio_mode = "auto"` and every
+  async test errors on collection. Both files are derived from
+  `pyproject.toml` at package time rather than copied, so the shipped
+  configuration cannot drift from the one the repository tests under.
+
+- **The packager runs the suite against the staged docker-only tree before
+  zipping**, and ships the `coverage.xml` that run produces.
+  `sonar-project.properties` points at that report, and the platform's Test
+  stage generates it on the python template. A docker-only archive has no Test
+  stage, so a Code Quality stage that did run would read a missing file and
+  score zero coverage, failing on an absence rather than on the code. The
+  report is generated from the exact tree being zipped, in the same build; the
+  packager fails if the suite does not pass or the report is not produced.
+
+- **Contract tests detect which template they are running in.** Assertions
+  about `requirements.txt` and `pyproject.toml` skip inside the docker-only
+  archive, detected from both manifests being absent rather than one, so a
+  python package that lost a manifest to a packaging bug still fails instead of
+  skipping. `TestDockerOnlyContract` asserts the inverse property there, so the
+  skip leaves no gap.
+
+- The Sonar project version is stamped into the staged copy at package time. It
+  had been left at `0.4.0`.
+
 ## [0.5.6] - 2026-08-28
 
 ### Changed

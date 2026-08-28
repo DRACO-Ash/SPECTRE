@@ -75,6 +75,13 @@ RUN set -eu; \
 
 COPY --from=build /opt/venv /opt/venv
 COPY spectre/ /app/spectre/
+# tle_clustering is imported by spectre/astro/tle_preprocessing.py inside a
+# try/except ImportError that logs a warning and returns an empty result. The
+# guard is correct - a missing clustering package should degrade the feature,
+# not crash the app - but it also means an image built without this COPY
+# deploys green and silently performs no TLE clustering at all. Every build up
+# to 0.5.6 shipped that way.
+COPY tle_clustering/ /app/tle_clustering/
 
 # Runtime user. Numeric so the platform can resolve it without an /etc/passwd
 # lookup, and created BEFORE the suid sweep because useradd sets setgid on the

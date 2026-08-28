@@ -173,3 +173,46 @@ repository with `scripts/package-appstore.sh`. Rebuild and resubmit under it
 if any of these arrive: the analyser's real error text, the `.pre` resolution
 job's log, PSIRENS's `pyproject.toml`, or word that the analyser defect is
 fixed. Until then, do not spend another submission guessing at it.
+
+## 0.5.7
+
+Phase 1 of restoring what docker-only gave up. The 0.5.6 result drew a hard
+line through the remaining work: template selection follows manifest detection,
+so files that are not recognised manifests can be restored at no risk, and the
+manifests themselves cannot be restored at all without re-enabling the broken
+stage. This entry does everything on the safe side of that line.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Ship `tle_clustering/` and `COPY` it in both Dockerfiles | `spectre/astro/tle_preprocessing.py:150` imports it inside `try/except ImportError`, logs a warning and returns an empty result. Neither `Dockerfile` nor `Dockerfile.docker-only` ever carried a `COPY` for it, and the docker-only packager dropped the directory outright. So the deployed image has performed no TLE clustering in any build to date, and nothing failed, because the guard is doing its job. Pinned by three tests, including one that performs the app's own import rather than checking for files. | Not a gate hypothesis. This is a defect fix and its correctness does not depend on the pipeline's verdict. |
+| Test, Code Quality | **PROBE** | Ship `tests/`, `sonar-project.properties`, a generated `pytest.ini` and `.coveragerc`, and a `coverage.xml` produced by running the suite against the staged tree | None of those five filenames is one the analyser selects on, so the template cannot flip. 0.5.6 ran six stages with none of them present, which is consistent with the stages being template-gated but does not establish it: we shipped no suite and no Sonar config, so the observation cannot separate "the stage does not exist" from "the stage had no input". | Two readings, both useful. If Test and Code Quality stay absent, they are template-gated, the question closes permanently, and the only cost is archive size. If they appear and pass, two platform gates come back for nothing. If they appear and fail, we learn what they need, which is more than we know now. |
+
+**One probe, and the evidenced change is independent of it.** The clustering
+fix ships regardless of what the pipeline decides, and its verification is
+local: the import resolves and the Dockerfiles copy the package.
+
+**Why `coverage.xml` ships, and why that is not gaming the metric.**
+`sonar-project.properties` points at `coverage.xml`, which the platform's Test
+stage generates on the python template. A docker-only archive has no Test
+stage, so a Code Quality stage that did run would read a missing file and score
+zero, failing the gate on an absence rather than on the code. The report shipped
+here is generated inside this build by running the suite against the exact tree
+being zipped. It is not the working copy's file, and the packager fails the
+build if the suite does not pass or the report is not produced.
+
+**Configuration is derived, not duplicated.** `pytest.ini` and `.coveragerc`
+are written from `pyproject.toml` at package time. Copying the values by hand
+would let the shipped configuration drift from the one the repository tests
+under, which is how the suite silently stops testing what it claims to.
+
+**Contract tests now know which template they are in.** The suite travels
+inside both archives. Assertions about `requirements.txt` and `pyproject.toml`
+skip under docker-only, detected from both manifests being absent rather than
+one, so a python package that lost a manifest to a packaging bug still fails
+rather than skipping. `TestDockerOnlyContract` asserts the inverse property
+there, so the skip is not a hole.
+
+**Standing note, unchanged.** Phase 2, restoring the manifests, is atomic: any
+one of them flips the template and brings Dependency Scanning back with it.
+Do not attempt it until the analyser's real error text, the `.pre` resolution
+job's log, PSIRENS's `pyproject.toml`, or a fix arrives.
