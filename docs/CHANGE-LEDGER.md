@@ -125,3 +125,51 @@ is the user's call and it has been made.
 **Standing note, still in force.** Do not add a further Dependency Scanning
 change to a future entry unless the analyser's real error text, the `.pre`
 resolution job's log, or a file-level diff against a passing package arrives.
+
+### Outcome: PASSED
+
+Recorded 28 August 2026. Version 0.5.6 cleared every stage and deployed. The
+app is Active.
+
+The probe is discharged, and the shape of the result matters more than the
+pass. The pipeline ran **six stages, not nine**: Secret Detection, SAST Scan,
+Dockerfile Lint, Container Build, Container Scan, Deploy. Dependencies,
+Dependency Scanning, Test and Code Quality did not run at all.
+
+So the mechanism is now established rather than guessed. Template selection
+follows manifest detection inside the archive. Removing every recognised
+manifest did not satisfy the Dependency Scanning stage; it removed the entire
+python-template branch of the pipeline. That also closes the alternative the
+entry raised: selection is not archive-level or account-level configuration
+beyond our reach, because the contents of the zip changed which stages exist.
+
+**What this does not establish.** Nothing about why the analyser crashed. That
+question is untouched and the evidence still points at a platform defect: a
+non-zero exit with no `gl-sbom-*.cdx.json` and no
+`gl-dependency-scanning-report.json`, now confirmed from the platform side.
+The escalation at `docs/ESCALATION-DEPENDENCY-SCANNING.md` remains worth
+sending on its own merits.
+
+**What we are running without, stated plainly.** Four gates no longer exercise
+this submission:
+
+● **Test.** The suite does not ship, so the platform never runs it. It still
+  runs in this repository and in `scripts/check-quality.sh`, and the packager
+  still runs it in-package when building the python template.
+● **Code Quality.** No `sonar-project.properties` ships. Local reproduction of
+  all six quality-gate conditions stays in `scripts/check-quality.sh`.
+● **Dependencies and Dependency Scanning.** No manifest ships, so the platform
+  performs no dependency analysis of any kind. Our own coverage is
+  `scripts/audit-dependencies.sh`: `pip-audit` across all three hash-locked
+  files, a CycloneDX SBOM, and the offline `gemnasium-db` match.
+
+That is four platform gates traded for four local ones. The local checks are
+real and they run, but they are ours, not the platform's, and nobody outside
+this repository sees their output. Any future submission that restores the
+python template restores all four.
+
+**Standing note, revised.** The python template remains buildable from this
+repository with `scripts/package-appstore.sh`. Rebuild and resubmit under it
+if any of these arrive: the analyser's real error text, the `.pre` resolution
+job's log, PSIRENS's `pyproject.toml`, or word that the analyser defect is
+fixed. Until then, do not spend another submission guessing at it.

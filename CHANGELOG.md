@@ -32,6 +32,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Code Quality stages have nothing to run against. Both passed on 0.5.4 and
   0.5.5.
 
+### Result
+
+- **Accepted and deployed.** All stages passed and the app is Active. The
+  pipeline ran six stages, not nine: Secret Detection, SAST Scan, Dockerfile
+  Lint, Container Build, Container Scan, Deploy. Dependencies, Dependency
+  Scanning, Test and Code Quality did not run, which establishes that template
+  selection follows manifest detection inside the archive rather than any
+  setting above it.
+
+  Four platform gates are therefore no longer exercising this submission. The
+  equivalent local checks are `scripts/check-quality.sh` for tests and the six
+  quality-gate conditions, and `scripts/audit-dependencies.sh` for `pip-audit`,
+  the CycloneDX SBOM and the offline `gemnasium-db` match. They run, but they
+  are ours rather than the platform's.
+
 ### Unchanged
 
 - The application itself. The docker-only image carries the same `spectre/`
