@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.6] - 2026-08-28
+
+### Changed
+
+- **Submitted as the docker-only template rather than python.** Twelve
+  submissions have failed the Dependency Scanning stage with an identical
+  signature: two INFO lines, `exit status 1` in under ten seconds, no
+  CycloneDX SBOM, no report and no error text. Eliminated across those
+  submissions: vulnerable packages (`gemnasium-db` matched offline, 97
+  packages, 148 advisories, zero affected), vendored JavaScript, stray
+  subdirectory manifests, lockfile header form, analyser Python version,
+  `pyproject.toml` presence, manifest count at the package root (0.5.4 was
+  file-for-file identical to an application that clears the gate), network
+  access, and a package that no standard Python tool could build (0.5.5).
+
+  The docker-only archive ships no recognised Python manifest at any depth,
+  so the analyser has nothing to select. `requirements-runtime.txt` stays for
+  the image build and is installed under `--require-hashes`; it is not a
+  filename the analyser reads.
+
+  The trade is deliberate and recorded: no `tests/`, no
+  `sonar-project.properties` and no `requirements.txt` ship, so the Test and
+  Code Quality stages have nothing to run against. Both passed on 0.5.4 and
+  0.5.5.
+
+### Unchanged
+
+- The application itself. The docker-only image carries the same `spectre/`
+  tree, the same hash-locked runtime lock and the same connection-pool
+  resilience fix from 0.5.3 as the python-template build. The python template
+  remains buildable from this repository with
+  `scripts/package-appstore.sh` for the day the gate is understood.
+
 ## [0.5.5] - 2026-08-28
 
 ### Fixed

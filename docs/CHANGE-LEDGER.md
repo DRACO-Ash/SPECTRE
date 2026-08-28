@@ -91,3 +91,37 @@ Python tool can build is a real defect.
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.
 Anything else is a guess dressed as work.
+
+## 0.5.6
+
+0.5.5 declared `[build-system]` and fixed a package that no standard Python
+tool could build. The gate still failed, with the same signature it has shown
+twelve times: two INFO lines, `exit status 1` in under ten seconds, no SBOM,
+no report, no error text. That outcome discharges the 0.5.5 hypothesis exactly
+as the ledger predicted it would: the analyser does not call the PEP 517 build
+hook, and the fault is not in resolving our manifests.
+
+None of the three pieces of evidence the standing note asks for has arrived.
+The user has instead made a scoping decision: submit the docker-only template
+and stop paying for a gate we cannot see inside. That decision is recorded
+here as the reason for the change, and the classification below is honest
+about what it is.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Dependency Scanning | **PROBE** | Submit the docker-only package. No recognised Python manifest ships at any depth: no `pyproject.toml`, no `requirements.txt`, no `setup.py`, no lockfile the analyser reads. `requirements-runtime.txt` stays for the image build, under `--require-hashes`, and is not a name the analyser selects. | Partial and second-hand. The locally built upstream analyser exits 0 against this archive with "No compatible file found", and the same binary was shown miscalibrated on two of three control samples, so it is not proof. What is solid is the platform's own behaviour: the Dependencies stage runs only for the python template, and a docker-only app has no such stage. This is a guess about the platform's template detection, not about our code. | Then the analyser is selected by something other than a manifest at any depth - an archive-level or account-level template setting the package cannot influence - and no change to the contents of a zip will clear this gate. The next step would stop being a code change and become the escalation already drafted at `docs/ESCALATION-DEPENDENCY-SCANNING.md`. |
+
+**One probe, and it is the only change.** Nothing else in this release alters
+application behaviour. The docker-only artefact carries the same `spectre/`
+tree, the same hash-locked runtime lock and the same 0.5.3 connection-pool fix
+as 0.5.5.
+
+**The cost, stated plainly.** docker-only ships no `tests/`, no
+`sonar-project.properties` and no `requirements.txt`. The Test and Code
+Quality stages will have nothing to run against. Those two stages passed on
+0.5.4 and 0.5.5, so this trades two known passes for one unknown. That trade
+is the user's call and it has been made.
+
+**Standing note, still in force.** Do not add a further Dependency Scanning
+change to a future entry unless the analyser's real error text, the `.pre`
+resolution job's log, or a file-level diff against a passing package arrives.
