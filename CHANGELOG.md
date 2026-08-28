@@ -7,6 +7,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.2] - 2026-08-28
+
+### Fixed
+
+- **Code Quality.** `scripts/` and `.github/` no longer ship. The job log named
+  all five findings in build tooling: a security hotspot at
+  `scripts/preflight-gate.py:213` and code smells at `:34`, `:50`, `:234` and
+  `scripts/package-appstore.sh:246`. `sonar-project.properties` declares
+  `sonar.sources=spectre,tle_clustering`, so the platform is analysing the whole
+  archive and ignoring that declaration. Build and verification tooling is not
+  application code, is not needed at runtime or by the Test stage, and only
+  widens what the gate can object to. This also retrospectively explains the
+  shell smells reported against `scripts/bump-version.sh` in 0.4.6, which were
+  addressed by changing the script when the real fix was not shipping it.
+
+### Added
+
+- **`docs/CHANGE-LEDGER.md`, enforced by the packager.** Every version must have
+  an entry before it can be built, classifying each change as EVIDENCED, PROBE
+  or HYGIENE and stating what a failure would rule out. At most one PROBE per
+  submission, because two guesses in one upload cannot be told apart. A gate
+  with no evidence gets "NO HYPOTHESIS" rather than an invented fix. Verified by
+  removing the entry and watching the build refuse.
+
+### Not changed
+
+- **Dependency Scanning.** No hypothesis. Seven failures, the gate contract
+  satisfied, and every content hypothesis held so far has been wrong. The ledger
+  records that no further change ships for this gate without the analyser's
+  error text, the `.pre` resolution job's log, or a file-level diff against a
+  package that passes.
+
 ## [0.5.1] - 2026-08-27
 
 0.5.0 failed with the contract satisfied. This matches the remaining attribute

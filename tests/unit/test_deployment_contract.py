@@ -198,19 +198,26 @@ class TestVersionStamp:
 
     def test_pyproject_version_matches_the_package(self) -> None:
         """The gate contract wants a [project] table, which rules out a dynamic
-        version. The two literals must therefore agree, and only
-        scripts/bump-version.sh may write either of them.
+        version. The two literals must therefore agree.
+
+        pyproject.toml ships, so this holds inside the package too and must
+        never be allowed to skip.
         """
         from spectre import __version__
 
-        body = _repo_only("pyproject.toml").read_text(encoding="utf-8")
+        body = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         declared = re.search(r'^version = "([^"]+)"$', body, re.MULTILINE)
         assert declared, "pyproject.toml must declare a literal version"
         assert declared.group(1) == __version__, (
             f"pyproject.toml says {declared.group(1)}, spectre/__init__.py says {__version__}"
         )
+
+    def test_only_the_bump_script_writes_the_version(self) -> None:
+        """Repository-only: scripts/ does not ship, so the platform never
+        analyses our build tooling as if it were application code."""
         bump = _repo_only("scripts/bump-version.sh").read_text(encoding="utf-8")
         assert "pyproject.toml" in bump, "the bump script must rewrite pyproject.toml too"
+        assert "spectre/__init__.py" in bump, "and the package's own version"
 
 
 class TestDatabasePortability:
@@ -468,12 +475,14 @@ class TestPipCompileLockContract:
         lockfile. The runtime pair must NOT use recognised names, so that the
         gate reads the test-inclusive superset rather than the narrower runtime
         set: it must scan at least what the image ships, never less.
-        """
-        packager = _repo_only("scripts/package-appstore.sh").read_text(encoding="utf-8")
-        allowlist = packager.split('PATHS="', 1)[1].split('"', 1)[0].split()
 
-        for required in ("pyproject.toml", "requirements.txt"):
-            assert required in allowlist, f"{required} must ship: the gate contract requires it"
+        Asserted against the actual root rather than the packager's allowlist,
+        so it is just as true inside the uploaded artefact as in the repository.
+        """
+        root_files = {p.name for p in _REPO_ROOT.iterdir() if p.is_file()}
+
+        for required in ("pyproject.toml", "requirements.txt", "requirements-runtime.txt"):
+            assert required in root_files, f"{required} must be at the root: the contract requires it"
 
         # Lockfile formats the analyser reads that this project does not use.
         # Shipping one would hand it a second, unmaintained view of the set.
@@ -487,11 +496,9 @@ class TestPipCompileLockContract:
             "setup.py",
             "setup.cfg",
         }
-        shipped = sorted(foreign.intersection(allowlist))
-        assert not shipped, f"these would give the analyser a competing view: {shipped}"
+        present = sorted(foreign.intersection(root_files))
+        assert not present, f"these would give the analyser a competing view: {present}"
 
-        # The runtime lock ships, but under a name the analyser does not read.
-        assert "requirements-runtime.txt" in allowlist, "the image needs its pinned set"
         recognised_names = {"requirements.txt", "requirements.pip", "requires.txt", "requirements.in"}
         assert "requirements-runtime.txt" not in recognised_names, (
             "the runtime lock must not use a name the analyser recognises"

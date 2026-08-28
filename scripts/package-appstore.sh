@@ -88,8 +88,6 @@ CODEOWNERS
 spectre
 tests
 tle_clustering
-scripts
-.github
 "
 
 if [ "$MODE" = "docker-only" ]; then
@@ -99,7 +97,7 @@ if [ "$MODE" = "docker-only" ]; then
     # stage, so shipping a suite and its configuration would only add files a
     # reviewer must account for.
     DROP="pyproject.toml requirements.in requirements.txt sonar-project.properties
-tests tle_clustering .github .pre-commit-config.yaml .coveragerc"
+tests tle_clustering .pre-commit-config.yaml .coveragerc"
     DROP="$DROP pytest.ini"
     KEPT=""
     for p in $PATHS; do
@@ -127,6 +125,14 @@ done
 # gate never reads it. That is why it must stay a strict, version-identical
 # subset of requirements.txt: otherwise the image would ship a version no stage
 # examined. scripts/check-quality.sh asserts the subset.
+
+# scripts/ and .github/ are deliberately ABSENT. The platform's Code Quality
+# stage analyses everything in the archive as application code: it flagged a
+# security hotspot and three smells in scripts/preflight-gate.py, and a smell in
+# this file, even though sonar-project.properties declares
+# sonar.sources=spectre,tle_clustering. Our source declaration is not honoured.
+# Build and verification tooling is not application code, is not needed at
+# runtime or by the Test stage, and only widens what the gate can object to.
 
 # ── Denylist ──────────────────────────────────────────────────────────────────
 # Removed after the copy so a nested match cannot survive. Each has a reason.
@@ -181,6 +187,28 @@ LEAKS=$(find "$STAGE" \( -name '.env' -o -name '*.pem' -o -name '*.key' -o -name
 if grep -rIlE '^SECRET_KEY=.+|^SPECTRE_ADMIN_PASS=.+' "$STAGE" 2>/dev/null | head -1 | grep -q .; then
     echo "FAIL: a populated secret value is present in the package"
     exit 1
+fi
+
+# ── Change ledger ─────────────────────────────────────────────────────────────
+# Refuse to build a version with no ledger entry. The ledger forces each change
+# to be classified EVIDENCED, PROBE or HYGIENE before it ships, and to state
+# what a failure would tell us. Seven submissions were spent on changes that
+# taught nothing when they failed; this is the control against an eighth.
+LEDGER="docs/CHANGE-LEDGER.md"
+if [ -f "$LEDGER" ]; then
+    if ! grep -qxF "## ${VERSION}" "$LEDGER"; then
+        echo "FAIL: no entry for ${VERSION} in ${LEDGER}."
+        echo "      Add one before building. It must classify every change as"
+        echo "      EVIDENCED, PROBE or HYGIENE and say what a failure would rule out."
+        echo "      A gate with no evidence gets 'NO HYPOTHESIS', not an invented fix."
+        exit 1
+    fi
+    PROBES=$(sed -n "/^## ${VERSION}\$/,/^## /p" "$LEDGER" | grep -c "\*\*PROBE\*\*" || true)
+    if [ "$PROBES" -gt 1 ]; then
+        echo "FAIL: ${VERSION} carries ${PROBES} probes. A submission with two guesses"
+        echo "      cannot tell you which one mattered. Ship one at a time."
+        exit 1
+    fi
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
