@@ -7,6 +7,41 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.5] - 2026-08-28
+
+### Fixed
+
+- **The package could not be built by any standard Python tool.**
+  `pyproject.toml` declared `[project]` but no `[build-system]`, so PEP 517
+  fell back to setuptools, whose flat-layout auto-discovery refuses a project
+  with more than one importable top-level directory:
+
+  ```
+  error: Multiple top-level packages discovered in a flat-layout:
+         ['spectre', 'tle_clustering']
+  ```
+
+  It fails in seconds, with the message on stderr. Reproduced with
+  `pip install --dry-run --no-deps .` against the package root, and it returns
+  the moment the fix is reverted.
+
+  `[build-system]` now names setuptools explicitly and
+  `[tool.setuptools.packages.find]` declares the two packages, excluding
+  `tests`. Metadata builds cleanly and `pip-compile pyproject.toml` resolves
+  with zero errors.
+
+  Whether the App Store analyser calls that build hook is inference, not proof.
+  It matches the failure signature exactly and is consistent with PSIRENS
+  passing, since a single package under `src/` auto-discovers unambiguously.
+  Either way a package no standard tool can build is a defect worth fixing.
+
+### Added
+
+- **`TestBuildBackendContract`.** Asserts the backend is declared rather than
+  defaulted, and that packages are declared explicitly whenever more than one
+  top-level package exists. Verified by removing the declaration and watching
+  two tests fail.
+
 ## [0.5.4] - 2026-08-28
 
 The package root is now identical, file for file, to PSIRENS, an application

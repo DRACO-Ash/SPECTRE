@@ -13,9 +13,35 @@
 #
 # The version is rewritten by scripts/bump-version.sh. Never edit it by hand.
 
+# The build backend is declared explicitly, and so are the packages.
+#
+# Without [build-system], PEP 517 defaults to setuptools. Any resolver that
+# reads this file calls the build hook to get requirements, and setuptools
+# flat-layout auto-discovery then sees TWO importable top-level directories and
+# refuses outright:
+#
+#     error: Multiple top-level packages discovered in a flat-layout:
+#            ['spectre', 'tle_clustering']
+#
+# That is a hard, immediate failure with the message on stderr. It is the most
+# likely explanation for a Dependency Scanning job that exits 1 after a few
+# seconds with no SBOM and no error text, and it is reproduced by
+# `pip install --dry-run --no-deps .` against the package root.
+#
+# PSIRENS, which clears this gate, has a single package under src/, so its
+# auto-discovery is unambiguous. Declaring the packages here achieves the same
+# certainty without restructuring the repository.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["spectre*", "tle_clustering*"]
+namespaces = false
+
 [project]
 name = "spectre"
-version = "0.5.4"
+version = "0.5.5"
 description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
 

@@ -503,3 +503,59 @@ class TestPipCompileLockContract:
         assert "requirements-runtime.txt" not in recognised_names, (
             "the runtime lock must not use a name the analyser recognises"
         )
+
+
+class TestBuildBackendContract:
+    """A resolver reading pyproject.toml must be able to build our metadata.
+
+    Without an explicit [build-system], PEP 517 falls back to setuptools, and
+    setuptools flat-layout auto-discovery refuses a project with more than one
+    importable top-level directory:
+
+        error: Multiple top-level packages discovered in a flat-layout:
+               ['spectre', 'tle_clustering']
+
+    It is a hard, immediate failure and the message goes to stderr. Reproduced
+    with `pip install --dry-run --no-deps .` against the package root, and it
+    returns the moment the declaration below is removed.
+    """
+
+    def _pyproject(self) -> str:
+        return (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    def _top_level_packages(self) -> list[str]:
+        return sorted(
+            d.name
+            for d in _REPO_ROOT.iterdir()
+            if d.is_dir() and (d / "__init__.py").is_file() and not d.name.startswith(".")
+        )
+
+    def test_build_backend_is_declared_not_defaulted(self) -> None:
+        body = self._pyproject()
+        assert "[build-system]" in body, (
+            "declare the backend rather than relying on the PEP 517 default"
+        )
+        assert "build-backend" in body
+
+    def test_packages_are_declared_when_the_layout_is_ambiguous(self) -> None:
+        """More than one top-level package means auto-discovery cannot guess."""
+        packages = self._top_level_packages()
+        if len(packages) < 2:
+            return  # a single package discovers unambiguously
+        body = self._pyproject()
+        assert "[tool.setuptools.packages.find]" in body, (
+            f"{len(packages)} top-level packages exist ({packages}), so setuptools "
+            "auto-discovery will refuse. Declare them explicitly."
+        )
+        for package in packages:
+            if package == "tests":
+                continue
+            assert f'"{package}*"' in body or f'"{package}"' in body, (
+                f"{package} is importable at the root but is not in the include list"
+            )
+
+    def test_tests_are_not_declared_as_a_shipped_package(self) -> None:
+        """tests/ is importable but must never be part of the distribution."""
+        body = self._pyproject()
+        include = body.split("[tool.setuptools.packages.find]", 1)[1].split("\n\n", 1)[0]
+        assert '"tests' not in include, "tests/ must not be declared as a package"

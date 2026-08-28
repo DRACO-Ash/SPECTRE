@@ -67,6 +67,26 @@ with evidence for the Dependency Scanning gate.
 affect the analyser, because none of those filenames is one it reads. So a
 failure still isolates cleanly to the manifest hypothesis.
 
+## 0.5.5
+
+0.5.4 failed with the root identical to PSIRENS, which rules out manifest count
+at the root. The ledger's recorded next step was the layout difference, and
+examining it produced a reproduced, named error.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Dependency Scanning | **EVIDENCED** | Declare `[build-system]` and `[tool.setuptools.packages.find]` in `pyproject.toml` | Our package could not be built by any standard tool. `pip install --dry-run --no-deps .` against the package root fails in seconds with `error: Multiple top-level packages discovered in a flat-layout: ['spectre', 'tle_clustering']`. With no `[build-system]`, PEP 517 defaults to setuptools, and its auto-discovery refuses an ambiguous flat layout. Any resolver that reads pyproject.toml calls that hook. Now builds cleanly, and `pip-compile pyproject.toml` resolves with zero errors. | Then the analyser does not call the build hook, and the fault is in how it parses the two manifests rather than in resolving them. The next evidence needed would be PSIRENS's `pyproject.toml` contents, 424 bytes and non-sensitive, to compare structure directly. |
+
+**Honest limit on the classification.** The error is reproduced and the fix is
+verified in both directions. What is *inferred* is that the analyser calls the
+PEP 517 build hook. It fits the signature exactly - a hard failure in seconds
+with the message on stderr - and it is consistent with PSIRENS passing, since a
+single package under `src/` auto-discovers unambiguously. But it is not proven
+against the platform's binary.
+
+This is worth shipping regardless of the gate: a package that no standard
+Python tool can build is a real defect.
+
 **Standing note on Dependency Scanning.** Do not add a change for this gate to a
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.
