@@ -216,6 +216,40 @@ def _resolve_port() -> int:
     return port if _MIN_PORT <= port <= _MAX_PORT else DEFAULT_PORT
 
 
+# Connection pool recycling, in seconds.
+#
+# Reproduced against PostgreSQL 16: with no pool arguments, a backend closed
+# server-side (an idle timeout, a proxy, a failover) stays in SQLAlchemy's pool
+# and the next checkout raises
+#
+#     InterfaceError: <asyncpg...InterfaceError>: connection is closed
+#
+# on its first statement. That is what the deployed app hit on login, which is
+# a low-traffic path and so the likeliest place for a long-idle connection to
+# be handed out.
+#
+# pool_pre_ping is the cure and is applied unconditionally: SQLAlchemy tests a
+# connection on checkout and transparently replaces a dead one. Recycling is
+# the belt to that brace, discarding connections before an intermediary is
+# likely to. 300 seconds sits below the common 350 to 600 second idle cut-off
+# used by managed PostgreSQL proxies. Override with SPECTRE_DB_POOL_RECYCLE.
+DEFAULT_POOL_RECYCLE_SECONDS = 300
+
+# 0 disables recycling; negative is meaningless, so it is treated as the default.
+_MIN_POOL_RECYCLE = 0
+
+
+def _resolve_pool_recycle() -> int:
+    raw = os.environ.get("SPECTRE_DB_POOL_RECYCLE", "").strip()
+    if not raw:
+        return DEFAULT_POOL_RECYCLE_SECONDS
+    try:
+        seconds = int(raw)
+    except ValueError:
+        return DEFAULT_POOL_RECYCLE_SECONDS
+    return seconds if seconds >= _MIN_POOL_RECYCLE else DEFAULT_POOL_RECYCLE_SECONDS
+
+
 @dataclass
 class Settings:
     """Runtime configuration for a SPECTRE session.
@@ -238,6 +272,7 @@ class Settings:
     port: int = field(default_factory=_resolve_port)
     sqlite_dir: str = field(default_factory=_resolve_sqlite_dir)
     session_cookie_secure: bool = field(default_factory=_resolve_cookie_secure)
+    db_pool_recycle: int = field(default_factory=_resolve_pool_recycle)
     spectre_admin_user: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_USER", "admin")
     )

@@ -17,7 +17,41 @@ _settings = get_settings()
 # translated into connect arguments or it fails with a bare TypeError.
 _url, _connect_args = split_database_url(_settings.database_url)
 
-engine = create_async_engine(_url, echo=False, connect_args=_connect_args)
+# Pool arguments. Reproduced against PostgreSQL 16: without pool_pre_ping, a
+# backend the server has closed stays in the pool and the next checkout fails
+# on its first statement with
+#
+#     InterfaceError: <asyncpg...InterfaceError>: connection is closed
+#
+# which is what the deployed app hit on login. pool_pre_ping makes SQLAlchemy
+# test the connection on checkout and silently replace a dead one; pool_recycle
+# discards connections before an intermediary is likely to.
+#
+# Kept a pure function so it can be tested without reloading this module. The
+# engine is built at import time and other modules bind to it, so a reload in a
+# test replaces an object the rest of the suite is already holding.
+def build_pool_kwargs(url: str, recycle_seconds: int) -> dict[str, object]:
+    """Return the pool arguments appropriate to *url*."""
+    kwargs: dict[str, object] = {
+        "pool_pre_ping": True,
+        "pool_recycle": recycle_seconds,
+    }
+    # Sizing is a queue-pool concept for a networked server. SQLite is local and
+    # single-writer, so the arguments are meaningless there.
+    if not url.startswith("sqlite"):
+        kwargs["pool_size"] = 5
+        kwargs["max_overflow"] = 10
+        # Do not queue behind an exhausted pool indefinitely; fail the request
+        # rather than hanging the worker that is holding it.
+        kwargs["pool_timeout"] = 30
+    return kwargs
+
+
+_pool_kwargs = build_pool_kwargs(_url, _settings.db_pool_recycle)
+
+engine = create_async_engine(
+    _url, echo=False, connect_args=_connect_args, **_pool_kwargs
+)
 
 AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine, expire_on_commit=False

@@ -36,6 +36,14 @@ no hypothesis". Say that instead of inventing one.
 ● **Code Quality: outcome not yet seen.** This is the one thing that would tell
   us whether the evidenced fix in 0.5.2 landed. Needed before the next entry.
 
+## 0.5.3
+
+| Gate / defect | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime: login crash | **EVIDENCED** | `pool_pre_ping`, `pool_recycle` and bounded sizing on the async engine | The pod traceback names it: `asyncpg...InterfaceError: connection is closed` on `SELECT users... WHERE users.username = $1`. Reproduced against a real PostgreSQL 16 by terminating the backend server-side, then fixed and re-verified using the app's own engine and the real login query. | Then the connection is being closed mid-statement rather than while idle in the pool, which pre-ping cannot see. The next step would be a retry at the session boundary, not more pool tuning. |
+| Code Quality | **CONFIRMED FIXED** | None needed | 0.5.2 passed. The evidenced fix in that version (not shipping `scripts/`) landed. | n/a |
+| Dependency Scanning | **NO HYPOTHESIS** | None | Nine failures. 8 of 9 stages now pass. Still no SBOM, no report, no error text. | n/a. Unchanged position: nothing ships for this gate without the analyser's error text, the `.pre` resolution job's log, or a diff against a passing package. |
+
 **Standing note on Dependency Scanning.** Do not add a change for this gate to a
 future entry unless one of these arrives: the analyser's real error text, the
 `.pre` resolution job's log, or a file-level diff against a package that passes.

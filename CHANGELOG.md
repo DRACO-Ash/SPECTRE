@@ -7,6 +7,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.3] - 2026-08-28
+
+### Fixed
+
+- **Login crashed on the deployed app with `connection is closed`.** The async
+  engine was created with no pool arguments, so a PostgreSQL backend closed
+  server-side, by an idle timeout, a proxy or a failover, stayed in SQLAlchemy's
+  pool and was handed to the next caller. The first statement then failed with
+  `asyncpg...InterfaceError: connection is closed`. Login is a low-traffic path,
+  which is why it surfaced there.
+
+  The engine now sets `pool_pre_ping`, so SQLAlchemy tests a connection on
+  checkout and transparently replaces a dead one, and `pool_recycle` (300s,
+  `SPECTRE_DB_POOL_RECYCLE`) to discard connections before an intermediary is
+  likely to. PostgreSQL also gets bounded sizing: pool 5, overflow 10, a 30
+  second checkout timeout so an exhausted pool fails the request rather than
+  hanging the worker. SQLite is deliberately given neither, since sizing is a
+  queue-pool concept for a networked server.
+
+  Reproduced and verified against a real PostgreSQL 16: the backend is
+  terminated server-side, then the app's own engine runs the real login query.
+  Before the change that raises the production error; after it, it recovers.
+  `scripts/verify-db-resilience.py` is that check, kept runnable.
+
+### Added
+
+- **`tests/unit/test_db_pool_contract.py`.** The pool decision is a pure
+  function, `build_pool_kwargs`, so it can be asserted without reloading the
+  data layer. An earlier draft of this test did reload it, which handed the rest
+  of the suite an engine with no tables; the failures surfaced far from the
+  cause. Nine assertions, all running everywhere including inside the package.
+
 ## [0.5.2] - 2026-08-28
 
 ### Fixed
