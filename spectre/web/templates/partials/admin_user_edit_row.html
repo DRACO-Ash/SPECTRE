@@ -9,8 +9,8 @@
   </td>
   <td colspan="3" style="padding:var(--spectre-space-3) var(--spectre-space-4)">
     <form hx-post="/admin/users/{{ u.id }}"
-          hx-target="#user-row-{{ u.id }}"
-          hx-swap="outerHTML"
+          hx-target="#user-table-region"
+          hx-swap="innerHTML"
           style="display:flex; flex-wrap:wrap; gap:var(--spectre-space-3); align-items:flex-end">
       <div>
         <label class="spectre-label" for="edit-role-{{ u.id }}">Role</label>

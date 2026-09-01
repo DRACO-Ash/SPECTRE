@@ -726,7 +726,7 @@ class TestBuildContextContract:
         patterns = []
         for raw in body.splitlines():
             line = raw.strip()
-            if not line or line.startswith("#") or line.startswith("!"):
+            if not line or line.startswith(("#", "!")):
                 continue
             if "*" in line or "?" in line:
                 continue

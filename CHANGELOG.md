@@ -7,6 +7,59 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.9] - 2026-09-01
+
+### Fixed
+
+- **The user management table never updated after a change.** Creating a user
+  appeared to do nothing: the row did not appear and the form did not clear, so
+  it looked as though the account had not been created. It had been. The POST
+  returned 200 with the new row and the flash message in the body, and the
+  failure was entirely client-side:
+
+  ```
+  htmx:swapError
+  TypeError: e.querySelectorAll is not a function
+  ```
+
+  htmx 1.9.12 chooses its parsing path from the first tag of a response. A
+  response beginning with `<tr>` is wrapped in `<table><tbody>` before parsing,
+  and the HTML parser then foster-parents the trailing out-of-band flash
+  `<div>` out of the table. htmx handed a non-element to its out-of-band code,
+  which threw and abandoned the entire swap.
+
+  Reproduced in Chromium against a running instance. Measured blast radius:
+  create, save-edit and delete all failed; opening and cancelling an edit were
+  clean, because those responses carry no flash. The rule was exact - every
+  admin response carrying a flash was broken, every one without it worked.
+
+  Fixed by rooting those responses at the whole table region rather than a bare
+  run of rows, so the flash stays a legal sibling and the table parsing path is
+  never entered. All three paths now swap live with zero console errors.
+
+- **Two plain POST forms submitted without a CSRF token**, and were rejected
+  with `{"detail":"CSRF validation failed."}`:
+
+  ● The sidebar **Return to Operations** button in training mode, which
+    stranded operators inside the training system. The nav-bar copy of the same
+    button did carry the field, which is why it survived review.
+  ● **Sign Out** on the user management page, which had not been reported yet
+    and was found by auditing every template.
+
+  HTMX requests take the token from `hx-headers` on `<body>`; a plain
+  `<form method="post">` does not, so it must carry the hidden field. Both now
+  submit cleanly. `/login` is the only remaining plain POST form without one,
+  and it is exempt by design.
+
+### Added
+
+- A template-wide guard asserting every plain POST form carries a
+  `csrf_token` field unless its action is exempt. Verified in both directions:
+  removing the field again fails the test naming the exact file and line.
+- Response-shape tests asserting no mutating admin endpoint returns a
+  table-scoped root element while carrying a flash. Asserted on the wire, not
+  in the template, because the defect is a property of the bytes htmx receives.
+
 ## [0.5.8] - 2026-08-28
 
 ### Fixed

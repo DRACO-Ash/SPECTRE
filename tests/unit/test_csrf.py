@@ -6,9 +6,11 @@ regression here silently unlocks every state-changing endpoint at once.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from spectre.web.csrf import make_csrf_token, verify_csrf_token
+from spectre.web.csrf import _EXEMPT_PATHS, make_csrf_token, verify_csrf_token
 
 
 class TestTokenBinding:
@@ -118,3 +120,66 @@ class TestPasswordHashing:
         assert "s3cret-value" not in hash_password("s3cret-value")
 
 
+
+
+class TestTemplateFormsCarryTheToken:
+    """Every plain POST form must ship a csrf_token field.
+
+    HTMX requests get the token from hx-headers on <body>. A plain
+    <form method="post"> does not, so it must carry the hidden field or
+    require_csrf rejects it with 403 "CSRF validation failed."
+
+    Two forms shipped without one. The sidebar "Return to Operations" button
+    stranded operators inside training mode, and Sign Out on the user
+    management page failed the same way. Both were invisible to the suite
+    because nothing asserted the pair had to agree, and invisible in review
+    because the nav-bar copy of the very same button did carry the field.
+    """
+
+    import re as _re
+
+    _FORM_TAG = _re.compile(r"<form\b[^>]*>", _re.S)
+    _ACTION = _re.compile(r'action="([^"]+)"')
+    _HX_VERBS = ("hx-post", "hx-put", "hx-patch", "hx-delete")
+
+    def _plain_post_forms(self) -> list[tuple[str, int, str, bool]]:
+        root = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates"
+        found = []
+        for path in sorted(root.rglob("*.html")):
+            body_text = path.read_text(encoding="utf-8")
+            for match in self._FORM_TAG.finditer(body_text):
+                tag = match.group(0)
+                if any(verb in tag for verb in self._HX_VERBS):
+                    continue  # HTMX supplies the header
+                if 'method="post"' not in tag.lower():
+                    continue
+                close = body_text.find("</form>", match.end())
+                inner = body_text[match.end() : close if close != -1 else None]
+                action_match = self._ACTION.search(tag)
+                found.append((
+                    str(path.relative_to(root)),
+                    body_text[: match.start()].count("\n") + 1,
+                    action_match.group(1) if action_match else "",
+                    "csrf_token" in inner,
+                ))
+        return found
+
+    def test_every_plain_post_form_carries_the_token(self) -> None:
+        offenders = [
+            f"{name}:{line} action={action or '(none)'}"
+            for name, line, action, has_token in self._plain_post_forms()
+            if not has_token and action not in _EXEMPT_PATHS
+        ]
+        assert not offenders, (
+            "these forms submit without a CSRF token and will be rejected with 403: "
+            f"{offenders}. Add <input type=\"hidden\" name=\"csrf_token\" "
+            'value="{{ csrf_token }}"> inside the form.'
+        )
+
+    def test_the_guard_can_actually_see_forms(self) -> None:
+        """A scanner that silently matches nothing is worse than no scanner."""
+        forms = self._plain_post_forms()
+        assert len(forms) >= 4, f"expected several plain POST forms, found {len(forms)}"
+        assert any(action == "/login" for _, _, action, _ in forms), (
+            "the login form should be among them, as the exempt-path case"
+        )

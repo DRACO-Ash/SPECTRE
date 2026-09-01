@@ -31,26 +31,27 @@ def _table_response(
     current_user: User,
     flash: dict[str, str] | None = None,
 ) -> HTMLResponse:
-    """Return tbody rows + OOB flash update as a single HTMX response."""
+    """Return the whole table region plus the out-of-band flash.
+
+    The region is a <table>, not a bare run of <tr>, and that is load-bearing.
+    htmx 1.9.12 decides how to parse a response from its first tag: a response
+    starting with <tr> is wrapped in <table><tbody> before parsing, at which
+    point the HTML parser foster-parents the trailing flash <div> out of the
+    table. htmx then handed a non-element to its out-of-band code, which threw
+    "e.querySelectorAll is not a function" and abandoned the whole swap. The
+    server had already committed the change, so a created, renamed or deleted
+    user was invisible until the page was reloaded by hand.
+
+    Rooting the response at <div>/<table> keeps the flash a legal sibling and
+    keeps the parser off the table path entirely. Every mutating endpoint on
+    this page returns this shape for that reason; do not switch one back to a
+    bare row to save a few bytes.
+    """
     tmpl = get_templates()
     ctx: dict[str, Any] = {"users": users, "current_user": current_user, "request": request}
-    table_html = tmpl.get_template("partials/admin_user_table.html").render(ctx)
+    table_html = tmpl.get_template("partials/admin_user_table_region.html").render(ctx)
     flash_html = tmpl.get_template("partials/admin_flash.html").render({"flash": flash, "request": request})
     return HTMLResponse(table_html + flash_html)
-
-
-def _row_response(
-    request: Request,
-    user: User,
-    current_user: User,
-    flash: dict[str, str] | None = None,
-) -> HTMLResponse:
-    """Return a single display row + OOB flash update."""
-    tmpl = get_templates()
-    ctx: dict[str, Any] = {"u": user, "current_user": current_user, "request": request}
-    row_html = tmpl.get_template("partials/admin_user_row.html").render(ctx)
-    flash_html = tmpl.get_template("partials/admin_flash.html").render({"flash": flash, "request": request})
-    return HTMLResponse(row_html + flash_html)
 
 
 async def _all_users(db: AsyncSession) -> list[User]:
@@ -177,14 +178,17 @@ async def update_user(
         return HTMLResponse("<tr><td colspan='5'>User not found.</td></tr>", status_code=404)
 
     if role not in _VALID_ROLES:
-        return _row_response(request, user, current_user, flash={"type": "error", "message": "Invalid role."})
+        return _table_response(
+            request, await _all_users(db), current_user,
+            flash={"type": "error", "message": "Invalid role."},
+        )
 
     # Guard: cannot demote the last admin
     if user.role == "admin" and role != "admin":
         admin_count = await _admin_count(db)
         if admin_count <= 1:
-            return _row_response(
-                request, user, current_user,
+            return _table_response(
+                request, await _all_users(db), current_user,
                 flash={"type": "error", "message": "Cannot demote the last admin account."},
             )
 
@@ -205,8 +209,8 @@ async def update_user(
         )
 
     label = " and ".join(changed) if changed else "no changes"
-    return _row_response(
-        request, user, current_user,
+    return _table_response(
+        request, await _all_users(db), current_user,
         flash={"type": "success", "message": f"User '{user.username}' updated ({label})."},
     )
 

@@ -41,7 +41,7 @@ namespaces = false
 
 [project]
 name = "spectre"
-version = "0.5.8"
+version = "0.5.9"
 description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
 

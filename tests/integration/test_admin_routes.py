@@ -273,3 +273,85 @@ class TestDeleteUser:
                 assert demote_resp.status_code == 200
                 assert b"last admin" in demote_resp.content.lower()
                 break
+
+
+class TestFlashResponseShape:
+    """Every mutating admin response must be rooted at a non-table element.
+
+    htmx 1.9.12 chooses its parsing path from the first tag of the response. A
+    response beginning with <tr> is wrapped in <table><tbody> before parsing,
+    and the HTML parser then foster-parents the out-of-band flash <div> out of
+    the table. htmx handed the result to its OOB code, which threw
+    "e.querySelectorAll is not a function" and abandoned the entire swap.
+
+    The server had already committed the change, so the failure was invisible
+    server-side: created, edited and deleted users simply never appeared until
+    the page was reloaded by hand, and the create form never cleared. Reproduced
+    in Chromium against a live instance before the fix, and confirmed clean
+    after it.
+
+    Asserted on the wire rather than in the template, because the defect is a
+    property of the bytes htmx receives.
+    """
+
+    @staticmethod
+    def _first_tag(body: bytes) -> str:
+        text = body.decode("utf-8", "replace").lstrip()
+        assert text.startswith("<"), f"response does not start with a tag: {text[:60]!r}"
+        return text[1 : text.index(">")].split()[0].lower()
+
+    # Tags the HTML parser only accepts inside a table. A response rooted at one
+    # of these cannot also carry the flash div as a sibling.
+    _TABLE_SCOPED = frozenset({"tr", "td", "th", "tbody", "thead", "tfoot", "caption", "col", "colgroup"})
+
+    def test_create_response_is_not_table_scoped(self, client: object) -> None:
+        cookies = _admin_session(client)
+        resp = client.post(  # type: ignore[attr-defined]
+            "/admin/users",
+            data={"username": "shape_probe", "password": "hunter2", "role": "operator"},
+            cookies=cookies,
+            headers=csrf_headers(cookies),
+        )
+        assert resp.status_code == 200
+        assert b'id="admin-flash"' in resp.content, "the response must carry the flash"
+        assert self._first_tag(resp.content) not in self._TABLE_SCOPED
+
+    def test_update_response_is_not_table_scoped(self, client: object) -> None:
+        cookies = _admin_session(client)
+        client.post(  # type: ignore[attr-defined]
+            "/admin/users",
+            data={"username": "shape_update", "password": "hunter2", "role": "operator"},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+        import re
+
+        ids = re.findall(rb'id="user-row-(\d+)"', listing.content)
+        assert ids, "no user rows rendered"
+        resp = client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{int(ids[-1])}",
+            data={"role": "operator", "new_password": ""},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        assert resp.status_code == 200
+        assert b'id="admin-flash"' in resp.content
+        assert self._first_tag(resp.content) not in self._TABLE_SCOPED
+
+    def test_delete_response_is_not_table_scoped(self, client: object) -> None:
+        cookies = _admin_session(client)
+        client.post(  # type: ignore[attr-defined]
+            "/admin/users",
+            data={"username": "shape_delete", "password": "hunter2", "role": "operator"},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+        import re
+
+        ids = re.findall(rb'id="user-row-(\d+)"', listing.content)
+        resp = client.request(  # type: ignore[attr-defined]
+            "DELETE", f"/admin/users/{int(ids[-1])}",
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        assert resp.status_code == 200
+        assert b'id="admin-flash"' in resp.content
+        assert self._first_tag(resp.content) not in self._TABLE_SCOPED

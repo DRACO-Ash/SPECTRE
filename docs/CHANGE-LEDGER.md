@@ -269,3 +269,29 @@ the remaining change is a named, reproduced build failure.
 stays parked until the analyser's real error text, the `.pre` resolution job's
 log, PSIRENS's `pyproject.toml`, or a fix arrives. The 0.5.7 result sharpens
 what it would buy: all four gates return together, or none does.
+
+## 0.5.9
+
+Three defects reported from the live console. Two are fixed here and both were
+reproduced in a real browser against a running instance before a line was
+changed. The third, self-service password reset, is a feature and is not in
+this release.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Root every flash-carrying admin response at a `<div>`/`<table>` instead of a bare `<tr>` | Reproduced in Chromium: the create POST returned 200 with the new row and the flash in the body, and htmx threw `htmx:swapError` / `TypeError: e.querySelectorAll is not a function`, abandoning the swap. htmx 1.9.12 picks its parsing path from the first tag; a `<tr>`-rooted response is wrapped in `<table><tbody>`, and the parser then foster-parents the sibling flash `<div>` out of the table. Measured blast radius: create, save-edit and delete all failed; open-edit and cancel, which carry no flash, were clean. After the fix all three swap live with zero console errors. | The defect would have to be elsewhere in the swap, and the console now reports it directly. |
+| Runtime correctness | **EVIDENCED** | Add the `csrf_token` field to the two plain POST forms that lacked it | The reported symptom was `{"detail":"CSRF validation failed."}` from the sidebar Return to Operations button. A template-wide audit found the same omission on Sign Out in `admin/users.html`, which nobody had reported yet. Both now submit cleanly in the browser; the third form without a field is `/login`, which is in `_EXEMPT_PATHS`. | Not applicable: verified end to end in a browser, and guarded by a test that fails with the exact filename and line when the field is removed. |
+
+**Why not the one-line fix.** htmx 1.9.12 has `htmx.config.useTemplateFragments`,
+which parses every response inside a `<template>` and sidesteps table
+foster-parenting entirely. It is the documented remedy and htmx 2 makes it the
+default. It was rejected here because it changes fragment parsing for every
+swap in the application, and this session could not smoke-test all of them. The
+structural fix touches only the user management page and cannot regress
+anything else. The flag remains available if a wider pass is ever run.
+
+**Both guards were tested in both directions.** Reinstating the removed
+`csrf_token` field makes the audit fail naming `training.html:131
+action=/training/leave`; restoring it passes. The response-shape tests assert
+on the wire rather than the template, because the defect is a property of the
+bytes htmx receives, not of the markup that produced them.
