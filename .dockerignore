@@ -5,6 +5,7 @@
 .github
 .gitignore
 .pre-commit-config.yaml
+.claude
 
 # Tests, docs and development tooling never ship in the runtime image.
 #
