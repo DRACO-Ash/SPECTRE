@@ -295,3 +295,32 @@ anything else. The flag remains available if a wider pass is ever run.
 action=/training/leave`; restoring it passes. The response-shape tests assert
 on the wire rather than the template, because the defect is a property of the
 bytes htmx receives, not of the markup that produced them.
+
+## 0.5.10
+
+No application behaviour changes. This is the first batch of the approved
+improvement plan (`IMPROVEMENT-PLAN.md`), which closed the retrospective's
+headline finding: nothing written in the previous window had a committed case
+proving it could go red.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | A browser smoke probe, `scripts/smoke-browser.py`, that boots a throwaway instance and drives login, admin create and delete, training exit and sign out, failing on any uncaught exception or same-origin console error | Watched to fail and to pass. With the 0.5.9 fixes reverted it exits 1 naming `[admin-create] uncaught exception: e.querySelectorAll is not a function`, `the new row never appeared without a reload (1 -> 1)` and `[training-leave] leaving training mode was rejected by the CSRF guard`. With them restored it exits 0. Both defects returned HTTP 200 and were invisible to 850 server-side tests. | Not applicable: verified in both directions against a real browser. |
+| Build integrity | **HYGIENE** | `tests/integration/test_packager_gates.py`, eleven cases that break one thing in a throwaway tree and assert the packager refuses, naming the reason | The packaging script had no test at all: five fail-closed branches deciding whether an artefact ships, with zero coverage. The harness immediately caught two defects in the gates added alongside it. | Cannot fail a submission: the harness runs locally and in the suite, not on the platform. |
+
+**A guard is unproved until watched.** Two new packager gates ship with this
+batch and both have a committed red case: a gate may not read a file git does
+not track (the ledger lives in gitignored `docs/`, so that gate ran on one
+machine only), and non-application material may not reach the archive (the
+platform ignores `sonar.sources` and grades every file as application code).
+
+**The harness caught its own author.** Its first version built the fixture from
+`git archive HEAD`, so it exercised the previously committed packager and
+reported every new gate as broken when it was simply absent from the code under
+test. Fixed to copy the working tree. Recorded because it is the same class of
+mistake as a guard that never runs.
+
+**Coverage now reports the truth.** `fail_under` was 70 against a house standard
+of 80 while actual coverage was 74.3, so the loop passed from underneath its own
+bar. The floor is now a ratchet at 74 and `scripts/check-quality.sh` prints the
+5.7-point gap on every run. The gap is real and open; nothing here closes it.

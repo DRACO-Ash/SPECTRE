@@ -10,3 +10,10 @@ pip-audit>=2.7
 pip-tools>=7.4
 diff-cover>=9.0
 anyio[trio]>=4.0
+
+# playwright: drives a real browser for scripts/smoke-browser.py. Dev-only and
+# never installed by the image or the platform Test stage. Recorded reason: two
+# defects reached production returning HTTP 200 with a broken page - a dead
+# HTMX swap and a CSRF-less form - and no server-side assertion could see
+# either. A console-error assertion sees both.
+playwright

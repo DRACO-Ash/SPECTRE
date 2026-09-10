@@ -96,6 +96,42 @@ else
     fail "coverage on changed lines is below ${COVERAGE_FLOOR}%"
 fi
 
+# ── Whole-repository coverage against the house standard ─────────────────────
+# The gate condition above measures CHANGED lines. The house standard is a
+# whole-repository figure, and the project floor in pyproject.toml sat at 70
+# against a standard of 80 while actual coverage was 74: the loop reported
+# green from underneath the bar it exists to enforce. Declare the standard once,
+# here, and report the distance to it on every run so it cannot be silent again.
+HOUSE_COVERAGE_STANDARD=80
+printf '\n== Whole-repository coverage against the house standard ==\n'
+OVERALL=$(python3 -c "
+import sys, xml.etree.ElementTree as E
+try:
+    print(round(float(E.parse('$COVERAGE_XML').getroot().get('line-rate', 0)) * 100, 1))
+except Exception:
+    print(-1)
+")
+DECLARED=$(python3 -c "
+import re, pathlib
+m = re.search(r'^fail_under\s*=\s*(\d+)', pathlib.Path('pyproject.toml').read_text(), re.M)
+print(m.group(1) if m else -1)
+")
+if [ "$DECLARED" -gt "$HOUSE_COVERAGE_STANDARD" ] 2>/dev/null; then
+    fail "the declared floor (${DECLARED}%) is above the house standard; one of them is wrong"
+fi
+printf '  measured %s%%, project floor %s%%, house standard %s%%\n' \
+    "$OVERALL" "$DECLARED" "$HOUSE_COVERAGE_STANDARD"
+if python3 -c "import sys; sys.exit(0 if float('$OVERALL') >= $HOUSE_COVERAGE_STANDARD else 1)"; then
+    pass "at or above the house standard"
+elif python3 -c "import sys; sys.exit(0 if float('$OVERALL') + 0.05 >= float('$DECLARED') else 1)"; then
+    printf '  GAP   %s points below the house standard of %s%%. The floor is a\n' \
+        "$(python3 -c "print(round($HOUSE_COVERAGE_STANDARD - float('$OVERALL'), 1))")" \
+        "$HOUSE_COVERAGE_STANDARD"
+    printf '        ratchet at %s%% so this cannot slip, but the gap is real and open.\n' "$DECLARED"
+else
+    fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
+fi
+
 printf '\n== Duplication on changed files ==\n'
 if command -v npx >/dev/null 2>&1; then
     SCAN=$(mktemp -d)

@@ -41,7 +41,7 @@ namespaces = false
 
 [project]
 name = "spectre"
-version = "0.5.9"
+version = "0.5.10"
 description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
 
@@ -69,7 +69,11 @@ concurrency = ["thread", "greenlet"]
 omit = ["tests/*", "spectre/app_logging/config.py"]
 
 [tool.coverage.report]
-fail_under = 70
+# Ratchet, not an aspiration. Set to the measured whole-repository figure so
+# coverage cannot slip, and raised as it improves. The HOUSE STANDARD is 80,
+# declared once in scripts/check-quality.sh and reported against on every run:
+# this file must never claim a floor the standard does not accept silently.
+fail_under = 74
 show_missing = true
 
 [tool.ruff]

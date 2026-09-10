@@ -205,6 +205,25 @@ else
     done
 fi
 
+# The platform's Code Quality stage analyses EVERY file in the uploaded
+# archive and does not honour sonar.sources: our declaration scoped analysis to
+# the application packages and was ignored, so build tooling was graded as
+# application code and produced five findings against files that never run in
+# production. Treat the archive as the analysis scope and keep non-application
+# material out of it.
+NON_APP=""
+for unwanted in scripts .github docs .claude .git .venv; do
+    [ -e "$STAGE/$unwanted" ] && NON_APP="$NON_APP $unwanted"
+done
+for stray in $(find "$STAGE" -maxdepth 1 -name '*.md' ! -name 'README.md' 2>/dev/null); do
+    NON_APP="$NON_APP $(basename "$stray")"
+done
+if [ -n "$NON_APP" ]; then
+    echo "FAIL: non-application material staged for the archive:$NON_APP"
+    echo "      Every file in the archive is analysed as application code."
+    exit 1
+fi
+
 LEAKS=$(find "$STAGE" \( -name '.env' -o -name '*.pem' -o -name '*.key' -o -name 'id_rsa*' \) 2>/dev/null | grep -v '\.env\.example' || true)
 [ -z "$LEAKS" ] || { echo "FAIL: credential-shaped files in the package:"; echo "$LEAKS"; exit 1; }
 
@@ -219,6 +238,16 @@ fi
 # what a failure would tell us. Seven submissions were spent on changes that
 # taught nothing when they failed; this is the control against an eighth.
 LEDGER="docs/CHANGE-LEDGER.md"
+# A gate whose input is untracked is not a gate. docs/ is gitignored by the
+# standard template and the ledger lives in docs/, so this gate once passed on
+# one machine and would have failed everywhere else until the file was
+# force-added. Assert the input travels before trusting what it says.
+if [ -f "$LEDGER" ] && ! git ls-files --error-unmatch "$LEDGER" >/dev/null 2>&1; then
+    echo "FAIL: ${LEDGER} exists but git does not track it."
+    echo "      This gate would pass here and fail in a clean clone."
+    echo "      Run: git add -f ${LEDGER}"
+    exit 1
+fi
 if [ -f "$LEDGER" ]; then
     if ! grep -qxF "## ${VERSION}" "$LEDGER"; then
         echo "FAIL: no entry for ${VERSION} in ${LEDGER}."

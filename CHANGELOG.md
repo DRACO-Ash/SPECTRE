@@ -7,6 +7,61 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.10] - 2026-09-10
+
+No application behaviour changes. First batch of the approved improvement plan.
+
+### Added
+
+- **A browser smoke probe** (`scripts/smoke-browser.py`). Boots a throwaway
+  instance on a free port against a temporary database, then drives login,
+  admin create and delete, the training exit and sign out, failing on any
+  uncaught exception, any HTMX swap error, and any same-origin console error.
+  External network failures are classified and ignored, and the count is
+  reported so the allowance cannot hide a real fault.
+
+  Watched to fail and to pass. With the 0.5.9 fixes reverted it exits 1 naming
+  `[admin-create] uncaught exception: e.querySelectorAll is not a function` and
+  `[training-leave] leaving training mode was rejected by the CSRF guard`. With
+  them restored it exits 0. Both of those defects returned HTTP 200 and were
+  invisible to all 850 server-side tests.
+
+  It does not skip itself when its browser is missing; it fails and says why. A
+  probe that quietly does nothing is how the defects it exists to catch reached
+  production in the first place. `SMOKE_BROWSER_SKIP=1` skips it deliberately.
+
+- **A test harness for the packaging gates**
+  (`tests/integration/test_packager_gates.py`). Eleven cases that copy the
+  tracked working tree, break exactly one thing, run the real packager and
+  assert it refuses with the message naming the problem. The script previously
+  had no test at all, despite its five fail-closed branches deciding whether an
+  artefact ships.
+
+- **Two new packaging gates, each with a committed red case.** A gate may not
+  read a file git does not track, because `docs/` is gitignored and the change
+  ledger lives there, so that gate ran on one machine only. And
+  non-application material may not reach the archive, because the platform
+  ignores `sonar.sources` and grades every file in it as application code.
+
+### Changed
+
+- **Coverage reporting now tells the truth.** `fail_under` was 70 against a
+  house standard of 80 while actual coverage was 74.3, so the loop reported
+  green from underneath its own bar. The floor is now a ratchet at 74 so
+  coverage cannot slip, and `scripts/check-quality.sh` prints the measured
+  figure, the floor and the standard on every run, naming the 5.7-point gap.
+  **The gap is open and nothing here closes it.**
+
+- `playwright` added to `requirements-dev.txt` with its reason recorded in
+  `requirements-dev.in`. Dev-only: neither the image nor the platform Test
+  stage installs it, and the scanned and runtime locks are unchanged.
+
+### Known cost
+
+- The packager harness runs the real script eleven times, so the full suite is
+  materially slower than it was. That is the price of covering the code that
+  decides what ships.
+
 ## [0.5.9] - 2026-09-01
 
 ### Fixed
