@@ -21,6 +21,11 @@ from pathlib import Path
 
 import pytest
 
+# Absolute paths: a partial executable name resolves through PATH, which a
+# test should not depend on and the analyser flags (S607).
+_GIT = shutil.which("git") or "/usr/bin/git"
+_SH = shutil.which("sh") or "/bin/sh"
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGER = "scripts/package-appstore.sh"
 
@@ -39,8 +44,8 @@ def _tracked_tree(destination: Path) -> None:
     The packager reads the git index for its commit stamp and for the
     tracked-input check, so the copy is initialised as a real repository.
     """
-    listing = subprocess.run(  # noqa: S603
-        ["git", "ls-files"], cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+    listing = subprocess.run(
+        [_GIT, "ls-files"], cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split("\n")
     destination.mkdir(parents=True, exist_ok=True)
     for relative in filter(None, listing):
@@ -51,11 +56,11 @@ def _tracked_tree(destination: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     for command in (
-        ["git", "init", "-q"],
-        ["git", "add", "-A", "-f"],
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture"],
+        [_GIT, "init", "-q"],
+        [_GIT, "add", "-A", "-f"],
+        [_GIT, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture"],
     ):
-        subprocess.run(command, cwd=destination, check=True, capture_output=True)  # noqa: S603
+        subprocess.run(command, cwd=destination, check=True, capture_output=True)
 
 
 def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
@@ -64,8 +69,9 @@ def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
         "SKIP_PACKAGE_TESTS": "1",  # the suite is exercised by its own run
         "SKIP_DS_VERIFY": "1",      # the advisory analyser needs a Go toolchain
     }
-    return subprocess.run(  # noqa: S603
-        ["sh", _PACKAGER, "--docker-only", "out"],
+    return subprocess.run(
+        [_SH, _PACKAGER, "--docker-only", "out"],
+        check=False,
         cwd=tree, env=env, capture_output=True, text=True, timeout=300,
     )
 
@@ -136,8 +142,8 @@ class TestLedgerGate:
         clean clone until the file was force-added.
         """
         def break_it(root: Path) -> None:
-            subprocess.run(  # noqa: S603
-                ["git", "rm", "--cached", "-q", "docs/CHANGE-LEDGER.md"],
+            subprocess.run(
+                [_GIT, "rm", "--cached", "-q", "docs/CHANGE-LEDGER.md"],
                 cwd=root, check=True, capture_output=True,
             )
 

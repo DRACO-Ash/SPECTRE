@@ -324,3 +324,34 @@ mistake as a guard that never runs.
 of 80 while actual coverage was 74.3, so the loop passed from underneath its own
 bar. The floor is now a ratchet at 74 and `scripts/check-quality.sh` prints the
 5.7-point gap on every run. The gap is real and open; nothing here closes it.
+
+## 0.5.11
+
+A correctness defect in the orbital mechanics, found by validating the Lambert
+solver against a published reference rather than by any gate. Every gate was
+green while this was live.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Correct the Lambert time-of-flight residual, replace divergent Newton with bracketed bisection, raise on non-convergence, and key the degeneracy guard to the transfer angle | Curtis Example 5.2: departure velocity error was **1,970 m/s**, now **0.05 m/s**; the round trip missed by **6,268 km**, now **0.14 m**. The GEO 180-degree phasing case missed by **74,790 km** and is now refused as ill-posed. Six geometries validated by propagating the computed departure state forward and measuring the arrival miss. | Not applicable: validated numerically against a published answer and by an independent propagator. |
+
+**Two independent defects, either one sufficient.** The residual substituted the
+gravitational parameter for the Stumpff function C(z) - Curtis defines
+`chi = sqrt(y/C)`, the code wrote `sqrt(y/mu)` - so the iteration was not
+solving the time-of-flight equation at all, never converged, and the routine
+returned its unconverged value without complaint. Separately the degeneracy
+guard tested the chord term A rather than the transfer angle, and `sin(pi)` in
+floating point is 1.2e-16 rather than zero, so at exactly 180 degrees A stayed
+at 3.7e-12 and the guard never fired.
+
+**Why no test caught it.** The tests that existed asserted the shape of the
+answer: a velocity magnitude within 15 per cent of circular, a delta-V greater
+than zero, a burn count of two. A transfer that misses by 6,268 km satisfies all
+three. The new file asserts the answer instead, and includes a sensitivity case
+proving the residual is tight enough to matter: a 10 m/s perturbation must move
+the arrival point by more than 10 km, or the check is void.
+
+**Blast radius.** `solve_lambert` feeds `lambert_intercept`, which is called
+from the threat sweep at two sites in `spectre/web/routes/threat.py` and from
+the manoeuvre planner. Every Lambert-derived delta-V, transfer cost and sweep
+entry produced before this release was wrong.
