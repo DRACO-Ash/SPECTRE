@@ -609,6 +609,11 @@ def plane_change_intercept(
     kep_red = state_to_keplerian(sv_red)
     kep_blue = state_to_keplerian(sv_blue)
 
+    # KeplerianElements stores inc/raan/argp/ta in DEGREES. These angles were
+    # being passed through math.degrees() a second time, multiplying every one
+    # by 57.3: plane-change delta-V came out 14x to 57x too high, the J2 drift
+    # plan used a meaningless inclination, and the manoeuvre-direction
+    # classifier answered "normal" for almost any burn.
     inc_diff = abs(kep_blue.inc - kep_red.inc)
     r_red = sv_red.r_mag
     r_blue = sv_blue.r_mag
@@ -616,7 +621,7 @@ def plane_change_intercept(
 
     if alt_diff < 50.0:
         # Similar altitude — pure plane change
-        pc = plane_change(r_red, math.degrees(inc_diff), kep_red.ecc, mu)
+        pc = plane_change(r_red, inc_diff, kep_red.ecc, mu)
 
         # Single burn at optimal location, in the normal direction
         h = np.cross(sv_red.r, sv_red.v)
@@ -627,7 +632,7 @@ def plane_change_intercept(
 
         t_arrival = t_departure  # instantaneous
         _notes = (
-            f"Plane change: Δi={math.degrees(inc_diff):.2f}°, "
+            f"Plane change: Δi={inc_diff:.2f}°, "
             f"optimal at {pc.optimal_location}, "
             f"node ΔV={pc.delta_v_at_node:.4f}, apogee ΔV={pc.delta_v_at_apogee:.4f} km/s"
         )
@@ -643,7 +648,7 @@ def plane_change_intercept(
     else:
         # Different altitudes — combined transfer
         cpc = combined_altitude_plane_change(
-            r_red, r_blue, math.degrees(inc_diff), mu
+            r_red, r_blue, inc_diff, mu
         )
 
         v_hat = sv_red.v / sv_red.v_mag
@@ -703,15 +708,15 @@ def j2_drift_intercept(
     kep_blue = state_to_keplerian(sv_blue)
 
     # RAAN difference
-    delta_raan = math.degrees(kep_red.raan - kep_blue.raan)
+    delta_raan = kep_red.raan - kep_blue.raan
     if delta_raan > 180.0:
         delta_raan -= 360.0
     elif delta_raan < -180.0:
         delta_raan += 360.0
 
     result = j2_drift_plan(
-        kep_red.a, kep_red.ecc, math.degrees(kep_red.inc),
-        kep_blue.a, kep_blue.ecc, math.degrees(kep_blue.inc),
+        kep_red.a, kep_red.ecc, kep_red.inc,
+        kep_blue.a, kep_blue.ecc, kep_blue.inc,
         delta_raan, mu,
     )
 
@@ -1119,8 +1124,8 @@ def intent_predict_intercept(
     kep_blue = state_to_keplerian(sv_blue)
 
     delta_a = kep_blue.a - kep_red.a
-    delta_inc = math.degrees(kep_blue.inc - kep_red.inc)
-    delta_raan = math.degrees(kep_blue.raan - kep_red.raan)
+    delta_inc = kep_blue.inc - kep_red.inc
+    delta_raan = kep_blue.raan - kep_red.raan
     if delta_raan > 180:
         delta_raan -= 360
     elif delta_raan < -180:
@@ -1263,7 +1268,7 @@ def fingerprint_intercept(
 
     # Estimate ΔV and burn direction from element changes
     da = kep_after.a - kep_before.a
-    di = math.degrees(kep_after.inc - kep_before.inc)
+    di = kep_after.inc - kep_before.inc
     dv_est = abs(da) * math.sqrt(mu / kep_before.a**3) / 2.0  # vis-viva approx
 
     if abs(di) > 0.1:
@@ -1279,7 +1284,7 @@ def fingerprint_intercept(
 
     result = fingerprint_manoeuvre(
         dv_est, direction, altitude,
-        math.degrees(kep_before.inc), kep_before.ecc,
+        kep_before.inc, kep_before.ecc,
     )
 
     return InterceptSolution(
@@ -1364,7 +1369,7 @@ def terrain_intercept(
     kep_red = state_to_keplerian(sv_red)
 
     altitude = kep_red.a - R_EARTH
-    result = orbital_terrain(altitude, math.degrees(kep_red.inc))
+    result = orbital_terrain(altitude, kep_red.inc)
 
     return InterceptSolution(
         method="terrain",

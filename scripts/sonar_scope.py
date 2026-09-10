@@ -67,7 +67,10 @@ def main() -> int:
         if row in scoped.get(path, set()):
             kept.append((path, row, finding))
 
-    for path, row, finding in sorted(kept):
+    # Sort on (path, row) only. Sorting the raw tuples falls through to
+    # comparing the finding dicts whenever two findings share a line, which
+    # raises TypeError and takes the whole quality gate down with it.
+    for path, row, finding in sorted(kept, key=lambda item: (item[0], item[1] or 0)):
         code = finding.get("code") or "?"
         print(f"  {path}:{row}  {code}  {finding.get('message')}")
 

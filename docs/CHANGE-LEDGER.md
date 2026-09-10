@@ -355,3 +355,29 @@ the arrival point by more than 10 km, or the check is void.
 from the threat sweep at two sites in `spectre/web/routes/threat.py` and from
 the manoeuvre planner. Every Lambert-derived delta-V, transfer cost and sweep
 entry produced before this release was wrong.
+
+## 0.5.12
+
+Second half of the orbital calculation audit. Two more defects that produced
+confidently wrong numbers, both invisible to every existing test and to every
+pipeline gate.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Remove twelve double conversions of angles already in degrees in `maneuvers.py` | Plane-change cost at GEO measured against the closed form 2v.sin(di/2): a 0.5 degree change costs 27 m/s and was reported as 1,521 m/s, a 57x overstatement. The same corruption fed the J2 drift planner a 2,956 degree inclination and made the manoeuvre-direction classifier answer "normal" for almost any burn. | Not applicable: measured against a closed form. |
+| Runtime correctness | **EVIDENCED** | Substitute the defined element when a classical element is undefined in `state_to_keplerian` | A state converted to elements and back moved 8,000 km for a circular inclined orbit, 17,074 km for an equatorial elliptical one and 78,460 km for circular equatorial, which is GEO. All six round-trip cases now return the same state. Latent rather than live: nothing currently reads `.ta` or `.argp`. | Not applicable: verified by round trip. |
+
+**Findings recorded, not fixed.** `docs/ORBITAL-CALCULATION-AUDIT.md` lists
+five open items: transfer functions with no input validation, a regime-blind CW
+validity threshold (4.2 per cent error at 500 km in GEO against 23.9 per cent
+in LEO), a GEO radius constant inconsistent with the sidereal day in the same
+file, TEME and ECI conflated across the propagator boundary, and
+`propagate_range` swallowing propagation failures.
+
+**Eight of fifteen modules were not audited**, including `tactical.py`, the
+largest in the package. Given that all three modules examined closely contained
+a defect, the remainder should not be assumed clean.
+
+**The tooling failed too.** `scripts/sonar_scope.py` crashed with a TypeError
+whenever two findings shared a line, sorting tuples that end in a dict. It took
+the whole quality gate down with it, which is how a gate stops being a gate.

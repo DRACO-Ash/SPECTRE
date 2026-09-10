@@ -44,7 +44,7 @@ def _tracked_tree(destination: Path) -> None:
     The packager reads the git index for its commit stamp and for the
     tracked-input check, so the copy is initialised as a real repository.
     """
-    listing = subprocess.run(
+    listing = subprocess.run(  # noqa: S603 - fixed argv, no shell, test-controlled paths
         [_GIT, "ls-files"], cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split("\n")
     destination.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ def _tracked_tree(destination: Path) -> None:
         [_GIT, "add", "-A", "-f"],
         [_GIT, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture"],
     ):
-        subprocess.run(command, cwd=destination, check=True, capture_output=True)
+        subprocess.run(command, cwd=destination, check=True, capture_output=True)  # noqa: S603
 
 
 def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
@@ -69,7 +69,7 @@ def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
         "SKIP_PACKAGE_TESTS": "1",  # the suite is exercised by its own run
         "SKIP_DS_VERIFY": "1",      # the advisory analyser needs a Go toolchain
     }
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell, test-controlled paths
         [_SH, _PACKAGER, "--docker-only", "out"],
         check=False,
         cwd=tree, env=env, capture_output=True, text=True, timeout=300,
@@ -142,7 +142,7 @@ class TestLedgerGate:
         clean clone until the file was force-added.
         """
         def break_it(root: Path) -> None:
-            subprocess.run(
+            subprocess.run(  # noqa: S603
                 [_GIT, "rm", "--cached", "-q", "docs/CHANGE-LEDGER.md"],
                 cwd=root, check=True, capture_output=True,
             )

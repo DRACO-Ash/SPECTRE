@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -110,15 +111,14 @@ def solve_lambert(
     # This matters operationally rather than academically: a phasing transfer
     # across the GEO belt sits exactly here, and it is one of the most common
     # geometries in the work this tool exists to support.
-    _DEGENERATE_ANGLE_TOL = math.radians(0.5)
-    if dnu < _DEGENERATE_ANGLE_TOL or abs(dnu - math.pi) < _DEGENERATE_ANGLE_TOL:
+    if dnu < _DEGENERATE_ANGLE_TOL_RAD or abs(dnu - math.pi) < _DEGENERATE_ANGLE_TOL_RAD:
         raise ValueError(
             f"degenerate Lambert geometry: transfer angle {math.degrees(dnu):.4f} deg is "
             "within half a degree of 0 or 180, where the transfer plane is undefined or "
             "numerically ill-conditioned. Offset the epoch by a few minutes to move the "
             "geometry off the singularity, or plan the transfer in a specified plane."
         )
-    if abs(2.0 * math.pi - dnu) < _DEGENERATE_ANGLE_TOL:
+    if abs(2.0 * math.pi - dnu) < _DEGENERATE_ANGLE_TOL_RAD:
         raise ValueError(
             f"degenerate Lambert geometry: transfer angle {math.degrees(dnu):.4f} deg is "
             "within half a degree of a full revolution; the departure and arrival "
@@ -132,7 +132,7 @@ def solve_lambert(
         raise ValueError("degenerate Lambert geometry (A is zero to machine precision)")
 
     # Solve via Stumpff functions with Newton–Raphson iteration.
-    z = _solve_z(float(r1_mag), float(r2_mag), A, tof, mu)
+    z = _solve_z(_Geometry(float(r1_mag), float(r2_mag), A), tof, mu)
 
     # Lagrange coefficients.
     sz = _stumpff_S(z)
@@ -197,18 +197,40 @@ class LambertConvergenceError(ValueError):
     """
 
 
+# Transfer angles within this tolerance of 0 or pi have no unique transfer
+# plane; see the guard in solve_lambert for why it is keyed to the angle.
+_DEGENERATE_ANGLE_TOL_RAD: float = math.radians(0.5)
+
+# Below this the Stumpff series leaves float range. Nothing physical lives
+# there: it is a hyperbola far beyond any achievable departure energy.
+_Z_HYPERBOLIC_FLOOR: float = -5.0e5
+
+# Bracket width at which further bisection buys nothing.
+_Z_BRACKET_EPSILON: float = 1e-12
+
 # The single-revolution solution lies below the parabolic limit z = 4*pi^2.
 # At that limit the time of flight diverges; above it the transfer needs a
 # full extra revolution, which this solver does not model.
 _Z_PARABOLIC_LIMIT: float = 4.0 * math.pi**2
 
 
-def _y_of_z(z: float, r1_mag: float, r2_mag: float, A: float) -> float:
+class _Geometry(NamedTuple):
+    """The fixed geometry of one Lambert problem: two radii and the chord term."""
+
+    r1_mag: float
+    r2_mag: float
+    chord: float  # Curtis writes this A (eq. 5.35)
+
+
+def _y_of_z(z: float, geom: _Geometry) -> float:
     """Curtis eq. 5.38. May be non-positive for a long-way transfer at low z."""
-    return r1_mag + r2_mag + A * (z * _stumpff_S(z) - 1.0) / math.sqrt(_stumpff_C(z))
+    return (
+        geom.r1_mag + geom.r2_mag
+        + geom.chord * (z * _stumpff_S(z) - 1.0) / math.sqrt(_stumpff_C(z))
+    )
 
 
-def _time_residual(z: float, r1_mag: float, r2_mag: float, A: float, tof: float, mu: float) -> float:
+def _time_residual(z: float, geom: _Geometry, tof: float, mu: float) -> float:
     """Curtis eq. 5.40: computed time of flight minus the requested one.
 
     Monotonically increasing in z, which is what makes bisection safe.
@@ -221,11 +243,11 @@ def _time_residual(z: float, r1_mag: float, r2_mag: float, A: float, tof: float,
     anything meaningful.
     """
     try:
-        y = _y_of_z(z, r1_mag, r2_mag, A)
+        y = _y_of_z(z, geom)
         if y <= 0.0:
             return -math.inf  # push the bracket upward; this z is not admissible
         chi = math.sqrt(y / _stumpff_C(z))
-        return chi**3 * _stumpff_S(z) + A * math.sqrt(y) - math.sqrt(mu) * tof
+        return chi**3 * _stumpff_S(z) + geom.chord * math.sqrt(y) - math.sqrt(mu) * tof
     except (OverflowError, ValueError):
         # Deep in the hyperbolic region the Stumpff series overflows a float.
         # The limit is unambiguous: as z falls the time of flight tends to
@@ -236,9 +258,7 @@ def _time_residual(z: float, r1_mag: float, r2_mag: float, A: float, tof: float,
 
 
 def _solve_z(
-    r1_mag: float,
-    r2_mag: float,
-    A: float,
+    geom: _Geometry,
     tof: float,
     mu: float,
     tol: float = 1e-8,
@@ -257,7 +277,7 @@ def _solve_z(
             to reach *tol*. Never returns an unconverged value.
     """
     def residual(z: float) -> float:
-        return _time_residual(z, r1_mag, r2_mag, A, tof, mu)
+        return _time_residual(z, geom, tof, mu)
 
     # Upper bound: just inside the parabolic limit, where the time of flight
     # diverges, so the residual is certainly positive there.
@@ -282,7 +302,7 @@ def _solve_z(
         # Below roughly -5e5 the Stumpff functions leave float range. Nothing
         # physical lives down there: it is a hyperbola far beyond any
         # achievable departure energy.
-        if z_lo < -5.0e5:
+        if z_lo < _Z_HYPERBOLIC_FLOOR:
             raise LambertConvergenceError(
                 "could not bracket a solution: the geometry and time of flight "
                 "admit no hyperbolic or elliptic single-revolution transfer"
@@ -291,7 +311,7 @@ def _solve_z(
     for _ in range(max_iter):
         z_mid = 0.5 * (z_lo + z_hi)
         f_mid = residual(z_mid)
-        if abs(f_mid) < tol * max(1.0, math.sqrt(mu) * tof) or (z_hi - z_lo) < 1e-12:
+        if abs(f_mid) < tol * max(1.0, math.sqrt(mu) * tof) or (z_hi - z_lo) < _Z_BRACKET_EPSILON:
             return z_mid
         if f_mid < 0.0:
             z_lo = z_mid
