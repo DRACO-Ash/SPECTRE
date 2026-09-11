@@ -64,16 +64,42 @@ def phasing_orbit(
     phase_rad = math.radians(phase_angle_deg)
     T_target = 2.0 * math.pi * math.sqrt(r_target**3 / mu)
 
-    # Total time = N complete target revolutions
-    total_time = n_revolutions * T_target
-
-    # Chaser must complete N revolutions + phase_angle fraction in total_time
-    # (if target is ahead, chaser needs a faster/lower orbit)
-    n_chaser_revs = n_revolutions + phase_rad / (2.0 * math.pi)
-    T_phase = total_time / n_chaser_revs
+    # The chaser burns at a point P and must come back to P to make the second
+    # burn, so it flies a WHOLE number of phasing revolutions. The previous
+    # formulation solved for N + phase/2pi revolutions, a non-integer count,
+    # which puts the chaser at the target's angle but at the wrong radius -
+    # there is no rendezvous. The error was 5 km of semi-major axis at a
+    # 5 degree gap and 5,615 km at 180 degrees.
+    #
+    # Correct closure: the target starts *phase_rad* ahead of P, so to be at P
+    # after N chaser revolutions it must travel 2*pi*N - phase_rad.
+    #     N * T_phase = T_target * (N - phase_rad / 2pi)
+    if n_revolutions < 1:
+        raise ValueError(f"n_revolutions must be at least 1, got {n_revolutions}")
+    revolutions_to_close = n_revolutions - phase_rad / (2.0 * math.pi)
+    if revolutions_to_close <= 0.0:
+        raise ValueError(
+            f"a {phase_angle_deg:.1f} degree gap cannot be closed in "
+            f"{n_revolutions} revolution(s): the target would have to travel "
+            "backwards. Allow more revolutions."
+        )
+    T_phase = T_target * revolutions_to_close / n_revolutions
+    total_time = n_revolutions * T_phase
 
     # Semi-major axis of phasing orbit from period
     a_phase = (mu * (T_phase / (2.0 * math.pi)) ** 2) ** (1.0 / 3.0)
+
+    # The phasing orbit has its apsis at the burn radius, so the far apsis sits
+    # at 2*a_phase - r_chaser. A deep phasing orbit can put that inside the
+    # atmosphere, which is a plan that cannot be flown.
+    far_apsis = 2.0 * a_phase - r_chaser
+    if far_apsis <= R_EARTH + 100.0:
+        raise ValueError(
+            f"the phasing orbit needed to close {phase_angle_deg:.1f} degrees in "
+            f"{n_revolutions} revolution(s) has its far apsis at "
+            f"{far_apsis - R_EARTH:.0f} km altitude, inside the atmosphere. "
+            "Allow more revolutions."
+        )
 
     # ΔV to enter/exit phasing orbit (at chaser radius)
     v_chaser = math.sqrt(mu / r_chaser)
@@ -930,17 +956,28 @@ def nmc_safety_ellipse(
     safety_margin = radial_amp
     is_safe = radial_amp > 0.01  # at least 10 metres
 
-    # ΔV to establish: need to impart radial velocity = A_x * n
-    # and along-track velocity for bounded motion = 0 (if starting at max radial)
-    # Starting from co-located, co-velocity state:
-    #   Apply Δvx = A_x * n (radial)
-    #   Apply Δvz = A_z * n (cross-track, if any)
-    dv_radial = radial_amp * n
+    # Establishing burn.
+    #
+    # The previous version prescribed a radial burn from a CO-LOCATED state and
+    # then reported the radial amplitude as a passive-safety margin. Flying that
+    # initial condition gives x(t) = (v/n) sin(nt), y(t) = -(2v/n)(1 - cos(nt)),
+    # which passes through the origin once per orbit: the actual closest
+    # approach is ZERO, not the 5 km the function reported. It certified a
+    # collision trajectory as passively safe.
+    #
+    # A bounded ellipse centred on the target needs the chaser already
+    # displaced radially by A_x, and then an ALONG-TRACK burn of 2*n*A_x:
+    #     x(t) = A_x cos(nt),  y(t) = -2 A_x sin(nt)
+    # which never comes closer than A_x. That is the trajectory whose margin is
+    # the radial amplitude, so it is the one that must be returned here.
+    dv_along_track = 2.0 * radial_amp * n
     dv_cross = cross_track_km * n if cross_track_km > 0 else 0.0
-    dv_total = math.sqrt(dv_radial**2 + dv_cross**2)
+    dv_total = math.sqrt(dv_along_track**2 + dv_cross**2)
 
     notes_parts = [
         f"Bounded CW ellipse: {radial_amp:.1f}×{along_track_km:.1f} km (R×T)",
+        f"establish from a radial offset of {radial_amp:.1f} km with an "
+        f"along-track burn of {dv_along_track * 1000:.1f} m/s",
     ]
     if cross_track_km > 0:
         notes_parts.append(f"cross-track ±{cross_track_km:.1f} km")
@@ -1387,13 +1424,23 @@ def intercept_envelope_analytical(
     n_steps: int = 24,
     mu: float = MU_EARTH,
 ) -> InterceptEnvelopeResult:
-    """Compute analytical intercept envelope using energy approximation.
+    """Coarse radius-only reachability estimate. NOT an intercept cost.
 
-    Sweeps over TOF values and estimates the ΔV required for each
-    using a vis-viva energy approach. This gives an approximate
-    reachability envelope without needing full Lambert solutions.
+    .. warning::
+       This takes two radii and no geometry, so the angular separation between
+       chaser and target - the term that dominates a co-orbital intercept -
+       cannot enter the calculation at all. Measured against true Lambert
+       solutions for a co-orbital GEO case it underestimated the cost by
+       between 1.3x and 121x, and for equal radii its Hohmann reference
+       degenerates to zero delta-V over half a period, which describes no
+       manoeuvre.
 
-    The TLE wrapper does a full Lambert sweep for higher accuracy.
+       It is retained as a cheap upper-bound sketch for unequal radii. For an
+       intercept cost with real geometry use ``lambert_intercept``, which
+       ``intercept_envelope_intercept`` now calls.
+
+    The ``penalty`` factor below is a shaping heuristic with no physical
+    derivation; it is not a delta-V.
 
     Args:
         r1: Interceptor orbit radius (km).

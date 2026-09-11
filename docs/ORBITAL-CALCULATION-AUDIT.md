@@ -23,7 +23,8 @@ in ways worth stating, because "we checked and it is right" is useful.
 | `cw_geometry.py` | correct | numerical integration of the CW equations |
 | `pattern_of_life.py` (J2) | correct | sun-synchronous rate, critical inclination |
 | `monte_carlo.py` (sampling) | correct | Rayleigh cone statistics |
-| remaining eight modules | **not audited** | see the honest limits below |
+| `tactical.py` | **three defects, fixed** | closed forms and flown trajectories |
+| remaining seven modules | **not audited** | see the honest limits below |
 
 ## 1. The Lambert solver returned a confident wrong answer
 
@@ -107,6 +108,93 @@ this was a latent defect rather than a live wrong answer. It is still a
 landmine, because `keplerian_to_state(state_to_keplerian(sv))` is an obvious
 idiom and any future phasing work needs true anomaly.
 
+
+## 4. tactical.py: a collision trajectory certified as passively safe
+
+`nmc_safety_ellipse` plans a Natural Motion Circumnavigation, the standard
+passively-safe inspection trajectory: if propulsion fails, the inspector must
+drift clear rather than into the target.
+
+It prescribed a radial burn from a co-located state and then reported the
+radial amplitude as the safety margin. Flying that initial condition gives
+
+    x(t) = (v/n) sin(nt),   y(t) = -(2v/n)(1 - cos(nt))
+
+which returns to the origin once per orbit. Measured closest approach for a
+reported 5.000 km margin: **zero**. The function certified a collision
+trajectory as safe.
+
+A bounded ellipse centred on the target needs the chaser already displaced
+radially by A and an along-track burn of 2nA, giving x = A cos(nt),
+y = -2A sin(nt), which never comes closer than A. Fixed, and the flown
+closest approach is now 5.0000 km against a reported 5.000 km.
+
+## 5. tactical.py: the phasing orbit did not close
+
+`phasing_orbit` solved for `N + phase/2pi` revolutions. A phasing orbit only
+returns to its burn point after a whole number of revolutions, so the chaser
+arrived at the target's angle at the wrong altitude and the second burn had
+nothing to match.
+
+Correct closure: the target starts *phase* ahead of the burn point P, so to be
+at P after N chaser revolutions it must travel `2*pi*N - phase`, giving
+`T_phase = T_target * (1 - phase / (2*pi*N))`.
+
+| Phase gap | Old semi-major axis | Correct | Error |
+|---|---|---|---|
+| 5 deg | 41,778.1 km | 41,772.7 km | 5 km |
+| 30 deg | 39,973.0 km | 39,787.8 km | 185 km |
+| 90 deg | 36,335.8 km | 34,805.6 km | 1,530 km |
+| 180 deg | 32,177.2 km | 26,561.7 km | **5,615 km** |
+
+Small at the close-approach gaps the tool is used for most often, which is why
+it looked plausible. Now flies exactly 1.000000 revolutions, and refuses a gap
+too large for the revolutions allowed or a phasing orbit that would dip into
+the atmosphere.
+
+## 6. tactical.py: the intercept envelope could not see the geometry
+
+`intercept_envelope_analytical` takes two radii and no angular separation, so
+the term that dominates a co-orbital intercept cannot enter the calculation.
+It also multiplies its result by `penalty = (tof_hohmann / tof)**0.5`, a
+shaping heuristic with no physical derivation.
+
+Measured against true Lambert solutions, co-orbital GEO, chaser 30 degrees
+behind:
+
+| Time of flight | Envelope | True Lambert | Ratio |
+|---|---|---|---|
+| 2 h | 2,015 m/s | 6,240 m/s | 0.32x |
+| 6 h | 1,164 m/s | 1,993 m/s | 0.58x |
+| 12 h | 5.6 m/s | 680 m/s | **0.01x** |
+
+Underestimating intercept cost is the dangerous direction: it overstates how
+easily a hostile can reach an asset, and it under-budgets our own planning.
+For equal radii the Hohmann reference the penalty is anchored to degenerates to
+zero delta-V over half a period, which describes no manoeuvre at all.
+
+`intercept_envelope_intercept`, the TLE wrapper, claimed in its description to
+run "a full Lambert sweep for higher accuracy" and did not: it discarded the
+state vectors it held and passed only the two radii. It also took its delta-V
+budget from a parameter named `target_distance_km`, a distance. It now runs a
+real Lambert sweep over the requested window using the actual propagated
+geometry, and records an unreachable time of flight as infeasible rather than
+letting a gap in the sweep read as a cheap option.
+
+The analytic function is retained for unequal radii and its docstring now
+states plainly what it cannot represent.
+
+## tactical.py: checked and found correct
+
+`geo_drift` matches `delta_a = -2/3 (dlambda/dt) a / n` exactly, with the
+correct sense: a lower orbit drifts east. `graveyard_transfer` matches the
+closed form to nine figures and lands at 10.88 m/s against IADC guidance of
+about 11 m/s for a 300 km raise. `j2_raan_rate` reproduces the
+sun-synchronous condition. `cw_radial_separation` and `cw_along_track_drift`
+agree with the validated CW propagator to 1e-6 km, including their reported
+side effects, and `cw_along_track_drift` correctly surfaces that a 100 km
+along-track move over six hours carries a 277 km radial excursion.
+
 ## What was checked and found correct
 
 **Hohmann and bi-elliptic transfers** match the closed form to the last digit
@@ -170,12 +258,24 @@ error, the same silent-degradation pattern as the clustering import.
 
 ## Honest limits of this audit
 
-Eight modules were not audited: `tactical.py` (2,129 lines, the largest in the
-package), `photometry.py`, `notso.py`, `events.py`, `tle_filter.py`,
-`tle_preprocessing.py`, the collision-probability paths of `monte_carlo.py`,
-and the bulk of `pattern_of_life.py` beyond its J2 rates. Given that the three
-modules examined most closely each contained a defect that produced confidently
-wrong numbers, the prior for the remainder should not be optimistic.
+Seven modules remain unaudited: `photometry.py`, `notso.py`, `events.py`,
+`tle_filter.py`, `tle_preprocessing.py`, the collision-probability paths of
+`monte_carlo.py`, and the bulk of `pattern_of_life.py` beyond its J2 rates.
+
+Within `tactical.py`, the closed-form physics was validated but fourteen
+heuristic and classification functions were not: `collision_avoidance`,
+`classify_manoeuvre`, `detectability_metric`, `optimal_evasion`,
+`assess_intercept_intent`, `relative_motion_stability`,
+`fingerprint_manoeuvre`, `formation_defence_burn`, `orbital_terrain`,
+`j2_drift_plan`, `combined_altitude_plane_change`, `cw_combined`,
+`min_time_intercept_analytical`, and the two hop sequences. These encode
+judgement rather than physics, so they need a subject-matter review against
+doctrine rather than a numerical one, but note that `fingerprint_manoeuvre` and
+`orbital_terrain` were both being fed angles corrupted by the units defect.
+
+Every module examined closely contained at least one defect that produced
+confidently wrong numbers. The prior for the remainder should not be
+optimistic.
 
 Three times during this audit the harness was wrong rather than the code: a
 mis-stated CW drift coefficient, a Hill frame built from a bogus velocity, and

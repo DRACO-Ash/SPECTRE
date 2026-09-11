@@ -381,3 +381,33 @@ a defect, the remainder should not be assumed clean.
 **The tooling failed too.** `scripts/sonar_scope.py` crashed with a TypeError
 whenever two findings shared a line, sorting tuples that end in a dict. It took
 the whole quality gate down with it, which is how a gate stops being a gate.
+
+## 0.5.13
+
+`tactical.py` audited, 2,129 lines. Three more defects, one of them a safety
+function certifying a collision trajectory.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Correct the NMC establishing burn in `nmc_safety_ellipse` | The prescribed initial condition (radial burn from co-located) gives a trajectory through the origin once per orbit. Flown closest approach for a reported 5.000 km margin was **zero**. Now a radial offset plus an along-track burn of 2nA; flown closest approach 5.0000 km. | Not applicable: flown and measured. |
+| Runtime correctness | **EVIDENCED** | Correct the `phasing_orbit` closure condition | It solved for a non-integer revolution count, so the chaser reached the target's angle at the wrong altitude. Semi-major axis error 5 km at a 5 degree gap, 5,615 km at 180 degrees. Now exactly 1.000000 revolutions against the closed form. | Not applicable: closed form. |
+| Runtime correctness | **EVIDENCED** | Make `intercept_envelope_intercept` run the Lambert sweep its description always claimed | It discarded the state vectors it held and passed two radii to a phase-blind estimate, which measured 1.3x to 121x optimistic against true Lambert. It also took its delta-V budget from a parameter named `target_distance_km`. | Not applicable: measured against Lambert. |
+
+**Three pre-existing tests were asserting an impossible manoeuvre.** Closing a
+30 degree gap in one revolution from a 400 km LEO needs a phasing orbit with
+its far apsis 275 km below the surface. The old code returned a number for it.
+Those tests now use GEO, and a new case asserts the LEO refusal.
+
+**Checked and found correct:** `geo_drift`, `graveyard_transfer`,
+`j2_raan_rate`, `cw_radial_separation` and `cw_along_track_drift`, all against
+independent relations or the validated CW propagator.
+
+**Not audited:** fourteen heuristic and classification functions inside
+`tactical.py`, plus seven whole modules. These encode judgement rather than
+physics and need a doctrine review, not a numerical one, but note that
+`fingerprint_manoeuvre` and `orbital_terrain` were both being fed angles
+corrupted by the 0.5.12 units defect.
+
+**Recorded, not fixed:** the threat sweep wraps every method in
+`except Exception: pass`, so an infeasible method drops out silently and so
+does a genuine bug.

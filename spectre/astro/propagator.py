@@ -18,6 +18,12 @@ from sgp4.api import Satrec, jday
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
 
+# Below these an orbit is treated as exactly equatorial or exactly circular,
+# and the classical element that becomes undefined is replaced by the one
+# that is still defined. See state_to_keplerian.
+_EQUATORIAL_NODE_TOL: float = 1e-10
+_CIRCULAR_ECC_TOL: float = 1e-10
+
 
 @dataclass
 class StateVector:
@@ -171,8 +177,8 @@ def state_to_keplerian(sv: StateVector) -> KeplerianElements:
     # The standard substitutions below keep the state recoverable in every
     # case: argument of latitude for a circular orbit, longitude of periapsis
     # for an equatorial one, true longitude when both apply.
-    equatorial = n_mag <= 1e-10
-    circular = ecc <= 1e-10
+    equatorial = n_mag <= _EQUATORIAL_NODE_TOL
+    circular = ecc <= _CIRCULAR_ECC_TOL
 
     if circular and equatorial:
         # True longitude: angle from the x-axis to the position vector.
