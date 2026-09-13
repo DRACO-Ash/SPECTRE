@@ -87,10 +87,24 @@ nothing about the adversary.
 actually fly that intercept?* It is computed, displayed on another page, and
 not consulted.
 
-## Phase 1: connect what exists
+## Phase 1: connect what exists - DELIVERED in 0.5.14, with one item part-done
 
 Nothing here is new science. It is wiring, and it is where the fastest and
 largest gain sits.
+
+Status against the four items as written, so the record is not flattering:
+
+| Item | State |
+|---|---|
+| 1. Composite threat verdict | **Done.** `spectre/domain/threat_assessment.py`, geometry and capability answered separately, weaker side governing, unassessed objects falling back to geometry rather than being scored harmless. |
+| 2. Rank on warning time | **Done.** `warning_time_rank` drives both the entry sort and the worst course of action; warning time is now the lead figure on the panel. |
+| 3. Real intent from behaviour | **Part done.** The verdict *rationale* is written from real evidence and names the status that produced it. The `_sweep_intents` dictionary mapping solver name to prose is unchanged, because replacing it needs the manoeuvre classifier, which needs an element-set history the sweep does not fetch. |
+| 4. Show what was refused | **Done.** Eight silent excepts now record the solver's own message; the panel lists them. |
+
+Capability evidence is currently the assessed record alone. Propellant budget,
+anomaly score and observed manoeuvre count all need the same absent history and
+are reported as unavailable rather than assumed either way. That fetch is the
+first piece of Phase 2 and would complete item 3 with it.
 
 **1. A composite threat verdict.** Combine geometric accessibility with
 behavioural anomaly, propellant remaining, and assessed status. An object with

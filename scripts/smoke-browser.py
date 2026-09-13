@@ -52,6 +52,13 @@ _ADMIN_USER = "smoke_admin"
 _ADMIN_PASS = "smoke-probe-password-not-a-secret"
 _SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
 
+# A real catalogued GEO element set, used only to give the sweep a red object
+# without needing UDL credentials.
+_PROBE_RED_TLE = (
+    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
+    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
+)
+
 # Network failures reaching outside the app are the sandbox or the network, not
 # a defect in the page. Everything else, including any same-origin request that
 # fails, is ours and fails the probe.
@@ -227,6 +234,48 @@ async def _run(base_url: str) -> list[str]:
             check("admin-delete", await page.locator("#user-tbody tr").count() == before,
                   "the deleted row did not disappear without a reload")
 
+        # 4b. The threat sweep, the capability Phase 1 changed.
+        #
+        #     Honest limit, stated rather than hidden: the sweep button only
+        #     renders once a red satellite is selected, and that dropdown is
+        #     populated from UDL. A throwaway instance has no credentials, so
+        #     the sweep CANNOT be driven end to end here. What the probe can do
+        #     is reach the panel, confirm the form and the override control are
+        #     present and usable, and drive the sweep whenever data does exist.
+        #
+        #     A step that silently does nothing is the exact failure this probe
+        #     was written to catch, so it says which of the two happened.
+        await page.goto(f"{base_url}/")
+        await page.wait_for_load_state("networkidle")
+        sweep_form = page.locator('form:has(textarea[name="manual_red_tle"])')
+        check("threat-sweep", await sweep_form.count() > 0,
+              "the sweep form is not reachable from the console")
+
+        # The override lives inside a collapsed <details>; a hidden control
+        # cannot be filled, so open it the way an operator would.
+        toggle = page.locator("#ts-manual-red-tle-toggle > summary")
+        check("threat-sweep-override", await toggle.count() > 0,
+              "the manual red TLE override control is missing")
+        if await toggle.count():
+            await toggle.first.click()
+            await page.wait_for_timeout(300)
+            await page.locator('textarea[name="manual_red_tle"]').fill(_PROBE_RED_TLE)
+
+        sweep_button = page.locator('button:has-text("Sweep Targets")')
+        if await sweep_button.count():
+            await sweep_button.first.click()
+            await page.wait_for_timeout(6000)
+            body = await page.content()
+            check("threat-sweep-run", "Internal Server Error" not in body,
+                  "the sweep returned a server error")
+            check("threat-sweep-verdict",
+                  ("GEOMETRIC ACCESS" in body) or ("No intercept solutions" in body),
+                  "the sweep rendered neither a verdict nor an explanation")
+            print("        threat sweep driven end to end; verdict panel rendered")
+        else:
+            print("        threat sweep NOT driven: no red satellite available "
+                  "without UDL credentials. Form and override reached only.")
+
         # 5. Enter training and leave it by the sidebar button, which is the
         #    form that answered 403 in production.
         await page.goto(f"{base_url}/training")
@@ -288,7 +337,7 @@ def main() -> int:
         for failure in failures:
             print(f"    {failure}")
         return 1
-    print("  PASS  login, admin create and delete, training exit and sign out, no console errors")
+    print("  PASS  login, admin create and delete, threat sweep panel, training\n        exit and sign out, no console errors")
     return 0
 
 

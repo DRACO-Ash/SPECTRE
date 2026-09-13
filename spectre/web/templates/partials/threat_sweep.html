@@ -32,6 +32,24 @@
       <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
     </div>
 
+    {# The two findings the single word used to conflate. Geometric access and
+       assessed capability are different questions with different answers, and
+       showing only their combination is how the verdict came to contradict the
+       intelligence panel on the same screen. #}
+    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; flex-wrap:wrap; font-size:0.7rem">
+      <span style="color:var(--text-muted)">GEOMETRIC ACCESS</span>
+      <strong>{{ worst_coa.access_level }}</strong>
+      <span style="color:var(--text-muted)">&#183; ASSESSED CAPABILITY</span>
+      <strong>{{ worst_coa.capability_level }}</strong>
+      <span style="color:var(--text-muted)">&#183; CONFIDENCE</span>
+      <strong>{{ worst_coa.assessment_confidence }}</strong>
+      {% if worst_coa.inputs_missing %}
+      <span style="color:var(--text-muted)" title="Evidence not available for this object: {{ worst_coa.inputs_missing | join(', ') }}">
+        &#183; {{ worst_coa.inputs_missing | length }} input(s) unavailable
+      </span>
+      {% endif %}
+    </div>
+
     {# ── Stat cards ── #}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
       <div class="stat-card">
@@ -41,12 +59,12 @@
         <div class="stat-lbl">Primary Target</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val" style="color:{{ worst_coa.threat_color }}">{{ worst_coa.dv }} <span style="font-size:0.7rem; font-weight:400">km/s</span></div>
-        <div class="stat-lbl">Min. &#916;V Required</div>
+        <div class="stat-val" style="color:{{ worst_coa.threat_color }}">{{ worst_coa.tof_label }}</div>
+        <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ worst_coa.tof_label }}</div>
-        <div class="stat-lbl">Time of Flight</div>
+        <div class="stat-val">{{ "%.3f" | format(worst_coa.dv) }} <span style="font-size:0.7rem; font-weight:400">km/s</span></div>
+        <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.method | upper }}</div>
@@ -102,6 +120,29 @@
     <p style="margin:0.15rem 0; font-size:0.78rem">&#9888; {{ err }}</p>
     {% endfor %}
   </div>
+  {% endif %}
+
+  {# Methods that produced nothing, and why.
+
+     These were previously discarded by a bare except, so the analyst could not
+     tell a method that was tried and found unviable from one that threw, or
+     see that it had been attempted at all. The omission biased the sweep
+     towards under-reporting the fastest approaches: refusals cluster on the
+     aggressive end, where the geometry is degenerate or the orbit unflyable. #}
+  {% if method_refusals %}
+  <details style="margin:0.4rem 0">
+    <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
+      {{ method_refusals | length }} method(s) produced no solution
+    </summary>
+    <div style="padding:0.4rem 0.6rem">
+      {% for method, reason in method_refusals %}
+      <p style="margin:0.15rem 0; font-size:0.74rem">
+        <strong>{{ method | upper }}</strong>
+        <span style="color:var(--text-muted)">{{ reason }}</span>
+      </p>
+      {% endfor %}
+    </div>
+  </details>
   {% endif %}
 
   {% if grouped %}
@@ -168,7 +209,7 @@
             {% endif %}
           </td>
           <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
-          <td class="mnv-dv"><strong>{{ "%.4f" | format(group.best_dv) }}</strong></td>
+          <td class="mnv-dv"><strong>{{ "%.3f" | format(group.best_dv) }}</strong></td>
           <td class="col-dim">{{ group.best_method }}</td>
           <td class="col-dim">
             <span class="threat-profile-badge">{{ group.profile_count }}</span>
@@ -203,7 +244,7 @@
           <td class="threat-child-indent"></td>
           <td class="col-dim">{{ child.entry.burn_location }}</td>
           <td class="col-dim">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td class="mnv-dv">{{ "%.4f" | format(child.entry.delta_v_km_s) }}</td>
+          <td class="mnv-dv">{{ "%.3f" | format(child.entry.delta_v_km_s) }}</td>
           <td class="col-dim">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
           <td class="col-dim" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
             {{ child.entry.method }}

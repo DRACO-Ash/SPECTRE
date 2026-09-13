@@ -37,6 +37,12 @@ from spectre.domain.models import (
     ThreatSweepEntry,
     ThreatTarget,
 )
+from spectre.domain.threat_assessment import (
+    AccessEvidence,
+    CapabilityEvidence,
+    assess_threat,
+    warning_time_rank,
+)
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.models import User
@@ -482,15 +488,55 @@ def _sol_to_entry(
     )
 
 
+# Verdict colours. MINIMAL is new: it is the band an object lands in when the
+# geometry is permissive but the object cannot fly it, which previously had no
+# way of being expressed at all.
+_BAND_COLOURS: dict[str, tuple[str, str]] = {
+    "CRITICAL": ("#ef4444", "rgba(239,68,68,0.06)"),
+    "HIGH":     ("#f59e0b", "rgba(245,158,11,0.06)"),
+    "MEDIUM":   ("#3b8beb", "rgba(59,139,235,0.06)"),
+    "LOW":      ("#22c55e", "rgba(34,197,94,0.06)"),
+    "MINIMAL":  ("#64748b", "rgba(100,116,139,0.06)"),
+}
+
+
+def _refusal_reason(exc: BaseException) -> str:
+    """Turn a solver refusal into a sentence worth showing.
+
+    A refusal is information: "this geometry is degenerate" tells the analyst
+    something real. An empty result tells them nothing, and looks identical to
+    a method that was never tried.
+    """
+    text = str(exc).strip()
+    if not text:
+        return f"refused ({type(exc).__name__})"
+    first_sentence = text.split(".")[0].split(";")[0].strip()
+    return first_sentence[:160] if first_sentence else text[:160]
+
+
 def _sweep_all_methods(
     red_tle: str,
     target_tle: str,
     target: ThreatTarget,
     epochs: list[tuple[str, datetime]],
     max_dv: float,
+    refusals: dict[str, str] | None = None,
 ) -> list[ThreatSweepEntry]:
-    """Run all applicable transfer methods for one target across all epochs."""
+    """Run all applicable transfer methods for one target across all epochs.
+
+    *refusals* collects, per method, why it produced nothing. Every method used
+    to be wrapped in a bare ``except Exception: pass``, so the analyst could not
+    tell "tried and not viable" from "threw", and could not see that a method
+    had been attempted at all.
+
+    That asymmetry mattered in the dangerous direction. The cheapest options are
+    the ones most likely to be refused: a degenerate Lambert geometry is the
+    near-180-degree GEO phasing case, and a phasing orbit too aggressive to fly
+    is the short-notice one. Refusals cluster on the fast end, so dropping them
+    silently biased the sweep towards under-reporting the quickest approaches.
+    """
     entries: list[ThreatSweepEntry] = []
+    notes: dict[str, str] = refusals if refusals is not None else {}
 
     for location, epoch in epochs:
         # Hohmann
@@ -501,8 +547,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "hohmann"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("hohmann", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("hohmann", _refusal_reason(exc))
 
         # Lambert (6-hour TOF)
         try:
@@ -512,8 +560,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "lambert"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("lambert", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("lambert", _refusal_reason(exc))
 
         # Bi-elliptic
         try:
@@ -523,8 +573,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "bielliptic"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("bielliptic", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("bielliptic", _refusal_reason(exc))
 
         # Phasing (1 revolution)
         try:
@@ -534,8 +586,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "phasing"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("phasing", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("phasing", _refusal_reason(exc))
 
         # Plane change
         try:
@@ -545,8 +599,10 @@ def _sweep_all_methods(
             )
             if abs(sol.total_delta_v) <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "plane_change"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("plane_change", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("plane_change", _refusal_reason(exc))
 
         # Min-time
         try:
@@ -557,8 +613,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "min_time"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("min_time", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("min_time", _refusal_reason(exc))
 
         # V-bar hop (3-hop sequence, auto-derived distance)
         try:
@@ -569,8 +627,10 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "vbar_hop"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("vbar_hop", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("vbar_hop", _refusal_reason(exc))
 
         # H-bar hop (3-hop sequence, auto-derived distance)
         try:
@@ -581,18 +641,51 @@ def _sweep_all_methods(
             )
             if sol.total_delta_v <= max_dv:
                 entries.append(_sol_to_entry(sol, target, epoch, location, "hbar_hop"))
-        except Exception:
-            pass
+            else:
+                notes.setdefault("hbar_hop", f"exceeds the {max_dv:g} km/s budget")
+        except Exception as exc:
+            notes.setdefault("hbar_hop", _refusal_reason(exc))
 
     return entries
 
 
-def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict[str, Any] | None:
+def _red_capability(red_satno: str | None) -> CapabilityEvidence:
+    """Assemble what is known about the red object's ability to act.
+
+    Reads the assessed intelligence record, which is already loaded and was
+    already being joined for display. Behavioural evidence (propellant budget,
+    anomaly score, manoeuvre count) comes from pattern-of-life analysis, which
+    needs an element-set history rather than the single current TLE the sweep
+    holds; those fields stay None here and the verdict reports them as missing
+    rather than assuming either way.
+    """
+    if not red_satno:
+        return CapabilityEvidence()
+    record = get_intel(red_satno)
+    if not record:
+        return CapabilityEvidence()
+    return CapabilityEvidence(
+        intel_threat_level=record.get("threat_level"),
+        operational_status=record.get("status"),
+    )
+
+
+def _compute_worst_coa(
+    entries: list[ThreatSweepEntry],
+    capability: CapabilityEvidence | None = None,
+    max_dv: float = 3.0,
+) -> dict[str, Any] | None:
     """Identify and describe the most dangerous course of action from sweep entries.
 
-    The "most dangerous" entry is the one with the lowest ΔV — it is the most
-    easily achievable intercept and therefore represents the highest immediate
-    threat to the target set.
+    "Most dangerous" now means the one that leaves the least warning time among
+    the intercepts that can actually be flown, not simply the cheapest. Warning
+    time is what a defender spends: an intercept costing 0.45 km/s arriving in
+    35 minutes is a far harder problem than one costing 0.12 km/s over 40 hours,
+    and ranking on delta-V alone called the second the greater threat.
+
+    *capability* carries what is known about the red object's ability to act.
+    Without it the verdict is geometry alone, which is what this function used
+    to be while calling itself an adversary capability assessment.
 
     Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
     """
@@ -601,27 +694,25 @@ def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict[str, Any] | None
 
     import math
 
-    # entries are already sorted by dv ascending — lowest = most achievable = most dangerous
-    worst = entries[0]
+    # The entry that leaves the least warning time among the feasible ones.
+    worst = min(
+        entries,
+        key=lambda e: warning_time_rank(e.delta_v_km_s, e.tof_hours, max_dv),
+    )
     dv = worst.delta_v_km_s
 
-    # Threat level: lower ΔV means more achievable, therefore higher threat
-    if dv < 0.2:
-        threat_level = "CRITICAL"
-        threat_color = "#ef4444"
-        threat_bg = "rgba(239,68,68,0.06)"
-    elif dv < 0.5:
-        threat_level = "HIGH"
-        threat_color = "#f59e0b"
-        threat_bg = "rgba(245,158,11,0.06)"
-    elif dv < 1.0:
-        threat_level = "MEDIUM"
-        threat_color = "#3b8beb"
-        threat_bg = "rgba(59,139,235,0.06)"
-    else:
-        threat_level = "LOW"
-        threat_color = "#22c55e"
-        threat_bg = "rgba(34,197,94,0.06)"
+    assessment = assess_threat(
+        AccessEvidence(
+            best_delta_v_km_s=dv,
+            time_to_arrival_hours=worst.tof_hours,
+            method=worst.method,
+        ),
+        capability or CapabilityEvidence(),
+    )
+    threat_level = assessment.verdict_label
+    threat_color, threat_bg = _BAND_COLOURS.get(
+        threat_level, ("#94a3b8", "rgba(148,163,184,0.06)")
+    )
 
     _sweep_intents: dict[str, str] = {
         "hohmann":      "Orbital Transfer — Energy Change",
@@ -674,15 +765,27 @@ def _compute_worst_coa(entries: list[ThreatSweepEntry]) -> dict[str, Any] | None
 
     dv_budget_pct = round(min(100.0, dv / 3.0 * 100.0), 1)
 
+    # Three decimals, not four. Measured against TLE uncertainty, a co-orbital
+    # GEO intercept is good to about 1 m/s at a realistic few-kilometre error,
+    # so the fourth decimal (0.1 m/s) was noise presented as precision.
     summary = (
-        f"Most achievable intercept: {worst.method.upper()} transfer to "
-        f"{worst.target.target_name} burning at {worst.burn_location} "
-        f"requires only {dv:.4f} km/s \u0394V with {tof_label} time of flight. "
-        f"Dominant burn axis: {direction}. "
-        f"Adversary capability assessment — intercept is {threat_level.lower()} threat."
+        f"Least warning: {worst.method.upper()} transfer to "
+        f"{worst.target.target_name} arriving in {tof_label}, costing "
+        f"{dv:.3f} km/s \u0394V, burning at {worst.burn_location}. "
+        f"Dominant burn axis: {direction}. {assessment.rationale}"
     )
 
     return {
+        # The two findings, kept separately visible. One word carrying both is
+        # how the geometric verdict came to contradict the intelligence panel
+        # beside it.
+        "access_level": assessment.access_label,
+        "capability_level": assessment.capability_label,
+        "assessment_confidence": assessment.confidence,
+        "assessment_rationale": assessment.rationale,
+        "inputs_used": assessment.inputs_used,
+        "inputs_missing": assessment.inputs_missing,
+        "warning_time_hours": round(assessment.warning_time_hours, 2),
         "target_name": worst.target.target_name,
         "target_satno": worst.target.target_satno or "",
         "method": worst.method,
@@ -875,6 +978,14 @@ async def threat_sweep(
         except Exception as _cl_exc:
             logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
 
+    # What is known about the RED object's ability to act.
+    #
+    # Capability is a property of the threatening object, not of the things it
+    # might reach, and red is a single object, so this is one lookup rather
+    # than one per target. The sweep previously looked up intelligence for the
+    # TARGET and used it for display only, while the verdict consulted nothing.
+    red_capability = _red_capability(red_satno)
+
     # Compute epochs for red satellite.
     epochs = _compute_epochs(red_tle, now)
 
@@ -890,9 +1001,10 @@ async def threat_sweep(
     # Run sweep in executor.
     loop = asyncio.get_running_loop()
 
-    def _run_sweep() -> tuple[list[ThreatSweepEntry], list[str]]:
+    def _run_sweep() -> tuple[list[ThreatSweepEntry], list[str], dict[str, str]]:
         all_entries: list[ThreatSweepEntry] = []
         sweep_errors: list[str] = []
+        method_refusals: dict[str, str] = {}
         for target in targets:
             if target.target_source == "manual":
                 tle = _manual_tle_by_name.get(target.target_name)
@@ -912,19 +1024,24 @@ async def threat_sweep(
                     f"{red_regime} red vs {tgt_regime} target (regime mismatch)"
                 )
                 continue
-            target_entries = _sweep_all_methods(red_tle, tle, target, epochs, max_dv)
+            target_entries = _sweep_all_methods(
+                red_tle, tle, target, epochs, max_dv, refusals=method_refusals,
+            )
             if not target_entries:
                 sweep_errors.append(
                     f"{target.target_name}: all methods/epochs exceeded {max_dv} km/s or solver failed"
                 )
             all_entries.extend(target_entries)
-        return all_entries, sweep_errors
+        return all_entries, sweep_errors, method_refusals
 
-    entries, sweep_errors = await loop.run_in_executor(None, _run_sweep)
+    entries, sweep_errors, method_refusals = await loop.run_in_executor(None, _run_sweep)
     errors.extend(sweep_errors)
 
-    # Sort by delta-V ascending.
-    entries.sort(key=lambda e: e.delta_v_km_s)
+    # Rank on warning time among the feasible intercepts. Delta-V keeps its
+    # role as the feasibility filter it already was, but it is not the ranking:
+    # an intercept arriving in 35 minutes is a harder problem than a cheaper
+    # one arriving in 40 hours, and sorting on cost called the second worse.
+    entries.sort(key=lambda e: warning_time_rank(e.delta_v_km_s, e.tof_hours, max_dv))
 
     elapsed = time.monotonic() - t0
 
@@ -948,7 +1065,7 @@ async def threat_sweep(
             g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"
 
     # Identify the most dangerous course of action.
-    worst_coa = _compute_worst_coa(entries)
+    worst_coa = _compute_worst_coa(entries, red_capability, max_dv)
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -967,6 +1084,9 @@ async def threat_sweep(
         "grouped": grouped,
         "hrr_count": hrr_count,
         "worst_coa": worst_coa,
+        # Methods that produced nothing, and why. Previously discarded, which
+        # hid the fastest approaches: refusals cluster on the aggressive end.
+        "method_refusals": sorted(method_refusals.items()),
         "red_satno": red_satno or "",
         "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
         "clustering_summary": clustering_summary,

@@ -62,7 +62,7 @@ def phasing_orbit(
         mu: Gravitational parameter.
     """
     phase_rad = math.radians(phase_angle_deg)
-    T_target = 2.0 * math.pi * math.sqrt(r_target**3 / mu)
+    period_target = 2.0 * math.pi * math.sqrt(r_target**3 / mu)
 
     # The chaser burns at a point P and must come back to P to make the second
     # burn, so it flies a WHOLE number of phasing revolutions. The previous
@@ -73,7 +73,7 @@ def phasing_orbit(
     #
     # Correct closure: the target starts *phase_rad* ahead of P, so to be at P
     # after N chaser revolutions it must travel 2*pi*N - phase_rad.
-    #     N * T_phase = T_target * (N - phase_rad / 2pi)
+    #     N * period_phase = period_target * (N - phase_rad / 2pi)
     if n_revolutions < 1:
         raise ValueError(f"n_revolutions must be at least 1, got {n_revolutions}")
     revolutions_to_close = n_revolutions - phase_rad / (2.0 * math.pi)
@@ -83,11 +83,11 @@ def phasing_orbit(
             f"{n_revolutions} revolution(s): the target would have to travel "
             "backwards. Allow more revolutions."
         )
-    T_phase = T_target * revolutions_to_close / n_revolutions
-    total_time = n_revolutions * T_phase
+    period_phase = period_target * revolutions_to_close / n_revolutions
+    total_time = n_revolutions * period_phase
 
     # Semi-major axis of phasing orbit from period
-    a_phase = (mu * (T_phase / (2.0 * math.pi)) ** 2) ** (1.0 / 3.0)
+    a_phase = (mu * (period_phase / (2.0 * math.pi)) ** 2) ** (1.0 / 3.0)
 
     # The phasing orbit has its apsis at the burn radius, so the far apsis sits
     # at 2*a_phase - r_chaser. A deep phasing orbit can put that inside the
@@ -111,7 +111,7 @@ def phasing_orbit(
         phase_angle_deg=phase_angle_deg,
         n_revolutions=n_revolutions,
         phasing_sma_km=a_phase,
-        phasing_period_s=T_phase,
+        phasing_period_s=period_phase,
         delta_v_1=dv1,
         delta_v_2=dv2,
         total_delta_v=dv1 + dv2,

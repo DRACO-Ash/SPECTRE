@@ -7,6 +7,112 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.14] - 2026-09-13
+
+Phase 1 of the roadmap: the sweep's verdict now consults the evidence the
+application already holds about the adversary, instead of measuring only the
+geometry and calling the result a capability assessment.
+
+### Added
+
+- **A composite threat verdict** (`spectre/domain/threat_assessment.py`). Pure
+  functions over plain data, no I/O. Geometric **access** and assessed
+  **capability** are answered separately and combined with the weaker side
+  governing, because a threat needs both a permissive geometry and an object
+  able to exploit it.
+
+  The contradiction this removes was visible on screen. Kowsar and Kowsar-1.5
+  ship in `adversary_intel.json` assessed `LOW` / `Degraded`, and a degraded
+  satellite in a nearby orbit still has a cheap geometric path, so the sweep
+  scored them `CRITICAL` while the intelligence panel beside it said the
+  opposite. Same inputs now return verdict `MINIMAL`, access `CRITICAL`,
+  capability `MINIMAL`, all three shown.
+
+  An object with **no** capability record is not scored as incapable. The
+  verdict falls back to geometry with `LOW` confidence and says in words that
+  it may overstate the threat, because the alternative is quietly under-
+  reporting every object nobody has assessed yet.
+
+- **A guard that renders the real template** (`tests/unit/test_threat_sweep_template.py`).
+  Eight cases under `StrictUndefined`, with the `worst_coa` fixture built by
+  calling the real `_compute_worst_coa` so it cannot drift from the route.
+
+  It immediately found a defect in this release: the new refusals panel was
+  bound to `assessment.method_refusals` while the route passes
+  `method_refusals` at the top level. Jinja's default undefined is falsy and
+  silent, so the panel never rendered, the page returned 200, the browser probe
+  passed, and all 956 existing tests stayed green. Watched to fail against the
+  original binding and to pass against the fix.
+
+### Changed
+
+- **Ranking is on warning time, not cost.** `entries.sort` and the most
+  dangerous course of action now use `warning_time_rank`, which sorts on time
+  to arrival among intercepts inside the delta-V budget. Delta-V keeps the role
+  it already had as the feasibility filter. Previously a 0.05 km/s intercept
+  arriving in three hours outranked a 0.40 km/s intercept arriving in thirty
+  minutes and was called the greater threat; warning time is what a defender
+  actually spends.
+
+- **Refused methods are recorded and shown.** The eight
+  `except Exception: pass` blocks now capture the solver's own message, and the
+  interface lists them. Refusals are not evenly distributed: a degenerate
+  Lambert geometry is the near-180-degree GEO phasing case and an unflyable
+  phasing orbit is the short-notice one, so dropping them silently biased the
+  sweep towards under-reporting the fastest approaches. It is also how the
+  Lambert defect fixed in 0.5.11 survived as long as it did.
+
+- **Delta-V is reported to three decimals, not four.** Measured against TLE
+  uncertainty, a co-orbital GEO intercept over six hours is good to about
+  1 m/s at a realistic few-kilometre position error. The fourth decimal was
+  0.1 m/s of noise presented as precision.
+
+- **The browser probe reaches the sweep panel** and states plainly when it
+  cannot drive the sweep end to end, which it cannot without UDL credentials.
+  A step that silently does nothing is the failure the probe exists to catch.
+
+- `T_phase` and `T_target` in `astro/tactical.py` renamed to `period_phase` and
+  `period_target`, clearing the last naming finding on changed lines.
+
+### Known limits
+
+- **Behavioural capability is not yet connected.** Propellant budget, anomaly
+  score and observed manoeuvre count need an element-set history; the sweep
+  holds one current TLE per object. Those fields stay unset and the interface
+  reports "3 input(s) unavailable" rather than assuming either way.
+- **`_sweep_intents` is unchanged.** Roadmap item 3, replacing the static
+  solver-name-to-prose dictionary with the manoeuvre classifier, needs the same
+  absent history. The verdict *rationale* is now written from real evidence;
+  the intent label is not.
+
+## [0.5.13] - 2026-09-12
+
+`tactical.py` audited, 2,129 lines. Three defects fixed: the NMC establishing
+burn in `nmc_safety_ellipse` (a safety function certifying a trajectory whose
+flown closest approach was zero for a reported 5 km margin), the `phasing_orbit`
+closure condition (non-integer revolution count, 5,615 km semi-major axis error
+at 180 degrees), and `intercept_envelope_intercept`, which discarded the state
+vectors it held for a phase-blind estimate measuring 1.3x to 121x optimistic.
+Full detail in `docs/CHANGE-LEDGER.md` and `docs/ORBITAL-CALCULATION-AUDIT.md`.
+
+## [0.5.12] - 2026-09-12
+
+Second half of the orbital calculation audit. Twelve double conversions of
+angles already in degrees removed from `maneuvers.py`: a 0.5 degree plane
+change at GEO costs 27 m/s and was reported as 1,521 m/s. `state_to_keplerian`
+now substitutes the defined element where a classical element is degenerate;
+the circular equatorial round trip moved 78,460 km and now returns the same
+state.
+
+## [0.5.11] - 2026-09-11
+
+**Critical.** The Lambert solver computed `sqrt(y/mu)` where Curtis algorithm
+5.2 requires `sqrt(y/C(z))`. Error against the published worked example was
+1,970 m/s; a round trip missed by 6,268 km. Replaced with the correct residual
+and a bracketed bisection, and the degeneracy guard rekeyed on transfer angle
+rather than on a quantity that stayed at 3.7e-12 at exactly 180 degrees. Every
+Lambert-derived delta-V produced before this release was wrong.
+
 ## [0.5.10] - 2026-09-10
 
 No application behaviour changes. First batch of the approved improvement plan.

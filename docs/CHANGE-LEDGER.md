@@ -411,3 +411,43 @@ corrupted by the 0.5.12 units defect.
 **Recorded, not fixed:** the threat sweep wraps every method in
 `except Exception: pass`, so an infeasible method drops out silently and so
 does a genuine bug.
+
+## 0.5.14
+
+Phase 1 of the roadmap: connect the evidence the application already holds to
+the verdict it already shows. No new science, no new data source. The red-team
+assessment found that `threat.py` computed an "adversary capability assessment"
+from four thresholds on a delta-V number and consulted none of the three risk
+verdicts the application computes elsewhere.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Compose the sweep verdict from geometric access AND assessed capability, in a new `spectre/domain/threat_assessment.py` | The shipped `adversary_intel.json` records Kowsar and Kowsar-1.5 as `LOW` / `Degraded`. Both have a cheap co-orbital geometric path, so the sweep scored them `CRITICAL` while the intelligence panel on the same screen said the opposite, with nothing reconciling the two. Reproduced and asserted: the same inputs now return verdict `MINIMAL`, access `CRITICAL`, capability `MINIMAL`. | Then the weaker-side rule is wrong for some class of object, which the separately-visible access and capability bands would make obvious rather than hiding inside one word. |
+| Runtime correctness | **EVIDENCED** | Rank sweep entries and the worst course of action on warning time, with delta-V as the feasibility filter | `entries.sort(key=lambda e: e.delta_v_km_s)` ranked a 0.05 km/s intercept arriving in 3 hours above a 0.40 km/s intercept arriving in 30 minutes, and called the first the greater threat. Measured on the same entry set, the ranking now inverts and the headline reports 0.5 hours of warning. | Then delta-V is the operational quantity after all, which would be a real finding about the doctrine rather than the code. |
+| Runtime correctness | **EVIDENCED** | Record why each transfer method produced nothing, and show it | Eight `except Exception: pass` blocks. A method that threw was indistinguishable from one never tried. The refusals are not evenly distributed: a degenerate Lambert geometry is the near-180-degree GEO phasing case and an unflyable phasing orbit is the short-notice one, so silence biased the sweep towards under-reporting the fastest approaches. It is also how the Lambert `sqrt(y/mu)` defect survived. | Not applicable: the refusal strings come from the solvers' own messages. |
+| Runtime correctness | **EVIDENCED** | Bind the refusals panel to the context key the route actually passes | **A defect in this release, found before it shipped.** The panel was bound to `assessment.method_refusals`; the route passes `method_refusals` at the top level. Jinja's default undefined is falsy and silent, so the panel never rendered, the page returned 200, the browser probe passed with no console error, and all 956 tests stayed green. Caught by writing the guard, not by running the code. | Not applicable: watched to fail against the original binding and to pass against the fix. |
+
+**The fix could have introduced a worse failure than the one it removed.** If
+an object with no capability record were scored as incapable, the sweep would
+quietly stop reporting exactly the objects nobody has assessed yet. `band()`
+returns `None` rather than `MINIMAL` for absent evidence, the verdict falls
+back to geometry alone with `LOW` confidence, and the rationale says in words
+that it may overstate the threat. Two committed cases pin that behaviour.
+
+**What is deliberately still missing.** Behavioural capability - propellant
+budget, anomaly score, observed manoeuvre count - needs an element-set history.
+The sweep holds one current TLE per object, so those three fields stay `None`
+and the interface reports "3 input(s) unavailable" rather than assuming either
+way. Connecting them is a data-fetch change, not a scoring change.
+
+**Roadmap item 3 is only partly delivered, and is recorded as such.** The
+verdict rationale is now written from real evidence, but `_sweep_intents`, the
+static dictionary mapping solver name to prose, is still in place. Replacing it
+needs the manoeuvre classifier, which needs the same absent history.
+
+**A new class of guard.** `tests/unit/test_threat_sweep_template.py` renders
+the real template under `StrictUndefined`, with the `worst_coa` fixture built
+by calling the real `_compute_worst_coa` rather than typed out, so it cannot
+drift from what the route passes. Every server-side test in this repository
+asserts what a handler returns; none asserted that the page showed it. That was
+the gap the binding defect fell through.
