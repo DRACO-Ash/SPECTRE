@@ -290,7 +290,13 @@ async def pol_monte_carlo(
     request: Request,
     satno: Annotated[int, Form()],
     manoeuvre_epoch: Annotated[str, Form()],
-    dv_km_s: Annotated[float, Form()],
+    # Posted in m/s, like every other figure the operator sees. Currently
+    # accepted and not read: the Monte Carlo run takes its magnitude from the
+    # archetype rather than from the detected burn. Left in the signature
+    # because the form sends it and dropping it would change the contract, but
+    # renamed so that if anyone does start reading it they inherit m/s rather
+    # than a value whose unit lived only in a parameter name.
+    dv_m_s: Annotated[float, Form(alias="dv_m_s")] = 0.0,
     manoeuvre_type: Annotated[str, Form()] = "orbit_raise",
     n_samples: Annotated[int, Form()] = 500,
     horizon_h: Annotated[float, Form()] = 48.0,
@@ -413,8 +419,10 @@ async def pol_chart_data(
             "lons": man_lons,
         },
         "stats": {
-            "dv_mean": pol.dv_stats.mean * 1000 if pol.dv_stats else None,
-            "dv_2sigma_high": pol.pol_high_dv * 1000 if pol.pol_high_dv else None,
+            # pattern_of_life is an astro module and reports km/s; the operator
+            # reads m/s. This is the conversion boundary for this panel.
+            "dv_mean_m_s": pol.dv_stats.mean * 1000.0 if pol.dv_stats else None,  # km/s -> m/s
+            "dv_2sigma_high_m_s": pol.pol_high_dv * 1000.0 if pol.pol_high_dv else None,  # km/s -> m/s
             "interval_mean": pol.interval_stats.mean if pol.interval_stats else None,
             "interval_low": pol.pol_low_interval,
             "interval_high": pol.pol_high_interval,

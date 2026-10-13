@@ -42,12 +42,13 @@ def _context(**overrides: Any) -> dict[str, Any]:
         target=target,
         burn_epoch=datetime(2026, 9, 13, 12, 0, tzinfo=UTC),
         burn_location="now",
-        delta_v_km_s=0.4012,
+        delta_v_m_s=401.2,
         tof_hours=0.5,
-        dv_prograde=0.38,
-        dv_normal=0.10,
-        dv_radial=0.05,
+        dv_prograde=380.0,
+        dv_normal=100.0,
+        dv_radial=50.0,
         method="min_time",
+        regime="GEO",
     )
     worst_coa = _compute_worst_coa(
         [entry],
@@ -67,7 +68,7 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "hrr_count": 0,
         "worst_coa": worst_coa,
         "method_refusals": [
-            ("bielliptic", "exceeds the 3 km/s budget"),
+            ("bielliptic", "exceeds the 500 m/s budget"),
             ("lambert", "transfer angle within 0.5 degrees of 180"),
         ],
         "red_satno": "41838",
@@ -80,11 +81,21 @@ def _context(**overrides: Any) -> dict[str, Any]:
 
 
 def _render(context: dict[str, Any]) -> str:
-    env = Environment(  # noqa: S701  autoescape is set below; this is not a default-off env
+    """Render through the application's OWN filter set, not a fresh one.
+
+    A private Environment here would not have the ``m_s`` filter the templates
+    use, so this guard would fail for a reason production never sees, and worse,
+    a filter added in production and missed here would go unnoticed. The filters
+    are taken from the real app so the two cannot drift.
+    """
+    from spectre.web.app import templates as _app_templates
+
+    env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),
         autoescape=True,
         undefined=StrictUndefined,
     )
+    env.filters.update(_app_templates.env.filters)
     return env.get_template(_TEMPLATE).render(**context)
 
 
@@ -108,7 +119,7 @@ class TestTheRefusalsPanelIsVisible:
         html = _render(_context())
         assert "2 method(s) produced no solution" in html
         assert "BIELLIPTIC" in html
-        assert "exceeds the 3 km/s budget" in html
+        assert "exceeds the 500 m/s budget" in html
         assert "transfer angle within 0.5 degrees of 180" in html
 
     def test_no_panel_when_nothing_was_refused(self) -> None:
@@ -123,10 +134,10 @@ class TestTheTwoFindingsStaySeparatelyVisible:
         html = _render(_context())
         assert "GEOMETRIC ACCESS" in html
         assert "ASSESSED CAPABILITY" in html
-        # 0.401 km/s is HIGH accessibility; the object is recorded Degraded,
+        # 401 m/s is an AGGRESSIVE profile for GEO; the object is Degraded,
         # so capability is MINIMAL. Shown side by side rather than collapsed
         # into one word that then disagrees with the intel panel beside it.
-        assert re.search(r"GEOMETRIC ACCESS.*?HIGH", html, re.S)
+        assert re.search(r"GEOMETRIC ACCESS.*?MEDIUM", html, re.S)
         assert re.search(r"ASSESSED CAPABILITY.*?MINIMAL", html, re.S)
         assert "MINIMAL THREAT" in html, "the weaker side governs the verdict"
 
@@ -136,6 +147,43 @@ class TestTheTwoFindingsStaySeparatelyVisible:
         assert "propellant budget" in html
 
 
+class TestThePostureIsOnTheScreen:
+    """A delta-v figure on its own tells an operator nothing."""
+
+    def test_the_posture_and_its_reasoning_are_shown(self) -> None:
+        html = _render(_context())
+        # 401 m/s for a GEO rendezvous is well past the 120 m/s annoyance
+        # ceiling drawn from the observed SJ-21 dock-and-tow round trip.
+        assert "AGGRESSIVE" in html
+        assert "m/s" in html
+        assert "station-keeping" in html, (
+            "the multiple of routine station-keeping is the figure an operator "
+            "can actually weigh"
+        )
+
+    def test_a_burn_nothing_could_deliver_in_time_says_so(self) -> None:
+        """Reserve is not the same as the ability to spend it in time."""
+        from spectre.domain.threat_assessment import AccessEvidence, assess_threat
+        from spectre.domain.threat_assessment import CapabilityEvidence as Cap
+
+        verdict = assess_threat(
+            AccessEvidence(
+                best_delta_v_m_s=450.0, time_to_arrival_hours=0.6,
+                method="min_time", regime="GEO",
+            ),
+            Cap(intel_threat_level="HIGH", operational_status="Operational"),
+        )
+        assert verdict.undeliverable_reason, (
+            "no flown platform can deliver 450 m/s in 36 minutes; the fastest "
+            "is a storable-chemical OTV at about 2.5 hours"
+        )
+        coa = _context()["worst_coa"]
+        coa["undeliverable_reason"] = verdict.undeliverable_reason
+        html = _render(_context(worst_coa=coa))
+        assert "NOT FLYABLE" in html
+        assert "continuous thrust" in html
+
+
 class TestWarningTimeLeads:
     def test_warning_time_is_the_first_stat_after_the_target(self) -> None:
         html = _render(_context())
@@ -143,8 +191,9 @@ class TestWarningTimeLeads:
         cost = html.index("&#916;V Required")
         assert warning < cost, "warning time is the decision; cost is the filter"
 
-    def test_delta_v_is_shown_to_three_decimals_not_four(self) -> None:
-        """The fourth decimal is 0.1 m/s, below TLE-driven uncertainty."""
+    def test_delta_v_is_shown_in_whole_metres_per_second(self) -> None:
+        """401 m/s, not 0.4012 km/s. The operator never sees km/s."""
         html = _render(_context())
-        assert "0.401 " in html
-        assert "0.4012" not in html
+        assert "401" in html
+        assert "0.4012" not in html, "that is km/s with four decimals of noise"
+        assert "km/s" not in html, "no operator-facing figure is in km/s"

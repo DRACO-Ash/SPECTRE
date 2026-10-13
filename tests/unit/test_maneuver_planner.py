@@ -23,7 +23,7 @@ def config() -> ManeuverSearchConfig:
         blue_sat="B_SAT_Alpha",
         search_window_start=datetime(2026, 3, 6, 0, 0, 0, tzinfo=UTC),
         search_window_stop=datetime(2026, 3, 6, 12, 0, 0, tzinfo=UTC),
-        max_delta_v_km_s=2.0,
+        max_delta_v_m_s=2.0,
         burn_types=[BurnType.IMPULSIVE],
         burn_locations=[BurnLocation.APOGEE, BurnLocation.ASCENDING_NODE],
     )
@@ -62,12 +62,12 @@ class TestManeuverPlannerValidation:
             validate_search_config(config)
 
     def test_zero_max_dv_raises(self, config: ManeuverSearchConfig) -> None:
-        config.max_delta_v_km_s = 0.0
+        config.max_delta_v_m_s = 0.0
         with pytest.raises(ManeuverPlannerError, match="positive"):
             validate_search_config(config)
 
     def test_negative_max_dv_raises(self, config: ManeuverSearchConfig) -> None:
-        config.max_delta_v_km_s = -1.0
+        config.max_delta_v_m_s = -1.0
         with pytest.raises(ManeuverPlannerError, match="positive"):
             validate_search_config(config)
 

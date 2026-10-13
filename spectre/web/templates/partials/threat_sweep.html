@@ -50,6 +50,33 @@
       {% endif %}
     </div>
 
+    {# What the cost says about how the actor would have to behave.
+       A delta-v figure on its own means nothing to an operator: 50 m/s is one
+       routine year at GEO and fifty years of it at MEO. The posture reads it
+       against what satellites actually do. #}
+    {% set _posture_colour = {
+         'BENIGN': '#22c55e',
+         'ANNOYANCE': '#f59e0b',
+         'AGGRESSIVE': '#ef4444',
+         'BEYOND PLATFORM': '#a78bfa'
+       }.get(worst_coa.posture_label, '#94a3b8') %}
+    <div style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.5rem; font-size:0.72rem">
+      <span style="background:{{ _posture_colour }}22; color:{{ _posture_colour }}; border:1px solid {{ _posture_colour }}66;
+                   font-size:0.65rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:3px;
+                   letter-spacing:0.05em; white-space:nowrap">{{ worst_coa.posture_label }}</span>
+      <span style="color:var(--text-dim)" title="{{ worst_coa.posture_basis }}">{{ worst_coa.posture_rationale }}</span>
+    </div>
+
+    {% if worst_coa.undeliverable_reason %}
+    {# Reserve is not the ability to spend it in time. An all-electric bus holds
+       1,500 m/s but thrusts at 0.27 N, so it needs about 64 days to deliver
+       500 m/s. An impulsive solution arriving in an hour is not flyable. #}
+    <div style="border-left:3px solid #a78bfa; background:rgba(167,139,250,0.07); padding:0.4rem 0.6rem;
+                margin-bottom:0.5rem; font-size:0.72rem; color:var(--text-dim)">
+      <strong style="color:#a78bfa">NOT FLYABLE</strong> &#183; {{ worst_coa.undeliverable_reason }}
+    </div>
+    {% endif %}
+
     {# ── Stat cards ── #}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
       <div class="stat-card">
@@ -63,7 +90,7 @@
         <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ "%.3f" | format(worst_coa.dv) }} <span style="font-size:0.7rem; font-weight:400">km/s</span></div>
+        <div class="stat-val">{{ "%.3f" | format(worst_coa.dv) }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
         <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
@@ -84,7 +111,7 @@
     <div style="margin-bottom:0.5rem">
       <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:0.2rem">
         <span>&#916;V Budget Utilisation</span>
-        <span>{{ worst_coa.dv_budget_pct }}% of 3 km/s</span>
+        <span>{{ worst_coa.dv_budget_pct }}% of {{ worst_coa.budget_m_s | m_s }} m/s budget</span>
       </div>
       <div style="height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden">
         <div style="height:100%; width:{{ worst_coa.dv_budget_pct }}%; background:{{ worst_coa.threat_color }}; border-radius:3px"></div>
@@ -183,7 +210,9 @@
       <tbody>
         {% for group in grouped %}
         {# ── Parent row (one per target) ── #}
-        <tr class="threat-parent {% if group.best_dv < 0.5 %}threat-high{% elif group.best_dv < 1.0 %}threat-med{% endif %}"
+        {# Colour by posture, not by a delta-v threshold. The thresholds here were
+   0.5 and 1.0 km/s, which in m/s shade every row above 1 m/s identically. #}
+        <tr class="threat-parent {% if group.best_posture in ('BENIGN', 'ANNOYANCE') %}threat-high{% elif group.best_posture == 'AGGRESSIVE' %}threat-med{% endif %}"
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
@@ -231,7 +260,7 @@
           <td></td>
           <th onclick="childSort({{ group_idx }},1,'str')">Location <span class="hrr-sort-ind"></span></th>
           <th onclick="childSort({{ group_idx }},2,'str')">Burn Epoch <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},3,'num')">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},3,'num')">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
           <th onclick="childSort({{ group_idx }},4,'num')">TOF <span class="hrr-sort-ind"></span></th>
           <th onclick="childSort({{ group_idx }},5,'str')">Method <span class="hrr-sort-ind"></span></th>
           <th class="no-sort">Action</th>
@@ -240,11 +269,11 @@
         <tr class="threat-child threat-children-{{ group_idx }}"
             id="threat-row-{{ child.flat_idx }}"
             style="display:none"
-            {% if child.entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif child.entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+            {% if child.entry.posture_label in ('BENIGN', 'ANNOYANCE') %}data-threat="high"{% elif child.entry.posture_label == 'AGGRESSIVE' %}data-threat="med"{% endif %}>
           <td class="threat-child-indent"></td>
           <td class="col-dim">{{ child.entry.burn_location }}</td>
           <td class="col-dim">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td class="mnv-dv">{{ "%.3f" | format(child.entry.delta_v_km_s) }}</td>
+          <td class="mnv-dv">{{ child.entry.delta_v_m_s | m_s }}</td>
           <td class="col-dim">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
           <td class="col-dim" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
             {{ child.entry.method }}

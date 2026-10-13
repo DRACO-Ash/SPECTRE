@@ -55,14 +55,14 @@ class TestThreatSweepEntry:
             target=target,
             burn_epoch=datetime(2024, 1, 1, tzinfo=UTC),
             burn_location="now",
-            delta_v_km_s=1.5,
+            delta_v_m_s=1.5,
             tof_hours=3.0,
             dv_prograde=1.2,
             dv_normal=0.3,
             dv_radial=0.1,
             method="hohmann",
         )
-        assert entry.delta_v_km_s == 1.5
+        assert entry.delta_v_m_s == 1.5
         assert entry.method == "hohmann"
         assert entry.notes == ""
 
@@ -86,7 +86,7 @@ class TestThreatAssessment:
                 target=target,
                 burn_epoch=datetime(2024, 1, 1, tzinfo=UTC),
                 burn_location="now",
-                delta_v_km_s=0.8,
+                delta_v_m_s=0.8,
                 tof_hours=2.0,
                 dv_prograde=0.7,
                 dv_normal=0.1,
@@ -97,7 +97,7 @@ class TestThreatAssessment:
                 target=target,
                 burn_epoch=datetime(2024, 1, 1, tzinfo=UTC),
                 burn_location="apogee",
-                delta_v_km_s=1.2,
+                delta_v_m_s=1.2,
                 tof_hours=3.0,
                 dv_prograde=1.0,
                 dv_normal=0.2,
@@ -189,39 +189,43 @@ class TestSweepHelpers:
         assert epochs[0][1] == now
 
     def test_sweep_all_methods(self) -> None:
-        from spectre.web.routes.threat import _sweep_all_methods
+        from spectre.web.routes.threat import _SweepRequest, _sweep_all_methods
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
         epochs = [("now", now)]
 
+        # Deliberately wider than any real platform's reserve: this case
+        # exercises the eight-method fan-out, not the budget filter. The
+        # ISS-to-Tiangong plane change alone is about 10 degrees, which costs
+        # thousands of m/s and no object on orbit could fly.
         entries = _sweep_all_methods(
-            red_tle=_ISS_TLE,
-            target_tle=_TIANGONG_TLE,
-            target=target,
-            epochs=epochs,
-            max_dv=10.0,
+            _SweepRequest(
+                red_tle=_ISS_TLE, target_tle=_TIANGONG_TLE, target=target,
+                max_dv_m_s=10_000.0, regime="LEO",
+            ),
+            epochs,
         )
         assert len(entries) >= 1
         methods_seen = {e.method for e in entries}
         assert "hohmann" in methods_seen
         assert entries[0].burn_location == "now"
-        assert entries[0].delta_v_km_s > 0
+        assert entries[0].delta_v_m_s > 0
 
     def test_sweep_all_methods_filters_by_max_dv(self) -> None:
-        from spectre.web.routes.threat import _sweep_all_methods
+        from spectre.web.routes.threat import _SweepRequest, _sweep_all_methods
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
         epochs = [("now", now)]
 
-        # Use negative max_dv to filter everything out.
+        # Use a negative budget to filter everything out.
         entries = _sweep_all_methods(
-            red_tle=_ISS_TLE,
-            target_tle=_TIANGONG_TLE,
-            target=target,
-            epochs=epochs,
-            max_dv=-1.0,
+            _SweepRequest(
+                red_tle=_ISS_TLE, target_tle=_TIANGONG_TLE, target=target,
+                max_dv_m_s=-1.0, regime="LEO",
+            ),
+            epochs,
         )
         assert len(entries) == 0
 
@@ -234,29 +238,36 @@ class TestSweepHelpers:
         t_b = ThreatTarget("SAT_B", "222", "hrr", 1)
         entries = [
             ThreatSweepEntry(target=t_a, burn_epoch=now, burn_location="now",
-                             delta_v_km_s=2.0, tof_hours=1.0, dv_prograde=0,
+                             delta_v_m_s=2.0, tof_hours=1.0, dv_prograde=0,
                              dv_normal=0, dv_radial=0, method="hohmann"),
             ThreatSweepEntry(target=t_b, burn_epoch=now, burn_location="now",
-                             delta_v_km_s=0.5, tof_hours=1.0, dv_prograde=0,
+                             delta_v_m_s=0.5, tof_hours=1.0, dv_prograde=0,
                              dv_normal=0, dv_radial=0, method="lambert"),
             ThreatSweepEntry(target=t_a, burn_epoch=now, burn_location="apogee",
-                             delta_v_km_s=1.0, tof_hours=2.0, dv_prograde=0,
+                             delta_v_m_s=1.0, tof_hours=2.0, dv_prograde=0,
                              dv_normal=0, dv_radial=0, method="lambert"),
         ]
 
         groups = _group_entries(entries)
         assert len(groups) == 2
-        # SAT_B has best dV (0.5), so it sorts first.
+
+        # Groups are ranked on WARNING TIME, matching the headline above them.
+        # They used to be ranked on cost while the banner ranked on time, so the
+        # two disagreed on the same screen about which target mattered most.
         assert groups[0]["target"].target_name == "SAT_B"
-        assert groups[0]["best_dv"] == 0.5
         assert groups[0]["profile_count"] == 1
-        # SAT_A has best dV 1.0 (from the apogee entry).
+
         assert groups[1]["target"].target_name == "SAT_A"
-        assert groups[1]["best_dv"] == 1.0
+        # SAT_A's representative is its SOONEST entry (1.0 h, costing 2.0 m/s),
+        # not its cheapest (2.0 h, costing 1.0 m/s). An intercept arriving in
+        # one hour is the harder problem whatever it costs.
+        assert groups[1]["best_tof"] == 1.0
+        assert groups[1]["best_dv"] == 2.0
         assert groups[1]["profile_count"] == 2
-        # Children are sorted by dV within the group.
-        assert groups[1]["children"][0]["entry"].delta_v_km_s == 1.0
-        assert groups[1]["children"][1]["entry"].delta_v_km_s == 2.0
+        # Children are sorted by warning time within the group too, so the row
+        # the operator opens first is the soonest arrival, not the cheapest.
+        assert groups[1]["children"][0]["entry"].tof_hours == 1.0
+        assert groups[1]["children"][1]["entry"].tof_hours == 2.0
 
     def test_hrr_group_counts(self) -> None:
         """_hrr_group_counts returns correct breakdowns by side and rank."""
@@ -280,21 +291,21 @@ class TestSweepHelpers:
         assert (2, 1) in red_hrr
 
     def test_entry_sorting(self) -> None:
-        """Entries should be sortable by delta_v_km_s."""
+        """Entries should be sortable by delta_v_m_s."""
         target = ThreatTarget("X", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
         entries = [
             ThreatSweepEntry(target=target, burn_epoch=now, burn_location="now",
-                             delta_v_km_s=2.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
+                             delta_v_m_s=2.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
                              dv_radial=0, method="hohmann"),
             ThreatSweepEntry(target=target, burn_epoch=now, burn_location="apogee",
-                             delta_v_km_s=0.5, tof_hours=1.0, dv_prograde=0, dv_normal=0,
+                             delta_v_m_s=0.5, tof_hours=1.0, dv_prograde=0, dv_normal=0,
                              dv_radial=0, method="hohmann"),
             ThreatSweepEntry(target=target, burn_epoch=now, burn_location="perigee",
-                             delta_v_km_s=1.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
+                             delta_v_m_s=1.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
                              dv_radial=0, method="hohmann"),
         ]
-        entries.sort(key=lambda e: e.delta_v_km_s)
-        assert entries[0].delta_v_km_s == 0.5
-        assert entries[1].delta_v_km_s == 1.0
-        assert entries[2].delta_v_km_s == 2.0
+        entries.sort(key=lambda e: e.delta_v_m_s)
+        assert entries[0].delta_v_m_s == 0.5
+        assert entries[1].delta_v_m_s == 1.0
+        assert entries[2].delta_v_m_s == 2.0

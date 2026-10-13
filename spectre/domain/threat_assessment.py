@@ -38,8 +38,18 @@ gather.
 
 from __future__ import annotations
 
+import contextlib
+
 from dataclasses import dataclass, field
 from enum import IntEnum
+
+from spectre.domain.manoeuvre_calibration import (
+    ManoeuvreKind,
+    Posture,
+    classify_posture,
+    fastest_delivery_hours,
+    kind_for_method,
+)
 
 __all__ = [
     "AccessEvidence",
@@ -64,14 +74,26 @@ class Band(IntEnum):
         return self.name
 
 
-# Geometric accessibility thresholds, in km/s. These are the original four and
-# they are kept deliberately: as a measure of how permissive the geometry is
-# they were never wrong, only mislabelled as a capability assessment.
-_ACCESS_THRESHOLDS: tuple[tuple[float, Band], ...] = (
-    (0.2, Band.CRITICAL),
-    (0.5, Band.HIGH),
-    (1.0, Band.MEDIUM),
-)
+# Geometric accessibility, derived from what the manoeuvre would actually cost
+# an object in that regime rather than from four global numbers.
+#
+# The old thresholds were 200, 500 and 1,000 m/s. Every counterspace manoeuvre
+# on open record sits below the lowest of them: the Luch/Olymp-K 2 relocation
+# cost 11 m/s, the SJ-21 tow of Beidou-2 G2 about 60 m/s, the most aggressive
+# GEO repositioning measured about 170 m/s. So the band returned CRITICAL for
+# a routine commercial move and CRITICAL for a hostile closure alike, and a
+# measurement that returns one answer for every input is not a measurement.
+#
+# Posture answers the question the thresholds were trying to ask. A manoeuvre
+# the object could make inside its routine operating budget is the MOST
+# permissive geometry there is, because it costs the adversary nothing it was
+# not already spending.
+_POSTURE_TO_ACCESS: dict[Posture, Band] = {
+    Posture.BENIGN: Band.CRITICAL,
+    Posture.ANNOYANCE: Band.HIGH,
+    Posture.AGGRESSIVE: Band.MEDIUM,
+    Posture.BEYOND_PLATFORM: Band.MINIMAL,
+}
 
 # Operational status strings that mean the object cannot be relied on to
 # manoeuvre. Matched case-insensitively on a substring so "Inactive - Retired /
@@ -93,18 +115,61 @@ _ANOMALY_HIGH: float = 80.0
 
 @dataclass(frozen=True)
 class AccessEvidence:
-    """What the geometry permits, and how much warning it leaves."""
+    """What the geometry permits, how much warning it leaves, and at what cost.
 
-    best_delta_v_km_s: float
+    Delta-v is in METRES PER SECOND. The astro package computes in km/s and the
+    conversion happens once, at the route boundary, via
+    ``manoeuvre_calibration.from_km_s``. Nothing downstream of that multiplies
+    by 1,000 again.
+    """
+
+    best_delta_v_m_s: float
     time_to_arrival_hours: float
     method: str = ""
+    regime: str = ""
+
+    @property
+    def kind(self) -> ManoeuvreKind:
+        """The operational kind of manoeuvre the winning method represents."""
+        return kind_for_method(self.method)
+
+    def posture(self):  # -> PostureAssessment
+        """What this cost says about how the actor would have to behave."""
+        return classify_posture(self.best_delta_v_m_s, self.regime, self.kind)
+
+    def is_physically_deliverable(self) -> tuple[bool, str]:
+        """False when no flown platform could deliver this burn in the time.
+
+        The transfer solvers are impulsive. Against a chemical platform over
+        several hours that is fair. Against an all-electric bus at millinewton
+        thrust it is not an approximation but the wrong question, so a solution
+        whose time of flight is shorter than the fastest possible delivery is
+        not flyable by anything currently in orbit.
+        """
+        hours, who = fastest_delivery_hours(self.best_delta_v_m_s)
+        if hours <= self.time_to_arrival_hours:
+            return (True, "")
+        if hours == float("inf"):
+            return (False, (
+                f"{self.best_delta_v_m_s:.0f} m/s is beyond the discretionary "
+                "reserve of every platform class on open record"
+            ))
+        return (False, (
+            f"no flown platform could deliver {self.best_delta_v_m_s:.0f} m/s "
+            f"in the {self.time_to_arrival_hours:.1f} h this transfer assumes; "
+            f"the fastest ({who}) needs {hours:.1f} h of continuous thrust"
+        ))
 
     def band(self) -> Band:
-        """How permissive the geometry is. Nothing to do with the adversary."""
-        for threshold, band in _ACCESS_THRESHOLDS:
-            if self.best_delta_v_km_s < threshold:
-                return band
-        return Band.LOW
+        """How permissive the geometry is. Nothing to do with the adversary.
+
+        A manoeuvre that is undeliverable in the time available is not a
+        permissive geometry at any price, so it floors at MINIMAL.
+        """
+        deliverable, _ = self.is_physically_deliverable()
+        if not deliverable:
+            return Band.MINIMAL
+        return _POSTURE_TO_ACCESS[self.posture().posture]
 
 
 @dataclass(frozen=True)
@@ -140,30 +205,30 @@ class CapabilityEvidence:
             )
         )
 
-    def band(self) -> Band | None:
-        """Capability severity, or None when nothing is known.
+    def _incapacity(self) -> Band | None:
+        """MINIMAL when something says this object cannot act, else None.
 
-        None is not the same as MINIMAL, and conflating them is how a verdict
-        starts quietly under-reporting objects nobody has assessed yet.
+        A stated inability to manoeuvre, or a spent tank, dominates every other
+        signal: whatever the geometry permits, this object is not flying it.
         """
-        if not self.has_any_evidence():
-            return None
-
-        # A stated inability to manoeuvre dominates everything else. Whatever
-        # the geometry permits, this object is not going to fly it.
         if self.is_impaired():
             return Band.MINIMAL
-
-        if self.propellant_used_pct is not None and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT:
+        if (
+            self.propellant_used_pct is not None
+            and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT
+        ):
             return Band.MINIMAL
+        return None
 
+    def _signals(self) -> list[Band]:
+        """Every capability signal this object offers, as a severity each."""
         candidates: list[Band] = []
 
         if self.intel_threat_level:
-            try:
+            # An unrecognised label is NO evidence, not low evidence, so a typo
+            # or a new label cannot quietly downgrade an object.
+            with contextlib.suppress(KeyError):
                 candidates.append(Band[self.intel_threat_level.strip().upper()])
-            except KeyError:
-                pass  # an unrecognised label is no evidence, not low evidence
 
         if self.anomaly_score is not None:
             if self.anomaly_score >= _ANOMALY_HIGH:
@@ -175,14 +240,29 @@ class CapabilityEvidence:
 
         if self.propellant_used_pct is not None:
             remaining = 100.0 - self.propellant_used_pct
-            if remaining >= _PROPELLANT_AMPLE_PCT:
-                candidates.append(Band.HIGH)
-            else:
-                candidates.append(Band.MEDIUM)
+            candidates.append(
+                Band.HIGH if remaining >= _PROPELLANT_AMPLE_PCT else Band.MEDIUM
+            )
 
         if self.manoeuvres_observed is not None and self.manoeuvres_observed > 0:
             candidates.append(Band.MEDIUM)
 
+        return candidates
+
+    def band(self) -> Band | None:
+        """Capability severity, or None when nothing is known.
+
+        None is not the same as MINIMAL, and conflating them is how a verdict
+        starts quietly under-reporting objects nobody has assessed yet.
+        """
+        if not self.has_any_evidence():
+            return None
+
+        incapacity = self._incapacity()
+        if incapacity is not None:
+            return incapacity
+
+        candidates = self._signals()
         if not candidates:
             return None
         # The strongest single indication governs: an object with one alarming
@@ -207,6 +287,13 @@ class ThreatAssessment:
     rationale: str
     inputs_used: list[str] = field(default_factory=list)
     inputs_missing: list[str] = field(default_factory=list)
+    #: What the required delta-v says about how the actor would have to behave,
+    #: and the published figures that band came from.
+    posture_label: str = ""
+    posture_rationale: str = ""
+    posture_basis: str = ""
+    #: Set when no flown platform could deliver the burn in the time available.
+    undeliverable_reason: str = ""
 
     @property
     def verdict_label(self) -> str:
@@ -251,7 +338,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         verdict = access_band
         confidence = "LOW"
         rationale = (
-            f"Geometry permits an intercept at {access.best_delta_v_km_s * 1000:.0f} m/s "
+            f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
             f"({access_band.label} accessibility). No capability evidence was available "
             "for this object, so the verdict reflects the geometry alone and may "
             "overstate the threat."
@@ -261,7 +348,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         confidence = "HIGH" if len(used) >= 4 else "MEDIUM"
         if capability_band < access_band:
             rationale = (
-                f"Geometry permits an intercept at {access.best_delta_v_km_s * 1000:.0f} m/s "
+                f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
                 f"({access_band.label} accessibility), but capability is assessed "
                 f"{capability_band.label}"
                 + (
@@ -275,14 +362,26 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
             rationale = (
                 f"Capability is assessed {capability_band.label}, but the geometry is "
                 f"{access_band.label}: the cheapest path costs "
-                f"{access.best_delta_v_km_s * 1000:.0f} m/s. Verdict held at {verdict.label}."
+                f"{access.best_delta_v_m_s:.0f} m/s. Verdict held at {verdict.label}."
             )
         else:
             rationale = (
                 f"Geometry and capability agree at {verdict.label}: an intercept costs "
-                f"{access.best_delta_v_km_s * 1000:.0f} m/s and the object is assessed "
+                f"{access.best_delta_v_m_s:.0f} m/s and the object is assessed "
                 "able to fly it."
             )
+
+    posture = access.posture()
+    deliverable, undeliverable_reason = access.is_physically_deliverable()
+
+    # The posture sentence is the part an analyst can act on: it says what the
+    # number means against what satellites actually do, rather than against a
+    # threshold somebody picked.
+    rationale = f"{rationale} {posture.rationale}"
+    if not deliverable:
+        rationale = (
+            f"{rationale} Flagged as not flyable: {undeliverable_reason}."
+        )
 
     return ThreatAssessment(
         verdict=verdict,
@@ -293,14 +392,18 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         rationale=rationale,
         inputs_used=used,
         inputs_missing=missing,
+        posture_label=posture.posture_label,
+        posture_rationale=posture.rationale,
+        posture_basis=posture.basis,
+        undeliverable_reason=undeliverable_reason,
     )
 
 
-def warning_time_rank(entry_delta_v_km_s: float, tof_hours: float, budget_km_s: float) -> tuple[float, float]:
+def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: float) -> tuple[float, float]:
     """Sort key that ranks on warning time, with feasibility as the filter.
 
-    The sweep ranked on delta-V alone, so an intercept costing 0.12 km/s and
-    taking 40 hours outranked one costing 0.45 km/s arriving in 35 minutes, and
+    The sweep ranked on delta-V alone, so an intercept costing 120 m/s and
+    taking 40 hours outranked one costing 450 m/s arriving in 35 minutes, and
     the second is by far the harder problem: warning time is what a defender
     actually spends.
 
@@ -308,5 +411,5 @@ def warning_time_rank(entry_delta_v_km_s: float, tof_hours: float, budget_km_s: 
     outside the budget sorts last regardless of how quickly it would arrive,
     because an intercept that cannot be flown buys no warning at all.
     """
-    feasible = 0 if entry_delta_v_km_s <= budget_km_s else 1
+    feasible = 0 if entry_delta_v_m_s <= budget_m_s else 1
     return (feasible, tof_hours)

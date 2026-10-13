@@ -38,7 +38,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plan/geometry", tags=["geometry"])
 
 # Maximum absolute values accepted for each form field.
-_DV_MAX_KM_S   = 20.0
+#
+# The burn components arrive in m/s, because they are posted straight back from
+# the intercept result panel, which the operator reads in m/s. They are handed
+# to the astro layer in km/s. That conversion is the whole reason this constant
+# changed: at ±20 km/s the clamp silently rejected any burn above 20 m/s the
+# moment the panel started emitting m/s, and anything that got through would
+# have reached the Clohessy-Wiltshire propagator a thousand times too large.
+_DV_MAX_M_S    = 20_000.0
 _TOF_MAX_HOURS = 168.0   # one week
 _COAST_MAX_H   = 24.0
 
@@ -90,9 +97,9 @@ async def intercept_geometry(
     red_sat:          Annotated[str,   Form()],
     blue_sat:         Annotated[str,   Form()],
     burn_epoch_str:   Annotated[str,   Form()],
-    dv_prograde:      Annotated[float, Form()] = 0.0,
-    dv_normal:        Annotated[float, Form()] = 0.0,
-    dv_radial:        Annotated[float, Form()] = 0.0,
+    dv_prograde_m_s:  Annotated[float, Form(alias="dv_prograde")] = 0.0,
+    dv_normal_m_s:    Annotated[float, Form(alias="dv_normal")] = 0.0,
+    dv_radial_m_s:    Annotated[float, Form(alias="dv_radial")] = 0.0,
     tof_hours:        Annotated[float, Form()] = 1.0,
     coast_hours:      Annotated[float, Form()] = 0.0,
     method:           Annotated[str,   Form()] = "unknown",
@@ -124,9 +131,9 @@ async def intercept_geometry(
 
     # ── Validate numeric inputs ───────────────────────────────────────────────
     try:
-        _clamp_validate(dv_prograde, -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_prograde")
-        _clamp_validate(dv_normal,   -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_normal")
-        _clamp_validate(dv_radial,   -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_radial")
+        _clamp_validate(dv_prograde_m_s, -_DV_MAX_M_S, _DV_MAX_M_S, "dv_prograde")
+        _clamp_validate(dv_normal_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_normal")
+        _clamp_validate(dv_radial_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_radial")
         _clamp_validate(tof_hours,   0.0, _TOF_MAX_HOURS, "tof_hours")
         _clamp_validate(coast_hours, 0.0, _COAST_MAX_H,   "coast_hours")
     except ValueError as exc:
@@ -153,9 +160,10 @@ async def intercept_geometry(
             red_tle          = red_tle,
             blue_tle         = blue_tle,
             burn_epoch       = burn_epoch,
-            dv_radial_km_s   = dv_radial,
-            dv_prograde_km_s = dv_prograde,
-            dv_normal_km_s   = dv_normal,
+            # The astro layer takes km/s; the form carries m/s. One conversion.
+            dv_radial_km_s   = dv_radial_m_s / 1000.0,
+            dv_prograde_km_s = dv_prograde_m_s / 1000.0,
+            dv_normal_km_s   = dv_normal_m_s / 1000.0,
             tof_s            = tof_hours * 3600.0,
             method           = method,
             red_name         = red_sat,

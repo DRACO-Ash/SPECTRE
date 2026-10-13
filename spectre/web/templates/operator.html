@@ -472,8 +472,8 @@
                 <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
                   <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
                 </label>
-                <label title="Maximum delta-V budget (km/s)">Max &#916;V (km/s)
-                  <input type="number" name="max_dv" value="3.000" min="0.001" step="any" />
+                <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
+                  <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
                 </label>
               </div>
 
@@ -556,8 +556,9 @@
                   {% include "partials/red_options.html" %}
                 </select>
               </label>
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Max &#916;V (km/s)
-                <input type="number" name="max_dv" value="3.0" step="0.1" min="0.1" />
+              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
+                     title="Budget in metres per second. 500 m/s is the point at which an on-station manoeuvre becomes a strong anomaly: every counterspace manoeuvre on open record costs less (the largest measured about 170 m/s), and 500 m/s is the lower bound of what an orbital transfer vehicle offers.">Max &#916;V (m/s)
+                <input type="number" name="max_dv_m_s" value="500" step="10" min="1" />
               </label>
             </div>
             <div id="ts-red-orbit-info" style="margin-bottom:0.3rem"></div>
@@ -986,7 +987,7 @@ function switchToTradeSpace() {
                 callbacks: {
                   label: function(ctx) {
                     var pt = ctx.raw;
-                    return [pt.label, '\u0394V: ' + pt.y.toFixed(4) + ' km/s',
+                    return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
                             'Transfer: ' + fmtTime(pt.x), 'Miss: ' + pt.miss.toFixed(1) + ' km'];
                   }
                 },
@@ -1003,7 +1004,7 @@ function switchToTradeSpace() {
               },
               y: {
                 type: useLogY ? 'logarithmic' : 'linear',
-                title: { display: true, text: '\u0394V (km/s)', color: '#5A7A9A', font: { size: 11 } },
+                title: { display: true, text: '\u0394V (m/s)', color: '#5A7A9A', font: { size: 11 } },
                 ticks: { color: '#5A7A9A' },
                 grid: { color: 'rgba(10,51,85,0.4)' }
               }

@@ -451,3 +451,61 @@ by calling the real `_compute_worst_coa` rather than typed out, so it cannot
 drift from what the route passes. Every server-side test in this repository
 asserts what a handler returns; none asserted that the page showed it. That was
 the gap the binding defect fell through.
+
+## 0.5.15
+
+Two changes that belong together. Everything the operator reads is now metres
+per second, and a delta-v figure is no longer shown bare: it is read against
+what satellites actually do, in three postures, per manoeuvre kind, per regime.
+
+Reference throughout: "Satellite Manoeuvre Delta-v: Feasibility Above 0.5 km/s
+and Budgets by Regime" (Bluestaq Limited Space Watch, v1.0, 13 October 2026).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Replace the four global access thresholds with posture bands per (regime, manoeuvre kind) in a new `spectre/domain/manoeuvre_calibration.py` | The old bands were 200, 500 and 1,000 m/s. EVERY counterspace manoeuvre on open record sits below the lowest: Luch/Olymp-K 2 relocated 62 degrees for 11 m/s, SJ-21 towed Beidou-2 G2 for about 60 m/s, Cosmos 2576 shadowed USA 314 for 25-30 m/s, and the most aggressive GEO repositioning measured about 170 m/s. The band returned CRITICAL for all of them, so it was saturated. The nine documented cases now return three different postures, asserted. | Then the band boundaries are wrong, which the committed cases make visible one at a time rather than hiding behind a single verdict. |
+| Runtime correctness | **EVIDENCED** | Reject a transfer no flown platform could deliver in the time of flight | An all-electric GEO bus holds up to 1,500 m/s but thrusts at about 0.27 N on roughly 3,000 kg, so it accelerates at 9e-5 m/s^2 and needs about 64 days to deliver 500 m/s. The sweep ranks on warning time, so it actively PREFERRED short flight times, which is exactly where the impulsive approximation fails. Measured: 450 m/s arriving in 0.6 h was scored CRITICAL and is unflyable by anything; the fastest class, a storable-chemical OTV, needs 2.5 h. | Then a platform class is mis-specified. The thrust and mass behind each figure are cited at the entry, so the wrong one can be found and corrected without touching the rule. |
+| Runtime correctness | **EVIDENCED** | Default budget 3,000 m/s to 500 m/s | 3,000 m/s exceeds the discretionary reserve of every flown platform class except a hybrid servicer at its upper bound, so the sweep accepted as feasible intercepts nothing could fly. The assessment's bottom line is that 500 m/s by an on-station object is a strong anomaly flag, which makes it the right outer edge. | Then real behaviour above 500 m/s exists that the assessment did not find, which would be a genuine finding about the sources rather than about this code. |
+| Runtime correctness | **EVIDENCED** | Convert the operator-facing layer to m/s, keeping the astro package in km/s | `MU_EARTH` is 398600.4418 km^3/s^2 and SGP4 returns km and km/s, so the physics layer's unit is not ours to choose. Conversion happens once, in `from_km_s`, at three named route boundaries. | Not applicable: a guard asserts the astro package keeps its km/s names and that no line outside it scales by 1,000 without naming the km side. |
+| Runtime correctness | **EVIDENCED** | MIN_TIME took its delta-v budget from the target DISTANCE | `max_dv = target_km if target_km > 0 else 3.0` at `maneuver.py`, where `target_km` is `target_distance_m / 1000.0` and is used as a separation everywhere else. An operator asking for a 500 m standoff set the solver's budget to 0.5 km/s. This is the SECOND site of a defect recorded in 0.5.13 for `intercept_envelope_intercept`. | Not applicable: the two quantities are now separate parameters with their units in their names. |
+| Runtime correctness | **EVIDENCED** | Convert the Hill-frame burn vector round trip | The intercept panel posts `b0.dv_prograde` into `/plan/geometry`, which clamped at +/-20 and passed the value to the Clohessy-Wiltshire propagator as km/s. Once the panel emitted m/s, a 380 m/s burn either failed the clamp or reached the propagator a thousand times too large. | Not applicable: the form carries m/s, the clamp is +/-20,000 m/s, and the handler divides once. |
+
+**A defect I introduced and did not catch myself.** Converting
+`intercept_geometry.html` with a blanket relabel changed three Hill-frame
+velocities from `km/s` to `m/s` **without scaling them**, printing a number a
+thousand times too small. The string-based guard went green precisely because
+the relabel removed the string it searches for. An adversarial completeness
+pass over the change found it. There is now a second guard that pairs known
+km/s attributes with their labels and requires a scaling, watched to fail
+against the broken line and to pass against the fix.
+
+**Four more sites were silently wrong after the rename and before the audit:**
+the delta-v budget bar divided by a hardcoded 3.0 and captioned itself "% of 3
+km/s"; the sweep's row colouring banded at 0.5 and 1.0, which against m/s
+shades every row above 1 m/s the same; the intercept panel banded CRITICAL at
+2.0, making almost every intercept critical; and the trade-space chart labelled
+its axis km/s while plotting m/s. None raised. All four put a wrong number in
+front of an operator.
+
+**Corrected, not just relabelled:** the `evasive` Monte Carlo archetype was
+30 m/s. Table 4 puts a collision avoidance manoeuvre at centimetres per second
+to about 1 m/s and notes that the screening threshold drives how OFTEN one is
+flown, not how large it is. Now 2 m/s with a wide dispersion. The other six
+archetypes already matched the published figures and now cite them.
+
+**Also converted:** the operator guide generator, which is the only written
+description of the units, and the training scenarios, whose GRADED answers
+carried km/s values and tolerances. A unit changed without its answer marks a
+correct response wrong.
+
+**Deliberately left in km/s, and stated rather than hidden:** the orbital state
+vector panel. Orbital speed is about 7.6 km/s in LEO and 3.07 km/s at GEO, and
+the assessment this calibration comes from writes orbital speed in km/s and
+manoeuvre cost in m/s throughout. The guard carries this as its single
+allow-list entry, with a test that fails if the entry stops applying.
+
+**Not addressed:** `pol_results.html` converts km/s to m/s in twelve places
+inside the template while `pol.py` converts at the route boundary. Both are
+currently correct and self-consistent, but the moment anyone converts
+`PatternOfLifeResult` at the boundary the chart series goes to 1,000,000x while
+the table goes to 1,000x, in the same panel. Recorded, not fixed.

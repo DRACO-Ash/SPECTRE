@@ -10,10 +10,13 @@ from __future__ import annotations
 import csv
 import io
 
+# Every delta-v column carries its unit in the name. A header reading km/s over
+# a value in m/s is worse than either unit alone, because whoever opens the file
+# cannot tell which one they have.
 _EXPECTED_COLUMNS = [
-    "run_id", "method", "red_name", "blue_name", "total_dv_km_s", "arrival_utc",
-    "miss_km", "n_burns", "burn_num", "segment", "burn_epoch_utc", "burn_dv_km_s",
-    "dv_prograde", "dv_normal", "dv_radial", "notes",
+    "run_id", "method", "red_name", "blue_name", "total_dv_m_s", "arrival_utc",
+    "miss_km", "n_burns", "burn_num", "segment", "burn_epoch_utc", "burn_dv_m_s",
+    "dv_prograde_m_s", "dv_normal_m_s", "dv_radial_m_s", "notes",
 ]
 
 

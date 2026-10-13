@@ -14,7 +14,7 @@
   {% if best %}
   <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
     Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
-    &mdash; {{ "%.4f" | format(best.result.total_delta_v_km_s) }} km/s
+    &mdash; {{ best.result.total_delta_v_m_s | m_s }} m/s
   </span>
   {% endif %}
   <span class="intercept-detail">
@@ -55,7 +55,7 @@
       <th onclick="aiSort(1,'str')" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(2,'num')" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(3,'str')" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" style="cursor:pointer; user-select:none; text-align:right">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(4,'num')" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(5,'num')" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(6,'str')" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(7,'num')" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
@@ -76,7 +76,7 @@
       data-sort-1="{{ item.result.method.value }}"
       data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"
       data-sort-3="{{ item.intel.manoeuvre_type }}"
-      data-sort-4="{{ item.result.total_delta_v_km_s }}"
+      data-sort-4="{{ item.result.total_delta_v_m_s }}"
       data-sort-5="{{ item.intel.tof_hours }}"
       data-sort-6="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
       data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}">
@@ -102,7 +102,7 @@
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.manoeuvre_type }}</td>
     <td class="mnv-dv" style="text-align:right; color:{{ item.intel.threat_color }}">
-      <strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong>
+      <strong>{{ item.result.total_delta_v_m_s | m_s }}</strong>
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.tof_label }}</td>
     <td style="font-size:0.67rem; color:var(--text-dim)">
@@ -158,9 +158,9 @@
             Total &#916;V
           </div>
           <div style="font-size:1rem; font-weight:700; color:var(--gold)">
-            {{ "%.4f" | format(item.result.total_delta_v_km_s) }}
+            {{ item.result.total_delta_v_m_s | m_s }}
           </div>
-          <div style="font-size:0.55rem; color:var(--text-dim)">km/s</div>
+          <div style="font-size:0.55rem; color:var(--text-dim)">m/s</div>
         </div>
         <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
                     padding:0.4rem 0.6rem; border-left:3px solid var(--ops-blue)">
@@ -300,7 +300,7 @@
             <thead>
               <tr>
                 <th>Burn #</th><th>Segment</th><th>Epoch (UTC)</th>
-                <th>&#916;V km/s</th><th>Prograde</th><th>Normal</th><th>Radial</th>
+                <th>&#916;V m/s</th><th>Prograde</th><th>Normal</th><th>Radial</th>
               </tr>
             </thead>
             <tbody>
@@ -309,17 +309,17 @@
                 <td>{{ burn.burn_number }}</td>
                 <td class="col-dim">{{ burn.segment_name }}</td>
                 <td class="col-dim">{{ burn.burn_epoch.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                <td class="mnv-dv"><strong>{{ "%.4f" | format(burn.delta_v_km_s) }}</strong></td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_prograde) }}</td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_normal) }}</td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_radial) }}</td>
+                <td class="mnv-dv"><strong>{{ burn.delta_v_m_s | m_s }}</strong></td>
+                <td class="col-dim">{{ burn.dv_prograde | m_s }}</td>
+                <td class="col-dim">{{ burn.dv_normal | m_s }}</td>
+                <td class="col-dim">{{ burn.dv_radial | m_s }}</td>
               </tr>
               {% endfor %}
             </tbody>
             <tfoot>
               <tr class="intercept-totals">
                 <td colspan="3"><strong>Total</strong></td>
-                <td class="mnv-dv"><strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong></td>
+                <td class="mnv-dv"><strong>{{ item.result.total_delta_v_m_s | m_s }}</strong></td>
                 <td colspan="3"></td>
               </tr>
             </tfoot>

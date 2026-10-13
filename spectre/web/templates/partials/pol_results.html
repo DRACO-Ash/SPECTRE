@@ -582,7 +582,7 @@
                     style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
                     title="Run Monte Carlo simulation for this manoeuvre"
                     hx-post="/pol/monte-carlo"
-                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "dv_km_s": "{{ m.delta_v_km_s }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "dv_m_s": "{{ m.delta_v_km_s * 1000 }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
                     hx-target="#pol-mc-results"
                     hx-swap="innerHTML"
                     hx-indicator="#pol-mc-indicator">

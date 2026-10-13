@@ -4,13 +4,13 @@
 {% elif entry %}
 <tr class="threat-child"
     id="threat-row-{{ index }}"
-    {% if entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+    {% if entry.posture_label in ('BENIGN', 'ANNOYANCE') %}data-threat="high"{% elif entry.posture_label == 'AGGRESSIVE' %}data-threat="med"{% endif %}>
   <td class="threat-child-indent"></td>
   <td class="col-dim">{{ entry.burn_location }}</td>
   <td class="col-dim">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
-  <td class="mnv-dv">{{ "%.4f" | format(entry.delta_v_km_s) }}</td>
+  <td class="mnv-dv">{{ entry.delta_v_m_s | m_s }}</td>
   <td class="col-dim">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
-  <td class="col-dim" title="Pro {{ '%.4f' | format(entry.dv_prograde) }}  Nor {{ '%.4f' | format(entry.dv_normal) }}  Rad {{ '%.4f' | format(entry.dv_radial) }}">
+  <td class="col-dim" title="Pro {{ entry.dv_prograde | m_s }}  Nor {{ entry.dv_normal | m_s }}  Rad {{ entry.dv_radial | m_s }}">
     {{ entry.method }}
   </td>
   <td class="col-actions" style="white-space:nowrap">

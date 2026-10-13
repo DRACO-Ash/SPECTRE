@@ -103,9 +103,9 @@
       Total &Delta;V
     </div>
     <div style="font-size:1.15rem; font-weight:700; color:var(--gold); line-height:1.1">
-      {{ "%.3f" | format(result.total_delta_v_km_s) }}
+      {{ result.total_delta_v_m_s | m_s }}
     </div>
-    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.08rem">km/s</div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.08rem">m/s</div>
   </div>
 
   {# Time-to-Intercept #}
@@ -170,12 +170,12 @@
 Red:    {{ result.red_name }}
 Blue:   {{ result.blue_name }}
 Method: {{ result.method.value | upper }}
-Total ΔV:     {{ "%.4f" | format(result.total_delta_v_km_s) }} km/s
+Total ΔV:     {{ result.total_delta_v_m_s | m_s }} m/s
 Arrival:      {{ result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
 Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
 Threat:       {{ intel.threat_level }}
 Observability:{{ intel.obs_level }}
-{% for b in result.burns %}  Burn {{ b.burn_number }} ({{ b.segment_name }})  epoch={{ b.burn_epoch.strftime('%Y-%m-%dT%H:%M:%SZ') }}  ΔV={{ "%.4f"|format(b.delta_v_km_s) }} km/s  [P={{ "%.4f"|format(b.dv_prograde) }} N={{ "%.4f"|format(b.dv_normal) }} R={{ "%.4f"|format(b.dv_radial) }}]
+{% for b in result.burns %}  Burn {{ b.burn_number }} ({{ b.segment_name }})  epoch={{ b.burn_epoch.strftime('%Y-%m-%dT%H:%M:%SZ') }}  ΔV={{ b.delta_v_m_s | m_s }} m/s  [P={{ "%.4f"|format(b.dv_prograde) }} N={{ "%.4f"|format(b.dv_normal) }} R={{ "%.4f"|format(b.dv_radial) }}]
 {% endfor %}Notes: {{ result.notes }}{% endset %}
   <button type="button"
           class="btn-secondary"
@@ -370,7 +370,7 @@ Observability:{{ intel.obs_level }}
     <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">
       &Delta;V Budget
       <span style="float:right; font-weight:600; color:var(--text-bright)">
-        {{ "%.1f" | format(intel.dv_budget_pct) }}% of 3.0 km/s
+        {{ "%.1f" | format(intel.dv_budget_pct) }}% of 3.0 m/s
       </span>
     </div>
     <div style="height:6px; border-radius:3px; background:rgba(255,255,255,0.07); overflow:hidden">
@@ -401,7 +401,7 @@ Observability:{{ intel.obs_level }}
           <th>Burn #</th>
           <th>Segment</th>
           <th>Burn Epoch (UTC)</th>
-          <th title="Total delta-V magnitude for this burn">&Delta;V km/s</th>
+          <th title="Total delta-V magnitude for this burn">&Delta;V m/s</th>
           <th title="Prograde (velocity direction) component">Prograde</th>
           <th title="Normal (orbit-normal) component">Normal</th>
           <th title="Radial (co-normal / radial) component">Radial</th>
@@ -413,17 +413,17 @@ Observability:{{ intel.obs_level }}
           <td>{{ burn.burn_number }}</td>
           <td class="col-dim">{{ burn.segment_name }}</td>
           <td class="col-dim">{{ burn.burn_epoch.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-          <td class="mnv-dv"><strong>{{ "%.4f" | format(burn.delta_v_km_s) }}</strong></td>
-          <td class="col-dim">{{ "%.4f" | format(burn.dv_prograde) }}</td>
-          <td class="col-dim">{{ "%.4f" | format(burn.dv_normal) }}</td>
-          <td class="col-dim">{{ "%.4f" | format(burn.dv_radial) }}</td>
+          <td class="mnv-dv"><strong>{{ burn.delta_v_m_s | m_s }}</strong></td>
+          <td class="col-dim">{{ burn.dv_prograde | m_s }}</td>
+          <td class="col-dim">{{ burn.dv_normal | m_s }}</td>
+          <td class="col-dim">{{ burn.dv_radial | m_s }}</td>
         </tr>
         {% endfor %}
       </tbody>
       <tfoot>
         <tr class="intercept-totals">
           <td colspan="3"><strong>Total</strong></td>
-          <td class="mnv-dv"><strong>{{ "%.4f" | format(result.total_delta_v_km_s) }}</strong></td>
+          <td class="mnv-dv"><strong>{{ result.total_delta_v_m_s | m_s }}</strong></td>
           <td colspan="3"></td>
         </tr>
       </tfoot>

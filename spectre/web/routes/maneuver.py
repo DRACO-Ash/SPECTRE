@@ -47,6 +47,13 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.propagator import regime_from_tle
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain.manoeuvre_calibration import (
+    DEFAULT_SWEEP_BUDGET_M_S,
+    Posture,
+    classify_posture,
+    from_km_s,
+    kind_for_method,
+)
 from spectre.domain.models import (
     BurnLocation,
     BurnResult,
@@ -124,7 +131,17 @@ _INTENT_LABELS: dict[InterceptMethod, str] = {
 }
 
 
-def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
+#: How each posture is presented on the intercept panel. An AGGRESSIVE profile
+#: is the alarming one: it is the manoeuvre an actor would only make for effect.
+_POSTURE_PRESENTATION: dict[Posture, tuple[str, str, str]] = {
+    Posture.BENIGN: ("LOW", "#22c55e", "rgba(34,197,94,0.04)"),
+    Posture.ANNOYANCE: ("MEDIUM", "#3b8beb", "rgba(59,139,235,0.04)"),
+    Posture.AGGRESSIVE: ("HIGH", "#f59e0b", "rgba(245,158,11,0.04)"),
+    Posture.BEYOND_PLATFORM: ("CRITICAL", "#ef4444", "rgba(239,68,68,0.04)"),
+}
+
+
+def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
     """Pre-compute all intelligence analysis data for the intercept result template.
 
     Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
@@ -132,7 +149,7 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
     import math
 
     method = result.method
-    dv = result.total_delta_v_km_s
+    dv = result.total_delta_v_m_s
     miss = result.intercept_range_km
 
     # ── Threat classification ────────────────────────────────────────────────
@@ -151,36 +168,35 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
             manoeuvre_type = "OFFENSIVE"
         else:
             manoeuvre_type = "REPOSITIONING"
-        if dv >= 2.0:
-            threat_level = "CRITICAL"
-            threat_color = "#ef4444"
-            threat_bg = "rgba(239,68,68,0.04)"
-        elif dv >= 0.5:
-            threat_level = "HIGH"
-            threat_color = "#f59e0b"
-            threat_bg = "rgba(245,158,11,0.04)"
-        elif dv >= 0.1:
-            threat_level = "MEDIUM"
-            threat_color = "#3b8beb"
-            threat_bg = "rgba(59,139,235,0.04)"
-        else:
-            threat_level = "LOW"
-            threat_color = "#22c55e"
-            threat_bg = "rgba(34,197,94,0.04)"
+        # Banded on posture, not on a bare delta-v figure. These thresholds
+        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
+        # 2 m/s would read CRITICAL. Posture also asks the better question:
+        # what does this cost say about how the actor would have to behave?
+        posture = classify_posture(dv, regime, kind_for_method(method.value))
+        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
+            posture.posture
+        ]
 
     # ── Operational intent ───────────────────────────────────────────────────
     intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
 
-    # ── ΔV classification ────────────────────────────────────────────────────
-    if dv < 0.01:
+    # ── ΔV classification, in m/s ────────────────────────────────────────────
+    #
+    # These were 0.01 / 0.05 / 0.3 / 1.0 / 3.0 km/s, read against m/s values.
+    # The boundaries are now set from observed behaviour rather than round
+    # numbers: 1 m/s is the top of a collision-avoidance burn, 50 m/s is one
+    # year of GEO north-south station-keeping, 170 m/s is the most aggressive
+    # GEO relocation on record, and 500 m/s is the point at which an on-station
+    # manoeuvre becomes a strong anomaly.
+    if dv < 1.0:
         dv_class = "Micro-manoeuvre"
-    elif dv < 0.05:
-        dv_class = "Station-keeping"
-    elif dv < 0.3:
+    elif dv < 50.0:
+        dv_class = "Station-keeping scale"
+    elif dv < 170.0:
         dv_class = "Minor Transfer"
-    elif dv < 1.0:
+    elif dv < 500.0:
         dv_class = "Moderate Transfer"
-    elif dv < 3.0:
+    elif dv < 3000.0:
         dv_class = "Major Transfer"
     else:
         dv_class = "High-Energy Transfer"
@@ -206,13 +222,15 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
         tof_label = f"{d}d {h}h" if h else f"{d}d"
 
     # ── ΔV budget percentage ─────────────────────────────────────────────────
-    dv_budget_pct = min(100.0, dv / 3.0 * 100.0)
+    # Against the default realistic budget rather than a hardcoded 3.0, which
+    # in m/s would read 100 per cent for any burn above 3 m/s.
+    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
 
     # ── Per-burn analysis ────────────────────────────────────────────────────
     burn_intel = []
     for burn in result.burns:
-        b_dv = burn.delta_v_km_s
-        b_dv_ms = b_dv * 1000.0
+        b_dv = burn.delta_v_m_s
+        b_dv_ms = b_dv  # already m/s
         pro = burn.dv_prograde
         nor = burn.dv_normal
         rad = burn.dv_radial
@@ -262,15 +280,18 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
         })
 
     # ── Observability assessment ─────────────────────────────────────────────
-    if dv > 1.0:
+    # Thresholds in m/s. They were 1.0 / 0.1 / 0.01 km/s, so against m/s values
+    # every burn above 1 m/s read HIGH. A manoeuvre at station-keeping scale is
+    # the one that hides in routine traffic, which is the point of this panel.
+    if dv > 170.0:
         obs_level = "HIGH"
         obs_color = "#ef4444"
         obs_reason = "Large ΔV signature — high probability of SSN detection and attribution"
-    elif dv > 0.1:
+    elif dv > 50.0:
         obs_level = "MEDIUM"
         obs_color = "#f59e0b"
         obs_reason = "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance"
-    elif dv > 0.01:
+    elif dv > 1.0:
         obs_level = "LOW"
         obs_color = "#22c55e"
         obs_reason = "Small ΔV — may fall below SSN detection threshold for routine cataloguing"
@@ -343,7 +364,7 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
         conf = miss / 100.0
         method_insights = [
             {"label": "Fingerprint Confidence", "value": f"{conf * 100:.0f}%"},
-            {"label": "Estimated ΔV", "value": f"{dv * 1000:.1f} m/s"},
+            {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
         ]
     elif method == InterceptMethod.TERRAIN:
         risk = miss / 100.0
@@ -355,12 +376,12 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
         conf = miss / 100.0
         method_insights = [
             {"label": "Detection Confidence", "value": f"{conf * 100:.0f}%"},
-            {"label": "Estimated ΔV", "value": f"{dv * 1000:.1f} m/s"},
+            {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
         ]
     elif method == InterceptMethod.INTERCEPT_ENVELOPE:
         method_insights = [
             {"label": "Feasible Solutions", "value": f"{int(miss)}"},
-            {"label": "Min Feasible ΔV", "value": f"{dv * 1000:.1f} m/s"},
+            {"label": "Min Feasible ΔV", "value": f"{dv:.0f} m/s"},
         ]
     elif method == InterceptMethod.COLA:
         method_insights = [
@@ -392,30 +413,30 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
     if method == InterceptMethod.RBAR_HOP:
         summary = (
             f"R-Bar hop places {result.red_name} {miss:.1f} km radially from "
-            f"{result.blue_name} using {dv:.3f} km/s \u0394V in {tof_label}."
+            f"{result.blue_name} using {dv:.0f} m/s \u0394V in {tof_label}."
         )
     elif method == InterceptMethod.VBAR_HOP:
         summary = (
             f"V-Bar hop sequence advances {result.red_name} {miss:.1f} km along V-bar "
             f"toward {result.blue_name} via {len(result.burns)} burns "
-            f"({dv:.3f} km/s total \u0394V, {tof_label} TOF). "
+            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — each hop mimics natural drift."
         )
     elif method == InterceptMethod.HBAR_HOP:
         summary = (
             f"H-Bar hop sequence advances {result.red_name} {miss:.1f} km in orbit-normal "
             f"toward {result.blue_name} via {len(result.burns)} normal burns "
-            f"({dv:.3f} km/s total \u0394V, {tof_label} TOF). "
+            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — consistent with ACS activity."
         )
     elif method in (InterceptMethod.LAMBERT, InterceptMethod.PROXIMITY, InterceptMethod.RENDEZVOUS):
         summary = (
             f"Lambert transfer achieves {miss:.1f} km close approach to {result.blue_name} "
-            f"with {dv:.3f} km/s total \u0394V in {tof_label}."
+            f"with {dv:.0f} m/s total \u0394V in {tof_label}."
         )
     elif method in (InterceptMethod.HOHMANN, InterceptMethod.BIELLIPTIC):
         summary = (
-            f"Hohmann transfer to {result.blue_name} requires {dv:.3f} km/s across "
+            f"Hohmann transfer to {result.blue_name} requires {dv:.0f} m/s across "
             f"{len(result.burns)} burn(s), arriving {arrival_str}."
         )
     elif method == InterceptMethod.INTENT_PREDICT:
@@ -433,22 +454,22 @@ def _compute_intercept_intel(result: InterceptResult) -> dict[str, Any]:
     elif method == InterceptMethod.COLA:
         summary = (
             f"COLA manoeuvre achieves {miss:.1f} km miss distance with "
-            f"{dv:.3f} km/s \u0394V, arriving {arrival_str}."
+            f"{dv:.0f} m/s \u0394V, arriving {arrival_str}."
         )
     elif method == InterceptMethod.EVASION:
         summary = (
             f"Evasion manoeuvre places {result.red_name} {miss:.1f} km from threat "
-            f"using {dv:.3f} km/s \u0394V."
+            f"using {dv:.0f} m/s \u0394V."
         )
     elif method == InterceptMethod.MIN_TIME:
         summary = (
             f"Minimum-time intercept of {result.blue_name} achieved in {tof_label} "
-            f"with {dv:.3f} km/s \u0394V."
+            f"with {dv:.0f} m/s \u0394V."
         )
     else:
         summary = (
             f"{intent_label} for {result.red_name} \u2192 {result.blue_name}: "
-            f"{dv:.3f} km/s \u0394V, arriving {arrival_str}."
+            f"{dv:.0f} m/s \u0394V, arriving {arrival_str}."
         )
 
     return {
@@ -544,7 +565,7 @@ async def apply_intercept(
     number_of_burns: Annotated[int, Form()] = 1,
     target_distance_m: Annotated[float, Form()] = 0.0,
     minimize_delta_v: Annotated[bool, Form()] = True,
-    max_dv: Annotated[float, Form(ge=0.0, le=100.0)] = 3.0,
+    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
@@ -618,7 +639,7 @@ async def apply_intercept(
             None,
             lambda: _run_intercept(
                 intercept_method, red_tle, blue_tle,
-                manoeuvre_start_dt, coast_s, tof_s, target_km,
+                manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
             ),
         )
     except Exception as exc:
@@ -636,22 +657,22 @@ async def apply_intercept(
     state.last_intercept_result = result
     state.intercept_history.append(result)
     burn_summary = ", ".join(
-        f"burn{b.burn_number} ΔV={b.delta_v_km_s:.3f}" for b in result.burns
+        f"burn{b.burn_number} ΔV={b.delta_v_m_s:.3f}" for b in result.burns
     )
     state.append_log(
         f"[INTERCEPT] {method} applied: "
-        f"total ΔV={result.total_delta_v_km_s:.3f} km/s, "
+        f"total ΔV={result.total_delta_v_m_s:.0f} m/s, "
         f"{len(result.burns)} burn(s) [{burn_summary}], "
         f"arrival={result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC')}, "
         f"miss={result.intercept_range_km:.1f} km"
     )
     logger.info(
-        "apply_intercept: %s for operator %s (%s → %s total_dv=%.3f km/s, burns=%d)",
+        "apply_intercept: %s for operator %s (%s → %s total_dv=%.0f m/s, burns=%d)",
         method, current_user.username,
-        red_sat, blue_sat, result.total_delta_v_km_s, len(result.burns),
+        red_sat, blue_sat, result.total_delta_v_m_s, len(result.burns),
     )
 
-    intel = _compute_intercept_intel(result)
+    intel = _compute_intercept_intel(result, red_regime)
     pair = get_intel(satno_from_tle(red_tle))
 
     return render(request, "partials/intercept_result.html", {
@@ -710,7 +731,7 @@ async def apply_all_intercepts(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
-    max_dv: Annotated[float, Form(ge=0.0, le=100.0)] = 3.0,
+    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
@@ -780,7 +801,7 @@ async def apply_all_intercepts(
             try:
                 sol = _run_intercept(
                     method, red_tle, blue_tle,
-                    manoeuvre_start_dt, coast_s, tof_s, target_km,
+                    manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
                 )
                 result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), method)
                 out.append((method, result, None))
@@ -793,7 +814,7 @@ async def apply_all_intercepts(
     items: list[dict[str, Any]] = []
     for method, result, error in raw:
         if result is not None:
-            intel = _compute_intercept_intel(result)
+            intel = _compute_intercept_intel(result, red_regime)
             items.append({"method": method, "result": result, "intel": intel, "error": None})
         else:
             items.append({"method": method, "result": None, "intel": None, "error": error})
@@ -802,7 +823,7 @@ async def apply_all_intercepts(
         if item["result"] is None:
             return (99, 0.0)
         level = item["intel"]["threat_level"]
-        return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_km_s)
+        return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_m_s)
 
     items.sort(key=_sort_key)
 
@@ -848,7 +869,7 @@ async def trade_space_data(
             transfer_s = 0.0
         points.append({
             "method": r.method.value,
-            "delta_v": round(r.total_delta_v_km_s, 4),
+            "delta_v": round(r.total_delta_v_m_s, 1),  # m/s
             "transfer_time_min": round(transfer_s / 60.0, 2),
             "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
             "miss_km": round(r.intercept_range_km, 2),
@@ -928,8 +949,17 @@ def _run_intercept(
     coast_s: float,
     tof_s: float,
     target_km: float,
+    max_dv_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
 ) -> InterceptSolution:
-    """Dispatch to the appropriate spectre.astro solver."""
+    """Dispatch to the appropriate spectre.astro solver.
+
+    *target_km* is a SEPARATION DISTANCE and *max_dv_m_s* is a VELOCITY BUDGET.
+    They were previously the same argument for MIN_TIME, which took its delta-v
+    budget from ``target_km``, so an operator asking for a 500 m standoff
+    silently set the solver's budget to 0.5 km/s. This is the second site of
+    that defect; the first was recorded in 0.5.13 for
+    ``intercept_envelope_intercept``.
+    """
     if method in (InterceptMethod.LAMBERT, InterceptMethod.PROXIMITY):
         return lambert_intercept(
             red_tle=red_tle, blue_tle=blue_tle,
@@ -1075,10 +1105,10 @@ def _run_intercept(
             manoeuvre_start=start, coast_s=coast_s,
         )
     elif method == InterceptMethod.MIN_TIME:
-        max_dv = target_km if target_km > 0 else 3.0
         return min_time_intercept_wrapper(
             red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, max_delta_v=max_dv,
+            manoeuvre_start=start,
+            max_delta_v=max_dv_m_s / 1000.0,  # astro takes km/s
             coast_s=coast_s,
         )
     else:
@@ -1091,16 +1121,21 @@ def _solution_to_result(
     blue_name: str,
     method: InterceptMethod,
 ) -> InterceptResult:
-    """Convert an astro InterceptSolution to a domain InterceptResult."""
+    """Convert an astro InterceptSolution to a domain InterceptResult.
+
+    THIS IS THE UNIT BOUNDARY for the intercept engine. The astro layer works
+    in km/s; everything from the domain layer outwards is m/s. ``from_km_s`` is
+    applied here and nowhere downstream.
+    """
     burns = [
         BurnResult(
             burn_number=b.burn_number,
             segment_name=f"Burn {b.burn_number}",
             burn_epoch=b.epoch,
-            delta_v_km_s=b.delta_v_mag,
-            dv_prograde=b.dv_prograde,
-            dv_normal=b.dv_normal,
-            dv_radial=b.dv_radial,
+            delta_v_m_s=from_km_s(b.delta_v_mag),
+            dv_prograde=from_km_s(b.dv_prograde),
+            dv_normal=from_km_s(b.dv_normal),
+            dv_radial=from_km_s(b.dv_radial),
         )
         for b in sol.burns
     ]
@@ -1109,7 +1144,7 @@ def _solution_to_result(
         blue_name=blue_name,
         method=method,
         burns=burns,
-        total_delta_v_km_s=sol.total_delta_v,
+        total_delta_v_m_s=from_km_s(sol.total_delta_v),
         arrival_epoch=sol.arrival_epoch,
         intercept_range_km=sol.miss_distance_km,
         notes=f"Computed via spectre.astro {sol.method} solver",

@@ -7,6 +7,112 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.15] - 2026-10-13
+
+Everything the operator reads is now metres per second, and a delta-v figure is
+no longer shown bare: it is read against what satellites actually do.
+
+Calibrated from "Satellite Manoeuvre Delta-v: Feasibility Above 0.5 km/s and
+Budgets by Regime" (Bluestaq Limited Space Watch, v1.0, 13 October 2026).
+
+### Added
+
+- **A manoeuvre calibration** (`spectre/domain/manoeuvre_calibration.py`).
+  Three postures, per manoeuvre kind, per orbital regime, every boundary
+  traceable to a named table or observed case:
+
+  ● **BENIGN** - efficient, minimum energy, long timeline. Indistinguishable
+    from routine operations.
+  ● **ANNOYANCE** - deliberate and noticed, but affordable and repeatable.
+    Shadowing, inspection, moderate repositioning.
+  ● **AGGRESSIVE** - short timeline, high energy, chosen for effect rather than
+    economy. Usually a meaningful fraction of the platform's remaining life.
+  ● **BEYOND PLATFORM** - past the reserve of every flown class, so it implies
+    a tug, an orbital transfer vehicle, a kick stage or refuelling.
+
+  The nine documented cases land where an analyst would put them: Luch/Olymp-K
+  2's 62 degree relocation for 11 m/s is BENIGN, the SJ-21 tow of Beidou-2 G2
+  at 60 m/s is ANNOYANCE, its 120 m/s round trip and the 170 m/s rapid
+  repositioning are AGGRESSIVE.
+
+- **A burn-rate feasibility check.** Reserve is not the ability to spend it in
+  time. An all-electric GEO bus holds up to 1,500 m/s but thrusts at about
+  0.27 N, so it needs about 64 days to deliver 500 m/s. A transfer whose time
+  of flight is shorter than the fastest possible delivery is now flagged NOT
+  FLYABLE with the class and the hours named.
+
+  This matters because the sweep ranks on warning time, so it actively
+  preferred short flight times, which is exactly where the impulsive
+  approximation breaks. Measured: 450 m/s arriving in 36 minutes was scored
+  CRITICAL and cannot be flown by anything in orbit.
+
+- **A guard that no operator-facing figure is in km/s**
+  (`tests/unit/test_operator_sees_metres_per_second.py`). Sixteen cases
+  covering templates, routes, the domain layer, the training scenarios and the
+  operator guide, with one documented allow-list entry and a test that fails if
+  that entry stops applying.
+
+### Changed
+
+- **The access band is posture, not four global numbers.** The thresholds were
+  200, 500 and 1,000 m/s, and every counterspace manoeuvre on open record sits
+  below the lowest of them, so the band returned CRITICAL for a routine
+  commercial repositioning and for a hostile closure alike. It is also keyed on
+  regime now, because 50 m/s is one routine year at GEO and fifty years of it
+  at MEO.
+
+- **The default budget is 500 m/s, not 3,000.** 3,000 m/s exceeded the
+  discretionary reserve of every flown platform class, so the sweep accepted
+  intercepts nothing could fly. 500 m/s is the assessment's own anomaly
+  threshold and sits above every manoeuvre on record.
+
+- **Sweep groups rank on warning time**, matching the headline above them. They
+  ranked on cost while the banner ranked on time, so the two disagreed about
+  which target mattered most on the same screen.
+
+- **The `evasive` Monte Carlo archetype was 30 m/s**, which matches no
+  published figure; a collision avoidance manoeuvre is centimetres per second
+  to about 1 m/s. Now 2 m/s. The other six archetypes already matched and now
+  cite their source.
+
+### Fixed
+
+- **MIN_TIME took its delta-v budget from the target distance.** An operator
+  asking for a 500 m standoff set the solver's budget to 0.5 km/s. Second site
+  of the defect recorded in 0.5.13 for `intercept_envelope_intercept`.
+
+- **The Hill-frame burn vector round trip.** The intercept panel posts its burn
+  components into the relative-geometry route, which clamped at +/-20 and
+  handed them to the Clohessy-Wiltshire propagator as km/s. Once the panel
+  emitted m/s a real burn either failed the clamp or arrived a thousand times
+  too large.
+
+- **Four display sites that were silently wrong after the rename:** the budget
+  bar divided by a hardcoded 3.0 and captioned itself "% of 3 km/s"; the sweep
+  row colouring banded at 0.5 and 1.0, shading every row above 1 m/s
+  identically; the intercept panel banded CRITICAL at 2.0; and the trade-space
+  chart labelled its axis km/s while plotting m/s.
+
+- **A defect introduced during this change and caught before it shipped.** A
+  blanket relabel changed three Hill-frame velocities from km/s to m/s without
+  scaling them, printing a number a thousand times too small. The string-based
+  guard went green precisely because the relabel removed the string it looks
+  for. A second guard now pairs known km/s attributes with their labels and
+  requires a scaling.
+
+### Known limits
+
+- **The orbital state vector panel stays in km/s**, deliberately. Orbital speed
+  is about 7.6 km/s in LEO and 3.07 km/s at GEO, and the source assessment
+  writes orbital speed in km/s and manoeuvre cost in m/s throughout.
+- **The posture bands describe an object already on station.** They do not
+  describe commissioning: electric orbit raising from geostationary transfer
+  orbit costs 1,500-2,500 m/s and is entirely routine.
+- **`pol_results.html` converts in twelve places inside the template** while
+  `pol.py` converts at the route boundary. Both are correct today, but
+  finishing the conversion at the boundary would put the chart at 1,000,000x
+  and the table at 1,000x in the same panel. Recorded, not fixed.
+
 ## [0.5.14] - 2026-09-13
 
 Phase 1 of the roadmap: the sweep's verdict now consults the evidence the
