@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse
 from spectre.astro.cw_geometry import RelativeGeometryError, compute_relative_geometry
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.format_units import to_m_s
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -203,5 +204,11 @@ async def intercept_geometry(
 
     return render(request, "partials/intercept_geometry.html", {
         "geom":       geom,
+        # THIS IS THE UNIT BOUNDARY for the Hill-frame panel. CWState carries
+        # km/s (cw_geometry.py), the operator reads m/s. Converted here so the
+        # template performs no arithmetic of its own.
+        "burn_xd_m_s": to_m_s(geom.burn_state.xd),
+        "burn_yd_m_s": to_m_s(geom.burn_state.yd),
+        "burn_zd_m_s": to_m_s(geom.burn_state.zd),
         "chart_json": json.dumps(chart_data),
     })

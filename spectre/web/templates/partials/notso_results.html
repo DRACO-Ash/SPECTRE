@@ -147,7 +147,8 @@
       </tr>
     </thead>
     <tbody>
-    {% for c in correlations %}
+    {% for row in correlation_rows %}
+    {% set c = row.c %}
       {% if c.correlation_type == "matched" %}
         {% set row_color = "#22c55e" %}
         {% set row_label = "MATCHED" %}
@@ -183,10 +184,10 @@
           {% else %}—{% endif %}
         </td>
         <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">
-          {% if c.manoeuvre and c.manoeuvre.delta_v_km_s %}
-            {{ (c.manoeuvre.delta_v_km_s * 1000) | round(2) }}
-          {% elif c.notso and c.notso.predicted_delta_v_km_s %}
-            <span style="color:var(--text-dim)">({{ (c.notso.predicted_delta_v_km_s * 1000) | round(2) }} pred)</span>
+          {% if row.manoeuvre_dv_m_s %}
+            {{ row.manoeuvre_dv_m_s | m_s }}
+          {% elif row.predicted_dv_m_s %}
+            <span style="color:var(--text-dim)">({{ row.predicted_dv_m_s | m_s }} pred)</span>
           {% else %}—{% endif %}
         </td>
         <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">

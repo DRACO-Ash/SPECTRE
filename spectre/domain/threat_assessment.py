@@ -108,6 +108,10 @@ _PROPELLANT_SPENT_PCT: float = 95.0
 # Propellant remaining above this adds nothing; the object is simply capable.
 _PROPELLANT_AMPLE_PCT: float = 50.0
 
+# Geometry plus three capability inputs. Fewer than this and the verdict rests
+# on an assessed label with little behaviour behind it.
+_EVIDENCE_FOR_HIGH_CONFIDENCE: int = 4
+
 # Behavioural anomaly above this is an object doing something unusual.
 _ANOMALY_NOTABLE: float = 60.0
 _ANOMALY_HIGH: float = 80.0
@@ -345,7 +349,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         )
     else:
         verdict = Band(min(access_band, capability_band))
-        confidence = "HIGH" if len(used) >= 4 else "MEDIUM"
+        confidence = "HIGH" if len(used) >= _EVIDENCE_FOR_HIGH_CONFIDENCE else "MEDIUM"
         if capability_band < access_band:
             rationale = (
                 f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "

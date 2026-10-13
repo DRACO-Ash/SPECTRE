@@ -13,7 +13,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
@@ -52,6 +52,7 @@ from spectre.domain.threat_assessment import (
 )
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.format_units import format_tof_label
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -516,10 +517,6 @@ def _sol_to_entry(
 #: undefined and the component percentages below would divide by noise.
 _ZERO_VECTOR_M_S: float = 1e-12
 
-_SECONDS_PER_MINUTE: float = 60.0
-_SECONDS_PER_HOUR: float = 3600.0
-_SECONDS_PER_DAY: float = 86400.0
-
 _BAND_COLOURS: dict[str, tuple[str, str]] = {
     "CRITICAL": ("#ef4444", "rgba(239,68,68,0.06)"),
     "HIGH":     ("#f59e0b", "rgba(245,158,11,0.06)"),
@@ -725,23 +722,8 @@ def _compute_worst_coa(
         pro_pct = nor_pct = rad_pct = 0.0
         direction = "Unknown"
 
-    # Time-of-flight label
-    tof_s = worst.tof_hours * 3600.0
-    if tof_s < _SECONDS_PER_MINUTE:
-        tof_label = "< 1m"
-    elif tof_s < _SECONDS_PER_HOUR:
-        tof_label = f"{int(tof_s // _SECONDS_PER_MINUTE)}m"
-    elif tof_s < _SECONDS_PER_DAY:
-        h = int(tof_s // 3600)
-        m = int((tof_s % 3600) // 60)
-        tof_label = f"{h}h {m}m" if m else f"{h}h"
-    else:
-        d = int(tof_s // 86400)
-        h = int((tof_s % 86400) // 3600)
-        tof_label = f"{d}d {h}h" if h else f"{d}d"
+    tof_label = format_tof_label(worst.tof_hours)
 
-    # Against the operator's OWN budget. This was hardcoded to 3.0, so the bar
-    # and its caption misreported the moment anyone changed the figure.
     dv_budget_pct = round(min(100.0, dv / max_dv_m_s * 100.0), 1) if max_dv_m_s > 0 else 0.0
 
     # Metres per second, whole numbers. Measured against TLE uncertainty a
@@ -830,6 +812,42 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
     return groups
 
 
+class _TargetGroup(NamedTuple):
+    """A parsed ``tgt_group`` form value, or the reason it could not be read.
+
+    Lifted out of the sweep handler, which carried 122 statements across 22
+    branches. Input parsing and its error paths are a third of that and have
+    nothing to do with running a sweep, so they are easier to read and to test
+    on their own.
+    """
+
+    side: str = ""
+    rank: int | None = None
+    group_label: str = ""
+    error: str = ""
+
+
+def _parse_target_group(tgt_group: str) -> _TargetGroup:
+    """Read the operator's target-group selection.
+
+    Accepts "none" or empty (manual targets only), "all", or "side:rank".
+    """
+    if not tgt_group or tgt_group == "none":
+        return _TargetGroup(side="none", rank=None, group_label="Manual only")
+    if tgt_group == "all":
+        return _TargetGroup(side="all", rank=None, group_label="All HRR")
+    if ":" not in tgt_group:
+        return _TargetGroup(error=f"Invalid target group: {tgt_group}")
+    side, rank_str = tgt_group.split(":", 1)
+    try:
+        rank = int(rank_str)
+    except ValueError:
+        return _TargetGroup(error=f"Invalid target group rank: {rank_str}")
+    return _TargetGroup(
+        side=side, rank=rank, group_label=f"{side.title()} HRR Rank {rank}",
+    )
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -858,27 +876,13 @@ async def threat_sweep(
         except Exception as exc:
             errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
 
-    if not tgt_group or tgt_group == "none":
-        side, rank = "none", None
-        group_label = "Manual only"
-    elif tgt_group == "all":
-        side, rank = "all", None
-        group_label = "All HRR"
-    elif ":" in tgt_group:
-        side, rank_str = tgt_group.split(":", 1)
-        try:
-            rank = int(rank_str)
-        except ValueError:
-            return render(request, "partials/threat_sweep.html", {
-                "assessment": None,
-                "error": f"Invalid target group rank: {rank_str}",
-            })
-        group_label = f"{side.title()} HRR Rank {rank}"
-    else:
+    parsed = _parse_target_group(tgt_group)
+    if parsed.error:
         return render(request, "partials/threat_sweep.html", {
             "assessment": None,
-            "error": f"Invalid target group: {tgt_group}",
+            "error": parsed.error,
         })
+    side, rank, group_label = parsed.side, parsed.rank, parsed.group_label
 
     # Find red TLE — manual override takes precedence over the registered track.
     red_tle: str | None
@@ -965,7 +969,7 @@ async def threat_sweep(
                 TLE_CLUSTERING,
             )
             state.hrr_tle_cache.update(reduced)
-        except Exception as _cl_exc:
+        except Exception as _cl_exc:  # noqa: BLE001 - clustering is an optimisation, never a gate
             logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
 
     # What is known about the RED object's ability to act.

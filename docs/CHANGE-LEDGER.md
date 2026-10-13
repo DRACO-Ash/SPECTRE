@@ -509,3 +509,34 @@ inside the template while `pol.py` converts at the route boundary. Both are
 currently correct and self-consistent, but the moment anyone converts
 `PatternOfLifeResult` at the boundary the chart series goes to 1,000,000x while
 the table goes to 1,000x, in the same panel. Recorded, not fixed.
+
+## 0.5.16
+
+The pattern-of-life double-conversion trap recorded in 0.5.15, closed. No
+template performs unit arithmetic anywhere in the application.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Move every km/s to m/s conversion out of the templates and into the route boundary | Four templates scaled inline in eighteen places: `pol_results.html` twelve, `intercept_geometry.html` three, `notso_results.html` two, `pol_mc_results.html` one. Each was correct; together they were a trap, because the route layer converts at its boundary too. Converting `PatternOfLifeResult` at the boundary, the obvious next step, would have left the template scaling an already-converted value: charts at 1,000,000x and the table at 1,000x in the same panel, neither raising. | Not applicable: the invariant is now enforced. A template containing `* 1000` fails the guard, and the three routes were watched failing it. |
+| Runtime correctness | **EVIDENCED** | Decompose `_compute_intercept_intel`, 163 statements across 56 branches | Past the point where a reader can hold it or a reviewer can check it, at roughly half coverage, so a refactor would silently change one branch in forty. 47 characterisation tests were written FIRST, pinning its output across every method, every delta-v band and the time-of-flight labels, then four pure helpers were extracted and the same 47 tests re-run. | Not applicable: behaviour is pinned by the characterisation suite, which asserts what the code does rather than what it should do. |
+| Runtime correctness | **HYGIENE** | One flight-time label, used by both panels | The sweep and the intercept panel each carried an identical if/elif chain. Two copies of a format is two places to drift, and an operator comparing the screens would see the same duration written two ways with no way to tell which to trust. | Cannot fail a gate; it is a duplication removal with both call sites covered. |
+
+**Three ways to reach the failure, each watched failing.** A template that
+scales; the conversion running twice in Python, caught by value with the
+message "482000.0, expected 482.0"; and a template going back to reading a
+km/s field, which would make a future boundary conversion double up again.
+
+**A second class of guard, from the 0.5.14 lesson.** Moving twelve conversions
+out of a template means the route must now supply twelve names, and Jinja's
+default undefined is falsy and silent, so a typo renders a blank panel and
+nothing raises. A contract test parses each panel for the names it reads and
+asserts the route passes every one. Watched failing against a deliberately
+misspelled key.
+
+**Dead code removed in passing:** the Monte Carlo route accepted a `dv_km_s`
+form parameter it never read, and the template posted it. Both gone.
+
+**Confirmed and unchanged, at the operator's direction:** the orbital state
+vector panel stays in km/s, and the astro package keeps km/s internally. Both
+remain the guard's documented exceptions, each with a test that fails if the
+exception stops applying.

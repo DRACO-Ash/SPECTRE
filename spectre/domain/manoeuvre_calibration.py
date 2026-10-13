@@ -406,6 +406,10 @@ PLATFORM_CLASSES: tuple[PlatformClass, ...] = (
 #: Excludes the cryogenic kick stage (3,000-9,000 m/s), which has not flown.
 _BEYOND_ANY_FLOWN_PLATFORM_M_S: float = 3000.0
 
+#: Below a tenth of a year, "0.0 years of station-keeping" says nothing useful,
+#: so the sentence is suppressed rather than printed as noise.
+_WORTH_STATING_IN_YEARS: float = 0.1
+
 #: Default sweep budget, m/s. The assessment's bottom line is that any inferred
 #: on-station delta-v of 500 m/s or more, outside orbit raising, is a strong
 #: anomaly flag. That makes 500 the right outer edge of the realistic envelope:
@@ -508,7 +512,7 @@ def classify_posture(
         f"{delta_v_m_s:.0f} m/s for a {kind.value}{where} is "
         f"{posture.label}: {descriptor}."
     )
-    if years is not None and years >= 0.1:
+    if years is not None and years >= _WORTH_STATING_IN_YEARS:
         rationale += (
             f" That is {years:.1f} years of this regime's routine "
             f"station-keeping budget ({sk:.0f} m/s per year), spent at once."

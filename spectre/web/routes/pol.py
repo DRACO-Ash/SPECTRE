@@ -19,6 +19,7 @@ from spectre.astro.tle_filter import filter_tle_history
 from spectre.data.intel import get_intel
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.format_units import to_m_s
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -282,21 +283,54 @@ async def pol_analyse(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
+        **_pol_view(pol),
     })
 
 
+def _pol_view(pol: object) -> dict[str, object]:
+    """Every delta-v figure ``pol_results.html`` shows, converted once, here.
+
+    THIS IS THE UNIT BOUNDARY for the pattern-of-life panel. ``pol`` is an
+    astro ``PatternOfLifeResult`` and carries km/s, because the astro package
+    works in km and km/s throughout. Everything this function returns is m/s
+    and says so in its name.
+
+    The template used to scale inline in twelve places. Each was correct on its
+    own, and together they were a trap: this route ALSO converts at its
+    boundary, so finishing the job here would have left the template scaling an
+    already-converted value, putting the charts at 1,000,000x and the table at
+    1,000x in the same panel, both rendering without error.
+
+    ``manoeuvre_rows`` wraps each manoeuvre rather than replacing it, so the
+    template keeps full access to the original object (epoch, type, altitude
+    and inclination deltas) and reads only ``delta_v_m_s`` from the wrapper.
+    """
+    stats = getattr(pol, "dv_stats", None)
+    budget = getattr(pol, "propellant_budget", None)
+
+    return {
+        "total_dv_m_s": to_m_s(getattr(pol, "total_dv_km_s", None)),
+        "dv_threshold_m_s": to_m_s(getattr(pol, "dv_threshold_km_s", None)),
+        "pol_high_dv_m_s": to_m_s(getattr(pol, "pol_high_dv", None)),
+        "dv_mean_m_s": to_m_s(stats.mean) if stats else None,
+        "dv_std_m_s": to_m_s(stats.std) if stats else None,
+        "dv_low_2sigma_m_s": to_m_s(stats.low_2sigma) if stats else None,
+        "dv_high_2sigma_m_s": to_m_s(stats.high_2sigma) if stats else None,
+        "dv_p95_m_s": to_m_s(stats.p95) if stats else None,
+        "budget_total_dv_m_s": to_m_s(budget.total_dv_km_s) if budget else None,
+        "budget_annual_dv_m_s": to_m_s(budget.annual_dv_km_s) if budget else None,
+        "manoeuvre_rows": [
+            {"m": m, "delta_v_m_s": to_m_s(m.delta_v_km_s)}
+            for m in getattr(pol, "manoeuvres", [])
+        ],
+    }
+
+
 @router.post("/monte-carlo", response_class=HTMLResponse)
-async def pol_monte_carlo(
+async def pol_monte_carlo(  # noqa: PLR0913, PLR0917 - FastAPI form parameters
     request: Request,
     satno: Annotated[int, Form()],
     manoeuvre_epoch: Annotated[str, Form()],
-    # Posted in m/s, like every other figure the operator sees. Currently
-    # accepted and not read: the Monte Carlo run takes its magnitude from the
-    # archetype rather than from the detected burn. Left in the signature
-    # because the form sends it and dropping it would change the contract, but
-    # renamed so that if anyone does start reading it they inherit m/s rather
-    # than a value whose unit lived only in a parameter name.
-    dv_m_s: Annotated[float, Form(alias="dv_m_s")] = 0.0,
     manoeuvre_type: Annotated[str, Form()] = "orbit_raise",
     n_samples: Annotated[int, Form()] = 500,
     horizon_h: Annotated[float, Form()] = 48.0,
@@ -353,6 +387,8 @@ async def pol_monte_carlo(
     return render(request, "partials/pol_mc_results.html", {
         "mc": result,
         "manoeuvre": manoeuvre,
+        # Converted here, not in the template. See _pol_view.
+        "manoeuvre_dv_m_s": to_m_s(manoeuvre.delta_v_km_s),
         "archetypes": list(MANOEUVRE_ARCHETYPES.keys()),
     })
 
@@ -550,6 +586,19 @@ async def pol_notso_correlate(
         return HTMLResponse(f'<p class="error-msg">Correlation error: {html.escape(str(exc))}</p>')
 
     return render(request, "partials/notso_results.html", {
+        # Rows carry their own m/s figures so the template does no arithmetic.
+        "correlation_rows": [
+            {
+                "c": c,
+                "manoeuvre_dv_m_s": to_m_s(
+                    c.manoeuvre.delta_v_km_s if c.manoeuvre else None
+                ),
+                "predicted_dv_m_s": to_m_s(
+                    c.notso.predicted_delta_v_km_s if c.notso else None
+                ),
+            }
+            for c in correlations
+        ],
         "correlations": correlations,
         "profile": profile,
         "pol": pol,

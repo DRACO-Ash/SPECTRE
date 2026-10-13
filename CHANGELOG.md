@@ -7,6 +7,65 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.16] - 2026-10-13
+
+Closes the double-conversion trap recorded as a known limit in 0.5.15. No
+template anywhere in the application performs unit arithmetic.
+
+### Fixed
+
+- **The pattern-of-life conversion trap.** Four templates scaled km/s to m/s
+  inline in eighteen places: `pol_results.html` twelve, `intercept_geometry.html`
+  three, `notso_results.html` two, `pol_mc_results.html` one. Every one was
+  correct. Together they were a trap, because the route layer converts at its
+  own boundary: the first person to finish the job by converting
+  `PatternOfLifeResult` at the boundary would have left the template scaling an
+  already-converted value, putting the charts at 1,000,000x and the table at
+  1,000x in the same panel, both rendering without error.
+
+  All eighteen now happen in Python, at a named route boundary, through one
+  `to_m_s` helper.
+
+### Added
+
+- **The invariant, enforced.** A template may not scale by a thousand, and the
+  four velocity panels may not read a km/s field at all, so a future boundary
+  conversion cannot reach them. Three routes to the failure were each watched
+  failing: a template that scales, a conversion running twice in Python
+  (caught by value, "482000.0, expected 482.0"), and a template going back to
+  reading a km/s field.
+
+- **A context contract for every converted figure.** Moving twelve conversions
+  out of a template means the route must now supply twelve names, and Jinja's
+  default undefined is falsy and silent, so a typo renders a blank panel and
+  nothing raises. A test parses each panel for the names it reads and asserts
+  the route passes every one. This is the 0.5.14 lesson applied before it bit.
+
+- **47 characterisation tests** for `_compute_intercept_intel`, written before
+  touching it, pinning its output across every intercept method, every delta-v
+  band, the flight-time labels and the per-burn breakdown.
+
+### Changed
+
+- **`_compute_intercept_intel` split into four pure helpers.** It was 163
+  statements across 56 branches at roughly half coverage, past the point where
+  a reader can hold it or a reviewer can check it. The same 47 characterisation
+  tests pass before and after.
+
+- **One flight-time label, shared.** The threat sweep and the intercept panel
+  each carried an identical if/elif chain. Two copies of a format is two places
+  to drift, and an operator comparing the two screens would see the same
+  duration written two ways with no way to tell which to trust.
+
+- **Dead code removed.** The Monte Carlo route accepted a `dv_km_s` form
+  parameter it never read, and the template posted it. Both gone.
+
+### Unchanged, confirmed
+
+- The orbital state vector panel stays in km/s, and the astro package keeps
+  km/s internally. Both remain the guard's documented exceptions, each with a
+  test that fails if the exception stops applying.
+
 ## [0.5.15] - 2026-10-13
 
 Everything the operator reads is now metres per second, and a delta-v figure is

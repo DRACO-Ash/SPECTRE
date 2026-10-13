@@ -8,6 +8,7 @@ bi-elliptic).  Orbital event detection uses SGP4 via ``spectre.astro.events``.
 from __future__ import annotations
 
 import asyncio
+import math
 import contextlib
 import logging
 from datetime import UTC, datetime
@@ -63,6 +64,7 @@ from spectre.domain.models import (
 )
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.format_units import format_tof_label
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -131,6 +133,21 @@ _INTENT_LABELS: dict[InterceptMethod, str] = {
 }
 
 
+#: Delta-v landmarks in m/s, from the manoeuvre assessment. Named rather than
+#: inlined so the same figure cannot drift between the two panels that use it.
+#:
+#: 1 m/s      the top of a collision avoidance burn (Table 4)
+#: 50 m/s     one year of GEO north-south station-keeping (Table 3)
+#: 170 m/s    the most aggressive GEO relocation on record, 90 deg in 3 days
+#: 500 m/s    the point at which an on-station manoeuvre is a strong anomaly
+#: 3,000 m/s  beyond the reserve of every flown platform class (Table 2)
+_CAM_SCALE_M_S: float = 1.0
+_ANNUAL_STATION_KEEPING_M_S: float = 50.0
+_MOST_AGGRESSIVE_OBSERVED_M_S: float = 170.0
+_ANOMALY_M_S: float = 500.0
+_BEYOND_PLATFORM_M_S: float = 3000.0
+
+
 #: How each posture is presented on the intercept panel. An AGGRESSIVE profile
 #: is the alarming one: it is the manoeuvre an actor would only make for effect.
 _POSTURE_PRESENTATION: dict[Posture, tuple[str, str, str]] = {
@@ -141,92 +158,60 @@ _POSTURE_PRESENTATION: dict[Posture, tuple[str, str, str]] = {
 }
 
 
-def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
-    """Pre-compute all intelligence analysis data for the intercept result template.
 
-    Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
+# ── Pieces of the intercept intelligence panel ───────────────────────────────
+#
+# _compute_intercept_intel was 163 statements across 56 branches, past the
+# point where a reader can hold it or a reviewer can check it. Each piece below
+# is pure: it reads its inputs and returns a value, with no shared state, so it
+# can be read and tested on its own. The behaviour they had before the split is
+# pinned by tests/unit/test_intercept_intel_characterisation.py.
+
+
+def _dv_classification(dv: float) -> str:
+    """Name the scale of a burn, given its magnitude in m/s.
+
+    The boundaries come from observed behaviour, not round numbers: 1 m/s is
+    the top of a collision-avoidance burn, 50 m/s one year of GEO north-south
+    station-keeping, 170 m/s the most aggressive GEO relocation on record, and
+    500 m/s the point at which an on-station manoeuvre is a strong anomaly.
     """
-    import math
+    if dv < _CAM_SCALE_M_S:
+        return "Micro-manoeuvre"
+    if dv < _ANNUAL_STATION_KEEPING_M_S:
+        return "Station-keeping scale"
+    if dv < _MOST_AGGRESSIVE_OBSERVED_M_S:
+        return "Minor Transfer"
+    if dv < _ANOMALY_M_S:
+        return "Moderate Transfer"
+    if dv < _BEYOND_PLATFORM_M_S:
+        return "Major Transfer"
+    return "High-Energy Transfer"
 
-    method = result.method
-    dv = result.total_delta_v_m_s
-    miss = result.intercept_range_km
 
-    # ── Threat classification ────────────────────────────────────────────────
-    if method in _ASSESSMENT_METHODS:
-        manoeuvre_type = "ASSESSMENT"
-        threat_level = "ASSESSMENT"
-        threat_color = "#6b7280"
-        threat_bg = "rgba(107,114,128,0.04)"
-    elif method in _DEFENSIVE_METHODS:
-        manoeuvre_type = "DEFENSIVE"
-        threat_level = "LOW"
-        threat_color = "#22c55e"
-        threat_bg = "rgba(34,197,94,0.04)"
-    else:
-        if method in _OFFENSIVE_METHODS:
-            manoeuvre_type = "OFFENSIVE"
-        else:
-            manoeuvre_type = "REPOSITIONING"
-        # Banded on posture, not on a bare delta-v figure. These thresholds
-        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
-        # 2 m/s would read CRITICAL. Posture also asks the better question:
-        # what does this cost say about how the actor would have to behave?
-        posture = classify_posture(dv, regime, kind_for_method(method.value))
-        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
-            posture.posture
-        ]
+def _observability(dv: float) -> tuple[str, str, str]:
+    """How visible a burn of this size is to space surveillance.
 
-    # ── Operational intent ───────────────────────────────────────────────────
-    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
+    Thresholds in m/s. They were 1.0 / 0.1 / 0.01 km/s, so against m/s values
+    every burn above 1 m/s read HIGH. A manoeuvre at station-keeping scale is
+    the one that hides in routine traffic, which is the point of this panel.
+    """
+    if dv > _MOST_AGGRESSIVE_OBSERVED_M_S:
+        return ("HIGH", "#ef4444",
+                "Large ΔV signature — high probability of SSN detection and attribution")
+    if dv > _ANNUAL_STATION_KEEPING_M_S:
+        return ("MEDIUM", "#f59e0b",
+                "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance")
+    if dv > _CAM_SCALE_M_S:
+        return ("LOW", "#22c55e",
+                "Small ΔV — may fall below SSN detection threshold for routine cataloguing")
+    return ("VERY LOW", "#6b7280",
+            "Micro-manoeuvre — consistent with propellant settling or thermal cycling")
 
-    # ── ΔV classification, in m/s ────────────────────────────────────────────
-    #
-    # These were 0.01 / 0.05 / 0.3 / 1.0 / 3.0 km/s, read against m/s values.
-    # The boundaries are now set from observed behaviour rather than round
-    # numbers: 1 m/s is the top of a collision-avoidance burn, 50 m/s is one
-    # year of GEO north-south station-keeping, 170 m/s is the most aggressive
-    # GEO relocation on record, and 500 m/s is the point at which an on-station
-    # manoeuvre becomes a strong anomaly.
-    if dv < 1.0:
-        dv_class = "Micro-manoeuvre"
-    elif dv < 50.0:
-        dv_class = "Station-keeping scale"
-    elif dv < 170.0:
-        dv_class = "Minor Transfer"
-    elif dv < 500.0:
-        dv_class = "Moderate Transfer"
-    elif dv < 3000.0:
-        dv_class = "Major Transfer"
-    else:
-        dv_class = "High-Energy Transfer"
 
-    # ── Time of flight ───────────────────────────────────────────────────────
-    if result.burns:
-        tof_s = (result.arrival_epoch - result.burns[0].burn_epoch).total_seconds()
-    else:
-        tof_s = 0.0
-    tof_hours = tof_s / 3600.0
-
-    if tof_s < 60:
-        tof_label = "< 1m"
-    elif tof_s < 3600:
-        tof_label = f"{int(tof_s // 60)}m"
-    elif tof_s < 86400:
-        h = int(tof_s // 3600)
-        m = int((tof_s % 3600) // 60)
-        tof_label = f"{h}h {m}m" if m else f"{h}h"
-    else:
-        d = int(tof_s // 86400)
-        h = int((tof_s % 86400) // 3600)
-        tof_label = f"{d}d {h}h" if h else f"{d}d"
-
-    # ── ΔV budget percentage ─────────────────────────────────────────────────
-    # Against the default realistic budget rather than a hardcoded 3.0, which
-    # in m/s would read 100 per cent for any burn above 3 m/s.
-    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
-
-    # ── Per-burn analysis ────────────────────────────────────────────────────
+def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
+    """Per-burn magnitude in m/s, dominant axis, and component percentages."""
+    burn_intel: list[dict[str, Any]] = []
     burn_intel = []
     for burn in result.burns:
         b_dv = burn.delta_v_m_s
@@ -278,27 +263,63 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
             "nor_pct": round(nor_pct, 1),
             "rad_pct": round(rad_pct, 1),
         })
+    return burn_intel
 
-    # ── Observability assessment ─────────────────────────────────────────────
-    # Thresholds in m/s. They were 1.0 / 0.1 / 0.01 km/s, so against m/s values
-    # every burn above 1 m/s read HIGH. A manoeuvre at station-keeping scale is
-    # the one that hides in routine traffic, which is the point of this panel.
-    if dv > 170.0:
-        obs_level = "HIGH"
-        obs_color = "#ef4444"
-        obs_reason = "Large ΔV signature — high probability of SSN detection and attribution"
-    elif dv > 50.0:
-        obs_level = "MEDIUM"
-        obs_color = "#f59e0b"
-        obs_reason = "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance"
-    elif dv > 1.0:
-        obs_level = "LOW"
-        obs_color = "#22c55e"
-        obs_reason = "Small ΔV — may fall below SSN detection threshold for routine cataloguing"
+
+def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
+    """Pre-compute all intelligence analysis data for the intercept result template.
+
+    Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
+    """
+    method = result.method
+    dv = result.total_delta_v_m_s
+    miss = result.intercept_range_km
+
+    # ── Threat classification ────────────────────────────────────────────────
+    if method in _ASSESSMENT_METHODS:
+        manoeuvre_type = "ASSESSMENT"
+        threat_level = "ASSESSMENT"
+        threat_color = "#6b7280"
+        threat_bg = "rgba(107,114,128,0.04)"
+    elif method in _DEFENSIVE_METHODS:
+        manoeuvre_type = "DEFENSIVE"
+        threat_level = "LOW"
+        threat_color = "#22c55e"
+        threat_bg = "rgba(34,197,94,0.04)"
     else:
-        obs_level = "VERY LOW"
-        obs_color = "#6b7280"
-        obs_reason = "Micro-manoeuvre — consistent with propellant settling or thermal cycling"
+        manoeuvre_type = (
+            "OFFENSIVE" if method in _OFFENSIVE_METHODS else "REPOSITIONING"
+        )
+        # Banded on posture, not on a bare delta-v figure. These thresholds
+        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
+        # 2 m/s would read CRITICAL. Posture also asks the better question:
+        # what does this cost say about how the actor would have to behave?
+        posture = classify_posture(dv, regime, kind_for_method(method.value))
+        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
+            posture.posture
+        ]
+
+    # ── Operational intent ───────────────────────────────────────────────────
+    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
+
+    dv_class = _dv_classification(dv)
+
+    # ── Time of flight ───────────────────────────────────────────────────────
+    if result.burns:
+        tof_s = (result.arrival_epoch - result.burns[0].burn_epoch).total_seconds()
+    else:
+        tof_s = 0.0
+    tof_hours = tof_s / 3600.0
+    tof_label = format_tof_label(tof_hours)
+
+    # ── ΔV budget percentage ─────────────────────────────────────────────────
+    # Against the default realistic budget rather than a hardcoded 3.0, which
+    # in m/s would read 100 per cent for any burn above 3 m/s.
+    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
+
+    burn_intel = _burn_breakdown(result)
+
+    obs_level, obs_color, obs_reason = _observability(dv)
 
     # ── Method-specific insights ─────────────────────────────────────────────
     if method == InterceptMethod.RBAR_HOP:

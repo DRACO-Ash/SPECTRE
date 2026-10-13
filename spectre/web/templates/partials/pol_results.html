@@ -217,11 +217,11 @@
     <table style="width:100%; font-size:0.67rem; border-collapse:collapse">
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Cumulative ΔV</td>
-        <td style="text-align:right; font-weight:600">{{ (pb.total_dv_km_s * 1000) | round(1) }} m/s</td>
+        <td style="text-align:right; font-weight:600">{{ budget_total_dv_m_s | m_s }} m/s</td>
       </tr>
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Annual burn rate</td>
-        <td style="text-align:right; font-weight:600">{{ (pb.annual_dv_km_s * 1000) | round(1) }} m/s/yr</td>
+        <td style="text-align:right; font-weight:600">{{ budget_annual_dv_m_s | m_s }} m/s/yr</td>
       </tr>
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Est. remaining life</td>
@@ -259,9 +259,9 @@
   {% endmacro %}
 
   {{ stat_card("Manoeuvres", pol.manoeuvres | length, "detected total") }}
-  {{ stat_card("Total ΔV", (pol.total_dv_km_s * 1000) | round(1) ~ " m/s", "cumulative budget") }}
+  {{ stat_card("Total ΔV", (total_dv_m_s | m_s) ~ " m/s", "cumulative budget") }}
   {% if pol.dv_stats %}
-  {{ stat_card("Mean ΔV", (pol.dv_stats.mean * 1000) | round(2) ~ " m/s", "σ = " ~ (pol.dv_stats.std * 1000) | round(2) ~ " m/s") }}
+  {{ stat_card("Mean ΔV", (dv_mean_m_s | m_s) ~ " m/s", "σ = " ~ (dv_std_m_s | m_s) ~ " m/s") }}
   {% endif %}
   {% if pol.interval_stats %}
   {{ stat_card("Mean Interval", pol.interval_stats.mean | round(1) ~ " d", "σ = " ~ pol.interval_stats.std | round(1) ~ " d") }}
@@ -352,11 +352,11 @@
     {% if pol.dv_stats %}
     <table style="width:100%; font-size:0.66rem; border-collapse:collapse">
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV Mean</td>
-          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.mean*1000)|round(2) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ dv_mean_m_s | m_s }} m/s</td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV ±2σ band</td>
-          <td style="text-align:right; font-weight:600">{{ [pol.dv_stats.low_2sigma*1000, 0]|max|round(1) }} – {{ (pol.dv_stats.high_2sigma*1000)|round(1) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ [dv_low_2sigma_m_s, 0]|max | m_s }} – {{ dv_high_2sigma_m_s | m_s }} m/s</td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV p95</td>
-          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.p95*1000)|round(2) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ dv_p95_m_s | m_s }} m/s</td></tr>
       {% if pol.interval_stats %}
       <tr><td colspan="2" style="border-top:1px solid var(--border); padding-top:0.25rem; margin-top:0.25rem"></td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">Interval Mean</td>
@@ -369,7 +369,7 @@
     </table>
     <div style="margin-top:0.5rem; font-size:0.62rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
       <strong>Out-of-PoL trigger:</strong> ΔV &gt;
-      <span style="color:var(--ops-gold)">{{ pol.pol_high_dv and (pol.pol_high_dv*1000)|round(1) or "N/A" }} m/s</span>
+      <span style="color:var(--ops-gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
       or gap &gt;
       <span style="color:var(--ops-gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
     </div>
@@ -526,7 +526,7 @@
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
   <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
     Manoeuvre Catalogue — {{ pol.manoeuvres | length }} events
-    <span style="font-size:0.6rem; font-weight:400">(ΔV threshold: {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s)</span>
+    <span style="font-size:0.6rem; font-weight:400">(ΔV threshold: {{ dv_threshold_m_s | m_s }} m/s)</span>
   </div>
   <div class="hrr-scroll" style="max-height:280px">
     <table class="hrr-table" style="font-size:0.66rem">
@@ -547,12 +547,13 @@
       </thead>
       <tbody>
         {% set TYPE_COL = {"station_keeping":"var(--ops-blue)","plane_change":"#f59e0b","repositioning":"#ef4444","unknown":"var(--text-dim)"} %}
-        {% for m in pol.manoeuvres | sort(attribute="epoch", reverse=True) %}
+        {% for row in manoeuvre_rows | sort(attribute="m.epoch", reverse=True) %}
+        {% set m = row.m %}
         <tr>
           <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
-          <td data-val="{{ (m.delta_v_km_s*1000)|round(3) }}">
+          <td data-val="{{ row.delta_v_m_s }}">
             <strong style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-primary)') }}">
-              {{ (m.delta_v_km_s*1000)|round(3) }}
+              {{ row.delta_v_m_s | m_s }}
             </strong>
           </td>
           <td style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-dim)') }}; white-space:nowrap">
@@ -582,7 +583,7 @@
                     style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
                     title="Run Monte Carlo simulation for this manoeuvre"
                     hx-post="/pol/monte-carlo"
-                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "dv_m_s": "{{ m.delta_v_km_s * 1000 }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
                     hx-target="#pol-mc-results"
                     hx-swap="innerHTML"
                     hx-indicator="#pol-mc-indicator">
@@ -597,7 +598,7 @@
 </div>
 {% else %}
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.8rem; margin-bottom:0.6rem; text-align:center">
-  <p class="empty-msg">No manoeuvres detected above the {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s threshold.
+  <p class="empty-msg">No manoeuvres detected above the {{ dv_threshold_m_s | m_s }} m/s threshold.
   This object appears <strong>passive</strong> or non-manoeuvring.</p>
 </div>
 {% endif %}

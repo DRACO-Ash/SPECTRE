@@ -19,9 +19,11 @@ fails if km/s reaches a screen.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TEMPLATES = _ROOT / "spectre" / "web" / "templates"
@@ -129,6 +131,48 @@ class TestNoRouteFormatsKilometresPerSecond:
         assert not offenders, (
             "these routes format a km/s label into operator-facing text:\n  "
             + "\n  ".join(offenders)
+        )
+
+
+class TestNoTemplatePerformsUnitArithmetic:
+    """The invariant that makes a double conversion structurally impossible.
+
+    Templates used to scale km/s to m/s inline in eighteen places across four
+    files. Every one was correct. Together they were a trap, because the route
+    layer converts at its boundary too: the first person to finish the job by
+    converting a result object at the boundary would have left the template
+    scaling an already-converted value. In the pattern-of-life panel that would
+    have put the charts at 1,000,000x and the table at 1,000x, side by side,
+    both rendering without error and neither raising.
+
+    The rule that removes it is one a reader can hold: a template receives
+    figures already in the unit of their name and never does the sum itself.
+    Conversion lives in Python, at a named route boundary, where it is one
+    greppable call and one place to get right.
+    """
+
+    def test_no_template_scales_by_a_thousand(self) -> None:
+        scaling = re.compile(r"[*/]\s*1000(?:\.0+)?\b")
+        offenders: list[str] = []
+        for path in _templates():
+            rel = path.relative_to(_TEMPLATES).as_posix()
+            for i, line in _rendered_lines(path):
+                if scaling.search(line):
+                    offenders.append(f"{rel}:{i}: {line.strip()[:110]}")
+        assert not offenders, (
+            "a template is converting units. Move it to the route boundary and "
+            "pass the figure in already in m/s, so the conversion cannot happen "
+            "twice:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_the_conversion_helper_is_what_routes_use(self) -> None:
+        """One function, so there is one place to be wrong."""
+        from spectre.web.format_units import to_m_s
+
+        assert to_m_s(0.0601) == pytest.approx(60.1)
+        assert to_m_s(None) is None, (
+            "a missing figure must pass through; a template rendering '-' "
+            "should not have to guard the conversion as well"
         )
 
 
@@ -283,3 +327,228 @@ class TestTheDisplayFilterIsRegistered:
         from spectre.web.format_units import format_m_s
 
         assert format_m_s(value) == expected
+
+
+class TestThePatternOfLifeTrapIsClosed:
+    """The specific hazard this file was extended to remove.
+
+    ``pol_results.html`` converted km/s to m/s in twelve places while
+    ``pol.py`` converted at its own boundary. Both were correct, and that was
+    the problem: converting ``PatternOfLifeResult`` at the boundary, the
+    obvious next step, would have left the template scaling an already
+    converted value. The charts would have gone to 1,000,000x and the table to
+    1,000x in the same panel, with no error anywhere.
+
+    Two things close it. The template no longer references a km/s field at all,
+    so a boundary conversion cannot reach it; and the one function that does
+    convert is pinned to exactly one factor of a thousand.
+    """
+
+    #: Velocity-bearing attributes on the astro pattern-of-life objects. A
+    #: template that reads one of these is reading km/s and must be converting,
+    #: which is what this class exists to prevent.
+    _KM_S_FIELDS = (
+        "total_dv_km_s", "dv_threshold_km_s", "annual_dv_km_s",
+        "pol_high_dv", "delta_v_km_s", "predicted_delta_v_km_s",
+        "dv_stats.mean", "dv_stats.std", "dv_stats.p95",
+        "dv_stats.low_2sigma", "dv_stats.high_2sigma",
+    )
+
+    _VELOCITY_TEMPLATES = (
+        "partials/pol_results.html",
+        "partials/pol_mc_results.html",
+        "partials/notso_results.html",
+        "partials/intercept_geometry.html",
+    )
+
+    def test_the_panels_read_no_km_s_field_at_all(self) -> None:
+        offenders: list[str] = []
+        for rel in self._VELOCITY_TEMPLATES:
+            path = _TEMPLATES / rel
+            for i, line in _rendered_lines(path):
+                for field in self._KM_S_FIELDS:
+                    if re.search(re.escape(field) + r"(?!\w)", line):
+                        offenders.append(f"{rel}:{i}: {field} -> {line.strip()[:90]}")
+        assert not offenders, (
+            "these panels still read a km/s field, so converting the astro "
+            "result at the route boundary would double-convert them:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_the_conversion_is_exactly_one_factor_of_a_thousand(self) -> None:
+        """Pinned numerically, so a second factor cannot hide behind a name."""
+        from spectre.web.format_units import to_m_s
+
+        for km_s in (0.001, 0.011, 0.0601, 0.17, 2.5):
+            assert to_m_s(km_s) == pytest.approx(km_s * 1000.0, rel=1e-12)
+
+    def test_the_view_converts_every_figure_once_and_only_once(self) -> None:
+        """Every m/s value the panel shows is exactly 1,000x its km/s source."""
+        from dataclasses import dataclass
+        from datetime import UTC, datetime
+
+        from spectre.web.routes.pol import _pol_view
+
+        @dataclass
+        class _Stats:
+            mean: float = 0.011
+            std: float = 0.002
+            p95: float = 0.034
+            low_2sigma: float = 0.007
+            high_2sigma: float = 0.015
+
+        @dataclass
+        class _Budget:
+            total_dv_km_s: float = 0.482
+            annual_dv_km_s: float = 0.048
+
+        @dataclass
+        class _Manoeuvre:
+            delta_v_km_s: float = 0.060
+            epoch: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+
+        @dataclass
+        class _Pol:
+            total_dv_km_s: float = 0.482
+            dv_threshold_km_s: float = 0.0005
+            pol_high_dv: float = 0.015
+            dv_stats: _Stats = None
+            propellant_budget: _Budget = None
+            manoeuvres: list = None
+
+        pol = _Pol(dv_stats=_Stats(), propellant_budget=_Budget(),
+                   manoeuvres=[_Manoeuvre()])
+        view = _pol_view(pol)
+
+        expected = {
+            "total_dv_m_s": 482.0,
+            "dv_threshold_m_s": 0.5,
+            "pol_high_dv_m_s": 15.0,
+            "dv_mean_m_s": 11.0,
+            "dv_std_m_s": 2.0,
+            "dv_p95_m_s": 34.0,
+            "dv_low_2sigma_m_s": 7.0,
+            "dv_high_2sigma_m_s": 15.0,
+            "budget_total_dv_m_s": 482.0,
+            "budget_annual_dv_m_s": 48.0,
+        }
+        for key, want in expected.items():
+            assert view[key] == pytest.approx(want), (
+                f"{key} is {view[key]}, expected {want}. A value 1,000x out "
+                "means the conversion ran twice; 1,000x small means it did not "
+                "run at all."
+            )
+        assert view["manoeuvre_rows"][0]["delta_v_m_s"] == pytest.approx(60.0)
+
+    def test_a_missing_statistic_does_not_crash_the_panel(self) -> None:
+        """An object with too few manoeuvres has no stats and no budget."""
+        from dataclasses import dataclass
+
+        from spectre.web.routes.pol import _pol_view
+
+        @dataclass
+        class _Bare:
+            total_dv_km_s: float = 0.0
+            dv_threshold_km_s: float = 0.0005
+            pol_high_dv: float | None = None
+            dv_stats: None = None
+            propellant_budget: None = None
+            manoeuvres: tuple = ()
+
+        view = _pol_view(_Bare())
+        assert view["dv_mean_m_s"] is None
+        assert view["budget_total_dv_m_s"] is None
+        assert view["pol_high_dv_m_s"] is None
+        assert view["manoeuvre_rows"] == []
+
+
+class TestEveryConvertedFigureIsActuallySupplied:
+    """Moving a conversion to the route means the route must now supply it.
+
+    Jinja's default undefined is falsy and silent. A context key the route
+    forgets to pass renders as an empty string, so a panel that used to show
+    "60.1 m/s" shows " m/s" and nothing raises. That is exactly how the
+    refusals panel shipped dead in 0.5.14, and moving twelve conversions out of
+    a template is twelve fresh chances to make the same mistake.
+    """
+
+    #: template -> the route module that renders it
+    _PANELS = {
+        "partials/pol_results.html": "pol.py",
+        "partials/pol_mc_results.html": "pol.py",
+        "partials/notso_results.html": "pol.py",
+        "partials/intercept_geometry.html": "geometry.py",
+    }
+
+    @staticmethod
+    def _required_names(rel: str) -> list[str]:
+        from jinja2 import meta
+
+        from spectre.web.app import templates as app_templates
+
+        env = Environment(
+            loader=FileSystemLoader(str(_TEMPLATES)), autoescape=True,
+        )
+        env.filters.update(app_templates.env.filters)
+        source = (_TEMPLATES / rel).read_text(encoding="utf-8")
+        found = meta.find_undeclared_variables(env.parse(source))
+        # Only the names this change introduced: the converted figures and the
+        # row wrappers that carry them.
+        return sorted(
+            n for n in found if n.endswith("_m_s") or n.endswith("_rows")
+        )
+
+    @pytest.mark.parametrize(("template", "route"), sorted(_PANELS.items()))
+    def test_the_route_passes_every_converted_name_the_panel_reads(
+        self, template: str, route: str
+    ) -> None:
+        required = self._required_names(template)
+        assert required, f"{template} reads no converted figure; has it regressed?"
+        source = (_ROUTES / route).read_text(encoding="utf-8")
+        missing = [n for n in required if f'"{n}"' not in source]
+        assert not missing, (
+            f"{template} reads {missing} but {route} never passes "
+            "them, so the panel renders blank and nothing raises"
+        )
+
+    def test_the_hill_frame_panel_renders_its_converted_burn_state(self) -> None:
+        """A small panel, rendered for real under StrictUndefined.
+
+        The fixture is the REAL ``RelativeGeometry`` dataclass, so a field added
+        to it fails here rather than rendering as an empty string in the panel.
+        """
+        from spectre.astro.cw_geometry import CWState, RelativeGeometry
+        from spectre.web.app import templates as app_templates
+
+        env = Environment(
+            loader=FileSystemLoader(str(_TEMPLATES)),
+            autoescape=True,
+            undefined=StrictUndefined,
+        )
+        env.filters.update(app_templates.env.filters)
+
+        # 0.0601 km/s radial, which is 60.1 m/s.
+        geom = RelativeGeometry(
+            method="lambert",
+            red_name="SJ-17",
+            blue_name="B_SAT_Alpha",
+            n_rad_s=7.2921e-5,
+            initial_range_km=12.0,
+            tof_hours=6.0,
+            dv_total_ms=61.3,
+            burn_epoch=datetime(2026, 10, 13, 12, 0, tzinfo=UTC),
+            cw_valid=True,
+            validity_notes=[],
+            coast_points=[],
+            transfer_points=[],
+            burn_state=CWState(0.0, 0.0, 0.0, 0.0601, -0.0122, 0.0034),
+            arrival_range_km=4.2,
+        )
+        html = env.get_template("partials/intercept_geometry.html").render(
+            geom=geom,
+            chart_json="{}",
+            burn_xd_m_s=60.1, burn_yd_m_s=-12.2, burn_zd_m_s=3.4,
+        )
+        assert "60" in html, "the converted radial rate is missing"
+        assert "0.0601" not in html, "that is the km/s value reaching the screen"
+        assert "60100" not in html, "that is the conversion applied twice"

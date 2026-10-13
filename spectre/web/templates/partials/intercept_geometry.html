@@ -116,13 +116,13 @@
                 background:var(--bg-secondary); padding:0.4rem 0.6rem; border-radius:4px;
                 display:grid; grid-template-columns:repeat(3,1fr); gap:0.2rem">
       <span>x (R-bar): {{ "%.4f"|format(geom.burn_state.x) }} km</span>
-      <span>ẋ: {{ (geom.burn_state.xd * 1000) | m_s }} m/s</span>
+      <span>ẋ: {{ burn_xd_m_s | m_s }} m/s</span>
       <span>n: {{ "%.6f"|format(geom.n_rad_s) }} rad/s</span>
       <span>y (V-bar): {{ "%.4f"|format(geom.burn_state.y) }} km</span>
-      <span>ẏ: {{ (geom.burn_state.yd * 1000) | m_s }} m/s</span>
+      <span>ẏ: {{ burn_yd_m_s | m_s }} m/s</span>
       <span>burn: {{ geom.burn_epoch.strftime('%Y-%m-%d %H:%M UTC') }}</span>
       <span>z (H-bar): {{ "%.4f"|format(geom.burn_state.z) }} km</span>
-      <span>ż: {{ (geom.burn_state.zd * 1000) | m_s }} m/s</span>
+      <span>ż: {{ burn_zd_m_s | m_s }} m/s</span>
       <span>method: {{ geom.method }}</span>
     </div>
   </details>

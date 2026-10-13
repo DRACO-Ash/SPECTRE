@@ -19,7 +19,7 @@
       </span>
     </div>
     <span style="font-size:0.62rem; color:var(--text-dim)">
-      Manoeuvre: {{ manoeuvre.epoch.strftime("%Y-%m-%d") }} · {{ (manoeuvre.delta_v_km_s*1000)|round(2) }} m/s
+      Manoeuvre: {{ manoeuvre.epoch.strftime("%Y-%m-%d") }} · {{ manoeuvre_dv_m_s | m_s }} m/s
     </span>
   </div>
 
