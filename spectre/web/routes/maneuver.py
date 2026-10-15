@@ -266,170 +266,202 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
     return burn_intel
 
 
-def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
-    """Pre-compute all intelligence analysis data for the intercept result template.
 
-    Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
-    """
-    method = result.method
-    dv = result.total_delta_v_m_s
-    miss = result.intercept_range_km
+#: A score above this reads High, above the lower one Medium, else Low. The
+#: same band serves detectability, stability and terrain risk, which each
+#: carried their own copy of the two numbers.
+_SCORE_HIGH: float = 0.6
+_SCORE_MEDIUM: float = 0.3
 
-    # ── Threat classification ────────────────────────────────────────────────
-    if method in _ASSESSMENT_METHODS:
-        manoeuvre_type = "ASSESSMENT"
-        threat_level = "ASSESSMENT"
-        threat_color = "#6b7280"
-        threat_bg = "rgba(107,114,128,0.04)"
-    elif method in _DEFENSIVE_METHODS:
-        manoeuvre_type = "DEFENSIVE"
-        threat_level = "LOW"
-        threat_color = "#22c55e"
-        threat_bg = "rgba(34,197,94,0.04)"
-    else:
-        manoeuvre_type = (
-            "OFFENSIVE" if method in _OFFENSIVE_METHODS else "REPOSITIONING"
+
+def _score_band(score: float) -> str:
+    """Name a 0-1 score. One definition for three panels that share it."""
+    if score > _SCORE_HIGH:
+        return "High"
+    return "Medium" if score > _SCORE_MEDIUM else "Low"
+
+
+#: Intercept method -> the figures its panel shows.
+#:
+#: This was a twenty-way if/elif chain, which was most of the branching the
+#: intelligence panel ever did. A table says what it actually is: a lookup, not
+#: a decision. Adding a method is one row, and a method with no row of its own
+#: still gets its miss distance rather than nothing.
+_METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, Any] = {
+    InterceptMethod.RBAR_HOP:
+        lambda result, dv, miss: (
+            [
+                {"label": "Hop Type", "value": "R-Bar (radial)"},
+                {"label": "Separation", "value": f"{miss:.2f} km"},
+                {"label": "Burns", "value": "1 radial impulse"},
+            ]
+        ),
+    InterceptMethod.VBAR_HOP:
+        lambda result, dv, miss: (
+            [
+                {"label": "Hop Type", "value": "V-Bar (along-track)"},
+                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": "Burns", "value": "2 radial (entry + correction)"},
+                {"label": "Signature", "value": "Low — mimics perturbation drift"},
+            ]
+        ),
+    InterceptMethod.HBAR_HOP:
+        lambda result, dv, miss: (
+            [
+                {"label": "Hop Type", "value": "H-Bar (orbit-normal)"},
+                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": "Burns", "value": "Normal burns at node crossings"},
+                {"label": "Signature", "value": "Low — ACS/propellant settling cover"},
+            ]
+        ),
+    InterceptMethod.LAMBERT:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
+                {"label": "Transfer Type", "value": "Lambert arc"},
+            ]
+        ),
+    InterceptMethod.PROXIMITY:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
+                {"label": "Transfer Type", "value": "Lambert arc"},
+            ]
+        ),
+    InterceptMethod.RENDEZVOUS:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
+                {"label": "Transfer Type", "value": "Lambert arc"},
+            ]
+        ),
+    InterceptMethod.HOHMANN:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": "0.0 km (coplanar)"},
+                {"label": "Burn Count", "value": str(len(result.burns))},
+            ]
+        ),
+    InterceptMethod.BIELLIPTIC:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": "0.0 km (coplanar)"},
+                {"label": "Burn Count", "value": str(len(result.burns))},
+            ]
+        ),
+    InterceptMethod.PHASING:
+        lambda result, dv, miss: (
+            [
+                {"label": "Miss Distance", "value": "0.0 km"},
+                {"label": "Transfer Type", "value": "Phasing orbit"},
+            ]
+        ),
+    InterceptMethod.DETECTABILITY:
+        lambda result, dv, miss: (
+            [
+                {"label": "Observability Score", "value": f"{miss:.0f}/100"},
+                {"label": "Detection Probability", "value": _score_band(miss / 100.0)},
+            ]
+        ),
+    InterceptMethod.INTENT_PREDICT:
+        lambda result, dv, miss: (
+            [
+                {"label": "Intercept Likelihood", "value": f"{miss:.0f}%"},
+                {"label": "Assessment", "value": (
+                    "High confidence intercept intent" if (miss / 100.0) > 0.7
+                    else ("Possible intercept intent" if (miss / 100.0) > 0.4 else "Low probability of intercept intent")
+                )},
+            ]
+        ),
+    InterceptMethod.STABILITY:
+        lambda result, dv, miss: (
+            [
+                {"label": "Stability Score", "value": f"{miss:.0f}/100"},
+                {"label": "Assessment", "value": (
+                    "Stable relative motion" if (miss / 100.0) > 0.6
+                    else ("Marginally stable" if (miss / 100.0) > 0.3 else "Unstable — natural drift likely")
+                )},
+            ]
+        ),
+    InterceptMethod.FINGERPRINT:
+        lambda result, dv, miss: (
+            [
+                {"label": "Fingerprint Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
+            ]
+        ),
+    InterceptMethod.TERRAIN:
+        lambda result, dv, miss: (
+            [
+                {"label": "Operational Risk", "value": f"{miss:.0f}/100"},
+                {"label": "Risk Level", "value": _score_band(miss / 100.0)},
+            ]
+        ),
+    InterceptMethod.MANOEUVRE_DETECT:
+        lambda result, dv, miss: (
+            [
+                {"label": "Detection Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
+            ]
+        ),
+    InterceptMethod.INTERCEPT_ENVELOPE:
+        lambda result, dv, miss: (
+            [
+                {"label": "Feasible Solutions", "value": f"{int(miss)}"},
+                {"label": "Min Feasible ΔV", "value": f"{dv:.0f} m/s"},
+            ]
+        ),
+    InterceptMethod.COLA:
+        lambda result, dv, miss: (
+            [
+                {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
+                {"label": "Strategy", "value": "Optimal COLA manoeuvre"},
+            ]
+        ),
+    InterceptMethod.EVASION:
+        lambda result, dv, miss: (
+            [
+                {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
+                {"label": "Type", "value": "Defensive evasion"},
+            ]
+        ),
+    InterceptMethod.GEO_DRIFT:
+        lambda result, dv, miss: (
+            [
+                {"label": "Longitude Gap", "value": f"{miss:.2f}\u00b0"},
+                {"label": "Type", "value": "GEO station relocation"},
+            ]
+        ),
+    InterceptMethod.J2_DRIFT:
+        lambda result, dv, miss: (
+            [
+                {"label": "RAAN \u0394 Target", "value": f"{miss:.2f}\u00b0"},
+                {"label": "Type", "value": "J2-assisted drift"},
+            ]
+        ),
+}
+
+
+def _method_insights(
+    result: InterceptResult, dv: float, miss: float,
+) -> list[dict[str, Any]]:
+    """The two or three figures that matter for THIS intercept method."""
+    builder = _METHOD_INSIGHT_BUILDERS.get(result.method)
+    if builder is None:
+        return (
+            [
+                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
+            ]
         )
-        # Banded on posture, not on a bare delta-v figure. These thresholds
-        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
-        # 2 m/s would read CRITICAL. Posture also asks the better question:
-        # what does this cost say about how the actor would have to behave?
-        posture = classify_posture(dv, regime, kind_for_method(method.value))
-        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
-            posture.posture
-        ]
+    return builder(result, dv, miss)
 
-    # ── Operational intent ───────────────────────────────────────────────────
-    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
 
-    dv_class = _dv_classification(dv)
-
-    # ── Time of flight ───────────────────────────────────────────────────────
-    if result.burns:
-        tof_s = (result.arrival_epoch - result.burns[0].burn_epoch).total_seconds()
-    else:
-        tof_s = 0.0
-    tof_hours = tof_s / 3600.0
-    tof_label = format_tof_label(tof_hours)
-
-    # ── ΔV budget percentage ─────────────────────────────────────────────────
-    # Against the default realistic budget rather than a hardcoded 3.0, which
-    # in m/s would read 100 per cent for any burn above 3 m/s.
-    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
-
-    burn_intel = _burn_breakdown(result)
-
-    obs_level, obs_color, obs_reason = _observability(dv)
-
-    # ── Method-specific insights ─────────────────────────────────────────────
-    if method == InterceptMethod.RBAR_HOP:
-        method_insights = [
-            {"label": "Hop Type", "value": "R-Bar (radial)"},
-            {"label": "Separation", "value": f"{miss:.2f} km"},
-            {"label": "Burns", "value": "1 radial impulse"},
-        ]
-    elif method == InterceptMethod.VBAR_HOP:
-        method_insights = [
-            {"label": "Hop Type", "value": "V-Bar (along-track)"},
-            {"label": "Total Advance", "value": f"{miss:.1f} km"},
-            {"label": "Burns", "value": "2 radial (entry + correction)"},
-            {"label": "Signature", "value": "Low — mimics perturbation drift"},
-        ]
-    elif method == InterceptMethod.HBAR_HOP:
-        method_insights = [
-            {"label": "Hop Type", "value": "H-Bar (orbit-normal)"},
-            {"label": "Total Advance", "value": f"{miss:.1f} km"},
-            {"label": "Burns", "value": "Normal burns at node crossings"},
-            {"label": "Signature", "value": "Low — ACS/propellant settling cover"},
-        ]
-    elif method in (InterceptMethod.LAMBERT, InterceptMethod.PROXIMITY, InterceptMethod.RENDEZVOUS):
-        method_insights = [
-            {"label": "Miss Distance", "value": f"{miss:.2f} km"},
-            {"label": "Transfer Type", "value": "Lambert arc"},
-        ]
-    elif method in (InterceptMethod.HOHMANN, InterceptMethod.BIELLIPTIC):
-        method_insights = [
-            {"label": "Miss Distance", "value": "0.0 km (coplanar)"},
-            {"label": "Burn Count", "value": str(len(result.burns))},
-        ]
-    elif method == InterceptMethod.PHASING:
-        method_insights = [
-            {"label": "Miss Distance", "value": "0.0 km"},
-            {"label": "Transfer Type", "value": "Phasing orbit"},
-        ]
-    elif method == InterceptMethod.DETECTABILITY:
-        score = miss / 100.0
-        method_insights = [
-            {"label": "Observability Score", "value": f"{score * 100:.0f}/100"},
-            {"label": "Detection Probability", "value": "High" if score > 0.6 else ("Medium" if score > 0.3 else "Low")},
-        ]
-    elif method == InterceptMethod.INTENT_PREDICT:
-        likelihood = miss / 100.0
-        method_insights = [
-            {"label": "Intercept Likelihood", "value": f"{likelihood * 100:.0f}%"},
-            {"label": "Assessment", "value": (
-                "High confidence intercept intent" if likelihood > 0.7
-                else ("Possible intercept intent" if likelihood > 0.4 else "Low probability of intercept intent")
-            )},
-        ]
-    elif method == InterceptMethod.STABILITY:
-        score = miss / 100.0
-        method_insights = [
-            {"label": "Stability Score", "value": f"{score * 100:.0f}/100"},
-            {"label": "Assessment", "value": (
-                "Stable relative motion" if score > 0.6
-                else ("Marginally stable" if score > 0.3 else "Unstable — natural drift likely")
-            )},
-        ]
-    elif method == InterceptMethod.FINGERPRINT:
-        conf = miss / 100.0
-        method_insights = [
-            {"label": "Fingerprint Confidence", "value": f"{conf * 100:.0f}%"},
-            {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
-        ]
-    elif method == InterceptMethod.TERRAIN:
-        risk = miss / 100.0
-        method_insights = [
-            {"label": "Operational Risk", "value": f"{risk * 100:.0f}/100"},
-            {"label": "Risk Level", "value": "High" if risk > 0.6 else ("Medium" if risk > 0.3 else "Low")},
-        ]
-    elif method == InterceptMethod.MANOEUVRE_DETECT:
-        conf = miss / 100.0
-        method_insights = [
-            {"label": "Detection Confidence", "value": f"{conf * 100:.0f}%"},
-            {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
-        ]
-    elif method == InterceptMethod.INTERCEPT_ENVELOPE:
-        method_insights = [
-            {"label": "Feasible Solutions", "value": f"{int(miss)}"},
-            {"label": "Min Feasible ΔV", "value": f"{dv:.0f} m/s"},
-        ]
-    elif method == InterceptMethod.COLA:
-        method_insights = [
-            {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
-            {"label": "Strategy", "value": "Optimal COLA manoeuvre"},
-        ]
-    elif method == InterceptMethod.EVASION:
-        method_insights = [
-            {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
-            {"label": "Type", "value": "Defensive evasion"},
-        ]
-    elif method == InterceptMethod.GEO_DRIFT:
-        method_insights = [
-            {"label": "Longitude Gap", "value": f"{miss:.2f}\u00b0"},
-            {"label": "Type", "value": "GEO station relocation"},
-        ]
-    elif method == InterceptMethod.J2_DRIFT:
-        method_insights = [
-            {"label": "RAAN \u0394 Target", "value": f"{miss:.2f}\u00b0"},
-            {"label": "Type", "value": "J2-assisted drift"},
-        ]
-    else:
-        method_insights = [
-            {"label": "Miss Distance", "value": f"{miss:.2f} km"},
-        ]
-
-    # ── Summary text ─────────────────────────────────────────────────────────
+def _summary_text(
+    result: InterceptResult, dv: float, miss: float,
+    intent_label: str, tof_label: str,
+) -> str:
+    """One sentence describing what this intercept would do."""
+    method = result.method
     arrival_str = result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC")
     if method == InterceptMethod.RBAR_HOP:
         summary = (
@@ -492,6 +524,66 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
             f"{intent_label} for {result.red_name} \u2192 {result.blue_name}: "
             f"{dv:.0f} m/s \u0394V, arriving {arrival_str}."
         )
+    return summary
+
+
+def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
+    """Pre-compute all intelligence analysis data for the intercept result template.
+
+    Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
+    """
+    method = result.method
+    dv = result.total_delta_v_m_s
+    miss = result.intercept_range_km
+
+    # ── Threat classification ────────────────────────────────────────────────
+    if method in _ASSESSMENT_METHODS:
+        manoeuvre_type = "ASSESSMENT"
+        threat_level = "ASSESSMENT"
+        threat_color = "#6b7280"
+        threat_bg = "rgba(107,114,128,0.04)"
+    elif method in _DEFENSIVE_METHODS:
+        manoeuvre_type = "DEFENSIVE"
+        threat_level = "LOW"
+        threat_color = "#22c55e"
+        threat_bg = "rgba(34,197,94,0.04)"
+    else:
+        manoeuvre_type = (
+            "OFFENSIVE" if method in _OFFENSIVE_METHODS else "REPOSITIONING"
+        )
+        # Banded on posture, not on a bare delta-v figure. These thresholds
+        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
+        # 2 m/s would read CRITICAL. Posture also asks the better question:
+        # what does this cost say about how the actor would have to behave?
+        posture = classify_posture(dv, regime, kind_for_method(method.value))
+        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
+            posture.posture
+        ]
+
+    # ── Operational intent ───────────────────────────────────────────────────
+    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
+
+    dv_class = _dv_classification(dv)
+
+    # ── Time of flight ───────────────────────────────────────────────────────
+    tof_s = (
+        (result.arrival_epoch - result.burns[0].burn_epoch).total_seconds()
+        if result.burns else 0.0
+    )
+    tof_hours = tof_s / 3600.0
+    tof_label = format_tof_label(tof_hours)
+
+    # ── ΔV budget percentage ─────────────────────────────────────────────────
+    # Against the default realistic budget rather than a hardcoded 3.0, which
+    # in m/s would read 100 per cent for any burn above 3 m/s.
+    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
+
+    burn_intel = _burn_breakdown(result)
+
+    obs_level, obs_color, obs_reason = _observability(dv)
+
+    method_insights = _method_insights(result, dv, miss)
+    summary = _summary_text(result, dv, miss, intent_label, tof_label)
 
     return {
         "manoeuvre_type": manoeuvre_type,
@@ -884,10 +976,10 @@ async def trade_space_data(
     state = get_session_state(current_user.username)
     points = []
     for r in state.intercept_history:
-        if r.burns:
-            transfer_s = (r.arrival_epoch - r.burns[0].burn_epoch).total_seconds()
-        else:
-            transfer_s = 0.0
+        transfer_s = (
+            (r.arrival_epoch - r.burns[0].burn_epoch).total_seconds()
+            if r.burns else 0.0
+        )
         points.append({
             "method": r.method.value,
             "delta_v": round(r.total_delta_v_m_s, 1),  # m/s

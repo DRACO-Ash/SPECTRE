@@ -7,6 +7,72 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.17] - 2026-10-15
+
+Blue asset screening. The sweep asks what one object can reach; screening asks
+who threatens one asset, which is the question an analyst actually holds.
+
+### Added
+
+- **Asset Screening**, a new console tab. Select a blue HRR object and every
+  red object in a regime that could physically reach it is screened, assessed
+  and ranked. Three clicks: the tab, the asset, Screen Asset.
+
+  This is the first time the composite verdict from 0.5.14 does any
+  discriminating work. In the red-out sweep capability is one constant across
+  every entry, because there is one red object. Here it varies per actor and it
+  is the field that separates the two objects worth briefing from the eighteen
+  that are not.
+
+- **Two headline answers, and the disagreement between them.** The most
+  dangerous actor is ranked on composite verdict with warning time as the
+  tie-break. The earliest possible arrival is named separately. When they are
+  different objects the panel says so in words:
+
+  > These disagree. TJS-3 is assessed CRITICAL and would arrive in 6.2 h, but
+  > COSMOS 2535 could be here in 0.7 h and is assessed MINIMAL. If that
+  > assessment is wrong, your warning time is 0.7 h, not 6.2 h.
+
+  Ranking on verdict alone would bury the fast approach. Ranking on warning
+  time alone would put a derelict on top and undo the verdict entirely.
+
+- **Expandable per-actor profiles.** Each ranked row opens to the epochs and
+  methods behind its verdict, soonest first, so the headline can be
+  interrogated rather than taken on trust.
+
+- **A manual asset TLE override**, for an asset whose element set is not
+  cached. It is also what lets the browser probe drive screening end to end,
+  which it cannot do for the sweep.
+
+### Measured, not assumed
+
+Per the plan, cost was measured before any feature code was written: **53.8 ms
+per candidate actor**, of which 81 per cent is the 24-hour orbital event scan.
+10 actors 0.54 s, 25 actors 1.35 s, 50 actors 2.69 s.
+
+The gate was to build a feasibility pre-screen if 25 actors exceeded about four
+seconds. It does not, so **no pre-screen was built**. An optimisation with
+nothing to optimise is a place for a defect to hide. Candidates are capped at
+60 and truncation is always reported.
+
+### Every empty answer carries a reason
+
+No watchlist, no compatible red object, no transfer inside the budget, and an
+asset with no cached element set each produce a different sentence naming what
+was checked. The no-candidates panel states how many red objects were screened
+and excluded, because "nothing listed" and "nothing can reach you" must not
+look the same.
+
+### Changed
+
+- **`_compute_intercept_intel` reduced further**, from 96 statements to 31
+  branches, by extracting the method-insight and summary blocks; the twenty-way
+  method chain is now a dispatch table. The 47 characterisation tests written
+  in 0.5.16 passed unchanged at every step. That suite is the only reason a
+  refactor of this size was safe to make alongside a feature.
+- **One score band** shared by the detectability, stability and terrain panels,
+  which each carried their own copy of the same two thresholds.
+
 ## [0.5.16] - 2026-10-13
 
 Closes the double-conversion trap recorded as a known limit in 0.5.15. No

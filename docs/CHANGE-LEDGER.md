@@ -540,3 +540,43 @@ form parameter it never read, and the template posted it. Both gone.
 vector panel stays in km/s, and the astro package keeps km/s internally. Both
 remain the guard's documented exceptions, each with a test that fails if the
 exception stops applying.
+
+## 0.5.17
+
+Blue asset screening: the sweep inverted. Select a blue HRR object and every
+red object that could reach it is screened, assessed and ranked.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime capability | **EVIDENCED** | Screen one blue asset against every compatible red HRR object, ranked on composite verdict with warning time as the tie-break | The sweep answered "what can this object reach", which requires the analyst to already know which object to ask about. Screening answers "who threatens this asset", which is the question they actually hold. It is also the first time the composite verdict discriminates: in the red-out sweep capability is one constant across every entry, because there is one red object. | Then the ranking rule is wrong, which the separately-named earliest arrival makes visible rather than hiding inside one ordering. |
+| Runtime correctness | **EVIDENCED** | Name the earliest possible arrival separately, and state the disagreement when it is a different object from the most dangerous one | Ranking on verdict alone buries a fast approach behind a capability assessment that may be out of date. Ranking on warning time alone puts a derelict top and undoes the composite verdict. Both are computed; where they differ the panel says what it costs to be wrong about the capability call. | Not applicable: both orderings are asserted, including the case where they agree and no disagreement is reported. |
+| Performance | **EVIDENCED** | No feasibility pre-screen built | Measured before any feature code, as the plan required: 53.8 ms per actor, of which 81 per cent is the 24-hour event scan at 30-second steps. 10 actors 0.54 s, 25 actors 1.35 s, 50 actors 2.69 s. The gate was "build the pre-screen if 25 actors exceeds about 4 s". It does not, so it was not built: an optimisation with nothing to optimise is a place for a defect to hide. | Then the measurement was taken against an unrepresentative element set. The figure and the conditions are recorded here so a slower case can be compared against them rather than guessed at. |
+
+**Capped at 60 actors**, about 3.2 s by the measurement above, and truncation
+is always reported rather than silently applied.
+
+**Every empty answer carries a reason.** No watchlist, no compatible red
+object, no transfer inside the budget, and an asset with no cached element set
+each produce a different sentence saying what was actually checked. "Nothing
+listed" and "nothing can reach you" must not look the same, which is why the
+no-candidates panel states how many red objects were screened and excluded.
+
+**`_find_tle` could not have served this.** It searches the operator's own blue
+assets and red tracks, which is right for the red-out sweep. Screening works
+entirely from the HRR watchlist, where both ends live in `hrr_tle_cache` keyed
+by satno, so a second resolver was needed rather than a parameter.
+
+**Regime filter is `regimes_compatible`, not equality.** A GTO or HEO object
+crosses both the LEO and GEO belts, so excluding it on a strict match would be
+a false negative on exactly the case worth catching.
+
+**Debt cleared to get the gate green**, all of it pre-existing and surfaced by
+line shift: `_compute_intercept_intel` fell from 163 statements to 96 and then
+to 31 branches by extracting the method-insight and summary blocks, and the
+twenty-way method chain became a dispatch table. The 47 characterisation tests
+written in 0.5.16 passed unchanged at every step, which is the only reason a
+refactor of that size was safe to make alongside a feature.
+
+**Not built, and not needed:** `_group_entries` was to gain an actor key. The
+screen renders its own ranked actor table with expandable profiles instead, so
+the sweep's grouping is untouched.

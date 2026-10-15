@@ -364,6 +364,26 @@ class ThreatTarget:
 
 
 @dataclass
+class ThreatActor:
+    """A candidate threat object: the thing that would have to manoeuvre.
+
+    The red-out sweep has one of these and never needs to name it, because
+    every entry belongs to the same object. Screening a blue asset inverts
+    that: there are many candidates and the question is which of them matters,
+    so the actor has to travel with the entry.
+    """
+
+    actor_name: str
+    actor_satno: str
+    country: str = ""
+    hrr_rank: int | None = None
+    regime: str = ""
+    #: True when the object was supplied by the operator rather than the HRR
+    #: watchlist, so the screen can say where its element set came from.
+    manual: bool = False
+
+
+@dataclass
 class ThreatSweepEntry:
     """One (target, epoch) intercept result."""
 
@@ -384,6 +404,11 @@ class ThreatSweepEntry:
     #: ``manoeuvre_calibration``. Computed once at the route boundary so no
     #: template has to carry a delta-v threshold of its own.
     posture_label: str = ""
+    #: Which object would fly this. None in the red-out sweep, where every
+    #: entry belongs to the one selected red satellite; set when screening a
+    #: blue asset against many candidate actors. Defaulted last so every
+    #: existing construction site stays valid.
+    actor: ThreatActor | None = None
 
 
 @dataclass

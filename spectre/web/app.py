@@ -25,7 +25,7 @@ from spectre.config.settings import (
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.health import router as health_router
-from spectre.web.format_units import format_m_s
+from spectre.web.format_units import format_m_s, format_tof_label
 from spectre.web.planning_state import set_default_hrr_objects
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
@@ -51,6 +51,7 @@ templates.env.autoescape = True  # Enforce HTML autoescaping (defence-in-depth a
 templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL-encoded string
 templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 templates.env.filters["m_s"] = format_m_s        # {{ dv | m_s }} → delta-v in m/s, honestly rounded
+templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m", one definition
 
 
 logger = logging.getLogger(__name__)

@@ -54,6 +54,11 @@ _SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
 
 # A real catalogued GEO element set, used only to give the sweep a red object
 # without needing UDL credentials.
+_PROBE_ASSET_TLE = (
+    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9995\n"
+    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46210"
+)
+
 _PROBE_RED_TLE = (
     "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
     "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
@@ -276,6 +281,50 @@ async def _run(base_url: str) -> list[str]:
             print("        threat sweep NOT driven: no red satellite available "
                   "without UDL credentials. Form and override reached only.")
 
+        # 4c. Asset screening, the inverse of the sweep.
+        #
+        #     Unlike the sweep this CAN be driven without UDL, because the
+        #     manual asset override needs no watchlist entry to resolve. What
+        #     it cannot do is produce a ranked list, since the candidate actors
+        #     all come from the HRR watchlist. Both outcomes are legitimate and
+        #     the probe says which one it got.
+        await page.locator('button.htab[data-panel="hero-screen"]').click()
+        await page.wait_for_timeout(600)
+        screen_form = page.locator("#threat-screen-form")
+        check("asset-screening", await screen_form.count() > 0,
+              "the asset screening panel is not reachable from the console")
+
+        toggle = page.locator("#scr-manual-asset-toggle > summary")
+        check("asset-screening-override", await toggle.count() > 0,
+              "the manual asset TLE control is missing")
+        if await toggle.count():
+            await toggle.first.click()
+            await page.wait_for_timeout(300)
+            await page.locator('textarea[name="manual_asset_tle"]').fill(_PROBE_ASSET_TLE)
+
+        screen_button = page.locator('button:has-text("Screen Asset")')
+        check("asset-screening-button", await screen_button.count() > 0,
+              "the Screen Asset button is missing")
+        if await screen_button.count():
+            await screen_button.first.click()
+            await page.wait_for_timeout(5000)
+            body = await page.content()
+            check("asset-screening-run", "Internal Server Error" not in body,
+                  "screening returned a server error")
+            ranked = "MOST DANGEROUS ACTOR" in body
+            explained = (
+                "No HRR watchlist" in body
+                or "No red HRR objects" in body
+                or "No candidate actor can reach" in body
+            )
+            check("asset-screening-result", ranked or explained,
+                  "screening rendered neither a ranking nor an explanation")
+            check("asset-screening-units", "km/s" not in body,
+                  "screening put a km/s figure on screen")
+            print("        asset screening "
+                  + ("ranked candidate actors" if ranked
+                     else "explained why it had no candidates (no watchlist)"))
+
         # 5. Enter training and leave it by the sidebar button, which is the
         #    form that answered 403 in production.
         await page.goto(f"{base_url}/training")
@@ -337,7 +386,7 @@ def main() -> int:
         for failure in failures:
             print(f"    {failure}")
         return 1
-    print("  PASS  login, admin create and delete, threat sweep panel, training\n        exit and sign out, no console errors")
+    print("  PASS  login, admin create and delete, threat sweep panel,\n        asset screening, training exit and sign out, no console errors")
     return 0
 
 

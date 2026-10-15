@@ -378,6 +378,10 @@
       <button class="htab active" data-panel="hero-sweep" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-red"></span>Threat Sweep
       </button>
+      <button class="htab" data-panel="hero-screen" onclick="heroTab(this)"
+              title="Asset Screening — select a blue HRR object and rank every red object that could reach it">
+        <span class="htab-icon htab-icon-blue"></span>Asset Screening
+      </button>
       <button class="htab" data-panel="hero-engine" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-gold"></span>Intercept Engine
       </button>
@@ -610,6 +614,63 @@
           </div>
         </section>
       </div><!-- end hero-sweep -->
+
+      <!-- ── ASSET SCREENING ───────────────────────────────── -->
+      <div class="hero-panel" id="hero-screen">
+        <section class="panel panel-blue">
+          <h2>Asset Screening</h2>
+          <p class="callout callout-gold" style="margin-bottom:0.6rem">
+            Select a blue HRR object. Every red object in a regime that could reach it is screened, assessed and ranked, with the earliest possible arrival called out separately.
+          </p>
+
+          <form id="threat-screen-form">
+            <div id="scr-asset-config"
+                 hx-get="/plan/threat/screen-config"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+              <p class="label-dim" style="font-size:0.72rem">Loading asset list&hellip;</p>
+            </div>
+
+            {# Manual asset override, for when the watchlist has no cached element set #}
+            <details id="scr-manual-asset-toggle" style="margin:0.4rem 0">
+              <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+                <span style="display:inline-block; font-size:0.65rem">&#9654;</span>
+                Manual Asset TLE
+                <span style="font-size:0.65rem; font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0">- screen an asset whose element set is not cached</span>
+              </summary>
+              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:4px">
+                <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+                  TLE (lines 1 &amp; 2)
+                  <textarea name="manual_asset_tle" id="scr-manual-asset-tle"
+                            rows="2"
+                            placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
+                            style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)"></textarea>
+                </label>
+                <p style="margin:0.3rem 0 0; font-size:0.68rem; color:var(--text-dim); font-style:italic">
+                  If set, this element set is used <strong>instead of</strong> the selected asset.
+                </p>
+              </div>
+            </details>
+
+            <div class="submit-row" style="margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid var(--border)">
+              <button type="button" class="btn-danger"
+                      hx-post="/plan/threat/screen"
+                      hx-target="#threat-screen-results"
+                      hx-swap="innerHTML"
+                      hx-indicator="#threat-screen-indicator"
+                      hx-include="closest form"
+                      hx-disabled-elt="this">Screen Asset</button>
+              <span id="threat-screen-indicator" class="htmx-indicator">
+                <span class="spinner"></span>Screening&hellip;
+              </span>
+            </div>
+          </form>
+
+          <div id="threat-screen-results" style="margin-top:0.5rem">
+            <p class="empty-msg">No asset screened yet &mdash; select a blue asset and click Screen Asset.</p>
+          </div>
+        </section>
+      </div><!-- end hero-screen -->
 
       <!-- ── HISTORICAL PATTERN OF LIFE ───────────────────── -->
       <div class="hero-panel" id="hero-pol"

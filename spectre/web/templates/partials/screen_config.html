@@ -1,0 +1,35 @@
+{# Blue asset selector for the screening panel.
+
+   Three clicks to an answer: the tab, the asset, Screen. The candidate actor
+   set is implied by the asset's regime, so there is no group to choose. #}
+{% if not has_udl %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  Connect to UDL first to load the HRR watchlist.
+</p>
+{% elif not has_hrr %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  No HRR objects loaded. Fetch the HRR watchlist from the UDL panel first.
+</p>
+{% elif not assets %}
+<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
+  The HRR watchlist holds no blue objects to screen.
+</p>
+{% else %}
+<div class="mnv-search-grid">
+  <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Blue Asset
+    <select name="asset_satno" id="scr-asset">
+      {% for a in assets %}
+      <option value="{{ a.satno }}">{{ a.name }} [{{ a.satno }}]{% if a.regime %} · {{ a.regime }}{% endif %}{% if a.rank is not none %} · R{{ a.rank }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
+         title="Budget in metres per second. 500 m/s is the point at which an on-station manoeuvre becomes a strong anomaly: every counterspace manoeuvre on open record costs less, the largest measured about 170 m/s.">Max &#916;V (m/s)
+    <input type="number" name="max_dv_m_s" value="500" step="10" min="1" />
+  </label>
+</div>
+<p style="margin:0.3rem 0 0; font-size:0.66rem; color:var(--text-dim)">
+  {{ red_total }} red object(s) on the watchlist. Candidates are filtered to
+  those in a regime that could physically reach the selected asset.
+</p>
+{% endif %}

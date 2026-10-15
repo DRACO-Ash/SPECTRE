@@ -53,10 +53,14 @@ from spectre.domain.manoeuvre_calibration import (
 
 __all__ = [
     "AccessEvidence",
+    "ActorVerdict",
     "Band",
     "CapabilityEvidence",
+    "ScreeningResult",
     "ThreatAssessment",
     "assess_threat",
+    "rank_actors",
+    "warning_time_rank",
 ]
 
 
@@ -417,3 +421,105 @@ def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: fl
     """
     feasible = 0 if entry_delta_v_m_s <= budget_m_s else 1
     return (feasible, tof_hours)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Screening one asset against many candidate actors
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ActorVerdict:
+    """One candidate actor's assessment against the asset being screened.
+
+    ``assessment`` is the composed verdict. ``warning_hours`` and
+    ``delta_v_m_s`` describe the entry that produced it, so the screen can show
+    what the verdict was built from without re-deriving it.
+    """
+
+    actor_name: str
+    actor_satno: str
+    assessment: ThreatAssessment
+    warning_hours: float
+    delta_v_m_s: float
+    method: str = ""
+    country: str = ""
+
+    @property
+    def verdict(self) -> Band:
+        return self.assessment.verdict
+
+    @property
+    def verdict_label(self) -> str:
+        return self.assessment.verdict_label
+
+
+@dataclass(frozen=True)
+class ScreeningResult:
+    """What screening an asset found, with its two headline answers.
+
+    The two can disagree, and when they do the disagreement is the finding.
+    """
+
+    #: Every actor assessed, ranked worst first.
+    ranked: list[ActorVerdict]
+    #: The actor with the strongest composite verdict.
+    most_dangerous: ActorVerdict | None
+    #: The actor that would arrive soonest, whatever its assessed capability.
+    earliest_arrival: ActorVerdict | None
+    #: Set when those two are different objects.
+    disagreement: str = ""
+
+
+def _actor_rank_key(v: ActorVerdict) -> tuple[int, float, float]:
+    """Worst first: strongest verdict, then least warning, then cheapest.
+
+    Verdict leads because a derelict that happens to sit in a convenient orbit
+    is not the thing to brief. Warning time breaks ties because among objects
+    that could equally do it, the one arriving first is the harder problem.
+    """
+    return (-int(v.verdict), v.warning_hours, v.delta_v_m_s)
+
+
+def rank_actors(verdicts: list[ActorVerdict]) -> ScreeningResult:
+    """Rank candidate actors and name the two headline answers.
+
+    Ranking on verdict alone would bury a fast approach behind a capability
+    assessment that might be wrong. Ranking on warning time alone would put a
+    derelict at the top and undo the whole point of the composite verdict.
+
+    So both are computed and the disagreement is reported in words. If the
+    object that could arrive soonest is not the object assessed most capable,
+    an analyst needs to know that, because it is precisely the case where a
+    wrong status field costs them their warning time.
+
+    Nothing is ever dropped. An actor assessed MINIMAL is ranked last, not
+    removed, for the same reason an unassessed object is not scored harmless:
+    "nothing listed" and "nothing can reach you" must not look the same.
+    """
+    if not verdicts:
+        return ScreeningResult(ranked=[], most_dangerous=None, earliest_arrival=None)
+
+    ranked = sorted(verdicts, key=_actor_rank_key)
+    most_dangerous = ranked[0]
+    earliest_arrival = min(verdicts, key=lambda v: (v.warning_hours, v.delta_v_m_s))
+
+    disagreement = ""
+    if earliest_arrival.actor_satno != most_dangerous.actor_satno:
+        disagreement = (
+            f"These disagree. {most_dangerous.actor_name} is assessed "
+            f"{most_dangerous.verdict_label} and would arrive in "
+            f"{most_dangerous.warning_hours:.1f} h, but "
+            f"{earliest_arrival.actor_name} could be here in "
+            f"{earliest_arrival.warning_hours:.1f} h and is assessed "
+            f"{earliest_arrival.verdict_label}. If that assessment is wrong, "
+            f"your warning time is {earliest_arrival.warning_hours:.1f} h, not "
+            f"{most_dangerous.warning_hours:.1f} h."
+        )
+
+    return ScreeningResult(
+        ranked=ranked,
+        most_dangerous=most_dangerous,
+        earliest_arrival=earliest_arrival,
+        disagreement=disagreement,
+    )

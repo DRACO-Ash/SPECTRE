@@ -362,13 +362,13 @@ class TestThePatternOfLifeTrapIsClosed:
     )
 
     def test_the_panels_read_no_km_s_field_at_all(self) -> None:
-        offenders: list[str] = []
-        for rel in self._VELOCITY_TEMPLATES:
-            path = _TEMPLATES / rel
-            for i, line in _rendered_lines(path):
-                for field in self._KM_S_FIELDS:
-                    if re.search(re.escape(field) + r"(?!\w)", line):
-                        offenders.append(f"{rel}:{i}: {field} -> {line.strip()[:90]}")
+        offenders: list[str] = [
+            f"{rel}:{i}: {field} -> {line.strip()[:90]}"
+            for rel in self._VELOCITY_TEMPLATES
+            for i, line in _rendered_lines(_TEMPLATES / rel)
+            for field in self._KM_S_FIELDS
+            if re.search(re.escape(field) + r"(?!\w)", line)
+        ]
         assert not offenders, (
             "these panels still read a km/s field, so converting the astro "
             "result at the route boundary would double-convert them:\n  "
@@ -494,9 +494,7 @@ class TestEveryConvertedFigureIsActuallySupplied:
         found = meta.find_undeclared_variables(env.parse(source))
         # Only the names this change introduced: the converted figures and the
         # row wrappers that carry them.
-        return sorted(
-            n for n in found if n.endswith("_m_s") or n.endswith("_rows")
-        )
+        return sorted(n for n in found if n.endswith(("_m_s", "_rows")))
 
     @pytest.mark.parametrize(("template", "route"), sorted(_PANELS.items()))
     def test_the_route_passes_every_converted_name_the_panel_reads(
