@@ -99,7 +99,14 @@ __pycache__/
 build/
 coverage.xml
 coverage/
-data/
+# The runtime data volume at the repository root, ANCHORED.
+#
+# This was "data/", which gitignore matches at any depth, so it silently
+# swallowed spectre/data/ as well. The JSON files already in spectre/data/
+# survive only because they were committed before the rule existed; anything
+# added there since has been ignored without a word. That is how the bundled
+# HRR bootstrap list came to be missing from every build.
+/data/
 dist/
 dmypy.json
 docs/*

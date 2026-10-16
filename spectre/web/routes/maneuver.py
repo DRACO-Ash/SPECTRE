@@ -281,6 +281,25 @@ def _score_band(score: float) -> str:
     return "Medium" if score > _SCORE_MEDIUM else "Low"
 
 
+#: Intent inference is banded higher than the others: calling an approach
+#: deliberate is a stronger claim than calling an orbit unstable.
+_INTENT_CONFIDENT: float = 0.7
+_INTENT_POSSIBLE: float = 0.4
+
+
+def _banded(
+    score: float,
+    phrasings: tuple[str, str, str],
+    bounds: tuple[float, float] = (_SCORE_HIGH, _SCORE_MEDIUM),
+) -> str:
+    """Pick one of three phrasings for a 0-1 score, high to low."""
+    high, medium, low = phrasings
+    high_at, medium_at = bounds
+    if score > high_at:
+        return high
+    return medium if score > medium_at else low
+
+
 #: Intercept method -> the figures its panel shows.
 #:
 #: This was a twenty-way if/elif chain, which was most of the branching the
@@ -367,9 +386,14 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, Any] = {
         lambda result, dv, miss: (
             [
                 {"label": "Intercept Likelihood", "value": f"{miss:.0f}%"},
-                {"label": "Assessment", "value": (
-                    "High confidence intercept intent" if (miss / 100.0) > 0.7
-                    else ("Possible intercept intent" if (miss / 100.0) > 0.4 else "Low probability of intercept intent")
+                {"label": "Assessment", "value": _banded(
+                    miss / 100.0,
+                    (
+                        "High confidence intercept intent",
+                        "Possible intercept intent",
+                        "Low probability of intercept intent",
+                    ),
+                    bounds=(_INTENT_CONFIDENT, _INTENT_POSSIBLE),
                 )},
             ]
         ),
@@ -377,9 +401,13 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, Any] = {
         lambda result, dv, miss: (
             [
                 {"label": "Stability Score", "value": f"{miss:.0f}/100"},
-                {"label": "Assessment", "value": (
-                    "Stable relative motion" if (miss / 100.0) > 0.6
-                    else ("Marginally stable" if (miss / 100.0) > 0.3 else "Unstable — natural drift likely")
+                {"label": "Assessment", "value": _banded(
+                    miss / 100.0,
+                    (
+                        "Stable relative motion",
+                        "Marginally stable",
+                        "Unstable — natural drift likely",
+                    ),
                 )},
             ]
         ),
@@ -755,7 +783,7 @@ async def apply_intercept(
                 manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
             ),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any solver failure is reported, not raised
         logger.error(
             "apply_intercept failed for operator %s: %s", current_user.username, exc
         )

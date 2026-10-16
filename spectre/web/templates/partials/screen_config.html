@@ -2,13 +2,16 @@
 
    Three clicks to an answer: the tab, the asset, Screen. The candidate actor
    set is implied by the asset's regime, so there is no group to choose. #}
-{% if not has_udl %}
+{# The gate is "do we have objects", not "are we connected".
+   A bundled bootstrap watchlist ships with the package, so a fresh instance
+   has a list before anyone logs in to UDL. Gating on the UDL session hid that
+   list behind a login it does not need, which is what made the capability
+   look broken on a clean deployment. #}
+{% if not has_hrr %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
-  Connect to UDL first to load the HRR watchlist.
-</p>
-{% elif not has_hrr %}
-<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
-  No HRR objects loaded. Fetch the HRR watchlist from the UDL panel first.
+  No HRR objects loaded.
+  {% if has_udl %}Fetch the HRR watchlist from the UDL panel.
+  {% else %}Connect to UDL and fetch the watchlist.{% endif %}
 </p>
 {% elif not assets %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
@@ -32,4 +35,14 @@
   {{ red_total }} red object(s) on the watchlist. Candidates are filtered to
   those in a regime that could physically reach the selected asset.
 </p>
+{% if synthetic_elements %}
+{# Provenance belongs where the choice is made, not only in a server log. #}
+<p style="margin:0.3rem 0 0; padding:0.3rem 0.5rem; font-size:0.66rem;
+          color:#f0a93a; background:rgba(198,124,0,0.12);
+          border:1px solid rgba(198,124,0,0.4); border-radius:3px">
+  <strong>BOOTSTRAP ELEMENT SETS.</strong> Some orbits below are synthetic,
+  generated so the capability runs before UDL is connected. They are not
+  tracking data. Connect to UDL and fetch the watchlist to replace them.
+</p>
+{% endif %}
 {% endif %}

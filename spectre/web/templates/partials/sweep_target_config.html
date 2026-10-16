@@ -1,13 +1,16 @@
 {# Sweep target selector — dropdown of Blue / Red HRR groups by rank, filtered to interceptor regime #}
 <input type="hidden" name="tgt_config_loaded" value="1" />
 
-{% if not has_udl %}
+{# The gate is "do we have objects", not "are we connected".
+   A bundled bootstrap watchlist ships with the package, so a fresh instance
+   has a list before anyone logs in to UDL. Gating on the UDL session hid that
+   list behind a login it does not need, which is what made the capability
+   look broken on a clean deployment. #}
+{% if not has_hrr %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
-  Connect to UDL first to load the HRR watchlist.
-</p>
-{% elif not has_hrr %}
-<p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
-  No HRR objects loaded. Fetch the HRR watchlist from the UDL panel first.
+  No HRR objects loaded.
+  {% if has_udl %}Fetch the HRR watchlist from the UDL panel.
+  {% else %}Connect to UDL and fetch the watchlist.{% endif %}
 </p>
 {% elif not interceptor_name %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">

@@ -42,7 +42,9 @@ _BAND_COLOURS = {
 
 
 def _verdict(name: str, satno: str, dv: float, hours: float,
-             intel: str | None, status: str | None, country: str = "CHN") -> ActorVerdict:
+             capability: tuple[str | None, str | None, str]) -> ActorVerdict:
+    """*capability* is (threat level, operational status, country)."""
+    intel, status, country = capability
     assessment = assess_threat(
         AccessEvidence(best_delta_v_m_s=dv, time_to_arrival_hours=hours,
                        method="vbar_hop", regime="GEO"),
@@ -86,10 +88,10 @@ def _context(**overrides: Any) -> dict[str, Any]:
     blank panel.
     """
     screening = rank_actors([
-        _verdict("TJS-3", "43874", 8.0, 6.2, "CRITICAL", "Operational"),
-        _verdict("COSMOS 2535", "44797", 9.0, 0.68, "LOW",
-                 "Inactive - Retired / Not Manoeuverable", country="RUS"),
-        _verdict("SJ-17", "41838", 55.0, 14.0, "HIGH", "Operational"),
+        _verdict("TJS-3", "43874", 8.0, 6.2, ("CRITICAL", "Operational", "CHN")),
+        _verdict("COSMOS 2535", "44797", 9.0, 0.68,
+                 ("LOW", "Inactive - Retired / Not Manoeuverable", "RUS")),
+        _verdict("SJ-17", "41838", 55.0, 14.0, ("HIGH", "Operational", "CHN")),
     ])
     context: dict[str, Any] = {
         "screening": screening,
@@ -166,7 +168,7 @@ class TestTheTwoHeadlineAnswers:
     def test_no_earliest_arrival_block_when_they_agree(self) -> None:
         """One actor cannot disagree with itself."""
         screening = rank_actors([
-            _verdict("TJS-3", "43874", 8.0, 1.0, "CRITICAL", "Operational"),
+            _verdict("TJS-3", "43874", 8.0, 1.0, ("CRITICAL", "Operational", "CHN")),
         ])
         html = _render(_context(screening=screening))
         assert "EARLIEST ARRIVAL" not in html

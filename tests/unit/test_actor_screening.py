@@ -35,12 +35,15 @@ def _verdict(
     *,
     delta_v_m_s: float,
     warning_hours: float,
-    intel: str | None = None,
-    status: str | None = None,
-    method: str = "vbar_hop",
-    regime: str = "GEO",
+    capability: tuple[str | None, str | None] = (None, None),
 ) -> ActorVerdict:
-    """An actor verdict built through the real assessment, not hand-set."""
+    """An actor verdict built through the real assessment, not hand-set.
+
+    *capability* is (assessed threat level, operational status), the pair the
+    production code reads from the intelligence record.
+    """
+    method, regime = "vbar_hop", "GEO"
+    intel, status = capability
     assessment = assess_threat(
         AccessEvidence(
             best_delta_v_m_s=delta_v_m_s,
@@ -66,11 +69,11 @@ class TestTheDisagreementIsTheFinding:
     def test_a_capable_slow_actor_outranks_a_derelict_fast_one(self) -> None:
         capable = _verdict(
             "TJS-3", "43874", delta_v_m_s=8.0, warning_hours=6.2,
-            intel="CRITICAL", status="Operational",
+            capability=("CRITICAL", "Operational"),
         )
         derelict = _verdict(
             "COSMOS 2535", "44797", delta_v_m_s=9.0, warning_hours=0.68,
-            intel="LOW", status="Inactive - Retired / Not Manoeuverable",
+            capability=("LOW", "Inactive - Retired / Not Manoeuverable"),
         )
         result = rank_actors([derelict, capable])
 
@@ -84,11 +87,11 @@ class TestTheDisagreementIsTheFinding:
     def test_the_disagreement_is_stated_in_words(self) -> None:
         capable = _verdict(
             "TJS-3", "43874", delta_v_m_s=8.0, warning_hours=6.2,
-            intel="CRITICAL", status="Operational",
+            capability=("CRITICAL", "Operational"),
         )
         derelict = _verdict(
             "COSMOS 2535", "44797", delta_v_m_s=9.0, warning_hours=0.68,
-            intel="LOW", status="Inactive - Retired / Not Manoeuverable",
+            capability=("LOW", "Inactive - Retired / Not Manoeuverable"),
         )
         result = rank_actors([derelict, capable])
 
@@ -104,11 +107,11 @@ class TestTheDisagreementIsTheFinding:
     def test_no_disagreement_is_reported_when_they_are_the_same_object(self) -> None:
         worst = _verdict(
             "TJS-3", "43874", delta_v_m_s=8.0, warning_hours=1.0,
-            intel="CRITICAL", status="Operational",
+            capability=("CRITICAL", "Operational"),
         )
         other = _verdict(
             "SL-12 R/B", "27051", delta_v_m_s=300.0, warning_hours=40.0,
-            intel="LOW", status="Operational",
+            capability=("LOW", "Operational"),
         )
         result = rank_actors([worst, other])
         assert result.most_dangerous is not None
@@ -123,11 +126,11 @@ class TestNothingIsEverDropped:
     def test_a_minimal_actor_is_ranked_last_not_removed(self) -> None:
         derelict = _verdict(
             "COSMOS 2535", "44797", delta_v_m_s=9.0, warning_hours=0.5,
-            intel="LOW", status="Decayed",
+            capability=("LOW", "Decayed"),
         )
         capable = _verdict(
             "TJS-3", "43874", delta_v_m_s=8.0, warning_hours=20.0,
-            intel="HIGH", status="Operational",
+            capability=("HIGH", "Operational"),
         )
         result = rank_actors([derelict, capable])
 
@@ -140,7 +143,7 @@ class TestNothingIsEverDropped:
         unknown = _verdict("UNKNOWN OBJECT", "99999", delta_v_m_s=8.0, warning_hours=2.0)
         known_weak = _verdict(
             "KOWSAR", "55555", delta_v_m_s=8.0, warning_hours=1.0,
-            intel="LOW", status="Degraded",
+            capability=("LOW", "Degraded"),
         )
         result = rank_actors([known_weak, unknown])
 
@@ -164,13 +167,13 @@ class TestTheRankingOrder:
     def test_verdict_leads_then_warning_time_then_cost(self) -> None:
         actors = [
             _verdict("slow but critical", "1", delta_v_m_s=8.0, warning_hours=30.0,
-                     intel="CRITICAL", status="Operational"),
+                     capability=("CRITICAL", "Operational")),
             _verdict("fast and critical", "2", delta_v_m_s=8.0, warning_hours=2.0,
-                     intel="CRITICAL", status="Operational"),
+                     capability=("CRITICAL", "Operational")),
             _verdict("fast but degraded", "3", delta_v_m_s=8.0, warning_hours=0.3,
-                     intel="HIGH", status="Degraded"),
+                     capability=("HIGH", "Degraded")),
             _verdict("moderate", "4", delta_v_m_s=55.0, warning_hours=10.0,
-                     intel="MEDIUM", status="Operational"),
+                     capability=("MEDIUM", "Operational")),
         ]
         ordered = [v.actor_name for v in rank_actors(actors).ranked]
         assert ordered[0] == "fast and critical"
@@ -181,9 +184,9 @@ class TestTheRankingOrder:
 
     def test_cost_breaks_a_tie_on_verdict_and_warning_time(self) -> None:
         cheap = _verdict("cheap", "1", delta_v_m_s=8.0, warning_hours=4.0,
-                         intel="HIGH", status="Operational")
+                         capability=("HIGH", "Operational"))
         dear = _verdict("dear", "2", delta_v_m_s=45.0, warning_hours=4.0,
-                        intel="HIGH", status="Operational")
+                        capability=("HIGH", "Operational"))
         ordered = [v.actor_name for v in rank_actors([dear, cheap]).ranked]
         assert ordered == ["cheap", "dear"]
 
@@ -191,7 +194,7 @@ class TestTheRankingOrder:
 class TestTheVerdictCarriesItsWorking:
     def test_each_actor_keeps_the_figures_behind_its_verdict(self) -> None:
         v = _verdict("TJS-3", "43874", delta_v_m_s=8.0, warning_hours=6.2,
-                     intel="CRITICAL", status="Operational")
+                     capability=("CRITICAL", "Operational"))
         assert v.delta_v_m_s == pytest.approx(8.0)
         assert v.warning_hours == pytest.approx(6.2)
         assert v.verdict_label == v.assessment.verdict_label

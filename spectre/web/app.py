@@ -26,7 +26,7 @@ from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.health import router as health_router
 from spectre.web.format_units import format_m_s, format_tof_label
-from spectre.web.planning_state import set_default_hrr_objects
+from spectre.web.planning_state import set_default_hrr_objects, set_default_hrr_tles
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
@@ -58,18 +58,30 @@ logger = logging.getLogger(__name__)
 
 _HRR_FILENAME = "HRR_List.json"
 
+#: Bundled bootstrap watchlist, shipped inside the package.
+#:
+#: The operator's own HRR_List.json is gitignored and dockerignored because it
+#: is operational data and belongs on the data volume, not in a source tree or
+#: an image. The consequence was that a freshly deployed instance had no
+#: watchlist at all and both the threat sweep and the asset screen stalled at
+#: "fetch the HRR list from the UDL panel first". This file is the floor under
+#: that: real catalogue numbers and names, SYNTHETIC element sets, clearly
+#: marked, and outranked by anything the operator supplies.
+_HRR_BUNDLED = Path(__file__).parent.parent / "data" / "hrr_default.json"
+
 
 def _hrr_candidate_paths() -> list[Path]:
-    """Return the places HRR_List.json may live, in priority order.
+    """Return the places an HRR watchlist may live, in priority order.
 
     The operator-supplied copy on the data volume wins, so a deployed instance
     can be given fresh data without rebuilding the image. The source-tree
-    location is kept for local development; it does not exist once the package
-    is installed into a container.
+    location is kept for local development. The bundled bootstrap list is last
+    and always present, so the capability runs out of the box.
     """
     return [
         Path(get_settings().data_dir) / _HRR_FILENAME,
         Path(__file__).parent.parent.parent / _HRR_FILENAME,
+        _HRR_BUNDLED,
     ]
 
 
@@ -106,12 +118,28 @@ def _load_hrr_from_disk() -> None:
             return
         newest = max(notifications, key=_parse_created_at)
         hrr_blue, hrr_red = parse_hrr_notification(newest)
-        set_default_hrr_objects(hrr_blue + hrr_red)
+        objects = hrr_blue + hrr_red
+        set_default_hrr_objects(objects)
+
+        # Element sets, where the list carried them. A real JCO notification
+        # does not, so this is empty for an operator-supplied file and the
+        # sweep still needs a UDL fetch, exactly as before.
+        tles = {o["satno"]: o["tle"] for o in objects if o.get("tle")}
+        modes = {o["satno"]: o.get("tle_data_mode", "REAL") for o in objects if o.get("tle")}
+        set_default_hrr_tles(tles, modes)
+
         logger.info(
-            "HRR pre-load: %d Blue + %d Red = %d satellites from %s",
-            len(hrr_blue), len(hrr_red), len(hrr_blue) + len(hrr_red),
-            newest.get("createdAt", "unknown date"),
+            "HRR pre-load: %d Blue + %d Red = %d satellites from %s (%s)",
+            len(hrr_blue), len(hrr_red), len(objects),
+            newest.get("createdAt", "unknown date"), hrr_path,
         )
+        synthetic = [m for m in modes.values() if m != "REAL"]
+        if synthetic:
+            logger.warning(
+                "%d of %d element sets are %s, not live tracking data. Connect "
+                "to UDL to replace them before relying on any result.",
+                len(synthetic), len(objects), sorted(set(synthetic))[0],
+            )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         # Malformed or unreadable cached data must not stop the boot: the threat
         # sweep falls back to requiring a UDL login. json.JSONDecodeError is a

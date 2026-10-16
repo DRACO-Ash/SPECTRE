@@ -115,13 +115,20 @@ _store: dict[str, SessionState] = {}
 def get_session_state(username: str) -> SessionState:
     """Return the :class:`SessionState` for *username*, creating it if absent.
 
-    New sessions are pre-populated with the default HRR object list so the
-    threat sweep is usable immediately without a live UDL connection.
+    New sessions are pre-populated with the default HRR object list, and with
+    any element sets that came with it, so the threat sweep and the asset
+    screen are usable immediately without a live UDL connection. An object
+    list on its own is not enough: both capabilities need an element set per
+    object, so seeding the list alone would populate a dropdown that then
+    refuses to run.
     """
     if username not in _store:
         state = SessionState()
         if _default_hrr_objects:
             state.hrr_objects = list(_default_hrr_objects)
+        if _default_hrr_tles:
+            state.hrr_tle_cache.update(_default_hrr_tles)
+            state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
         _store[username] = state
         logger.debug("Created new session state for user: %s", username)
     return _store[username]
@@ -178,3 +185,27 @@ def set_default_hrr_objects(objects: list[dict[str, Any]]) -> None:
 def get_default_hrr_objects() -> list[dict[str, Any]]:
     """Return the default HRR object list (loaded at startup)."""
     return _default_hrr_objects
+
+
+#: Element sets that arrived with the default watchlist, keyed by satno, with
+#: the provenance of each. Empty unless the loaded list carried them.
+_default_hrr_tles: dict[str, str] = {}
+_default_hrr_tle_modes: dict[str, str] = {}
+
+
+def set_default_hrr_tles(tles: dict[str, str], modes: dict[str, str]) -> None:
+    """Store element sets that came with the default watchlist."""
+    global _default_hrr_tles, _default_hrr_tle_modes
+    _default_hrr_tles = dict(tles)
+    _default_hrr_tle_modes = dict(modes)
+    synthetic = sum(1 for m in modes.values() if m != "REAL")
+    if tles:
+        logger.info(
+            "Default HRR element sets loaded: %d (%d not from live tracking)",
+            len(tles), synthetic,
+        )
+
+
+def get_default_hrr_tles() -> tuple[dict[str, str], dict[str, str]]:
+    """Return the default element sets and their provenance."""
+    return _default_hrr_tles, _default_hrr_tle_modes

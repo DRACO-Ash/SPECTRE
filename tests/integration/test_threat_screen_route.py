@@ -53,15 +53,46 @@ class TestTheScreenRefusesClearly:
         assert "No element set cached" in resp.text
         assert "Fetch the HRR watchlist" in resp.text
 
-    def test_no_watchlist_means_no_candidates_and_says_so(
+    def test_an_empty_watchlist_says_so_rather_than_rendering_blank(
         self, client: object, auth_cookie: str
     ) -> None:
-        """A valid asset with an empty HRR list must not look like safety."""
-        resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE)
+        """A valid asset with no watchlist must not look like safety.
+
+        This is no longer the default state: a bootstrap watchlist ships with
+        the package, so a fresh session always has candidates. The empty case
+        is reached only by clearing it, which is what this does, because the
+        branch still has to say something when an operator wipes the list.
+        """
+        from spectre.web.planning_state import get_session_state
+
+        state = get_session_state("testadmin")
+        saved_objects = list(state.hrr_objects)
+        state.hrr_objects = []
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE)
+            assert resp.status_code == 200
+            assert "No HRR watchlist" in resp.text, (
+                "an empty candidate set must be explained, never rendered blank"
+            )
+        finally:
+            state.hrr_objects = saved_objects
+
+    def test_a_fresh_session_can_screen_without_udl(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        """The point of bundling a watchlist: it runs out of the box.
+
+        Before this, a deployed instance had no watchlist and the screen
+        stalled at "fetch the HRR list from the UDL panel first", so nobody
+        without UDL credentials could see the capability work at all.
+        """
+        resp = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=500)
         assert resp.status_code == 200
-        assert "no candidate actors" in resp.text or "No HRR watchlist" in resp.text, (
-            "an empty candidate set must be explained, never rendered blank"
+        assert "MOST DANGEROUS ACTOR" in resp.text, (
+            "a fresh session must be able to rank candidate actors with no "
+            "UDL connection"
         )
+        assert "candidate actor(s)" in resp.text
 
 
 class TestTheScreenRunsAgainstAWatchlist:

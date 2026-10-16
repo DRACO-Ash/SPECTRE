@@ -353,7 +353,7 @@ async def fetch_targets(
 
     async def _fetch_one(satno_str: str) -> None:
         nonlocal fetched, failed
-        if satno_str in state.hrr_tle_cache:
+        if not _needs_live_tle(state, satno_str):
             fetched += 1
             return
         if not state.udl_username or not state.udl_password:
@@ -404,6 +404,21 @@ _EVENT_TO_LOCATION = {
     EventType.ASCENDING_NODE: "asc_node",
     EventType.DESCENDING_NODE: "desc_node",
 }
+
+
+
+def _needs_live_tle(state: object, satno: str) -> bool:
+    """True when *satno* has no element set, or only a synthetic one.
+
+    The bundled bootstrap watchlist seeds the cache so the sweep and the screen
+    run before anyone connects to UDL. Those element sets are SYNTHETIC. A
+    plain "is it cached" check would treat them as satisfied and never replace
+    them, so connecting to UDL would change nothing and the operator would
+    keep reading generated orbits believing they were tracked.
+    """
+    if satno not in state.hrr_tle_cache:  # type: ignore[attr-defined]
+        return True
+    return state.hrr_tle_data_mode.get(satno, "REAL") != "REAL"  # type: ignore[attr-defined]
 
 
 def _build_target_list(
@@ -467,7 +482,7 @@ def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
     return epochs
 
 
-def _sol_to_entry(
+def _sol_to_entry(  # noqa: PLR0913, PLR0917 - one parameter per column of the row it builds
     sol: InterceptSolution,
     target: ThreatTarget,
     epoch: datetime,
@@ -793,7 +808,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
         buckets.setdefault(key, []).append((flat_idx, entry))
 
     groups: list[dict[str, Any]] = []
-    for _name, items in buckets.items():
+    for items in buckets.values():
         items.sort(key=lambda t: (t[1].tof_hours, t[1].delta_v_m_s))
         best = items[0][1]
         groups.append({
@@ -890,7 +905,7 @@ def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
     return actors
 
 
-def _screen_one_actor(
+def _screen_one_actor(  # noqa: PLR0913, PLR0917 - the inputs of one actor's assessment
     actor: ThreatActor,
     actor_tle: str,
     asset_tle: str,
@@ -1063,7 +1078,10 @@ async def threat_sweep(
         errors.append(f"Target list truncated to {_MAX_SWEEP_TARGETS} (cap exceeded).")
 
     # Any targets without a cached TLE get a last-chance fetch now.
-    missing = [t for t in targets if t.target_satno and t.target_satno not in state.hrr_tle_cache]
+    missing = [
+        t for t in targets
+        if t.target_satno and _needs_live_tle(state, t.target_satno)
+    ]
     if missing and state.udl_username and state.udl_password:
         from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -1141,7 +1159,7 @@ async def threat_sweep(
             # Skip targets in incompatible orbit regimes.
             try:
                 tgt_regime = regime_from_tle(tle)
-            except Exception:
+            except Exception:  # noqa: BLE001 - one bad element set, not the whole sweep
                 tgt_regime = red_regime  # assume compatible if TLE can't be parsed
             if not regimes_compatible(red_regime, tgt_regime):
                 sweep_errors.append(
@@ -1225,6 +1243,203 @@ async def threat_sweep(
 
 
 
+
+
+
+async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> None:
+    """Fetch live element sets for actors that have none, or only synthetic.
+
+    A no-op without UDL credentials, which is the normal case on a fresh
+    instance running from the bundled bootstrap watchlist.
+    """
+    missing = [a for a in actors if _needs_live_tle(state, a.actor_satno)]
+    if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+        return
+
+    from spectre.web.routes.udl import fetch_tle_for_satno
+
+    sem = asyncio.Semaphore(10)
+    user: str = state.udl_username  # type: ignore[attr-defined]
+    password: str = state.udl_password  # type: ignore[attr-defined]
+
+    async def _fetch_one(actor: ThreatActor) -> None:
+        async with sem:
+            got = await fetch_tle_for_satno(
+                int(actor.actor_satno), user, password,
+                data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+                source=state.udl_tle_source,  # type: ignore[attr-defined]
+            )
+            if got:
+                tle, mode = got
+                state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
+                state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+
+    await asyncio.gather(*[_fetch_one(a) for a in missing])
+
+
+
+class _ScreenRun(NamedTuple):
+    """Everything one pass over the candidate actors produced."""
+
+    verdicts: list[ActorVerdict]
+    entries: list[ThreatSweepEntry]
+    refusals: dict[str, str]
+    notes: list[str]
+
+
+def _screen_all_actors(  # noqa: PLR0913, PLR0917 - the inputs of one screening pass
+    state: object,
+    actors: list[ThreatActor],
+    asset_tle: str,
+    asset: ThreatTarget,
+    now: datetime,
+    budget_m_s: float,
+) -> _ScreenRun:
+    """Assess every candidate actor against the asset.
+
+    An actor that cannot be assessed is recorded with the reason rather than
+    dropped, because a shorter list and a safer asset look identical.
+    """
+    verdicts: list[ActorVerdict] = []
+    entries: list[ThreatSweepEntry] = []
+    refusals: dict[str, str] = {}
+    notes: list[str] = []
+
+    for actor in actors:
+        actor_tle = _resolve_hrr_tle(state, actor.actor_satno)
+        if not actor_tle:
+            notes.append(f"{actor.actor_name} ({actor.actor_satno}): no element set")
+            continue
+        verdict, actor_entries = _screen_one_actor(
+            actor, actor_tle, asset_tle, asset, now, budget_m_s, refusals,
+        )
+        entries.extend(actor_entries)
+        if verdict is None:
+            notes.append(
+                f"{actor.actor_name} ({actor.actor_satno}): no method within "
+                f"{budget_m_s:g} m/s"
+            )
+            continue
+        verdicts.append(verdict)
+
+    return _ScreenRun(verdicts=verdicts, entries=entries, refusals=refusals, notes=notes)
+
+
+def _profiles_by_actor(
+    entries: list[ThreatSweepEntry],
+) -> dict[str, list[ThreatSweepEntry]]:
+    """Group entries so each ranked row opens to the profiles behind it.
+
+    Soonest first, so an analyst can see WHICH epoch and method produced the
+    warning time rather than being asked to take the headline on trust.
+    """
+    grouped: dict[str, list[ThreatSweepEntry]] = {}
+    for entry in entries:
+        if entry.actor is None:
+            continue
+        grouped.setdefault(entry.actor.actor_satno, []).append(entry)
+    for rows in grouped.values():
+        rows.sort(key=lambda e: (e.tof_hours, e.delta_v_m_s))
+    return grouped
+
+
+class _Candidates(NamedTuple):
+    """The actors to screen, how many were considered, or why there are none."""
+
+    actors: list[ThreatActor] = []
+    red_population: int = 0
+    notes: list[str] = []
+    error: str = ""
+
+
+def _select_candidates(state: object, asset_regime: str) -> _Candidates:
+    """Choose which red objects to screen against this asset.
+
+    Every empty outcome carries a different sentence. An operator reading
+    "no candidates" has to be able to tell a missing watchlist from a
+    watchlist whose red objects are all in the wrong regime, because one is a
+    setup problem and the other is a finding.
+    """
+    if not state.hrr_objects:  # type: ignore[attr-defined]
+        return _Candidates(error=(
+            "No HRR watchlist loaded, so there are no candidate actors to "
+            "screen against. Fetch the HRR list from the UDL panel first."
+        ))
+
+    red_population = sum(
+        1 for o in state.hrr_objects  # type: ignore[attr-defined]
+        if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
+    )
+    actors = _build_actor_list(state, asset_regime)
+    if not actors:
+        return _Candidates(error=(
+            f"No red HRR objects are in a regime compatible with "
+            f"{asset_regime or 'this asset'}. {red_population} red object(s) "
+            "were considered and all were excluded by regime."
+        ))
+
+    notes: list[str] = []
+    if len(actors) > _MAX_SCREEN_ACTORS:
+        notes.append(
+            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors)} "
+            "(compute cap). Ranking covers the truncated set only."
+        )
+        actors = actors[:_MAX_SCREEN_ACTORS]
+
+    return _Candidates(actors=actors, red_population=red_population, notes=notes)
+
+
+class _ResolvedAsset(NamedTuple):
+    """The asset to screen, or why it could not be resolved.
+
+    Pulled out of the handler because resolving which object the operator
+    means, and where its element set comes from, is a separate job from
+    screening it. Every failure here is a sentence the operator can act on.
+    """
+
+    tle: str = ""
+    satno: str = ""
+    name: str = ""
+    error: str = ""
+
+
+def _resolve_asset(
+    state: object, asset_satno: str, manual_tle: str,
+) -> _ResolvedAsset:
+    """Resolve the blue asset from a watchlist selection or a pasted TLE."""
+    if manual_tle:
+        try:
+            TLEOrbit(manual_tle)
+        except Exception as exc:  # noqa: BLE001 - operator input, reported not raised
+            return _ResolvedAsset(error=f"Manual asset TLE invalid: {exc}")
+        satno = str(satno_from_tle(manual_tle) or asset_satno)
+        return _ResolvedAsset(
+            tle=manual_tle,
+            satno=satno,
+            name=f"Manual asset [{satno}]" if satno else "Manual asset",
+        )
+
+    if not asset_satno:
+        return _ResolvedAsset(error="Select a blue asset to screen, or paste its TLE.")
+
+    tle = _resolve_hrr_tle(state, asset_satno)
+    if not tle:
+        return _ResolvedAsset(error=(
+            f"No element set cached for asset {asset_satno}. Fetch the HRR "
+            "watchlist TLEs from the UDL panel, or paste the asset's TLE."
+        ))
+
+    name = next(
+        (
+            str(o.get("name") or asset_satno).strip()
+            for o in state.hrr_objects  # type: ignore[attr-defined]
+            if str(o.get("satno") or "").strip() == asset_satno
+        ),
+        asset_satno,
+    )
+    return _ResolvedAsset(tle=tle, satno=asset_satno, name=name)
+
+
 @router.get("/screen-config", response_model=None)
 async def screen_config(
     request: Request,
@@ -1249,11 +1464,15 @@ async def screen_config(
         1 for o in state.hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
+    # Provenance. Element sets that did not come from live tracking must be
+    # declared where the operator chooses an asset, not only in a server log.
+    modes = {state.hrr_tle_data_mode.get(a["satno"], "REAL") for a in assets}
     return render(request, "partials/screen_config.html", {
         "has_udl": bool(state.udl_username),
         "has_hrr": bool(state.hrr_objects),
         "assets": assets,
         "red_total": red_total,
+        "synthetic_elements": bool(modes - {"REAL"}),
     })
 
 
@@ -1285,31 +1504,12 @@ async def threat_screen(
     manual_asset_tle = str(form.get("manual_asset_tle") or "").strip()
     asset_satno = str(asset_satno or form.get("asset_satno") or "").strip()
 
-    # ── Resolve the asset ────────────────────────────────────────────────────
-    asset_name = asset_satno or "Manual asset"
-    asset_tle: str | None = None
-    if manual_asset_tle:
-        try:
-            TLEOrbit(manual_asset_tle)
-            asset_tle = manual_asset_tle
-            asset_satno = str(satno_from_tle(manual_asset_tle) or asset_satno)
-            asset_name = f"Manual asset [{asset_satno}]" if asset_satno else "Manual asset"
-        except Exception as exc:  # noqa: BLE001 - operator input, reported not raised
-            return _fail(f"Manual asset TLE invalid: {exc}")
-    else:
-        if not asset_satno:
-            return _fail("Select a blue asset to screen, or paste its TLE.")
-        asset_tle = _resolve_hrr_tle(state, asset_satno)
-        if not asset_tle:
-            return _fail(
-                f"No element set cached for asset {asset_satno}. Fetch the HRR "
-                "watchlist TLEs from the UDL panel, or paste the asset's TLE."
-            )
-        for obj in state.hrr_objects:
-            if str(obj.get("satno") or "").strip() == asset_satno:
-                asset_name = str(obj.get("name") or asset_satno).strip()
-                break
-
+    resolved = _resolve_asset(state, asset_satno, manual_asset_tle)
+    if resolved.error:
+        return _fail(resolved.error)
+    asset_tle = resolved.tle
+    asset_satno = resolved.satno
+    asset_name = resolved.name
     asset_regime = _regime_of_tle(asset_tle)
     asset = ThreatTarget(
         target_name=asset_name,
@@ -1319,102 +1519,33 @@ async def threat_screen(
     )
 
     # ── Enumerate candidate actors ───────────────────────────────────────────
-    if not state.hrr_objects:
-        return _fail(
-            "No HRR watchlist loaded, so there are no candidate actors to "
-            "screen against. Fetch the HRR list from the UDL panel first."
-        )
+    candidates = _select_candidates(state, asset_regime)
+    if candidates.error:
+        return _fail(candidates.error)
+    actors = candidates.actors
+    screened_from = candidates.red_population
+    errors.extend(candidates.notes)
 
-    actors = _build_actor_list(state, asset_regime)
-    screened_from = sum(
-        1 for o in state.hrr_objects
-        if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
-    )
-    if not actors:
-        return _fail(
-            f"No red HRR objects are in a regime compatible with "
-            f"{asset_regime or 'this asset'}. {screened_from} red object(s) "
-            "were considered and all were excluded by regime."
-        )
-
-    if len(actors) > _MAX_SCREEN_ACTORS:
-        errors.append(
-            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors)} "
-            "(compute cap). Ranking covers the truncated set only."
-        )
-        actors = actors[:_MAX_SCREEN_ACTORS]
-
-    # ── Fetch any missing actor element sets ─────────────────────────────────
-    missing = [a for a in actors if a.actor_satno not in state.hrr_tle_cache]
-    if missing and state.udl_username and state.udl_password:
-        from spectre.web.routes.udl import fetch_tle_for_satno
-
-        sem = asyncio.Semaphore(10)
-        _user: str = state.udl_username
-        _pass: str = state.udl_password
-
-        async def _fetch_one(a: ThreatActor) -> None:
-            async with sem:
-                got = await fetch_tle_for_satno(
-                    int(a.actor_satno), _user, _pass,
-                    data_mode=state.udl_data_mode or "REAL",
-                    source=state.udl_tle_source,
-                )
-                if got:
-                    tle, dm = got
-                    state.hrr_tle_cache[a.actor_satno] = tle
-                    state.hrr_tle_data_mode[a.actor_satno] = dm
-
-        await asyncio.gather(*[_fetch_one(a) for a in missing])
+    # ── Fetch any missing or synthetic actor element sets ────────────────────
+    await _refresh_actor_tles(state, actors)
 
     # ── Screen, off the event loop ───────────────────────────────────────────
     loop = asyncio.get_running_loop()
-    asset_tle_resolved: str = asset_tle
+    run = await loop.run_in_executor(
+        None,
+        lambda: _screen_all_actors(state, actors, asset_tle, asset, now, max_dv_m_s),
+    )
+    errors.extend(run.notes)
 
-    def _run_screen() -> tuple[list[ActorVerdict], list[ThreatSweepEntry], dict[str, str], list[str]]:
-        verdicts: list[ActorVerdict] = []
-        all_entries: list[ThreatSweepEntry] = []
-        refusals: dict[str, str] = {}
-        notes: list[str] = []
-        for actor in actors:
-            actor_tle = _resolve_hrr_tle(state, actor.actor_satno)
-            if not actor_tle:
-                notes.append(f"{actor.actor_name} ({actor.actor_satno}): no element set")
-                continue
-            verdict, entries = _screen_one_actor(
-                actor, actor_tle, asset_tle_resolved, asset, now,
-                max_dv_m_s, refusals,
-            )
-            all_entries.extend(entries)
-            if verdict is None:
-                notes.append(
-                    f"{actor.actor_name} ({actor.actor_satno}): no method within "
-                    f"{max_dv_m_s:g} m/s"
-                )
-                continue
-            verdicts.append(verdict)
-        return verdicts, all_entries, refusals, notes
-
-    verdicts, entries, method_refusals, notes = await loop.run_in_executor(None, _run_screen)
-    errors.extend(notes)
-
-    screening = rank_actors(verdicts)
-
-    # Each ranked row opens to the profiles behind its verdict, soonest first,
-    # so an analyst can see WHICH epoch and method produced the warning time
-    # rather than being asked to take the headline on trust.
-    profiles_by_actor: dict[str, list[ThreatSweepEntry]] = {}
-    for entry in entries:
-        if entry.actor is None:
-            continue
-        profiles_by_actor.setdefault(entry.actor.actor_satno, []).append(entry)
-    for rows in profiles_by_actor.values():
-        rows.sort(key=lambda e: (e.tof_hours, e.delta_v_m_s))
+    screening = rank_actors(run.verdicts)
+    profiles_by_actor = _profiles_by_actor(run.entries)
+    entries = run.entries
+    method_refusals = run.refusals
     elapsed = time.monotonic() - t0
 
     state.append_log(
         f"[SCREEN] {asset_name}: {len(actors)} candidate actor(s), "
-        f"{len(verdicts)} within {max_dv_m_s:g} m/s, {elapsed:.1f}s "
+        f"{len(run.verdicts)} within {max_dv_m_s:g} m/s, {elapsed:.1f}s "
         f"(operator {current_user.username})"
     )
 
@@ -1424,7 +1555,7 @@ async def threat_screen(
         "asset_satno": asset_satno,
         "asset_regime": asset_regime or "unknown",
         "actors_considered": len(actors),
-        "actors_reachable": len(verdicts),
+        "actors_reachable": len(run.verdicts),
         "red_population": screened_from,
         "budget_m_s": max_dv_m_s,
         "elapsed_s": round(elapsed, 2),

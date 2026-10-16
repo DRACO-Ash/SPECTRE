@@ -7,6 +7,69 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.18] - 2026-10-16
+
+The HRR watchlist, delivered. The threat sweep and the asset screen both run
+on a fresh instance with no UDL connection.
+
+### Fixed
+
+- **An unanchored `data/` in `.gitignore`.** Gitignore matches at any depth, so
+  the rule meant for the runtime data volume silently swallowed
+  `spectre/data/` as well. The package data already there survives only
+  because it predates the rule; anything added since has been ignored without
+  a word. That is why the watchlist kept going missing, and nothing ever
+  errored to say so. Now anchored to `/data/`, with a guard that probes a new
+  file under `spectre/data/` and fails if it is ignored.
+
+- **The asset and target selectors refused to render without a UDL session.**
+  Both opened with `{% if not has_udl %}`, which hid a perfectly usable
+  watchlist behind a login it does not need. The gate is now "do we have
+  objects". Measured: 0 assets listed before, 18 after.
+
+- **A UDL fetch would never have replaced a bundled element set.** All three
+  fetch sites skipped anything already cached, so connecting to UDL would have
+  changed nothing and an operator would have kept reading generated orbits
+  believing they were tracked.
+
+### Added
+
+- **A bundled bootstrap watchlist** at `spectre/data/hrr_default.json`, last
+  in the candidate path so an operator-supplied file always wins. 38 objects:
+  18 blue assets and 20 red candidates, every red one joining to an existing
+  assessment in `adversary_intel.json` so the intelligence join is genuinely
+  exercised.
+
+  The operator's own `HRR_List.json` stays gitignored and dockerignored, as it
+  should: it is operational data and belongs on the data volume.
+
+- **Optional element sets in the HRR parser.** An object list alone populates
+  a dropdown that then refuses to run, because both capabilities need an orbit
+  per object. A real JCO notification carries no element sets, so the live
+  path is unchanged.
+
+- **`scripts/build-hrr-default.py`**, so the bundled list is reproducible
+  rather than a blob. It derives each object's regime label by reading it back
+  out of the element set it generated, so the label and the orbit cannot
+  disagree.
+
+### The element sets are synthetic, and say so everywhere
+
+Catalogue numbers and names are real and public. The orbits are generated to
+be physically consistent at a stated epoch, not observed. They are tagged
+`SYNTHETIC`, the startup log says so at WARNING, the asset selector carries a
+banner, and a UDL fetch replaces them. Four tests assert each of those.
+
+### Known limits
+
+- **The sweep's red interceptor dropdown still needs UDL or a pasted TLE.** It
+  reads operator-added Red Tracks, not HRR objects. The sweep's target side
+  now works from the bundled list; its interceptor side is unchanged.
+- **The classifier calls a Molniya orbit GTO.** It keys on eccentricity above
+  0.5 with a low perigee and does not separate a transfer orbit from an
+  operational highly elliptical one. Both are trans-belt for compatibility so
+  nothing is filtered wrongly, but the label reads oddly. Recorded, not fixed.
+
 ## [0.5.17] - 2026-10-15
 
 Blue asset screening. The sweep asks what one object can reach; screening asks

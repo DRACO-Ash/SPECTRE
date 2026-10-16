@@ -754,7 +754,13 @@ async def fetch_hrr_objects(
 def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse a single HRR notification dict into (blue, red) normalised satellite lists.
 
-    Shared by the live UDL fetch and the startup loader (HRR_List.json).
+    Shared by the live UDL fetch and the startup loader.
+
+    An entry MAY carry an element set as ``line1``/``line2``. A real JCO
+    notification does not, so the live path is unaffected; the bundled
+    bootstrap list does, which is what lets a fresh instance run before anyone
+    has connected to UDL. Where present it is carried through as ``tle`` with
+    its ``tle_data_mode``, so the interface can mark where it came from.
     """
     msg_body: list[dict[str, Any]] = notification.get("msgBody") or []
     created_at = str(notification.get("createdAt") or "").strip()
@@ -776,6 +782,13 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
             "orbit_regime": orbit_regime,
             "created_at": created_at,
         }
+        # Optional element set. Both lines must be present to be usable: half
+        # a TLE is not a degraded TLE, it is an unparseable one.
+        line1 = str(sat.get("line1") or "").strip()
+        line2 = str(sat.get("line2") or "").strip()
+        if line1 and line2:
+            entry["tle"] = f"{line1}\n{line2}"
+            entry["tle_data_mode"] = str(sat.get("tleDataMode") or "REAL").strip().upper()
         if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
