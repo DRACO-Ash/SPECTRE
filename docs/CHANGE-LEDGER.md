@@ -725,3 +725,48 @@ them. Four of those are now pinned as tests so a change to either side shows up.
 alone. It is stated as a guess wherever it is shown, and it is strictly better
 than one 3-tonne GEO assumption for every object, but an object's intel record
 often knows better and is not consulted.
+
+## 0.5.21
+
+What an adversarial review of 0.5.19 and 0.5.20 found. Four defects confirmed
+by measurement, one reported backwards and pinned the right way round.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | A single large manoeuvre no longer reads MINIMAL risk | The anomaly score needs two manoeuvres to say anything, so an object with exactly one fell through to MINIMAL. Measured: a catalogue with one 450.7 m/s AGGRESSIVE relocation reported risk level MINIMAL, because it happened only once. The worst observed posture is now a floor under the score: BEYOND PLATFORM gives CRITICAL, AGGRESSIVE gives HIGH, ANNOYANCE gives MEDIUM. It is a floor and never a ceiling, so a single BENIGN burn still reads MINIMAL. | Then the floor has become a ratchet. Both directions are asserted: 450 m/s gives HIGH, 13.7 m/s gives MINIMAL. |
+| Runtime correctness | **EVIDENCED** | The duplicate merge is bounded at both ends | Each detection was compared only against the previous cluster member, so clustering chained without limit. Measured: ten genuinely distinct burns spaced nine-tenths of a merge window apart collapsed into one event, which is exactly the shape of a low-thrust electric campaign. A cluster may now span at most two windows end to end. | Then the cap is too tight or too loose. Two tests: ten spaced burns stay several events, and two providers reporting one burn 0.2 days apart still merge to one. |
+| Runtime correctness | **EVIDENCED** | A Table 2 total standing in for a discretionary figure says so | Table 2 publishes a discretionary or margin figure for two of the six platform classes. The other four carried their TOTAL lifetime budget in a field named discretionary, so the propellant panel credited a LEO smallsat with 2,500 m/s of reserve available for manoeuvring against another object when that total is mostly drag make-up, collision avoidance and deorbit. The field now carries `discretionary_is_published`, and the panel says when it is standing in. | Then the flag is not reaching the caveats. Asserted for both a published class (GEO) and an unpublished one (LEO). |
+| Runtime correctness | **EVIDENCED** | The intercept panel's ΔV budget label names its own denominator | The percentage moved to the realistic 500 m/s budget in 0.5.15, with a comment in the route saying so. The template's hardcoded "% of 3.0 m/s" did not move with it, so the panel reported a figure against a number 167 times smaller than the one it was computed with. The denominator now travels with the percentage. | Then another label has drifted from its computation. A test asserts the literal is gone and the context key is present. |
+| Runtime correctness | **EVIDENCED** | `maneuver.py` stops calling a year's budget a station-keeping burn | A fourth copy of the same Table 3 figure. `_ANNUAL_STATION_KEEPING_M_S = 50.0` is named honestly but was used as a per-event boundary, so everything from 1 m/s to a whole year's budget was labelled "Station-keeping scale". That band covers the Luch/Olymp-K relocations, the graveyard raise and a 180 degree repositioning. A band for one real burn was inserted below it, derived from the calibration module rather than asserted, and the band above renamed to what it means. | Then the boundary is wrong, not the label. The characterisation test pins both: 1.5 m/s is station-keeping scale, 11 m/s is within a year's budget. |
+
+### The finding that was reported backwards
+
+A reviewer reported that the epoch-swept estimator under-reports a large
+manoeuvre and should be replaced by the element decomposition. Measured against
+the exact two-burn Hohmann cost, the opposite is true:
+
+| Δa | Δa/a | Hohmann (truth) | element n·Δa/2 | epoch-swept |
+|---|---|---|---|---|
+| 100 km | 0.015 | 54.74 m/s | +1.1% | +0.00% |
+| 500 km | 0.073 | 262.39 m/s | +5.5% | +0.03% |
+| 1,000 km | 0.145 | 498.96 m/s | +10.9% | +0.12% |
+| 2,000 km | 0.291 | 908.40 m/s | +21.8% | +0.41% |
+
+The swept figure is accurate; the element figure over-reports. The headline
+selection was already right.
+
+**The review was reading a defect in this project's own test harness.** The
+synthetic truth value in `test_dv_estimation.py` used `0.5·v·Δa/a`, which is
+the same first-order relation the element estimator uses, so the harness agreed
+with the estimator precisely where the estimator was wrong. A harness that
+shares an estimator's approximation cannot detect that approximation failing.
+It now computes the exact two-burn cost, the per-channel note says when Δa is
+large enough for the first-order relation to matter, and three parametrised
+cases pin the overshoot at 100, 500 and 1,000 km.
+
+**Recorded, not fixed:** the sweep drops solutions between 500 and 3,000 m/s,
+so orbital transfer vehicle and tug activity never reaches a posture;
+`breakdowns_truncated` is computed from the already-merged candidate list and
+so can never fire; and the detection provenance block claims a measurement it
+did not make when there are no usable pairs. All three were reported, none is
+operator-facing in the way the five above are, and none is fixed here.

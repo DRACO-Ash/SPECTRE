@@ -8,9 +8,9 @@ bi-elliptic).  Orbital event detection uses SGP4 via ``spectre.astro.events``.
 from __future__ import annotations
 
 import asyncio
-import math
 import contextlib
 import logging
+import math
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
 from typing import Annotated, Any
@@ -54,6 +54,7 @@ from spectre.domain.manoeuvre_calibration import (
     classify_posture,
     from_km_s,
     kind_for_method,
+    per_event_station_keeping_m_s,
 )
 from spectre.domain.models import (
     BurnLocation,
@@ -142,6 +143,12 @@ _INTENT_LABELS: dict[InterceptMethod, str] = {
 #: 500 m/s    the point at which an on-station manoeuvre is a strong anomaly
 #: 3,000 m/s  beyond the reserve of every flown platform class (Table 2)
 _CAM_SCALE_M_S: float = 1.0
+#: One routine station-keeping burn, derived from Table 3's annual budget and a
+#: fortnightly GEO cadence rather than asserted. The band below used to run
+#: from 1 m/s straight to the ANNUAL figure and was labelled "Station-keeping
+#: scale", so a 34 m/s burn — eighteen real station-keeping burns at once, and
+#: the cost of a 180 degree GEO relocation — read as routine housekeeping.
+_SINGLE_SK_BURN_M_S: float = per_event_station_keeping_m_s("GEO")[0]
 _ANNUAL_STATION_KEEPING_M_S: float = 50.0
 _MOST_AGGRESSIVE_OBSERVED_M_S: float = 170.0
 _ANOMALY_M_S: float = 500.0
@@ -172,14 +179,22 @@ def _dv_classification(dv: float) -> str:
     """Name the scale of a burn, given its magnitude in m/s.
 
     The boundaries come from observed behaviour, not round numbers: 1 m/s is
-    the top of a collision-avoidance burn, 50 m/s one year of GEO north-south
-    station-keeping, 170 m/s the most aggressive GEO relocation on record, and
-    500 m/s the point at which an on-station manoeuvre is a strong anomaly.
+    the top of a collision-avoidance burn, about 2 m/s one ROUTINE station-
+    keeping burn, 50 m/s a whole YEAR of GEO north-south station-keeping,
+    170 m/s the most aggressive GEO relocation on record, and 500 m/s the point
+    at which an on-station manoeuvre is a strong anomaly.
+
+    The distinction between the second and the third matters. Spending a year's
+    budget in one burn is what a relocation costs, and calling that
+    "station-keeping scale" describes the arithmetic while hiding the
+    behaviour.
     """
     if dv < _CAM_SCALE_M_S:
         return "Micro-manoeuvre"
-    if dv < _ANNUAL_STATION_KEEPING_M_S:
+    if dv < _SINGLE_SK_BURN_M_S:
         return "Station-keeping scale"
+    if dv < _ANNUAL_STATION_KEEPING_M_S:
+        return "Within a year's station-keeping budget"
     if dv < _MOST_AGGRESSIVE_OBSERVED_M_S:
         return "Minor Transfer"
     if dv < _ANOMALY_M_S:
@@ -623,6 +638,11 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
         "tof_hours": round(tof_hours, 3),
         "tof_label": tof_label,
         "dv_budget_pct": round(dv_budget_pct, 1),
+        # The denominator travels with the percentage. The template used to
+        # carry its own hardcoded "3.0 m/s", which survived the 0.5.15 move to
+        # the realistic 500 m/s budget and left the panel reporting a figure
+        # against a number 167 times smaller than the one it was computed with.
+        "dv_budget_m_s": DEFAULT_SWEEP_BUDGET_M_S,
         "burn_intel": burn_intel,
         "obs_level": obs_level,
         "obs_color": obs_color,

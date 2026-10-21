@@ -347,10 +347,19 @@ class PlatformClass:
     """
 
     name: str
+    #: Discretionary reserve, m/s: what is left to spend on manoeuvring against
+    #: someone once the platform's commitments are met. Table 2 states this for
+    #: only two of the six classes. Where it does not, these carry the TOTAL
+    #: lifetime figure and ``discretionary_is_published`` is False, because a
+    #: total silently relabelled as discretionary overstates what an object can
+    #: do: a LEO smallsat's 2,500 m/s is mostly drag make-up, collision
+    #: avoidance and deorbit, not reserve it can spend shadowing a neighbour.
     discretionary_min_m_s: float
     discretionary_max_m_s: float
     typical_acceleration_m_s2: float
     basis: str
+    #: True only where Table 2 gives a discretionary or margin figure outright.
+    discretionary_is_published: bool = True
 
     def minimum_burn_hours(self, delta_v_m_s: float) -> float:
         """Hours of continuous thrust needed to deliver *delta_v_m_s*."""
@@ -386,19 +395,26 @@ PLATFORM_CLASSES: tuple[PlatformClass, ...] = (
     ),
     PlatformClass(
         "LEO smallsat, electric", 500.0, 2500.0, 2.1e-4,
-        "Table 2: 500-2,500 m/s total, mostly drag make-up, collision "
-        "avoidance and deorbit. Acceleration from the Starlink V2 Mini argon "
-        "Hall thruster at 170 mN on about 800 kg.",
+        "Table 2: 500-2,500 m/s TOTAL, mostly drag make-up, collision "
+        "avoidance and deorbit. The discretionary share is not published, so "
+        "the total stands in for it and is flagged as doing so. Acceleration "
+        "from the Starlink V2 Mini argon Hall thruster at 170 mN on about "
+        "800 kg.",
+        discretionary_is_published=False,
     ),
     PlatformClass(
         "Dedicated inspector or RPO platform, chemical", 800.0, 1600.0, 4.0e-3,
-        "Table 2: 800-1,600 m/s total at Isp 220-320 s and 30-40 per cent "
-        "propellant; observed campaigns cost 10-120 m/s each.",
+        "Table 2: 800-1,600 m/s TOTAL at Isp 220-320 s and 30-40 per cent "
+        "propellant; the discretionary share is not published. Observed "
+        "campaigns cost 10-120 m/s each, so many are affordable within it.",
+        discretionary_is_published=False,
     ),
     PlatformClass(
         "Hybrid servicer, MEV class", 1000.0, 3000.0, 1.0e-4,
-        "Table 2: 1 to 3 km/s plausible, electric transfers with chemical "
-        "proximity work. Unpublished, so treat as indicative.",
+        "Table 2: 1 to 3 km/s TOTAL and plausible rather than published, "
+        "electric transfers with chemical proximity work. The discretionary "
+        "share is not published either; treat both as indicative.",
+        discretionary_is_published=False,
     ),
     PlatformClass(
         "Orbital transfer vehicle, storable chemical", 500.0, 1200.0, 5.0e-2,

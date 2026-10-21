@@ -12,6 +12,7 @@ against them.
 from __future__ import annotations
 
 import math
+import pathlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -412,3 +413,110 @@ class TestThePhysicsMatchesTheAssessment:
         self, label: str, cited: float, computed: object,
     ) -> None:
         assert computed() == pytest.approx(cited, rel=0.03), label
+
+
+# ── Defects found by adversarial review after 0.5.20 shipped ────────────────
+
+class TestReviewFindings:
+    """Each of these was reported by a reviewer, verified by measurement, and
+    fixed. One was reported backwards and is pinned the right way round."""
+
+    def test_a_single_large_burn_is_not_minimal_risk(self) -> None:
+        """The anomaly score needs two manoeuvres, so one 450 m/s AGGRESSIVE
+        relocation used to fall through to MINIMAL because it happened once."""
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(n=300, burn_at=150, d_alt_km=900.0),
+            satno=1, name="ONE BIG BURN",
+        )
+        a = assess_pattern_of_life(pol)
+        assert len(a.manoeuvres) == 1
+        assert a.manoeuvres[0].posture_label == "AGGRESSIVE"
+        assert a.anomaly is None, "one manoeuvre cannot produce an anomaly score"
+        assert a.intel.risk_level == "HIGH", (
+            "the worst observed posture is a floor under the risk level"
+        )
+
+    def test_a_single_small_burn_stays_minimal(self) -> None:
+        """The floor must not become a ratchet."""
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(n=300, burn_at=150, d_alt_km=25.0),
+            satno=1, name="ONE SMALL BURN",
+        )
+        a = assess_pattern_of_life(pol)
+        assert a.manoeuvres[0].posture_label == "BENIGN"
+        assert a.intel.risk_level == "MINIMAL"
+
+    def test_a_total_standing_in_for_a_discretionary_figure_says_so(self) -> None:
+        """Table 2 publishes a discretionary figure for two of six classes.
+
+        Where it does not, the total stands in, and an unflagged total
+        overstates what an object can spend manoeuvring against someone: a LEO
+        smallsat's 2,500 m/s is mostly drag make-up, collision avoidance and
+        deorbit.
+        """
+        assert platform_class_for_regime("GEO").discretionary_is_published
+        assert not platform_class_for_regime("LEO").discretionary_is_published
+
+        pol = analyse_pattern_of_life(TestTwoTierReporting._catalogue(), satno=1, name="T")
+        caveats = " ".join(assess_pattern_of_life(pol).propellant.caveats)
+        assert "TOTAL lifetime budget standing in" in caveats
+
+    def test_a_campaign_does_not_collapse_into_one_burn(self) -> None:
+        """Comparing each detection only to the previous one chains without
+        limit: ten distinct burns nine-tenths of a window apart became one,
+        which is the shape of a low-thrust electric campaign."""
+        from datetime import timedelta
+
+        from spectre.astro.pattern_of_life import _merge_duplicate_detections
+
+        class _Stub:
+            def __init__(self, day: float) -> None:
+                self.burn_epoch = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=day)
+                self.confidence = "HIGH"
+                self.gap_days = 0.1
+
+        chain = [_Stub(d * 0.9) for d in range(10)]
+        kept, merged = _merge_duplicate_detections(chain, 1.0)
+        assert len(kept) > 1, "a campaign must not collapse to a single event"
+        assert merged < 9
+
+    def test_one_burn_seen_by_two_providers_stays_one_burn(self) -> None:
+        """The span cap must not stop real duplicate merging."""
+        from datetime import timedelta
+
+        from spectre.astro.pattern_of_life import _merge_duplicate_detections
+
+        class _Stub:
+            def __init__(self, day: float) -> None:
+                self.burn_epoch = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=day)
+                self.confidence = "HIGH"
+                self.gap_days = 0.1
+
+        kept, merged = _merge_duplicate_detections([_Stub(0.0), _Stub(0.2)], 1.0)
+        assert len(kept) == 1
+        assert merged == 1
+
+    def test_the_capability_signal_is_no_longer_pinned(self) -> None:
+        """Before the propellant rebuild it read HIGH for every object, so
+        capability could never weaken a verdict."""
+        from spectre.domain.threat_assessment import CapabilityEvidence
+
+        platform = platform_class_for_regime("GEO")
+        bands = []
+        for spent in (0.0, 150.0, 200.0):
+            bands.append(CapabilityEvidence(
+                discretionary_remaining_m_s=max(0.0, platform.discretionary_max_m_s - spent),
+                discretionary_max_m_s=platform.discretionary_max_m_s,
+            ).band())
+        assert len(set(bands)) > 1, "the signal must vary with what is left"
+        assert bands[0] > bands[-1]
+
+    def test_the_intercept_budget_label_names_its_own_denominator(self) -> None:
+        """The percentage moved to a 500 m/s budget in 0.5.15; the template's
+        hardcoded "3.0 m/s" did not, leaving the label 167x out."""
+        template = (
+            pathlib.Path("spectre/web/templates/partials/intercept_result.html")
+            .read_text(encoding="utf-8")
+        )
+        assert "of 3.0 m/s" not in template
+        assert "dv_budget_m_s" in template

@@ -428,7 +428,17 @@ def _assess_propellant(
 
     caveats = [
         f"Platform class assumed from the orbit regime alone: {platform.name}. "
-        f"{platform.basis}",
+        f"{platform.basis}",]
+    if not platform.discretionary_is_published:
+        caveats.append(
+            f"Table 2 gives no discretionary figure for this class, so the "
+            f"{platform.discretionary_max_m_s:,.0f} m/s above is its TOTAL "
+            "lifetime budget standing in for one. Most of that total is "
+            "committed to routine operations, so the reserve genuinely "
+            "available for manoeuvring against another object is smaller, by "
+            "an amount the open sources do not state."
+        )
+    caveats += [
         f"Specific impulse assumed at {isp:,.0f} s and propellant at "
         f"{fraction * 100:.0f} per cent of mass, both from Table 2's stated "
         "assumptions for this class. These are rocket-equation estimates, not "
@@ -824,7 +834,23 @@ def _assess_intel(
         bclass = ("Nothing was resolved above this object's own fit scatter. That "
                   "is not the same as passive.")
 
+    # The anomaly score needs two manoeuvres to say anything, so a single
+    # large burn used to fall through to MINIMAL: a 450 m/s AGGRESSIVE
+    # relocation reported "minimal risk" because it happened only once. The
+    # worst posture observed is a floor under the score, never a ceiling.
+    _POSTURE_FLOOR = {
+        Posture.BEYOND_PLATFORM: "CRITICAL",
+        Posture.AGGRESSIVE: "HIGH",
+        Posture.ANNOYANCE: "MEDIUM",
+        Posture.BENIGN: "MINIMAL",
+    }
+    _ORDER = ["MINIMAL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
     risk = anomaly.risk_level if anomaly else "MINIMAL"
+    if views:
+        worst = max(postures, key=lambda p: list(Posture).index(p))
+        floor = _POSTURE_FLOOR.get(worst, "MINIMAL")
+        if _ORDER.index(floor) > _ORDER.index(risk):
+            risk = floor
 
     # Narrative. The "no manoeuvres" case is the one that used to mislead: it
     # asserted the object was passive, when routine traffic management sits

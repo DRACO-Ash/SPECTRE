@@ -49,6 +49,11 @@ inverted from Gauss's variational equations for a single impulse on a
 near-circular orbit:
 
 ● **Along-track** — drives semi-major axis.   Δa = 2·Δv/n  ⟹  Δv = n·Δa/2
+  First order in Δa/a, and it over-reports as that ratio grows: against the
+  exact two-burn Hohmann total it is +1.1% at Δa/a = 0.015 (100 km in LEO),
+  +5.5% at 0.073, and +10.9% at 0.145. The epoch-swept estimator tracks the
+  Hohmann total to better than 0.4% across the same range, which is why it is
+  the headline and this is the decomposition.
 ● **Radial** — drives the eccentricity vector. Δe = Δv/v   ⟹  Δv = v·Δe
 ● **Cross-track** — drives the orbit plane.    Δv = 2·v·sin(θ/2)
 
@@ -471,6 +476,16 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
     # ── Channel 1: along-track. Moves semi-major axis. ───────────────────────
     d_sma = after.sma_km - before.sma_km
     dv_along = abs(n * d_sma / 2.0)
+    # First order in Δa/a. Over-reports the exact two-burn Hohmann total by
+    # about 1% at Δa/a = 0.015 and 11% at 0.145, so the note says so once the
+    # ratio is large enough to matter rather than leaving the operator to
+    # discover it from the disagreement with the headline.
+    ratio = abs(d_sma) / before.sma_km if before.sma_km > 0 else 0.0
+    along_note = ("Prograde" if d_sma > 0 else "Retrograde") if d_sma else "No energy change"
+    if ratio > 0.01:
+        along_note += (f". Δa is {ratio * 100:.1f}% of the semi-major axis, where this "
+                       "first-order relation over-reports the exact two-burn total by "
+                       f"roughly {ratio * 75:.0f}%.")
     c_along = DvComponent(
         channel  = "along_track",
         label    = "Along-track (energy)",
@@ -483,7 +498,7 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
             "delta_a_km":  d_sma,
             "n_rad_s":     n,
         },
-        note = ("Prograde" if d_sma > 0 else "Retrograde") if d_sma else "No energy change",
+        note = along_note,
     )
 
     # ── Channel 2: radial. Moves the eccentricity vector. ────────────────────

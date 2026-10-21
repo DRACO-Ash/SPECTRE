@@ -7,6 +7,50 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.21] - 2026-10-21
+
+What an adversarial review of the two previous releases found.
+
+### Fixed
+
+- **A single large manoeuvre read as MINIMAL risk.** The anomaly score needs
+  two manoeuvres, so an object with exactly one fell through to the floor: a
+  450.7 m/s AGGRESSIVE relocation reported minimal risk because it happened
+  once. The worst observed posture is now a floor under the score, never a
+  ceiling.
+
+- **A whole campaign could collapse into one burn.** The duplicate merge
+  compared each detection only to the previous cluster member, so clustering
+  chained without limit. Ten distinct burns spaced nine-tenths of a window
+  apart became a single event, which is the shape of a low-thrust electric
+  campaign. Clusters are now bounded at both ends.
+
+- **Four of six platform classes carried a lifetime total in a field named
+  discretionary.** Table 2 publishes a discretionary figure for two of them.
+  The panel was crediting a LEO smallsat with 2,500 m/s of reserve for
+  manoeuvring against another object, when that total is mostly drag make-up,
+  collision avoidance and deorbit. Where the figure stands in, the panel says so.
+
+- **The intercept panel's ΔV budget label was 167× out.** The percentage moved
+  to the realistic 500 m/s budget in 0.5.15; the template's hardcoded
+  "% of 3.0 m/s" did not move with it. The denominator now travels with the
+  percentage.
+
+- **A fourth copy of the same Table 3 figure.** `maneuver.py` used an annual
+  station-keeping budget as a per-event boundary, so everything from 1 m/s to a
+  whole year's budget was labelled "Station-keeping scale" — a band that covers
+  both Luch/Olymp-K relocations and a 180° repositioning.
+
+### Notes
+
+One review finding was reported backwards: that the epoch-swept estimator
+under-reports a large burn. Measured against the exact two-burn Hohmann cost it
+is accurate to 0.4% across the whole range, and the element decomposition is
+the one that over-reports, by 10.9% at Δa/a = 0.145. The review was reading a
+defect in this project's own test harness, which used the same first-order
+relation as the element estimator and so agreed with it precisely where it was
+wrong. The harness now computes the exact cost and the overshoot is pinned.
+
 ## [0.5.20] - 2026-10-21
 
 The open-source delta-V assessment, assimilated. Pattern of Life now reads the

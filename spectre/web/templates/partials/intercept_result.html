@@ -370,7 +370,7 @@ Observability:{{ intel.obs_level }}
     <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.15rem">
       &Delta;V Budget
       <span style="float:right; font-weight:600; color:var(--text-bright)">
-        {{ "%.1f" | format(intel.dv_budget_pct) }}% of 3.0 m/s
+        {{ "%.1f" | format(intel.dv_budget_pct) }}% of {{ intel.dv_budget_m_s | m_s }} m/s
       </span>
     </div>
     <div style="height:6px; border-radius:3px; background:rgba(255,255,255,0.07); overflow:hidden">

@@ -62,6 +62,13 @@ _LONG_GAP_WARN_DAYS = 10.0  # days
 # inside this window are merged into one event.
 _MERGE_WINDOW_FLOOR_DAYS = 0.25
 
+# A cluster may span at most this many merge windows end to end. Without it the
+# chaining is unbounded: each detection is compared to the previous one, so a
+# run of closely spaced but genuinely distinct burns merges into a single
+# event. Two windows keeps a provider's duplicate of one burn together while
+# leaving a real sequence intact.
+_MERGE_SPAN_LIMIT = 2.0
+
 # Full forensic breakdowns are ~1.8 ms each against ~0.01 ms for the screening
 # estimator. Detections are ranked by ΔV and the largest this many get the full
 # treatment; beyond that the element figure stands and says so.
@@ -433,22 +440,35 @@ def _merge_duplicate_detections(manoeuvres: list[Manoeuvre],
     Keeps the best-evidenced member of each cluster: highest confidence first,
     then the one whose two element sets sit closest together in time, since a
     tighter bracket localises the burn better.
+
+    The cluster is bounded at both ends. Comparing each detection only against
+    the previous one chains without limit: ten genuinely distinct burns spaced
+    nine-tenths of a window apart collapsed into a single event, which is
+    exactly the shape of a low-thrust electric campaign. A cluster may now span
+    at most ``_MERGE_SPAN_LIMIT`` windows in total, so a real sequence stays a
+    sequence however finely spaced it is.
     """
     if len(manoeuvres) < 2:
         return manoeuvres, 0
 
     order = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "UNASSESSED": 3}
     ranked = sorted(manoeuvres, key=lambda m: m.burn_epoch)
+    span_limit = window_days * _MERGE_SPAN_LIMIT
+
+    def _best(cluster: list[Manoeuvre]) -> Manoeuvre:
+        return min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days))
 
     merged: list[Manoeuvre] = []
     cluster: list[Manoeuvre] = [ranked[0]]
     for m in ranked[1:]:
-        if (m.burn_epoch - cluster[-1].burn_epoch).total_seconds() / 86400.0 <= window_days:
+        gap = (m.burn_epoch - cluster[-1].burn_epoch).total_seconds() / 86400.0
+        span = (m.burn_epoch - cluster[0].burn_epoch).total_seconds() / 86400.0
+        if gap <= window_days and span <= span_limit:
             cluster.append(m)
         else:
-            merged.append(min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days)))
+            merged.append(_best(cluster))
             cluster = [m]
-    merged.append(min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days)))
+    merged.append(_best(cluster))
     return merged, len(manoeuvres) - len(merged)
 
 

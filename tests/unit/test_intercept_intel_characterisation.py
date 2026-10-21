@@ -59,7 +59,11 @@ class TestTheDeltaVBandsAsTheyStand:
         ("dv_m_s", "expected_class"),
         [
             (0.4, "Micro-manoeuvre"),
-            (11.0, "Station-keeping scale"),
+            # 11 m/s is the Luch/Olymp-K 2 relocation: six routine burns at once,
+            # not one. The band it used to fall in ran from 1 m/s to a whole
+            # YEAR's budget and called all of it station-keeping scale.
+            (1.5, "Station-keeping scale"),
+            (11.0, "Within a year's station-keeping budget"),
             (60.0, "Minor Transfer"),
             (300.0, "Moderate Transfer"),
             (900.0, "Major Transfer"),
@@ -140,6 +144,10 @@ class TestTheShapeOfTheWholePayload:
     _KEYS = {
         "manoeuvre_type", "threat_level", "threat_color", "threat_bg",
         "intent_label", "dv_class", "tof_hours", "tof_label", "dv_budget_pct",
+        # The denominator travels with the percentage. The template carried its
+        # own hardcoded "3.0 m/s", which survived the 0.5.15 move to the
+        # realistic 500 m/s budget and left the label 167x out.
+        "dv_budget_m_s",
         "burn_intel", "obs_level", "obs_color", "obs_reason", "method_insights",
         "summary",
     }

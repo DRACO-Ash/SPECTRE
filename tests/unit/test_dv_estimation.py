@@ -109,11 +109,27 @@ def _pair(gap_days: float, burn_frac: float = 0.0, *, d_alt: float = 0.0,
     if burn_frac < 1.0:
         after = _coast(after, gap_days * (1.0 - burn_frac))
     true_dv = math.sqrt(
-        (0.5 * _V0 * (d_alt / _A0)) ** 2
+        _hohmann_total_km_s(_A0, _A0 + d_alt) ** 2
         + (2 * _V0 * math.sin(math.radians(d_inc) / 2)) ** 2
         + (_V0 * d_ecc) ** 2
     ) * 1000.0
     return _satrec_to_record(before), _satrec_to_record(after), true_dv
+
+
+def _hohmann_total_km_s(r1: float, r2: float) -> float:
+    """Exact two-burn transfer cost between two circular orbits.
+
+    The truth value for an energy change, and deliberately NOT the
+    ``n·Δa/2`` the element estimator uses. A harness that shares an
+    estimator's approximation cannot detect that approximation failing: with
+    the first-order formula on both sides these tests agreed with the element
+    figure at Δa/a = 0.145, where it over-reports the real cost by 10.9%.
+    """
+    if r1 == r2:
+        return 0.0
+    a_t = (r1 + r2) / 2.0
+    return (abs(math.sqrt(MU_EARTH * (2 / r1 - 1 / a_t)) - math.sqrt(MU_EARTH / r1))
+            + abs(math.sqrt(MU_EARTH / r2) - math.sqrt(MU_EARTH * (2 / r2 - 1 / a_t))))
 
 
 def _rec(tle: str, *, source: str = "", data_mode: str = "") -> TLERecord:
@@ -219,6 +235,38 @@ class TestKnownBurns:
         d_a = along.inputs["delta_a_km"]
         assert abs(n * d_a / 2.0) == pytest.approx(along.dv_km_s, rel=1e-9)
         assert along.inputs["a_after_km"] - along.inputs["a_before_km"] == pytest.approx(d_a)
+
+    @pytest.mark.parametrize(
+        ("d_alt", "element_overshoot_pct"),
+        [(100.0, 1.1), (500.0, 5.5), (1000.0, 10.9)],
+    )
+    def test_the_element_decomposition_is_first_order_and_says_so(
+        self, d_alt: float, element_overshoot_pct: float,
+    ) -> None:
+        """Δv = n·Δa/2 over-reports as Δa/a grows. The headline must not.
+
+        Pinned because an adversarial review read the overshoot backwards and
+        reported the epoch-swept figure as under-reporting. It is not: against
+        the exact two-burn total the swept figure is accurate to better than
+        0.4% across this whole range, and the element figure is the one that
+        drifts. A harness sharing the first-order formula cannot see that, so
+        the truth value here is the exact Hohmann cost.
+        """
+        before, after, true_dv = _pair(1.0, 0.5, d_alt=d_alt)
+        bd = build_breakdown(before, after, 1.0)
+
+        assert bd.swept.dv_m_s == pytest.approx(true_dv, rel=0.01), (
+            "the epoch-swept headline must track the exact two-burn cost"
+        )
+        assert bd.elements.dv_m_s == pytest.approx(
+            true_dv * (1 + element_overshoot_pct / 100.0), rel=0.03
+        )
+        assert bd.headline_method == "epoch_swept"
+
+        along = next(c for c in bd.components if c.channel == "along_track")
+        assert "first-order" in along.note, (
+            "a decomposition that over-reports by this much has to say so"
+        )
 
     def test_the_burn_is_dated_not_assumed(self) -> None:
         """The after-epoch can be wrong by the whole gap; the burn time is measured."""
