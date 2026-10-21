@@ -7,6 +7,79 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.22] - 2026-10-21
+
+An operator correction on how NOTSOs actually work, and the adversarial physics
+review of the three previous releases.
+
+### Fixed
+
+- **A compliant operator was being labelled a stealth operator.** A NOTSO is
+  issued only after human-in-the-loop analysis, and notices are deliberately
+  withheld for small routine manoeuvres so the channel is not flooded. The
+  notification rate counted every detected burn in its denominator, so it was
+  measuring how much station-keeping an object does rather than how forthcoming
+  its operator is. An object whose manoeuvres are all routine scored zero and
+  was flagged, in red, as a stealth operator. The rate is now computed over
+  manoeuvres above the regime's routine per-burn ceiling, no band is offered
+  below three reportable manoeuvres, and "stealth operator" is gone.
+
+- **"Phantom NOTSO" blamed the operator for our own blind spot.** A NOTSO with
+  no detection beside it is far more likely to mean the burn sat below our
+  measured detection floor, which on most LEO catalogues is above routine
+  station-keeping. Renamed, and the panel says which reading is likelier. A
+  detection with no notice is also no longer coloured as suspicious; it is the
+  expected case.
+
+- **GET /pol/panel returned 500 once an analysis existed.** The panel includes
+  the results template and supplied none of its context, so the first name it
+  read was undefined. A hard crash on every reload after running an analysis.
+
+- **The J2 perigee rate was the exact negative of itself.** `1.5·(2.5sin²i − 2)`
+  against the correct `0.75·(5cos²i − 1)`. The correction added the natural
+  perigee rotation instead of removing it, and doubled it.
+
+- **The energy channel assumed a circular orbit.** An eccentric orbit is
+  cheapest to raise at perigee, so the circular form over-reported by 36% at
+  e = 0.3 and 139% at e = 0.7, where GTO and Molniya objects sit. Error after
+  the fix: 0.21% to 0.26%.
+
+- **A radial burn could never be confirmed.** The expected position mismatch
+  omitted the eccentricity term, so every eccentricity change was set aside and
+  dropped to LOW confidence, never reaching the cumulative ΔV.
+
+- **The duplicate merge is now source-aware.** Two detections can only be one
+  burn if they came from different sources. The previous version clustered on
+  time alone: six real burns 0.9 days apart in a single-provider catalogue were
+  reduced to two, attributing three real burns to a provider that was not in
+  the input.
+
+- **One named provider no longer differences against unattributed fits.**
+  Source matching required two named providers, so an interleaved catalogue
+  fell back to consecutive pairing and every pair crossed the boundary.
+
+- **A noise floor above any plausible fit scatter is no longer reported as
+  measured.** At 50% contamination the floor came out at 149 m/s, above the
+  events it exists to find.
+
+- **An unmeasurable noise floor can no longer confirm a detection.** Estimator
+  agreement says the arithmetic is consistent, not that the figure stands above
+  a scatter that could not be measured.
+
+- **NOTSO and photometry correlation see all detections**, not just confirmed
+  ones. A notice matching a candidate is the strongest corroboration available
+  for that candidate.
+
+- **`breakdowns_truncated` read a rebound name** and reported zero however many
+  detections were truncated.
+
+### Notes
+
+The operator correction changed the reasoning behind an earlier fix as well as
+its scope. A NOTSO has high specificity and low sensitivity: present means a
+human confirmed a burn, absent means nothing at all. Treating it as symmetric
+ground truth is what produced the stealth-operator label.
+
 ## [0.5.21] - 2026-10-21
 
 What an adversarial review of the two previous releases found.

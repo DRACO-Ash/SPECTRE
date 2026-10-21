@@ -48,13 +48,16 @@ is structurally immune to the failure above. Three orthogonal channels, each
 inverted from Gauss's variational equations for a single impulse on a
 near-circular orbit:
 
-● **Along-track** — drives semi-major axis.   Δa = 2·Δv/n  ⟹  Δv = n·Δa/2
-  First order in Δa/a, and it over-reports as that ratio grows: against the
+● **Along-track** — drives semi-major axis.   Δv = μ·Δa / (2·a²·v_perigee)
+  Which is the familiar n·Δa/2 when the orbit is circular. First order in Δa/a, and it over-reports as that ratio grows: against the
   exact two-burn Hohmann total it is +1.1% at Δa/a = 0.015 (100 km in LEO),
   +5.5% at 0.073, and +10.9% at 0.145. The epoch-swept estimator tracks the
   Hohmann total to better than 0.4% across the same range, which is why it is
   the headline and this is the decomposition.
 ● **Radial** — drives the eccentricity vector. Δe = Δv/v   ⟹  Δv = v·Δe
+  The part a tangential burn already explains is removed in quadrature, since
+  a tangential burn moves the eccentricity vector along the apsidal line and a
+  radial one rotates it.
 ● **Cross-track** — drives the orbit plane.    Δv = 2·v·sin(θ/2)
 
 Secular J2 drift in RAAN and argument of perigee is removed before
@@ -115,6 +118,18 @@ _NOISE_ABSOLUTE_FLOOR_KM_S = 1.0e-4   # 0.1 m/s
 
 #: Scale factor on the robust spread when setting the reporting floor.
 _NOISE_SIGMA_MULTIPLIER = 5.0
+
+#: Above this the measured "floor" is not fit scatter (km/s).
+#:
+#: Median and MAD are robust only while manoeuvres are a minority. Once more
+#: than half the pairs contain a burn the median IS a burn, and the floor
+#: climbs above the very events it exists to find: measured on a synthetic
+#: catalogue, 50% contamination at 50 m/s produced a floor of 149 m/s and 60%
+#: produced exactly 50 m/s, rejecting every detection. Two good element set
+#: fits of one object agree to about a kilometre in semi-major axis, which is
+#: well under a metre per second; even two providers 6 km apart disagree by
+#: about 3.5 m/s. A floor of 50 m/s cannot be scatter.
+_NOISE_IMPLAUSIBLE_CEILING_KM_S = 0.050
 
 #: A single impulse leaves the two orbits sharing a point, so the epoch-swept
 #: estimate is only a ΔV measurement where the two trajectories actually come
@@ -256,6 +271,10 @@ class NoiseModel:
     floor_km_s:     float
     samples:        int
     method:         str = "median + 5·MAD"
+    #: False when the robust statistics could not produce a usable floor and
+    #: the absolute floor stood in. Nothing downstream should present an
+    #: unmeasured floor as a measurement.
+    floor_is_measured: bool = True
 
     def snr(self, dv_km_s: float) -> float | None:
         """Signal-to-noise of *dv_km_s* against the measured background."""
@@ -352,11 +371,24 @@ def _j2_raan_rate_deg_day(sma_km: float, ecc: float, inc_deg: float) -> float:
 
 
 def _j2_argp_rate_deg_day(sma_km: float, ecc: float, inc_deg: float) -> float:
-    """Secular argument-of-perigee rotation from J2 (°/day)."""
+    """Secular argument-of-perigee rotation from J2 (°/day).
+
+    0.75·n·J2·(Re/p)²·(5cos²i − 1). Written in sin² that is
+    0.75·(4 − 5sin²i) = 3 − 3.75sin²i. The form that used to sit here,
+    1.5·(2.5sin²i − 2) = 3.75sin²i − 3, is the exact NEGATIVE of it, so the
+    correction added the natural perigee rotation instead of removing it and
+    doubled it. On a 550 km, 53° orbit the rate is +3.10°/day, not −3.10.
+
+    The blast radius was limited because :func:`secular_rates_deg_day` prefers
+    SGP4's own ``argpdot`` wherever an element set is available and only falls
+    back to this. "Limited" is not "none": the fallback runs whenever a TLE
+    cannot be parsed, and ``pattern_of_life`` used the same inverted form for
+    the perigee delta it shows the operator.
+    """
     n = math.sqrt(MU_EARTH / sma_km ** 3)
     d = (1.0 - ecc ** 2) ** 2
-    rate = (1.5 * n * J2_EARTH * (R_EARTH / sma_km) ** 2
-            * (2.5 * math.sin(math.radians(inc_deg)) ** 2 - 2.0) / d)
+    rate = (0.75 * n * J2_EARTH * (R_EARTH / sma_km) ** 2
+            * (5.0 * math.cos(math.radians(inc_deg)) ** 2 - 1.0) / d)
     return math.degrees(rate) * 86400.0
 
 
@@ -474,8 +506,21 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
     n = before.mean_motion_rad_s
 
     # ── Channel 1: along-track. Moves semi-major axis. ───────────────────────
+    #
+    # Δv = μ·Δa / (2·a²·v_burn). With v_burn the circular speed this collapses
+    # to the familiar n·Δa/2, which is why that form is quoted for near-circular
+    # orbits. It is only valid there: an eccentric orbit is cheapest to raise at
+    # perigee, where the speed is highest, and assuming circular speed
+    # over-reports the cost by 36% at e = 0.3 and 139% at e = 0.7. GTO and
+    # Molniya objects sit squarely in that range.
     d_sma = after.sma_km - before.sma_km
-    dv_along = abs(n * d_sma / 2.0)
+    r_peri = before.sma_km * (1.0 - before.ecc)
+    if r_peri > 0:
+        v_peri = math.sqrt(MU_EARTH * (2.0 / r_peri - 1.0 / before.sma_km))
+    else:
+        v_peri = before.orbital_speed_km_s
+    dv_along = (abs(MU_EARTH * d_sma / (2.0 * before.sma_km ** 2 * v_peri))
+                if v_peri > 0 else 0.0)
     # First order in Δa/a. Over-reports the exact two-burn Hohmann total by
     # about 1% at Δa/a = 0.015 and 11% at 0.145, so the note says so once the
     # ratio is large enough to matter rather than leaving the operator to
@@ -491,12 +536,15 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
         label    = "Along-track (energy)",
         dv_km_s  = dv_along,
         driver   = "semi-major axis",
-        formula  = "Δv = n · Δa / 2",
+        formula  = "Δv = μ · Δa / (2 · a² · v_perigee)",
         inputs   = {
-            "a_before_km": before.sma_km,
-            "a_after_km":  after.sma_km,
-            "delta_a_km":  d_sma,
-            "n_rad_s":     n,
+            "a_before_km":     before.sma_km,
+            "a_after_km":      after.sma_km,
+            "delta_a_km":      d_sma,
+            "e_before":        before.ecc,
+            "r_perigee_km":    r_peri,
+            "v_perigee_km_s":  v_peri,
+            "n_rad_s":         n,
         },
         note = along_note,
     )
@@ -515,17 +563,20 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
     d_evec = math.hypot(e2x - e1x, e2y - e1y)
 
     # A single tangential impulse of dv_along already changes eccentricity by
-    # 2·dv_along/v. Only the residual needs a radial component, so subtracting
-    # it here stops the same burn being counted in two channels.
+    # 2·dv_along/v, so removing that stops one burn being counted in two
+    # channels. The removal is in QUADRATURE, not linear: a tangential burn
+    # moves the eccentricity vector along the apsidal line while a radial burn
+    # rotates it, so the two contributions are close to orthogonal. Subtracting
+    # the magnitudes linearly under-reports the radial part of any mixed burn.
     d_e_explained = 2.0 * dv_along / v if v > 0 else 0.0
-    d_e_residual  = max(0.0, d_evec - d_e_explained)
+    d_e_residual  = math.sqrt(max(0.0, d_evec ** 2 - d_e_explained ** 2))
     dv_radial = v * d_e_residual
     c_radial = DvComponent(
         channel  = "radial",
         label    = "Radial (shape)",
         dv_km_s  = dv_radial,
         driver   = "eccentricity vector",
-        formula  = "Δv = v · (|Δe⃗| − 2·Δv_along/v)",
+        formula  = "Δv = v · √(|Δe⃗|² − (2·Δv_along/v)²)",
         inputs   = {
             "e_before":            before.ecc,
             "e_after":             after.ecc,
@@ -772,6 +823,18 @@ def calibrate_noise(dv_samples: list[float]) -> NoiseModel:
     med = _median(ordered)
     mad = _median(sorted(abs(x - med) for x in dv_samples))
     floor = max(med + _NOISE_SIGMA_MULTIPLIER * mad, _NOISE_ABSOLUTE_FLOOR_KM_S)
+
+    if floor >= _NOISE_IMPLAUSIBLE_CEILING_KM_S:
+        return NoiseModel(
+            median_km_s=med, mad_km_s=mad,
+            floor_km_s=_NOISE_ABSOLUTE_FLOOR_KM_S, samples=n,
+            method=(f"median+5·MAD gave {floor * 1000:.0f} m/s, which is far above any "
+                    "element set fit scatter. More than half these pairs most likely "
+                    "contain a manoeuvre, so the median is a burn rather than the "
+                    "background. Fell back to the absolute floor and every detection "
+                    "is reported for judgement."),
+            floor_is_measured=False,
+        )
     return NoiseModel(median_km_s=med, mad_km_s=mad, floor_km_s=floor, samples=n)
 
 
@@ -817,8 +880,21 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
     for c in elements.components:
         if c.channel == "cross_track":
             theta_deg = float(c.inputs.get("plane_angle_deg", 0.0))
-    expected_miss = math.hypot(abs(a.sma_km - b.sma_km),
-                               b.sma_km * math.radians(theta_deg))
+    # A radial burn separates the orbits at apsis by about a·|Δe⃗|, and
+    # omitting that term set every radial burn aside: the swept estimate was
+    # discarded, the headline fell back to element differencing, and the
+    # confidence dropped to LOW, so a real eccentricity change could never be
+    # confirmed and never reached the cumulative ΔV. Measured before the fix: a
+    # 3.8 m/s radial burn with a 3.46 km mismatch against a 2.07 km allowance.
+    d_e_vector = 0.0
+    for c in elements.components:
+        if c.channel == "radial":
+            d_e_vector = float(c.inputs.get("delta_e_vector", 0.0))
+    expected_miss = math.sqrt(
+        (a.sma_km - b.sma_km) ** 2
+        + (b.sma_km * math.radians(theta_deg)) ** 2
+        + (b.sma_km * d_e_vector) ** 2
+    )
     miss = swept.position_mismatch_km
     swept_usable = (
         not swept.failed
@@ -926,9 +1002,21 @@ def _judge(dv_km_s: float, swept: DvEstimate, ratio: float | None,
 
     agree = ratio is not None and ratio <= _AGREEMENT_HIGH
     strong = snr is not None and snr >= _SNR_HIGH
-    if agree and (strong or snr is None):
-        return "HIGH", (f"Independent estimators agree within {ratio:.2f}×"
-                        + (f", at {snr:.0f}× the measured noise." if strong else "."))
+    if snr is None:
+        # No measurable noise floor, because the object's own pair-to-pair
+        # differences were all but identical and the MAD came out zero. Two
+        # estimators agreeing says the arithmetic is consistent; it says
+        # nothing about whether the figure stands above this object's scatter,
+        # because the scatter could not be measured. Confirmation needs both.
+        return "MODERATE", (
+            "Estimators agree"
+            + (f" within {ratio:.2f}×" if ratio is not None else "")
+            + ", but this object's fit scatter could not be measured, so there "
+            "is nothing to say the figure stands above it."
+        )
+    if agree and strong:
+        return "HIGH", (f"Independent estimators agree within {ratio:.2f}×, "
+                        f"at {snr:.0f}× the measured noise.")
     if strong:
         return "MODERATE", (f"Well above noise ({snr:.0f}×), but the estimators "
                             f"differ by {ratio:.1f}×." if ratio is not None

@@ -62,12 +62,6 @@ _LONG_GAP_WARN_DAYS = 10.0  # days
 # inside this window are merged into one event.
 _MERGE_WINDOW_FLOOR_DAYS = 0.25
 
-# A cluster may span at most this many merge windows end to end. Without it the
-# chaining is unbounded: each detection is compared to the previous one, so a
-# run of closely spaced but genuinely distinct burns merges into a single
-# event. Two windows keeps a provider's duplicate of one burn together while
-# leaving a real sequence intact.
-_MERGE_SPAN_LIMIT = 2.0
 
 # Full forensic breakdowns are ~1.8 ms each against ~0.01 ms for the screening
 # estimator. Detections are ranked by ΔV and the largest this many get the full
@@ -148,6 +142,11 @@ class Manoeuvre:
 
     tle_before: TLERecord
     tle_after:  TLERecord
+
+    #: Sources other than this detection's own that reported the same burn
+    #: inside the merge window. Empty when nothing corroborated it, which on a
+    #: single-provider catalogue is every detection.
+    corroborated_by: tuple[str, ...] = ()
 
     #: The full working behind ``delta_v_km_s``: both estimates, every term in
     #: the element decomposition, the element sets side by side with their
@@ -365,7 +364,9 @@ def _j2_argp_rate(rec: TLERecord) -> float:
     """J2 arg-perigee drift rate (°/day)."""
     n  = (MU_EARTH / rec.sma_km ** 3) ** 0.5
     d  = (1.0 - rec.ecc ** 2) ** 2
-    rate = 1.5 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * (2.5 * math.sin(math.radians(rec.inc_deg)) ** 2 - 2.0) / d
+    # See the note in spectre.astro.dv_estimation._j2_argp_rate_deg_day: the
+    # previous form was the exact negative of the J2 perigee rate.
+    rate = 0.75 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * (5.0 * math.cos(math.radians(rec.inc_deg)) ** 2 - 1.0) / d
     return math.degrees(rate) * 86400.0
 
 
@@ -414,7 +415,14 @@ def _build_pairs(records: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, f
     keys = {_source_key(r) for r in records}
     attributed = keys - {"UNATTRIBUTED"}
 
-    if len(attributed) < 2:
+    # Any attribution at all is enough to separate. Requiring two NAMED
+    # providers meant a catalogue of one named provider interleaved with
+    # unattributed fits fell back to plain consecutive pairing, so every pair
+    # crossed the attribution boundary: measured, 5 of 5 pairs. That is the
+    # cross-provider differencing this function exists to prevent, and it
+    # defeated the cross_source warning too, because one side had no source to
+    # compare.
+    if not attributed or (len(keys) < 2):
         return [
             (records[i - 1], records[i],
              (records[i].epoch - records[i - 1].epoch).total_seconds() / 86400.0)
@@ -435,41 +443,71 @@ def _build_pairs(records: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, f
 
 def _merge_duplicate_detections(manoeuvres: list[Manoeuvre],
                                 window_days: float) -> tuple[list[Manoeuvre], int]:
-    """Collapse the same burn seen by more than one provider into one event.
+    """Collapse one burn seen by more than one provider into one event.
 
-    Keeps the best-evidenced member of each cluster: highest confidence first,
-    then the one whose two element sets sit closest together in time, since a
-    tighter bracket localises the burn better.
+    Two detections can only be the same burn if they came from DIFFERENT
+    sources. Within a single source each record is differenced against the
+    previous record from that same source, so one burn produces exactly one
+    detection; two detections from one provider are two burns, however close
+    together they fall.
 
-    The cluster is bounded at both ends. Comparing each detection only against
-    the previous one chains without limit: ten genuinely distinct burns spaced
-    nine-tenths of a window apart collapsed into a single event, which is
-    exactly the shape of a low-thrust electric campaign. A cluster may now span
-    at most ``_MERGE_SPAN_LIMIT`` windows in total, so a real sequence stays a
-    sequence however finely spaced it is.
+    That is the whole correction. The previous version clustered on time alone
+    and chained off the most recently added member, so it grew without bound
+    while each successive step stayed inside the window. Measured: six real
+    10 m/s burns 0.9 days apart in a one-fit-per-day single-provider catalogue
+    produced five correct HIGH detections totalling 62.2 m/s, which the merge
+    then collapsed to two totalling 31.8 m/s. Half the object's measured ΔV
+    disappeared into ``merged_duplicates``, a counter documented as counting
+    cross-provider duplicates, in a catalogue with one provider and no
+    duplicates in it at all. A bounded span alone does not fix that; it only
+    changes how much is lost.
+
+    The sources that corroborated a surviving detection are recorded on it, so
+    the evidence is auditable rather than reduced to a count.
     """
     if len(manoeuvres) < 2:
         return manoeuvres, 0
 
     order = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "UNASSESSED": 3}
     ranked = sorted(manoeuvres, key=lambda m: m.burn_epoch)
-    span_limit = window_days * _MERGE_SPAN_LIMIT
 
-    def _best(cluster: list[Manoeuvre]) -> Manoeuvre:
-        return min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days))
+    def _src(m: Manoeuvre) -> str:
+        return _source_key(m.tle_after)
+
+    def _close(a: Manoeuvre, b: Manoeuvre) -> bool:
+        return abs((b.burn_epoch - a.burn_epoch).total_seconds()) / 86400.0 <= window_days
 
     merged: list[Manoeuvre] = []
     cluster: list[Manoeuvre] = [ranked[0]]
     for m in ranked[1:]:
-        gap = (m.burn_epoch - cluster[-1].burn_epoch).total_seconds() / 86400.0
-        span = (m.burn_epoch - cluster[0].burn_epoch).total_seconds() / 86400.0
-        if gap <= window_days and span <= span_limit:
+        # Same burn only if no member of the cluster shares this detection's
+        # source, and it sits inside the window of the cluster ANCHOR, not of
+        # whatever was added last.
+        same_burn = (
+            _src(m) not in {_src(c) for c in cluster}
+            and _close(cluster[0], m)
+        )
+        if same_burn:
             cluster.append(m)
         else:
-            merged.append(_best(cluster))
+            merged.append(_pick_best(cluster, order))
             cluster = [m]
-    merged.append(_best(cluster))
+    merged.append(_pick_best(cluster, order))
     return merged, len(manoeuvres) - len(merged)
+
+
+def _pick_best(cluster: list[Manoeuvre], order: dict[str, int]) -> Manoeuvre:
+    """The best-evidenced member of a cluster, carrying who else saw it.
+
+    Highest confidence first, then the tightest element set bracket, since a
+    shorter gap localises the burn better.
+    """
+    best = min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days))
+    others = tuple(sorted({_source_key(c.tle_after) for c in cluster
+                           if c is not best}))
+    if others:
+        best.corroborated_by = others
+    return best
 
 
 #: Which orbital element each ΔV channel moves.
@@ -702,6 +740,12 @@ def analyse_pattern_of_life(
     # treatment even when the budget binds.
     candidates.sort(key=lambda c: c[3], reverse=True)
     rejected_below_floor = len(pairs) - len(candidates)
+    # Captured before `candidates` is rebound to the candidate-TIER manoeuvre
+    # list below. Reading it after the rebind made this counter the number of
+    # low-confidence manoeuvres minus the budget, which is negative in every
+    # realistic case and so reported zero however many detections were actually
+    # truncated.
+    pairs_over_forensic_budget = max(0, len(candidates) - _MAX_FULL_BREAKDOWNS)
 
     manoeuvres: list[Manoeuvre] = []
     for rank, (rp, rc, gap, screen) in enumerate(candidates):
@@ -765,7 +809,7 @@ def analyse_pattern_of_life(
 
     # ── Statistics ────────────────────────────────────────────────────────────
     dv_vals   = [m.delta_v_km_s for m in manoeuvres]
-    total_dv  = sum(dv_vals)
+    total_dv  = float(sum(dv_vals))
     sorted_m  = sorted(manoeuvres, key=lambda m: m.epoch)
 
     intervals: list[float] = []
@@ -845,5 +889,5 @@ def analyse_pattern_of_life(
         rejected_on_evidence=rejected_on_evidence,
         skipped_long_gap=skipped_long_gap,
         merged_duplicates=merged_duplicates,
-        breakdowns_truncated=max(0, len(candidates) - _MAX_FULL_BREAKDOWNS),
+        breakdowns_truncated=pairs_over_forensic_budget,
     )

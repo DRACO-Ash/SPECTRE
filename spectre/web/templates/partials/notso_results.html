@@ -13,10 +13,14 @@
 
 {# ── Behaviour Profile Card ─────────────────────────────────────────────────── #}
 {% set rate_pct = (profile.notification_rate * 100) | round(0) | int %}
+{# The rate is over REPORTABLE manoeuvres only. Scoring it over every detected
+   manoeuvre measured how much routine station-keeping an object does rather
+   than how forthcoming its operator is, and put a compliant operator in the
+   lowest band. #}
 {% if profile.consistent_notifier %}
   {% set rate_color = "#22c55e" %}
   {% set rate_label = "Consistent Notifier" %}
-{% elif profile.stealth_operator %}
+{% elif profile.low_notification_rate %}
   {% set rate_color = "#ef4444" %}
   {% set rate_label = "Stealth Operator" %}
 {% else %}
@@ -55,8 +59,11 @@
         <div><span style="color:var(--text-dim)">Total detected:</span> <strong>{{ profile.total_manoeuvres }}</strong></div>
         <div><span style="color:var(--text-dim)">Pre-notified:</span> <strong style="color:#22c55e">{{ profile.manoeuvres_with_notso }}</strong></div>
         <div><span style="color:var(--text-dim)">Silent:</span> <strong style="color:#ef4444">{{ profile.manoeuvres_without_notso }}</strong></div>
-        {% if profile.phantom_notso_count > 0 %}
-        <div><span style="color:var(--text-dim)">Phantom NOTSOs:</span> <strong style="color:#f59e0b">{{ profile.phantom_notso_count }}</strong></div>
+        {% if profile.notso_without_detection_count > 0 %}
+        <div title="A NOTSO is filed after human-in-the-loop analysis, so the likeliest reading is that the burn sat below this object's measured detection floor, not that the notice was spurious.">
+          <span style="color:var(--text-dim)">NOTSOs with no detection:</span>
+          <strong style="color:#f59e0b">{{ profile.notso_without_detection_count }}</strong>
+        </div>
         {% endif %}
       </div>
     </div>
@@ -102,8 +109,8 @@
   {# Behavioural flags #}
   {% set flags = [] %}
   {% if profile.consistent_notifier %}{% set _ = flags.append(("consistent notifier", "#22c55e")) %}{% endif %}
-  {% if profile.stealth_operator %}{% set _ = flags.append(("stealth operator", "#ef4444")) %}{% endif %}
-  {% if profile.inconsistent_notifier and not profile.consistent_notifier and not profile.stealth_operator %}{% set _ = flags.append(("inconsistent notifier", "#f59e0b")) %}{% endif %}
+  {% if profile.low_notification_rate %}{% set _ = flags.append(("low notification rate", "#f59e0b")) %}{% endif %}
+  {% if profile.inconsistent_notifier and not profile.consistent_notifier and not profile.low_notification_rate %}{% set _ = flags.append(("inconsistent notifier", "#f59e0b")) %}{% endif %}
   {% if profile.predictable_timing %}{% set _ = flags.append(("predictable timing", "#3b8beb")) %}{% endif %}
   {% if flags %}
   <div style="margin-top:0.35rem; display:flex; gap:0.35rem; flex-wrap:wrap">
@@ -128,7 +135,7 @@
       {{ correlations | length }} record(s) ·
       <span style="color:#22c55e">{{ correlations | selectattr('correlation_type','eq','matched') | list | length }} matched</span> ·
       <span style="color:#f59e0b">{{ correlations | selectattr('correlation_type','eq','notso_only') | list | length }} NOTSO-only</span> ·
-      <span style="color:#ef4444">{{ correlations | selectattr('correlation_type','eq','manoeuvre_only') | list | length }} manoeuvre-only</span>
+      <span style="color:var(--text-dim)" title="A detection with no notice is the EXPECTED case for a routine burn: notices are deliberately withheld for small manoeuvres so the channel is not flooded. It is not evidence of concealment.">{{ correlations | selectattr('correlation_type','eq','manoeuvre_only') | list | length }} detected, no notice expected or filed</span>
     </span>
   </div>
 

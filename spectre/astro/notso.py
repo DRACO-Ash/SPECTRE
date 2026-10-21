@@ -98,36 +98,73 @@ class OperatorBehaviourProfile:
     std_magnitude_ratio:    float | None
     window_accuracy_rate:   float       # Fraction where manoeuvre fell inside NOTSO window
 
-    # NOTSOs without detected manoeuvres
-    phantom_notso_count:    int
-    phantom_notso_types:    dict[str, int] = field(default_factory=dict)
+    # NOTSOs with no detected manoeuvre beside them.
+    #
+    # NOT evidence that the operator filed a notice for a burn that never
+    # happened. A NOTSO is issued only after human-in-the-loop analysis, so its
+    # presence is strong evidence a burn occurred; the absence of a matching
+    # detection is far more likely to mean the burn sat below OUR measured
+    # detection floor, which on most LEO catalogues is above routine
+    # station-keeping. The field was called phantom_notso_count, which put the
+    # blame in exactly the wrong place.
+    notso_without_detection_count: int = 0
+    notso_without_detection_types: dict[str, int] = field(default_factory=dict)
 
-    # Behavioural flags
-    consistent_notifier:    bool = False   # notification_rate > 0.90
+    # ── Reportability ────────────────────────────────────────────────────────
+    # A NOTSO is not filed for every burn. Small, routine manoeuvres are
+    # deliberately left unreported to stop the notification channel filling
+    # with inconsequential traffic, so a routine station-keeping burn is not
+    # expected to carry one. Measuring a notification rate over EVERY detected
+    # manoeuvre therefore scores a fully compliant operator near zero and, on
+    # the bands below, called them a stealth operator.
+    reportable_manoeuvres:       int = 0
+    below_reporting_threshold:   int = 0
+    reporting_threshold_km_s:    float | None = None
+
+    # Behavioural flags, computed over REPORTABLE manoeuvres only and only when
+    # there are enough of them to mean anything.
+    consistent_notifier:    bool = False   # rate > 0.90
     inconsistent_notifier:  bool = False   # 0.30 ≤ rate ≤ 0.90
-    stealth_operator:       bool = False   # rate < 0.30
+    low_notification_rate:  bool = False   # rate < 0.30
+    behaviour_unassessable: bool = False   # too few reportable manoeuvres
     predictable_timing:     bool = False   # std_lead_time < 6 h
 
     def summary(self) -> str:
         rate_pct = f"{self.notification_rate * 100:.0f}%"
-        if self.consistent_notifier:
-            behaviour = f"consistent notifier ({rate_pct})"
-        elif self.stealth_operator:
-            behaviour = f"stealth operator — low notification rate ({rate_pct})"
+        if self.behaviour_unassessable:
+            behaviour = (f"notification behaviour not assessable — only "
+                         f"{self.reportable_manoeuvres} manoeuvre(s) above the "
+                         "reporting threshold")
+        elif self.consistent_notifier:
+            behaviour = f"consistent notifier ({rate_pct} of reportable manoeuvres)"
+        elif self.low_notification_rate:
+            behaviour = f"low notification rate ({rate_pct} of reportable manoeuvres)"
         else:
-            behaviour = f"inconsistent notifier ({rate_pct})"
+            behaviour = f"inconsistent notifier ({rate_pct} of reportable manoeuvres)"
 
         parts = [
             f"SATNO {self.norad_id}: {behaviour}.",
-            f"{self.total_manoeuvres} manoeuvres detected, {self.manoeuvres_with_notso} pre-notified.",
+            f"{self.total_manoeuvres} manoeuvres detected, of which "
+            f"{self.reportable_manoeuvres} above the reporting threshold and "
+            f"{self.manoeuvres_with_notso} pre-notified.",
         ]
+        if self.below_reporting_threshold:
+            parts.append(
+                f"{self.below_reporting_threshold} sat below it and would not be "
+                "expected to carry a notice."
+            )
         if self.mean_lead_time_h is not None:
             parts.append(
                 f"Mean notification lead time: {self.mean_lead_time_h:.1f}h"
                 + (f" ± {self.std_lead_time_h:.1f}h." if self.std_lead_time_h else ".")
             )
-        if self.phantom_notso_count > 0:
-            parts.append(f"{self.phantom_notso_count} NOTSO(s) filed with no corresponding detected manoeuvre.")
+        if self.notso_without_detection_count > 0:
+            parts.append(
+                f"{self.notso_without_detection_count} NOTSO(s) have no detection "
+                "beside them. A NOTSO follows human analysis, so the likeliest "
+                "reading is that the burn sat below this object's measured "
+                "detection floor rather than that the notice was spurious."
+            )
         if self.predictable_timing:
             parts.append("Timing is predictable (low lead-time variance).")
         return " ".join(parts)
@@ -476,16 +513,50 @@ def extract_behaviour_profile(
     correlations: list[NOTSOManoeuvreCorrelation],
     analysis_start: datetime,
     analysis_end: datetime,
+    reportable_threshold_km_s: float | None = None,
+    min_reportable_for_behaviour: int = 3,
 ) -> OperatorBehaviourProfile:
-    """Aggregate correlations into an OperatorBehaviourProfile."""
+    """Aggregate correlations into an OperatorBehaviourProfile.
+
+    *reportable_threshold_km_s* is the ΔV below which a manoeuvre would not be
+    expected to carry a NOTSO. Notices follow human-in-the-loop analysis and
+    are deliberately withheld for small, routine burns so the channel is not
+    flooded with inconsequential traffic, so a routine station-keeping
+    manoeuvre carries no notice and its absence says nothing about the
+    operator. Scoring the notification rate over every detected manoeuvre
+    therefore measured how much routine station-keeping an object does, not how
+    forthcoming its operator is, and put a compliant operator in the lowest
+    band. Pass the routine per-burn ceiling for the object's regime; without it
+    the rate is computed over everything and the behaviour bands are withheld.
+
+    *min_reportable_for_behaviour* is the smallest number of reportable
+    manoeuvres from which a behavioural band will be offered at all. One
+    unreported burn out of one is not a pattern.
+    """
     matched  = [c for c in correlations if c.correlation_type == "matched"]
     notso_only = [c for c in correlations if c.correlation_type == "notso_only"]
     mnv_only   = [c for c in correlations if c.correlation_type == "manoeuvre_only"]
 
+    def _dv(c: NOTSOManoeuvreCorrelation) -> float:
+        return float(getattr(c.manoeuvre, "delta_v_km_s", 0.0) or 0.0)
+
     total_mnv     = len(matched) + len(mnv_only)
     with_notso    = len(matched)
     without_notso = len(mnv_only)
-    notif_rate    = with_notso / total_mnv if total_mnv > 0 else 0.0
+
+    if reportable_threshold_km_s is None:
+        reportable_matched, reportable_missing = matched, mnv_only
+        below_threshold = 0
+    else:
+        reportable_matched = [c for c in matched if _dv(c) >= reportable_threshold_km_s]
+        reportable_missing = [c for c in mnv_only if _dv(c) >= reportable_threshold_km_s]
+        below_threshold = (len(matched) + len(mnv_only)
+                           - len(reportable_matched) - len(reportable_missing))
+
+    reportable = len(reportable_matched) + len(reportable_missing)
+    notif_rate = len(reportable_matched) / reportable if reportable > 0 else 0.0
+    assessable = (reportable >= min_reportable_for_behaviour
+                  and reportable_threshold_km_s is not None)
 
     # Lead times (NOTSO effective_start − manoeuvre epoch)
     lead_times = [c.time_offset_hours for c in matched if c.time_offset_hours is not None]
@@ -520,12 +591,12 @@ def extract_behaviour_profile(
             window_hits += 1
     window_acc = window_hits / len(matched) if matched else 0.0
 
-    # Phantom NOTSOs by type
-    phantom_types: dict[str, int] = {}
+    # NOTSOs with no detection beside them, by type.
+    undetected_types: dict[str, int] = {}
     for c in notso_only:
         if c.notso:
             t = c.notso.notso_type.value
-            phantom_types[t] = phantom_types.get(t, 0) + 1
+            undetected_types[t] = undetected_types.get(t, 0) + 1
 
     profile = OperatorBehaviourProfile(
         norad_id=norad_id,
@@ -542,11 +613,15 @@ def extract_behaviour_profile(
         mean_magnitude_ratio=round(mean_mr, 3) if mean_mr is not None else None,
         std_magnitude_ratio=round(std_mr, 3) if std_mr is not None else None,
         window_accuracy_rate=round(window_acc, 4),
-        phantom_notso_count=len(notso_only),
-        phantom_notso_types=phantom_types,
-        consistent_notifier=notif_rate > 0.90,
-        inconsistent_notifier=0.30 <= notif_rate <= 0.90,
-        stealth_operator=notif_rate < 0.30,
+        notso_without_detection_count=len(notso_only),
+        notso_without_detection_types=undetected_types,
+        reportable_manoeuvres=reportable,
+        below_reporting_threshold=below_threshold,
+        reporting_threshold_km_s=reportable_threshold_km_s,
+        behaviour_unassessable=not assessable,
+        consistent_notifier=assessable and notif_rate > 0.90,
+        inconsistent_notifier=assessable and 0.30 <= notif_rate <= 0.90,
+        low_notification_rate=assessable and notif_rate < 0.30,
         predictable_timing=bool(std_lt is not None and std_lt < 6.0),
     )
     return profile

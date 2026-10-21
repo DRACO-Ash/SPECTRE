@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.data.intel import get_intel
+from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
 from spectre.domain.pol_assessment import assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
@@ -153,13 +154,30 @@ async def pol_panel(
     request: Request,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Return the PoL panel — credential form + results placeholder."""
+    """Return the PoL panel — credential form + results placeholder.
+
+    ``pol_panel.html`` includes ``pol_results.html`` whenever an analysis is in
+    session state, so this route has to supply that template's whole context
+    too. It did not, and the result was a hard 500 on every reload of the panel
+    once the operator had run an analysis: the include fired, the first name it
+    read was undefined, and StrictUndefined raised.
+
+    That is the correct behaviour from StrictUndefined. The alternative, Jinja's
+    silent default, would have rendered the panel with every figure blank and
+    nothing to say why.
+    """
     state = get_session_state(current_user.username)
-    return render(request, "partials/pol_panel.html", {
+    pol = getattr(state, "last_pol_analysis", None)
+    context: dict[str, object] = {
         "has_udl": bool(state.udl_username),
-        "pol": getattr(state, "last_pol_analysis", None),
+        "pol": pol,
         "error": None,
-    })
+    }
+    if pol is not None:
+        context.update(_pol_view(pol, _reserve_reset_for(state, pol.satno)))
+        context.setdefault("source", "UDL")
+        context.setdefault("pair", get_intel(pol.satno))
+    return render(request, "partials/pol_panel.html", context)
 
 
 @router.post("/analyse", response_class=HTMLResponse)
@@ -287,6 +305,23 @@ async def pol_analyse(
         "pair": get_intel(satno),
         **_pol_view(pol, _reserve_reset_for(state, satno)),
     })
+
+
+def _all_detections(pol: object) -> list[Any]:
+    """Confirmed manoeuvres and unconfirmed candidates together.
+
+    The two-tier split exists so that unconfirmed detections stay out of the
+    cumulative ΔV and the propellant budget. It is NOT a filter on what
+    external evidence may be compared against. A NOTSO is an operator's own
+    declaration that a burn happened, so correlating it against the confirmed
+    list alone reports a declared manoeuvre as a phantom whenever our own
+    detection of it fell to candidate confidence — and a NOTSO matching a
+    candidate is corroboration of that candidate, which is the single
+    strongest thing that could be said about it.
+    """
+    return list(getattr(pol, "manoeuvres", []) or []) + list(
+        getattr(pol, "candidate_manoeuvres", []) or []
+    )
 
 
 def _reserve_reset_for(state: object, satno: int) -> datetime | None:
@@ -686,7 +721,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917 - FastAPI form parameters
     # Find the manoeuvre matching the requested epoch
     target_epoch_str = manoeuvre_epoch[:19]  # trim to seconds
     matching = [
-        m for m in pol.manoeuvres
+        m for m in _all_detections(pol)
         if m.epoch.strftime("%Y-%m-%dT%H:%M:%S") == target_epoch_str
     ]
     if not matching:
@@ -897,13 +932,29 @@ async def pol_notso_correlate(
             )
 
     try:
+        # A NOTSO follows human analysis and is deliberately withheld for
+        # small routine burns, so the routine per-burn ceiling for this
+        # object's regime is the line below which no notice is expected.
+        reportable_m_s, _ = per_event_station_keeping_m_s(
+            str(getattr(pol, "regime", "") or ""),
+        )
+        # notso.py is an astro module and works in km/s; the calibration is
+        # m/s. This is the conversion, in that direction, and it is the only
+        # one on this path.
+        reportable_km_s = reportable_m_s / 1000.0
         correlations = correlate_notsos_with_manoeuvres(
-            notsos, pol.manoeuvres, pol.satno
+            notsos, _all_detections(pol), pol.satno
         )
 
         start = pol.records[0].epoch if pol.records else (pol.manoeuvres[0].epoch if pol.manoeuvres else None)
         end   = pol.records[-1].epoch if pol.records else (pol.manoeuvres[-1].epoch if pol.manoeuvres else None)
-        profile = extract_behaviour_profile(pol.satno, correlations, start, end) if (start and end) else None
+        profile = (
+            extract_behaviour_profile(
+                pol.satno, correlations, start, end,
+                reportable_threshold_km_s=reportable_km_s,
+            )
+            if (start and end) else None
+        )
 
         state.append_log(
             f"[NOTSO] Correlated {len(notsos)} NOTSOs ({source_label}) for {pol.satno}: "
@@ -976,7 +1027,9 @@ async def pol_photometry_analyse(
                 f'<p class="error-msg">Need at least 5 valid observations, got {len(observations)}.</p>'
             )
 
-        manoeuvres = pol.manoeuvres if pol else []
+        # Photometry corroborates in the same way a NOTSO does: a brightness
+        # change beside a candidate detection is evidence for it.
+        manoeuvres = _all_detections(pol) if pol else []
         result = assess_photometry(
             observations,
             manoeuvres=manoeuvres,

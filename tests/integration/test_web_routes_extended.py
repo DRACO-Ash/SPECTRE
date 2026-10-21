@@ -609,3 +609,32 @@ class TestTrainingFullWorkflow:
         assert resp2.status_code == 200
         # Both should succeed without error
         assert b"error" not in resp2.content.lower()
+
+
+class TestPolPanelRendersAfterAnalysis:
+    """GET /pol/panel includes pol_results.html once an analysis exists.
+
+    That include fired with none of the results template's context, so the
+    first name it read was undefined and StrictUndefined raised: a hard 500 on
+    every reload of the panel after the operator had run an analysis.
+    """
+
+    def test_panel_reload_after_an_analysis_does_not_500(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
+        from spectre.web.planning_state import get_session_state
+        from tests.unit.test_dv_estimation import TestTwoTierReporting
+
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
+        )
+        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+
+        resp = client.get(  # type: ignore[attr-defined]
+            "/pol/panel", cookies={"spectre_session": auth_cookie},
+        )
+        assert resp.status_code == 200
+        body = resp.content.decode()
+        assert "Detection Provenance" in body
+        assert "Manoeuvre Catalogue" in body

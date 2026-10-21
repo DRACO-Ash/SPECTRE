@@ -462,39 +462,89 @@ class TestReviewFindings:
         assert "TOTAL lifetime budget standing in" in caveats
 
     def test_a_campaign_does_not_collapse_into_one_burn(self) -> None:
-        """Comparing each detection only to the previous one chains without
-        limit: ten distinct burns nine-tenths of a window apart became one,
-        which is the shape of a low-thrust electric campaign."""
+        """Two detections can only be one burn if they came from DIFFERENT
+        sources. Within a source each record is differenced against the
+        previous record from that same source, so one burn gives exactly one
+        detection and two detections are two burns.
+
+        The previous clustering went on time alone and chained off the most
+        recently added member, so a run of real burns a fraction of a window
+        apart collapsed into a single event. Measured: six 10 m/s burns 0.9
+        days apart in a one-fit-per-day catalogue produced five correct
+        detections totalling 62.2 m/s and the merge reduced them to two
+        totalling 31.8 m/s, in a catalogue with one provider and no duplicates
+        in it at all.
+        """
         from datetime import timedelta
 
         from spectre.astro.pattern_of_life import _merge_duplicate_detections
 
+        class _Rec:
+            def __init__(self, source: str) -> None:
+                self.source = source
+
         class _Stub:
-            def __init__(self, day: float) -> None:
+            def __init__(self, day: float, source: str = "18SDS") -> None:
                 self.burn_epoch = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=day)
                 self.confidence = "HIGH"
                 self.gap_days = 0.1
+                self.tle_after = _Rec(source)
+                self.corroborated_by: tuple[str, ...] = ()
 
         chain = [_Stub(d * 0.9) for d in range(10)]
         kept, merged = _merge_duplicate_detections(chain, 1.0)
-        assert len(kept) > 1, "a campaign must not collapse to a single event"
-        assert merged < 9
+        assert len(kept) == 10, "one provider cannot produce a duplicate"
+        assert merged == 0
 
     def test_one_burn_seen_by_two_providers_stays_one_burn(self) -> None:
-        """The span cap must not stop real duplicate merging."""
         from datetime import timedelta
 
         from spectre.astro.pattern_of_life import _merge_duplicate_detections
 
+        class _Rec:
+            def __init__(self, source: str) -> None:
+                self.source = source
+
         class _Stub:
-            def __init__(self, day: float) -> None:
+            def __init__(self, day: float, source: str) -> None:
                 self.burn_epoch = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=day)
                 self.confidence = "HIGH"
                 self.gap_days = 0.1
+                self.tle_after = _Rec(source)
+                self.corroborated_by: tuple[str, ...] = ()
 
-        kept, merged = _merge_duplicate_detections([_Stub(0.0), _Stub(0.2)], 1.0)
+        kept, merged = _merge_duplicate_detections(
+            [_Stub(0.0, "18SDS"), _Stub(0.2, "COMSPOC")], 1.0,
+        )
         assert len(kept) == 1
         assert merged == 1
+        assert kept[0].corroborated_by == ("COMSPOC",), (
+            "who else saw the burn is evidence and must survive the merge"
+        )
+
+    def test_two_providers_reporting_two_real_burns_keep_both(self) -> None:
+        from datetime import timedelta
+
+        from spectre.astro.pattern_of_life import _merge_duplicate_detections
+
+        class _Rec:
+            def __init__(self, source: str) -> None:
+                self.source = source
+
+        class _Stub:
+            def __init__(self, day: float, source: str) -> None:
+                self.burn_epoch = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=day)
+                self.confidence = "HIGH"
+                self.gap_days = 0.1
+                self.tle_after = _Rec(source)
+                self.corroborated_by: tuple[str, ...] = ()
+
+        kept, merged = _merge_duplicate_detections(
+            [_Stub(0.0, "18SDS"), _Stub(0.1, "COMSPOC"),
+             _Stub(0.9, "18SDS"), _Stub(1.0, "COMSPOC")], 0.5,
+        )
+        assert len(kept) == 2
+        assert merged == 2
 
     def test_the_capability_signal_is_no_longer_pinned(self) -> None:
         """Before the propellant rebuild it read HIGH for every object, so

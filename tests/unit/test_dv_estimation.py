@@ -230,10 +230,17 @@ class TestKnownBurns:
         before, after, _ = _pair(1.0, 0.0, d_alt=12.66)
         bd = build_breakdown(before, after, 1.0)
         along = next(c for c in bd.components if c.channel == "along_track")
-        assert along.formula == "Δv = n · Δa / 2"
-        n = along.inputs["n_rad_s"]
+        assert along.formula == "Δv = μ · Δa / (2 · a² · v_perigee)"
+        a_km = along.inputs["a_before_km"]
         d_a = along.inputs["delta_a_km"]
-        assert abs(n * d_a / 2.0) == pytest.approx(along.dv_km_s, rel=1e-9)
+        v_peri = along.inputs["v_perigee_km_s"]
+        assert abs(MU_EARTH * d_a / (2.0 * a_km ** 2 * v_peri)) == pytest.approx(
+            along.dv_km_s, rel=1e-9
+        )
+        # On a near-circular orbit that collapses to the familiar n·Δa/2.
+        assert abs(along.inputs["n_rad_s"] * d_a / 2.0) == pytest.approx(
+            along.dv_km_s, rel=1e-3
+        )
         assert along.inputs["a_after_km"] - along.inputs["a_before_km"] == pytest.approx(d_a)
 
     @pytest.mark.parametrize(
@@ -561,3 +568,126 @@ class TestDrillDownContract:
 
         m.breakdown = None
         assert template.render(m=m, satno=62902, confirmed=True, **_breakdown_view(m))
+
+
+# ── Defects found by the adversarial physics review ─────────────────────────
+
+class TestPhysicsReviewFindings:
+    def test_the_j2_perigee_rate_is_not_the_negative_of_itself(self) -> None:
+        """ω̇ = 0.75·n·J2·(Re/p)²·(5cos²i − 1).
+
+        The form that used to sit here, 1.5·(2.5sin²i − 2), is the exact
+        negative of that, so the correction added the natural perigee rotation
+        instead of removing it and doubled it.
+        """
+        from spectre.astro.constants import J2_EARTH, R_EARTH
+        from spectre.astro.dv_estimation import _j2_argp_rate_deg_day
+
+        for a, e, i in ((6878.137, 0.001, 53.0), (42164.0, 1e-4, 0.1),
+                        (26600.0, 0.74, 63.4)):
+            n = math.sqrt(MU_EARTH / a ** 3)
+            p = a * (1 - e ** 2)
+            truth = math.degrees(
+                0.75 * n * J2_EARTH * (R_EARTH / p) ** 2
+                * (5 * math.cos(math.radians(i)) ** 2 - 1)
+            ) * 86400.0
+            assert _j2_argp_rate_deg_day(a, e, i) == pytest.approx(truth, rel=1e-9)
+
+        # Prograde LEO below the critical inclination advances its perigee.
+        assert _j2_argp_rate_deg_day(6878.137, 0.001, 53.0) > 0
+
+    @pytest.mark.parametrize("ecc", [0.0001, 0.1, 0.3, 0.5, 0.7])
+    def test_the_energy_channel_holds_on_eccentric_orbits(self, ecc: float) -> None:
+        """An eccentric orbit is cheapest to raise at perigee.
+
+        Assuming circular speed over-reported by 36% at e = 0.3 and 139% at
+        e = 0.7, which is squarely where GTO and Molniya objects sit.
+        """
+        from datetime import UTC, datetime
+
+        from spectre.astro.dv_estimation import StateSnapshot, estimate_dv_mean_elements
+
+        def _snap(a: float, e: float) -> StateSnapshot:
+            return StateSnapshot(
+                epoch=datetime(2026, 1, 1, tzinfo=UTC), sma_km=a, alt_km=a - 6378.137,
+                ecc=e, inc_deg=10.0, raan_deg=0.0, argp_deg=0.0, mean_anomaly_deg=0.0,
+                mean_motion_revday=1.0, period_min=1.0, bstar=0.0,
+                orbital_speed_km_s=math.sqrt(MU_EARTH / a),
+                mean_motion_rad_s=math.sqrt(MU_EARTH / a ** 3),
+            )
+
+        a, d_a = 24400.0, 50.0
+        r_peri = a * (1 - ecc)
+        truth = (math.sqrt(MU_EARTH * (2 / r_peri - 1 / (a + d_a)))
+                 - math.sqrt(MU_EARTH * (2 / r_peri - 1 / a))) * 1000.0
+        got = estimate_dv_mean_elements(_snap(a, ecc), _snap(a + d_a, ecc), 0.0).dv_km_s * 1000
+        assert got == pytest.approx(truth, rel=0.01)
+
+    @pytest.mark.parametrize("d_ecc", [1e-4, 5e-4, 1e-3, 5e-3])
+    def test_a_radial_burn_can_be_confirmed(self, d_ecc: float) -> None:
+        """The orbits separate at apsis by about a·|Δe⃗|.
+
+        Omitting that term from the expected mismatch set every radial burn
+        aside, so the headline fell back to element differencing and the
+        confidence dropped to LOW. A real eccentricity change could never be
+        confirmed and never reached the cumulative ΔV.
+        """
+        noise = calibrate_noise([1e-5 + (i % 5) * 1e-6 for i in range(500)])
+        before, after, true_dv = _pair(1.0, 0.5, d_ecc=d_ecc)
+        bd = build_breakdown(before, after, 1.0, noise)
+        assert bd.headline_method == "epoch_swept"
+        assert bd.dv_m_s == pytest.approx(true_dv, rel=0.02)
+        assert bd.confidence == "HIGH"
+
+    def test_a_floor_above_any_fit_scatter_is_not_reported_as_measured(self) -> None:
+        """Median and MAD are robust only while manoeuvres are a minority.
+
+        Once most pairs contain a burn the median IS a burn: measured, 50%
+        contamination at 50 m/s produced a floor of 149 m/s, rejecting
+        everything it existed to find.
+        """
+        quiet = calibrate_noise([0.0005] * 180 + [0.050] * 20)
+        assert quiet.floor_is_measured
+
+        for fraction in (0.5, 0.6, 0.8, 1.0):
+            n = 200
+            burns = int(n * fraction)
+            noisy = calibrate_noise([0.0005] * (n - burns) + [0.050] * burns)
+            assert not noisy.floor_is_measured, f"{fraction:.0%} contamination"
+            assert noisy.floor_km_s == pytest.approx(1.0e-4)
+            assert "manoeuvre" in noisy.method
+
+    def test_an_unmeasurable_noise_floor_cannot_confirm(self) -> None:
+        """Two estimators agreeing says the arithmetic is consistent. It says
+        nothing about whether the figure stands above a scatter that could not
+        be measured, and confirmation needs both."""
+        degenerate = calibrate_noise([0.002] * 100)
+        assert degenerate.snr(0.05) is None
+        before, after, _ = _pair(1.0, 0.5, d_alt=25.0)
+        bd = build_breakdown(before, after, 1.0, degenerate)
+        assert bd.confidence != "HIGH"
+        assert "could not be measured" in bd.confidence_reason
+
+    def test_one_named_provider_still_separates_from_unattributed_fits(self) -> None:
+        """Requiring two NAMED providers meant a catalogue of one named
+        provider interleaved with unattributed fits fell back to plain
+        consecutive pairing, so every pair crossed the attribution boundary."""
+        from spectre.astro.pattern_of_life import _build_pairs
+
+        records, tle = [], _base()
+        for k in range(6):
+            records.append(_rec(tle, source="18SDS" if k % 2 == 0 else ""))
+            tle = _coast(tle, 0.1)
+        pairs = _build_pairs(records)
+        assert pairs
+        for before, after, _gap in pairs:
+            assert (before.source or "") == (after.source or "")
+
+    def test_a_wholly_unattributed_catalogue_still_pairs(self) -> None:
+        records = [_rec(_coast(_base(), k * 0.1)) for k in range(5)]
+        assert len(_build_pairs_safe(records)) == 4
+
+
+def _build_pairs_safe(records: list[TLERecord]) -> list:
+    from spectre.astro.pattern_of_life import _build_pairs
+    return _build_pairs(records)

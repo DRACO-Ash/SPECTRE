@@ -340,7 +340,12 @@ class TestExtractBehaviourProfile:
                 magnitude_ratio=None,
             ))
         end = start + timedelta(days=200)
-        return extract_behaviour_profile(43689, correlations, start, end)
+        # A reportability threshold well below the fixture's manoeuvre ΔVs, so
+        # every one of them counts as reportable and the rate is over the same
+        # denominator these assertions were written against.
+        return extract_behaviour_profile(
+            43689, correlations, start, end, reportable_threshold_km_s=1e-9,
+        )
 
     def test_notification_rate_all_notified(self):
         p = self._build_profile(5, 5)
@@ -350,7 +355,59 @@ class TestExtractBehaviourProfile:
     def test_notification_rate_none_notified(self):
         p = self._build_profile(5, 0)
         assert p.notification_rate == pytest.approx(0.0)
-        assert p.stealth_operator is True
+        assert p.low_notification_rate is True
+
+    def test_routine_burns_are_not_counted_against_the_operator(self):
+        """A NOTSO follows human analysis and is deliberately withheld for
+        small routine manoeuvres, so their absence says nothing.
+
+        Scoring the rate over every detected manoeuvre measured how much
+        routine station-keeping an object does rather than how forthcoming its
+        operator is, and put a fully compliant operator in the lowest band and
+        labelled them a stealth operator.
+        """
+        # Ten manoeuvres, every one of them routine at 1 m/s, none notified.
+        p = self._build_profile(10, 0)
+        assert p.notification_rate == pytest.approx(0.0)
+        assert p.low_notification_rate is True, "sanity: the fixture is unreported"
+
+        above_every_fixture_burn = 1.0   # km/s
+        correlations = []
+        start = _dt("2025-01-01T00:00:00")
+        for i in range(10):
+            correlations.append(NOTSOManoeuvreCorrelation(
+                notso=None,
+                manoeuvre=_FakeManoeuvre(start + timedelta(days=i * 5), 0.001),
+                correlation_type="manoeuvre_only",
+                time_offset_hours=None, magnitude_ratio=None,
+            ))
+        routine = extract_behaviour_profile(
+            43689, correlations, start, start + timedelta(days=200),
+            reportable_threshold_km_s=above_every_fixture_burn,
+        )
+        assert routine.below_reporting_threshold == 10
+        assert routine.reportable_manoeuvres == 0
+        assert routine.behaviour_unassessable is True
+        assert routine.low_notification_rate is False, (
+            "an operator whose only manoeuvres are below the reporting "
+            "threshold must not be graded on notices nobody expected"
+        )
+
+    def test_one_unreported_burn_is_not_a_pattern(self):
+        correlations = []
+        start = _dt("2025-01-01T00:00:00")
+        correlations.append(NOTSOManoeuvreCorrelation(
+            notso=None, manoeuvre=_FakeManoeuvre(start, 0.050),
+            correlation_type="manoeuvre_only",
+            time_offset_hours=None, magnitude_ratio=None,
+        ))
+        p = extract_behaviour_profile(
+            43689, correlations, start, start + timedelta(days=100),
+            reportable_threshold_km_s=0.002,
+        )
+        assert p.reportable_manoeuvres == 1
+        assert p.behaviour_unassessable is True
+        assert p.low_notification_rate is False
 
     def test_notification_rate_partial(self):
         p = self._build_profile(10, 6)
@@ -373,8 +430,13 @@ class TestExtractBehaviourProfile:
         p = self._build_profile(4, 4)
         assert p.window_accuracy_rate == pytest.approx(1.0)
 
-    def test_phantom_notso_count(self):
-        """notso_only correlations counted as phantom NOTSOs."""
+    def test_notso_without_detection_count(self):
+        """A NOTSO with no detection beside it is counted, not blamed.
+
+        It used to be called a phantom. A NOTSO is filed after
+        human-in-the-loop analysis, so the likeliest reading is that the burn
+        sat below this object's measured detection floor.
+        """
         correlations = []
         start = _dt("2025-01-01T00:00:00")
         for i in range(3):
@@ -401,4 +463,4 @@ class TestExtractBehaviourProfile:
                 magnitude_ratio=None,
             ))
         p = extract_behaviour_profile(43689, correlations, start, start + timedelta(days=100))
-        assert p.phantom_notso_count == 3
+        assert p.notso_without_detection_count == 3
