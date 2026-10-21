@@ -1,9 +1,14 @@
-
-!docs/*.json
-!docs/*.md
-!docs/*.py
-!docs/*.txt
 !docs/SPECTRE_Operator_Guide.docx
+# docs/ is deliberately NOT ignored. Five "!docs/*.ext" negations used to sit
+# here trying to carve it back out from a "docs/*" rule further down, and they
+# never worked: gitignore applies the LAST matching rule, so the broad rule
+# always won. Both the rule and the negations are gone. Nothing here excludes
+# docs/ now, and nothing should: .dockerignore keeps it out of the image, the
+# packager deletes it from the staging tree, sonar.sources names only spectre
+# and tle_clustering, and package-appstore.sh REQUIRES docs/CHANGE-LEDGER.md to
+# exist. tests/unit/test_docs_are_committable.py probes a new file and fails if
+# this comes back.
+
 # Additional .env spellings the base pattern misses
 # Claude Code
 # Claude Code memory
@@ -109,7 +114,6 @@ coverage/
 /data/
 dist/
 dmypy.json
-docs/*
 eggs/
 ehthumbs.db
 env/
