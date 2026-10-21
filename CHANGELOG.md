@@ -7,6 +7,92 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.20] - 2026-10-21
+
+The open-source delta-V assessment, assimilated. Pattern of Life now reads the
+same cited figures the threat sweep has used since 0.5.15.
+
+### Fixed
+
+- **Four of the assessment's own named counterspace events classified as
+  routine station-keeping.** `_SK_DV_LIMIT` applied Table 3's **annual**
+  budgets as **per-event** limits; its GEO and HEO values matched the annual
+  figures exactly. The GEO graveyard raise, both Luch/Olymp-K relocations and a
+  180° repositioning all came back as station-keeping. The ceiling is now
+  derived from the annual budget and the object's own observed cadence: 1.84
+  m/s for a GEO burn at a fortnightly cycle, against the 50 m/s in force.
+
+- **The propellant figure measured the wrong thing.** It reported the fraction
+  of **total spacecraft mass** under a label naming the fraction of the
+  **propellant load**. They differ by the propellant mass fraction, so a LEO
+  smallsat reading 0.9% had in fact spent about 9.2% of its tank. It also
+  applied 900 kg on a 3-tonne platform to every object in every regime, and
+  computed remaining ΔV with a `prop + prop` denominator that returned a
+  constant 1,495 m/s whatever the object.
+
+- **The incapacity band could not fire.** The threat assessment grades an
+  object unable to act at 95% propellant consumed, and that dominates every
+  other capability signal. With the old estimator it fired on everything, so
+  SATNO 62902 would have read as incapable while actively manoeuvring.
+  Correcting the ΔV did not fix it: 95% of total mass needs 9.40 km/s against a
+  practical ceiling of 2.5. Reading the tank instead needs 1.57 km/s for a LEO
+  smallsat, which is inside Table 2's envelope. A discretionary-reserve signal
+  was added alongside, because most of a comsat's remaining tank is committed
+  to station-keeping and cannot be spent on manoeuvring against anyone.
+
+- **The anomaly score ignored regime.** A full budget score was awarded at 200
+  m/s/yr everywhere: 4 times routine in GEO, 8 in LEO, 200 in MEO. A navigation
+  satellite burning twice its regime's entire annual budget scored one point
+  out of a hundred.
+
+- **A quiet object was reported as passive.** Collision avoidance is
+  centimetres per second to about 1 m/s and Starlink flew 207,152 of them in
+  six months, all of it below any element-set detection floor. The panel now
+  states the measured floor, lists which named events sit above and below it,
+  and says that a quiet result is evidence about what can be seen rather than
+  about what the object is doing.
+
+### Added
+
+- **Posture on every manoeuvre**, from the cited per-regime, per-kind bands:
+  BENIGN, ANNOYANCE, AGGRESSIVE or BEYOND PLATFORM, with the band's provenance
+  and the reasoning shown in the drill-down.
+- **Escalation at 500 m/s on station**, the assessment's second watchlist
+  recommendation. The measured decomposition distinguishes a plane change from
+  a tug, so the panel names which explanation the orbit change supports instead
+  of listing all four.
+- **How long the burn must have taken.** A 170 m/s relocation on an
+  all-electric GEO bus is 21.9 days of continuous thrust, which rules out any
+  scenario needing it at short notice. Uses the object's own assumed platform,
+  not the fastest one that could afford it.
+- **A reserve reset date**, so a refuelled object stops reading as
+  progressively more exhausted as it becomes more capable. The earlier total is
+  retained and shown separately. The transferred quantity is deliberately not
+  modelled; the one reported figure is unconfirmed secondary reporting.
+- **Graveyard disposal as a distinct classification.** Disposal and the start of
+  a drift are identical in the elements; only the altitude it ends at separates
+  them.
+
+### Changed
+
+- Classification, propellant, anomaly scoring and the operator narrative moved
+  from `spectre/astro/pattern_of_life.py` to the new
+  `spectre/domain/pol_assessment.py`. The astro package measures and stops
+  there. This also puts the m/s interpretation on the correct side of the unit
+  boundary, since astro works in km/s throughout.
+- A mixed-channel manoeuvre is now scored against the proximity band rather
+  than the permissive rendezvous one. Cosmos 2576's inspector campaign reads
+  BENIGN against rendezvous and ANNOYANCE against proximity.
+- `DEFAULT_SWEEP_BUDGET_M_S` stays at 500 m/s, deliberately. It is a sweep
+  budget, not an alert threshold; lowering it would shrink the intercept set
+  rather than tighten the watch floor. Three tests pin the figure and the
+  reasoning so it is not changed later by someone matching on the number.
+
+### Notes
+
+SPECTRE reproduces eleven of the assessment's published worked values to within
+rounding, having been built independently of them. Four are now pinned as tests.
+
 ## [0.5.19] - 2026-10-21
 
 The Pattern of Life ΔV figures were measuring the gap between element sets, not

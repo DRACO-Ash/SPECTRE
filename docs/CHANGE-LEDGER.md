@@ -677,3 +677,51 @@ never derived from anything, and the station-keeping limits they encode are
 plausible rather than cited. They matter less now that the ΔV feeding them is
 correct, but a 20 m/s station-keeping ceiling for all of LEO is an assertion,
 not a measurement.
+
+## 0.5.20
+
+The open-source delta-V assessment, assimilated. Pattern of Life now reads the
+same cited figures the threat sweep has used since 0.5.15, and the four of the
+assessment's own named counterspace events that it called routine no longer are.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Derive the per-event station-keeping ceiling instead of asserting it | `_SK_DV_LIMIT` applied Table 3's ANNUAL budgets as PER-EVENT limits. Its GEO and HEO values matched the assessment's annual figures exactly, which is how the confusion was visible rather than merely suspected. Running the real classifier on the assessment's own named events returned "station keeping" for the GEO graveyard raise (11 m/s), both Luch/Olymp-K moves (11 and 15 m/s) and a 180 degree relocation (34 m/s). The ceiling is now the annual budget spread over the object's own observed cadence: 1.84 m/s for GEO at a fortnightly cycle. | Then the ceiling is wrong, not absent. Seven parametrised tests assert no named counterspace event classifies as routine, and two assert that collision avoidance and a real north-south burn still do. |
+| Runtime correctness | **EVIDENCED** | Report the fraction of the PROPELLANT LOAD, not of total spacecraft mass | `_compute_propellant_budget` computed `1 - exp(-dv/ve)`, the fraction of total mass that had to be propellant, under a label naming the fraction of the tank. They differ by the propellant mass fraction: a LEO smallsat reading 0.9 per cent had spent about 9.2 per cent. It also applied 900 kg on a 3-tonne platform to every object in every regime, and computed `dv_remaining` with a `prop + prop` denominator returning a constant 1,495 m/s whatever the object. | Then the division is in the wrong place. One test asserts the reported figure equals the total-mass fraction divided by the propellant fraction; another asserts the remaining reserve is not that constant. |
+| Runtime correctness | **EVIDENCED** | Re-derive the incapacity threshold so it can fire at all | `threat_assessment` grades an object MINIMAL, cannot act, at 95 per cent consumed, and that band dominates every other signal. With the old estimator reporting tens of km/s it fired on every object, so SATNO 62902 would have read as unable to act while actively manoeuvring. Correcting the delta-V did not fix it: 95 per cent of TOTAL MASS needs 9.40 km/s for bipropellant against a practical ceiling of 2.5, so it could then never fire. Reading the tank instead needs 1.57 km/s for a LEO smallsat and 0.85 for a chemical GEO comsat, both inside Table 2. A discretionary-reserve signal was added alongside, because most of a comsat's remaining tank is committed to station-keeping. | Then the band is unreachable again. The arithmetic for both regimes is pinned. |
+| Runtime correctness | **EVIDENCED** | Score the anomaly budget term against the object's own regime | A full score was awarded at 200 m/s/yr for every regime: 4 times routine in GEO, 8 in LEO, 200 in MEO. A navigation satellite burning twice its regime's entire annual budget scored one point out of a hundred. | Then the per-regime figure is not reaching the score. The basis string names the regime and its cited budget, and a test asserts it. |
+| Runtime capability | **EVIDENCED** | Say what the detection floor excludes | Table 4 puts collision avoidance at centimetres per second to about 1 m/s, and Starlink flew 207,152 of them between December 2025 and May 2026. The measured floor is 0.68 m/s on a clean catalogue and 2.80 m/s where two providers contribute, so routine traffic management is below it and always will be. "No manoeuvres detected" on such an object is materially misleading, and the panel asserted the object was passive. | Then a quiet object still reads as passive. A test asserts the word does not appear in the narrative and that the named events above and below the floor are both listed. |
+| Runtime capability | **EVIDENCED** | Escalate an on-station delta-V at or above 500 m/s | The assessment's second watchlist recommendation. Nothing escalated on it. The measured decomposition distinguishes the plane-change explanation from the others, so the panel names which one the orbit change supports rather than listing four and leaving the operator to choose. | Then the escalation names the wrong cause. Two tests assert a cross-track burn leads with the plane change and an along-track one with the tug. |
+| Runtime capability | **EVIDENCED** | Carry the rate constraint into Pattern of Life | The assessment's third recommendation: characterise electric platforms by rate, not reserve. `PLATFORM_CLASSES.minimum_burn_hours` existed but only the threat sweep used it. A 170 m/s relocation on an all-electric GEO bus is 21.9 days of continuous thrust, which rules out any scenario needing it at short notice. The figure uses the object's own assumed platform, not the fastest one that could afford it: a LEO smallsat is not an orbital transfer vehicle. | Then the wrong platform is being used. One test asserts the burn platform matches the regime's assumed class and exceeds the fastest available. |
+| Runtime capability | **EVIDENCED** | Represent refuelling | The assessment's fourth recommendation. Cumulative delta-V is monotonic, so a refuelled object reads as progressively more exhausted exactly as it becomes more capable: 200 m/s gave 9.9 years remaining, 1,200 m/s gave 1.1. SJ-21 was refuelled by SJ-25 in 2025 and its spend since 2022 kept counting against it. An operator-settable reserve reset date now carries the count, with the earlier total retained and shown separately. | Then the reset is not reaching the figure. A test asserts the spend since the reset falls while the total is unchanged. |
+| Runtime correctness | **EVIDENCED** | Move every calibrated judgement into the domain layer | Two sets of numbers for the same physics is worse than one set that is wrong, because only one gets updated. `manoeuvre_calibration.py` held the cited figures; `pattern_of_life.py` imported none of it and carried uncited duplicates. The astro package also works in km/s while every operator-facing figure is m/s, so the interpretation was on the wrong side of the unit boundary as well. Classification, propellant, anomaly scoring and the narrative now live in `spectre/domain/pol_assessment.py`. | Then a constant has come back. A test asserts the astro module no longer defines `_SK_DV_LIMIT`, `_GEO_SK_BASELINE`, `_ISP_MONO`, `_ISP_BI` or any of the three compute functions. |
+| Runtime correctness | **NO CHANGE** | `DEFAULT_SWEEP_BUDGET_M_S` stays at 500 m/s | The assessment says "set the GEO alert threshold at about 0.1 km/s, not 0.5 km/s". This is the nearest 500 in the codebase and is not that threshold: it is the delta-V an interceptor is assumed able to spend. Lowering it would shrink the set of intercepts the sweep considers, which is the opposite of what the recommendation intends. The watch floor it is actually about is already at 100 m/s in the GEO posture bands. | Not applicable. Three tests pin the figure and the reasoning, so it is not "fixed" later by someone matching on the number. |
+
+### What the assessment validates
+
+SPECTRE reproduces eleven of its published worked values to within rounding,
+having been built independently of them: both plane-change-per-degree figures
+(53.66 against 54, 132.86 against 133), the GEO graveyard raise (10.94 against
+11), three relocation cases, and the semi-major axis offset at 30 degrees a day
+(2,342 km against 2,300). The estimator replaced in 0.5.19 reproduced none of
+them. Four of those are now pinned as tests so a change to either side shows up.
+
+### What it still cannot do
+
+● Military and Chinese or Russian figures are lower bounds. The assessment rates
+  its own confidence low: they are inferred from tracked orbit changes using
+  impulsive two-body approximations, which is exactly what SPECTRE does.
+● Platform ceilings are rocket-equation estimates, not published budgets. The
+  assessment rates them moderate confidence, and every verdict turning on one
+  inherits that.
+● The MEO station-keeping figure has no authoritative source. A verdict leaning
+  hard on 1 m/s/yr is leaning on the weakest row in the assessment.
+● Both estimators assume an impulse. A months-long electric transfer is not a
+  burn with a date, and where the platform is all-electric the burn epoch is the
+  midpoint of a campaign. The panel now says how long the burn must have taken,
+  which is the honest form of that caveat, but does not model the campaign.
+
+**Recorded, not fixed:** the platform class is guessed from the orbit regime
+alone. It is stated as a guess wherever it is shown, and it is strictly better
+than one 3-tonne GEO assumption for every object, but an object's intel record
+often knows better and is not consulted.

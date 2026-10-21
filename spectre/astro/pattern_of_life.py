@@ -41,9 +41,6 @@ from spectre.astro.dv_estimation import (
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
-_G0_KM_S2   = 9.80665e-3        # km/s² — standard gravity
-_ISP_MONO   = 220.0             # s  — monopropellant hydrazine (conservative)
-_ISP_BI     = 320.0             # s  — bipropellant (GEO-typical)
 _EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -72,16 +69,19 @@ _MAX_FULL_BREAKDOWNS = 500
 _DRIFT_STATIONARY = 0.05    # °/day — |drift| below this → "Stationary"
 _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 
-_SK_DV_LIMIT = {"GEO": 0.050, "LEO": 0.020, "MEO": 0.030,
-                "HEO": 0.050, "GTO": 0.100, "DEEP": 0.050}
-
-# GEO normal-SK baseline (used for anomaly scoring)
-_GEO_SK_BASELINE = dict(
-    dv_mean_ms      = 8.0,   # m/s  — typical single SK ΔV
-    interval_days   = 14.0,  # days — typical NS/EW SK cadence
-    lon_range_deg   = 1.0,   # °    — typical controlled slot box
-    max_drift_deg_d = 0.05,  # °/d  — tolerable drift in SK slot
-)
+# _SK_DV_LIMIT and _GEO_SK_BASELINE used to live here. Both are gone, and
+# nothing in this module replaces them, because neither was a measurement.
+#
+# _SK_DV_LIMIT applied Table 3's ANNUAL station-keeping budgets as PER-EVENT
+# limits: 50 m/s for GEO, against a real single north-south burn of about
+# 1.8 m/s. Four of the open-source assessment's own named counterspace events
+# classified as routine station-keeping as a result, including both
+# Luch/Olymp-K relocations. _GEO_SK_BASELINE implied 209 m/s/yr against the
+# cited 44 to 55.
+#
+# Those judgements now live in spectre/domain/pol_assessment.py, built on
+# spectre/domain/manoeuvre_calibration.py, where the figures are cited and
+# where the operator-facing unit is m/s. This module measures and stops there.
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -133,9 +133,11 @@ class Manoeuvre:
     delta_period_s:             float
     delta_drift_deg_day:        float | None   # change in longitude drift rate
 
+    #: Which element the manoeuvre principally moved. The operational label
+    #: ("station keeping", "relocation", "plane change") is a judgement against
+    #: cited per-regime budgets and is produced by
+    #: :func:`spectre.domain.pol_assessment.assess_pattern_of_life`.
     dominant_element:   str
-    manoeuvre_type:     str
-    sk_subtype:         str
 
     tle_before: TLERecord
     tle_after:  TLERecord
@@ -182,49 +184,6 @@ class DriftPhase:
 
 
 @dataclass
-class AnomalyScore:
-    """Multi-component anomaly score vs GEO-SK baseline (0–100 each)."""
-
-    dv_magnitude:   float   # how large are the burns?
-    lon_coverage:   float   # how far does it roam?
-    drift_rate:     float   # how fast does it drift?
-    sk_regularity:  float   # how irregular are the events?
-    budget_rate:    float   # annual ΔV vs GEO-SK norm?
-    overall:        float   # weighted composite
-    risk_level:     str     # "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "MINIMAL"
-
-
-@dataclass
-class PropellantBudget:
-    """Rough propellant budget estimate from cumulative ΔV."""
-
-    assumed_isp_s:          float
-    assumed_propellant_kg:  float
-    total_dv_km_s:          float
-    propellant_used_pct:    float   # % of assumed propellant mass
-    annual_dv_km_s:         float
-    remaining_life_years:   float | None
-    budget_class:           str     # "Conservative" | "Normal" | "High" | "Very High"
-
-
-@dataclass
-class IntelAssessment:
-    """Operator-level intelligence assessment."""
-
-    mission_profile:        str
-    behaviour_class:        str
-    risk_level:             str
-    operational_signature:  str
-    anomaly_narrative:      str
-    notable_periods:        list[str]
-    predicted_lon_30d:      float | None
-    predicted_lon_60d:      float | None
-    predicted_lon_90d:      float | None
-    current_drift_dir:      str
-    current_drift_rate:     float | None
-
-
-@dataclass
 class PolStats:
     mean:       float
     std:        float
@@ -267,7 +226,6 @@ class PolAnalysis:
     # Manoeuvre chart data
     manoeuvre_epochs:   list[str]
     manoeuvre_dvs:      list[float]   # m/s
-    manoeuvre_types:    list[str]
     manoeuvre_alts:     list[float]
     manoeuvre_drift_deltas: list[float]  # change in drift rate at each manoeuvre
 
@@ -278,16 +236,6 @@ class PolAnalysis:
     total_dv_km_s:  float
     dv_stats:       PolStats | None
     interval_stats: PolStats | None
-
-    # Classification
-    dominant_activity:  str
-    is_station_keeping: bool
-    sk_type:            str
-
-    # Scoring / assessment
-    anomaly_score:      AnomalyScore | None
-    propellant_budget:  PropellantBudget | None
-    intel_assessment:   IntelAssessment | None
 
     # Prediction
     next_manoeuvre_est:               str | None
@@ -512,42 +460,33 @@ _CHANNEL_ELEMENT = {
 }
 
 
-def _classify_manoeuvre(dv: float, d_alt: float, d_inc: float, d_ecc: float,
-                        regime: str, breakdown: DvBreakdown | None = None) -> tuple[str, str, str]:
-    """Dominant element, manoeuvre type and station-keeping subtype.
+def _dominant_element(d_alt: float, d_inc: float, d_ecc: float,
+                      breakdown: DvBreakdown | None = None) -> str:
+    """Which orbital element this manoeuvre principally moved.
 
-    Where a breakdown is available the dominant element is simply whichever
-    channel carries the most ΔV, which is what "dominant" means. The fallback
-    below compares raw element deltas scaled against each other, which needs
-    weights that have no physical basis; it survives only for pairs that fell
-    outside the forensic budget.
+    A measurement, not a judgement: whether that constitutes station-keeping,
+    a relocation or a plane change depends on cited per-regime budgets, which
+    are m/s and live in :mod:`spectre.domain.pol_assessment`.
+
+    Where a breakdown is available the answer is simply whichever ΔV channel
+    carries the most, which is what "dominant" means. The fallback compares raw
+    element deltas scaled against each other with weights that have no physical
+    basis; it survives only for pairs that fell outside the forensic budget.
     """
-    sk_limit = _SK_DV_LIMIT.get(regime, 0.050)
-
     if breakdown is not None and breakdown.components:
         top = max(breakdown.components, key=lambda c: c.dv_km_s)
         total = sum(c.dv_km_s for c in breakdown.components)
-        dominant = (_CHANNEL_ELEMENT.get(top.channel, "mixed")
-                    if total > 0 and top.dv_km_s / total >= 0.6 else "mixed")
-    else:
-        scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100,
-                  "eccentricity": abs(d_ecc) * 1000}
-        dominant = max(scores, key=lambda k: scores[k])
-        if abs(d_inc) > 0.05 and abs(d_inc) > abs(d_alt) * 0.1:
-            dominant = "inclination"
-        if all(v < 0.5 for v in scores.values()):
-            dominant = "mixed"
+        if total > 0 and top.dv_km_s / total >= 0.6:
+            return _CHANNEL_ELEMENT.get(top.channel, "mixed")
+        return "mixed"
 
-    if dv <= sk_limit:
-        mtype  = "station_keeping"
-        sk_sub = "NS" if abs(d_inc) > 0.02 else ("EW" if abs(d_alt) > 0.5 or abs(d_ecc) > 5e-5 else "combined")
-    elif abs(d_inc) > 0.5:
-        mtype, sk_sub = "plane_change", ""
-    elif abs(d_alt) > 50.0 or dv > sk_limit * 5:
-        mtype, sk_sub = "repositioning", ""
-    else:
-        mtype, sk_sub = "unknown", ""
-    return dominant, mtype, sk_sub
+    scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100,
+              "eccentricity": abs(d_ecc) * 1000}
+    if all(v < 0.5 for v in scores.values()):
+        return "mixed"
+    if abs(d_inc) > 0.05 and abs(d_inc) > abs(d_alt) * 0.1:
+        return "inclination"
+    return max(scores, key=lambda k: scores[k])
 
 
 def _percentile(data: list[float], p: float) -> float:
@@ -625,252 +564,6 @@ def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
 
     _flush(phase_start, geo_recs[-1], rates_in_phase, cur_dir)
     return phases
-
-
-# ── Anomaly scoring ───────────────────────────────────────────────────────────
-
-def _clamp01(x: float) -> float:
-    return max(0.0, min(1.0, x))
-
-
-def _compute_anomaly_score(
-    manoeuvres: list[Manoeuvre],
-    drift_phases: list[DriftPhase],
-    dv_stats: PolStats | None,
-    interval_stats: PolStats | None,
-    span_days: float,
-    regime: str,
-) -> AnomalyScore | None:
-    if not manoeuvres or len(manoeuvres) < 2:
-        return None
-
-    bl = _GEO_SK_BASELINE
-
-    # ΔV magnitude score (0=normal SK, 100=very large burns)
-    mean_dv_ms = (dv_stats.mean * 1000) if dv_stats else 0.0
-    dv_score   = _clamp01((mean_dv_ms - bl["dv_mean_ms"]) / (bl["dv_mean_ms"] * 4)) * 100
-
-    # Longitude coverage score (GEO only)
-    lons = [m.tle_after.geo_longitude_deg for m in manoeuvres if m.tle_after.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
-    lon_score = _clamp01(lon_range / 60.0) * 100   # 60° = full score
-
-    # Drift rate score
-    if drift_phases:
-        max_drift = max(abs(p.rate_deg_day) for p in drift_phases)
-        drift_score = _clamp01((max_drift - bl["max_drift_deg_d"]) / 1.5) * 100
-    else:
-        drift_score = 0.0
-
-    # SK regularity score (coefficient of variation of intervals)
-    if interval_stats and interval_stats.std > 0:
-        cv = interval_stats.std / max(interval_stats.mean, 0.01)
-        reg_score = _clamp01(cv / 2.0) * 100
-    else:
-        reg_score = 0.0
-
-    # Annual ΔV budget score
-    total_dv_ms = sum(m.delta_v_km_s for m in manoeuvres) * 1000
-    annual_dv   = total_dv_ms / max(span_days / 365.25, 0.1)
-    budget_score = _clamp01(annual_dv / 200.0) * 100   # 200 m/s/yr = full score
-
-    # Weighted composite
-    if regime in ("GEO", "DEEP"):
-        overall = (dv_score * 0.20 + lon_score * 0.30 + drift_score * 0.25
-                   + reg_score * 0.10 + budget_score * 0.15)
-    else:
-        overall = (dv_score * 0.30 + reg_score * 0.20 + budget_score * 0.25
-                   + drift_score * 0.10 + lon_score * 0.15)
-
-    if overall >= 75:
-        risk = "CRITICAL"
-    elif overall >= 55:
-        risk = "HIGH"
-    elif overall >= 35:
-        risk = "MEDIUM"
-    elif overall >= 15:
-        risk = "LOW"
-    else:
-        risk = "MINIMAL"
-
-    return AnomalyScore(
-        dv_magnitude=round(dv_score,  1),
-        lon_coverage=round(lon_score, 1),
-        drift_rate  =round(drift_score, 1),
-        sk_regularity=round(reg_score, 1),
-        budget_rate =round(budget_score, 1),
-        overall     =round(overall,   1),
-        risk_level  =risk,
-    )
-
-
-# ── Propellant budget ─────────────────────────────────────────────────────────
-
-def _compute_propellant_budget(
-    total_dv_km_s: float,
-    span_days: float,
-    regime: str,
-) -> PropellantBudget:
-    isp = _ISP_BI if regime in ("GEO", "DEEP", "HEO") else _ISP_MONO
-    ve  = isp * _G0_KM_S2     # exhaust velocity km/s
-    # Assume ~30% of launch mass is propellant (typical GEO)
-    assumed_prop_kg = 900.0   # kg — typical 3-tonne GEO platform
-    mass_frac_used  = 1.0 - math.exp(-total_dv_km_s / ve) if ve > 0 else 0.0
-    pct_used        = mass_frac_used * 100.0
-    annual_dv       = total_dv_km_s / max(span_days / 365.25, 0.1)
-    # Remaining propellant (rough)
-    prop_remaining  = assumed_prop_kg * (1.0 - mass_frac_used)
-    dv_remaining    = -ve * math.log(max(1.0 - prop_remaining / (assumed_prop_kg + assumed_prop_kg), 0.01)) if prop_remaining > 0 else 0.0
-    life_remaining  = dv_remaining / annual_dv if annual_dv > 0 else None
-
-    if annual_dv * 1000 > 100:
-        budget_class = "Very High"
-    elif annual_dv * 1000 > 50:
-        budget_class = "High"
-    elif annual_dv * 1000 > 20:
-        budget_class = "Normal"
-    else:
-        budget_class = "Conservative"
-
-    return PropellantBudget(
-        assumed_isp_s         = isp,
-        assumed_propellant_kg = assumed_prop_kg,
-        total_dv_km_s         = round(total_dv_km_s, 4),
-        propellant_used_pct   = round(pct_used, 1),
-        annual_dv_km_s        = round(annual_dv, 4),
-        remaining_life_years  = round(life_remaining, 1) if life_remaining and life_remaining < 50 else None,
-        budget_class          = budget_class,
-    )
-
-
-# ── Intelligence assessment ───────────────────────────────────────────────────
-
-def _intel_assessment(
-    records: list[TLERecord],
-    manoeuvres: list[Manoeuvre],
-    drift_phases: list[DriftPhase],
-    anomaly: AnomalyScore | None,
-    propellant: PropellantBudget | None,
-    regime: str,
-    span_days: float,
-) -> IntelAssessment:
-
-    # Current state
-    last_rec     = records[-1]
-    last_drift   = last_rec.geo_drift_rate_deg_day
-    cur_dir      = "EAST" if (last_drift or 0) > _DRIFT_STATIONARY else (
-                   "WEST" if (last_drift or 0) < -_DRIFT_STATIONARY else "STATIONARY")
-
-    # Longitude coverage
-    lons = [r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
-
-    # SK fraction
-    n_mnv = len(manoeuvres)
-    sk_n  = sum(1 for m in manoeuvres if m.manoeuvre_type == "station_keeping")
-    sk_frac = sk_n / n_mnv if n_mnv > 0 else 1.0
-
-    # Predictions (simple linear extrapolation of current drift)
-    pred_30 = pred_60 = pred_90 = None
-    if last_rec.geo_longitude_deg is not None and last_drift is not None:
-        cur_lon = last_rec.geo_longitude_deg
-        pred_30 = round(cur_lon + last_drift * 30,  2)
-        pred_60 = round(cur_lon + last_drift * 60,  2)
-        pred_90 = round(cur_lon + last_drift * 90,  2)
-
-    # Notable periods (significant drift phases)
-    notable: list[str] = []
-    for ph in drift_phases:
-        if ph.direction != "STATIONARY" and abs(ph.distance_deg) > 5.0:
-            notable.append(
-                f"{ph.start_epoch.strftime('%Y-%m-%d')} — {ph.end_epoch.strftime('%Y-%m-%d')}: "
-                f"{ph.direction} drift {abs(ph.distance_deg):.1f}° at {abs(ph.rate_deg_day):.2f}°/day"
-            )
-
-    # Mission profile
-    score = anomaly.overall if anomaly else 0.0
-
-    if regime in ("GEO", "DEEP"):
-        if lon_range > 30.0 or (anomaly and anomaly.drift_rate > 60):
-            mission = "On-orbit Inspection / RPO Platform (GEO Belt Roamer)"
-            bclass  = "Non-standard GEO — deliberate large-scale drift operations"
-        elif lon_range > 5.0:
-            mission = "GEO Longitude Relocation / Repositioning"
-            bclass  = "Above-normal GEO drift — repositioning to new slot"
-        elif sk_frac > 0.8:
-            mission = "Standard GEO Station-Keeping"
-            bclass  = "Normal GEO commercial / government operations"
-        else:
-            mission = "GEO — Irregular Operations"
-            bclass  = "Mixed SK and repositioning — atypical for commercial operator"
-    else:
-        if score > 55:
-            mission = f"Active Manoeuvring Platform ({regime})"
-            bclass  = "High-activity orbit adjustment — non-passive payload"
-        elif score > 25:
-            mission = f"Operational Satellite with Periodic Correction ({regime})"
-            bclass  = "Routine altitude / inclination maintenance"
-        else:
-            mission = f"Passive / Minimal-Manoeuvre Payload ({regime})"
-            bclass  = "Low activity — possible debris or decommissioned asset"
-
-    # Risk level
-    risk = anomaly.risk_level if anomaly else "MINIMAL"
-
-    # Narrative
-    if regime in ("GEO", "DEEP") and lon_range > 20.0:
-        narrative = (
-            f"This object has traversed {lon_range:.1f}° of the GEO belt over {span_days:.0f} days — "
-            f"a distance inconsistent with commercial or government station-keeping operations, which "
-            f"typically maintain a ±0.1° longitude box. The pattern of alternating drift phases and "
-            f"manoeuvres is consistent with a deliberate repositioning or proximity inspection mission. "
-            f"Current drift: {cur_dir} at {abs(last_drift or 0):.3f}°/day."
-        )
-    elif score > 55:
-        narrative = (
-            f"Analysis of {len(manoeuvres)} detected manoeuvres over {span_days:.0f} days shows "
-            f"activity significantly above the norm for this orbit regime. Manoeuvre ΔVs and "
-            f"frequency are inconsistent with routine station-keeping. Recommend enhanced monitoring."
-        )
-    elif n_mnv == 0:
-        narrative = (
-            f"No manoeuvres detected above the analysis threshold over the {span_days:.0f}-day "
-            f"observation period. Object appears passive. Consistent with debris, decommissioned "
-            f"asset, or a platform with very low thrust profile."
-        )
-    else:
-        narrative = (
-            f"Activity is broadly consistent with normal operational behaviour for a {regime} satellite. "
-            f"{n_mnv} manoeuvres detected — primarily {mission.lower()}."
-        )
-
-    # Operational signature (fingerprint)
-    if n_mnv > 0:
-        type_counts: dict[str, int] = {}
-        for m in manoeuvres:
-            type_counts[m.manoeuvre_type] = type_counts.get(m.manoeuvre_type, 0) + 1
-        sig_parts = [f"{v} {k.replace('_',' ')}" for k, v in sorted(type_counts.items(), key=lambda x: -x[1])]
-        if propellant:
-            sig_parts.append(f"~{propellant.propellant_used_pct:.0f}% propellant consumed")
-        if lon_range > 0:
-            sig_parts.append(f"{lon_range:.1f}° GEO belt coverage")
-        op_sig = " · ".join(sig_parts)
-    else:
-        op_sig = "No manoeuvres detected — passive object"
-
-    return IntelAssessment(
-        mission_profile       = mission,
-        behaviour_class       = bclass,
-        risk_level            = risk,
-        operational_signature = op_sig,
-        anomaly_narrative     = narrative,
-        notable_periods       = notable[:8],
-        predicted_lon_30d     = pred_30,
-        predicted_lon_60d     = pred_60,
-        predicted_lon_90d     = pred_90,
-        current_drift_dir     = cur_dir,
-        current_drift_rate    = round(last_drift, 3) if last_drift is not None else None,
-    )
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -1014,14 +707,14 @@ def analyse_pattern_of_life(
         if rp.geo_drift_rate_deg_day is not None and rc.geo_drift_rate_deg_day is not None:
             d_drift = rc.geo_drift_rate_deg_day - rp.geo_drift_rate_deg_day
 
-        dominant, mtype, sk_sub = _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime, bd)
+        dominant = _dominant_element(d_alt, d_inc, d_ecc, bd)
         manoeuvres.append(Manoeuvre(
             epoch=rc.epoch, gap_days=gap,
             delta_v_km_s=dv, delta_alt_km=d_alt, delta_inc_deg=d_inc,
             delta_ecc=d_ecc, delta_raan_corrected_deg=d_raan,
             delta_argp_corrected_deg=d_argp, delta_period_s=d_per,
             delta_drift_deg_day=d_drift,
-            dominant_element=dominant, manoeuvre_type=mtype, sk_subtype=sk_sub,
+            dominant_element=dominant,
             tle_before=rp, tle_after=rc, breakdown=bd,
         ))
 
@@ -1062,24 +755,6 @@ def analyse_pattern_of_life(
     dv_stats       = _pol_stats(dv_vals)
     interval_stats = _pol_stats(intervals)
 
-    # Classification
-    if manoeuvres:
-        tc: dict[str, int] = {}
-        for m in manoeuvres:
-            tc[m.manoeuvre_type] = tc.get(m.manoeuvre_type, 0) + 1
-        dominant_activity = max(tc, key=lambda k: tc[k])
-    else:
-        dominant_activity = "none_detected"
-
-    sk_count = sum(1 for m in manoeuvres if m.manoeuvre_type == "station_keeping")
-    is_sk    = len(manoeuvres) > 0 and sk_count / len(manoeuvres) >= 0.6
-    if is_sk:
-        ns_n = sum(1 for m in manoeuvres if m.sk_subtype == "NS")
-        ew_n = sum(1 for m in manoeuvres if m.sk_subtype == "EW")
-        sk_type = "inclination (NS)" if ns_n > ew_n * 2 else ("altitude (EW)" if ew_n > ns_n * 2 else "combined (EW+NS)")
-    else:
-        sk_type = "N/A"
-
     # Prediction
     next_est = next_unc = None
     if interval_stats and interval_stats.n >= 3 and sorted_m:
@@ -1105,11 +780,6 @@ def analyse_pattern_of_life(
     if not manoeuvres:
         pol_reason = "No manoeuvres detected — object appears passive."
 
-    # Scoring + assessment
-    anomaly_score    = _compute_anomaly_score(manoeuvres, drift_phases, dv_stats, interval_stats, span_days, regime)
-    propellant_budget = _compute_propellant_budget(total_dv, span_days, regime)
-    intel = _intel_assessment(records, manoeuvres, drift_phases, anomaly_score, propellant_budget, regime, span_days)
-
     # ── Chart data ────────────────────────────────────────────────────────────
     cr = _downsample(records, 500)
     chart_epochs    = [r.epoch.strftime("%Y-%m-%d") for r in cr]
@@ -1123,7 +793,6 @@ def analyse_pattern_of_life(
 
     man_epochs        = [m.epoch.strftime("%Y-%m-%d") for m in sorted_m]
     man_dvs           = [round(m.delta_v_km_s * 1000, 3) for m in sorted_m]
-    man_types         = [m.manoeuvre_type              for m in sorted_m]
     man_alts          = [round(m.tle_after.alt_km, 1)  for m in sorted_m]
     man_drift_deltas  = [round(m.delta_drift_deg_day, 3) if m.delta_drift_deg_day is not None else 0 for m in sorted_m]
 
@@ -1136,16 +805,11 @@ def analyse_pattern_of_life(
         chart_raans=chart_raans, chart_periods=chart_periods,
         chart_longitudes=chart_lons, chart_drift_rates=chart_drifts,
         manoeuvre_epochs=man_epochs, manoeuvre_dvs=man_dvs,
-        manoeuvre_types=man_types, manoeuvre_alts=man_alts,
+        manoeuvre_alts=man_alts,
         manoeuvre_drift_deltas=man_drift_deltas,
         drift_phases=drift_phases,
         total_dv_km_s=round(total_dv, 4),
         dv_stats=dv_stats, interval_stats=interval_stats,
-        dominant_activity=dominant_activity,
-        is_station_keeping=is_sk, sk_type=sk_type,
-        anomaly_score=anomaly_score,
-        propellant_budget=propellant_budget,
-        intel_assessment=intel,
         next_manoeuvre_est=next_est,
         next_manoeuvre_uncertainty_days=next_unc,
         pol_status=pol_status, pol_status_reason=pol_reason,

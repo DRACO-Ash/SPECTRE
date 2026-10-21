@@ -365,12 +365,14 @@ class TestEdgeCases:
 
 class TestTwoTierReporting:
     @staticmethod
-    def _catalogue(n: int = 300, burn_at: int = 150) -> list[TLERecord]:
-        """A coasting object with one unmistakable burn partway through."""
+    def _catalogue(n: int = 300, burn_at: int | tuple[int, ...] = 150,
+                   d_alt_km: float = 25.0) -> list[TLERecord]:
+        """A coasting object with unmistakable burns partway through."""
+        burns = (burn_at,) if isinstance(burn_at, int) else burn_at
         recs, tle = [], _base()
         for k in range(n):
-            if k == burn_at:
-                tle = _burn(tle, d_alt_km=25.0)
+            if k in burns:
+                tle = _burn(tle, d_alt_km=d_alt_km)
             recs.append(_rec(tle, source="18SDS"))
             tle = _coast(tle, 0.25)
         return recs
@@ -408,11 +410,12 @@ class TestTwoTierReporting:
         for _ in range(300):
             recs.append(_rec(tle, source="18SDS"))
             tle = _coast(tle, 0.25)
+        from spectre.domain.pol_assessment import assess_pattern_of_life
+
         pol = analyse_pattern_of_life(recs, satno=62902, name="QUIET")
         assert pol.manoeuvres == []
         assert pol.total_dv_km_s == pytest.approx(0.0, abs=1e-9)
-        assert pol.propellant_budget is not None
-        assert pol.propellant_budget.propellant_used_pct < 0.1
+        assert assess_pattern_of_life(pol).propellant.propellant_used_pct < 0.1
 
     def test_a_real_burn_is_found_and_sized_correctly(self) -> None:
         pol = analyse_pattern_of_life(self._catalogue(), satno=62902, name="TEST")

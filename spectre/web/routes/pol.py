@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import httpx
@@ -17,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.data.intel import get_intel
+from spectre.domain.pol_assessment import assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
@@ -283,11 +285,26 @@ async def pol_analyse(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol),
+        **_pol_view(pol, _reserve_reset_for(state, satno)),
     })
 
 
-def _pol_view(pol: object) -> dict[str, object]:
+def _reserve_reset_for(state: object, satno: int) -> datetime | None:
+    """The operator-recorded refuelling date for *satno*, if any.
+
+    The assessment's fourth watchlist recommendation is to track refuelling as
+    a capability multiplier: SJ-25 class activity removes the end-of-life ΔV
+    constraint on a GEO inspector. Cumulative ΔV is monotonic, so without this
+    a refuelled object reads as progressively more exhausted exactly as it
+    becomes more capable.
+    """
+    resets = getattr(state, "pol_reserve_resets", None)
+    if not isinstance(resets, dict):
+        return None
+    return resets.get(satno)
+
+
+def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
     THIS IS THE UNIT BOUNDARY for the pattern-of-life panel. ``pol`` is an
@@ -306,9 +323,15 @@ def _pol_view(pol: object) -> dict[str, object]:
     and inclination deltas) and reads only ``delta_v_m_s`` from the wrapper.
     """
     stats = getattr(pol, "dv_stats", None)
-    budget = getattr(pol, "propellant_budget", None)
+    assessment = assess_pattern_of_life(pol, reserve_reset)
 
     return {
+        "assessment": assessment,
+        "intel": assessment.intel,
+        "anomaly": assessment.anomaly,
+        "propellant": assessment.propellant,
+        "limits": assessment.detection,
+        "reserve_reset": reserve_reset,
         "total_dv_m_s": to_m_s(getattr(pol, "total_dv_km_s", None)),
         "dv_threshold_m_s": to_m_s(getattr(pol, "dv_threshold_km_s", None)),
         "pol_high_dv_m_s": to_m_s(getattr(pol, "pol_high_dv", None)),
@@ -317,16 +340,15 @@ def _pol_view(pol: object) -> dict[str, object]:
         "dv_low_2sigma_m_s": to_m_s(stats.low_2sigma) if stats else None,
         "dv_high_2sigma_m_s": to_m_s(stats.high_2sigma) if stats else None,
         "dv_p95_m_s": to_m_s(stats.p95) if stats else None,
-        "budget_total_dv_m_s": to_m_s(budget.total_dv_km_s) if budget else None,
-        "budget_annual_dv_m_s": to_m_s(budget.annual_dv_km_s) if budget else None,
-        "manoeuvre_rows": [
-            {"m": m, "delta_v_m_s": to_m_s(m.delta_v_km_s)}
-            for m in getattr(pol, "manoeuvres", [])
-        ],
-        "candidate_rows": [
-            {"m": m, "delta_v_m_s": to_m_s(m.delta_v_km_s)}
-            for m in getattr(pol, "candidate_manoeuvres", [])
-        ],
+        # The assessment already works in m/s, so these need no conversion and
+        # must not get one. Converting a converted figure is the trap that put
+        # the charts at 1,000,000x in 0.5.16.
+        "budget_total_dv_m_s": assessment.propellant.spent_m_s,
+        "budget_annual_dv_m_s": assessment.propellant.annual_rate_m_s,
+        "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
+                           for v in assessment.manoeuvres],
+        "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
+                           for v in assessment.candidates],
         "detection": _detection_view(pol),
     }
 
@@ -448,6 +470,11 @@ def _breakdown_view(m: object) -> dict[str, object]:
     than a failure in test.
     """
     view: dict[str, object] = {
+        # The interpreted view of this manoeuvre, supplied by the route. Named
+        # here with a None default so a caller that spreads this dict cannot
+        # leave the template reading an undefined name: under StrictUndefined
+        # that is a 500, and under Jinja's default it is a silently blank panel.
+        "v":                    None,
         "has_breakdown":        False,
         "delta_v_m_s":          to_m_s(getattr(m, "delta_v_km_s", 0.0)),
         "headline_method":      "",
@@ -527,6 +554,62 @@ def _breakdown_view(m: object) -> dict[str, object]:
     return view
 
 
+@router.post("/reserve-reset", response_class=HTMLResponse)
+async def pol_reserve_reset(
+    request: Request,
+    satno: Annotated[int, Form()],
+    reset_date: Annotated[str, Form()] = "",
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """Record or clear a refuelling date, and re-render against it.
+
+    Cumulative ΔV is monotonic, so an object that has been refuelled reads as
+    progressively more exhausted exactly as it becomes more capable. SJ-21 was
+    refuelled by SJ-25 in 2025 and its spend since 2022 keeps counting against
+    it. Everything before the reset is retained and reported separately.
+
+    The transferred quantity is deliberately not modelled. The one reported
+    figure, 142 kg of hydrazine, is secondary reporting that the open-source
+    assessment marks unconfirmed, and inventing a number here would put a
+    fabricated reserve into a capability verdict.
+    """
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+    if pol is None or pol.satno != satno:
+        return HTMLResponse(
+            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
+        )
+
+    resets = getattr(state, "pol_reserve_resets", None)
+    if not isinstance(resets, dict):
+        resets = {}
+        state.pol_reserve_resets = resets  # type: ignore[attr-defined]
+
+    cleared = not reset_date.strip()
+    if cleared:
+        resets.pop(satno, None)
+    else:
+        try:
+            parsed = datetime.strptime(reset_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=UTC)
+        except ValueError:
+            return HTMLResponse(
+                f'<p class="error-msg">Could not read "{html.escape(reset_date)}" as a '
+                "date. Use YYYY-MM-DD.</p>"
+            )
+        resets[satno] = parsed
+
+    state.append_log(
+        f"[POL] Reserve reset for {satno} "
+        + ("cleared" if cleared else f"set to {reset_date.strip()[:10]}")
+    )
+    return render(request, "partials/pol_results.html", {
+        "pol": pol,
+        "source": "UDL",
+        "pair": get_intel(satno),
+        **_pol_view(pol, resets.get(satno)),
+    })
+
+
 @router.post("/manoeuvre-detail", response_class=HTMLResponse)
 async def pol_manoeuvre_detail(
     request: Request,
@@ -559,8 +642,14 @@ async def pol_manoeuvre_detail(
         )
 
     m = matching[0]
+    # The interpretation comes from the same assessment the results panel uses,
+    # so the drill-down cannot disagree with the row it was opened from.
+    assessment = assess_pattern_of_life(pol, _reserve_reset_for(state, satno))
+    view = next((v for v in (*assessment.manoeuvres, *assessment.candidates)
+                 if v.manoeuvre is m), None)
     return render(request, "partials/pol_manoeuvre_detail.html", {
         "m": m,
+        "v": view,
         "satno": satno,
         "confirmed": m in pol.manoeuvres,
         **_breakdown_view(m),

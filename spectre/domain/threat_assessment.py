@@ -108,9 +108,26 @@ _IMPAIRED_STATUS_MARKERS: tuple[str, ...] = (
 )
 
 # Propellant remaining below this is treated as unable to sustain an intercept.
+#
+# This threshold was dead in both directions before the Pattern of Life
+# propellant model was rebuilt. The delta-V feeding it was measuring along-track
+# phase, so every analysed object reported 100 per cent consumed and was graded
+# incapable while actively manoeuvring. Correcting the delta-V did not fix it:
+# the figure was the fraction of TOTAL SPACECRAFT MASS, which needs 9.40 km/s of
+# cumulative spend to reach 95 per cent against a practical ceiling of 2.5, so
+# the band could then never fire at all. It now reads the fraction of the
+# PROPELLANT LOAD, which is reachable: about 1.57 km/s for a LEO smallsat and
+# 0.85 km/s for a chemical GEO comsat, both inside Table 2's envelopes.
 _PROPELLANT_SPENT_PCT: float = 95.0
 # Propellant remaining above this adds nothing; the object is simply capable.
 _PROPELLANT_AMPLE_PCT: float = 50.0
+
+# A platform can hold propellant and still be unable to act: most of a GEO
+# comsat's remaining tank is committed to fifteen years of station-keeping, and
+# Table 2 puts its DISCRETIONARY reserve at 50 to 200 m/s. Spending that is
+# what removes the ability to manoeuvre against someone, which is the question
+# a capability verdict is actually asking.
+_DISCRETIONARY_EXHAUSTED_M_S: float = 0.0
 
 # Geometry plus three capability inputs. Fewer than this and the verdict rests
 # on an assessed label with little behaviour behind it.
@@ -191,8 +208,17 @@ class CapabilityEvidence:
 
     intel_threat_level: str | None = None      # from the assessed record
     operational_status: str | None = None      # "Operational", "Degraded", ...
-    propellant_used_pct: float | None = None   # from PropellantBudget
-    anomaly_score: float | None = None         # 0-100, from AnomalyScore
+    #: Fraction of the PROPELLANT LOAD consumed, from PropellantAssessment.
+    #: Not the fraction of total spacecraft mass, which is what the field used
+    #: to carry and which differs by the propellant mass fraction: a factor of
+    #: ten for a LEO smallsat.
+    propellant_used_pct: float | None = None
+    #: Discretionary reserve left, m/s, from PropellantAssessment. The better
+    #: signal, because it is the budget a manoeuvre against someone comes out
+    #: of rather than the tank as a whole.
+    discretionary_remaining_m_s: float | None = None
+    discretionary_max_m_s: float | None = None
+    anomaly_score: float | None = None         # 0-100, from AnomalyAssessment
     manoeuvres_observed: int | None = None     # detected in the history window
     history_span_days: float | None = None
 
@@ -208,7 +234,8 @@ class CapabilityEvidence:
             value is not None
             for value in (
                 self.intel_threat_level, self.operational_status,
-                self.propellant_used_pct, self.anomaly_score,
+                self.propellant_used_pct, self.discretionary_remaining_m_s,
+                self.anomaly_score,
                 self.manoeuvres_observed,
             )
         )
@@ -224,6 +251,11 @@ class CapabilityEvidence:
         if (
             self.propellant_used_pct is not None
             and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT
+        ):
+            return Band.MINIMAL
+        if (
+            self.discretionary_remaining_m_s is not None
+            and self.discretionary_remaining_m_s <= _DISCRETIONARY_EXHAUSTED_M_S
         ):
             return Band.MINIMAL
         return None
@@ -246,7 +278,15 @@ class CapabilityEvidence:
             else:
                 candidates.append(Band.MEDIUM)
 
-        if self.propellant_used_pct is not None:
+        # The discretionary reserve is the better reading where it is
+        # available, because it is the budget a manoeuvre against someone comes
+        # out of. Fall back to the tank only when it is not.
+        if (self.discretionary_remaining_m_s is not None
+                and self.discretionary_max_m_s is not None
+                and self.discretionary_max_m_s > 0):
+            share = self.discretionary_remaining_m_s / self.discretionary_max_m_s
+            candidates.append(Band.HIGH if share >= 0.5 else Band.MEDIUM)
+        elif self.propellant_used_pct is not None:
             remaining = 100.0 - self.propellant_used_pct
             candidates.append(
                 Band.HIGH if remaining >= _PROPELLANT_AMPLE_PCT else Band.MEDIUM

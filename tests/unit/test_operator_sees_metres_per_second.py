@@ -383,83 +383,81 @@ class TestThePatternOfLifeTrapIsClosed:
             assert to_m_s(km_s) == pytest.approx(km_s * 1000.0, rel=1e-12)
 
     def test_the_view_converts_every_figure_once_and_only_once(self) -> None:
-        """Every m/s value the panel shows is exactly 1,000x its km/s source."""
-        from dataclasses import dataclass
-        from datetime import UTC, datetime
+        """Each m/s figure is exactly 1,000x its km/s source, or already m/s.
 
+        Built on a real analysis rather than a stub, because the view now draws
+        on two sources with different units and the trap is the boundary
+        between them. ``spectre.astro`` works in km/s; the domain assessment
+        works in m/s and has already converted. A figure taken from the
+        assessment and scaled again here would be 1,000x out, which is the
+        failure this class exists to prevent.
+        """
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
         from spectre.web.routes.pol import _pol_view
+        from tests.unit.test_dv_estimation import TestTwoTierReporting
 
-        @dataclass
-        class _Stats:
-            mean: float = 0.011
-            std: float = 0.002
-            p95: float = 0.034
-            low_2sigma: float = 0.007
-            high_2sigma: float = 0.015
-
-        @dataclass
-        class _Budget:
-            total_dv_km_s: float = 0.482
-            annual_dv_km_s: float = 0.048
-
-        @dataclass
-        class _Manoeuvre:
-            delta_v_km_s: float = 0.060
-            epoch: datetime = datetime(2026, 1, 1, tzinfo=UTC)
-
-        @dataclass
-        class _Pol:
-            total_dv_km_s: float = 0.482
-            dv_threshold_km_s: float = 0.0005
-            pol_high_dv: float = 0.015
-            dv_stats: _Stats = None
-            propellant_budget: _Budget = None
-            manoeuvres: list = None
-
-        pol = _Pol(dv_stats=_Stats(), propellant_budget=_Budget(),
-                   manoeuvres=[_Manoeuvre()])
+        # Two burns, because the dv statistics need more than one sample and
+        # those statistics are half of what this test is guarding.
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(burn_at=(100, 200)),
+            satno=62902, name="UNITS",
+        )
+        assert len(pol.manoeuvres) >= 2, "fixture must produce two confirmed manoeuvres"
+        assert pol.dv_stats is not None
         view = _pol_view(pol)
 
-        expected = {
-            "total_dv_m_s": 482.0,
-            "dv_threshold_m_s": 0.5,
-            "pol_high_dv_m_s": 15.0,
-            "dv_mean_m_s": 11.0,
-            "dv_std_m_s": 2.0,
-            "dv_p95_m_s": 34.0,
-            "dv_low_2sigma_m_s": 7.0,
-            "dv_high_2sigma_m_s": 15.0,
-            "budget_total_dv_m_s": 482.0,
-            "budget_annual_dv_m_s": 48.0,
+        # Taken from the astro layer, so exactly 1,000x their km/s source.
+        from_astro = {
+            "total_dv_m_s": pol.total_dv_km_s,
+            "dv_threshold_m_s": pol.dv_threshold_km_s,
+            "pol_high_dv_m_s": pol.pol_high_dv,
+            "dv_mean_m_s": pol.dv_stats.mean,
+            "dv_std_m_s": pol.dv_stats.std,
+            "dv_p95_m_s": pol.dv_stats.p95,
+            "dv_low_2sigma_m_s": pol.dv_stats.low_2sigma,
+            "dv_high_2sigma_m_s": pol.dv_stats.high_2sigma,
         }
-        for key, want in expected.items():
-            assert view[key] == pytest.approx(want), (
-                f"{key} is {view[key]}, expected {want}. A value 1,000x out "
-                "means the conversion ran twice; 1,000x small means it did not "
-                "run at all."
+        for key, source_km_s in from_astro.items():
+            assert view[key] == pytest.approx(source_km_s * 1000.0, rel=1e-9), (
+                f"{key} is {view[key]}, expected {source_km_s * 1000.0}. A value "
+                "1,000x out means the conversion ran twice; 1,000x small means "
+                "it did not run at all."
             )
-        assert view["manoeuvre_rows"][0]["delta_v_m_s"] == pytest.approx(60.0)
+
+        # Taken from the domain assessment, which is ALREADY m/s. Scaling these
+        # again is the double-conversion trap in its newest form.
+        assessment = view["assessment"]
+        assert view["budget_total_dv_m_s"] == pytest.approx(
+            assessment.propellant.spent_m_s
+        ), "budget_total_dv_m_s was converted a second time"
+        assert view["budget_annual_dv_m_s"] == pytest.approx(
+            assessment.propellant.annual_rate_m_s
+        ), "budget_annual_dv_m_s was converted a second time"
+
+        # Both figures must still be the right ORDER of magnitude: a cumulative
+        # spend of tens of m/s, not tens of thousands.
+        assert 0.0 < view["budget_total_dv_m_s"] < 10_000.0
+
+        row = view["manoeuvre_rows"][0]
+        assert row["delta_v_m_s"] == pytest.approx(row["m"].delta_v_km_s * 1000.0)
+        assert row["v"].delta_v_m_s == pytest.approx(row["delta_v_m_s"])
 
     def test_a_missing_statistic_does_not_crash_the_panel(self) -> None:
-        """An object with too few manoeuvres has no stats and no budget."""
-        from dataclasses import dataclass
-
+        """An object with one element set has no stats and no manoeuvres."""
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
         from spectre.web.routes.pol import _pol_view
+        from tests.unit.test_dv_estimation import _base, _rec
 
-        @dataclass
-        class _Bare:
-            total_dv_km_s: float = 0.0
-            dv_threshold_km_s: float = 0.0005
-            pol_high_dv: float | None = None
-            dv_stats: None = None
-            propellant_budget: None = None
-            manoeuvres: tuple = ()
-
-        view = _pol_view(_Bare())
+        pol = analyse_pattern_of_life([_rec(_base())], satno=1, name="BARE")
+        view = _pol_view(pol)
         assert view["dv_mean_m_s"] is None
-        assert view["budget_total_dv_m_s"] is None
         assert view["pol_high_dv_m_s"] is None
         assert view["manoeuvre_rows"] == []
+        assert view["candidate_rows"] == []
+        # The propellant figure is always present now, because the assessment
+        # always produces one; it is simply zero.
+        assert view["budget_total_dv_m_s"] == pytest.approx(0.0)
+        assert view["assessment"].propellant.propellant_used_pct == pytest.approx(0.0)
 
 
 class TestEveryConvertedFigureIsActuallySupplied:

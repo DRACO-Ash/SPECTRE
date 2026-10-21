@@ -6,6 +6,7 @@
    performs NO arithmetic on any ΔV. See the _pol_view docstring for why. #}
 
 {% set CONF_COL = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
+{% set POSTURE_COL = {"BENIGN":"#22c55e","ANNOYANCE":"#f59e0b","AGGRESSIVE":"#ef4444","BEYOND PLATFORM":"#a855f7"} %}
 {% set CHAN_COL = {"along_track":"var(--ops-blue)","radial":"#a855f7","cross_track":"#f59e0b"} %}
 
 <div style="background:var(--panel-bg); border:1px solid rgba(59,139,235,0.4); border-radius:6px;
@@ -35,6 +36,52 @@
       {% endif %}
     </div>
   </div>
+
+  {# ── What the cost means, and how long delivering it takes ──────────── #}
+  {% if v %}
+  <div style="border:1px solid var(--border); border-radius:4px; padding:0.45rem 0.6rem;
+              margin-bottom:0.6rem">
+    <div style="display:flex; flex-wrap:wrap; gap:0.9rem; align-items:baseline; font-size:0.64rem">
+      <span><span style="color:var(--text-dim)">Classified</span>
+        <strong style="margin-left:0.25rem">{{ v.classification }}</strong>
+        {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}</span>
+      <span><span style="color:var(--text-dim)">Posture</span>
+        <strong style="color:{{ POSTURE_COL.get(v.posture_label, 'var(--text-primary)') }}; margin-left:0.25rem">
+          {{ v.posture_label }}</strong></span>
+      <span><span style="color:var(--text-dim)">Routine burn ceiling</span>
+        <strong style="margin-left:0.25rem">{{ v.sk_ceiling_m_s | m_s }} m/s</strong></span>
+    </div>
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.3rem; line-height:1.5">
+      {{ v.posture.rationale }}
+    </div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem; line-height:1.5">
+      Band from {{ v.posture.basis }}
+    </div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem; line-height:1.5">
+      Ceiling: {{ v.sk_ceiling_basis }}
+    </div>
+    {% if v.burn_hours is not none %}
+    <div style="font-size:0.62rem; margin-top:0.35rem; padding-top:0.3rem;
+                border-top:1px solid var(--border); line-height:1.5;
+                color:{% if v.burn_is_slow %}#a855f7{% else %}var(--text-dim){% endif %}">
+      Delivering {{ delta_v_m_s | m_s }} m/s on a {{ v.burn_platform }} takes
+      <strong>{{ "%.1f"|format(v.burn_hours) }} h</strong>
+      {% if v.burn_is_slow %}(<strong>{{ "%.1f"|format(v.burn_days) }} days</strong>) of
+      continuous thrust, so this manoeuvre cannot have been executed at short notice
+      and must have begun well before its measured epoch{% endif %}.
+      The fastest flown platform class, a {{ v.fastest_platform }}, would need
+      {{ "%.2f"|format(v.fastest_burn_hours) if v.fastest_burn_hours is not none else "?" }} h.
+    </div>
+    {% endif %}
+    {% if v.escalation %}
+    <div style="font-size:0.63rem; margin-top:0.4rem; padding:0.35rem 0.5rem;
+                background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.4);
+                border-radius:3px; color:var(--text-primary); line-height:1.5">
+      <strong style="color:#ef4444">High priority.</strong> {{ v.escalation }}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {% if not has_breakdown %}
   <p class="empty-msg" style="font-size:0.66rem">

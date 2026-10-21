@@ -75,6 +75,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 __all__ = [
+    "ON_STATION_ANOMALY_EXPLANATIONS",
+    "ON_STATION_ANOMALY_M_S",
     "ManoeuvreKind",
     "PlatformClass",
     "Posture",
@@ -83,6 +85,10 @@ __all__ = [
     "fastest_delivery_hours",
     "from_km_s",
     "kind_for_method",
+    "per_event_station_keeping_m_s",
+    "platform_class_for_regime",
+    "platform_total_budget_m_s",
+    "propellant_mass_fraction",
     "station_keeping_m_s_per_year",
 ]
 
@@ -508,8 +514,9 @@ def classify_posture(
 
     # An unknown regime must not render as "for a rendezvous in  is BENIGN".
     where = f" in {regime_key}" if regime_key else " (regime unknown)"
+    article = "an" if kind.value[0] in "aeiou" else "a"
     rationale = (
-        f"{delta_v_m_s:.0f} m/s for a {kind.value}{where} is "
+        f"{delta_v_m_s:.0f} m/s for {article} {kind.value}{where} is "
         f"{posture.label}: {descriptor}."
     )
     if years is not None and years >= _WORTH_STATING_IN_YEARS:
@@ -529,3 +536,155 @@ def classify_posture(
         station_keeping_years=years,
         rationale=rationale,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform selection and propellant accounting (Table 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Which platform class a Pattern of Life object is assumed to be, given only
+#: its orbit regime. A crude guess, and it is stated as one wherever it is
+#: shown, but it is strictly better than the single "3-tonne GEO platform with
+#: 900 kg of propellant" that Pattern of Life applied to every object in every
+#: regime, including LEO smallsats whose entire dry mass is under a tonne.
+_REGIME_TO_PLATFORM: dict[str, str] = {
+    "LEO":  "LEO smallsat, electric",
+    "MEO":  "All-electric GEO bus",      # navigation buses are comparable in mass
+    "GEO":  "Chemical GEO comsat, on station",
+    "HEO":  "Chemical GEO comsat, on station",
+    "GTO":  "Chemical GEO comsat, on station",
+    "DEEP": "All-electric GEO bus",
+}
+
+
+def platform_class_for_regime(regime: str) -> PlatformClass:
+    """The assumed platform class for an object in *regime*.
+
+    Falls back to the chemical GEO comsat, the most constrained class, so an
+    unrecognised regime cannot quietly credit an object with more reserve than
+    anything on open record carries.
+    """
+    name = _REGIME_TO_PLATFORM.get(regime.strip().upper(), "Chemical GEO comsat, on station")
+    for platform in PLATFORM_CLASSES:
+        if platform.name == name:
+            return platform
+    return PLATFORM_CLASSES[0]
+
+
+#: Propellant as a fraction of launch mass, by regime, from Table 2's stated
+#: assumptions. Needed because the Pattern of Life propellant figure was
+#: computing the fraction of TOTAL MASS that had to be propellant and labelling
+#: it the fraction of the PROPELLANT LOAD consumed. Those differ by exactly
+#: this number, so a LEO smallsat reading "0.9 per cent used" had in fact spent
+#: about 9 per cent of its tank.
+_PROPELLANT_MASS_FRACTION: dict[str, float] = {
+    # "propellant 5 to 15 per cent"; the midpoint.
+    "LEO":  0.10,
+    # All-electric bus, "xenon 15 to 25 per cent"; the midpoint.
+    "MEO":  0.20,
+    "DEEP": 0.20,
+    # "propellant about 55 per cent of GTO mass", of which most is spent
+    # reaching the operational orbit. On station the remaining tank is a far
+    # smaller share of the remaining mass; 0.25 is the on-station figure.
+    "GEO":  0.25,
+    "HEO":  0.25,
+    "GTO":  0.25,
+}
+
+
+def propellant_mass_fraction(regime: str) -> float:
+    """Propellant as a fraction of mass for an on-station object in *regime*."""
+    return _PROPELLANT_MASS_FRACTION.get(regime.strip().upper(), 0.25)
+
+
+#: Total delta-V an object in this regime could ever have held, m/s (Table 2).
+#: This is the LIFETIME figure, not what remains. A cumulative spend that
+#: exceeds it did not happen, so the estimate, the element sets, or the
+#: assumption that this is one object are wrong.
+_PLATFORM_TOTAL_BUDGET_M_S: dict[str, float] = {
+    "LEO":  2500.0,   # "about 0.5 to 2.5 km/s (central 1.5)"
+    "MEO":  6000.0,   # all-electric bus, "about 4.4 km/s (range 2.5 to 6)"
+    "GEO":  2500.0,   # chemical comsat, "about 2.5 km/s"
+    "HEO":  2500.0,
+    "GTO":  2500.0,
+    "DEEP": 6000.0,
+}
+
+
+def platform_total_budget_m_s(regime: str) -> float:
+    """Upper bound on lifetime delta-V for an object in *regime* (Table 2)."""
+    return _PLATFORM_TOTAL_BUDGET_M_S.get(regime.strip().upper(), 2500.0)
+
+
+#: The assessment's second watchlist recommendation: "Treat inferred on-station
+#: delta-v of 0.5 km/s or more as high priority. It indicates a plane change,
+#: cislunar departure, OTV or tug activity, or refuelling-enabled behaviour."
+ON_STATION_ANOMALY_M_S: float = 500.0
+
+#: The four explanations the assessment gives for such a figure, in the order
+#: it gives them. The decomposition can distinguish the first from the rest.
+ON_STATION_ANOMALY_EXPLANATIONS: tuple[str, ...] = (
+    "a plane change of more than about 4 degrees in LEO or 9 degrees in GEO",
+    "departure to cislunar space",
+    "an orbital transfer vehicle or tug, rather than the satellite itself",
+    "refuelling-enabled behaviour, which removes the end-of-life delta-V limit",
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-event station-keeping, derived rather than asserted
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Nominal interval between routine station-keeping burns, days. Used only
+#: where an object's own observed cadence is unavailable.
+#:
+#: GEO north-south keeping is conventionally run on a fortnightly cycle, which
+#: with Table 3's 43-50 m/s/yr gives about 1.8 m/s per burn. LEO drag make-up
+#: is less regular and is taken monthly. MEO barely manoeuvres at all, so a
+#: quarterly cycle is assumed.
+_NOMINAL_SK_INTERVAL_DAYS: dict[str, float] = {
+    "LEO": 30.0, "MEO": 90.0, "GEO": 14.0, "HEO": 14.0, "GTO": 14.0, "DEEP": 14.0,
+}
+
+#: Below this, a derived per-event ceiling is noise rather than a threshold.
+_MIN_PER_EVENT_SK_M_S: float = 0.5
+
+
+def per_event_station_keeping_m_s(
+    regime: str, observed_interval_days: float | None = None,
+) -> tuple[float, str]:
+    """Largest single burn still consistent with routine station-keeping.
+
+    Returns the ceiling in m/s and a sentence saying how it was derived.
+
+    Pattern of Life previously asserted this per regime, and the figures it
+    asserted were the ANNUAL budgets: 50 m/s for GEO against Table 3's 43-50
+    m/s PER YEAR. A burn is not a year. The consequence was that the
+    assessment's own named events were classified as routine, including both
+    Luch/Olymp-K relocations and a 180 degree GEO repositioning.
+
+    The ceiling is the annual budget spread over the interval between burns.
+    An object's own observed cadence is used where there is one, because an
+    object that manoeuvres monthly is spending its annual budget in twelve
+    pieces, not twenty-six.
+    """
+    key = regime.strip().upper()
+    annual = station_keeping_m_s_per_year(key)
+    if annual is None:
+        return (_MIN_PER_EVENT_SK_M_S,
+                "No published station-keeping budget for this regime, so no "
+                "per-event ceiling could be derived.")
+
+    nominal = _NOMINAL_SK_INTERVAL_DAYS.get(key, 14.0)
+    if observed_interval_days is not None and observed_interval_days > 0:
+        interval = observed_interval_days
+        how = (f"this object's own observed cadence of {interval:.1f} days "
+               f"between manoeuvres")
+    else:
+        interval = nominal
+        how = f"a nominal {interval:.0f} day cadence for {key}"
+
+    ceiling = max(annual * interval / 365.25, _MIN_PER_EVENT_SK_M_S)
+    basis = (f"{annual:.0f} m/s per year of routine station-keeping for {key} "
+             f"(Table 3), spread over {how}, gives {ceiling:.2f} m/s per burn.")
+    return (ceiling, basis)

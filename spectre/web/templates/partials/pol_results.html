@@ -7,11 +7,14 @@
 {% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444"} %}
 {% set ELSET_TABLE_CAP = 400 %}
 {% set CONF_COL    = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
-{% set TYPE_LABEL  = {"station_keeping":"Station Keeping","plane_change":"Plane Change","repositioning":"Repositioning","unknown":"Unknown","none_detected":"None detected"} %}
+{# Manoeuvre labels and posture colours come from the domain assessment now.
+   The old TYPE_LABEL map keyed on an astro-layer classification that applied
+   Table 3's ANNUAL station-keeping budgets as per-event limits. #}
+{% set POSTURE_COL = {"BENIGN":"#22c55e","ANNOYANCE":"#f59e0b","AGGRESSIVE":"#ef4444","BEYOND PLATFORM":"#a855f7"} %}
 {% set DRIFT_COLOR = {"EAST":"#22c55e","WEST":"#ef4444","STATIONARY":"#6b7280"} %}
 {% set DRIFT_ICON  = {"EAST":"→","WEST":"←","STATIONARY":"—"} %}
 
-{% set risk_level  = pol.intel_assessment.risk_level if pol.intel_assessment else "MINIMAL" %}
+{% set risk_level  = intel.risk_level if intel else "MINIMAL" %}
 {% set rc          = RISK_COLOR.get(risk_level, "#6b7280") %}
 {% set rb          = RISK_BG.get(risk_level, "rgba(107,114,128,0.10)") %}
 {% set is_geo      = pol.regime in ("GEO","DEEP") or (pol.records and pol.records[-1].geo_longitude_deg is not none) %}
@@ -29,9 +32,9 @@
       <div style="font-size:0.6rem; font-weight:900; color:{{ rc }}; text-transform:uppercase; letter-spacing:0.12em; margin-top:0.2rem">
         {{ risk_level }}
       </div>
-      {% if pol.anomaly_score %}
+      {% if anomaly %}
       <div style="font-size:1.5rem; font-weight:900; color:{{ rc }}; line-height:1; margin-top:0.2rem">
-        {{ pol.anomaly_score.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
+        {{ anomaly.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
       </div>
       <div style="font-size:0.58rem; color:var(--text-dim)">anomaly score</div>
       {% endif %}
@@ -52,21 +55,21 @@
         </span>
         {% endif %}
       </div>
-      {% if pol.intel_assessment %}
+      {% if intel %}
       <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
-        {{ pol.intel_assessment.mission_profile }}
+        {{ intel.mission_profile }}
       </div>
       <div style="font-size:0.68rem; color:var(--ops-gold); font-style:italic; margin-bottom:0.4rem">
-        {{ pol.intel_assessment.behaviour_class }}
+        {{ intel.behaviour_class }}
       </div>
       <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.5; max-width:52rem">
-        {{ pol.intel_assessment.anomaly_narrative }}
+        {{ intel.anomaly_narrative }}
       </div>
-      {% if pol.intel_assessment.operational_signature %}
+      {% if intel.operational_signature %}
       <div style="margin-top:0.45rem; font-size:0.64rem; color:var(--text-dim);
                   border-top:1px solid var(--border); padding-top:0.35rem">
         <span style="color:var(--text-primary); font-weight:600">Operational Signature:</span>
-        {{ pol.intel_assessment.operational_signature }}
+        {{ intel.operational_signature }}
       </div>
       {% endif %}
       {% else %}
@@ -146,8 +149,8 @@
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
       Anomaly Score — Component Breakdown
     </div>
-    {% if pol.anomaly_score %}
-    {% set anoms = pol.anomaly_score %}
+    {% if anomaly %}
+    {% set anoms = anomaly %}
     {% macro score_bar(label, val, tooltip="") %}
     <div style="margin-bottom:0.35rem" {% if tooltip %}title="{{ tooltip }}"{% endif %}>
       <div style="display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-dim); margin-bottom:0.1rem">
@@ -186,10 +189,9 @@
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
       Propellant Budget Estimate
     </div>
-    {% if pol.propellant_budget %}
-    {% set pb = pol.propellant_budget %}
-    {# Circular gauge using SVG #}
-    {% set pct = [pb.propellant_used_pct, 100] | min | round(1) %}
+    {% if propellant %}
+    {% set pb = propellant %}
+    {% set pct = [pb.propellant_used_pct, 100] | min %}
     {% set circ = 100 %}
     {% set dash = (pct / 100 * circ) | round(2) %}
     <div style="display:flex; gap:1rem; align-items:center; margin-bottom:0.6rem">
@@ -197,22 +199,19 @@
         <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.2"/>
         <circle cx="18" cy="18" r="15.9" fill="none"
           stroke="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}"
-          stroke-width="3.2"
-          stroke-dasharray="{{ dash }} {{ circ - dash }}"
-          stroke-dashoffset="25"
-          stroke-linecap="round"
-          transform="rotate(-90 18 18)"/>
+          stroke-width="3.2" stroke-dasharray="{{ dash }} {{ circ - dash }}"
+          stroke-dashoffset="25" stroke-linecap="round" transform="rotate(-90 18 18)"/>
         <text x="18" y="19" text-anchor="middle" font-size="6.5" font-weight="700"
               fill="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}">
           {{ pct | round(0) | int }}%
         </text>
-        <text x="18" y="25" text-anchor="middle" font-size="3.5" fill="#8899aa">used</text>
+        <text x="18" y="25" text-anchor="middle" font-size="3.5" fill="#8899aa">of tank</text>
       </svg>
       <div>
-        <div style="font-size:0.72rem; font-weight:700; color:var(--text-primary)">{{ pb.budget_class }}</div>
-        <div style="font-size:0.64rem; color:var(--text-dim); margin-top:0.15rem">
-          ISP {{ pb.assumed_isp_s | round(0) | int }} s (bipropellant GEO)<br>
-          Assumes {{ pb.assumed_propellant_kg | round(0) | int }} kg propellant load
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-primary)">{{ pb.rate_class }}</div>
+        <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.15rem; line-height:1.5">
+          {{ pb.platform.name }}<br>
+          Isp {{ pb.assumed_isp_s | round(0) | int }} s · propellant {{ (pb.propellant_fraction * 100) | round(0) | int }}% of mass
         </div>
       </div>
     </div>
@@ -221,23 +220,60 @@
         <td style="color:var(--text-dim); padding:0.15rem 0">Cumulative ΔV</td>
         <td style="text-align:right; font-weight:600">{{ budget_total_dv_m_s | m_s }} m/s</td>
       </tr>
+      {% if reserve_reset %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.15rem 0">Annual burn rate</td>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Since reserve reset</td>
+        <td style="text-align:right; font-weight:600; color:var(--ops-gold)">
+          {{ pb.spent_since_reset_m_s | m_s }} m/s
+        </td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Annual rate</td>
         <td style="text-align:right; font-weight:600">{{ budget_annual_dv_m_s | m_s }} m/s/yr</td>
       </tr>
+      {% if pb.routine_annual_m_s %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.15rem 0">Est. remaining life</td>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Against routine ({{ pb.regime }})</td>
         <td style="text-align:right; font-weight:600">
-          {% if pb.remaining_life_years %}
-            <span style="color:{% if pb.remaining_life_years < 2 %}#ef4444{% elif pb.remaining_life_years < 5 %}#f59e0b{% else %}#22c55e{% endif %}">
-              ~{{ pb.remaining_life_years | round(1) }} yr
-            </span>
-          {% else %}N/A{% endif %}
+          <span style="color:{% if pb.rate_multiple >= 5 %}#ef4444{% elif pb.rate_multiple >= 2 %}#f59e0b{% else %}#22c55e{% endif %}">
+            {{ pb.rate_multiple }}&times;</span>
+          <span style="color:var(--text-dim); font-weight:400">of {{ pb.routine_annual_m_s | m_s }} m/s/yr</span>
+        </td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Discretionary reserve left</td>
+        <td style="text-align:right; font-weight:600">
+          <span style="color:{% if pb.discretionary_remaining_m_s <= 0 %}#ef4444{% elif pb.discretionary_remaining_m_s < pb.discretionary_max_m_s * 0.5 %}#f59e0b{% else %}#22c55e{% endif %}">
+            {{ pb.discretionary_remaining_m_s | m_s }} m/s</span>
+          <span style="color:var(--text-dim); font-weight:400">of {{ pb.discretionary_max_m_s | m_s }}</span>
         </td>
       </tr>
     </table>
-    <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
-      ⚠ Indicative only — assumes ~30% propellant mass fraction. Actual margins unknown.
+    <div style="font-size:0.63rem; color:var(--text-primary); margin-top:0.45rem; line-height:1.5">
+      {{ pb.narrative }}
+    </div>
+
+    {# ── Refuelling, the capability multiplier ─────────────────────────── #}
+    <form hx-post="/pol/reserve-reset" hx-target="#pol-results" hx-swap="innerHTML"
+          style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.4rem">
+      <input type="hidden" name="satno" value="{{ pol.satno }}">
+      <label style="font-size:0.6rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
+        Reserve reset (refuelling) — cumulative ΔV counts from this date
+      </label>
+      <div style="display:flex; gap:0.3rem; align-items:center">
+        <input type="date" name="reset_date" class="form-input"
+               value="{{ reserve_reset.strftime('%Y-%m-%d') if reserve_reset else '' }}"
+               style="font-size:0.62rem; padding:0.15rem 0.3rem; flex:1">
+        <button type="submit" class="btn-secondary" style="font-size:0.6rem; padding:0.15rem 0.5rem">
+          {{ "Update" if reserve_reset else "Set" }}
+        </button>
+      </div>
+    </form>
+
+    <div style="margin-top:0.4rem; font-size:0.58rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem; line-height:1.5">
+      {% for caveat in pb.caveats %}● {{ caveat }}<br>{% endfor %}
     </div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Propellant budget unavailable.</p>
@@ -268,8 +304,11 @@
   {% if pol.interval_stats %}
   {{ stat_card("Mean Interval", pol.interval_stats.mean | round(1) ~ " d", "σ = " ~ pol.interval_stats.std | round(1) ~ " d") }}
   {% endif %}
-  {{ stat_card("Primary Activity", TYPE_LABEL.get(pol.dominant_activity, pol.dominant_activity), color="var(--ops-blue)") }}
-  {{ stat_card("SK Profile", pol.sk_type) }}
+  {{ stat_card("Primary Activity", intel.mission_profile, color="var(--ops-blue)") }}
+  {% if assessment.manoeuvres %}
+  {{ stat_card("Routine Burn Ceiling", (assessment.sk_ceiling_m_s | m_s) ~ " m/s",
+               "derived from Table 3, not asserted") }}
+  {% endif %}
   {% if pol.next_manoeuvre_est %}
   {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
   {% endif %}
@@ -454,7 +493,7 @@
 {# ══════════════════════════════════════════════════════════════════════════════
    § 8 — LONGITUDE PREDICTIONS + NOTABLE PERIODS (GEO only)
    ══════════════════════════════════════════════════════════════════════════════ #}
-{% if is_geo and pol.intel_assessment and pol.intel_assessment.predicted_lon_30d is not none %}
+{% if is_geo and intel and intel.predicted_lon_30d is not none %}
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
 
   {# 30/60/90-day predictions #}
@@ -464,7 +503,7 @@
     </div>
     <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.5rem; font-style:italic">
       Assumes current drift of
-      {{ pol.intel_assessment.current_drift_rate | round(4) if pol.intel_assessment.current_drift_rate else "?" }}°/d continues unchanged.
+      {{ intel.current_drift_rate | round(4) if intel.current_drift_rate else "?" }}°/d continues unchanged.
       Manoeuvres will alter trajectory.
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem">
@@ -480,20 +519,20 @@
         {% endif %}
       </div>
       {% endmacro %}
-      {{ pred_card("30 d", pol.intel_assessment.predicted_lon_30d, pol.intel_assessment.current_drift_dir) }}
-      {{ pred_card("60 d", pol.intel_assessment.predicted_lon_60d, pol.intel_assessment.current_drift_dir) }}
-      {{ pred_card("90 d", pol.intel_assessment.predicted_lon_90d, pol.intel_assessment.current_drift_dir) }}
+      {{ pred_card("30 d", intel.predicted_lon_30d, intel.current_drift_dir) }}
+      {{ pred_card("60 d", intel.predicted_lon_60d, intel.current_drift_dir) }}
+      {{ pred_card("90 d", intel.predicted_lon_90d, intel.current_drift_dir) }}
     </div>
   </div>
 
   {# Notable activity periods #}
-  {% if pol.intel_assessment.notable_periods %}
+  {% if intel.notable_periods %}
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.45rem">
       Notable Activity Periods
     </div>
     <ul style="list-style:none; padding:0; margin:0">
-      {% for note in pol.intel_assessment.notable_periods %}
+      {% for note in intel.notable_periods %}
       <li style="font-size:0.64rem; color:var(--text-dim); padding:0.2rem 0;
                  border-bottom:1px solid rgba(255,255,255,0.04)">
         {% if "EAST" in note %}
@@ -524,6 +563,49 @@
 {# ══════════════════════════════════════════════════════════════════════════════
    § 9 — MANOEUVRE CATALOGUE
    ══════════════════════════════════════════════════════════════════════════════ #}
+{# ── Escalations: the assessment's watchlist, acted on ─────────────────── #}
+{% if assessment.escalations %}
+<div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.5); border-radius:5px;
+            padding:0.6rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:#ef4444; text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">High Priority</div>
+  {% for note in assessment.escalations %}
+  <div style="font-size:0.64rem; color:var(--text-primary); margin-bottom:0.3rem; line-height:1.5">
+    ● {{ note }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── R3: state what the floor excludes, rather than implying "passive" ─── #}
+{% if limits %}
+<div style="background:var(--panel-bg); border:1px solid rgba(245,158,11,0.3); border-radius:5px;
+            padding:0.55rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.62rem; font-weight:700; color:#f59e0b; text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">What This Analysis Can And Cannot See</div>
+  <div style="font-size:0.63rem; color:var(--text-primary); line-height:1.55; margin-bottom:0.35rem">
+    {{ limits.narrative }}
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; font-size:0.6rem">
+    <div>
+      <div style="color:#22c55e; font-weight:700; margin-bottom:0.15rem">
+        Above the floor, would be caught</div>
+      {% for label, dv in limits.visible %}
+      <div style="color:var(--text-dim)">● {{ dv | m_s }} m/s &mdash; {{ label }}</div>
+      {% endfor %}
+      {% if not limits.visible %}<div style="color:var(--text-dim)">Nothing on open record.</div>{% endif %}
+    </div>
+    <div>
+      <div style="color:#ef4444; font-weight:700; margin-bottom:0.15rem">
+        Below the floor, invisible to this method</div>
+      {% for label, dv in limits.invisible %}
+      <div style="color:var(--text-dim)">● {{ dv | m_s }} m/s &mdash; {{ label }}</div>
+      {% endfor %}
+      {% if not limits.invisible %}<div style="color:var(--text-dim)">Nothing on open record.</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── Detection provenance: what was examined, and what was discarded ───── #}
 {% if detection.noise_floor_m_s is not none %}
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
@@ -563,6 +645,7 @@
           <th onclick="polSort(this)" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
@@ -576,19 +659,26 @@
         </tr>
       </thead>
       <tbody>
-        {% set TYPE_COL = {"station_keeping":"var(--ops-blue)","plane_change":"#f59e0b","repositioning":"#ef4444","unknown":"var(--text-dim)"} %}
         {% for row in manoeuvre_rows | sort(attribute="m.epoch", reverse=True) %}
-        {% set m = row.m %}
+        {% set m = row.m %}{% set v = row.v %}
+        {% set pcol = POSTURE_COL.get(v.posture_label, "var(--text-dim)") %}
         <tr>
           <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
           <td data-val="{{ row.delta_v_m_s }}">
-            <strong style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-primary)') }}">
-              {{ row.delta_v_m_s | m_s }}
-            </strong>
+            <strong style="color:{{ pcol }}">{{ row.delta_v_m_s | m_s }}</strong>
           </td>
-          <td style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-dim)') }}; white-space:nowrap">
-            {{ TYPE_LABEL.get(m.manoeuvre_type, m.manoeuvre_type) }}
-            {% if m.sk_subtype %}<span class="label-dim">({{ m.sk_subtype }})</span>{% endif %}
+          <td style="white-space:nowrap">
+            {{ v.classification }}
+            {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <span style="color:{{ pcol }}; font-weight:700" title="{{ v.posture.rationale }}">
+              {{ v.posture_label }}</span>
+            {% if v.burn_is_slow %}
+            <span style="color:#a855f7; font-size:0.56rem" title="Delivering this ΔV on a {{ v.burn_platform }} takes {{ v.burn_days | round(1) }} days of continuous thrust, so it cannot have been executed at short notice.">
+              &#9201; {{ v.burn_days | round(1) }} d
+            </span>
+            {% endif %}
           </td>
           <td data-val="{{ m.delta_alt_km|round(3) }}">
             {% if m.delta_alt_km > 0.5 %}<span style="color:#22c55e">+{% elif m.delta_alt_km < -0.5 %}<span style="color:#ef4444">{% else %}<span>{% endif %}{{ m.delta_alt_km|round(2) }}</span>
@@ -630,7 +720,7 @@
                     style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
                     title="Run Monte Carlo simulation for this manoeuvre"
                     hx-post="/pol/monte-carlo"
-                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "manoeuvre_type": "{{ v.monte_carlo_archetype }}"}'
                     hx-target="#pol-mc-results"
                     hx-swap="innerHTML"
                     hx-indicator="#pol-mc-indicator">
@@ -675,7 +765,7 @@
       </thead>
       <tbody>
         {% for row in candidate_rows | sort(attribute="m.epoch", reverse=True) %}
-        {% set m = row.m %}
+        {% set m = row.m %}{% set v = row.v %}
         <tr>
           <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
           <td><strong>{{ row.delta_v_m_s | m_s }}</strong></td>
