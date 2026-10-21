@@ -481,6 +481,68 @@ class TestPolRoutes:
         assert resp.status_code == 200
         assert b"error" in resp.content.lower() or b"Enter UDL" in resp.content or b"username" in resp.content.lower()
 
+    def test_manoeuvre_detail_without_an_analysis_says_so(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        resp = client.post(  # type: ignore[attr-defined]
+            "/pol/manoeuvre-detail",
+            data={"satno": "25544", "manoeuvre_epoch": "2026-01-01T00:00:00"},
+            cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
+        )
+        assert resp.status_code == 200
+        assert b"Run Pattern of Life first" in resp.content
+
+    def test_manoeuvre_detail_renders_the_full_working(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        """Seed a real analysis, then drill into a real manoeuvre end to end."""
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
+        from spectre.web.planning_state import get_session_state
+        from tests.unit.test_dv_estimation import TestTwoTierReporting
+
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
+        )
+        assert pol.manoeuvres, "fixture must produce at least one confirmed manoeuvre"
+        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+
+        epoch = pol.manoeuvres[0].epoch.strftime("%Y-%m-%dT%H:%M:%S")
+        resp = client.post(  # type: ignore[attr-defined]
+            "/pol/manoeuvre-detail",
+            data={"satno": "62902", "manoeuvre_epoch": epoch},
+            cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
+        )
+        assert resp.status_code == 200
+        body = resp.content.decode()
+        for expected in ("Along-track", "Radial", "Cross-track",
+                         "Element sets", "Estimators", "Detection floor",
+                         "Semi-major axis", "Mean anomaly"):
+            assert expected in body, f"drill-down is missing {expected!r}"
+        # Phase must be shown but explicitly marked as unused by the estimator.
+        assert "not used" in body
+
+    def test_manoeuvre_detail_rejects_an_unknown_epoch(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
+        from spectre.web.planning_state import get_session_state
+        from tests.unit.test_dv_estimation import TestTwoTierReporting
+
+        pol = analyse_pattern_of_life(
+            TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
+        )
+        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+        resp = client.post(  # type: ignore[attr-defined]
+            "/pol/manoeuvre-detail",
+            data={"satno": "62902", "manoeuvre_epoch": "1999-01-01T00:00:00"},
+            cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
+        )
+        assert resp.status_code == 200
+        assert b"not found" in resp.content
+
     def test_pol_unauthenticated_redirects(self, initialized_app: object) -> None:
         from fastapi.testclient import TestClient
         with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]

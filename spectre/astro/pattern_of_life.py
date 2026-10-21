@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import numpy as np
 from sgp4.api import Satrec
 
 from spectre.astro.constants import (
@@ -30,7 +29,15 @@ from spectre.astro.constants import (
     SIDEREAL_DAY,
     classify_orbit_regime,
 )
-from spectre.astro.propagator import TLEOrbit
+from spectre.astro.dv_estimation import (
+    DvBreakdown,
+    NoiseModel,
+    build_breakdown,
+    calibrate_noise,
+    estimate_dv_mean_elements,
+    secular_rates_deg_day,
+    snapshot_from_record,
+)
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
@@ -41,8 +48,27 @@ _EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 
-_DV_NOISE_FLOOR   = 0.002   # km/s — below this = TLE noise
-_MAX_GAP_DAYS     = 15.0    # days — skip ΔV computation for large gaps
+# Floor on the operator-supplied ΔV threshold (km/s). The real detection
+# threshold is measured per object by ``calibrate_noise``; this is only the
+# default for the form field.
+_DV_NOISE_FLOOR   = 0.002   # km/s
+
+# Beyond this gap the object could have done anything in between, so a single
+# before/after pair cannot be read as one manoeuvre. Raised from 15 days once
+# the estimator stopped degrading with the gap; detections beyond
+# ``_LONG_GAP_WARN_DAYS`` are kept but flagged as possibly several burns.
+_MAX_GAP_DAYS       = 30.0  # days
+_LONG_GAP_WARN_DAYS = 10.0  # days
+
+# Two detections of one burn by two different providers arrive within about a
+# catalogue interval of each other. Detections whose measured burn epochs fall
+# inside this window are merged into one event.
+_MERGE_WINDOW_FLOOR_DAYS = 0.25
+
+# Full forensic breakdowns are ~1.8 ms each against ~0.01 ms for the screening
+# estimator. Detections are ranked by ΔV and the largest this many get the full
+# treatment; beyond that the element figure stands and says so.
+_MAX_FULL_BREAKDOWNS = 500
 _DRIFT_STATIONARY = 0.05    # °/day — |drift| below this → "Stationary"
 _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 
@@ -113,6 +139,31 @@ class Manoeuvre:
 
     tle_before: TLERecord
     tle_after:  TLERecord
+
+    #: The full working behind ``delta_v_km_s``: both estimates, every term in
+    #: the element decomposition, the element sets side by side with their
+    #: provenance, the measured noise floor and a confidence verdict. This is
+    #: what the drill-down renders. ``None`` only where the detection fell
+    #: outside the forensic budget, in which case ``delta_v_km_s`` is the
+    #: element-differencing figure.
+    breakdown: DvBreakdown | None = None
+
+    @property
+    def burn_epoch(self) -> datetime:
+        """When the burn happened, measured where possible.
+
+        ``epoch`` is the after-element-set epoch, which can be wrong by the
+        whole gap. The epoch-swept estimator dates the burn properly; fall back
+        to ``epoch`` only when it could not.
+        """
+        bd = self.breakdown
+        if bd is not None and bd.burn_epoch is not None and not bd.swept.burn_epoch_ambiguous:
+            return bd.burn_epoch
+        return self.epoch
+
+    @property
+    def confidence(self) -> str:
+        return self.breakdown.confidence if self.breakdown else "UNASSESSED"
 
 
 @dataclass
@@ -195,6 +246,10 @@ class PolAnalysis:
     regime:     str
 
     records:    list[TLERecord]
+
+    #: Confirmed manoeuvres. Everything downstream — cumulative ΔV, propellant
+    #: budget, anomaly score, intelligence assessment — is derived from these
+    #: and only these.
     manoeuvres: list[Manoeuvre]
 
     # Down-sampled time-series for charts
@@ -248,6 +303,22 @@ class PolAnalysis:
 
     # TLE cadence filter — populated when cadence filtering was applied
     quality_flags:          list[Any] = field(default_factory=list)  # list[QualityFlag]
+
+    # ── Detection audit trail ────────────────────────────────────────────────
+    # What the detector looked at and what it threw away, so the manoeuvre count
+    # can be defended rather than merely reported.
+    #: Detections that cleared the reporting floor but not the confirmation
+    #: level. Shown to the operator as candidates, deliberately excluded from
+    #: every derived statistic.
+    candidate_manoeuvres:   list[Manoeuvre] = field(default_factory=list)
+
+    noise_model:            NoiseModel | None = None
+    pairs_examined:         int = 0
+    rejected_below_floor:   int = 0   # screened out by the measured noise floor
+    rejected_on_evidence:   int = 0   # survived the floor, failed the forensics
+    skipped_long_gap:       int = 0   # gap too large to read as a single burn
+    merged_duplicates:      int = 0   # same burn reported by more than one provider
+    breakdowns_truncated:   int = 0   # detections past the forensic budget
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -348,27 +419,124 @@ def _angle_diff(a: float, b: float) -> float:
 
 
 def _estimate_dv(r_prev: TLERecord, r_cur: TLERecord) -> float:
-    try:
-        orbit = TLEOrbit(r_prev.tle)
-        sv_before = orbit.propagate(r_cur.epoch)
-        sv_after  = TLEOrbit(r_cur.tle).propagate(r_cur.epoch)
-        return float(np.linalg.norm(sv_after.v - sv_before.v))
-    except Exception:
-        v1 = math.sqrt(MU_EARTH / r_prev.sma_km)
-        v2 = math.sqrt(MU_EARTH / r_cur.sma_km)
-        dv_alt = abs(v2 - v1)
-        dv_inc = 2.0 * v2 * abs(math.sin(math.radians(abs(_angle_diff(r_prev.inc_deg, r_cur.inc_deg)) / 2.0)))
-        return math.hypot(dv_alt, dv_inc)
+    """Screening ΔV between two element sets, in km/s.
+
+    Mean element differencing. Cheap enough to run on every consecutive pair in
+    a long history, and structurally immune to the along-track phase error that
+    made the previous propagation-difference method report thousands of metres
+    per second for objects that never manoeuvred. See
+    :mod:`spectre.astro.dv_estimation` for the measurements.
+
+    This is the screening figure. Detections are re-estimated with the full
+    machinery, which is more accurate still and dates the burn.
+    """
+    gap_days = (r_cur.epoch - r_prev.epoch).total_seconds() / 86400.0
+    b = snapshot_from_record(r_prev)
+    a = snapshot_from_record(r_cur)
+    raan_rate, argp_rate = secular_rates_deg_day(r_prev.tle, b.sma_km, b.ecc, b.inc_deg)
+    return estimate_dv_mean_elements(b, a, gap_days, raan_rate, argp_rate).dv_km_s
 
 
-def _classify_manoeuvre(dv: float, d_alt: float, d_inc: float, d_ecc: float, regime: str) -> tuple[str, str, str]:
+def _source_key(rec: TLERecord) -> str:
+    """Which catalogue produced this fit.
+
+    Differencing one organisation's orbit determination against another's
+    measures the disagreement between them, not a manoeuvre. Two providers
+    whose semi-major axes differ by 6 km put a standing 3.5 m/s on every
+    provider switch, which buries every real station-keeping burn beneath it.
+    Records with no attribution are grouped together rather than discarded.
+    """
+    return (rec.source or "").strip().upper() or "UNATTRIBUTED"
+
+
+def _build_pairs(records: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, float]]:
+    """Consecutive element set pairs, matched within source where known.
+
+    Falls back to plain consecutive pairing when the catalogue does not
+    attribute its fits, or when splitting by source would leave too little to
+    work with.
+    """
+    keys = {_source_key(r) for r in records}
+    attributed = keys - {"UNATTRIBUTED"}
+
+    if len(attributed) < 2:
+        return [
+            (records[i - 1], records[i],
+             (records[i].epoch - records[i - 1].epoch).total_seconds() / 86400.0)
+            for i in range(1, len(records))
+        ]
+
+    pairs: list[tuple[TLERecord, TLERecord, float]] = []
+    last: dict[str, TLERecord] = {}
+    for rec in records:
+        k = _source_key(rec)
+        prev = last.get(k)
+        if prev is not None:
+            pairs.append((prev, rec, (rec.epoch - prev.epoch).total_seconds() / 86400.0))
+        last[k] = rec
+    pairs.sort(key=lambda t: t[1].epoch)
+    return pairs
+
+
+def _merge_duplicate_detections(manoeuvres: list[Manoeuvre],
+                                window_days: float) -> tuple[list[Manoeuvre], int]:
+    """Collapse the same burn seen by more than one provider into one event.
+
+    Keeps the best-evidenced member of each cluster: highest confidence first,
+    then the one whose two element sets sit closest together in time, since a
+    tighter bracket localises the burn better.
+    """
+    if len(manoeuvres) < 2:
+        return manoeuvres, 0
+
+    order = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "UNASSESSED": 3}
+    ranked = sorted(manoeuvres, key=lambda m: m.burn_epoch)
+
+    merged: list[Manoeuvre] = []
+    cluster: list[Manoeuvre] = [ranked[0]]
+    for m in ranked[1:]:
+        if (m.burn_epoch - cluster[-1].burn_epoch).total_seconds() / 86400.0 <= window_days:
+            cluster.append(m)
+        else:
+            merged.append(min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days)))
+            cluster = [m]
+    merged.append(min(cluster, key=lambda x: (order.get(x.confidence, 3), x.gap_days)))
+    return merged, len(manoeuvres) - len(merged)
+
+
+#: Which orbital element each ΔV channel moves.
+_CHANNEL_ELEMENT = {
+    "along_track": "altitude",
+    "cross_track": "inclination",
+    "radial":      "eccentricity",
+}
+
+
+def _classify_manoeuvre(dv: float, d_alt: float, d_inc: float, d_ecc: float,
+                        regime: str, breakdown: DvBreakdown | None = None) -> tuple[str, str, str]:
+    """Dominant element, manoeuvre type and station-keeping subtype.
+
+    Where a breakdown is available the dominant element is simply whichever
+    channel carries the most ΔV, which is what "dominant" means. The fallback
+    below compares raw element deltas scaled against each other, which needs
+    weights that have no physical basis; it survives only for pairs that fell
+    outside the forensic budget.
+    """
     sk_limit = _SK_DV_LIMIT.get(regime, 0.050)
-    scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100, "eccentricity": abs(d_ecc) * 1000}
-    dominant = max(scores, key=lambda k: scores[k])
-    if abs(d_inc) > 0.05 and abs(d_inc) > abs(d_alt) * 0.1:
-        dominant = "inclination"
-    if all(v < 0.5 for v in scores.values()):
-        dominant = "mixed"
+
+    if breakdown is not None and breakdown.components:
+        top = max(breakdown.components, key=lambda c: c.dv_km_s)
+        total = sum(c.dv_km_s for c in breakdown.components)
+        dominant = (_CHANNEL_ELEMENT.get(top.channel, "mixed")
+                    if total > 0 and top.dv_km_s / total >= 0.6 else "mixed")
+    else:
+        scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100,
+                  "eccentricity": abs(d_ecc) * 1000}
+        dominant = max(scores, key=lambda k: scores[k])
+        if abs(d_inc) > 0.05 and abs(d_inc) > abs(d_alt) * 0.1:
+            dominant = "inclination"
+        if all(v < 0.5 for v in scores.values()):
+            dominant = "mixed"
 
     if dv <= sk_limit:
         mtype  = "station_keeping"
@@ -785,15 +953,52 @@ def analyse_pattern_of_life(
     span_days = (records[-1].epoch - records[0].epoch).total_seconds() / 86400.0
 
     # ── Manoeuvre detection ───────────────────────────────────────────────────
-    manoeuvres: list[Manoeuvre] = []
-    for i in range(1, len(records)):
-        rp, rc = records[i - 1], records[i]
-        gap = (rc.epoch - rp.epoch).total_seconds() / 86400.0
+    #
+    # Two passes. The first screens every consecutive pair with the cheap mean
+    # element estimator and, from that whole distribution, measures what this
+    # object's own fit scatter looks like. The second re-estimates only the
+    # pairs that clear the measured floor, with the full forensic machinery.
+    #
+    # The floor has to be measured rather than assumed. A fixed threshold
+    # cannot know that one object's catalogue is fed by a single sensor at one
+    # fit per day while another's is nine fits a day from several providers
+    # that disagree with each other. The median and median absolute deviation
+    # are used because real burns, however large, move neither, so an object's
+    # own manoeuvres cannot inflate the threshold meant to find them.
+
+    pairs: list[tuple[TLERecord, TLERecord, float]] = []
+    screen_dv: list[float] = []
+    skipped_long_gap = 0
+    for rp, rc, gap in _build_pairs(records):
         if gap > _MAX_GAP_DAYS:
+            skipped_long_gap += 1
             continue
-        dv = _estimate_dv(rp, rc)
-        if dv < dv_threshold:
-            continue
+        pairs.append((rp, rc, gap))
+        screen_dv.append(_estimate_dv(rp, rc))
+
+    noise = calibrate_noise(screen_dv)
+    # The operator's threshold and the measured floor are both lower bounds;
+    # whichever is higher governs. Asking for 1 m/s on an object whose fits
+    # disagree by 4 m/s does not make 1 m/s detectable.
+    effective_threshold = max(dv_threshold, noise.floor_km_s)
+
+    candidates = [(rp, rc, gap, dv)
+                  for (rp, rc, gap), dv in zip(pairs, screen_dv, strict=True)
+                  if dv >= effective_threshold]
+    # Rank by screening ΔV so the largest events always get the full forensic
+    # treatment even when the budget binds.
+    candidates.sort(key=lambda c: c[3], reverse=True)
+    rejected_below_floor = len(pairs) - len(candidates)
+
+    manoeuvres: list[Manoeuvre] = []
+    for rank, (rp, rc, gap, screen) in enumerate(candidates):
+        if rank < _MAX_FULL_BREAKDOWNS:
+            bd = build_breakdown(rp, rc, gap, noise)
+            if bd.confidence == "REJECT":
+                continue
+            dv = bd.dv_km_s
+        else:
+            bd, dv = None, screen
 
         d_alt  = rc.alt_km  - rp.alt_km
         d_inc  = _angle_diff(rp.inc_deg,  rc.inc_deg)
@@ -809,7 +1014,7 @@ def analyse_pattern_of_life(
         if rp.geo_drift_rate_deg_day is not None and rc.geo_drift_rate_deg_day is not None:
             d_drift = rc.geo_drift_rate_deg_day - rp.geo_drift_rate_deg_day
 
-        dominant, mtype, sk_sub = _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime)
+        dominant, mtype, sk_sub = _classify_manoeuvre(dv, d_alt, d_inc, d_ecc, regime, bd)
         manoeuvres.append(Manoeuvre(
             epoch=rc.epoch, gap_days=gap,
             delta_v_km_s=dv, delta_alt_km=d_alt, delta_inc_deg=d_inc,
@@ -817,8 +1022,30 @@ def analyse_pattern_of_life(
             delta_argp_corrected_deg=d_argp, delta_period_s=d_per,
             delta_drift_deg_day=d_drift,
             dominant_element=dominant, manoeuvre_type=mtype, sk_subtype=sk_sub,
-            tle_before=rp, tle_after=rc,
+            tle_before=rp, tle_after=rc, breakdown=bd,
         ))
+
+    rejected_on_evidence = len(candidates[:_MAX_FULL_BREAKDOWNS]) - sum(
+        1 for m in manoeuvres if m.breakdown is not None
+    )
+
+    # One burn seen by two providers is one burn.
+    gaps_seen = sorted(g for _, _, g in pairs)
+    median_gap = gaps_seen[len(gaps_seen) // 2] if gaps_seen else 0.0
+    detections, merged_duplicates = _merge_duplicate_detections(
+        manoeuvres, max(_MERGE_WINDOW_FLOOR_DAYS, median_gap),
+    )
+
+    # Two tiers. A detection is confirmed only where two independent estimators
+    # agree on it, it stands ten times above the object's own measured fit
+    # scatter, and nothing about the element sets' provenance objects. Those
+    # carry the headline statistics. Everything else is kept and shown as a
+    # candidate but left out of the cumulative ΔV, the propellant budget and
+    # the anomaly score: an unconfirmed detection is not evidence of expended
+    # fuel, and treating it as such is how a LEO smallsat comes to read as
+    # having spent 36,000 m/s against a lifetime budget of 2,500.
+    manoeuvres = [m for m in detections if m.confidence == "HIGH"]
+    candidates = [m for m in detections if m.confidence != "HIGH"]
 
     # ── Drift phases ──────────────────────────────────────────────────────────
     drift_phases = _compute_drift_phases(records)
@@ -927,4 +1154,12 @@ def analyse_pattern_of_life(
         pol_high_interval=round(interval_stats.high_2sigma, 1) if interval_stats else None,
         pol_low_interval =round(interval_stats.low_2sigma,  1) if interval_stats else None,
         quality_flags=quality_flags or [],
+        candidate_manoeuvres=sorted(candidates, key=lambda m: m.epoch),
+        noise_model=noise,
+        pairs_examined=len(pairs),
+        rejected_below_floor=rejected_below_floor,
+        rejected_on_evidence=rejected_on_evidence,
+        skipped_long_gap=skipped_long_gap,
+        merged_duplicates=merged_duplicates,
+        breakdowns_truncated=max(0, len(candidates) - _MAX_FULL_BREAKDOWNS),
     )

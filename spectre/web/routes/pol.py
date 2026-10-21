@@ -323,7 +323,248 @@ def _pol_view(pol: object) -> dict[str, object]:
             {"m": m, "delta_v_m_s": to_m_s(m.delta_v_km_s)}
             for m in getattr(pol, "manoeuvres", [])
         ],
+        "candidate_rows": [
+            {"m": m, "delta_v_m_s": to_m_s(m.delta_v_km_s)}
+            for m in getattr(pol, "candidate_manoeuvres", [])
+        ],
+        "detection": _detection_view(pol),
     }
+
+
+def _detection_view(pol: object) -> dict[str, object]:
+    """What the detector examined, measured, and threw away.
+
+    The manoeuvre count on its own is not defensible. This is the audit trail
+    behind it: the threshold the object's own element sets forced, how many
+    pairs fell under it, and how many were discarded on evidence rather than on
+    magnitude. Every ΔV here is converted once, as everywhere else in this
+    module.
+    """
+    noise = getattr(pol, "noise_model", None)
+    return {
+        "pairs_examined":       getattr(pol, "pairs_examined", 0),
+        "rejected_below_floor": getattr(pol, "rejected_below_floor", 0),
+        "rejected_on_evidence": getattr(pol, "rejected_on_evidence", 0),
+        "skipped_long_gap":     getattr(pol, "skipped_long_gap", 0),
+        "merged_duplicates":    getattr(pol, "merged_duplicates", 0),
+        "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
+        "confirmed":            len(getattr(pol, "manoeuvres", [])),
+        "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),
+        "noise_floor_m_s":      to_m_s(noise.floor_km_s) if noise else None,
+        "noise_median_m_s":     to_m_s(noise.median_km_s) if noise else None,
+        "noise_mad_m_s":        to_m_s(noise.mad_km_s) if noise else None,
+        "noise_samples":        noise.samples if noise else 0,
+        "noise_method":         noise.method if noise else "",
+    }
+
+
+# ── Manoeuvre drill-down ──────────────────────────────────────────────────────
+
+#: Suffix on a ``DvComponent.inputs`` key to the unit it is measured in. The
+#: keys are symbols from the formula, so the unit has to come from somewhere;
+#: taking it from the name keeps the two from ever drifting apart.
+_INPUT_UNITS = {
+    "_km_s":   "km/s",
+    "_rad_s":  "rad/s",
+    "_deg_day": "°/day",
+    "_km":     "km",
+    "_deg":    "°",
+}
+
+
+def _input_rows(inputs: dict[str, float]) -> list[dict[str, object]]:
+    """One display row per number that entered a ΔV component.
+
+    Values are left in the units the physics uses. Only ΔV is converted to m/s,
+    and that happens on the component itself, not here: an operator checking
+    ``Δv = n · Δa / 2`` by hand needs ``n`` in rad/s and ``Δa`` in km, which is
+    what the formula is written in.
+    """
+    rows: list[dict[str, object]] = []
+    for key, value in inputs.items():
+        unit = ""
+        for suffix, label in _INPUT_UNITS.items():
+            if key.endswith(suffix):
+                unit = label
+                break
+        rows.append({
+            "key":   key,
+            "label": key.replace("_", " "),
+            "unit":  unit,
+            "value": value,
+            # Element differences run from 1e-7 to 1e4, so a fixed number of
+            # decimal places is unreadable at one end and lossy at the other.
+            "text":  f"{value:,.6g}",
+        })
+    return rows
+
+
+def _estimate_view(est: object, headline_method: str) -> dict[str, object]:
+    """One estimator's result, converted at this boundary."""
+    return {
+        "method":      getattr(est, "method", ""),
+        "label":       getattr(est, "label", ""),
+        "dv_m_s":      to_m_s(getattr(est, "dv_km_s", 0.0)),
+        "notes":       list(getattr(est, "notes", ()) or ()),
+        "failed":      bool(getattr(est, "failed", False)),
+        "failure":     getattr(est, "failure_reason", ""),
+        "is_headline": getattr(est, "method", "") == headline_method,
+    }
+
+
+def _snapshot_view(s: object) -> dict[str, object]:
+    """One element set, flattened for the side-by-side table."""
+    return {
+        "epoch":          getattr(s, "epoch", None),
+        "sma_km":         getattr(s, "sma_km", 0.0),
+        "alt_km":         getattr(s, "alt_km", 0.0),
+        "ecc":            getattr(s, "ecc", 0.0),
+        "inc_deg":        getattr(s, "inc_deg", 0.0),
+        "raan_deg":       getattr(s, "raan_deg", 0.0),
+        "argp_deg":       getattr(s, "argp_deg", 0.0),
+        "ma_deg":         getattr(s, "mean_anomaly_deg", 0.0),
+        "mm_revday":      getattr(s, "mean_motion_revday", 0.0),
+        "period_min":     getattr(s, "period_min", 0.0),
+        "bstar":          getattr(s, "bstar", 0.0),
+        "speed_km_s":     getattr(s, "orbital_speed_km_s", 0.0),
+        "provenance":     getattr(s, "provenance_label", ""),
+        "source":         getattr(s, "source", ""),
+        "data_mode":      getattr(s, "data_mode", ""),
+        "rms_residual":   getattr(s, "rms_residual", None),
+        "element_set_no": getattr(s, "element_set_no", 0),
+    }
+
+
+def _breakdown_view(m: object) -> dict[str, object]:
+    """Everything behind one manoeuvre's ΔV, ready for the drill-down.
+
+    THIS IS THE UNIT BOUNDARY for the manoeuvre detail panel, on the same terms
+    as :func:`_pol_view`. Every ΔV leaves here in m/s and says so in its name.
+    Element values stay in the units the formulas are written in, labelled.
+
+    Every key is always present, including when there is no breakdown to show.
+    A partial context is how a panel comes to reference an undefined name, and
+    Jinja's StrictUndefined turns that into a blank panel in production rather
+    than a failure in test.
+    """
+    view: dict[str, object] = {
+        "has_breakdown":        False,
+        "delta_v_m_s":          to_m_s(getattr(m, "delta_v_km_s", 0.0)),
+        "headline_method":      "",
+        "confidence":           getattr(m, "confidence", "UNASSESSED"),
+        "confidence_reason":    "",
+        "warnings":             [],
+        "gap_days":             float(getattr(m, "gap_days", 0.0) or 0.0),
+        "agreement_ratio":      None,
+        "snr":                  None,
+        "burn_epoch":           None,
+        "burn_ambiguous":       False,
+        "position_mismatch_km": None,
+        "cross_source":         False,
+        "estimates":            [],
+        "components":           [],
+        "component_total_m_s":  None,
+        "before":               {},
+        "after":                {},
+        "deltas":               {},
+        "noise_floor_m_s":      None,
+        "noise_median_m_s":     None,
+        "noise_mad_m_s":        None,
+        "noise_samples":        0,
+    }
+
+    bd = getattr(m, "breakdown", None)
+    if bd is None:
+        return view
+
+    headline = getattr(bd, "headline_method", "")
+    before, after = bd.before, bd.after
+    view.update({
+        "has_breakdown":        True,
+        "delta_v_m_s":          to_m_s(bd.dv_km_s),
+        "headline_method":      headline,
+        "confidence":           bd.confidence,
+        "confidence_reason":    bd.confidence_reason,
+        "warnings":             list(bd.warnings),
+        "gap_days":             bd.gap_days,
+        "agreement_ratio":      bd.agreement_ratio,
+        "snr":                  bd.snr,
+        "burn_epoch":           bd.burn_epoch,
+        "burn_ambiguous":       bool(getattr(bd.swept, "burn_epoch_ambiguous", False)),
+        "position_mismatch_km": getattr(bd.swept, "position_mismatch_km", None),
+        "cross_source":         bd.cross_source,
+        "estimates":            [_estimate_view(e, headline) for e in bd.estimates],
+        "components": [
+            {
+                "channel": c.channel,
+                "label":   c.label,
+                "dv_m_s":  to_m_s(c.dv_km_s),
+                "driver":  c.driver,
+                "formula": c.formula,
+                "note":    c.note,
+                "inputs":  _input_rows(c.inputs),
+            }
+            for c in bd.components
+        ],
+        "component_total_m_s": to_m_s(bd.elements.dv_km_s),
+        "before": _snapshot_view(before),
+        "after":  _snapshot_view(after),
+        "deltas": {
+            "sma_km":     after.sma_km - before.sma_km,
+            "alt_km":     after.alt_km - before.alt_km,
+            "ecc":        after.ecc - before.ecc,
+            "inc_deg":    after.inc_deg - before.inc_deg,
+            "raan_deg":   after.raan_deg - before.raan_deg,
+            "argp_deg":   after.argp_deg - before.argp_deg,
+            "mm_revday":  after.mean_motion_revday - before.mean_motion_revday,
+            "period_min": after.period_min - before.period_min,
+        },
+        "noise_floor_m_s":  to_m_s(bd.noise.floor_km_s) if bd.noise else None,
+        "noise_median_m_s": to_m_s(bd.noise.median_km_s) if bd.noise else None,
+        "noise_mad_m_s":    to_m_s(bd.noise.mad_km_s) if bd.noise else None,
+        "noise_samples":    bd.noise.samples if bd.noise else 0,
+    })
+    return view
+
+
+@router.post("/manoeuvre-detail", response_class=HTMLResponse)
+async def pol_manoeuvre_detail(
+    request: Request,
+    satno: Annotated[int, Form()],
+    manoeuvre_epoch: Annotated[str, Form()],
+    current_user: User = Depends(require_login),
+) -> HTMLResponse:
+    """The full working behind one manoeuvre's ΔV figure.
+
+    Both element sets side by side with their provenance, every term in the
+    decomposition with the numbers that produced it, all three estimators, and
+    why the result was or was not believed.
+    """
+    state = get_session_state(current_user.username)
+    pol = getattr(state, "last_pol_analysis", None)
+
+    if pol is None or pol.satno != satno:
+        return HTMLResponse(
+            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
+        )
+
+    target = manoeuvre_epoch[:19]
+    everything = list(pol.manoeuvres) + list(getattr(pol, "candidate_manoeuvres", []))
+    matching = [m for m in everything
+                if m.epoch.strftime("%Y-%m-%dT%H:%M:%S") == target]
+    if not matching:
+        return HTMLResponse(
+            f'<p class="error-msg">Manoeuvre at {html.escape(manoeuvre_epoch)} '
+            "not found in PoL results.</p>"
+        )
+
+    m = matching[0]
+    return render(request, "partials/pol_manoeuvre_detail.html", {
+        "m": m,
+        "satno": satno,
+        "confirmed": m in pol.manoeuvres,
+        **_breakdown_view(m),
+    })
 
 
 @router.post("/monte-carlo", response_class=HTMLResponse)

@@ -7,6 +7,96 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.19] - 2026-10-21
+
+The Pattern of Life ΔV figures were measuring the gap between element sets, not
+the manoeuvre between them. Every number downstream of them was wrong by up to
+three orders of magnitude.
+
+### Fixed
+
+- **ΔV was estimated by differencing two propagated velocity vectors.** The
+  before-element-set was propagated to the after-epoch and the velocities
+  differenced. That measures how far two trajectories have drifted apart, which
+  is dominated by along-track phase and carries no ΔV information at all.
+  Measured on a 550 km orbit: two fits of the same orbit at the same epoch,
+  differing only in mean anomaly by 0.1° (1.6 seconds of along-track timing),
+  reported 13.3 m/s; at 30° of phase, 3,936 m/s. True ΔV is zero in both. The
+  error compounded with the epoch gap, so a real 6.95 m/s burn read as 395 m/s
+  across 0.2 days and 1,971 m/s across one day.
+
+- **Natural node precession was partly read as a plane change.** Secular drift
+  rates now come from SGP4's own initialised element set rather than the
+  closed-form J2 relation, and are weighted by the measured burn instant
+  because the orbit precesses at one rate before a burn and another after it.
+  The mismatch had been putting 39 m/s of phantom plane change on a real 7 m/s
+  burn across a 15-day gap.
+
+- **One provider's fit was differenced against another's.** Each element set is
+  now differenced only against the previous one from the same source.
+  Differencing across providers measures the disagreement between two
+  organisations' orbit determination, not a manoeuvre: on a catalogue with two
+  providers 6.3 km apart in semi-major axis it put a standing 3.5 m/s on every
+  provider switch and raised the detection floor from 2.8 to 9.1 m/s, burying
+  every real station-keeping burn beneath it.
+
+- **The detection threshold was a fixed 2 m/s.** It is now measured per object,
+  from the median and median absolute deviation of every consecutive-pair ΔV in
+  that object's own history. Both statistics are robust, so an object's own
+  burns cannot inflate the threshold meant to find them.
+
+- **The element set table rendered every record with its full element set
+  text.** On a 3,676-set catalogue that was 7.3 MB of HTML into a 340 px scroll
+  box. Capped to the newest 400, with the omission stated on the page rather
+  than left silent. Measured: 7,321,947 characters before, 905,528 after.
+
+### Added
+
+- **A drill-down behind every ΔV figure.** Both element sets side by side with
+  their provenance and fit residuals, all three estimators with their readings,
+  every channel with the numbers that produced it and the relation applied, the
+  measured detection floor, the dated burn instant, and why the result was or
+  was not believed. Mean anomaly is shown and explicitly marked "not used",
+  because it is the variable that caused the original defect.
+
+- **Two estimators, neither of which can read phase as ΔV.** The headline is
+  epoch-swept propagation: velocity differencing is exact at the instant of the
+  burn and only then, so the gap is searched for the epoch at which the two
+  trajectories actually coincide. Measured against synthetic burns of known
+  magnitude, it is accurate to better than 0.2% at every gap from 0.2 to 15
+  days. The second is mean element differencing, which decomposes the figure
+  per variable and never reads mean anomaly.
+
+- **Confirmed and candidate tiers.** A detection is confirmed only where both
+  estimators agree within 1.5×, it stands ten times above the object's own
+  measured fit scatter, and nothing about the element sets' provenance objects.
+  Only confirmed events feed the cumulative ΔV, the propellant budget and the
+  anomaly score. Candidates are kept, shown and labelled with the reason they
+  did not qualify.
+
+- **A detection provenance block.** How many element set pairs were examined,
+  the measured floor and the statistics behind it, and how many pairs were
+  discarded, for what reason.
+
+### Changed
+
+- `PolAnalysis.manoeuvres` now holds confirmed detections only; the rest are in
+  `PolAnalysis.candidate_manoeuvres`. Everything derived from manoeuvres, the
+  propellant budget included, follows the confirmed list.
+- Manoeuvre classification keys on which measured channel carries the ΔV rather
+  than on scaled element deltas with weights that had no physical basis.
+- The maximum epoch gap for a detectable manoeuvre rose from 15 to 30 days, now
+  that the estimator no longer degrades with the gap.
+
+### Notes
+
+The new figures under-report: across four simulated catalogues the cumulative
+ΔV came out at 0.69 to 0.91 of known truth, because burns below the measured
+floor genuinely cannot be told apart from the disagreement between successive
+fits. The old estimator over-reported by 5,581× on the same data.
+Under-claiming expended propellant is recoverable; over-claiming it by three
+orders of magnitude into a capability assessment is not.
+
 ## [0.5.18] - 2026-10-16
 
 The HRR watchlist, delivered. The threat sweep and the asset screen both run

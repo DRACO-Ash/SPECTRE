@@ -624,3 +624,56 @@ rather than deleted.
 sweep's target side now works from the bundled list; its interceptor side
 still needs a Red Track or a pasted TLE. Unchanged by this release, and not
 something the watchlist can supply.
+
+## 0.5.19
+
+The Pattern of Life ΔV figures were measuring the gap between element sets, not
+the manoeuvre between them. Every number downstream of them was wrong by up to
+three orders of magnitude.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Runtime correctness | **EVIDENCED** | Stop estimating ΔV by differencing two propagated velocity vectors | The method propagated the before-element-set to the after-epoch and differenced velocities. That measures how far two trajectories have drifted, which is dominated by along-track phase and carries no ΔV information. Measured on a 550 km orbit: two fits of the SAME orbit at the SAME epoch differing only in mean anomaly by 0.1° (1.6 seconds of along-track timing) reported 13.3 m/s; at 30° of phase, 3,936 m/s. True ΔV is zero in both. The error also compounds with the gap: a real 6.95 m/s burn read as 395 m/s across 0.2 days and 1,971 m/s across one day. | Then the replacement shares the defect, which `test_dv_estimation.py::TestPhaseIsNotDeltaV` would catch: it pins the six measured phase offsets above and asserts each reads under 0.01 m/s. |
+| Runtime correctness | **EVIDENCED** | Headline ΔV from epoch-swept propagation | Velocity differencing is exact at the instant of the burn and only then. Rather than abandon it, the gap is searched for the epoch at which the two trajectories are actually closest and the velocities differenced there. Measured against synthetic burns of known magnitude at known instants: better than 0.2% at every gap from 0.2 to 15 days, where the old method's error grew from 395 to 14,110 m/s on the same 6.95 m/s burn. | Then the error returns with the gap. Twelve parametrised cases assert the same burn reads the same at four gaps. |
+| Runtime correctness | **EVIDENCED** | Per-variable decomposition from mean element differencing | This is what the operator asked for and what the drill-down renders: along-track from Δa, radial from the eccentricity vector, cross-track from Δi and ΔΩ, each carrying every input number and the relation applied, so a figure can be recomputed by hand. Mean anomaly is never read, so it is structurally immune to the defect above. | Then a channel is mis-inverted. Each is asserted against its analytic relation, and one test recomputes the along-track term from its own published inputs. |
+| Runtime correctness | **EVIDENCED** | Take secular drift rates from SGP4 rather than the closed-form J2 relation | The two differ by enough to matter. On a 15-day gap the mismatch put 39 m/s of phantom plane change on a real 7 m/s burn, because natural node precession was only partly removed before differencing. The rates are read off SGP4's own initialised `Satrec`, which is the drift the catalogue's fits were produced against, and weighted by the measured burn instant because the orbit precesses at one rate before the burn and another after. | Then the residual returns at long gaps. The coasting case asserts under 0.1 m/s across 68° of natural node drift. |
+| Runtime correctness | **EVIDENCED** | Measure the detection floor per object instead of assuming 2 m/s | A fixed threshold cannot know that one object's catalogue is one fit a day from one sensor while another's is nine a day from several providers that disagree. The floor is now the median plus five median absolute deviations of every consecutive-pair ΔV for that object. Both statistics are robust, so an object's own burns cannot inflate the threshold meant to find them: injecting 1% of samples at 5 km/s moves the floor by under 1%. | Then the floor is being set by the signal. That exact contamination case is asserted. |
+| Runtime correctness | **EVIDENCED** | Difference each fit only against the previous fit from the same source | Differencing one organisation's orbit determination against another's measures the disagreement between them. On a simulated catalogue with two providers 6.3 km apart in semi-major axis, cross-provider pairing put a standing 3.5 m/s on every provider switch and raised the measured floor from 2.8 to 9.1 m/s, burying every real station-keeping burn beneath it. | Then pairing is crossing sources. Asserted directly: every pair produced from a two-provider catalogue has matching sources. |
+| Runtime correctness | **EVIDENCED** | Two tiers, and only confirmed events carry the headline statistics | A detection is confirmed only where two independent estimators agree within 1.5×, it stands ten times above the object's own measured fit scatter, and nothing about the element sets' provenance objects. Measured over four simulated catalogues of known truth, that combination returned no false confirmations on three of them and two on the sparsest; relaxing the signal requirement to five admitted twelve to sixteen. A statistical confirmation level was tried first and removed: at the 99.9th percentile it was set by the object's own largest burn on a sparse catalogue and missed all six known manoeuvres. | Then unconfirmed detections are reaching the propellant budget. `test_only_confirmed_events_carry_the_headline_statistics` asserts the cumulative ΔV equals the confirmed sum exactly. |
+| Runtime capability | **EVIDENCED** | A drill-down panel behind every ΔV figure | Both element sets side by side with their provenance and fit residuals, all three estimators with their readings, every channel with the numbers that produced it, the measured detection floor, and why the result was or was not believed. Mean anomaly is shown and explicitly marked "not used", because it is the variable that caused the original defect. | Then a panel ships blank. Both branches are rendered under `StrictUndefined` in unit and integration tests. |
+| Runtime correctness | **EVIDENCED** | The element set table renders at most 400 rows | Each row carries the full element set text, so the table ran about 2 kB per record with no cap. On a 3,676-set catalogue the panel rendered 7.3 MB of HTML into a 340 px scroll box. Capped to the newest 400, with the omission stated in the page rather than left silent. Measured: 7,321,947 characters before, 905,528 after. | Then something else is unbounded. The figure is the test. |
+| Runtime correctness | **EVIDENCED** | The drill-down view returns every key in both branches | The first render under `StrictUndefined` failed on `confidence`, which the panel header read before the no-breakdown guard. A partial context is how a dead panel ships: the same class of defect as the refusals panel in 0.5.14. The view now builds a complete default dict and updates it. | Then a name was added to the template and not to the default. One test asserts the two branches have identical key sets. |
+
+### What this costs
+
+**The new figures under-report, and that is the right direction.** Across four
+simulated catalogues the cumulative ΔV came out at 0.69 to 0.91 of truth,
+because burns below the measured floor are genuinely indistinguishable from the
+disagreement between successive fits. The old estimator over-reported by 5,581×
+on the same data. Under-claiming a platform's expended propellant is
+recoverable; over-claiming it by three orders of magnitude into a capability
+assessment is not.
+
+**The candidates tier exists so nothing is hidden.** Detections above the floor
+that fail the forensic checks are kept, shown, and labelled with the reason,
+but excluded from the cumulative ΔV, the propellant budget and the anomaly
+score. An unconfirmed detection is not evidence of expended fuel.
+
+### What it means for SATNO 62902
+
+The reported 36,686.4 m/s of cumulative ΔV and 100% propellant consumed were
+never a propellant measurement. The research basis puts a LEO smallsat's entire
+lifetime budget at 500 to 2,500 m/s, so the figure was 15 to 70× anything the
+platform could hold. The equal-and-opposite ±12.66 km altitude pairs on single
+dates, and the rows at a 0.0-day gap, are the signature of two providers' fits
+being differenced against each other, which the source-matched pairing now
+prevents. On a catalogue built to match it (3,676 element sets, 385 days, two
+providers, six known burns totalling 29.9 m/s) the detector went from 3,304
+manoeuvres and 166,666 m/s to two manoeuvres and 20.5 m/s, with propellant
+consumed falling from 100% to 0.9%.
+
+**Recorded, not fixed:** the classification thresholds in `_SK_DV_LIMIT` were
+never derived from anything, and the station-keeping limits they encode are
+plausible rather than cited. They matter less now that the ΔV feeding them is
+correct, but a 20 m/s station-keeping ceiling for all of LEO is an assertion,
+not a measurement.
