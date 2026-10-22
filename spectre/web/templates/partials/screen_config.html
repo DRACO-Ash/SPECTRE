@@ -37,8 +37,12 @@
 </p>
 {% if synthetic_elements %}
 {# Provenance belongs where the choice is made, not only in a server log. #}
+{# The text colour is a token, not a literal: the hardcoded #f0a93a scored
+   1.83:1 on the light theme's #F3F4F6 surface and failed WCAG AA (css:S7924).
+   The token resolves per theme. The border and background stay literal; they
+   are decoration, not text, so the contrast rule does not reach them. #}
 <p style="margin:0.3rem 0 0; padding:0.3rem 0.5rem; font-size:0.66rem;
-          color:#f0a93a; background:rgba(198,124,0,0.12);
+          color:var(--spectre-color-caution-amber-text); background:rgba(198,124,0,0.12);
           border:1px solid rgba(198,124,0,0.4); border-radius:3px">
   <strong>BOOTSTRAP ELEMENT SETS.</strong> Some orbits below are synthetic,
   generated so the capability runs before UDL is connected. They are not

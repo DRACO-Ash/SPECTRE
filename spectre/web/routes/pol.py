@@ -34,6 +34,19 @@ _UDL_BASE = "https://unifieddatalibrary.com/udl"
 # Maximum TLEs to fetch from UDL historical endpoint.
 _UDL_MAX_RESULTS = 5000
 
+# The PoL hero tab's own template. Every route that answers with the whole
+# panel - the panel itself and each of pol_analyse's failure exits - has to
+# name the same one, or a failed analysis returns a fragment the tab cannot
+# swap in.
+_POL_PANEL_TEMPLATE = "partials/pol_panel.html"
+
+# Returned by every drill-down that is asked about a SATNO the session has no
+# analysis for. Held here so the three exits stay byte-identical: the operator
+# reaching this from a stale tab should not be able to tell which one answered.
+_NO_ANALYSIS_HTML = (
+    '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
+)
+
 
 # ── UDL helper ────────────────────────────────────────────────────────────────
 
@@ -177,7 +190,7 @@ async def pol_panel(
         context.update(_pol_view(pol, _reserve_reset_for(state, pol.satno)))
         context.setdefault("source", "UDL")
         context.setdefault("pair", get_intel(pol.satno))
-    return render(request, "partials/pol_panel.html", context)
+    return render(request, _POL_PANEL_TEMPLATE, context)
 
 
 @router.post("/analyse", response_class=HTMLResponse)
@@ -197,7 +210,7 @@ async def pol_analyse(
     name = str(satno)
 
     def _err(msg: str) -> HTMLResponse:
-        return render(request, "partials/pol_panel.html", {
+        return render(request, _POL_PANEL_TEMPLATE, {
             "has_udl": bool(state.udl_username),
             "pol": None,
             "error": msg,
@@ -263,7 +276,7 @@ async def pol_analyse(
             metadata=merged_meta, rms_metadata=merged_rms,
         )
         if not records:
-            return render(request, "partials/pol_panel.html", {
+            return render(request, _POL_PANEL_TEMPLATE, {
                 "has_udl": bool(state.udl_username),
                 "pol": None,
                 "error": f"No valid TLEs parsed from UDL response for SATNO {satno}.",
@@ -293,7 +306,7 @@ async def pol_analyse(
         )
     except Exception as exc:
         logger.exception("PoL analysis failed for %d", satno)
-        return render(request, "partials/pol_panel.html", {
+        return render(request, _POL_PANEL_TEMPLATE, {
             "has_udl": bool(state.udl_username),
             "pol": None,
             "error": f"Analysis error: {exc}",
@@ -593,8 +606,11 @@ def _breakdown_view(m: object) -> dict[str, object]:
 async def pol_reserve_reset(
     request: Request,
     satno: Annotated[int, Form()],
+    # Annotated dependencies carry no default, so this has to precede
+    # reset_date. FastAPI binds route arguments by name, so the order is
+    # invisible to callers.
+    current_user: Annotated[User, Depends(require_login)],
     reset_date: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Record or clear a refuelling date, and re-render against it.
 
@@ -611,9 +627,7 @@ async def pol_reserve_reset(
     state = get_session_state(current_user.username)
     pol = getattr(state, "last_pol_analysis", None)
     if pol is None or pol.satno != satno:
-        return HTMLResponse(
-            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
-        )
+        return HTMLResponse(_NO_ANALYSIS_HTML)
 
     resets = getattr(state, "pol_reserve_resets", None)
     if not isinstance(resets, dict):
@@ -650,7 +664,7 @@ async def pol_manoeuvre_detail(
     request: Request,
     satno: Annotated[int, Form()],
     manoeuvre_epoch: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """The full working behind one manoeuvre's ΔV figure.
 
@@ -662,9 +676,7 @@ async def pol_manoeuvre_detail(
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
-        return HTMLResponse(
-            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
-        )
+        return HTMLResponse(_NO_ANALYSIS_HTML)
 
     target = manoeuvre_epoch[:19]
     everything = list(pol.manoeuvres) + list(getattr(pol, "candidate_manoeuvres", []))
@@ -692,7 +704,8 @@ async def pol_manoeuvre_detail(
 
 
 @router.post("/monte-carlo", response_class=HTMLResponse)
-async def pol_monte_carlo(  # noqa: PLR0913, PLR0917 - FastAPI form parameters
+# PLR0913, PLR0917: FastAPI form parameters.
+async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     request: Request,
     satno: Annotated[int, Form()],
     manoeuvre_epoch: Annotated[str, Form()],
@@ -714,9 +727,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917 - FastAPI form parameters
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
-        return HTMLResponse(
-            '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
-        )
+        return HTMLResponse(_NO_ANALYSIS_HTML)
 
     # Find the manoeuvre matching the requested epoch
     target_epoch_str = manoeuvre_epoch[:19]  # trim to seconds
@@ -852,6 +863,83 @@ async def pol_notso_panel(
     })
 
 
+def _notso_message_text(rec: dict[str, Any]) -> str:
+    """The parseable NOTSO text for one cached record.
+
+    A cached record normally carries the whole notification in ``msgText``.
+    Some carry only the structured fields, and a minimal message is rebuilt
+    from those rather than the record being dropped: a declared burn the
+    operator never sees is indistinguishable from one that was never declared.
+    """
+    msg_text = str(rec.get("msgText") or rec.get("message") or "")
+    if msg_text:
+        return msg_text
+    # Reconstruct minimal parseable text from structured fields
+    created = rec.get("createdAt") or ""
+    return (
+        f"MSGID: {rec.get('msgId', '')}\n"
+        f"SATNO: {rec.get('satNo', '')}\n"
+        f"ISSUE DATE: {created}\n"
+        f"EFFECTIVE START: {created}\n"
+        f"TYPE: MANOEUVRE\n"
+        f"DESCRIPTION: {rec.get('msgType', 'TACREP_NOTSO')}"
+    )
+
+
+def _notsos_from_cache_records(raw_records: list[dict[str, Any]]) -> list[Any]:
+    """Cached NOTSO dicts as ``NOTSORecord`` objects.
+
+    The cache holds raw dicts, so they go back through the same text parser the
+    pasted-text path uses. One grammar, one set of results, whichever source
+    the operator correlated from.
+    """
+    from spectre.astro.notso import parse_notso_text
+
+    notsos: list[Any] = []
+    for rec in raw_records:
+        parsed = parse_notso_text(_notso_message_text(rec))
+        # If parser couldn't extract satno, force it from the record
+        for p in parsed:
+            if p.norad_id == 0 or p.norad_id is None:
+                p.norad_id = int(rec.get("satNo") or 0)
+        notsos.extend(parsed)
+    return notsos
+
+
+def _analysis_window(pol: Any) -> tuple[datetime | None, datetime | None]:
+    """First and last epoch the analysis covers.
+
+    The element history is the authority on the span; the manoeuvre list is the
+    fallback for an analysis whose records were not retained. Both ends come
+    from the same source, because a window with one end from each would report
+    a behaviour profile over a span that was never observed.
+    """
+    if pol.records:
+        return pol.records[0].epoch, pol.records[-1].epoch
+    if pol.manoeuvres:
+        return pol.manoeuvres[0].epoch, pol.manoeuvres[-1].epoch
+    return None, None
+
+
+def _correlation_rows(correlations: list[Any]) -> list[dict[str, object]]:
+    """One display row per correlation, each carrying its own m/s figures.
+
+    Converted here, not in the template, on the same terms as :func:`_pol_view`.
+    """
+    return [
+        {
+            "c": c,
+            "manoeuvre_dv_m_s": to_m_s(
+                c.manoeuvre.delta_v_km_s if c.manoeuvre else None
+            ),
+            "predicted_dv_m_s": to_m_s(
+                c.notso.predicted_delta_v_km_s if c.notso else None
+            ),
+        }
+        for c in correlations
+    ]
+
+
 @router.post("/notso-correlate", response_class=HTMLResponse)
 async def pol_notso_correlate(
     request: Request,
@@ -905,25 +993,7 @@ async def pol_notso_correlate(
             )
         # Convert raw cache dicts → NOTSORecord using the existing text parser
         # Each record has a msgText field (full notification text) or we reconstruct it.
-        for rec in raw_records:
-            msg_text = str(rec.get("msgText") or rec.get("message") or "")
-            if not msg_text:
-                # Reconstruct minimal parseable text from structured fields
-                created = rec.get("createdAt") or ""
-                msg_text = (
-                    f"MSGID: {rec.get('msgId', '')}\n"
-                    f"SATNO: {rec.get('satNo', '')}\n"
-                    f"ISSUE DATE: {created}\n"
-                    f"EFFECTIVE START: {created}\n"
-                    f"TYPE: MANOEUVRE\n"
-                    f"DESCRIPTION: {rec.get('msgType', 'TACREP_NOTSO')}"
-                )
-            parsed = parse_notso_text(msg_text)
-            # If parser couldn't extract satno, force it from the record
-            for p in parsed:
-                if p.norad_id == 0 or p.norad_id is None:
-                    p.norad_id = int(rec.get("satNo") or 0)
-            notsos.extend(parsed)
+        notsos = _notsos_from_cache_records(raw_records)
         source_label = f"local cache ({len(raw_records)} records)"
         if not notsos:
             return HTMLResponse(
@@ -946,8 +1016,7 @@ async def pol_notso_correlate(
             notsos, _all_detections(pol), pol.satno
         )
 
-        start = pol.records[0].epoch if pol.records else (pol.manoeuvres[0].epoch if pol.manoeuvres else None)
-        end   = pol.records[-1].epoch if pol.records else (pol.manoeuvres[-1].epoch if pol.manoeuvres else None)
+        start, end = _analysis_window(pol)
         profile = (
             extract_behaviour_profile(
                 pol.satno, correlations, start, end,
@@ -968,18 +1037,7 @@ async def pol_notso_correlate(
 
     return render(request, "partials/notso_results.html", {
         # Rows carry their own m/s figures so the template does no arithmetic.
-        "correlation_rows": [
-            {
-                "c": c,
-                "manoeuvre_dv_m_s": to_m_s(
-                    c.manoeuvre.delta_v_km_s if c.manoeuvre else None
-                ),
-                "predicted_dv_m_s": to_m_s(
-                    c.notso.predicted_delta_v_km_s if c.notso else None
-                ),
-            }
-            for c in correlations
-        ],
+        "correlation_rows": _correlation_rows(correlations),
         "correlations": correlations,
         "profile": profile,
         "pol": pol,

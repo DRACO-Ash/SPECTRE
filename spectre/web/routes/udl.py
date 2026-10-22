@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import (
     SessionState,
@@ -255,7 +256,7 @@ async def udl_login(
                 timeout=10.0,
             )
         if resp.status_code == 401:
-            logger.warning("UDL login rejected for operator %s", current_user.username)
+            logger.warning("UDL login rejected for operator %s", log_safe(current_user.username))
             return render(request,
                 "partials/udl_status.html",
                 {"udl_user": None, "error": "Invalid UDL credentials (401)."},
@@ -263,7 +264,7 @@ async def udl_login(
         if not resp.is_success:
             body = resp.text[:300].strip() or "(empty)"
             error = f"UDL probe returned HTTP {resp.status_code}: {body}"
-            logger.warning("UDL login probe %d for operator %s: %s", resp.status_code, current_user.username, body)
+            logger.warning("UDL login probe %d for operator %s: %s", resp.status_code, log_safe(current_user.username), body)
             return render(request,
                 "partials/udl_status.html",
                 {"udl_user": None, "error": error},
@@ -272,7 +273,7 @@ async def udl_login(
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:300].strip() or "(empty)"
         error = f"UDL probe returned HTTP {exc.response.status_code}: {body}"
-        logger.warning("UDL login probe HTTP error for operator %s: %s", current_user.username, exc)
+        logger.warning("UDL login probe HTTP error for operator %s: %s", log_safe(current_user.username), exc)
         return render(request,
             "partials/udl_status.html",
             {"udl_user": None, "error": error},
@@ -292,7 +293,7 @@ async def udl_login(
     state.udl_username = username
     state.udl_password = password
     state.append_log(f"[UDL] Connected as {username}")
-    logger.info("UDL credentials stored for operator: %s", current_user.username)
+    logger.info("UDL credentials stored for operator: %s", log_safe(current_user.username))
 
     # Kick off background tasks (no-op for catalog if already loaded).
     asyncio.create_task(_fetch_onorbit_background(username, password))
@@ -325,7 +326,7 @@ async def set_data_mode(
         mode = "REAL"
     state.udl_data_mode = mode
     state.append_log(f"[UDL] Data mode set to {mode}")
-    logger.info("UDL data mode set to %s for operator %s", mode, current_user.username)
+    logger.info("UDL data mode set to %s for operator %s", mode, log_safe(current_user.username))
     return render(request,
         "partials/data_mode_status.html",
         {"udl_data_mode": mode},
@@ -346,7 +347,7 @@ async def set_tle_source(
         state.append_log(f"[UDL] TLE source set to {source}")
     else:
         state.append_log("[UDL] TLE source reset to UDL default")
-    logger.info("TLE source set to %r for operator %s", source, current_user.username)
+    logger.info("TLE source set to %r for operator %s", source, log_safe(current_user.username))
     return render(request,
         "partials/tle_source_status.html",
         {"tle_source": source, "available": state.udl_available_sources},
@@ -363,7 +364,7 @@ async def udl_logout(
     state.udl_username = None
     state.udl_password = None
     state.append_log("[UDL] Disconnected")
-    logger.info("UDL credentials cleared for operator: %s", current_user.username)
+    logger.info("UDL credentials cleared for operator: %s", log_safe(current_user.username))
 
     return render(request,
         "partials/udl_status.html",
@@ -563,7 +564,7 @@ async def fetch_tle(
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
-        satno, name, mode, current_user.username,
+        satno, name, mode, log_safe(current_user.username),
     )
 
     return render(request,
@@ -669,7 +670,7 @@ async def fetch_statevector(
         "State vector fetched for SATNO %s (%s) by operator %s",
         satno,
         sv["name"],
-        current_user.username,
+        log_safe(current_user.username),
     )
 
     return render(request,
@@ -751,6 +752,22 @@ async def fetch_hrr_objects(
     return hrr_blue, hrr_red, days_used, None
 
 
+def _hrr_elset_fields(sat: dict[str, Any]) -> dict[str, str]:
+    """Return the optional element-set fields for one HRR entry, or nothing.
+
+    Both lines must be present to be usable: half a TLE is not a degraded
+    TLE, it is an unparseable one.
+    """
+    line1 = str(sat.get("line1") or "").strip()
+    line2 = str(sat.get("line2") or "").strip()
+    if line1 and line2:
+        return {
+            "tle": f"{line1}\n{line2}",
+            "tle_data_mode": str(sat.get("tleDataMode") or "REAL").strip().upper(),
+        }
+    return {}
+
+
 def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse a single HRR notification dict into (blue, red) normalised satellite lists.
 
@@ -782,13 +799,8 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
             "orbit_regime": orbit_regime,
             "created_at": created_at,
         }
-        # Optional element set. Both lines must be present to be usable: half
-        # a TLE is not a degraded TLE, it is an unparseable one.
-        line1 = str(sat.get("line1") or "").strip()
-        line2 = str(sat.get("line2") or "").strip()
-        if line1 and line2:
-            entry["tle"] = f"{line1}\n{line2}"
-            entry["tle_data_mode"] = str(sat.get("tleDataMode") or "REAL").strip().upper()
+        # Optional element set, carried through only when the source has one.
+        entry.update(_hrr_elset_fields(sat))
         if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
@@ -820,7 +832,7 @@ async def fetch_hrr(
     )
 
     if error:
-        logger.warning("HRR fetch error for operator %s: %s", current_user.username, error)
+        logger.warning("HRR fetch error for operator %s: %s", log_safe(current_user.username), error)
         return render(request,
             "partials/hrr_panel.html", {**_empty_err, "error": error},
         )
@@ -834,7 +846,7 @@ async def fetch_hrr(
     )
     logger.info(
         "HRR fetched for operator %s: lookback=%dd %d blue + %d red",
-        current_user.username, days_used, len(hrr_blue), len(hrr_red),
+        log_safe(current_user.username), days_used, len(hrr_blue), len(hrr_red),
     )
 
     return render(request,

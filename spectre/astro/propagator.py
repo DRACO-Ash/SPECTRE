@@ -20,7 +20,7 @@ from spectre.astro.constants import MU_EARTH, R_EARTH
 
 # Below these an orbit is treated as exactly equatorial or exactly circular,
 # and the classical element that becomes undefined is replaced by the one
-# that is still defined. See state_to_keplerian.
+# that is still defined. See _argp_and_ta.
 _EQUATORIAL_NODE_TOL: float = 1e-10
 _CIRCULAR_ECC_TOL: float = 1e-10
 
@@ -161,22 +161,52 @@ def state_to_keplerian(sv: StateVector) -> KeplerianElements:
         raan = 0.0
 
     # Argument of periapsis and true anomaly, including the degenerate cases.
-    #
-    # Two classical elements are undefined for particular orbits, and the
-    # previous code returned zero for both rather than substituting the
-    # element that IS defined. The result round-tripped to the wrong place in
-    # the orbit, silently:
-    #
-    #   circular inclined (e = 0)      true anomaly undefined      8,000 km out
-    #   equatorial elliptical (i = 0)  arg. of periapsis undefined 17,074 km out
-    #   circular equatorial            both undefined              78,460 km out
-    #
-    # The third is GEO, this application's primary regime, where a returned
-    # element set placed the object at an arbitrary point on the belt.
-    #
-    # The standard substitutions below keep the state recoverable in every
-    # case: argument of latitude for a circular orbit, longitude of periapsis
-    # for an equatorial one, true longitude when both apply.
+    argp, ta = _argp_and_ta(sv, h, n, e_vec, ecc)
+
+    return KeplerianElements(
+        a=a, ecc=ecc, inc=inc, raan=raan, argp=argp, ta=ta, epoch=sv.epoch,
+    )
+
+
+def _argp_and_ta(
+    sv: StateVector,
+    h: np.ndarray,
+    n: np.ndarray,
+    e_vec: np.ndarray,
+    ecc: float,
+) -> tuple[float, float]:
+    """Return argument of periapsis and true anomaly in degrees.
+
+    Lifted out of state_to_keplerian unchanged: the quadrant corrections
+    carried most of that function's cognitive complexity, which was over the
+    Code Quality gate's limit.
+
+    Two classical elements are undefined for particular orbits, and the
+    previous code returned zero for both rather than substituting the
+    element that IS defined. The result round-tripped to the wrong place in
+    the orbit, silently:
+
+      circular inclined (e = 0)      true anomaly undefined      8,000 km out
+      equatorial elliptical (i = 0)  arg. of periapsis undefined 17,074 km out
+      circular equatorial            both undefined              78,460 km out
+
+    The third is GEO, this application's primary regime, where a returned
+    element set placed the object at an arbitrary point on the belt.
+
+    The standard substitutions below keep the state recoverable in every
+    case: argument of latitude for a circular orbit, longitude of periapsis
+    for an equatorial one, true longitude when both apply.
+    """
+    r = sv.r
+    v = sv.v
+    r_mag = sv.r_mag
+    # Derived here rather than passed in, so the helper takes only the vectors
+    # the corrections are defined against. These are the same norms of the same
+    # vectors the caller already took, so every value below is bit-identical to
+    # the inline version this replaced.
+    h_mag = float(np.linalg.norm(h))
+    n_mag = float(np.linalg.norm(n))
+
     equatorial = n_mag <= _EQUATORIAL_NODE_TOL
     circular = ecc <= _CIRCULAR_ECC_TOL
 
@@ -212,9 +242,7 @@ def state_to_keplerian(sv: StateVector) -> KeplerianElements:
         if np.dot(r, v) < 0:
             ta = 360.0 - ta
 
-    return KeplerianElements(
-        a=a, ecc=ecc, inc=inc, raan=raan, argp=argp, ta=ta, epoch=sv.epoch,
-    )
+    return argp, ta
 
 
 def keplerian_to_state(

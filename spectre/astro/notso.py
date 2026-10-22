@@ -508,6 +508,77 @@ def correlate_notsos_with_manoeuvres(
 
 # ── Behaviour profile extraction ──────────────────────────────────────────────
 
+# Smallest sample a spread may be quoted from: a standard deviation over a
+# single observation is not a spread, it is zero information.
+_MIN_SAMPLES_FOR_STD = 2
+
+
+def _dv(c: NOTSOManoeuvreCorrelation) -> float:
+    return float(getattr(c.manoeuvre, "delta_v_km_s", 0.0) or 0.0)
+
+
+def _split_by_reportability(
+    matched: list[NOTSOManoeuvreCorrelation],
+    mnv_only: list[NOTSOManoeuvreCorrelation],
+    reportable_threshold_km_s: float | None,
+) -> tuple[list[NOTSOManoeuvreCorrelation], list[NOTSOManoeuvreCorrelation], int]:
+    """Split detected manoeuvres into those a notice was expected for and the rest.
+
+    With no threshold supplied, everything comes back as reportable and nothing
+    sits below it, which is what leaves the rate computed over every detected
+    manoeuvre and the behaviour bands withheld by the caller.
+    """
+    if reportable_threshold_km_s is None:
+        return matched, mnv_only, 0
+
+    reportable_matched = [c for c in matched if _dv(c) >= reportable_threshold_km_s]
+    reportable_missing = [c for c in mnv_only if _dv(c) >= reportable_threshold_km_s]
+    below_threshold = (len(matched) + len(mnv_only)
+                       - len(reportable_matched) - len(reportable_missing))
+    return reportable_matched, reportable_missing, below_threshold
+
+
+def _mean_and_std(values: list[float]) -> tuple[float | None, float | None]:
+    """Sample mean and sample standard deviation, each None when unavailable."""
+    mean = sum(values) / len(values) if values else None
+    std = None
+    if len(values) >= _MIN_SAMPLES_FOR_STD and mean is not None:
+        import math
+        _mean: float = mean
+        variance = sum((x - _mean) ** 2 for x in values) / (len(values) - 1)
+        std = math.sqrt(variance)
+    return mean, std
+
+
+def _window_accuracy_rate(matched: list[NOTSOManoeuvreCorrelation]) -> float:
+    """Fraction of matched manoeuvres whose epoch fell inside the NOTSO window.
+
+    Inside the stated window itself, not merely within the correlation
+    tolerance that paired the two in the first place.
+    """
+    window_hits = 0
+    for c in matched:
+        mnv_epoch = getattr(c.manoeuvre, "epoch", None)
+        if (
+            c.notso
+            and c.manoeuvre
+            and mnv_epoch is not None
+            and c.notso.effective_start_utc <= mnv_epoch <= c.notso.effective_end_utc
+        ):
+            window_hits += 1
+    return window_hits / len(matched) if matched else 0.0
+
+
+def _undetected_notso_types(notso_only: list[NOTSOManoeuvreCorrelation]) -> dict[str, int]:
+    """Count, by NOTSO type, the notices with no detection beside them."""
+    undetected_types: dict[str, int] = {}
+    for c in notso_only:
+        if c.notso:
+            t = c.notso.notso_type.value
+            undetected_types[t] = undetected_types.get(t, 0) + 1
+    return undetected_types
+
+
 def extract_behaviour_profile(
     norad_id: int,
     correlations: list[NOTSOManoeuvreCorrelation],
@@ -537,21 +608,13 @@ def extract_behaviour_profile(
     notso_only = [c for c in correlations if c.correlation_type == "notso_only"]
     mnv_only   = [c for c in correlations if c.correlation_type == "manoeuvre_only"]
 
-    def _dv(c: NOTSOManoeuvreCorrelation) -> float:
-        return float(getattr(c.manoeuvre, "delta_v_km_s", 0.0) or 0.0)
-
     total_mnv     = len(matched) + len(mnv_only)
     with_notso    = len(matched)
     without_notso = len(mnv_only)
 
-    if reportable_threshold_km_s is None:
-        reportable_matched, reportable_missing = matched, mnv_only
-        below_threshold = 0
-    else:
-        reportable_matched = [c for c in matched if _dv(c) >= reportable_threshold_km_s]
-        reportable_missing = [c for c in mnv_only if _dv(c) >= reportable_threshold_km_s]
-        below_threshold = (len(matched) + len(mnv_only)
-                           - len(reportable_matched) - len(reportable_missing))
+    reportable_matched, reportable_missing, below_threshold = _split_by_reportability(
+        matched, mnv_only, reportable_threshold_km_s,
+    )
 
     reportable = len(reportable_matched) + len(reportable_missing)
     notif_rate = len(reportable_matched) / reportable if reportable > 0 else 0.0
@@ -560,43 +623,17 @@ def extract_behaviour_profile(
 
     # Lead times (NOTSO effective_start − manoeuvre epoch)
     lead_times = [c.time_offset_hours for c in matched if c.time_offset_hours is not None]
-    mean_lt = sum(lead_times) / len(lead_times) if lead_times else None
-    std_lt  = None
-    if len(lead_times) >= 2 and mean_lt is not None:
-        import math
-        _mean_lt: float = mean_lt
-        variance = sum((x - _mean_lt) ** 2 for x in lead_times) / (len(lead_times) - 1)
-        std_lt = math.sqrt(variance)
+    mean_lt, std_lt = _mean_and_std(lead_times)
 
     # Magnitude accuracy
     ratios = [c.magnitude_ratio for c in matched if c.magnitude_ratio is not None]
-    mean_mr = sum(ratios) / len(ratios) if ratios else None
-    std_mr  = None
-    if len(ratios) >= 2 and mean_mr is not None:
-        import math
-        _mean_mr: float = mean_mr
-        var_mr = sum((x - _mean_mr) ** 2 for x in ratios) / (len(ratios) - 1)
-        std_mr = math.sqrt(var_mr)
+    mean_mr, std_mr = _mean_and_std(ratios)
 
     # Window accuracy: manoeuvre fell inside (not just within tolerance)
-    window_hits = 0
-    for c in matched:
-        mnv_epoch = getattr(c.manoeuvre, "epoch", None)
-        if (
-            c.notso
-            and c.manoeuvre
-            and mnv_epoch is not None
-            and c.notso.effective_start_utc <= mnv_epoch <= c.notso.effective_end_utc
-        ):
-            window_hits += 1
-    window_acc = window_hits / len(matched) if matched else 0.0
+    window_acc = _window_accuracy_rate(matched)
 
     # NOTSOs with no detection beside them, by type.
-    undetected_types: dict[str, int] = {}
-    for c in notso_only:
-        if c.notso:
-            t = c.notso.notso_type.value
-            undetected_types[t] = undetected_types.get(t, 0) + 1
+    undetected_types = _undetected_notso_types(notso_only)
 
     profile = OperatorBehaviourProfile(
         norad_id=norad_id,

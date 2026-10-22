@@ -300,6 +300,50 @@ async def target_config(
     })
 
 
+async def _prefetch_group_tle(
+    state: object, satno_str: str, sem: asyncio.Semaphore, window_hours: float,
+) -> bool:
+    """Bring one HRR object's element set up to date, history included.
+
+    Lifted whole out of ``fetch_targets``, where it was a closure counting
+    into two ``nonlocal`` tallies three levels deep. True means the object
+    ends the call holding a usable element set, which is what the status
+    panel counts as fetched: one that already held a REAL one counts without
+    a call being made.
+
+    The credential check is kept even though the caller has already made it.
+    Session state is shared, and dropping a guard because it looks redundant
+    is how a concurrent disconnect turns into a request for an empty password.
+    """
+    from spectre.web.routes.udl import fetch_tle_for_satno, fetch_tle_history_for_satno
+
+    if not _needs_live_tle(state, satno_str):
+        return True
+    if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+        return False
+    async with sem:
+        result = await fetch_tle_for_satno(
+            int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
+            data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+            source=state.udl_tle_source,  # type: ignore[attr-defined]
+        )
+        if not result:
+            return False
+        tle, dm = result
+        state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
+        state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
+        # Also fetch multi-provider history for clustering.
+        history = await fetch_tle_history_for_satno(
+            int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
+            window_hours=window_hours,
+            data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+            source=state.udl_tle_source,  # type: ignore[attr-defined]
+        )
+        if len(history) > 1:
+            state.hrr_tle_multiset[satno_str] = history  # type: ignore[attr-defined]
+    return True
+
+
 @router.post("/fetch-targets", response_model=None)
 async def fetch_targets(
     request: Request,
@@ -340,51 +384,23 @@ async def fetch_targets(
         })
 
     from spectre.config.constants import TLE_CLUSTERING
-    from spectre.web.routes.udl import fetch_tle_for_satno, fetch_tle_history_for_satno
 
     # Clear the multi-TLE cache so this fetch starts clean; prevents stale TLEs
     # from a prior group selection contaminating clustering for the new group.
     state.hrr_tle_multiset.clear()
 
     sem = asyncio.Semaphore(10)
-    fetched = 0
-    failed = 0
     _window_hours: float = float(TLE_CLUSTERING.get("fetch_window_hours", 24))
-
-    async def _fetch_one(satno_str: str) -> None:
-        nonlocal fetched, failed
-        if not _needs_live_tle(state, satno_str):
-            fetched += 1
-            return
-        if not state.udl_username or not state.udl_password:
-            failed += 1
-            return
-        async with sem:
-            _result = await fetch_tle_for_satno(
-                int(satno_str), state.udl_username, state.udl_password,
-                data_mode=state.udl_data_mode or "REAL",
-                source=state.udl_tle_source,
-            )
-            if _result:
-                tle, dm = _result
-                state.hrr_tle_cache[satno_str] = tle
-                state.hrr_tle_data_mode[satno_str] = dm
-                fetched += 1
-                # Also fetch multi-provider history for clustering.
-                history = await fetch_tle_history_for_satno(
-                    int(satno_str), state.udl_username, state.udl_password,
-                    window_hours=_window_hours,
-                    data_mode=state.udl_data_mode or "REAL",
-                    source=state.udl_tle_source,
-                )
-                if len(history) > 1:
-                    state.hrr_tle_multiset[satno_str] = history
-            else:
-                failed += 1
 
     satnos = [str(o.get("satno") or "").strip() for o in objects]
     satnos = [s for s in satnos if s]
-    await asyncio.gather(*[_fetch_one(s) for s in satnos])
+    # Exactly one of fetched/failed was counted per object before, so the two
+    # tallies still add up to the total.
+    outcomes = await asyncio.gather(*[
+        _prefetch_group_tle(state, s, sem, _window_hours) for s in satnos
+    ])
+    fetched = sum(1 for ok in outcomes if ok)
+    failed = len(outcomes) - fetched
 
     total = len(satnos)
     state.append_log(
@@ -482,7 +498,8 @@ def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
     return epochs
 
 
-def _sol_to_entry(  # noqa: PLR0913, PLR0917 - one parameter per column of the row it builds
+# PLR0913, PLR0917: one parameter per column of the row it builds.
+def _sol_to_entry(  # noqa: PLR0913, PLR0917
     sol: InterceptSolution,
     target: ThreatTarget,
     epoch: datetime,
@@ -534,6 +551,10 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917 - one parameter per column of the r
 #: A burn vector shorter than this is numerically zero, so its direction is
 #: undefined and the component percentages below would divide by noise.
 _ZERO_VECTOR_M_S: float = 1e-12
+
+#: A component carrying at least this share of the burn magnitude names the
+#: axis on its own; below it the burn is reported as "Combined".
+_DOMINANT_AXIS_FRACTION: float = 0.7
 
 _BAND_COLOURS: dict[str, tuple[str, str]] = {
     "CRITICAL": ("#ef4444", "rgba(239,68,68,0.06)"),
@@ -634,7 +655,8 @@ def _sweep_all_methods(
                     ))
                 else:
                     notes.setdefault(name, f"exceeds the {budget:g} m/s budget")
-            except Exception as exc:  # noqa: BLE001 - one refusal recorded, sweep continues
+            # BLE001: one refusal is recorded and the sweep continues.
+            except Exception as exc:  # noqa: BLE001
                 notes.setdefault(name, _refusal_reason(exc))
 
     return entries
@@ -661,6 +683,47 @@ def _red_capability(red_satno: str | None) -> CapabilityEvidence:
     )
 
 
+def _dominant_axis(pro: float, nor: float, rad: float, threshold: float) -> str:
+    """Name the axis carrying the burn, or "Combined" when none dominates.
+
+    The ladder is tested prograde, then normal, then radial, and the first
+    component at or above *threshold* wins. That order is the reported one and
+    matters when two components are both above it.
+    """
+    if abs(pro) >= threshold:
+        return "Prograde" if pro >= 0 else "Retrograde"
+    if abs(nor) >= threshold:
+        return "Normal" if nor >= 0 else "Anti-normal"
+    if abs(rad) >= threshold:
+        return "Radial" if rad >= 0 else "Anti-radial"
+    return "Combined"
+
+
+def _burn_direction_breakdown(
+    pro: float, nor: float, rad: float,
+) -> tuple[float, float, float, str]:
+    """Split a burn into per-axis percentages and name its dominant axis.
+
+    Lifted out of ``_compute_worst_coa`` whole. The comparison stays written
+    as "greater than zero" rather than inverted into a guard clause: a NaN
+    component must fall to the "Unknown" branch exactly as it did before, and
+    an inverted test would send it down the dividing path instead.
+
+    Returns ``(pro_pct, nor_pct, rad_pct, direction)``.
+    """
+    import math
+
+    total_vec = math.sqrt(pro ** 2 + nor ** 2 + rad ** 2)
+    if total_vec > _ZERO_VECTOR_M_S:
+        return (
+            round(abs(pro) / total_vec * 100.0, 1),
+            round(abs(nor) / total_vec * 100.0, 1),
+            round(abs(rad) / total_vec * 100.0, 1),
+            _dominant_axis(pro, nor, rad, _DOMINANT_AXIS_FRACTION * total_vec),
+        )
+    return (0.0, 0.0, 0.0, "Unknown")
+
+
 def _compute_worst_coa(
     entries: list[ThreatSweepEntry],
     capability: CapabilityEvidence | None = None,
@@ -682,8 +745,6 @@ def _compute_worst_coa(
     """
     if not entries:
         return None
-
-    import math
 
     # The entry that leaves the least warning time among the feasible ones.
     worst = min(
@@ -719,26 +780,9 @@ def _compute_worst_coa(
     intent_label = _sweep_intents.get(worst.method, "Intercept Manoeuvre")
 
     # Burn direction breakdown
-    pro = worst.dv_prograde
-    nor = worst.dv_normal
-    rad = worst.dv_radial
-    total_vec = math.sqrt(pro ** 2 + nor ** 2 + rad ** 2)
-    if total_vec > _ZERO_VECTOR_M_S:
-        pro_pct = round(abs(pro) / total_vec * 100.0, 1)
-        nor_pct = round(abs(nor) / total_vec * 100.0, 1)
-        rad_pct = round(abs(rad) / total_vec * 100.0, 1)
-        threshold = 0.7 * total_vec
-        if abs(pro) >= threshold:
-            direction = "Prograde" if pro >= 0 else "Retrograde"
-        elif abs(nor) >= threshold:
-            direction = "Normal" if nor >= 0 else "Anti-normal"
-        elif abs(rad) >= threshold:
-            direction = "Radial" if rad >= 0 else "Anti-radial"
-        else:
-            direction = "Combined"
-    else:
-        pro_pct = nor_pct = rad_pct = 0.0
-        direction = "Unknown"
+    pro_pct, nor_pct, rad_pct, direction = _burn_direction_breakdown(
+        worst.dv_prograde, worst.dv_normal, worst.dv_radial,
+    )
 
     tof_label = format_tof_label(worst.tof_hours)
 
@@ -872,7 +916,8 @@ def _regime_of_tle(tle: str) -> str:
     """Canonical regime for an element set, or "" when it cannot be read."""
     try:
         return regime_from_tle(tle)
-    except Exception:  # noqa: BLE001 - a malformed element set must not kill the screen
+    # BLE001: a malformed element set must not kill the screen.
+    except Exception:  # noqa: BLE001
         return ""
 
 
@@ -905,7 +950,8 @@ def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
     return actors
 
 
-def _screen_one_actor(  # noqa: PLR0913, PLR0917 - the inputs of one actor's assessment
+# PLR0913, PLR0917: the inputs of one actor's assessment.
+def _screen_one_actor(  # noqa: PLR0913, PLR0917
     actor: ThreatActor,
     actor_tle: str,
     asset_tle: str,
@@ -998,6 +1044,193 @@ def _parse_target_group(tgt_group: str) -> _TargetGroup:
     )
 
 
+def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
+    """Accept a pasted red element set, or record why it was rejected.
+
+    A rejected override is reported and the registered track is used instead,
+    so a typo in the paste box never quietly becomes a sweep of a different
+    object than the operator named.
+    """
+    if not raw:
+        return None
+    try:
+        TLEOrbit(raw)  # validate
+    except Exception as exc:
+        errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
+        return None
+    return raw
+
+
+def _append_manual_targets(
+    state: object, targets: list[ThreatTarget],
+) -> dict[str, str]:
+    """Append the session's manual sweep targets and return their element sets.
+
+    The returned mapping is keyed by target NAME, not by satellite number: a
+    pasted element set may carry no number the catalogue recognises, and the
+    name is the only handle the sweep has on it.
+    """
+    manual_tle_by_name: dict[str, str] = {}
+    for manual in state.manual_sweep_tles:  # type: ignore[attr-defined]
+        name = manual["name"]
+        tle = manual["tle"]
+        confidence = manual.get("confidence", "")
+        satno = str(satno_from_tle(tle)) if tle else ""
+        targets.append(ThreatTarget(
+            target_name=name,
+            target_satno=satno,
+            target_source="manual",
+            hrr_rank=None,
+            confidence=confidence,
+        ))
+        manual_tle_by_name[name] = tle
+    return manual_tle_by_name
+
+
+async def _fetch_missing_target_tles(
+    state: object, targets: list[ThreatTarget], errors: list[str],
+) -> None:
+    """Last-chance fetch for targets with no element set, or only a synthetic one.
+
+    A no-op without UDL credentials, which is the normal case on a fresh
+    instance running from the bundled bootstrap watchlist. A failed fetch is
+    recorded against the target rather than dropped.
+    """
+    missing = [
+        t for t in targets
+        if t.target_satno and _needs_live_tle(state, t.target_satno)
+    ]
+    if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+        return
+
+    from spectre.web.routes.udl import fetch_tle_for_satno
+
+    sem = asyncio.Semaphore(10)
+    udl_user: str = state.udl_username  # type: ignore[attr-defined]
+    udl_pass: str = state.udl_password  # type: ignore[attr-defined]
+
+    async def _fetch_one(t: ThreatTarget) -> None:
+        async with sem:
+            _result = await fetch_tle_for_satno(
+                int(t.target_satno), udl_user, udl_pass,
+                data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+                source=state.udl_tle_source,  # type: ignore[attr-defined]
+            )
+            if _result:
+                tle, dm = _result
+                state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
+                state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
+            else:
+                errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
+
+    await asyncio.gather(*[_fetch_one(t) for t in missing])
+
+
+def _reduce_tle_clusters(state: object) -> Any | None:
+    """Reduce multi-provider element sets to one representative per object.
+
+    Returns the clustering summary for display, or None when there was
+    nothing to cluster. The cache update stays inside the try: a summary
+    computed before a failed update is still the summary that was computed,
+    and reporting None there would understate what the sweep actually ran on.
+    """
+    # Imported before the guard, as they were when this sat inline in the
+    # handler: the sweep resolved these names on every request, whether or
+    # not there was anything to cluster.
+    from spectre.astro.tle_preprocessing import cluster_and_reduce_tle_cache
+    from spectre.config.constants import TLE_CLUSTERING
+
+    if not state.hrr_tle_multiset:  # type: ignore[attr-defined]
+        return None
+
+    clustering_summary = None
+    try:
+        reduced, clustering_summary = cluster_and_reduce_tle_cache(
+            state.hrr_tle_multiset,  # type: ignore[attr-defined]
+            state.hrr_tle_cache,  # type: ignore[attr-defined]
+            TLE_CLUSTERING,
+        )
+        state.hrr_tle_cache.update(reduced)  # type: ignore[attr-defined]
+    # BLE001: clustering is an optimisation, never a gate.
+    except Exception as _cl_exc:  # noqa: BLE001
+        logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
+    return clustering_summary
+
+
+# PLR0913, PLR0917: the inputs of one pass over the sweep's target list.
+def _run_target_sweep(  # noqa: PLR0913, PLR0917
+    state: object,
+    targets: list[ThreatTarget],
+    manual_tle_by_name: dict[str, str],
+    red_tle: str,
+    red_regime: str,
+    epochs: list[tuple[str, datetime]],
+    max_dv_m_s: float,
+) -> tuple[list[ThreatSweepEntry], list[str], dict[str, str]]:
+    """Fan every target out across every method and epoch.
+
+    Synchronous on purpose: the handler hands this to an executor thread.
+    Lifted out of that handler whole, where being nested inside it added the
+    handler's nesting to every branch here on top of its own.
+
+    Returns ``(entries, errors, method_refusals)``. A target that is skipped
+    is recorded with the reason rather than dropped, because a short result
+    and a safe one read identically on the screen.
+    """
+    all_entries: list[ThreatSweepEntry] = []
+    sweep_errors: list[str] = []
+    method_refusals: dict[str, str] = {}
+    for target in targets:
+        if target.target_source == "manual":
+            tle = manual_tle_by_name.get(target.target_name)
+        else:
+            tle = state.hrr_tle_cache.get(target.target_satno)  # type: ignore[attr-defined]
+        if not tle:
+            sweep_errors.append(f"No TLE for {target.target_name} — skipped")
+            continue
+        # Skip targets in incompatible orbit regimes.
+        try:
+            tgt_regime = regime_from_tle(tle)
+        # BLE001: one bad element set, not the whole sweep.
+        except Exception:  # noqa: BLE001
+            tgt_regime = red_regime  # assume compatible if TLE can't be parsed
+        if not regimes_compatible(red_regime, tgt_regime):
+            sweep_errors.append(
+                f"{target.target_name}: skipped — "
+                f"{red_regime} red vs {tgt_regime} target (regime mismatch)"
+            )
+            continue
+        target_entries = _sweep_all_methods(
+            _SweepRequest(
+                red_tle=red_tle, target_tle=tle, target=target,
+                max_dv_m_s=max_dv_m_s, regime=red_regime,
+            ),
+            epochs,
+            refusals=method_refusals,
+        )
+        if not target_entries:
+            sweep_errors.append(
+                f"{target.target_name}: all methods/epochs exceeded {max_dv_m_s:g} m/s or solver failed"
+            )
+        all_entries.extend(target_entries)
+    return all_entries, sweep_errors, method_refusals
+
+
+def _attach_data_mode(state: object, grouped: list[dict[str, Any]]) -> None:
+    """Record each group's element-set provenance for the display-time filter.
+
+    Manual targets are marked MANUAL. Everything else reports the UDL dataMode
+    its element set arrived with, so an operator can see at a glance which rows
+    rest on tracked orbits and which on generated ones.
+    """
+    for g in grouped:
+        if g["target"].target_source == "manual":
+            g["data_mode"] = "MANUAL"
+            continue
+        satno = g["target"].target_satno
+        g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"  # type: ignore[attr-defined]
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1018,13 +1251,7 @@ async def threat_sweep(
     # Read optional manual red TLE override.
     manual_red_tle_raw = str(form.get("manual_red_tle") or "").strip()
     manual_red_confidence = str(form.get("manual_red_confidence") or "MEDIUM").strip().upper()
-    manual_red_tle: str | None = None
-    if manual_red_tle_raw:
-        try:
-            TLEOrbit(manual_red_tle_raw)  # validate
-            manual_red_tle = manual_red_tle_raw
-        except Exception as exc:
-            errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
+    manual_red_tle: str | None = _validate_manual_red_tle(manual_red_tle_raw, errors)
 
     parsed = _parse_target_group(tgt_group)
     if parsed.error:
@@ -1050,20 +1277,7 @@ async def threat_sweep(
     )
 
     # Build manual targets from session state.
-    _manual_tle_by_name: dict[str, str] = {}
-    for _m in state.manual_sweep_tles:
-        _mname = _m["name"]
-        _mtle = _m["tle"]
-        _mconf = _m.get("confidence", "")
-        _msatno = str(satno_from_tle(_mtle)) if _mtle else ""
-        targets.append(ThreatTarget(
-            target_name=_mname,
-            target_satno=_msatno,
-            target_source="manual",
-            hrr_rank=None,
-            confidence=_mconf,
-        ))
-        _manual_tle_by_name[_mname] = _mtle
+    _manual_tle_by_name = _append_manual_targets(state, targets)
 
     if not targets:
         return render(request, "partials/threat_sweep.html", {
@@ -1078,48 +1292,10 @@ async def threat_sweep(
         errors.append(f"Target list truncated to {_MAX_SWEEP_TARGETS} (cap exceeded).")
 
     # Any targets without a cached TLE get a last-chance fetch now.
-    missing = [
-        t for t in targets
-        if t.target_satno and _needs_live_tle(state, t.target_satno)
-    ]
-    if missing and state.udl_username and state.udl_password:
-        from spectre.web.routes.udl import fetch_tle_for_satno
-
-        sem = asyncio.Semaphore(10)
-        _udl_user: str = state.udl_username
-        _udl_pass: str = state.udl_password
-
-        async def _fetch_one(t: ThreatTarget) -> None:
-            async with sem:
-                _result = await fetch_tle_for_satno(
-                    int(t.target_satno), _udl_user, _udl_pass,
-                    data_mode=state.udl_data_mode or "REAL",
-                    source=state.udl_tle_source,
-                )
-                if _result:
-                    tle, dm = _result
-                    state.hrr_tle_cache[t.target_satno] = tle
-                    state.hrr_tle_data_mode[t.target_satno] = dm
-                else:
-                    errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
-
-        await asyncio.gather(*[_fetch_one(t) for t in missing])
+    await _fetch_missing_target_tles(state, targets, errors)
 
     # Cluster multi-provider TLEs and reduce to best representative per object.
-    from spectre.astro.tle_preprocessing import cluster_and_reduce_tle_cache
-    from spectre.config.constants import TLE_CLUSTERING
-
-    clustering_summary = None
-    if state.hrr_tle_multiset:
-        try:
-            reduced, clustering_summary = cluster_and_reduce_tle_cache(
-                state.hrr_tle_multiset,
-                state.hrr_tle_cache,
-                TLE_CLUSTERING,
-            )
-            state.hrr_tle_cache.update(reduced)
-        except Exception as _cl_exc:  # noqa: BLE001 - clustering is an optimisation, never a gate
-            logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
+    clustering_summary = _reduce_tle_clusters(state)
 
     # What is known about the RED object's ability to act.
     #
@@ -1138,51 +1314,18 @@ async def threat_sweep(
     # Classify red satellite's regime once — used to skip incompatible targets.
     try:
         red_regime = regime_from_tle(red_tle)
-    except Exception:  # noqa: BLE001 - a malformed element set must not kill the sweep
+    # BLE001: a malformed element set must not kill the sweep.
+    except Exception:  # noqa: BLE001
         red_regime = "LEO"  # assume LEO on parse failure; sweep proceeds
 
     # Run sweep in executor.
     loop = asyncio.get_running_loop()
-
-    def _run_sweep() -> tuple[list[ThreatSweepEntry], list[str], dict[str, str]]:
-        all_entries: list[ThreatSweepEntry] = []
-        sweep_errors: list[str] = []
-        method_refusals: dict[str, str] = {}
-        for target in targets:
-            if target.target_source == "manual":
-                tle = _manual_tle_by_name.get(target.target_name)
-            else:
-                tle = state.hrr_tle_cache.get(target.target_satno)
-            if not tle:
-                sweep_errors.append(f"No TLE for {target.target_name} — skipped")
-                continue
-            # Skip targets in incompatible orbit regimes.
-            try:
-                tgt_regime = regime_from_tle(tle)
-            except Exception:  # noqa: BLE001 - one bad element set, not the whole sweep
-                tgt_regime = red_regime  # assume compatible if TLE can't be parsed
-            if not regimes_compatible(red_regime, tgt_regime):
-                sweep_errors.append(
-                    f"{target.target_name}: skipped — "
-                    f"{red_regime} red vs {tgt_regime} target (regime mismatch)"
-                )
-                continue
-            target_entries = _sweep_all_methods(
-                _SweepRequest(
-                    red_tle=red_tle, target_tle=tle, target=target,
-                    max_dv_m_s=max_dv_m_s, regime=red_regime,
-                ),
-                epochs,
-                refusals=method_refusals,
-            )
-            if not target_entries:
-                sweep_errors.append(
-                    f"{target.target_name}: all methods/epochs exceeded {max_dv_m_s:g} m/s or solver failed"
-                )
-            all_entries.extend(target_entries)
-        return all_entries, sweep_errors, method_refusals
-
-    entries, sweep_errors, method_refusals = await loop.run_in_executor(None, _run_sweep)
+    entries, sweep_errors, method_refusals = await loop.run_in_executor(
+        None,
+        lambda: _run_target_sweep(
+            state, targets, _manual_tle_by_name, red_tle, red_regime, epochs, max_dv_m_s,
+        ),
+    )
     errors.extend(sweep_errors)
 
     # Rank on warning time among the feasible intercepts. Delta-V keeps its
@@ -1205,12 +1348,7 @@ async def threat_sweep(
     # Group entries by target for the collapsed-row UI.
     grouped = _group_entries(entries)
     # Attach UDL dataMode provenance to each group for the display-time filter.
-    for g in grouped:
-        if g["target"].target_source == "manual":
-            g["data_mode"] = "MANUAL"
-        else:
-            satno = g["target"].target_satno
-            g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"
+    _attach_data_mode(state, grouped)
 
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
@@ -1287,7 +1425,8 @@ class _ScreenRun(NamedTuple):
     notes: list[str]
 
 
-def _screen_all_actors(  # noqa: PLR0913, PLR0917 - the inputs of one screening pass
+# PLR0913, PLR0917: the inputs of one screening pass.
+def _screen_all_actors(  # noqa: PLR0913, PLR0917
     state: object,
     actors: list[ThreatActor],
     asset_tle: str,
@@ -1410,7 +1549,8 @@ def _resolve_asset(
     if manual_tle:
         try:
             TLEOrbit(manual_tle)
-        except Exception as exc:  # noqa: BLE001 - operator input, reported not raised
+        # BLE001: operator input, reported not raised.
+        except Exception as exc:  # noqa: BLE001
             return _ResolvedAsset(error=f"Manual asset TLE invalid: {exc}")
         satno = str(satno_from_tle(manual_tle) or asset_satno)
         return _ResolvedAsset(
@@ -1443,7 +1583,7 @@ def _resolve_asset(
 @router.get("/screen-config", response_model=None)
 async def screen_config(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the blue asset selector for the screening panel."""
     state = get_session_state(current_user.username)
@@ -1479,9 +1619,11 @@ async def screen_config(
 @router.post("/screen", response_model=None)
 async def threat_screen(
     request: Request,
+    # Annotated carries no default, so it must precede the defaulted form
+    # fields. FastAPI binds these by name, so the order is not observable.
+    current_user: Annotated[User, Depends(require_login)],
     asset_satno: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Screen ONE blue asset against every candidate red actor in reach.
 

@@ -85,9 +85,9 @@ _G0_M_S2: float = 9.80665
 #: the same ΔV. Getting this wrong by an order of magnitude is exactly what the
 #: previous model did by applying one chemical figure to every object.
 _ASSUMED_ISP_S: dict[str, float] = {
-    # "Electric (Hall-effect, gridded ion), Isp of 1,500 to 3,500 s"; LEO
-    # smallsats sit at the lower end, so 1,600 s. The Starlink V2 Mini argon
-    # Hall thruster is specified at 2,500 s.
+    # Electric propulsion, Hall-effect or gridded ion, has an Isp of 1,500
+    # to 3,500 s. LEO smallsats sit at the lower end, so 1,600 s. The
+    # Starlink V2 Mini argon Hall thruster is specified at 2,500 s.
     "LEO":  1600.0,
     # All-electric bus, 1,500-3,500 s; the midpoint.
     "MEO":  2500.0,
@@ -109,6 +109,25 @@ _RATE_ALARMING_MULTIPLE: float = 5.0
 #: that the budget term is now measured against the object's own regime.
 _W_GEO = {"dv": 0.20, "lon": 0.30, "drift": 0.25, "regularity": 0.10, "budget": 0.15}
 _W_OTHER = {"dv": 0.30, "lon": 0.15, "drift": 0.10, "regularity": 0.20, "budget": 0.25}
+
+#: Overall anomaly score at or above which each risk level is reported,
+#: highest rung first. The thresholds are the ones the nested ternary used;
+#: they are named because the posture floor in the intel narrative has to
+#: order the same five labels, and two hand-written copies of one ordering
+#: are how the two come to disagree.
+_RISK_LADDER: tuple[tuple[float, str], ...] = (
+    (75.0, "CRITICAL"),
+    (55.0, "HIGH"),
+    (35.0, "MEDIUM"),
+    (15.0, "LOW"),
+)
+#: Reported when the score sits below every rung.
+_RISK_FLOOR_LEVEL: str = "MINIMAL"
+#: The same labels in increasing order of concern, derived from the ladder
+#: so that it cannot drift out of step with it.
+_RISK_ORDER: tuple[str, ...] = (
+    _RISK_FLOOR_LEVEL, *(level for _, level in reversed(_RISK_LADDER)),
+)
 
 #: Named events from the assessment, used to tell an operator in concrete terms
 #: what this object's measured detection floor can and cannot see.
@@ -159,6 +178,11 @@ _CHANNEL_TO_KIND: dict[tuple[bool, str], ManoeuvreKind] = {
 #: elements alone.
 _GEO_PROTECTED_MAX_ALT_KM: float = 36186.0
 
+#: Operator label for a manoeuvre inside the routine per-event budget.
+#: Three places decide on this one string: the classifier that assigns it,
+#: the routine test that reads it back, and the Monte Carlo archetype map.
+_LABEL_STATION_KEEPING: str = "station keeping"
+
 
 @dataclass(frozen=True)
 class ManoeuvreView:
@@ -199,7 +223,7 @@ class ManoeuvreView:
 
     @property
     def is_routine(self) -> bool:
-        return self.classification == "station keeping"
+        return self.classification == _LABEL_STATION_KEEPING
 
     @property
     def burn_days(self) -> float | None:
@@ -215,7 +239,7 @@ class ManoeuvreView:
         the other's labels.
         """
         return {
-            "station keeping":    "station_keeping",
+            _LABEL_STATION_KEEPING: "station_keeping",
             "plane change":       "plane_change",
             "relocation":         "phasing",
             "altitude change":    "orbit_raise",
@@ -258,7 +282,7 @@ def _classify(delta_v_m_s: float, channel: str, regime: str,
 
     if delta_v_m_s <= sk_ceiling_m_s:
         subtype = {"cross_track": "NS", "along_track": "EW"}.get(channel, "combined")
-        return ("station keeping", subtype, kind)
+        return (_LABEL_STATION_KEEPING, subtype, kind)
 
     # A raise that ends above the GEO protected region is a graveyard disposal.
     # In the elements alone it is indistinguishable from the start of a drift,
@@ -276,13 +300,17 @@ def _classify(delta_v_m_s: float, channel: str, regime: str,
     return (label, "", kind)
 
 
-def _escalation_text(delta_v_m_s: float, channel: str, regime: str) -> str:
+def _escalation_text(delta_v_m_s: float, channel: str, _regime: str) -> str:
     """What a manoeuvre above the on-station anomaly threshold implies.
 
     The assessment gives four explanations for an inferred on-station ΔV of
     0.5 km/s or more. The measured decomposition distinguishes the first from
     the rest, so say which one the orbit change actually supports rather than
     listing all four and leaving the operator to choose.
+
+    *_regime* is not read: the four explanations are not regime-specific. It
+    stays in the signature because the caller and the direct unit tests both
+    pass it positionally.
     """
     if channel == "cross_track":
         leading = ON_STATION_ANOMALY_EXPLANATIONS[0]
@@ -521,6 +549,14 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+def _risk_level(overall: float) -> str:
+    """The risk label for an overall anomaly score, highest rung first."""
+    for threshold, level in _RISK_LADDER:
+        if overall >= threshold:
+            return level
+    return _RISK_FLOOR_LEVEL
+
+
 def _assess_anomaly(
     views: list[ManoeuvreView], pol: Any, regime: str,
     propellant: PropellantAssessment,
@@ -573,8 +609,7 @@ def _assess_anomaly(
     overall = (dv_score * w["dv"] + lon_score * w["lon"] + drift_score * w["drift"]
                + reg_score * w["regularity"] + budget_score * w["budget"])
 
-    risk = ("CRITICAL" if overall >= 75 else "HIGH" if overall >= 55
-            else "MEDIUM" if overall >= 35 else "LOW" if overall >= 15 else "MINIMAL")
+    risk = _risk_level(overall)
 
     return AnomalyAssessment(
         dv_magnitude=round(dv_score, 1), lon_coverage=round(lon_score, 1),
@@ -614,7 +649,10 @@ class DetectionLimits:
         return self.floor_m_s <= 1.8
 
 
-def _assess_detection(noise: Any, regime: str) -> DetectionLimits | None:
+# *_regime* is not read: the reference events and the measured floor are both
+# regime-independent. It stays in the signature because the caller and the
+# direct unit tests both pass it positionally.
+def _assess_detection(noise: Any, _regime: str) -> DetectionLimits | None:
     if noise is None:
         return None
     floor = from_km_s(noise.floor_km_s)
@@ -752,6 +790,24 @@ def assess_pattern_of_life(
 _GEO_SLOT_DEGREES: float = 2.0
 #: Past this, the object is working the belt rather than relocating within it.
 _GEO_ROAMER_DEGREES: float = 30.0
+#: Drift rate, degrees per day, inside which the object reads as holding its
+#: slot rather than moving. Table 3's east-west keeping budget holds a GEO
+#: slot to about this rate.
+_STATIONARY_DRIFT_DEG_DAY: float = 0.05
+#: How far ahead the longitude predictions run, days. Fixed by the three
+#: predicted_lon_* fields the panel renders.
+_PREDICTION_HORIZON_DAYS: tuple[int, int, int] = (30, 60, 90)
+
+#: The anomaly score needs two manoeuvres to say anything, so a single
+#: large burn used to fall through to MINIMAL: a 450 m/s AGGRESSIVE
+#: relocation reported "minimal risk" because it happened only once. The
+#: worst posture observed is a floor under the score, never a ceiling.
+_POSTURE_FLOOR: dict[Posture, str] = {
+    Posture.BEYOND_PLATFORM: "CRITICAL",
+    Posture.AGGRESSIVE: "HIGH",
+    Posture.ANNOYANCE: "MEDIUM",
+    Posture.BENIGN: _RISK_FLOOR_LEVEL,
+}
 
 
 @dataclass(frozen=True)
@@ -771,42 +827,40 @@ class IntelAssessment:
     current_drift_rate:    float | None
 
 
-def _assess_intel(
-    pol: Any, regime: str, views: list[ManoeuvreView],
-    anomaly: AnomalyAssessment | None, propellant: PropellantAssessment,
-    detection: DetectionLimits | None,
-) -> IntelAssessment:
-    records = list(getattr(pol, "records", []) or [])
-    span_days = float(getattr(pol, "span_days", 0.0) or 0.0)
-    is_geo = regime.strip().upper() in ("GEO", "DEEP")
+def _drift_direction(drift: float | None) -> str:
+    """Which way the object is drifting, or that it is holding its slot."""
+    rate = drift or 0
+    if rate > _STATIONARY_DRIFT_DEG_DAY:
+        return "EAST"
+    if rate < -_STATIONARY_DRIFT_DEG_DAY:
+        return "WEST"
+    return "STATIONARY"
 
-    last = records[-1] if records else None
-    drift = getattr(last, "geo_drift_rate_deg_day", None) if last else None
-    direction = ("EAST" if (drift or 0) > 0.05
-                 else "WEST" if (drift or 0) < -0.05 else "STATIONARY")
 
-    lons = [r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
+def _predicted_longitudes(
+    last: Any, drift: float | None,
+) -> tuple[float | None, float | None, float | None]:
+    """Where the current drift rate puts the object at each horizon.
 
-    pred_30 = pred_60 = pred_90 = None
+    A prediction needs a longitude to start from and a rate to apply to it,
+    so an object missing either gets no figure rather than one extrapolated
+    from an assumed zero.
+    """
     if last is not None and last.geo_longitude_deg is not None and drift is not None:
-        pred_30 = round(last.geo_longitude_deg + drift * 30, 2)
-        pred_60 = round(last.geo_longitude_deg + drift * 60, 2)
-        pred_90 = round(last.geo_longitude_deg + drift * 90, 2)
+        d30, d60, d90 = _PREDICTION_HORIZON_DAYS
+        return (round(last.geo_longitude_deg + drift * d30, 2),
+                round(last.geo_longitude_deg + drift * d60, 2),
+                round(last.geo_longitude_deg + drift * d90, 2))
+    return (None, None, None)
 
-    notable = [
-        f"{p.start_epoch:%Y-%m-%d} to {p.end_epoch:%Y-%m-%d}: {p.direction} drift "
-        f"{abs(p.distance_deg):.1f}° at {abs(p.rate_deg_day):.2f}°/day"
-        for p in (getattr(pol, "drift_phases", []) or [])
-        if p.direction != "STATIONARY" and abs(p.distance_deg) > 5.0
-    ][:8]
 
+def _mission_profile(
+    regime: str, is_geo: bool, lon_range: float,
+    views: list[ManoeuvreView], above_routine: int,
+) -> tuple[str, str]:
+    """Mission profile, keyed on cited budgets rather than an ad-hoc score."""
     postures = [v.posture.posture for v in views]
     aggressive = sum(1 for p in postures if p in (Posture.AGGRESSIVE, Posture.BEYOND_PLATFORM))
-    above_routine = sum(1 for v in views if not v.is_routine)
-    rate_multiple = propellant.rate_multiple
-
-    # Mission profile, keyed on cited budgets rather than an ad-hoc score.
     if is_geo and lon_range > _GEO_ROAMER_DEGREES:
         mission = "On-orbit inspection or RPO platform (GEO belt roamer)"
         bclass = (f"Traverses {lon_range:.0f}° of the belt. Table 3's east-west "
@@ -833,82 +887,138 @@ def _assess_intel(
         mission = f"No manoeuvre detected above the measured floor ({regime})"
         bclass = ("Nothing was resolved above this object's own fit scatter. That "
                   "is not the same as passive.")
+    return (mission, bclass)
 
-    # The anomaly score needs two manoeuvres to say anything, so a single
-    # large burn used to fall through to MINIMAL: a 450 m/s AGGRESSIVE
-    # relocation reported "minimal risk" because it happened only once. The
-    # worst posture observed is a floor under the score, never a ceiling.
-    _POSTURE_FLOOR = {
-        Posture.BEYOND_PLATFORM: "CRITICAL",
-        Posture.AGGRESSIVE: "HIGH",
-        Posture.ANNOYANCE: "MEDIUM",
-        Posture.BENIGN: "MINIMAL",
-    }
-    _ORDER = ["MINIMAL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
-    risk = anomaly.risk_level if anomaly else "MINIMAL"
-    if views:
-        worst = max(postures, key=lambda p: list(Posture).index(p))
-        floor = _POSTURE_FLOOR.get(worst, "MINIMAL")
-        if _ORDER.index(floor) > _ORDER.index(risk):
-            risk = floor
 
-    # Narrative. The "no manoeuvres" case is the one that used to mislead: it
-    # asserted the object was passive, when routine traffic management sits
-    # below the floor for most LEO objects.
-    if not views and detection is not None:
-        narrative = (
-            f"No manoeuvre was resolved above the measured detection floor of "
-            f"{detection.floor_m_s:.2f} m/s over {span_days:.0f} days. "
-            + ("That floor is above routine traffic management, so this object "
-               "may well be manoeuvring regularly without any of it being "
-               "visible to element-set differencing. "
-               if not detection.sees_routine_station_keeping else
-               "The floor is below a routine station-keeping burn, so a genuinely "
-               "active object would have shown something. ")
-            + "A quiet result is evidence about what can be seen, not about what "
-            "the object is doing."
-        )
-    elif is_geo and lon_range > _GEO_ROAMER_DEGREES:
-        narrative = (
-            f"This object has traversed {lon_range:.1f}° of the GEO belt over "
-            f"{span_days:.0f} days, against an east-west station-keeping budget "
-            "that holds a slot to about a tenth of a degree. The pattern of "
-            f"alternating drift phases and manoeuvres is consistent with "
-            f"deliberate repositioning or proximity work. Current drift: "
-            f"{direction} at {abs(drift or 0):.3f}°/day."
-        )
-    elif rate_multiple is not None and rate_multiple >= _RATE_ALARMING_MULTIPLE:
-        narrative = (
+def _risk_with_posture_floor(
+    anomaly: AnomalyAssessment | None, views: list[ManoeuvreView],
+) -> str:
+    """The anomaly risk level, floored by the worst posture observed."""
+    risk = anomaly.risk_level if anomaly else _RISK_FLOOR_LEVEL
+    if not views:
+        return risk
+    worst = max((v.posture.posture for v in views), key=lambda p: list(Posture).index(p))
+    floor = _POSTURE_FLOOR.get(worst, _RISK_FLOOR_LEVEL)
+    if _RISK_ORDER.index(floor) > _RISK_ORDER.index(risk):
+        return floor
+    return risk
+
+
+def _quiet_narrative(detection: DetectionLimits, span_days: float) -> str:
+    """What a quiet result means.
+
+    This is the case that used to mislead: it asserted the object was
+    passive, when routine traffic management sits below the floor for most
+    LEO objects.
+    """
+    return (
+        f"No manoeuvre was resolved above the measured detection floor of "
+        f"{detection.floor_m_s:.2f} m/s over {span_days:.0f} days. "
+        + ("That floor is above routine traffic management, so this object "
+           "may well be manoeuvring regularly without any of it being "
+           "visible to element-set differencing. "
+           if not detection.sees_routine_station_keeping else
+           "The floor is below a routine station-keeping burn, so a genuinely "
+           "active object would have shown something. ")
+        + "A quiet result is evidence about what can be seen, not about what "
+        "the object is doing."
+    )
+
+
+def _roamer_narrative(
+    lon_range: float, span_days: float, direction: str, drift: float | None,
+) -> str:
+    """The narrative for an object working the belt rather than holding a slot."""
+    return (
+        f"This object has traversed {lon_range:.1f}° of the GEO belt over "
+        f"{span_days:.0f} days, against an east-west station-keeping budget "
+        "that holds a slot to about a tenth of a degree. The pattern of "
+        f"alternating drift phases and manoeuvres is consistent with "
+        f"deliberate repositioning or proximity work. Current drift: "
+        f"{direction} at {abs(drift or 0):.3f}°/day."
+    )
+
+
+def _rate_narrative(
+    regime: str, views: list[ManoeuvreView], span_days: float,
+    propellant: PropellantAssessment, above_routine: int,
+) -> str:
+    """The narrative when the spend rate, not the geometry, is the finding."""
+    rate_multiple = propellant.rate_multiple
+    if rate_multiple is not None and rate_multiple >= _RATE_ALARMING_MULTIPLE:
+        return (
             f"{len(views)} confirmed manoeuvres over {span_days:.0f} days, at "
             f"{propellant.annual_rate_m_s:,.1f} m/s a year against a routine "
             f"{regime} budget of {propellant.routine_annual_m_s:,.0f} m/s. "
             f"Spending {rate_multiple:.1f} times the routine rate is itself the "
             "finding, whatever the individual manoeuvres were for."
         )
-    else:
-        narrative = (
-            f"{len(views)} confirmed manoeuvres over {span_days:.0f} days, "
-            f"{above_routine} of them above the routine per-burn budget. "
-            f"Consumption is {propellant.annual_rate_m_s:,.1f} m/s a year"
-            + (f", {rate_multiple:.1f} times the routine {regime} figure."
-               if rate_multiple is not None else ".")
-        )
+    return (
+        f"{len(views)} confirmed manoeuvres over {span_days:.0f} days, "
+        f"{above_routine} of them above the routine per-burn budget. "
+        f"Consumption is {propellant.annual_rate_m_s:,.1f} m/s a year"
+        + (f", {rate_multiple:.1f} times the routine {regime} figure."
+           if rate_multiple is not None else ".")
+    )
 
-    # Operational signature.
-    if views:
-        counts: dict[str, int] = {}
-        for v in views:
-            counts[v.classification] = counts.get(v.classification, 0) + 1
-        parts = [f"{n} {label}" for label, n in sorted(counts.items(), key=lambda x: -x[1])]
-        parts.append(f"~{propellant.propellant_used_pct:.1f}% of the assumed tank")
-        if lon_range > 0:
-            parts.append(f"{lon_range:.1f}° of belt covered")
-        slow = [v for v in views if v.burn_is_slow]
-        if slow:
-            parts.append(f"{len(slow)} needing over a day of continuous thrust")
-        signature = " · ".join(parts)
+
+def _operational_signature(
+    views: list[ManoeuvreView], propellant: PropellantAssessment, lon_range: float,
+) -> str:
+    """The one-line summary of what was seen, for the panel header."""
+    if not views:
+        return "Nothing resolved above the measured detection floor"
+    counts: dict[str, int] = {}
+    for v in views:
+        counts[v.classification] = counts.get(v.classification, 0) + 1
+    parts = [f"{n} {label}" for label, n in sorted(counts.items(), key=lambda x: -x[1])]
+    parts.append(f"~{propellant.propellant_used_pct:.1f}% of the assumed tank")
+    if lon_range > 0:
+        parts.append(f"{lon_range:.1f}° of belt covered")
+    slow = [v for v in views if v.burn_is_slow]
+    if slow:
+        parts.append(f"{len(slow)} needing over a day of continuous thrust")
+    return " · ".join(parts)
+
+
+def _assess_intel(
+    pol: Any, regime: str, views: list[ManoeuvreView],
+    anomaly: AnomalyAssessment | None, propellant: PropellantAssessment,
+    detection: DetectionLimits | None,
+) -> IntelAssessment:
+    records = list(getattr(pol, "records", []) or [])
+    span_days = float(getattr(pol, "span_days", 0.0) or 0.0)
+    is_geo = regime.strip().upper() in ("GEO", "DEEP")
+
+    last = records[-1] if records else None
+    drift = getattr(last, "geo_drift_rate_deg_day", None) if last else None
+    direction = _drift_direction(drift)
+
+    lons = [r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None]
+    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
+
+    pred_30, pred_60, pred_90 = _predicted_longitudes(last, drift)
+
+    notable = [
+        f"{p.start_epoch:%Y-%m-%d} to {p.end_epoch:%Y-%m-%d}: {p.direction} drift "
+        f"{abs(p.distance_deg):.1f}° at {abs(p.rate_deg_day):.2f}°/day"
+        for p in (getattr(pol, "drift_phases", []) or [])
+        if p.direction != "STATIONARY" and abs(p.distance_deg) > 5.0
+    ][:8]
+
+    above_routine = sum(1 for v in views if not v.is_routine)
+
+    mission, bclass = _mission_profile(regime, is_geo, lon_range, views, above_routine)
+    risk = _risk_with_posture_floor(anomaly, views)
+
+    if not views and detection is not None:
+        narrative = _quiet_narrative(detection, span_days)
+    elif is_geo and lon_range > _GEO_ROAMER_DEGREES:
+        narrative = _roamer_narrative(lon_range, span_days, direction, drift)
     else:
-        signature = "Nothing resolved above the measured detection floor"
+        narrative = _rate_narrative(regime, views, span_days, propellant, above_routine)
+
+    signature = _operational_signature(views, propellant, lon_range)
 
     return IntelAssessment(
         mission_profile=mission, behaviour_class=bclass, risk_level=risk,

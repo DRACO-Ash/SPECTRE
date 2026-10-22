@@ -70,6 +70,14 @@ _MAX_FULL_BREAKDOWNS = 500
 _DRIFT_STATIONARY = 0.05    # °/day — |drift| below this → "Stationary"
 _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 
+# Backward-compatible PoL status. This is an outlier test against the object's
+# OWN measured history and nothing more; whether the behaviour matters
+# operationally is a judgement against cited budgets and is made in
+# spectre/domain/pol_assessment.py.
+_STATUS_RECENT_DAYS     = 10.0  # days: older than this and there is no "latest" manoeuvre
+_STATUS_ANOMALOUS_SIGMA = 3.0   # σ above the historical mean ΔV → "ANOMALOUS"
+_STATUS_CAUTION_SIGMA   = 2.0   # σ above the historical mean ΔV → "CAUTION"
+
 # _SK_DV_LIMIT and _GEO_SK_BASELINE used to live here. Both are gone, and
 # nothing in this module replaces them, because neither was a measurement.
 #
@@ -682,6 +690,107 @@ def parse_tle_history(
     return records
 
 
+def _screen_pairs(
+    records: list[TLERecord],
+) -> tuple[list[tuple[TLERecord, TLERecord, float]], list[float], int]:
+    """Every usable consecutive pair and its cheap screening ΔV.
+
+    Pairs separated by more than ``_MAX_GAP_DAYS`` are counted and dropped
+    rather than measured, because the object could have done anything in
+    between and one before/after pair cannot be read as a single burn.
+    """
+    pairs: list[tuple[TLERecord, TLERecord, float]] = []
+    screen_dv: list[float] = []
+    skipped_long_gap = 0
+    for rp, rc, gap in _build_pairs(records):
+        if gap > _MAX_GAP_DAYS:
+            skipped_long_gap += 1
+            continue
+        pairs.append((rp, rc, gap))
+        screen_dv.append(_estimate_dv(rp, rc))
+    return pairs, screen_dv, skipped_long_gap
+
+
+def _detect_manoeuvres(
+    candidates: list[tuple[TLERecord, TLERecord, float, float]],
+    noise: NoiseModel,
+) -> list[Manoeuvre]:
+    """Re-estimate the screened candidates, in rank order, into detections.
+
+    *candidates* arrives ranked by screening ΔV, so the largest events always
+    get the full forensic treatment even when the budget binds. The first
+    ``_MAX_FULL_BREAKDOWNS`` can be thrown out by that treatment; past the
+    budget the screening figure stands, and the absent breakdown is what says
+    so.
+    """
+    manoeuvres: list[Manoeuvre] = []
+    for rank, (rp, rc, gap, screen) in enumerate(candidates):
+        if rank < _MAX_FULL_BREAKDOWNS:
+            bd = build_breakdown(rp, rc, gap, noise)
+            if bd.confidence == "REJECT":
+                continue
+            dv = bd.dv_km_s
+        else:
+            bd, dv = None, screen
+
+        d_alt  = rc.alt_km  - rp.alt_km
+        d_inc  = _angle_diff(rp.inc_deg,  rc.inc_deg)
+        d_ecc  = rc.ecc     - rp.ecc
+        d_per  = (rc.period_min - rp.period_min) * 60.0
+
+        raan_j2  = _j2_raan_rate(rp)  * gap
+        argp_j2  = _j2_argp_rate(rp)  * gap
+        d_raan   = _angle_diff(rp.raan_deg + raan_j2, rc.raan_deg)
+        d_argp   = _angle_diff(rp.argp_deg + argp_j2, rc.argp_deg)
+
+        d_drift  = None
+        if rp.geo_drift_rate_deg_day is not None and rc.geo_drift_rate_deg_day is not None:
+            d_drift = rc.geo_drift_rate_deg_day - rp.geo_drift_rate_deg_day
+
+        dominant = _dominant_element(d_alt, d_inc, d_ecc, bd)
+        manoeuvres.append(Manoeuvre(
+            epoch=rc.epoch, gap_days=gap,
+            delta_v_km_s=dv, delta_alt_km=d_alt, delta_inc_deg=d_inc,
+            delta_ecc=d_ecc, delta_raan_corrected_deg=d_raan,
+            delta_argp_corrected_deg=d_argp, delta_period_s=d_per,
+            delta_drift_deg_day=d_drift,
+            dominant_element=dominant,
+            tle_before=rp, tle_after=rc, breakdown=bd,
+        ))
+    return manoeuvres
+
+
+def _pol_status_and_reason(
+    latest_epoch: datetime,
+    manoeuvres: list[Manoeuvre],
+    dv_stats: PolStats | None,
+) -> tuple[str, str]:
+    """The backward-compatible PoL status and the sentence explaining it.
+
+    *latest_epoch* is the epoch of the last element set in the history: a
+    manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not "the
+    latest" and leaves the status at NORMAL, because an object that has simply
+    stopped manoeuvring is not an anomaly.
+    """
+    pol_status = "NORMAL"
+    pol_reason = "All metrics within normal historical bounds."
+    if manoeuvres and dv_stats:
+        last_dv = manoeuvres[-1].delta_v_km_s if (
+            latest_epoch - manoeuvres[-1].epoch
+        ).total_seconds() / 86400.0 < _STATUS_RECENT_DAYS else None
+        if last_dv and dv_stats.std > 0:
+            z = (last_dv - dv_stats.mean) / dv_stats.std
+            if z > _STATUS_ANOMALOUS_SIGMA:
+                pol_status = "ANOMALOUS"
+                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above historical mean."
+            elif z > _STATUS_CAUTION_SIGMA:
+                pol_status = "CAUTION"
+                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above mean — approaching anomalous threshold."
+    if not manoeuvres:
+        pol_reason = "No manoeuvres detected — object appears passive."
+    return pol_status, pol_reason
+
+
 def analyse_pattern_of_life(
     records: list[TLERecord],
     satno: int = 0,
@@ -717,15 +826,7 @@ def analyse_pattern_of_life(
     # are used because real burns, however large, move neither, so an object's
     # own manoeuvres cannot inflate the threshold meant to find them.
 
-    pairs: list[tuple[TLERecord, TLERecord, float]] = []
-    screen_dv: list[float] = []
-    skipped_long_gap = 0
-    for rp, rc, gap in _build_pairs(records):
-        if gap > _MAX_GAP_DAYS:
-            skipped_long_gap += 1
-            continue
-        pairs.append((rp, rc, gap))
-        screen_dv.append(_estimate_dv(rp, rc))
+    pairs, screen_dv, skipped_long_gap = _screen_pairs(records)
 
     noise = calibrate_noise(screen_dv)
     # The operator's threshold and the measured floor are both lower bounds;
@@ -747,40 +848,7 @@ def analyse_pattern_of_life(
     # truncated.
     pairs_over_forensic_budget = max(0, len(candidates) - _MAX_FULL_BREAKDOWNS)
 
-    manoeuvres: list[Manoeuvre] = []
-    for rank, (rp, rc, gap, screen) in enumerate(candidates):
-        if rank < _MAX_FULL_BREAKDOWNS:
-            bd = build_breakdown(rp, rc, gap, noise)
-            if bd.confidence == "REJECT":
-                continue
-            dv = bd.dv_km_s
-        else:
-            bd, dv = None, screen
-
-        d_alt  = rc.alt_km  - rp.alt_km
-        d_inc  = _angle_diff(rp.inc_deg,  rc.inc_deg)
-        d_ecc  = rc.ecc     - rp.ecc
-        d_per  = (rc.period_min - rp.period_min) * 60.0
-
-        raan_j2  = _j2_raan_rate(rp)  * gap
-        argp_j2  = _j2_argp_rate(rp)  * gap
-        d_raan   = _angle_diff(rp.raan_deg + raan_j2, rc.raan_deg)
-        d_argp   = _angle_diff(rp.argp_deg + argp_j2, rc.argp_deg)
-
-        d_drift  = None
-        if rp.geo_drift_rate_deg_day is not None and rc.geo_drift_rate_deg_day is not None:
-            d_drift = rc.geo_drift_rate_deg_day - rp.geo_drift_rate_deg_day
-
-        dominant = _dominant_element(d_alt, d_inc, d_ecc, bd)
-        manoeuvres.append(Manoeuvre(
-            epoch=rc.epoch, gap_days=gap,
-            delta_v_km_s=dv, delta_alt_km=d_alt, delta_inc_deg=d_inc,
-            delta_ecc=d_ecc, delta_raan_corrected_deg=d_raan,
-            delta_argp_corrected_deg=d_argp, delta_period_s=d_per,
-            delta_drift_deg_day=d_drift,
-            dominant_element=dominant,
-            tle_before=rp, tle_after=rc, breakdown=bd,
-        ))
+    manoeuvres = _detect_manoeuvres(candidates, noise)
 
     rejected_on_evidence = len(candidates[:_MAX_FULL_BREAKDOWNS]) - sum(
         1 for m in manoeuvres if m.breakdown is not None
@@ -827,22 +895,9 @@ def analyse_pattern_of_life(
         next_unc = round(interval_stats.std * 2.0, 1)
 
     # PoL status
-    pol_status = "NORMAL"
-    pol_reason = "All metrics within normal historical bounds."
-    if manoeuvres and dv_stats:
-        last_dv = manoeuvres[-1].delta_v_km_s if (
-            records[-1].epoch - manoeuvres[-1].epoch
-        ).total_seconds() / 86400.0 < 10 else None
-        if last_dv and dv_stats.std > 0:
-            z = (last_dv - dv_stats.mean) / dv_stats.std
-            if z > 3.0:
-                pol_status = "ANOMALOUS"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above historical mean."
-            elif z > 2.0:
-                pol_status = "CAUTION"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above mean — approaching anomalous threshold."
-    if not manoeuvres:
-        pol_reason = "No manoeuvres detected — object appears passive."
+    pol_status, pol_reason = _pol_status_and_reason(
+        records[-1].epoch, manoeuvres, dv_stats,
+    )
 
     # ── Chart data ────────────────────────────────────────────────────────────
     cr = _downsample(records, 500)

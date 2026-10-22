@@ -259,11 +259,15 @@
     <form hx-post="/pol/reserve-reset" hx-target="#pol-results" hx-swap="innerHTML"
           style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.4rem">
       <input type="hidden" name="satno" value="{{ pol.satno }}">
-      <label style="font-size:0.6rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
+      {# The label carries "for" and the input an "id" so a screen reader reads
+         the two as one control (Web:S6853, Web:InputWithoutLabelCheck). The id
+         is a literal because this partial is included once per panel, never in
+         a loop, so it stays unique in the rendered page. #}
+      <label for="pol-reserve-reset-date" style="font-size:0.6rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
         Reserve reset (refuelling) — cumulative ΔV counts from this date
       </label>
       <div style="display:flex; gap:0.3rem; align-items:center">
-        <input type="date" name="reset_date" class="form-input"
+        <input type="date" id="pol-reserve-reset-date" name="reset_date" class="form-input"
                value="{{ reserve_reset.strftime('%Y-%m-%d') if reserve_reset else '' }}"
                style="font-size:0.62rem; padding:0.15rem 0.3rem; flex:1">
         <button type="submit" class="btn-secondary" style="font-size:0.6rem; padding:0.15rem 0.5rem">
@@ -642,18 +646,18 @@
     <table class="hrr-table" style="font-size:0.66rem">
       <thead>
         <tr>
-          <th onclick="polSort(this)" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
-          {% if is_geo %}<th onclick="polSort(this)" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
-          <th onclick="polSort(this)" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
+          {% if is_geo %}<th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
           <th style="text-align:right">Alt After</th>
-          <th onclick="polSort(this)" style="cursor:pointer">Confidence<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Confidence<span class="hrr-sort-ind"></span></th>
           <th style="text-align:center">Working</th>
           <th style="text-align:center">MC</th>
         </tr>
@@ -868,19 +872,19 @@
     <table class="hrr-table" style="font-size:0.64rem; width:100%">
       <thead>
         <tr>
-          <th onclick="polSort(this)" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
           {% if pol.records | selectattr("data_mode") | list %}
-          <th onclick="polSort(this)" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
           {% endif %}
           {% if pol.records | selectattr("source") | list %}
-          <th onclick="polSort(this)" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
           {% endif %}
           <th style="white-space:nowrap">TLE</th>
         </tr>

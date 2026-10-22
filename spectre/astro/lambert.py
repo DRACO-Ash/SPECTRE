@@ -87,16 +87,13 @@ def solve_lambert(
     cos_dnu = np.dot(r1, r2) / (r1_mag * r2_mag)
     cos_dnu = np.clip(cos_dnu, -1.0, 1.0)
 
-    if prograde:
-        if cross_z < 0:
-            dnu = 2.0 * math.pi - math.acos(cos_dnu)
-        else:
-            dnu = math.acos(cos_dnu)
-    else:
-        if cross_z >= 0:
-            dnu = 2.0 * math.pi - math.acos(cos_dnu)
-        else:
-            dnu = math.acos(cos_dnu)
+    # acos returns the principal value in [0, pi], so the sense of r1 x r2
+    # decides whether that is the transfer angle or its reflex. The prograde and
+    # retrograde cases are mirror images of one another rather than two separate
+    # rules: the long way round is taken whenever the requested direction
+    # disagrees with the sign of the orbit normal.
+    long_way = (cross_z < 0) if prograde else (cross_z >= 0)
+    dnu = 2.0 * math.pi - math.acos(cos_dnu) if long_way else math.acos(cos_dnu)
 
     # Collinear geometry has no unique transfer plane, and the guard for it has
     # to be keyed to the ANGLE, not to A.

@@ -111,6 +111,7 @@
         {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
         {% set row_id = 'scr-' ~ loop.index0 %}
         <tr class="threat-parent" onclick="scrToggle('{{ row_id }}')" style="cursor:pointer"
+            role="button" tabindex="0" onkeydown="spectreActivate(event)"
             title="Open the profiles behind this verdict">
           <td class="col-dim">{{ loop.index }}</td>
           <td><strong>{{ v.actor_name }}</strong></td>

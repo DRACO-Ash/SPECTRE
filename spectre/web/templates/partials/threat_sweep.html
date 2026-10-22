@@ -199,12 +199,12 @@
       <thead>
         <tr>
           <th style="width:2rem">&nbsp;</th>
-          <th onclick="threatSort(1,'str')">Target <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(2,'str')">Source <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(3,'num')">HRR <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(4,'num')">Best &#916;V <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(5,'str')">Best Method <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(6,'num')">Profiles <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Target <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(2,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Source <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(3,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">HRR <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Best &#916;V <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(5,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Best Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(6,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Profiles <span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -216,6 +216,7 @@
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
+            role="button" tabindex="0" onkeydown="spectreActivate(event)"
             title="Click to expand {{ group.profile_count }} manoeuvre profiles">
           <td class="threat-chevron-cell">
             <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>
@@ -258,11 +259,11 @@
         {% set group_idx = loop.index0 %}
         <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
           <td></td>
-          <th onclick="childSort({{ group_idx }},1,'str')">Location <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},2,'str')">Burn Epoch <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},3,'num')">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},4,'num')">TOF <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},5,'str')">Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Location <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},2,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Burn Epoch <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},3,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">TOF <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},5,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Method <span class="hrr-sort-ind"></span></th>
           <th class="no-sort">Action</th>
         </tr>
         {% for child in group.children %}

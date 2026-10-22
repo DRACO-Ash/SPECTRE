@@ -52,13 +52,13 @@
   <thead>
     <tr>
       <th></th>
-      <th onclick="aiSort(1,'str')" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(2,'num')" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(3,'str')" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(5,'num')" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(6,'str')" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(7,'num')" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -72,6 +72,7 @@
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
+      role="button" tabindex="0" onkeydown="spectreActivate(event)"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
       data-sort-1="{{ item.result.method.value }}"
       data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"

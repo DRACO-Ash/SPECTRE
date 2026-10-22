@@ -343,8 +343,22 @@ def changed_line_ranges(base: str) -> dict[str, list[tuple[int, int]]]:
     git = shutil.which("git")
     if git is None:
         return {}
+
+    # Against the MERGE BASE and the WORKING TREE, not against HEAD.
+    #
+    # "base...HEAD" would compare commits only, and the artefact is built from
+    # the working tree. A refactor that adds one line inside an untouched
+    # 67-complexity function puts that function in the gate's window, and a
+    # check that cannot see uncommitted work would report it clean right up to
+    # the moment of upload. That is exactly how this was found.
+    merge_base = subprocess.run(  # noqa: S603
+        [git, "merge-base", base, "HEAD"],
+        cwd=_ROOT, capture_output=True, text=True, check=False,
+    )
+    anchor = merge_base.stdout.strip() if merge_base.returncode == 0 else base
+
     result = subprocess.run(  # noqa: S603
-        [git, "diff", "-U0", f"{base}...HEAD"],
+        [git, "diff", "-U0", anchor],
         cwd=_ROOT, capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:

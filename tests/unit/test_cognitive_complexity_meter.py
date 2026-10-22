@@ -154,17 +154,62 @@ class TestItAgreesWithSonarQube:
 
 
 class TestTheNewCodeScoping:
-    """The gate reports S3776 only on new code, so the check must too."""
+    """The gate reports S3776 only on new code, so the check must too.
 
-    def test_changed_mode_reports_nothing_against_head(self) -> None:
+    The scoping is half the value of the tool. Without it the loop would fail
+    on 43 pre-existing functions and be ignored within a day; with it, the
+    check reports exactly what the gate will.
+
+    It is measured against the merge base and the WORKING TREE rather than
+    against HEAD, because the uploaded artefact is built from the working tree.
+    That is not a detail: a one-line change inside an untouched function of
+    complexity 67 puts that function in the gate's window, and a check that
+    compared commits only would report it clean right up to the upload.
+    """
+
+    def _overlaps(self, start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+        meter = _load()
+        return meter._overlaps({"line": start, "end_line": end}, spans)
+
+    def test_a_function_inside_a_changed_span_is_in_scope(self) -> None:
+        assert self._overlaps(10, 20, [(12, 14)])
+
+    def test_a_function_wholly_before_the_change_is_not(self) -> None:
+        assert not self._overlaps(10, 20, [(21, 30)])
+
+    def test_a_function_wholly_after_the_change_is_not(self) -> None:
+        assert not self._overlaps(10, 20, [(1, 9)])
+
+    def test_a_single_touched_line_puts_the_whole_function_in_scope(self) -> None:
+        """One added line inside a 67-complexity function is enough."""
+        assert self._overlaps(379, 520, [(567, 567)]) is False
+        assert self._overlaps(379, 600, [(567, 567)]) is True
+
+    def test_a_change_at_either_boundary_counts(self) -> None:
+        assert self._overlaps(10, 20, [(20, 20)])
+        assert self._overlaps(10, 20, [(10, 10)])
+
+    def test_scoping_is_restricted_to_the_sonar_source_roots(self) -> None:
+        """A complex script is real complexity but not gate complexity."""
+        meter = _load()
+        assert "spectre" in meter._SONAR_SOURCE_ROOTS
+        assert not "scripts/x.py".startswith(meter._SONAR_SOURCE_ROOTS)
+
+    def test_changed_mode_runs_against_a_clean_tree(self) -> None:
+        """End to end, but only where the premise holds."""
         if not _SCRIPT.is_file():
             pytest.skip("scripts/ is excluded from the submission package")
-        if shutil.which("git") is None or not (_ROOT / ".git").exists():
+        git = shutil.which("git")
+        if git is None or not (_ROOT / ".git").exists():
             pytest.skip("the scoping check needs git")
+        dirty = subprocess.run(  # noqa: S603
+            [git, "status", "--porcelain"],
+            cwd=_ROOT, capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if dirty:
+            pytest.skip("the working tree has uncommitted changes, which are in scope by design")
         result = subprocess.run(  # noqa: S603
             [sys.executable, str(_SCRIPT), "--changed", "HEAD", "--max", "15"],
             cwd=_ROOT, capture_output=True, text=True, check=False,
         )
-        # HEAD against HEAD is an empty diff, so nothing is in scope whatever
-        # the tree looks like. This pins the scoping, not the scores.
         assert result.returncode == 0, result.stdout

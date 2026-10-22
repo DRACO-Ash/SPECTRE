@@ -928,3 +928,72 @@ class TestSubprocessGuardsAreEnvironmentCorrect:
             f"{offenders}. The platform's Test image has a .git directory and "
             "no git executable; guard on the executable."
         )
+
+
+class TestSonarProjectVersionTracksTheRelease:
+    """A stale projectVersion makes the gate's own report name the wrong build.
+
+    sonar.projectVersion sat at 0.4.0 through eight releases because nothing
+    rewrote it. scripts/bump-version.sh now does, and this is the assertion that
+    keeps it honest. Both files travel in the submission package, so it holds in
+    every environment the suite runs in.
+    """
+
+    def test_it_matches_the_package_version(self) -> None:
+        from spectre import __version__
+
+        properties = (_REPO_ROOT / "sonar-project.properties").read_text(encoding="utf-8")
+        declared = [
+            line.split("=", 1)[1].strip()
+            for line in properties.splitlines()
+            if line.startswith("sonar.projectVersion=")
+        ]
+        assert declared, "sonar-project.properties must declare sonar.projectVersion"
+        assert declared[0] == __version__, (
+            f"sonar.projectVersion is {declared[0]!r} but the package is "
+            f"{__version__!r}. Run scripts/bump-version.sh rather than editing "
+            "either by hand."
+        )
+
+
+class TestEveryClickableTableElementAnswersTheKeyboard:
+    """A console that can only be driven by mouse is unusable from a keyboard.
+
+    SonarQube reports this as Web:MouseEventWithoutKeyboardEquivalentCheck, and
+    it reported seven instances. There were fifty, across five templates: the
+    other forty-three were invisible only because their lines had not changed.
+    This pins the whole population rather than the sample.
+
+    The shared handler lives in base.html as spectreActivate(event); an element
+    opts in with tabindex="0" onkeydown="spectreActivate(event)".
+    """
+
+    _TEMPLATES = _REPO_ROOT / "spectre" / "web" / "templates"
+    _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bonclick\b[^>]*>", re.IGNORECASE | re.DOTALL)
+    _KEYBOARD = re.compile(r"\bon(keydown|keypress|keyup)\b", re.IGNORECASE)
+
+    def _offenders(self) -> list[str]:
+        offenders = []
+        for path in sorted(self._TEMPLATES.rglob("*.html")):
+            body = path.read_text(encoding="utf-8")
+            for match in self._CLICKABLE.finditer(body):
+                if self._KEYBOARD.search(match.group(0)):
+                    continue
+                line = body[: match.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(_REPO_ROOT)}:{line}")
+        return offenders
+
+    def test_no_clickable_row_or_header_is_mouse_only(self) -> None:
+        offenders = self._offenders()
+        assert not offenders, (
+            f"{len(offenders)} clickable <tr>/<th> have no keyboard equivalent: "
+            f'{offenders[:8]}. Add tabindex="0" onkeydown="spectreActivate(event)".'
+        )
+
+    def test_the_shared_handler_exists(self) -> None:
+        """Every opt-in above calls it, so its absence breaks all of them at once."""
+        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
+        assert "function spectreActivate" in base, (
+            "spectreActivate is gone from base.html, so every onkeydown that "
+            "calls it is now a silent no-op"
+        )

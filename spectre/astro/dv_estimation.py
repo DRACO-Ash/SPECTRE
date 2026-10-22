@@ -78,6 +78,7 @@ term in the sum, and the provenance of both fits.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -146,6 +147,19 @@ _SWEPT_MISS_TOLERANCE = 3.0
 #: where it admitted six-minute pairs whose fits disagreed by 8 km while the
 #: orbit itself had moved 0.05 km, and arbitrary everywhere else.
 _SWEPT_MISS_FLOOR_FRACTION = 3.0e-4
+
+#: Operator-facing name of the epoch-swept estimator. Held once so a failed
+#: estimate and a successful one are labelled identically in the panel.
+_SWEPT_ESTIMATOR_LABEL = "Epoch-swept propagation"
+
+#: The closest-approach search stops once its bracket is this small a fraction
+#: of the gap, which is far below the resolution of the fits either side of it.
+_REFINE_CONVERGED_FRACTION = 1e-9
+
+#: A pair whose two fits differ in RMS residual by more than this multiple is
+#: flagged: one side is far better observed than the other, so the difference
+#: between them is as likely to be fit quality as a manoeuvre.
+_RMS_DISPARITY_RATIO = 3.0
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -409,7 +423,8 @@ def secular_rates_deg_day(tle: str, sma_km: float, ecc: float,
         lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]
         s = Satrec.twoline2rv(lines[-2], lines[-1])
         return (math.degrees(s.nodedot) * 1440.0, math.degrees(s.argpdot) * 1440.0)
-    except Exception:  # noqa: BLE001 — any parse failure falls back to the closed form
+    # BLE001: any parse failure falls back to the closed form.
+    except Exception:  # noqa: BLE001
         return (_j2_raan_rate_deg_day(sma_km, ecc, inc_deg),
                 _j2_argp_rate_deg_day(sma_km, ecc, inc_deg))
 
@@ -526,7 +541,12 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
     # ratio is large enough to matter rather than leaving the operator to
     # discover it from the disagreement with the headline.
     ratio = abs(d_sma) / before.sma_km if before.sma_km > 0 else 0.0
-    along_note = ("Prograde" if d_sma > 0 else "Retrograde") if d_sma else "No energy change"
+    if not d_sma:
+        along_note = "No energy change"
+    elif d_sma > 0:
+        along_note = "Prograde"
+    else:
+        along_note = "Retrograde"
     if ratio > 0.01:
         along_note += (f". Δa is {ratio * 100:.1f}% of the semi-major axis, where this "
                        "first-order relation over-reports the exact two-burn total by "
@@ -644,6 +664,62 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
 
 # ── Estimator 2: epoch-swept propagation (independent cross-check) ───────────
 
+#: One sample of the gap: (fraction through the gap, position mismatch km,
+#: velocity difference km/s).
+_Sample = tuple[float, float, float]
+#: A probe of the gap: fraction in, position mismatch and velocity difference
+#: out, or None where SGP4 could not propagate that instant.
+_Probe = Callable[[float], tuple[float, float] | None]
+
+
+def _coarse_scan(probe: _Probe, coarse_steps: int) -> tuple[list[_Sample], _Sample]:
+    """Sample the gap evenly and return every usable sample with the closest.
+
+    The sentinel best is an infinite mismatch at the start of the gap, which is
+    what the caller sees when every sample is unusable or every mismatch is a
+    NaN that no comparison can beat.
+    """
+    best: _Sample = (0.0, float("inf"), 0.0)
+    samples: list[_Sample] = []
+    for k in range(coarse_steps + 1):
+        got = probe(k / coarse_steps)
+        if got is None:
+            continue
+        dr, dv = got
+        samples.append((k / coarse_steps, dr, dv))
+        if dr < best[1]:
+            best = (k / coarse_steps, dr, dv)
+    return samples, best
+
+
+def _refine_minimum(probe: _Probe, best: _Sample,
+                    coarse_steps: int, refine_steps: int) -> _Sample:
+    """Golden-section refine of the closest approach, one coarse step either side.
+
+    The two branches differ only in which end of the bracket moves and which
+    probe becomes the candidate, so the "closer than the best so far" test is
+    written once below them rather than once inside each.
+    """
+    half = 1.0 / coarse_steps
+    lo, hi = max(0.0, best[0] - half), min(1.0, best[0] + half)
+    for _ in range(refine_steps):
+        if hi - lo < _REFINE_CONVERGED_FRACTION:
+            break
+        m1, m2 = lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0
+        p1, p2 = probe(m1), probe(m2)
+        if p1 is None or p2 is None:
+            break
+        if p1[0] <= p2[0]:
+            hi = m2
+            pick, pick_frac = p1, m1
+        else:
+            lo = m1
+            pick, pick_frac = p2, m2
+        if pick[0] < best[1]:
+            best = (pick_frac, pick[0], pick[1])
+    return best
+
+
 def estimate_dv_epoch_swept(
     before_tle: str, after_tle: str,
     t_before: datetime, t_after: datetime,
@@ -670,9 +746,10 @@ def estimate_dv_epoch_swept(
         from spectre.astro.propagator import TLEOrbit
         orb_a = TLEOrbit(before_tle)
         orb_b = TLEOrbit(after_tle)
-    except Exception as exc:  # noqa: BLE001 — a malformed element set is reportable
+    # BLE001: a malformed element set is reportable.
+    except Exception as exc:  # noqa: BLE001
         return DvEstimate(
-            method="epoch_swept", label="Epoch-swept propagation",
+            method="epoch_swept", label=_SWEPT_ESTIMATOR_LABEL,
             dv_km_s=0.0, failed=True,
             failure_reason=f"Could not build propagator: {type(exc).__name__}: {exc}",
         )
@@ -687,51 +764,25 @@ def estimate_dv_epoch_swept(
         try:
             sa = orb_a.propagate(t)
             sb = orb_b.propagate(t)
-        except Exception:  # noqa: BLE001 — SGP4 can diverge; that sample is simply unusable
+        # BLE001: SGP4 can diverge; that sample is simply unusable.
+        except Exception:  # noqa: BLE001
             return None
         dr = math.sqrt(sum((float(y) - float(x)) ** 2 for x, y in zip(sa.r, sb.r, strict=True)))
         dv = math.sqrt(sum((float(y) - float(x)) ** 2 for x, y in zip(sa.v, sb.v, strict=True)))
         return dr, dv
 
-    best_frac = 0.0
-    best_dr = float("inf")
-    best_dv = 0.0
-    coarse: list[tuple[float, float, float]] = []   # (frac, dr, dv)
-    for k in range(coarse_steps + 1):
-        got = _probe(k / coarse_steps)
-        if got is None:
-            continue
-        dr, dv = got
-        coarse.append((k / coarse_steps, dr, dv))
-        if dr < best_dr:
-            best_dr, best_dv, best_frac = dr, dv, k / coarse_steps
+    coarse, best = _coarse_scan(_probe, coarse_steps)
     sampled = len(coarse)
 
     if sampled == 0:
         return DvEstimate(
-            method="epoch_swept", label="Epoch-swept propagation",
+            method="epoch_swept", label=_SWEPT_ESTIMATOR_LABEL,
             dv_km_s=0.0, failed=True,
             failure_reason="SGP4 failed at every sample across the gap.",
         )
 
     # Golden-section refine around the coarse minimum.
-    half = 1.0 / coarse_steps
-    lo, hi = max(0.0, best_frac - half), min(1.0, best_frac + half)
-    for _ in range(refine_steps):
-        if hi - lo < 1e-9:
-            break
-        m1, m2 = lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0
-        p1, p2 = _probe(m1), _probe(m2)
-        if p1 is None or p2 is None:
-            break
-        if p1[0] <= p2[0]:
-            hi = m2
-            if p1[0] < best_dr:
-                best_dr, best_dv, best_frac = p1[0], p1[1], m1
-        else:
-            lo = m1
-            if p2[0] < best_dr:
-                best_dr, best_dv, best_frac = p2[0], p2[1], m2
+    best_frac, best_dr, best_dv = _refine_minimum(_probe, best, coarse_steps, refine_steps)
 
     # A burn that only changes the orbit plane leaves the two trajectories
     # crossing at every node passage, so many instants look equally close and
@@ -756,7 +807,7 @@ def estimate_dv_epoch_swept(
                      "contain the manoeuvre.")
     return DvEstimate(
         method="epoch_swept",
-        label="Epoch-swept propagation",
+        label=_SWEPT_ESTIMATOR_LABEL,
         dv_km_s=best_dv,
         notes=tuple(notes),
         burn_epoch=burn_epoch,
@@ -782,7 +833,8 @@ def estimate_dv_propagation(before_tle: str, after_tle: str,
         sv_b = TLEOrbit(after_tle).propagate(at_epoch)
         dv = math.sqrt(sum((float(b) - float(a)) ** 2
                            for a, b in zip(sv_a.v, sv_b.v, strict=True)))
-    except Exception as exc:  # noqa: BLE001 — any propagation failure is reportable
+    # BLE001: any propagation failure is reportable.
+    except Exception as exc:  # noqa: BLE001
         return DvEstimate(
             method = "propagation_difference", label = "Propagation difference (legacy)",
             dv_km_s = 0.0, failed = True, failure_reason = f"{type(exc).__name__}: {exc}",
@@ -840,6 +892,76 @@ def calibrate_noise(dv_samples: list[float]) -> NoiseModel:
 
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
+def _channel_input(components: tuple[DvComponent, ...], channel: str, key: str) -> float:
+    """Read one working value out of the named channel of an estimate.
+
+    Last match wins, as the loop this replaced did. The decomposition carries
+    exactly one component per channel, so the two are the same thing.
+    """
+    value = 0.0
+    for c in components:
+        if c.channel == channel:
+            value = float(c.inputs.get(key, 0.0))
+    return value
+
+
+def _agreement_ratio(swept: DvEstimate, elements: DvEstimate) -> float | None:
+    """How far apart the two independent estimators are, as a ratio.
+
+    None when both sit under the absolute floor: the ratio of two numbers that
+    are each indistinguishable from zero says nothing about either.
+    """
+    lo = min(swept.dv_km_s, elements.dv_km_s)
+    hi = max(swept.dv_km_s, elements.dv_km_s)
+    if hi >= _NOISE_ABSOLUTE_FLOOR_KM_S:
+        if lo > 0:
+            return hi / lo
+        return float("inf")
+    return None
+
+
+def _provenance_warnings(b: StateSnapshot, a: StateSnapshot,
+                         gap_days: float) -> list[str]:
+    """Objections to the pair itself, before any estimator has been read."""
+    warnings: list[str] = []
+    if b.source.strip() and a.source.strip() and b.source.strip() != a.source.strip():
+        warnings.append(
+            f"Element sets come from different sources ({b.source} → {a.source}). "
+            "A difference between two providers' fits is not a manoeuvre."
+        )
+    if b.data_mode.strip() and a.data_mode.strip() and b.data_mode != a.data_mode:
+        warnings.append(f"Data mode changes across the pair ({b.data_mode} → {a.data_mode}).")
+    if gap_days <= 0.0:
+        warnings.append(f"Non-positive epoch gap ({gap_days:.4f} days): the two fits "
+                        "are effectively simultaneous and cannot bracket a manoeuvre.")
+    if b.rms_residual is not None and a.rms_residual is not None:
+        worst, best = max(b.rms_residual, a.rms_residual), min(b.rms_residual, a.rms_residual)
+        if best > 0 and worst / best > _RMS_DISPARITY_RATIO:
+            warnings.append(f"Fit quality differs sharply across the pair "
+                            f"(RMS {b.rms_residual:.4g} → {a.rms_residual:.4g}).")
+    return warnings
+
+
+def _estimator_warnings(swept: DvEstimate, swept_usable: bool, miss: float | None,
+                        expected_miss: float, ratio: float | None) -> list[str]:
+    """Objections the estimators raise against their own output."""
+    warnings: list[str] = []
+    if swept.failed:
+        warnings.append(f"Epoch-swept estimator unavailable ({swept.failure_reason}). "
+                        "Headline figure is from element differencing alone.")
+    if not swept.failed and not swept_usable and miss is not None:
+        warnings.append(
+            f"The two fits never come within {miss:.1f} km of each other inside the "
+            f"gap, against {expected_miss:.1f} km expected from the element change. "
+            "The epoch-swept figure is not a ΔV and has been set aside; the headline "
+            "is element differencing."
+        )
+    if ratio is not None and ratio > _AGREEMENT_POOR:
+        warnings.append(f"The two estimators disagree by {ratio:.1f}×. The element "
+                        "change is not a clean single impulse.")
+    return warnings
+
+
 def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
                     noise: NoiseModel | None = None) -> DvBreakdown:
     """Run every estimator on one element set pair and judge the result.
@@ -876,20 +998,14 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
     # by roughly r·θ. Anything much beyond that and the two fits never describe
     # one object at one place, so the velocity difference between them is not
     # an impulse and must not be reported as one.
-    theta_deg = 0.0
-    for c in elements.components:
-        if c.channel == "cross_track":
-            theta_deg = float(c.inputs.get("plane_angle_deg", 0.0))
+    theta_deg = _channel_input(elements.components, "cross_track", "plane_angle_deg")
     # A radial burn separates the orbits at apsis by about a·|Δe⃗|, and
     # omitting that term set every radial burn aside: the swept estimate was
     # discarded, the headline fell back to element differencing, and the
     # confidence dropped to LOW, so a real eccentricity change could never be
     # confirmed and never reached the cumulative ΔV. Measured before the fix: a
     # 3.8 m/s radial burn with a 3.46 km mismatch against a 2.07 km allowance.
-    d_e_vector = 0.0
-    for c in elements.components:
-        if c.channel == "radial":
-            d_e_vector = float(c.inputs.get("delta_e_vector", 0.0))
+    d_e_vector = _channel_input(elements.components, "radial", "delta_e_vector")
     expected_miss = math.sqrt(
         (a.sma_km - b.sma_km) ** 2
         + (b.sma_km * math.radians(theta_deg)) ** 2
@@ -908,47 +1024,15 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
     else:
         dv, headline = elements.dv_km_s, elements.method
 
-    # Agreement between the two independent estimators. Skipped when both sit
-    # under the absolute floor: the ratio of two numbers that are each
-    # indistinguishable from zero says nothing about either.
+    # Agreement between the two independent estimators.
     ratio: float | None = None
     if swept_usable:
-        lo = min(swept.dv_km_s, elements.dv_km_s)
-        hi = max(swept.dv_km_s, elements.dv_km_s)
-        if hi >= _NOISE_ABSOLUTE_FLOOR_KM_S:
-            ratio = hi / lo if lo > 0 else float("inf")
+        ratio = _agreement_ratio(swept, elements)
 
     snr = noise.snr(dv) if noise else None
 
-    warnings: list[str] = []
-    if b.source.strip() and a.source.strip() and b.source.strip() != a.source.strip():
-        warnings.append(
-            f"Element sets come from different sources ({b.source} → {a.source}). "
-            "A difference between two providers' fits is not a manoeuvre."
-        )
-    if b.data_mode.strip() and a.data_mode.strip() and b.data_mode != a.data_mode:
-        warnings.append(f"Data mode changes across the pair ({b.data_mode} → {a.data_mode}).")
-    if gap_days <= 0.0:
-        warnings.append(f"Non-positive epoch gap ({gap_days:.4f} days): the two fits "
-                        "are effectively simultaneous and cannot bracket a manoeuvre.")
-    if b.rms_residual is not None and a.rms_residual is not None:
-        worst, best = max(b.rms_residual, a.rms_residual), min(b.rms_residual, a.rms_residual)
-        if best > 0 and worst / best > 3.0:
-            warnings.append(f"Fit quality differs sharply across the pair "
-                            f"(RMS {b.rms_residual:.4g} → {a.rms_residual:.4g}).")
-    if swept.failed:
-        warnings.append(f"Epoch-swept estimator unavailable ({swept.failure_reason}). "
-                        "Headline figure is from element differencing alone.")
-    if not swept.failed and not swept_usable and miss is not None:
-        warnings.append(
-            f"The two fits never come within {miss:.1f} km of each other inside the "
-            f"gap, against {expected_miss:.1f} km expected from the element change. "
-            "The epoch-swept figure is not a ΔV and has been set aside; the headline "
-            "is element differencing."
-        )
-    if ratio is not None and ratio > _AGREEMENT_POOR:
-        warnings.append(f"The two estimators disagree by {ratio:.1f}×. The element "
-                        "change is not a clean single impulse.")
+    warnings = _provenance_warnings(b, a, gap_days)
+    warnings.extend(_estimator_warnings(swept, swept_usable, miss, expected_miss, ratio))
 
     if not legacy.failed and dv > 0 and legacy.dv_km_s / dv > 10.0:
         legacy = replace(legacy, notes=(*legacy.notes,
@@ -956,7 +1040,7 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
             "along-track phase this method cannot separate from ΔV, and is why the "
             "panel's ΔV figures changed."))
 
-    confidence, reason = _judge(dv, swept, ratio, snr, noise, warnings)
+    confidence, reason = _judge(dv, ratio, snr, noise, warnings)
 
     return DvBreakdown(
         dv_km_s=dv, headline_method=headline,
@@ -968,9 +1052,8 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
     )
 
 
-def _judge(dv_km_s: float, swept: DvEstimate, ratio: float | None,
-           snr: float | None, noise: NoiseModel | None,
-           warnings: list[str]) -> tuple[str, str]:
+def _judge(dv_km_s: float, ratio: float | None, snr: float | None,
+           noise: NoiseModel | None, warnings: list[str]) -> tuple[str, str]:
     """Verdict on whether a ΔV figure should be believed.
 
     Ordered so that the disqualifying checks run first: a figure below the
@@ -982,6 +1065,21 @@ def _judge(dv_km_s: float, swept: DvEstimate, ratio: float | None,
     catalogues of known truth that combination returned no false confirmations
     on three and two on the sparsest, while relaxing the signal requirement to
     five admitted twelve to sixteen.
+    """
+    disqualified = _disqualifying_verdict(dv_km_s, ratio, snr, noise, warnings)
+    if disqualified is not None:
+        return disqualified
+    return _grade_confidence(ratio, snr)
+
+
+def _disqualifying_verdict(dv_km_s: float, ratio: float | None, snr: float | None,
+                           noise: NoiseModel | None,
+                           warnings: list[str]) -> tuple[str, str] | None:
+    """REJECT or LOW where the evidence rules the figure out, else None.
+
+    These run before any grading, so a figure that is below the floor, below
+    the noise, or carrying a provenance objection can never be read as a
+    confirmation however well the two estimators happen to agree.
     """
     if noise and dv_km_s < noise.floor_km_s:
         return "REJECT", (f"{dv_km_s * 1000:.3f} m/s is below the measured detection "
@@ -999,7 +1097,11 @@ def _judge(dv_km_s: float, swept: DvEstimate, ratio: float | None,
         return "LOW", f"Independent estimators disagree by {ratio:.1f}×."
     if snr is not None and snr < _SNR_LOW:
         return "LOW", f"Signal-to-noise {snr:.1f} — close to this object's fit scatter."
+    return None
 
+
+def _grade_confidence(ratio: float | None, snr: float | None) -> tuple[str, str]:
+    """HIGH or MODERATE, once nothing has ruled the figure out."""
     agree = ratio is not None and ratio <= _AGREEMENT_HIGH
     strong = snr is not None and snr >= _SNR_HIGH
     if snr is None:

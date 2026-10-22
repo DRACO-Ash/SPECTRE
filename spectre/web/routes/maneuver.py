@@ -66,6 +66,7 @@ from spectre.domain.models import (
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import format_tof_label
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -224,6 +225,39 @@ def _observability(dv: float) -> tuple[str, str, str]:
             "Micro-manoeuvre — consistent with propellant settling or thermal cycling")
 
 
+#: What each named burn direction does to the orbit. The branches below
+#: each built their own one or two entry copy of this map, so the same
+#: wording was written out four times and could drift between them.
+_BURN_DIRECTION_DETAIL: dict[str, str] = {
+    "Prograde": "Raises apogee — increases orbital energy",
+    "Retrograde": "Lowers perigee — decreases orbital energy",
+    "Normal": "Positive plane change — inclination increase",
+    "Anti-normal": "Negative plane change — inclination decrease",
+    "Radial": "Radial thrust — eccentricity adjustment",
+    "Anti-radial": "Anti-radial thrust — eccentricity reduction",
+    "Combined": "Multi-axis manoeuvre — combined orbit change",
+}
+
+
+def _burn_direction(pro: float, nor: float, rad: float, threshold: float) -> str:
+    """Name the dominant axis of a burn, or "Combined" if no axis dominates.
+
+    *threshold* is the share of the burn's vector magnitude an axis has to
+    carry before it is named; the caller sets it.
+
+    Lifted out of _burn_breakdown whole rather than split in half: the chain
+    sat inside the per-burn loop, and the nesting penalty it carried there
+    was most of that function's cognitive complexity score.
+    """
+    if abs(pro) >= threshold:
+        return "Prograde" if pro >= 0 else "Retrograde"
+    if abs(nor) >= threshold:
+        return "Normal" if nor >= 0 else "Anti-normal"
+    if abs(rad) >= threshold:
+        return "Radial" if rad >= 0 else "Anti-radial"
+    return "Combined"
+
+
 def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
     """Per-burn magnitude in m/s, dominant axis, and component percentages."""
     burn_intel: list[dict[str, Any]] = []
@@ -244,29 +278,8 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
 
         # Direction
         threshold = 0.7 * dv_total
-        if abs(pro) >= threshold:
-            direction = "Prograde" if pro >= 0 else "Retrograde"
-            detail_map = {
-                "Prograde": "Raises apogee — increases orbital energy",
-                "Retrograde": "Lowers perigee — decreases orbital energy",
-            }
-        elif abs(nor) >= threshold:
-            direction = "Normal" if nor >= 0 else "Anti-normal"
-            detail_map = {
-                "Normal": "Positive plane change — inclination increase",
-                "Anti-normal": "Negative plane change — inclination decrease",
-            }
-        elif abs(rad) >= threshold:
-            direction = "Radial" if rad >= 0 else "Anti-radial"
-            detail_map = {
-                "Radial": "Radial thrust — eccentricity adjustment",
-                "Anti-radial": "Anti-radial thrust — eccentricity reduction",
-            }
-        else:
-            direction = "Combined"
-            detail_map = {"Combined": "Multi-axis manoeuvre — combined orbit change"}
-
-        direction_detail = detail_map.get(direction, "Multi-axis manoeuvre — combined orbit change")
+        direction = _burn_direction(pro, nor, rad, threshold)
+        direction_detail = _BURN_DIRECTION_DETAIL.get(direction, "Multi-axis manoeuvre — combined orbit change")
 
         burn_intel.append({
             "number": burn.burn_number,
@@ -315,6 +328,17 @@ def _banded(
     return medium if score > medium_at else low
 
 
+#: Headings on the intercept insight table, as the operator reads them.
+#: Seven methods show the miss distance and four name the transfer, so the
+#: wording is written once: two methods heading the same quantity
+#: differently would read as two different quantities.
+_LABEL_MISS_DISTANCE: str = "Miss Distance"
+_LABEL_TRANSFER_TYPE: str = "Transfer Type"
+#: The transfer flown by the three methods that solve the same two-point
+#: boundary value problem.
+_TRANSFER_LAMBERT_ARC: str = "Lambert arc"
+
+
 #: Intercept method -> the figures its panel shows.
 #:
 #: This was a twenty-way if/elif chain, which was most of the branching the
@@ -351,43 +375,43 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, Any] = {
     InterceptMethod.LAMBERT:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
-                {"label": "Transfer Type", "value": "Lambert arc"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.PROXIMITY:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
-                {"label": "Transfer Type", "value": "Lambert arc"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.RENDEZVOUS:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
-                {"label": "Transfer Type", "value": "Lambert arc"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.HOHMANN:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.BIELLIPTIC:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.PHASING:
         lambda result, dv, miss: (
             [
-                {"label": "Miss Distance", "value": "0.0 km"},
-                {"label": "Transfer Type", "value": "Phasing orbit"},
+                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km"},
+                {"label": _LABEL_TRANSFER_TYPE, "value": "Phasing orbit"},
             ]
         ),
     InterceptMethod.DETECTABILITY:
@@ -493,7 +517,7 @@ def _method_insights(
     if builder is None:
         return (
             [
-                {"label": "Miss Distance", "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
             ]
         )
     return builder(result, dv, miss)
@@ -668,7 +692,7 @@ async def orbital_events(
     """
     logger.info(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
-        red_sat, blue_sat, current_user.username,
+        log_safe(red_sat), log_safe(blue_sat), log_safe(current_user.username),
     )
     state = get_session_state(current_user.username)
 
@@ -691,7 +715,7 @@ async def orbital_events(
             raw = find_orbital_events(tle, sc_start, sc_stop)
             red_events = [_astro_event_to_domain(e) for e in raw]
         else:
-            logger.warning("orbital_events: no TLE found for red %s", red_sat)
+            logger.warning("orbital_events: no TLE found for red %s", log_safe(red_sat))
 
     if blue_sat.strip():
         tle = _find_tle(state, blue_sat.strip())
@@ -699,7 +723,7 @@ async def orbital_events(
             raw = find_orbital_events(tle, sc_start, sc_stop)
             blue_events = [_astro_event_to_domain(e) for e in raw]
         else:
-            logger.warning("orbital_events: no TLE found for blue %s", blue_sat)
+            logger.warning("orbital_events: no TLE found for blue %s", log_safe(blue_sat))
 
     error = None
     if not red_events and not blue_events:
@@ -803,9 +827,10 @@ async def apply_intercept(
                 manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
             ),
         )
-    except Exception as exc:  # noqa: BLE001 - any solver failure is reported, not raised
+    # BLE001: any solver failure is reported to the operator, not raised.
+    except Exception as exc:  # noqa: BLE001
         logger.error(
-            "apply_intercept failed for operator %s: %s", current_user.username, exc
+            "apply_intercept failed for operator %s: %s", log_safe(current_user.username), exc
         )
         state.append_log(f"[INTERCEPT] {method} failed: {exc}")
         return render(request, "partials/intercept_result.html", {
@@ -829,8 +854,8 @@ async def apply_intercept(
     )
     logger.info(
         "apply_intercept: %s for operator %s (%s → %s total_dv=%.0f m/s, burns=%d)",
-        method, current_user.username,
-        red_sat, blue_sat, result.total_delta_v_m_s, len(result.burns),
+        log_safe(method), log_safe(current_user.username),
+        log_safe(red_sat), log_safe(blue_sat), result.total_delta_v_m_s, len(result.burns),
     )
 
     intel = _compute_intercept_intel(result, red_regime)
@@ -1002,8 +1027,8 @@ async def apply_all_intercepts(
     )
     logger.info(
         "apply_all_intercepts: %s → %s, %d/%d ok, by %s",
-        red_sat.strip(), blue_sat.strip(),
-        n_ok, len(_ALL_METHODS_SEQUENCE), current_user.username,
+        log_safe(red_sat.strip()), log_safe(blue_sat.strip()),
+        n_ok, len(_ALL_METHODS_SEQUENCE), log_safe(current_user.username),
     )
 
     return render(request, "partials/all_intercepts_result.html", {

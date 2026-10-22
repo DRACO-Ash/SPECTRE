@@ -356,6 +356,19 @@ class ThreatAssessment:
         return self.capability.label if self.capability is not None else "UNASSESSED"
 
 
+def _impairment_clause(capability: CapabilityEvidence) -> str:
+    """The clause naming the recorded status, or empty when there is none.
+
+    Guards on the status string as well as the impairment flag so the rationale
+    can never read "recorded as None". The verdict is there to be interrogated,
+    and a sentence that cites absent evidence is how an analyst learns to stop
+    trusting it.
+    """
+    if capability.is_impaired() and capability.operational_status:
+        return f" because the object is recorded as {capability.operational_status}"
+    return ""
+
+
 def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> ThreatAssessment:
     """Compose the two into one verdict, showing the working.
 
@@ -399,11 +412,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
                 f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
                 f"({access_band.label} accessibility), but capability is assessed "
                 f"{capability_band.label}"
-                + (
-                    f" because the object is recorded as {capability.operational_status}"
-                    if capability.is_impaired() and capability.operational_status
-                    else ""
-                )
+                + _impairment_clause(capability)
                 + f". Verdict held at {verdict.label}."
             )
         elif capability_band > access_band:

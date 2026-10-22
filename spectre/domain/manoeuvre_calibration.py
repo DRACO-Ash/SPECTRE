@@ -378,17 +378,25 @@ class PlatformClass:
         return self.minimum_burn_hours(delta_v_m_s) <= hours_available
 
 
+#: Platform class names. Each is both the name carried by an entry of
+#: ``PLATFORM_CLASSES`` and the value ``_REGIME_TO_PLATFORM`` selects it by, and
+#: ``platform_class_for_regime`` matches the two by exact string. A name written
+#: out in both places can drift apart and the lookup would then fall through to
+#: the first class without saying so, which is why each is written once here.
+_CHEMICAL_GEO_COMSAT: str = "Chemical GEO comsat, on station"
+_ALL_ELECTRIC_GEO_BUS: str = "All-electric GEO bus"
+
 #: Table 2, with thrust and mass figures from Sections 1 and 2.
 PLATFORM_CLASSES: tuple[PlatformClass, ...] = (
     PlatformClass(
-        "Chemical GEO comsat, on station", 50.0, 200.0, 3.3e-3,
+        _CHEMICAL_GEO_COMSAT, 50.0, 200.0, 3.3e-3,
         "Table 2: about 2,500 m/s total, of which GTO to GEO takes 1,500-1,800 "
         "and 15 years of north-south keeping takes about 750, leaving 50-200 "
         "m/s discretionary. Acceleration from a 10 N on-station thruster on "
         "about 3,000 kg.",
     ),
     PlatformClass(
-        "All-electric GEO bus", 500.0, 1500.0, 9.0e-5,
+        _ALL_ELECTRIC_GEO_BUS, 500.0, 1500.0, 9.0e-5,
         "Table 2: margin up to about 500-1,500 m/s at millinewton thrust. "
         "Acceleration from a BPT-4000 class thruster at about 0.27 N on about "
         "3,000 kg, so weeks to months per move.",
@@ -565,11 +573,11 @@ def classify_posture(
 #: regime, including LEO smallsats whose entire dry mass is under a tonne.
 _REGIME_TO_PLATFORM: dict[str, str] = {
     "LEO":  "LEO smallsat, electric",
-    "MEO":  "All-electric GEO bus",      # navigation buses are comparable in mass
-    "GEO":  "Chemical GEO comsat, on station",
-    "HEO":  "Chemical GEO comsat, on station",
-    "GTO":  "Chemical GEO comsat, on station",
-    "DEEP": "All-electric GEO bus",
+    "MEO":  _ALL_ELECTRIC_GEO_BUS,       # navigation buses are comparable in mass
+    "GEO":  _CHEMICAL_GEO_COMSAT,
+    "HEO":  _CHEMICAL_GEO_COMSAT,
+    "GTO":  _CHEMICAL_GEO_COMSAT,
+    "DEEP": _ALL_ELECTRIC_GEO_BUS,
 }
 
 
@@ -580,7 +588,7 @@ def platform_class_for_regime(regime: str) -> PlatformClass:
     unrecognised regime cannot quietly credit an object with more reserve than
     anything on open record carries.
     """
-    name = _REGIME_TO_PLATFORM.get(regime.strip().upper(), "Chemical GEO comsat, on station")
+    name = _REGIME_TO_PLATFORM.get(regime.strip().upper(), _CHEMICAL_GEO_COMSAT)
     for platform in PLATFORM_CLASSES:
         if platform.name == name:
             return platform

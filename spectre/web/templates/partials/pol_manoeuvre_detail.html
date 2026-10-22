@@ -178,10 +178,16 @@
       <div style="font-size:0.58rem; color:var(--text-dim); margin-bottom:0.3rem">
         drives {{ c.driver }} &nbsp;·&nbsp; <code style="font-size:0.58rem">{{ c.formula }}</code>
       </div>
+      {# The label cell is the heading for its row, not for a column, so it is a
+         <th scope="row">: this readout is a label and value list, and a table
+         with no header at all cannot be navigated by a screen reader
+         (Web:S5256). The two declarations appended to the original style only
+         undo the browser defaults a <th> brings with it (bold, centred), so the
+         rendering is unchanged. -#}
       <table style="width:100%; font-size:0.58rem; border-collapse:collapse">
         {% for row in c.inputs %}
         <tr>
-          <td style="color:var(--text-dim); padding:0.05rem 0.3rem 0.05rem 0; white-space:nowrap">{{ row.label }}</td>
+          <th scope="row" style="color:var(--text-dim); padding:0.05rem 0.3rem 0.05rem 0; white-space:nowrap; font-weight:400; text-align:left">{{ row.label }}</th>
           <td style="text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap">{{ row.text }}</td>
           <td style="color:var(--text-dim); padding-left:0.25rem; white-space:nowrap">{{ row.unit }}</td>
         </tr>
