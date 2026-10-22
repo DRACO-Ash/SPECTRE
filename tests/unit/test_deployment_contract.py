@@ -997,3 +997,21 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
             "spectreActivate is gone from base.html, so every onkeydown that "
             "calls it is now a silent no-op"
         )
+
+    def test_the_handler_ignores_events_from_nested_controls(self) -> None:
+        """Without this guard an activatable row swallows its own buttons.
+
+        keydown bubbles, so a key press on a control inside an opted-in row
+        reaches the row's handler, which calls preventDefault() and clicks the
+        ROW. The nested control never fires. That shipped once: the Load button
+        in the All-Intercepts panel staged nothing for a keyboard operator
+        while working perfectly with a mouse, because the mouse path had a
+        stopPropagation guard and the key path had none.
+        """
+        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
+        handler = base.split("function spectreActivate", 1)[1].split("</script>", 1)[0]
+        assert "e.target !== e.currentTarget" in handler, (
+            "spectreActivate no longer checks that the opted-in element is the "
+            "one with focus, so every nested button, link and input inside an "
+            "activatable row is now unreachable from the keyboard"
+        )

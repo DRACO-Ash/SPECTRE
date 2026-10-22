@@ -72,7 +72,7 @@
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
-      role="button" tabindex="0" onkeydown="spectreActivate(event)"
+      tabindex="0" onkeydown="spectreActivate(event)"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
       data-sort-1="{{ item.result.method.value }}"
       data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"
@@ -115,8 +115,15 @@
       </span>
     </td>
     <td class="col-actions">
+      {# The row above opts into spectreActivate, which calls preventDefault()
+         on Enter and Space. keydown bubbles, so without this guard a key press
+         on the button reached the row's handler instead: the button's own
+         activation was cancelled and the row toggled, so a keyboard operator
+         staged nothing. The mouse path has always been guarded the same way,
+         in onclick. #}
       <button class="btn-secondary btn-sm"
               type="button"
+              onkeydown="event.stopPropagation()"
               onclick="event.stopPropagation(); aiLoadEngine('{{ item.result.red_name }}','{{ item.result.blue_name }}','{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}','{{ item.result.method.value }}')"
               title="Pre-fill intercept engine with this result">Load</button>
     </td>

@@ -33,9 +33,19 @@
      to both keys, and its default scroll is suppressed. #}
   <script>
     function spectreActivate(e) {
+      // Only when the opted-in element ITSELF has focus.
+      //
+      // keydown bubbles. Without this guard, a key press on a control nested
+      // inside an activatable row reaches the row's handler, which calls
+      // preventDefault() and clicks the ROW, so the nested control never
+      // fires. That shipped once: the Load button in the All-Intercepts panel
+      // staged nothing for a keyboard operator while working perfectly with a
+      // mouse, because the mouse path had a stopPropagation guard and the key
+      // path had none.
+      if (e.target !== e.currentTarget) { return; }
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
         e.preventDefault();
-        (e.currentTarget || e.target).click();
+        e.currentTarget.click();
       }
     }
   </script>

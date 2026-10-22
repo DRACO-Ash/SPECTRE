@@ -1055,7 +1055,8 @@ def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
         return None
     try:
         TLEOrbit(raw)  # validate
-    except Exception as exc:
+    # BLE001: operator input, reported not raised.
+    except Exception as exc:  # noqa: BLE001
         errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
         return None
     return raw

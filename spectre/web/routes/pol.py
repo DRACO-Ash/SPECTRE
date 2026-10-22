@@ -193,6 +193,87 @@ async def pol_panel(
     return render(request, _POL_PANEL_TEMPLATE, context)
 
 
+def _panel_error(request: Request, state: Any, message: str) -> HTMLResponse:
+    """The whole PoL panel, re-rendered with one error message and no analysis.
+
+    Every failure exit from an analysis answers with the panel template rather
+    than a results fragment, because the hero tab swaps the panel whole: a bare
+    fragment would leave the operator with a tab that cannot be run again. The
+    context is built in one place so the exits cannot drift apart - an exit
+    that dropped ``has_udl`` would hide the credentials form on the one screen
+    the operator needs it on.
+    """
+    return render(request, _POL_PANEL_TEMPLATE, {
+        "has_udl": bool(state.udl_username),
+        "pol": None,
+        "error": message,
+    })
+
+
+async def _fetch_merged_history(
+    satno: int, username: str, password: str, data_mode: str, source: str = "",
+) -> tuple[str, str, dict[str, tuple[str, str]], dict[str, float | None], str]:
+    """Archive and current UDL elsets for one object, merged into one block.
+
+    Returns ``(archive_text, merged_text, metadata, rms_metadata, name)``. The
+    archive text comes back alongside the merged block because the caller
+    reports the size of the archive fetch, not of the merge.
+
+    ``/elset`` caps at ``_UDL_MAX_RESULTS``, so a long-lived object runs out of
+    archive before it reaches the present. The current elset is therefore
+    fetched separately and layered on top of the archive.
+
+    An empty *data_mode* is normalised to REAL, which is what the session path
+    did at both of its call sites before they moved in here.
+    """
+    mode = data_mode or "REAL"
+    archive_text, meta, rms_meta, archive_name = await _fetch_udl_history(
+        satno, username, password, mode, source=source,
+    )
+    latest_text, latest_meta, latest_rms, latest_name = await _fetch_udl_latest(
+        satno, username, password, mode, source=source,
+    )
+    name = latest_name or archive_name or str(satno)
+    # Latest entries override archive ones: the newer provenance is the one the
+    # operator is shown.
+    merged_meta = {**meta, **latest_meta}
+    merged_rms = {**rms_meta, **latest_rms}
+    merged_text = archive_text + ("\n" if archive_text else "") + latest_text
+    return archive_text, merged_text, merged_meta, merged_rms, name
+
+
+def _cadence_filtered(
+    records: list[Any], apply_filter: bool, satno: int,
+) -> tuple[list[Any], list[Any]]:
+    """The element history, cadence-filtered if the operator asked for it.
+
+    Returns ``(records, quality_flags)``. The unfiltered case hands the records
+    straight back with no flags, so the caller carries one shape into the
+    analysis rather than a branch around the filter.
+    """
+    if not apply_filter:
+        return records, []
+    raw_count = len(records)
+    filtered, quality_flags = filter_tle_history(records)
+    logger.info(
+        "PoL cadence filter: %d → %d records, %d flags for %d",
+        raw_count, len(filtered), len(quality_flags), satno,
+    )
+    return filtered, quality_flags
+
+
+def _filter_note(apply_filter: bool, quality_flags: list[Any]) -> str:
+    """The cadence-filter suffix for the session log line.
+
+    An unfiltered run says nothing rather than reporting zero flags: zero flags
+    from a filter that never ran reads as a clean history, and the operator
+    would have no way to tell the two apart in the log.
+    """
+    if not apply_filter:
+        return ""
+    return f" [cadence-filtered, {len(quality_flags)} flags]"
+
+
 @router.post("/analyse", response_class=HTMLResponse)
 async def pol_analyse(
     request: Request,
@@ -206,65 +287,44 @@ async def pol_analyse(
 ) -> HTMLResponse:
     """Fetch historical TLEs from UDL and run PoL analysis."""
     state = get_session_state(current_user.username)
-    tle_text = ""
-    name = str(satno)
-
-    def _err(msg: str) -> HTMLResponse:
-        return render(request, _POL_PANEL_TEMPLATE, {
-            "has_udl": bool(state.udl_username),
-            "pol": None,
-            "error": msg,
-        })
 
     # ── UDL direct credentials ────────────────────────────────────────────────
     if pol_source == "udl_direct":
         if not udl_user.strip() or not udl_pass.strip():
-            return _err("Enter UDL username and password.")
+            return _panel_error(request, state, "Enter UDL username and password.")
         try:
-            tle_text, meta, rms_meta, _hist_name = await _fetch_udl_history(
+            archive_text, merged_text, merged_meta, merged_rms, name = await _fetch_merged_history(
                 satno, udl_user.strip(), udl_pass.strip(), "REAL",
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta, latest_rms, latest_name = await _fetch_udl_latest(
-                satno, udl_user.strip(), udl_pass.strip(), "REAL",
-                source=state.udl_tle_source,
-            )
-            name = latest_name or _hist_name or str(satno)
-            logger.info("PoL: %d chars from UDL (direct) for %d", len(tle_text), satno)
+            logger.info("PoL: %d chars from UDL (direct) for %d", len(archive_text), satno)
         except Exception as exc:
             logger.warning("PoL: UDL direct failed: %s", exc)
-            return _err(f"UDL fetch failed: {exc}")
+            return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
     # ── UDL session credentials ───────────────────────────────────────────────
     else:  # pol_source == "udl"
         if not state.udl_username or not state.udl_password:
-            return _err("No active UDL session. Connect UDL first, or choose 'UDL (credentials)'.")
+            return _panel_error(
+                request, state,
+                "No active UDL session. Connect UDL first, or choose 'UDL (credentials)'.",
+            )
         try:
-            tle_text, meta, rms_meta, _hist_name = await _fetch_udl_history(
+            archive_text, merged_text, merged_meta, merged_rms, name = await _fetch_merged_history(
                 satno, state.udl_username, state.udl_password,
-                state.udl_data_mode or "REAL",
+                state.udl_data_mode,
                 source=state.udl_tle_source,
             )
-            latest_text, latest_meta, latest_rms, latest_name = await _fetch_udl_latest(
-                satno, state.udl_username, state.udl_password,
-                state.udl_data_mode or "REAL",
-                source=state.udl_tle_source,
-            )
-            name = latest_name or _hist_name or str(satno)
-            logger.info("PoL: %d chars from UDL (session) for %d", len(tle_text), satno)
+            logger.info("PoL: %d chars from UDL (session) for %d", len(archive_text), satno)
         except Exception as exc:
             logger.warning("PoL: UDL session failed: %s", exc)
-            return _err(f"UDL fetch failed: {exc}")
-
-    # Merge historical + latest: latest entries override historical (newer provenance).
-    merged_meta = {**meta, **latest_meta}
-    merged_rms  = {**rms_meta, **latest_rms}
-    merged_text = tle_text + ("\n" if tle_text else "") + latest_text
+            return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
     if not merged_text.strip():
-        return _err(
+        return _panel_error(
+            request, state,
             f"No TLE data returned from UDL for SATNO {satno}. "
-            "Check the SATNO and credentials, and verify the object exists in the catalogue."
+            "Check the SATNO and credentials, and verify the object exists in the catalogue.",
         )
 
     # ── Parse + analyse ───────────────────────────────────────────────────────
@@ -276,20 +336,12 @@ async def pol_analyse(
             metadata=merged_meta, rms_metadata=merged_rms,
         )
         if not records:
-            return render(request, _POL_PANEL_TEMPLATE, {
-                "has_udl": bool(state.udl_username),
-                "pol": None,
-                "error": f"No valid TLEs parsed from UDL response for SATNO {satno}.",
-            })
-
-        quality_flags: list[Any] = []
-        if apply_filter:
-            raw_count = len(records)
-            records, quality_flags = filter_tle_history(records)
-            logger.info(
-                "PoL cadence filter: %d → %d records, %d flags for %d",
-                raw_count, len(records), len(quality_flags), satno,
+            return _panel_error(
+                request, state,
+                f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             )
+
+        records, quality_flags = _cadence_filtered(records, apply_filter, satno)
 
         pol = analyse_pattern_of_life(
             records,
@@ -299,18 +351,14 @@ async def pol_analyse(
             quality_flags=quality_flags,
         )
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
-        filter_note = f" [cadence-filtered, {len(quality_flags)} flags]" if apply_filter else ""
+        filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
             f"[POL] Analysed {satno}: {pol.tle_count} TLEs, "
             f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
     except Exception as exc:
         logger.exception("PoL analysis failed for %d", satno)
-        return render(request, _POL_PANEL_TEMPLATE, {
-            "has_udl": bool(state.udl_username),
-            "pol": None,
-            "error": f"Analysis error: {exc}",
-        })
+        return _panel_error(request, state, f"Analysis error: {exc}")
 
     return render(request, "partials/pol_results.html", {
         "pol": pol,

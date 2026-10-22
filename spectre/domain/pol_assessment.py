@@ -85,8 +85,8 @@ _G0_M_S2: float = 9.80665
 #: the same ΔV. Getting this wrong by an order of magnitude is exactly what the
 #: previous model did by applying one chemical figure to every object.
 _ASSUMED_ISP_S: dict[str, float] = {
-    # Electric propulsion, Hall-effect or gridded ion, has an Isp of 1,500
-    # to 3,500 s. LEO smallsats sit at the lower end, so 1,600 s. The
+    # "Electric (Hall-effect, gridded ion), Isp of 1,500 to
+    # 3,500 s"; LEO smallsats sit at the lower end, so 1,600 s. The
     # Starlink V2 Mini argon Hall thruster is specified at 2,500 s.
     "LEO":  1600.0,
     # All-electric bus, 1,500-3,500 s; the midpoint.
@@ -380,7 +380,7 @@ def _view(manoeuvre: Any, regime: str, sk_ceiling_m_s: float,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Propellant
+# The propellant model
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
