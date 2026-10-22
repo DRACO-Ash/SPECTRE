@@ -71,7 +71,22 @@ _python_template_only = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def dockerfile() -> str:
-    assert _DOCKERFILE.is_file(), "Dockerfile must sit at the package root for template detection"
+    """The Dockerfile, or a skip.
+
+    It must SKIP rather than assert. Every test in this module travels inside
+    the submission package and runs in whatever tree the platform assembles,
+    and that tree is NOT the archive: release 0.5.24 shipped
+    sonar-project.properties in the zip and the platform's checkout did not
+    have it, which failed the whole Test stage on an environmental assumption
+    nobody had checked.
+
+    "This file must ship" belongs in a repository-only test that can see the
+    package (see TestThePackagerShipsWhatTheGatesRead below). A test running
+    INSIDE the artefact cannot tell a packaging bug from a platform that
+    supplies its own copy, so it must not try.
+    """
+    if not _DOCKERFILE.is_file():
+        pytest.skip("Dockerfile is not present in this tree")
     return _DOCKERFILE.read_text(encoding="utf-8")
 
 
@@ -191,16 +206,14 @@ class TestImageHardening:
 
 class TestPackaging:
     def test_dockerignore_exists_and_excludes_secrets(self) -> None:
-        ignore = _REPO_ROOT / ".dockerignore"
-        assert ignore.is_file(), "the image build context must be shaped by a .dockerignore"
-        body = ignore.read_text(encoding="utf-8")
+        body = _repo_only(".dockerignore").read_text(encoding="utf-8")
         assert ".env" in body
         assert ".git" in body
 
     @_python_template_only
     def test_shipped_manifest_is_committed_and_hash_pinned(self) -> None:
         """requirements.txt is the one manifest the submission carries."""
-        body = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        body = _repo_only("requirements.txt").read_text(encoding="utf-8")
         assert "--hash=sha256:" in body, "the manifest must pin hashes"
         assert re.search(r"^[a-z0-9_.-]+==", body, re.MULTILINE), "every dependency must be pinned"
 
@@ -212,8 +225,8 @@ class TestPackaging:
         selects the python template, which is deliberate: the quality gate is
         met, and the Dockerfile still drives the container build.
         """
-        assert (_REPO_ROOT / "requirements.txt").is_file()
-        assert (_REPO_ROOT / "Dockerfile").is_file()
+        assert _repo_only("requirements.txt").is_file()
+        assert _repo_only("Dockerfile").is_file()
 
     @_python_template_only
     def test_manifests_do_not_drift(self) -> None:
@@ -229,7 +242,7 @@ class TestPackaging:
 
         def pins(name: str) -> dict[str, str]:
             found = {}
-            for line in (_REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
+            for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
                 match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)", line)
                 if match:
                     found[match.group(1).lower().replace("_", "-")] = match.group(2)
@@ -252,8 +265,8 @@ class TestPackaging:
         Collapsing the split would drag the whole test toolchain into the
         runtime image and count it against the Container Scan stage.
         """
-        runtime = (_REPO_ROOT / "requirements-runtime.txt").read_text(encoding="utf-8")
-        dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        runtime = _repo_only("requirements-runtime.txt").read_text(encoding="utf-8")
+        dockerfile = _repo_only("Dockerfile").read_text(encoding="utf-8")
         assert "--hash=sha256:" in runtime
         assert "--require-hashes" in dockerfile
         assert "-r requirements-runtime.txt" in dockerfile
@@ -279,7 +292,7 @@ class TestVersionStamp:
         """
         from spectre import __version__
 
-        body = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        body = _repo_only("pyproject.toml").read_text(encoding="utf-8")
         declared = re.search(r'^version = "([^"]+)"$', body, re.MULTILINE)
         assert declared, "pyproject.toml must declare a literal version"
         assert declared.group(1) == __version__, (
@@ -343,7 +356,7 @@ class TestDatabasePortability:
     @_python_template_only
     def test_async_postgres_driver_is_pinned(self) -> None:
         """The add-on is useless without a driver the async engine can use."""
-        manifest = (_REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        manifest = _repo_only("requirements.txt").read_text(encoding="utf-8")
         assert "asyncpg==" in manifest
 
     def test_sqlite_is_never_placed_on_the_injected_mount(self) -> None:
@@ -564,7 +577,7 @@ class TestPipCompileLockContract:
 
     @_python_template_only
     def test_requirements_txt_is_a_recognisable_lockfile(self) -> None:
-        req = _REPO_ROOT / "requirements.txt"
+        req = _repo_only("requirements.txt")
         assert self._is_pip_compile_lock(req), (
             "requirements.txt line 2 must begin with "
             f"{self._PIP_COMPILE_HEADER!r}, or line 1 with the uv marker. Regenerate "
@@ -580,7 +593,7 @@ class TestPipCompileLockContract:
         something unexpected, and only a generated file guarantees every entry
         carries a hash.
         """
-        runtime = _REPO_ROOT / "requirements-runtime.txt"
+        runtime = _repo_only("requirements-runtime.txt")
         assert self._is_pip_compile_lock(runtime), (
             "requirements-runtime.txt must be regenerated with scripts/lock.sh"
         )
@@ -607,7 +620,8 @@ class TestPipCompileLockContract:
                 if re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*==", b) and "--hash=" not in b
             ]
             assert not unhashed, f"{name} has unhashed pins: {unhashed}"
-        assert checked, "no lock file was present to check"
+        if not checked:
+            pytest.skip("no lock file travels in this tree")
 
     @_python_template_only
     def test_package_matches_the_gate_contract(self) -> None:
@@ -621,13 +635,19 @@ class TestPipCompileLockContract:
         gate reads the test-inclusive superset rather than the narrower runtime
         set: it must scan at least what the image ships, never less.
 
-        Asserted against the actual root rather than the packager's allowlist,
-        so it is just as true inside the uploaded artefact as in the repository.
+        Only the must-be-ABSENT half is asserted here. An earlier version also
+        asserted the three required files were at the root, reasoning that this
+        was "just as true inside the uploaded artefact as in the repository".
+        It was not: the platform assembles its own tree, 0.5.24 shipped
+        sonar-project.properties that the platform's checkout did not have, and
+        the Test stage died on it. Presence now lives in
+        TestThePackagerShipsWhatTheGatesRead, which only runs where absence is
+        genuinely a defect.
+
+        Absence is different in kind and stays here. No platform can ADD a
+        competing lockfile to the tree, so finding one is always our bug.
         """
         root_files = {p.name for p in _REPO_ROOT.iterdir() if p.is_file()}
-
-        for required in ("pyproject.toml", "requirements.txt", "requirements-runtime.txt"):
-            assert required in root_files, f"{required} must be at the root: the contract requires it"
 
         # Lockfile formats the analyser reads that this project does not use.
         # Shipping one would hand it a second, unmaintained view of the set.
@@ -667,7 +687,7 @@ class TestBuildBackendContract:
     """
 
     def _pyproject(self) -> str:
-        return (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        return _repo_only("pyproject.toml").read_text(encoding="utf-8")
 
     def _top_level_packages(self) -> list[str]:
         return sorted(
@@ -754,7 +774,7 @@ class TestDockerOnlyContract:
     @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
     def test_the_image_still_has_a_hashed_lock_to_install(self) -> None:
         """Dropping the manifests must not drop the pinning with them."""
-        runtime = _REPO_ROOT / "requirements-runtime.txt"
+        runtime = _repo_only("requirements-runtime.txt")
         assert runtime.is_file(), "the image has nothing to install from"
         body = runtime.read_text(encoding="utf-8")
         assert "--hash=sha256:" in body, "the runtime lock must stay hash-pinned"
@@ -942,7 +962,7 @@ class TestSonarProjectVersionTracksTheRelease:
     def test_it_matches_the_package_version(self) -> None:
         from spectre import __version__
 
-        properties = (_REPO_ROOT / "sonar-project.properties").read_text(encoding="utf-8")
+        properties = _repo_only("sonar-project.properties").read_text(encoding="utf-8")
         declared = [
             line.split("=", 1)[1].strip()
             for line in properties.splitlines()
@@ -1014,4 +1034,123 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
             "spectreActivate no longer checks that the opted-in element is the "
             "one with focus, so every nested button, link and input inside an "
             "activatable row is now unreachable from the keyboard"
+        )
+
+
+class TestThePackagerShipsWhatTheGatesRead:
+    """Where "this file must ship" belongs, now that it cannot live anywhere else.
+
+    Every other test in this module travels INSIDE the submission package and
+    runs in whatever tree the platform assembles. That tree is not the archive:
+    release 0.5.24 shipped sonar-project.properties in the zip and the
+    platform's checkout did not have it, so a test asserting its presence
+    failed the whole Test stage. The assertion was not wrong about the package;
+    it was wrong about where it was standing.
+
+    A test running inside the artefact cannot tell a packaging bug from a
+    platform that supplies its own copy of a file, so it must skip on absence
+    rather than fail. That leaves nobody asserting the files actually ship,
+    which is this class: repository-only, reading the packager's allowlist,
+    where absence genuinely is a defect.
+    """
+
+    def _allowlist(self) -> list[str]:
+        body = _repo_only("scripts/package-appstore.sh").read_text(encoding="utf-8")
+        match = re.search(r'^PATHS="\n(.*?)^"', body, re.MULTILINE | re.DOTALL)
+        assert match, "the packager no longer declares a PATHS allowlist"
+        return [line.strip() for line in match.group(1).splitlines() if line.strip()]
+
+    def test_the_stages_that_read_a_file_still_get_it(self) -> None:
+        """Each entry is named with the stage that fails without it."""
+        required = {
+            "Dockerfile": "Container Build; also what selects the container template",
+            "requirements.txt": "Dependency Scanning reads it, and the Test stage installs from it",
+            "requirements-runtime.txt": "the image build installs from it",
+            "pyproject.toml": "carries the pytest and coverage configuration the Test stage uses",
+            "spectre": "the application",
+            "tests": "the Test stage runs them",
+            "tle_clustering": "imported under a try/except, so its absence degrades silently",
+        }
+        allowed = set(self._allowlist())
+        missing = {name: why for name, why in required.items() if name not in allowed}
+        assert not missing, (
+            "the packager would not ship these, and the named stage fails without "
+            f"each one: {missing}"
+        )
+
+    def test_only_one_literal_allowlist_is_declared(self) -> None:
+        """A second literal list would let the two disagree about one file.
+
+        The docker-only branch rebinds PATHS to a filtered copy, which is a
+        derivation rather than a second source of truth, so it does not count.
+        """
+        body = _repo_only("scripts/package-appstore.sh").read_text(encoding="utf-8")
+        literal = re.findall(r'^PATHS="\n', body, re.MULTILINE)
+        assert len(literal) == 1, (
+            f"{len(literal)} literal allowlists are declared; which one ships "
+            "is now a question rather than a fact"
+        )
+
+
+class TestNoTestAssertsAFileIsPresent:
+    """The class that failed this project three times, pinned.
+
+    Three releases have now been lost to a test asserting an environmental
+    fact that does not hold where the suite actually runs: docs/ stripped by
+    the packager, the git executable absent from the runner's image, and
+    sonar-project.properties absent from the platform's checkout. Each time the
+    fix was applied to the instance and the class was left alone.
+
+    The rule is simple and checkable: inside this module, a path that is not
+    application code is reached through _repo_only(), which SKIPS when the file
+    is not there. Assertions about what must ship belong in the class above,
+    which only runs in the repository.
+    """
+
+    _SELF = Path(__file__)
+    _APPLICATION = ("spectre", "tests", "tle_clustering")
+
+    _PRESENCE = {"is_file", "exists", "is_dir"}
+
+    def test_every_non_application_path_goes_through_the_guard(self) -> None:
+        import ast
+
+        tree = ast.parse(self._SELF.read_text(encoding="utf-8"))
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+
+        def is_presence_check(node: ast.AST) -> bool:
+            """True when the path is only asked whether it exists."""
+            parent = parents.get(node)
+            return (
+                isinstance(parent, ast.Attribute)
+                and parent.attr in self._PRESENCE
+            )
+
+        def is_module_constant(node: ast.AST) -> bool:
+            """A module-level constant is consumed by a fixture that skips."""
+            parent = parents.get(node)
+            return isinstance(parent, ast.Assign) and parents.get(parent) is tree
+
+        offenders = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+                continue
+            left, right = node.left, node.right
+            if not (isinstance(left, ast.Name) and left.id == "_REPO_ROOT"):
+                continue
+            if not (isinstance(right, ast.Constant) and isinstance(right.value, str)):
+                continue
+            if right.value.startswith(self._APPLICATION):
+                continue
+            if is_presence_check(node) or is_module_constant(node):
+                continue
+            offenders.append(f"line {node.lineno}: {right.value}")
+        assert not offenders, (
+            "these read a non-application file without the skip guard, so they "
+            f"fail wherever the platform does not supply it: {offenders}. "
+            "Use _repo_only(name), and put any must-ship assertion in "
+            "TestThePackagerShipsWhatTheGatesRead."
         )
