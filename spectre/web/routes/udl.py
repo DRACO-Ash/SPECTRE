@@ -347,7 +347,10 @@ async def set_tle_source(
         state.append_log(f"[UDL] TLE source set to {source}")
     else:
         state.append_log("[UDL] TLE source reset to UDL default")
-    logger.info("TLE source set to %r for operator %s", source, log_safe(current_user.username))
+    # %r is what keeps this line unforgeable: repr escapes a newline in an
+    # unvalidated tle_source. Keep it. log_safe is identity for every real
+    # source name, so the rendered text is unchanged either way.
+    logger.info("TLE source set to %r for operator %s", log_safe(source), log_safe(current_user.username))
     return render(request,
         "partials/tle_source_status.html",
         {"tle_source": source, "available": state.udl_available_sources},
@@ -477,7 +480,7 @@ async def fetch_tle(
     # ── Select the best record ───────────────────────────────────────────────
     logger.info(
         "UDL returned %d elset record(s) for SATNO %s mode=%s dataMode=%s",
-        len(records), satno, mode, dm,
+        len(records), satno, log_safe(mode), dm,
     )
 
     # Log the keys from the first record so we can verify field names.
@@ -564,7 +567,7 @@ async def fetch_tle(
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
-        satno, name, mode, log_safe(current_user.username),
+        satno, log_safe(name), log_safe(mode), log_safe(current_user.username),
     )
 
     return render(request,
