@@ -15,10 +15,14 @@ from spectre.config.settings import (
     DEFAULT_PORT,
     ConfigurationError,
     Settings,
+    _ephemeral_secret_key,
     _resolve_data_dir,
     _resolve_database_url,
     _resolve_port,
+    _resolve_secret_key,
+    appstore_dast_scan,
     get_settings,
+    secret_key_is_ephemeral,
     validate_data_dir,
     validate_secret_key,
 )
@@ -29,6 +33,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove every variable these tests care about, so defaults are exercised."""
     for name in (
         "PORT", "SPECTRE_DATA_DIR", "STORAGE_MOUNT_PATH", "DATABASE_URL", "SECRET_KEY",
+        "APPSTORE_DAST_SCAN",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -103,6 +108,71 @@ class TestSecretKeyValidation:
     def test_error_names_the_variable(self) -> None:
         with pytest.raises(ConfigurationError, match="SECRET_KEY"):
             validate_secret_key("")
+
+
+class TestDastScanSigningKey:
+    """The platform's DAST scan starts the image with NO environment at all.
+
+    It then waits 300 seconds for HTTP on port 8080. SPECTRE fails closed on a
+    missing SECRET_KEY, correctly, so the container refused to boot and the
+    gate recorded `no_report: the scanner got no answer from
+    http://dast-target:8080 within 300 seconds`. The platform's own remedy is
+    to mint a throwaway key when APPSTORE_DAST_SCAN is set.
+
+    What must stay true is that the fallback is unreachable by accident: an
+    operator who simply forgets SECRET_KEY still gets the fail-closed error.
+    """
+
+    def test_a_missing_key_still_fails_closed_without_the_flag(self, clean_env: None) -> None:
+        assert _resolve_secret_key() == ""
+        assert not secret_key_is_ephemeral()
+        with pytest.raises(ConfigurationError):
+            validate_secret_key(Settings().secret_key)
+
+    @pytest.mark.parametrize("flag", ["true", "TRUE", "1", "yes", "on", " true "])
+    def test_the_flag_alone_produces_a_usable_key(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        monkeypatch.setenv("APPSTORE_DAST_SCAN", flag)
+        assert appstore_dast_scan()
+        assert secret_key_is_ephemeral()
+        validate_secret_key(Settings().secret_key)
+
+    @pytest.mark.parametrize("flag", ["", "false", "0", "no", "off", "maybe"])
+    def test_anything_but_an_affirmative_leaves_the_gate_shut(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        monkeypatch.setenv("APPSTORE_DAST_SCAN", flag)
+        assert not appstore_dast_scan()
+        assert Settings().secret_key == ""
+
+    def test_a_configured_key_always_wins(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The flag must never be able to displace a real operator secret."""
+        monkeypatch.setenv("APPSTORE_DAST_SCAN", "true")
+        monkeypatch.setenv("SECRET_KEY", "k" * 32)
+        assert Settings().secret_key == "k" * 32
+        assert not secret_key_is_ephemeral()
+
+    def test_the_throwaway_key_is_stable_across_settings_instances(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """get_settings() builds a fresh Settings on every call.
+
+        A key minted per instance would differ between the request that issues
+        a session cookie and the request that reads it back, so every session
+        and CSRF token would fail validation part-way through the scan.
+        """
+        monkeypatch.setenv("APPSTORE_DAST_SCAN", "true")
+        assert get_settings().secret_key == get_settings().secret_key
+        assert Settings().secret_key == get_settings().secret_key
+
+    def test_the_throwaway_key_is_not_a_weak_one(self) -> None:
+        """Unguessable and unique per process; it simply does not persist."""
+        key = _ephemeral_secret_key()
+        assert len(key) >= 32
+        validate_secret_key(key)
 
 
 class TestDataDirValidation:

@@ -19,6 +19,7 @@ pinned here:
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 _BUNDLED = _ROOT / "spectre" / "data" / "hrr_default.json"
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
+# Resolved once, absolutely: a bare executable name goes through PATH, which a
+# test should not depend on and the analyser flags (S607).
+_GIT = shutil.which("git")
+
 
 @pytest.fixture(scope="module")
 def notification() -> dict:
@@ -36,19 +41,34 @@ def notification() -> dict:
     return parsed[0]
 
 
-def _repository_only() -> None:
-    """Skip outside the repository: the package carries no .git to ask."""
+def _repository_only() -> str:
+    """Return the git executable, or skip. Two things can be missing, not one.
+
+    Inside the submission package there is no ``.git`` to ask about, which the
+    previous version of this guard checked for.
+
+    Inside the platform's Test image there IS a ``.git``, because the runner's
+    helper container performs the checkout, but there is no ``git`` EXECUTABLE,
+    because the job image is a bare Python one. A guard that tests only for the
+    directory therefore passes on the platform and the test then dies on
+    ``FileNotFoundError: [Errno 2] No such file or directory: 'git'``. That is
+    what turned four of these red on the submission pipeline while they passed
+    in every environment they had ever been run in.
+    """
+    if _GIT is None:
+        pytest.skip("no git executable: the runner's job image ships none")
     if not (_ROOT / ".git").exists():
         pytest.skip("no git repository: running from the submission package")
+    return _GIT
 
 
 class TestItCanActuallyBeDelivered:
     """A file git refuses to track ships nowhere."""
 
     def test_the_bundled_list_is_not_gitignored(self) -> None:
-        _repository_only()
+        git = _repository_only()
         result = subprocess.run(  # noqa: S603
-            ["git", "check-ignore", "-v", str(_BUNDLED.relative_to(_ROOT))],
+            [git, "check-ignore", "-v", str(_BUNDLED.relative_to(_ROOT))],
             cwd=_ROOT, capture_output=True, text=True, check=False,
         )
         assert result.returncode != 0, (
@@ -57,7 +77,7 @@ class TestItCanActuallyBeDelivered:
         )
 
     def test_nothing_under_the_package_data_dir_is_ignored(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """The general rule, not just this one file.
 
         An unanchored data/ in .gitignore matches at any depth. The files
@@ -68,7 +88,7 @@ class TestItCanActuallyBeDelivered:
         probe.write_text("", encoding="utf-8")
         try:
             result = subprocess.run(  # noqa: S603
-                ["git", "check-ignore", "-q", str(probe.relative_to(_ROOT))],
+                [git, "check-ignore", "-q", str(probe.relative_to(_ROOT))],
                 cwd=_ROOT, capture_output=True, text=True, check=False,
             )
             assert result.returncode != 0, (
@@ -80,14 +100,14 @@ class TestItCanActuallyBeDelivered:
             probe.unlink(missing_ok=True)
 
     def test_the_runtime_data_volume_is_still_ignored(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """Anchoring must not start committing the operator's runtime data."""
         (_ROOT / "data").mkdir(exist_ok=True)
         probe = _ROOT / "data" / "_ignore_probe.tmp"
         probe.write_text("", encoding="utf-8")
         try:
             result = subprocess.run(  # noqa: S603
-                ["git", "check-ignore", "-q", "data/_ignore_probe.tmp"],
+                [git, "check-ignore", "-q", "data/_ignore_probe.tmp"],
                 cwd=_ROOT, capture_output=True, text=True, check=False,
             )
             assert result.returncode == 0, (
@@ -98,7 +118,7 @@ class TestItCanActuallyBeDelivered:
             probe.unlink(missing_ok=True)
 
     def test_the_operators_own_list_stays_ignored_everywhere(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """HRR_List.json is their operational product, not ours to commit."""
         for rel in ("HRR_List.json", "spectre/data/HRR_List.json"):
             probe = _ROOT / rel
@@ -106,7 +126,7 @@ class TestItCanActuallyBeDelivered:
             probe.write_text("", encoding="utf-8")
             try:
                 result = subprocess.run(  # noqa: S603
-                    ["git", "check-ignore", "-q", rel],
+                    [git, "check-ignore", "-q", rel],
                     cwd=_ROOT, capture_output=True, text=True, check=False,
                 )
                 assert result.returncode == 0, f"{rel} would be committed"

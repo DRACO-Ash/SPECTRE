@@ -9,13 +9,20 @@
 #   3. The Python floor: the lowest interpreter version on which the pinned
 #      manifest can actually be resolved.
 #
-# Step 3 exists because of a real deployment failure. The App Store's
-# Dependency Scanning stage runs `pip download` against the manifest before it
-# can analyse anything. If the analyser's interpreter is older than the floor,
-# resolution fails, the job exits non-zero with no report artifact, and the
-# platform surfaces that as "Vulnerable dependencies found" - a scan that never
-# ran, reported as a finding. Knowing the floor turns that into a fact we can
-# hand to the platform team.
+# Step 3 exists because of a real deployment failure, and it is now a GATE
+# rather than a measurement. The App Store's Dependency Scanning stage runs
+#
+#     pip download --disable-pip-version-check --dest ./dist -r requirements.txt
+#
+# before it can analyse anything, on PYTHON 3.11: the analyser is GitLab's
+# gemnasium-python, whose image is built FROM python:3.11-slim
+# (build/gemnasium-python/debian/Dockerfile, ARG DS_PYTHON_VERSION=3.11).
+#
+# If any pin requires a newer interpreter, resolution fails, the job exits
+# non-zero with no report artifact, and the platform surfaces that as
+# "Vulnerable dependencies found" - a scan that never ran, reported as a
+# finding. Twelve submissions died that way on numpy and scipy pins that
+# declare Requires-Python >= 3.12.
 #
 # Requires network access to PyPI.
 #
@@ -26,6 +33,8 @@ set -eu
 
 OUT_DIR="${1:-dist}"
 REQ="requirements.txt"
+# The interpreter the App Store's Dependency Scanning analyser actually runs.
+SCANNER_PYTHON="3.11"
 [ -f "$REQ" ] || { echo "FAIL: $REQ not found; run from the repository root"; exit 1; }
 mkdir -p "$OUT_DIR"
 
@@ -64,12 +73,24 @@ for PY in 3.9 3.10 3.11 3.12 3.13 3.14; do
 done
 
 echo
-if [ -n "$FLOOR" ]; then
-    echo "  Resolution floor: python ${FLOOR}."
-    echo "  A Dependency Scanning analyser older than ${FLOOR} CANNOT scan this"
-    echo "  manifest. That is an analyser configuration matter, not a vulnerable"
-    echo "  package: see docs/DEPENDENCY-SCANNING.md."
-else
+if [ -z "$FLOOR" ]; then
     echo "  FAIL  the manifest resolves on no tested interpreter"
     exit 1
 fi
+
+echo "  Resolution floor: python ${FLOOR}."
+case "$FLOOR" in
+    3.9|3.10|3.11)
+        echo "  PASS  at or below python ${SCANNER_PYTHON}, which is what the App Store's"
+        echo "        Dependency Scanning analyser runs."
+        ;;
+    *)
+        echo "  FAIL  the floor is ABOVE python ${SCANNER_PYTHON}, which is the interpreter"
+        echo "        the App Store's Dependency Scanning analyser runs. It will fail"
+        echo "        \`pip download\` in about three seconds, write no SBOM and no report,"
+        echo "        and the interface will call that \"Vulnerable dependencies found\"."
+        echo "        Recompile with: sh scripts/lock.sh ${SCANNER_PYTHON}"
+        echo "        See docs/DEPENDENCY-SCANNING.md."
+        exit 1
+        ;;
+esac

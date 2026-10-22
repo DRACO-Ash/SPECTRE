@@ -810,3 +810,28 @@ cross-track ΔV on a 15 day gap; the sweep drops solutions between 500 and
 3,000 m/s, so tug activity never reaches a posture; and the measured burn
 epoch is wired into merging and the drill-down but not into the other
 consumers, which still date events at the after-epoch.
+
+## 0.5.23
+
+Four failing gates, four root causes, and for the first time in thirteen
+submissions the Dependency Scanning row is EVIDENCED rather than NO HYPOTHESIS.
+The evidence is the analyser's own source: `dependency-scan-python` is GitLab's
+`gemnasium-python`, which is public at
+`gitlab.com/gitlab-org/security-products/analyzers/gemnasium`, tag `v6.6.3`,
+the exact version the job log reports. Earlier entries recorded that the image
+was not public. The IMAGE is not; the SOURCE is, and it answers everything.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Dependency Scanning | **EVIDENCED** | Compile all three lock files for Python 3.11 instead of 3.12 | Two lines of analyser source. `build/gemnasium-python/debian/Dockerfile` line 1 is `ARG DS_PYTHON_VERSION=3.11`, so the analyser image is built `FROM python:3.11-slim`. `builder/pip/pip.go` runs `pip download --disable-pip-version-check --dest ./dist -r requirements.txt` as the FIRST action on any pip project, and logs pip's output with `log.Debugf`, which the platform discards at its default log level. Our lock pinned `numpy==2.5.2` and `scipy==1.18.1`, both of which declare `Requires-Python >= 3.12`, so pip could not resolve and exited 1. Reproduced outside the platform: the same command with `--python-version 3.11` fails in 3.42 seconds on `No matching distribution found for numpy==2.5.2`; the job ran 3.5 seconds, 06:39:23.7 to 06:39:27.2. With the recompiled lock the same command exits 0 in 13 seconds. | Then the analyser is not running the interpreter its own Dockerfile declares, or the runner's index cannot serve the pins at all. Both are narrow and both are now answerable with one line from `SECURE_LOG_LEVEL: debug`. The next structural move, if needed, is a `uv.lock`: `finder/detect.go` elects a lock-file-bearing package manager over pip for the whole pypi package type, and `buildProjects` skips lock-file projects entirely, so pip never runs. |
+| Tests | **EVIDENCED** | Guard on the git EXECUTABLE, not the `.git` directory | The job log names four tests and one error: `FileNotFoundError: [Errno 2] No such file or directory: 'git'`. The same run SKIPPED `test_docs_are_committable.py` with "docs/ is excluded", which proves the `.git` directory was present: that module checks for `.git` first. So the platform's checkout has the directory and its job image has no executable. | Then the image has git after all and the failure is something else in the same four tests. The skip reason distinguishes the two cases by name. |
+| DAST Scan | **EVIDENCED** | Mint a throwaway signing key when `APPSTORE_DAST_SCAN` is set and `SECRET_KEY` is not | The job log states the mechanism and the remedy in the same place: `no_report: the scanner got no answer from http://dast-target:8080 within 300 seconds`, then "The scan gives your container none of your environment variables or secrets... If your app must refuse to start without one (a signing key, say), generate a throwaway value when APPSTORE_DAST_SCAN=true." Reproduced locally: with `env -i` the boot dies on `ConfigurationError: SECRET_KEY is not set`; with `env -i APPSTORE_DAST_SCAN=true` it serves 200 on `/healthz` and `/` on port 8080. | Then the platform does not set that variable, and the next step is to ask what it does set, because no other startup input is missing: the data directory, database URL and port all have code defaults, and a missing admin password logs an error without stopping the boot. |
+| Container Scan | **EVIDENCED** | Remove pip, setuptools and wheel `.dist-info` with the packages themselves | Six `pip-25.0.1` findings against an image whose prep stage already removed `/usr/local/lib/python3.12/site-packages/pip` and `/opt/venv/bin/pip`. The scan reads the dist-info, not the code, so the metadata was the whole finding. | Then the scan reads something else that names pip. The removal now verifies itself and fails the build closed, so a partial sweep cannot ship silently. |
+| Container Scan | **EVIDENCED** | Bump the base image digest and certifi | The scan names both with a fix: `python-3.12.14` to 3.12.15 or later, `certifi-2026.7.22` to 2026.10.19 or later. The current `python:3.12-slim-bookworm` index digest carries Python 3.12.15, confirmed by reading the image config from the registry. | Then the platform's registry mirror served a different digest than the one pinned, which the build log would show. |
+| Container Scan: Debian base CVEs | **NO HYPOTHESIS** | None | The remaining findings are Debian 12 packages with no fix available upstream (`util-linux`, `libc6`, `openssl`, `libsqlite3-0`, `krb5`, `perl-base`). Nothing we can do inside this base image clears them, and removing the dpkg database to hide them would be suppressing an unmitigated finding rather than mitigating it. | n/a. If these are what fails the gate rather than the three fixable items, the answer is a base image change (Debian 13 or distroless), which is a larger move and should be made on evidence that it is needed. |
+
+**One EVIDENCED change per gate, and each is independently falsifiable.** The
+dependency fix is the only one that changes what any other gate sees, and it
+changes it in one direction: three pins move down or forward, and the full
+suite, the hash-locked install under the image's own flags, and the in-package
+run were all re-run against the new set.

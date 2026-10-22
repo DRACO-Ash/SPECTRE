@@ -36,7 +36,7 @@
 #
 # Base image is pinned by digest. Bump the digest to take OS security patches;
 # that bump is the patch mechanism, not an unpinned tag.
-ARG BASE_IMAGE=python:3.12-slim-bookworm@sha256:a116514e19457bcb7af7efe9c3dd0b9b71e85b317694e7882a1c52aa15a78134
+ARG BASE_IMAGE=python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
 ################################################################################
 # Stage 1 — build
@@ -106,6 +106,13 @@ RUN mkdir -p /app/data \
 
 # Remove every package manager and build tool from what ships. The runtime needs
 # none of them, and they are the usual source of High/Critical CVE findings.
+#
+# The METADATA goes with the code. The previous version of this instruction
+# removed pip's package directory and left `pip-25.0.1.dist-info` behind, and
+# the Container Scan reads the dist-info, so it went on reporting six pip
+# advisories against an image with no pip in it. Removing the record of
+# software that is genuinely gone is not suppressing a finding; leaving it is
+# shipping an inventory that is wrong in both directions.
 RUN set -eu; \
     rm -rf /usr/local/lib/python3.12/ensurepip \
            /usr/local/lib/python3.12/site-packages/pip \
@@ -124,7 +131,22 @@ RUN set -eu; \
            /usr/bin/dpkg-statoverride /usr/bin/dpkg-trigger /usr/bin/gpgv \
            /var/lib/apt /var/cache/apt /var/cache/debconf \
            /usr/share/doc /usr/share/man /usr/share/info /root/.cache; \
-    find / -xdev -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    find / -xdev -type d \( -name 'pip-*.dist-info' -o -name 'setuptools-*.dist-info' \
+           -o -name 'wheel-*.dist-info' -o -name 'pkg_resources-*.dist-info' \
+           -o -name 'pip-*.egg-info' -o -name 'setuptools-*.egg-info' \
+           -o -name 'wheel-*.egg-info' \) -prune -exec rm -rf {} + 2>/dev/null || true; \
+    find / -xdev -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true; \
+    leftover="$(find / -xdev \( -name 'pip-*.dist-info' -o -name 'setuptools-*.dist-info' \
+           -o -name 'wheel-*.dist-info' -o -name 'pkg_resources-*.dist-info' \) -print)"; \
+    if [ -n "$leftover" ]; then \
+      echo "FAIL: package-manager metadata still ships, so the scan will still report it:"; \
+      echo "$leftover"; \
+      exit 1; \
+    fi; \
+    for shipped in /usr/local/bin/pip /opt/venv/bin/pip /usr/bin/dpkg; do \
+      if [ -e "$shipped" ]; then echo "FAIL: $shipped still ships"; exit 1; fi; \
+    done; \
+    echo "TOOLCHAIN: removed, with no package-manager metadata left to scan"
 
 # LAST mutation: strip every setuid and setgid bit from files AND directories.
 # The policy scan stops (not warns) on suid_or_guid_set, so this fails the build

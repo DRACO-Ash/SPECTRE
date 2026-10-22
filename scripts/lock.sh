@@ -6,16 +6,33 @@
 # with a stale hash fails the container build rather than installing something
 # unexpected. That is the correct behaviour and an expensive way to find a typo.
 #
-# --python-version is not optional. A lock file compiled for a different
-# interpreter resolves a different set, and on the legacy analyser lineage a
-# platform mismatch is a documented failure mode.
+# --python-version is not optional, and the value is 3.11 for a specific
+# reason that cost twelve submissions to find.
+#
+# The App Store's Dependency Scanning analyser is GitLab's gemnasium-python.
+# Its image is built FROM python:3.11-slim (build/gemnasium-python/debian/
+# Dockerfile, ARG DS_PYTHON_VERSION=3.11), and before it can analyse anything
+# it runs, on that interpreter:
+#
+#     pip download --disable-pip-version-check --dest ./dist -r requirements.txt
+#
+# A manifest pinning any package that declares Requires-Python >= 3.12 cannot
+# resolve there. pip exits non-zero, the analyser logs pip's output at DEBUG
+# only, and the job dies in about three seconds with no error text, no SBOM and
+# no report, which the interface renders as "Vulnerable dependencies found".
+#
+# So the lock is compiled for 3.11, the SCANNER's interpreter, while the app
+# still runs on 3.12: a set resolved for 3.11 installs cleanly on 3.12, and
+# --generate-hashes carries every wheel's hash, the cp312 ones included.
+#
+# scripts/audit-dependencies.sh measures the real floor and fails above 3.11.
 #
 # Usage:  sh scripts/lock.sh [PYTHON_VERSION]
-#         sh scripts/lock.sh 3.12
+#         sh scripts/lock.sh 3.11
 
 set -eu
 
-PYVER="${1:-3.12}"
+PYVER="${1:-3.11}"
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "error: uv not found." >&2

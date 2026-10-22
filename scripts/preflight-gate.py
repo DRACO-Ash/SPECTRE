@@ -230,6 +230,59 @@ def check_pins_and_hashes(root: Path, out: list) -> None:
         ))
 
 
+# The interpreter the App Store's Dependency Scanning analyser actually runs.
+# gemnasium-python's image is built FROM python:3.11-slim
+# (build/gemnasium-python/debian/Dockerfile, ARG DS_PYTHON_VERSION=3.11).
+SCANNER_PYTHON = "3.11"
+
+
+def check_scanner_interpreter(root: Path, out: list) -> None:
+    """The lock must be compiled for the interpreter the SCANNER runs, not ours.
+
+    Before the analyser can read anything it runs, on its own Python 3.11:
+
+        pip download --disable-pip-version-check --dest ./dist -r requirements.txt
+
+    A pin that declares Requires-Python >= 3.12 cannot resolve there. pip exits
+    non-zero, the analyser logs pip's output at DEBUG only, and the job dies in
+    about three seconds with no error text, no SBOM and no report. Twelve
+    submissions died that way on numpy and scipy.
+
+    The header is the offline half of the check: it records the interpreter the
+    lock was compiled for. scripts/audit-dependencies.sh measures the real
+    floor against the index and fails above 3.11.
+    """
+    for name in ("requirements.txt", "requirements-runtime.txt"):
+        lock = root / name
+        if not lock.is_file():
+            continue
+        header = "\n".join(read(lock).splitlines()[:4])
+        if f"--python-version {SCANNER_PYTHON}" in header:
+            out.append(Finding(
+                GOOD, "FACT",
+                f"{name} is compiled for python {SCANNER_PYTHON}, the scanner's interpreter.",
+            ))
+            continue
+        found = re.search(r"--python-version\s+(\d+\.\d+)", header)
+        if found and found.group(1) > SCANNER_PYTHON:
+            out.append(Finding(
+                BLOCK, "FACT",
+                f"{name} is compiled for python {found.group(1)}; the Dependency "
+                f"Scanning analyser runs python {SCANNER_PYTHON}.",
+                f"sh scripts/lock.sh {SCANNER_PYTHON}. A pin requiring a newer "
+                "interpreter fails pip download in about three seconds, with no "
+                "report, which the interface calls \"Vulnerable dependencies found\".",
+            ))
+        else:
+            out.append(Finding(
+                WARN, "INFERENCE",
+                f"{name} does not record which interpreter it was compiled for.",
+                f"Regenerate with scripts/lock.sh so the header names python "
+                f"{SCANNER_PYTHON}, and run scripts/audit-dependencies.sh to "
+                "measure the real floor.",
+            ))
+
+
 def check_runtime_subset(root: Path, out: list) -> None:
     full, lean = root / "requirements.txt", root / "requirements-runtime.txt"
     if not (full.is_file() and lean.is_file()):
@@ -347,6 +400,7 @@ def run(root: Path) -> int:
     check_placement(root, out)
     check_hazards(root, out)
     check_pins_and_hashes(root, out)
+    check_scanner_interpreter(root, out)
     check_runtime_subset(root, out)
     check_layout(root, out)
     check_dockerfile(root, out)
@@ -367,7 +421,8 @@ def run(root: Path) -> int:
     else:
         print("Contract satisfied. This predicts nothing about the gate's verdict;")
         print("it removes the failure modes that are visible from here.")
-    print("UNKNOWN: the analyser's real error text. If you see it, record it.")
+    print("The analyser's silence is explained: gemnasium-python logs pip's output")
+    print("at DEBUG only, so a resolution failure shows as a bare exit 1.")
     return 1 if blocks else 0
 
 

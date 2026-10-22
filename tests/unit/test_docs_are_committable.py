@@ -18,6 +18,7 @@ that looks like one, which is why this is a test and not a tidier .gitignore.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -25,8 +26,12 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 
+# Resolved once, absolutely: a bare executable name goes through PATH, which a
+# test should not depend on and the analyser flags (S607).
+_GIT = shutil.which("git")
 
-def _repository_only() -> None:
+
+def _repository_only() -> str:
     """Skip when running from the submission package rather than the repository.
 
     The suite ships inside the upload and runs there, where there is no .git
@@ -35,29 +40,38 @@ def _repository_only() -> None:
     it travels in is a broken test, not a finding. This module forgot that and
     turned the package's own verification run red, which is the failure mode
     the packager's docstring records as having already cost a submission cycle.
+
+    The platform's Test image is a third case, and the one that cost a
+    submission: it HAS a ``.git``, because the runner's helper container does
+    the checkout, and it has no ``git`` EXECUTABLE, because the job image is a
+    bare Python one. Guarding on the directory alone passes there and the test
+    then dies on ``FileNotFoundError``.
     """
+    if _GIT is None:
+        pytest.skip("no git executable: the runner's job image ships none")
     if not (_ROOT / ".git").exists():
         pytest.skip("no git repository: running from the submission package")
     if not (_ROOT / "docs").is_dir():
         pytest.skip("docs/ is excluded from the submission package")
+    return _GIT
 
 
-def _is_ignored(relative_path: str) -> bool:
+def _is_ignored(git: str, relative_path: str) -> bool:
     return subprocess.run(  # noqa: S603
-        ["git", "check-ignore", "-q", relative_path],
+        [git, "check-ignore", "-q", relative_path],
         cwd=_ROOT, capture_output=True, text=True, check=False,
     ).returncode == 0
 
 
 class TestDocsCanBeCommitted:
     def test_a_new_document_is_not_ignored(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """The general rule, not just the documents that happen to be here."""
         probe = _ROOT / "docs" / "_ignore_probe.md"
         probe.parent.mkdir(exist_ok=True)
         probe.write_text("", encoding="utf-8")
         try:
-            assert not _is_ignored("docs/_ignore_probe.md"), (
+            assert not _is_ignored(git, "docs/_ignore_probe.md"), (
                 "a new document under docs/ is gitignored, so it can never be "
                 "committed and nobody but its author will ever read it. "
                 "Remove whatever rule matches it; git check-ignore -v names "
@@ -67,24 +81,24 @@ class TestDocsCanBeCommitted:
             probe.unlink(missing_ok=True)
 
     def test_every_document_already_here_stays_trackable(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """A rule added later must not orphan what is already committed."""
         tracked = subprocess.run(  # noqa: S603
-            ["git", "ls-files", "docs/"],
+            [git, "ls-files", "docs/"],
             cwd=_ROOT, capture_output=True, text=True, check=False,
         ).stdout.split()
         assert tracked, "docs/ should contain tracked files"
-        orphaned = [f for f in tracked if _is_ignored(f)]
+        orphaned = [f for f in tracked if _is_ignored(git, f)]
         assert not orphaned, (
             f"{len(orphaned)} tracked documents are now gitignored: {orphaned[:5]}. "
             "They survive only until someone needs to change one."
         )
 
     def test_the_packaged_ledger_is_trackable(self) -> None:
-        _repository_only()
+        git = _repository_only()
         """scripts/package-appstore.sh reads it, so a build from a fresh clone
         fails outright if it is ever ignored."""
-        assert not _is_ignored("docs/CHANGE-LEDGER.md"), (
+        assert not _is_ignored(git, "docs/CHANGE-LEDGER.md"), (
             "docs/CHANGE-LEDGER.md is gitignored. package-appstore.sh requires "
             "it, so a build from a fresh clone would fail."
         )

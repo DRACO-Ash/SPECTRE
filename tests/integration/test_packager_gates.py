@@ -31,8 +31,16 @@ _PACKAGER = "scripts/package-appstore.sh"
 
 # The suite ships inside the upload, where scripts/ is stripped on purpose and
 # there is no .git to build a tree from. These gates are repository-only.
+#
+# The git EXECUTABLE is checked separately from the .git directory. The
+# platform's Test image has the directory, because the runner's helper
+# container does the checkout, and no executable, because the job image is a
+# bare Python one. Only the fallback path above kept this module from dying on
+# FileNotFoundError there, and a fallback is not a guard.
 pytestmark = pytest.mark.skipif(
-    not (_REPO_ROOT / _PACKAGER).exists() or not (_REPO_ROOT / ".git").exists(),
+    not (_REPO_ROOT / _PACKAGER).exists()
+    or not (_REPO_ROOT / ".git").exists()
+    or shutil.which("git") is None,
     reason="packager and git are excluded from the submission package",
 )
 

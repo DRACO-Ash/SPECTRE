@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import secrets
 import ssl
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -45,6 +47,65 @@ _PLACEHOLDER_SECRETS = frozenset({
 
 # Minimum acceptable length for a session-signing key.
 _MIN_SECRET_LENGTH = 16
+
+# Values an operator may write to mean "on".
+_TRUTHY = frozenset({"true", "1", "yes", "on"})
+
+# The App Store's Dynamic Application Security Testing (DAST) scan starts the
+# image with NONE of the application's environment: no secrets, no injected
+# configuration, nothing. It then waits 300 seconds for HTTP on port 8080 and
+# reports `no_report` if nothing answers.
+#
+# SPECTRE fails closed on an unusable SECRET_KEY, which is correct and stays
+# correct, so under that scan it refused to boot and the gate recorded the
+# container as never having served. The platform's own remedy is this flag:
+# "If your app must refuse to start without one (a signing key, say), generate
+# a throwaway value when APPSTORE_DAST_SCAN=true."
+#
+# The flag is set by the scanner, never by us. It is deliberately NOT an ENV
+# line in the Dockerfile: a baked default would apply to every deployment and
+# silently replace the operator's real key with a throwaway one.
+_DAST_SCAN_FLAG = "APPSTORE_DAST_SCAN"
+
+
+def appstore_dast_scan() -> bool:
+    """True when the platform's DAST scanner is driving this container."""
+    return os.environ.get(_DAST_SCAN_FLAG, "").strip().lower() in _TRUTHY
+
+
+@lru_cache(maxsize=1)
+def _ephemeral_secret_key() -> str:
+    """Return a throwaway signing key, minted once for this process.
+
+    Once per PROCESS, not once per :class:`Settings`. ``get_settings()``
+    constructs a fresh instance on every call, so a key minted in the field
+    factory would differ between the request that issues a session cookie and
+    the request that reads it back, and every session and CSRF token would fail
+    validation part-way through the scan.
+
+    This is not a weaker key. It is 48 bytes from the system entropy source,
+    unguessable and unique per boot; what it cannot do is survive a restart,
+    which is exactly why it is confined to the scan.
+    """
+    return secrets.token_urlsafe(48)
+
+
+def _resolve_secret_key() -> str:
+    """Return the session-signing key, or a scan-only throwaway.
+
+    A configured key always wins. The fallback is reached only when SECRET_KEY
+    is absent AND the scanner's flag is set, so no deployment can land on it by
+    accident: an operator who forgets the key still gets the fail-closed error.
+    """
+    configured = os.environ.get("SECRET_KEY", "")
+    if configured.strip() or not appstore_dast_scan():
+        return configured
+    return _ephemeral_secret_key()
+
+
+def secret_key_is_ephemeral() -> bool:
+    """True when this process is running on a minted throwaway key."""
+    return not os.environ.get("SECRET_KEY", "").strip() and appstore_dast_scan()
 
 # Valid TCP port range, per RFC 6335.
 _MIN_PORT = 1
@@ -264,9 +325,7 @@ class Settings:
     log_dir: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_LOG_DIR", "logs")
     )
-    secret_key: str = field(
-        default_factory=lambda: os.environ.get("SECRET_KEY", "")
-    )
+    secret_key: str = field(default_factory=_resolve_secret_key)
     database_url: str = field(default_factory=_resolve_database_url)
     data_dir: str = field(default_factory=_resolve_data_dir)
     port: int = field(default_factory=_resolve_port)
@@ -283,7 +342,7 @@ class Settings:
     # explicitly, because leaving it on resets the password every restart.
     admin_reset: bool = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET", "").strip().lower()
-        in {"true", "1", "yes", "on"}
+        in _TRUTHY
     )
 
 

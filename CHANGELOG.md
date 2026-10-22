@@ -7,6 +7,87 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.23] - 2026-10-22
+
+Four App Store gates, four root causes. The dependency one had survived twelve
+submissions, and the reason nobody could see it was that the analyser logs the
+error at DEBUG and the platform discards it.
+
+### Fixed
+
+- **Dependency Scanning: the analyser runs Python 3.11 and our lock refused
+  it.** `dependency-scan-python` is GitLab's `gemnasium-python`, whose source
+  is public at tag v6.6.3, the exact version in the job log. Its image is built
+  `FROM python:3.11-slim`, and `builder/pip/pip.go` runs
+  `pip download --dest ./dist -r requirements.txt` as the first action on any
+  pip project. Our lock was compiled for 3.12 and pinned `numpy==2.5.2` and
+  `scipy==1.18.1`, which both declare `Requires-Python >= 3.12`. pip exited 1.
+  The analyser writes pip's output with `log.Debugf`, so the job showed a bare
+  `exit status 1` after 3.5 seconds with no SBOM and no report, which the
+  interface renders as "Vulnerable dependencies found" for a scan that never
+  ran. Reproduced outside the platform in 3.42 seconds, same message.
+
+  All three lock files are now compiled with `--python-version 3.11`, the
+  scanner's interpreter. The application still targets 3.12: a set resolved for
+  3.11 installs cleanly on a newer interpreter, and the generated hashes cover
+  every wheel including the cp312 ones. Three pins move: numpy 2.5.2 to 2.4.6,
+  scipy 1.18.1 to 1.17.1, certifi 2026.7.22 to 2026.10.19.
+
+- **Tests: four tests died on a missing git binary.** The platform's Test image
+  is a bare Python one. The runner's helper container performs the checkout, so
+  the working directory HAS a `.git`, and the job image has no `git`
+  EXECUTABLE. Guards written against the directory passed there and the tests
+  then died on `FileNotFoundError: No such file or directory: 'git'`. Three
+  modules now resolve git with `shutil.which` and skip when it is absent, and a
+  contract test pins the class so the next module cannot repeat it.
+
+- **DAST: the scan starts the container with no environment at all.** SPECTRE
+  fails closed on a missing `SECRET_KEY`, correctly, so nothing ever answered
+  on port 8080 and the gate recorded `no_report` after 300 seconds. Per the
+  platform's own remedy, a throwaway signing key is now minted when
+  `APPSTORE_DAST_SCAN` is set and `SECRET_KEY` is not. It is minted once per
+  process, so sessions issued during the scan still validate; it is announced
+  at boot in a warning that says it must never be seen in a deployment; and an
+  operator who simply forgets `SECRET_KEY` still gets the fail-closed error,
+  because the fallback needs the scanner's flag as well as the absence.
+
+- **Container Scan: pip was reported against an image with no pip in it.** The
+  prep stage removed pip's package directory and left `pip-25.0.1.dist-info`
+  behind. The scan reads the dist-info, so six pip advisories kept landing.
+  Metadata now travels with the code, the removal verifies itself and fails the
+  build closed, and only the package managers are removed: a blanket
+  `*.dist-info` sweep would suppress genuine findings against the dependencies
+  the image really ships, which a test now forbids.
+
+- **Container Scan: Python 3.12.14 and certifi.** The base image digest moves
+  to the current `python:3.12-slim-bookworm`, which carries Python 3.12.15 and
+  clears both CPython advisories, and certifi moves to 2026.10.19.
+
+### Added
+
+- `scripts/audit-dependencies.sh` now FAILS when the manifest's resolution
+  floor lands above Python 3.11, instead of printing it.
+- `scripts/preflight-gate.py` blocks when a shipped lock's header names an
+  interpreter newer than the scanner's.
+- `TestScannerInterpreterContract` asserts the same thing offline, and travels
+  inside the submission package.
+
+### Changed
+
+- `docs/DEPENDENCY-SCANNING.md` replaces its "Still unknown" section with the
+  root cause, the two lines of analyser source that cause it, and the
+  reproduction.
+- `docs/ESCALATION-DEPENDENCY-SCANNING.md` is closed out. Nothing is now needed
+  from the platform team to unblock this submission; it keeps the two
+  improvements worth making for the next team, both of which would have saved
+  all twelve cycles.
+
+### Known, not fixed
+
+- 61 static-analysis findings on branch code from 0.5.19 to 0.5.22, all of the
+  magic-value and cyclomatic-complexity class. None are in the files this
+  release touches, and Code Quality is not among the failing gates.
+
 ## [0.5.22] - 2026-10-21
 
 An operator correction on how NOTSOs actually work, and the adversarial physics

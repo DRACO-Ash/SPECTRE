@@ -150,6 +150,44 @@ class TestImageHardening:
     def test_base_image_is_pinned_by_digest(self, dockerfile: str) -> None:
         assert re.search(r"BASE_IMAGE=\S+@sha256:[0-9a-f]{64}", dockerfile)
 
+    def test_package_manager_metadata_is_removed_with_the_package(
+        self, dockerfile: str
+    ) -> None:
+        """The scan reads dist-info, not the code.
+
+        0.5.22 removed pip's package directory and left ``pip-25.0.1.dist-info``
+        behind, so the Container Scan went on reporting six pip advisories
+        against an image with no pip in it. Metadata and code travel together or
+        the inventory is wrong in both directions.
+        """
+        prep = dockerfile.split("FROM scratch", 1)[0]
+        for pattern in ("pip-*.dist-info", "setuptools-*.dist-info", "wheel-*.dist-info"):
+            assert pattern in prep, f"{pattern} must be removed from the shipped image"
+
+    def test_the_toolchain_removal_fails_the_build_closed(self, dockerfile: str) -> None:
+        """A silent partial removal ships the finding it was meant to clear."""
+        block = dockerfile.split("pip-*.dist-info", 1)[1].split("# LAST mutation", 1)[0]
+        assert "exit 1" in block, (
+            "the toolchain removal must verify itself and stop the build, not "
+            "report success over an image that still carries pip"
+        )
+
+    def test_application_dependency_metadata_is_not_swept_up(
+        self, dockerfile: str
+    ) -> None:
+        """Only the package managers go. Removing the rest would hide real findings.
+
+        The scanner's inventory of what actually ships must stay complete: a
+        blanket ``*.dist-info`` removal would silence genuine advisories against
+        the dependencies the image really does carry, which is suppression, not
+        mitigation.
+        """
+        prep = dockerfile.split("FROM scratch", 1)[0]
+        assert "-name '*.dist-info'" not in prep, (
+            "a blanket dist-info removal would suppress findings against the "
+            "dependencies the image really ships"
+        )
+
 
 class TestPackaging:
     def test_dockerignore_exists_and_excludes_secrets(self) -> None:
@@ -436,6 +474,64 @@ class TestPythonFloorContract:
         major, minor = self._declared_floor()
         assert f"{major}.{minor}" in doc.read_text(encoding="utf-8"), (
             "the diagnosis document must name the current interpreter floor"
+        )
+
+
+class TestScannerInterpreterContract:
+    """The lock must resolve on the SCANNER's interpreter, not only on ours.
+
+    This is the defect that failed twelve submissions. The App Store's
+    Dependency Scanning analyser is GitLab's gemnasium-python, whose image is
+    built FROM python:3.11-slim (build/gemnasium-python/debian/Dockerfile,
+    ARG DS_PYTHON_VERSION=3.11). Before it can analyse anything it runs, on
+    that interpreter:
+
+        pip download --disable-pip-version-check --dest ./dist -r requirements.txt
+
+    numpy 2.5.2 and scipy 1.18.1 both declare Requires-Python >= 3.12, so pip
+    could not satisfy them and exited 1. The analyser logs pip's output with
+    log.Debugf, so at the default log level the job showed a bare `exit status
+    1` after three and a half seconds, with no SBOM and no report, which the
+    interface renders as "Vulnerable dependencies found" for a scan that never
+    ran. Reproduced exactly: 3.42 seconds, same message.
+
+    The lock is therefore compiled for 3.11 while the app still runs on 3.12.
+    A set resolved for 3.11 installs cleanly on 3.12, and --generate-hashes
+    carries every wheel's hash, the cp312 ones included.
+
+    This is the offline half of the guard and it ships inside the package.
+    scripts/audit-dependencies.sh measures the real floor against the index and
+    fails above 3.11.
+    """
+
+    SCANNER_PYTHON = "3.11"
+
+    def _header(self, name: str) -> str:
+        path = _REPO_ROOT / name
+        if not path.is_file():
+            pytest.skip(f"{name} is excluded from this package")
+        return "\n".join(path.read_text(encoding="utf-8").splitlines()[:4])
+
+    @pytest.mark.parametrize("name", ["requirements.txt", "requirements-runtime.txt"])
+    def test_the_lock_is_compiled_for_the_scanners_interpreter(self, name: str) -> None:
+        header = self._header(name)
+        assert f"--python-version {self.SCANNER_PYTHON}" in header, (
+            f"{name} must be compiled for python {self.SCANNER_PYTHON}, which is "
+            "what the Dependency Scanning analyser runs. Regenerate with "
+            f"scripts/lock.sh {self.SCANNER_PYTHON}. Compiling for a newer "
+            "interpreter lets a pin in that resolves nowhere the scanner can "
+            "reach, and the job then dies in three seconds with no message."
+        )
+
+    def test_the_two_shipped_locks_agree_on_the_interpreter(self) -> None:
+        """A split would let the image and the scanned set resolve different trees."""
+        found = {
+            name: re.search(r"--python-version\s+(\d+\.\d+)", self._header(name))
+            for name in ("requirements.txt", "requirements-runtime.txt")
+        }
+        versions = {name: (m.group(1) if m else None) for name, m in found.items()}
+        assert len(set(versions.values())) == 1, (
+            f"the shipped locks were compiled for different interpreters: {versions}"
         )
 
 
@@ -775,3 +871,60 @@ class TestBuildContextContract:
                 if not (_REPO_ROOT / source.rstrip("/")).exists():
                     missing.append(f"{name}: COPY {source}")
         assert not missing, f"these COPY sources do not exist: {missing}"
+
+
+class TestSubprocessGuardsAreEnvironmentCorrect:
+    """A test that shells out to a tool must first prove the tool is there.
+
+    The platform's Test image is a bare Python one. The runner's helper
+    container performs the checkout, so the job's working directory HAS a
+    ``.git``, and the job's image has no ``git`` executable at all. Three test
+    modules guarded on the directory, which is present, and then invoked the
+    executable, which is not, so four tests died on
+
+        FileNotFoundError: [Errno 2] No such file or directory: 'git'
+
+    and took the whole submission down with them. Guarding on the artefact a
+    tool leaves behind is not the same as guarding on the tool.
+
+    This pins the class rather than the four instances: any test module that
+    invokes git must also resolve it with ``shutil.which``.
+    """
+
+    _TESTS = _REPO_ROOT / "tests"
+    # This module names the patterns it looks for, so it matches itself.
+    _SELF = Path(__file__).resolve()
+
+    def _modules_invoking_git(self) -> list[Path]:
+        found = []
+        for path in sorted(self._TESTS.rglob("test_*.py")):
+            if path.resolve() == self._SELF:
+                continue
+            body = path.read_text(encoding="utf-8")
+            if re.search(r"""\[\s*["']git["']\s*,""", body):
+                found.append(path)
+        return found
+
+    def test_no_test_invokes_git_by_bare_name(self) -> None:
+        offenders = [str(p.relative_to(_REPO_ROOT)) for p in self._modules_invoking_git()]
+        assert not offenders, (
+            "these modules invoke git by bare name, which resolves through "
+            f"PATH and dies where there is no git: {offenders}. Resolve it "
+            "with shutil.which() and skip when it returns None."
+        )
+
+    def test_every_module_touching_git_checks_the_executable(self) -> None:
+        offenders = []
+        for path in sorted(self._TESTS.rglob("test_*.py")):
+            if path.resolve() == self._SELF:
+                continue
+            body = path.read_text(encoding="utf-8")
+            if "check-ignore" not in body and "ls-files" not in body and "git archive" not in body:
+                continue
+            if 'shutil.which("git")' not in body:
+                offenders.append(str(path.relative_to(_REPO_ROOT)))
+        assert not offenders, (
+            "these modules run git but never check that it exists: "
+            f"{offenders}. The platform's Test image has a .git directory and "
+            "no git executable; guard on the executable."
+        )

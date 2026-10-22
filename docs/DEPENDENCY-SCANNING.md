@@ -68,17 +68,106 @@ can no longer fail a build, and its header carries the calibration table.
   only advisory on file for any of them is CVE-2020-7746 against Chart.js
   `<2.9.4`; we ship 4.4.7.
 
-## Still unknown
+## Root cause, found 22 October 2026
 
-The analyser's real error text. Nobody has seen it. `dependency-scan-python`
-v6.6.1 is not a public image, so it cannot be reproduced outside the platform.
-Until someone reads that text, every explanation here is reasoning from the
-outside.
+**The analyser runs Python 3.11. Our lock pinned packages that refuse it.**
 
-Ask for `SECURE_LOG_LEVEL: debug` on the deployment repository's pipeline, or
-the raw job stderr. On the current analyser lineage the `.pre` resolution job
-runs with `allow_failure: true`, so a resolution failure is silent unless
-someone opens that job's log specifically.
+`dependency-scan-python` is GitLab's `gemnasium-python`, and the source is
+public at `gitlab.com/gitlab-org/security-products/analyzers/gemnasium`. Tag
+`v6.6.3` is the exact version the gate reports. Two files decide everything.
 
-If you are the person who finally sees the error, put it in this file. That one
-paragraph would be worth more than the rest of it.
+`build/gemnasium-python/debian/Dockerfile`, line 1:
+
+```
+ARG DS_PYTHON_VERSION=3.11
+```
+
+`builder/pip/pip.go`, the first thing that happens to any pip project:
+
+```go
+cmd := exec.Command(pathPip, "download", "--disable-pip-version-check",
+                    "--dest", b.CacheDir, "-r", file)
+output, err := cmd.CombinedOutput()
+log.Debugf("%s\n%s", cmd.String(), output)
+if err != nil {
+    return err
+}
+```
+
+Two consequences, and together they are the whole twelve-cycle story.
+
+1. The manifest has to RESOLVE on Python 3.11 before a single advisory is
+   looked up. Our lock was compiled for 3.12 and pinned `numpy==2.5.2` and
+   `scipy==1.18.1`. Both declare `Requires-Python >= 3.12`, so pip could not
+   satisfy either and exited 1.
+2. pip's output is written with `log.Debugf`. At the default log level the job
+   therefore shows a bare `exit status 1` and nothing else. That is why nobody
+   ever saw an error: there was never one to see without `SECURE_LOG_LEVEL`.
+
+Reproduced against the 0.5.22 package:
+
+```
+$ pip download --disable-pip-version-check --python-version 3.11 \
+      --only-binary=:all: --dest ./dist -r requirements.txt
+ERROR: Could not find a version that satisfies the requirement numpy==2.5.2
+ERROR: No matching distribution found for numpy==2.5.2
+real    0m3.423s
+```
+
+The failing job ran for 3.5 seconds (06:39:23.7 to 06:39:27.2). The same
+command against the recompiled lock exits 0 in 13 seconds.
+
+## The fix
+
+`scripts/lock.sh` now compiles for **3.11, the scanner's interpreter**, not for
+3.12. The application still runs on 3.12: a set resolved for 3.11 installs
+cleanly on a newer interpreter, and `--generate-hashes` emits every wheel's
+hash for each pinned version, the cp312 ones included. Verified with the
+image's own flags, `pip install --require-hashes --only-binary=:all:`, on 3.12.
+
+The change is three pins:
+
+| | was | now |
+|---|---|---|
+| numpy | 2.5.2 | 2.4.6 |
+| scipy | 1.18.1 | 1.17.1 |
+| certifi | 2026.7.22 | 2026.10.19 (Container Scan fix, unrelated) |
+
+`requires-python` in `pyproject.toml` stays at **3.12** and the base image stays
+`python:3.12-slim-bookworm`. Those describe where the application runs. The
+lock describes what the scanner must be able to resolve, and the two are
+allowed to differ as long as the lock's floor is the lower of the pair.
+
+## What stops it recurring
+
+● `scripts/lock.sh` defaults to 3.11 and says why.
+● `scripts/audit-dependencies.sh` measures the real floor against the index and
+  now FAILS when it lands above 3.11, instead of printing it.
+● `scripts/preflight-gate.py` blocks when a shipped lock's header names a newer
+  interpreter.
+● `TestScannerInterpreterContract` asserts the header offline, and travels
+  inside the package.
+
+The exposure is now explicit: every dependency bump has to keep the whole set
+installable on Python 3.11 until the platform moves its analyser. Three of the
+four guards above are offline, so the cost is one line in a lock header.
+
+## What was eliminated along the way, and was never the cause
+
+Each of these cost a submission and is recorded so nobody pays for it twice:
+the pip-compile header form, the presence or absence of `pyproject.toml`, the
+manifest count at the package root, stray manifests at depth, vendored
+JavaScript, vulnerable packages (`gemnasium-db` matched offline: 97 packages,
+148 advisories, 0 affected), and a package no standard Python tool could build.
+None of them mattered. The interpreter did.
+
+## A platform defect still worth raising
+
+Mapping "analyser exited non-zero" to **"Vulnerable dependencies found. Update
+the flagged dependencies to versions without known vulnerabilities"** is
+misleading when no dependency was flagged and no report exists. It sent this
+submission hunting a non-existent CVE across twelve cycles. "Dependency scan
+failed to complete" would have been accurate.
+
+The second ask is cheaper still: `SECURE_LOG_LEVEL: debug` on the deployment
+repository's pipeline would have surfaced pip's own error on the first run.
