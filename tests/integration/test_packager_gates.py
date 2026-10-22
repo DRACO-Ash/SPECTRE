@@ -29,6 +29,13 @@ _SH = shutil.which("sh") or "/bin/sh"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGER = "scripts/package-appstore.sh"
 
+# The suite ships inside the upload, where scripts/ is stripped on purpose and
+# there is no .git to build a tree from. These gates are repository-only.
+pytestmark = pytest.mark.skipif(
+    not (_REPO_ROOT / _PACKAGER).exists() or not (_REPO_ROOT / ".git").exists(),
+    reason="packager and git are excluded from the submission package",
+)
+
 
 def _tracked_tree(destination: Path) -> None:
     """Copy the tracked files as they stand in the WORKING TREE.

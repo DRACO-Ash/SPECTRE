@@ -21,7 +21,25 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
+
+
+def _repository_only() -> None:
+    """Skip when running from the submission package rather than the repository.
+
+    The suite ships inside the upload and runs there, where there is no .git
+    and docs/ has been stripped on purpose. An invariant about material that
+    does not travel must skip, not fail: a test that cannot hold in the artefact
+    it travels in is a broken test, not a finding. This module forgot that and
+    turned the package's own verification run red, which is the failure mode
+    the packager's docstring records as having already cost a submission cycle.
+    """
+    if not (_ROOT / ".git").exists():
+        pytest.skip("no git repository: running from the submission package")
+    if not (_ROOT / "docs").is_dir():
+        pytest.skip("docs/ is excluded from the submission package")
 
 
 def _is_ignored(relative_path: str) -> bool:
@@ -33,6 +51,7 @@ def _is_ignored(relative_path: str) -> bool:
 
 class TestDocsCanBeCommitted:
     def test_a_new_document_is_not_ignored(self) -> None:
+        _repository_only()
         """The general rule, not just the documents that happen to be here."""
         probe = _ROOT / "docs" / "_ignore_probe.md"
         probe.parent.mkdir(exist_ok=True)
@@ -48,6 +67,7 @@ class TestDocsCanBeCommitted:
             probe.unlink(missing_ok=True)
 
     def test_every_document_already_here_stays_trackable(self) -> None:
+        _repository_only()
         """A rule added later must not orphan what is already committed."""
         tracked = subprocess.run(  # noqa: S603
             ["git", "ls-files", "docs/"],
@@ -61,6 +81,7 @@ class TestDocsCanBeCommitted:
         )
 
     def test_the_packaged_ledger_is_trackable(self) -> None:
+        _repository_only()
         """scripts/package-appstore.sh reads it, so a build from a fresh clone
         fails outright if it is ever ignored."""
         assert not _is_ignored("docs/CHANGE-LEDGER.md"), (
@@ -73,18 +94,23 @@ class TestDocsStillDoNotShip:
     """Making documents committable must not put them in the artefact."""
 
     def test_the_image_excludes_docs(self) -> None:
+        _repository_only()
         dockerignore = (_ROOT / ".dockerignore").read_text(encoding="utf-8")
         assert any(line.strip() in ("docs/", "docs") for line in dockerignore.splitlines()), (
             "docs/ is no longer excluded from the runtime image"
         )
 
     def test_the_packager_strips_docs(self) -> None:
+        _repository_only()
+        if not (_ROOT / "scripts" / "package-appstore.sh").exists():
+            pytest.skip("scripts/ is excluded from the submission package")
         packager = (_ROOT / "scripts" / "package-appstore.sh").read_text(encoding="utf-8")
         assert "$STAGE/docs" in packager, (
             "the packager no longer removes docs/ from the staging tree"
         )
 
     def test_sonar_does_not_analyse_docs(self) -> None:
+        _repository_only()
         props = (_ROOT / "sonar-project.properties").read_text(encoding="utf-8")
         sources = [ln.split("=", 1)[1].strip() for ln in props.splitlines()
                    if ln.startswith("sonar.sources=")]

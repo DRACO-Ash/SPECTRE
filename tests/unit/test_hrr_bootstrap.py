@@ -36,10 +36,17 @@ def notification() -> dict:
     return parsed[0]
 
 
+def _repository_only() -> None:
+    """Skip outside the repository: the package carries no .git to ask."""
+    if not (_ROOT / ".git").exists():
+        pytest.skip("no git repository: running from the submission package")
+
+
 class TestItCanActuallyBeDelivered:
     """A file git refuses to track ships nowhere."""
 
     def test_the_bundled_list_is_not_gitignored(self) -> None:
+        _repository_only()
         result = subprocess.run(  # noqa: S603
             ["git", "check-ignore", "-v", str(_BUNDLED.relative_to(_ROOT))],
             cwd=_ROOT, capture_output=True, text=True, check=False,
@@ -50,6 +57,7 @@ class TestItCanActuallyBeDelivered:
         )
 
     def test_nothing_under_the_package_data_dir_is_ignored(self) -> None:
+        _repository_only()
         """The general rule, not just this one file.
 
         An unanchored data/ in .gitignore matches at any depth. The files
@@ -72,6 +80,7 @@ class TestItCanActuallyBeDelivered:
             probe.unlink(missing_ok=True)
 
     def test_the_runtime_data_volume_is_still_ignored(self) -> None:
+        _repository_only()
         """Anchoring must not start committing the operator's runtime data."""
         (_ROOT / "data").mkdir(exist_ok=True)
         probe = _ROOT / "data" / "_ignore_probe.tmp"
@@ -89,6 +98,7 @@ class TestItCanActuallyBeDelivered:
             probe.unlink(missing_ok=True)
 
     def test_the_operators_own_list_stays_ignored_everywhere(self) -> None:
+        _repository_only()
         """HRR_List.json is their operational product, not ours to commit."""
         for rel in ("HRR_List.json", "spectre/data/HRR_List.json"):
             probe = _ROOT / rel
