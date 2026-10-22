@@ -51,6 +51,12 @@
   --spectre-color-caution-amber:    #EF9F27;
   --spectre-color-caution-amber-dim:#BA7517;
   --spectre-color-caution-amber-bg: rgba(239, 159, 39, 0.08);
+  /* TEXT on a light surface needs its own value. #EF9F27 against the light
+     theme's #F3F4F6 is 1.98:1, which fails WCAG AA (4.5:1) outright and is
+     what css:S7924 flagged on the bootstrap-elements banner. The fill colour
+     above stays as it is: it is correct on console black (8.8:1) and is used
+     for borders, badges and chart series where it is not body text. */
+  --spectre-color-caution-amber-text: #EF9F27;
 
   --spectre-color-nominal-green:    #1D9E75;
   --spectre-color-nominal-green-dim:#0F6E56;
@@ -176,6 +182,8 @@
   --spectre-surface-raised:         #FFFFFF;
   --spectre-surface-overlay:        #FFFFFF;
   --spectre-surface-panel:          #E5E7EB;
+  /* 5.59:1 against #F3F4F6 and 6.11:1 against #FFFFFF, both clear of AA. */
+  --spectre-color-caution-amber-text: #8A5600;
   --spectre-surface-input:          #FFFFFF;
   --spectre-surface-input-hover:    #F9FAFB;
   --spectre-surface-input-focus:    #FFFFFF;
@@ -201,6 +209,8 @@
     --spectre-surface-raised:         #FFFFFF;
     --spectre-surface-overlay:        #FFFFFF;
     --spectre-surface-panel:          #E5E7EB;
+    /* 5.59:1 against #F3F4F6 and 6.11:1 against #FFFFFF, both clear of AA. */
+    --spectre-color-caution-amber-text: #8A5600;
     --spectre-surface-input:          #FFFFFF;
     --spectre-surface-input-hover:    #F9FAFB;
     --spectre-surface-input-focus:    #FFFFFF;

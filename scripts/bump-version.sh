@@ -58,6 +58,14 @@ PYPROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
 [ "$PYPROJECT_VERSION" = "$NEXT" ] || {
     echo "FAIL: pyproject.toml still reads '${PYPROJECT_VERSION}', expected ${NEXT}"; exit 1; }
 
+# The Code Quality gate reads sonar.projectVersion, and a stale one makes the
+# gate's own report say which release it scanned incorrectly. It sat at 0.4.0
+# through eight releases because nothing rewrote it.
+sed -i "s/^sonar.projectVersion=.*$/sonar.projectVersion=${NEXT}/" sonar-project.properties
+SONAR_VERSION=$(sed -n 's/^sonar.projectVersion=\(.*\)$/\1/p' sonar-project.properties)
+[ "$SONAR_VERSION" = "$NEXT" ] || {
+    echo "FAIL: sonar-project.properties still reads '${SONAR_VERSION}', expected ${NEXT}"; exit 1; }
+
 # Documentation quotes the version as literal text, so rewrite those too. Only
 # whole-version matches are replaced, guarded by a word boundary either side.
 DOCS="READINESS.md README.md"

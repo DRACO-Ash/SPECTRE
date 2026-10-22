@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from spectre.web.auth import require_login
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -115,7 +116,7 @@ async def export_intercepts(
 
     logger.info(
         "Intercept export: operator=%s rows=%d filter=%s filename=%s",
-        current_user.username, len(results), run_id or "all", filename,
+        log_safe(current_user.username), len(results), log_safe(run_id or "all"), log_safe(filename),
     )
 
     return StreamingResponse(

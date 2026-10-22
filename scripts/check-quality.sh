@@ -87,6 +87,23 @@ fi
 [ "$SCOPED_OK" -eq 0 ] || fail "the findings above land on changed code and must be zero"
 pass "no new bugs, vulnerabilities or code smells on changed lines"
 
+# ── Cognitive complexity on changed code ─────────────────────────────────────
+# SonarQube's Code Quality gate caps python:S3776 at 15 and scopes it to NEW
+# code, so a function nobody touched is not reported however bad it is. This
+# leg reproduces both halves: the score, which the tool computes exactly (it is
+# calibrated against sixteen functions whose Sonar scores are known), and the
+# scoping, so the check stays predictive instead of failing on 43 pre-existing
+# functions and being ignored within a day.
+#
+# Ruff's C901 is not a substitute. It counts decision points; S3776 adds a
+# nesting penalty, and the two diverge by a factor of three on real code.
+printf '\n== Cognitive complexity on changed code (SonarQube S3776) ==\n'
+if python3 scripts/cognitive_complexity.py --changed "$BASE" --max 15; then
+    pass "no function this branch touched is over the Sonar limit of 15"
+else
+    fail "the functions above will be reported by the Code Quality gate"
+fi
+
 printf '\n== Coverage on changed lines ==\n'
 [ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
 if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --fail-under="$COVERAGE_FLOOR" >/tmp/diffcov.out 2>&1; then

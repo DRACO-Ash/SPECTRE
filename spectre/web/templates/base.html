@@ -19,6 +19,26 @@
           onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js'"></script>
   <script src="/static/chartjs-plugin-zoom.min.js"
           onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js'"></script>
+  {# Keyboard equivalent for the sortable headers and expandable rows.
+
+     A table header or row that only answers to onclick is unreachable without
+     a mouse, which is a real barrier in an operations room where a console may
+     be driven from the keyboard, and a Sonar finding
+     (Web:MouseEventWithoutKeyboardEquivalentCheck) besides.
+
+     Defined once here rather than inline per element: an inline handler
+     repeated across forty headers is forty copies of the same logic to get
+     wrong. Elements opt in with tabindex="0" onkeydown="spectreActivate(event)".
+     Space is included because a control that behaves like a button must answer
+     to both keys, and its default scroll is suppressed. #}
+  <script>
+    function spectreActivate(e) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        (e.currentTarget || e.target).click();
+      }
+    }
+  </script>
 </head>
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <div class="app-chrome">

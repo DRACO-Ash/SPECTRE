@@ -73,8 +73,10 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
 
 async def init_db() -> None:
     """Create all tables and bootstrap the default admin user if the table is empty."""
-    # Import training models so their tables are registered on Base.metadata
-    import spectre.training.models  # noqa: F401 — side-effect import registers ORM tables
+    # Import training models so their tables are registered on Base.metadata.
+    # F401: the import is the point. It is never referenced; importing it is
+    # what puts the training tables on Base.metadata before create_all runs.
+    import spectre.training.models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

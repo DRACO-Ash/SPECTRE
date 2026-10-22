@@ -14,6 +14,7 @@ from spectre.config.settings import get_settings
 from spectre.web.auth import _COOKIE_NAME, make_session_cookie, verify_password
 from spectre.web.database import get_db
 from spectre.web.deps import render
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -35,17 +36,21 @@ async def post_login(
     request: Request,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse | RedirectResponse:
     """Authenticate and set a session cookie, or re-render with an error."""
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.hashed_password):
-        logger.warning("Failed login attempt for username: %s", username)
+        # The only unauthenticated path that writes an operator-supplied value
+        # into the audit log, so the only one an attacker can pick freely. A bare
+        # %s here lets a newline in the form field forge a second record that
+        # reads exactly like a successful login (pythonsecurity:S5145).
+        logger.warning("Failed login attempt for username: %s", log_safe(username))
         return render(request, "login.html", {"error": "Invalid username or password."}, status_code=401)
 
-    logger.info("Successful login: %s (role=%s)", username, user.role)
+    logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
     token = make_session_cookie(username)
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
@@ -70,7 +75,7 @@ async def post_logout(request: Request) -> RedirectResponse:
         username = decode_session_cookie(cookie)
         if username:
             clear_session_state(username)
-            logger.info("Session state cleared on logout for: %s", username)
+            logger.info("Session state cleared on logout for: %s", log_safe(username))
 
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=_COOKIE_NAME)

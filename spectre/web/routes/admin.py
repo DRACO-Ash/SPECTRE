@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from spectre.web.auth import hash_password, require_admin
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,12 @@ async def create_user(
     new_user = User(username=username, hashed_password=hash_password(password), role=role)
     db.add(new_user)
     await db.commit()
-    logger.info("Admin '%s' created user '%s' (role=%s)", current_user.username, username, role)
+    # Both names reach the audit log from outside: the acting admin's from the
+    # session, the new user's straight from the form (pythonsecurity:S5145).
+    logger.info(
+        "Admin '%s' created user '%s' (role=%s)",
+        log_safe(current_user.username), log_safe(username), role,
+    )
 
     users = await _all_users(db)
     return _table_response(
@@ -205,7 +211,7 @@ async def update_user(
         await db.commit()
         logger.info(
             "Admin '%s' updated user '%s': %s",
-            current_user.username, user.username, ", ".join(changed),
+            log_safe(current_user.username), log_safe(user.username), ", ".join(changed),
         )
 
     label = " and ".join(changed) if changed else "no changes"
@@ -249,7 +255,7 @@ async def delete_user(
     username = user.username
     await db.delete(user)
     await db.commit()
-    logger.info("Admin '%s' deleted user '%s'", current_user.username, username)
+    logger.info("Admin '%s' deleted user '%s'", log_safe(current_user.username), log_safe(username))
 
     users = await _all_users(db)
     return _table_response(

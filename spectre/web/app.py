@@ -139,7 +139,7 @@ def _load_hrr_from_disk() -> None:
             logger.warning(
                 "%d of %d element sets are %s, not live tracking data. Connect "
                 "to UDL to replace them before relying on any result.",
-                len(synthetic), len(objects), sorted(set(synthetic))[0],
+                len(synthetic), len(objects), min(synthetic),
             )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         # Malformed or unreadable cached data must not stop the boot: the threat

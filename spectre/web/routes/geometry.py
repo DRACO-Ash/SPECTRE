@@ -31,6 +31,7 @@ from spectre.astro.cw_geometry import RelativeGeometryError, compute_relative_ge
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -122,7 +123,7 @@ async def intercept_geometry(
         """
         logger.warning(
             "geometry/intercept validation error for %r: %s",
-            current_user.username, msg,
+            log_safe(current_user.username), log_safe(msg),
         )
         safe = html.escape(msg, quote=True)
         return HTMLResponse(
@@ -177,7 +178,7 @@ async def intercept_geometry(
     except Exception as exc:
         logger.exception(
             "geometry/intercept unexpected error for %r: %s",
-            current_user.username, exc,
+            log_safe(current_user.username), log_safe(exc),
         )
         return _err(f"Internal computation error: {exc}")
 
@@ -198,7 +199,7 @@ async def intercept_geometry(
 
     logger.info(
         "geometry/intercept: %r red=%r blue=%r method=%r arrival_range=%.3f km valid=%s",
-        current_user.username, red_sat, blue_sat, method,
+        log_safe(current_user.username), log_safe(red_sat), log_safe(blue_sat), log_safe(method),
         geom.arrival_range_km, geom.cw_valid,
     )
 
