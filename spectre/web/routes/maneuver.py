@@ -11,9 +11,10 @@ import asyncio
 import contextlib
 import logging
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -908,6 +909,98 @@ _THREAT_SORT_ORDER: dict[str, int] = {
 }
 
 
+class _InterceptArgs(NamedTuple):
+    """One intercept run's solver inputs, carried together.
+
+    The batch runs twenty-three methods over the same inputs and the solver
+    dispatch table keys off them, so passing them as one value keeps both off
+    the long positional signature that made ``_run_intercept`` unreadable.
+    """
+
+    red_tle: str
+    blue_tle: str
+    start: datetime
+    coast_s: float
+    tof_s: float
+    target_km: float
+    max_dv_m_s: float
+
+
+def _missing_tle_labels(
+    red_tle: str | None,
+    red_sat: str,
+    blue_tle: str | None,
+    blue_sat: str,
+) -> list[str]:
+    """Name the sides whose TLE was not found, red before blue.
+
+    The operator reads these in the error, so the order is fixed here rather
+    than left to whatever the caller happens to check first.
+    """
+    missing: list[str] = []
+    if not red_tle:
+        missing.append(f"red ({red_sat})")
+    if not blue_tle:
+        missing.append(f"blue ({blue_sat})")
+    return missing
+
+
+def _run_all_methods(
+    args: _InterceptArgs,
+    red_name: str,
+    blue_name: str,
+) -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
+    """Run every method of the batch, keeping each one's failure beside it.
+
+    A closure would have carried the route's nesting into its own branching and
+    charged the route for it, which is how the batch came to be reported by the
+    Code Quality gate in the first place.
+    """
+    out: list[tuple[InterceptMethod, InterceptResult | None, str | None]] = []
+    for method in _ALL_METHODS_SEQUENCE:
+        try:
+            sol = _run_intercept(
+                method, args.red_tle, args.blue_tle,
+                args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
+            )
+            result = _solution_to_result(sol, red_name, blue_name, method)
+            out.append((method, result, None))
+        # BLE001: any solver failure is reported per method, not raised.
+        except Exception as exc:  # noqa: BLE001
+            out.append((method, None, str(exc)))
+    return out
+
+
+def _items_from_solutions(
+    raw: list[tuple[InterceptMethod, InterceptResult | None, str | None]],
+    red_regime: str,
+) -> list[dict[str, Any]]:
+    """Turn each method's outcome into one row of the comparison table.
+
+    A method that failed keeps its row and carries its error, so the panel
+    accounts for all twenty-three rather than quietly listing fewer than it ran.
+    """
+    items: list[dict[str, Any]] = []
+    for method, result, error in raw:
+        if result is not None:
+            intel = _compute_intercept_intel(result, red_regime)
+            items.append({"method": method, "result": result, "intel": intel, "error": None})
+        else:
+            items.append({"method": method, "result": None, "intel": None, "error": error})
+    return items
+
+
+def _sort_key(item: dict[str, Any]) -> tuple[int, float]:
+    """Rank one row by threat level, then by the delta-v it costs.
+
+    A method whose solver failed sorts behind every assessment.
+    """
+    if item["result"] is None:
+        return (99, 0.0)
+    level = item["intel"]["threat_level"]
+    return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_m_s)
+
+
 @router.post("/apply-all-intercepts", response_model=None)
 async def apply_all_intercepts(
     request: Request,
@@ -938,11 +1031,7 @@ async def apply_all_intercepts(
     blue_tle = _find_tle(state, blue_sat.strip())
 
     if not red_tle or not blue_tle:
-        missing = []
-        if not red_tle:
-            missing.append(f"red ({red_sat})")
-        if not blue_tle:
-            missing.append(f"blue ({blue_sat})")
+        missing = _missing_tle_labels(red_tle, red_sat, blue_tle, blue_sat)
         return render(request, "partials/all_intercepts_result.html", {
             "items": [], "error": f"No TLE found for: {', '.join(missing)}",
             "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
@@ -979,38 +1068,16 @@ async def apply_all_intercepts(
     tof_s = intercept_hours * 3600.0
     target_km = target_distance_m / 1000.0
 
+    args = _InterceptArgs(
+        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
+    )
+
     loop = asyncio.get_running_loop()
+    raw = await loop.run_in_executor(
+        None, lambda: _run_all_methods(args, red_sat.strip(), blue_sat.strip())
+    )
 
-    def _run_all() -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
-        out: list[tuple[InterceptMethod, InterceptResult | None, str | None]] = []
-        for method in _ALL_METHODS_SEQUENCE:
-            try:
-                sol = _run_intercept(
-                    method, red_tle, blue_tle,
-                    manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
-                )
-                result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), method)
-                out.append((method, result, None))
-            except Exception as exc:
-                out.append((method, None, str(exc)))
-        return out
-
-    raw = await loop.run_in_executor(None, _run_all)
-
-    items: list[dict[str, Any]] = []
-    for method, result, error in raw:
-        if result is not None:
-            intel = _compute_intercept_intel(result, red_regime)
-            items.append({"method": method, "result": result, "intel": intel, "error": None})
-        else:
-            items.append({"method": method, "result": None, "intel": None, "error": error})
-
-    def _sort_key(item: dict[str, Any]) -> tuple[int, float]:
-        if item["result"] is None:
-            return (99, 0.0)
-        level = item["intel"]["threat_level"]
-        return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_m_s)
-
+    items = _items_from_solutions(raw, red_regime)
     items.sort(key=_sort_key)
 
     # Replace history with current batch so trade-space shows the full comparison
@@ -1127,6 +1194,189 @@ async def _refetch_tles(
     return new_red, new_blue
 
 
+# ── Intercept solver dispatch ────────────────────────────────────────────────
+#
+# _run_intercept was a chain of twenty-three elif branches over one value and
+# scored 38 against the Code Quality gate's cognitive complexity limit of 15.
+# It is now two tables, in the same spirit as _METHOD_INSIGHT_BUILDERS above:
+# the solvers that take nothing but the coast time, and the ones whose
+# arguments have to be shaped from the panel's inputs first. Every entry makes
+# the call its branch made, unchanged.
+
+#: The hour the panel's coast time is read in. Named after the same constant in
+#: ``spectre.web.format_units``, because a bare 3600 beside a revolution count
+#: and a drift time in days reads as neither.
+_SECONDS_PER_HOUR: float = 3600.0
+
+
+def _hop_count(coast_s: float, default: int) -> int:
+    """Whole hours of coast, read as a revolution or hop count.
+
+    The phasing and hop solvers count revolutions rather than taking a
+    duration, so the panel's coast time doubles as that count once it runs past
+    an hour. Below that the solver's own default stands.
+    """
+    if coast_s > _SECONDS_PER_HOUR:
+        return max(1, int(coast_s / _SECONDS_PER_HOUR))
+    return default
+
+
+def _hop_distance_km(target_km: float) -> float | None:
+    """Hop spacing for the V-bar and H-bar solvers, or None to leave it to them.
+
+    Zero is the operator leaving the standoff field empty, not a request to hop
+    nowhere.
+    """
+    if target_km > 0:
+        return target_km
+    return None
+
+
+def _geo_drift_days(coast_s: float) -> float | None:
+    """Drift time for the GEO relocation solver, or None to leave it to the solver."""
+    if coast_s > _SECONDS_PER_HOUR:
+        return coast_s / _SECONDS_PER_HOUR
+    return None
+
+
+def _evasion_fuel_km_s(coast_s: float) -> float:
+    """Fuel budget for the evasion solver, falling back to half a km/s."""
+    if coast_s > 0:
+        return coast_s / _SECONDS_PER_HOUR
+    return 0.5
+
+
+def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
+    """Solve the Lambert arc, which LAMBERT and PROXIMITY both fly."""
+    return lambert_intercept(
+        red_tle=a.red_tle, blue_tle=a.blue_tle,
+        manoeuvre_start=a.start, tof_s=a.tof_s, coast_s=a.coast_s,
+        target_distance_km=a.target_km,
+    )
+
+
+#: Methods whose solver takes the two TLEs, the manoeuvre start and the coast
+#: time, and nothing else. RENDEZVOUS flies the Hohmann transfer, as it did in
+#: the chain this table replaced. These entries hold the solver object itself,
+#: bound at import, so rebinding the name on this module does not reach them;
+#: the shaped table below resolves its solver on every call.
+_COAST_ONLY_SOLVERS: dict[InterceptMethod, Callable[..., InterceptSolution]] = {
+    InterceptMethod.HOHMANN: hohmann_intercept,
+    InterceptMethod.RENDEZVOUS: hohmann_intercept,
+    InterceptMethod.BIELLIPTIC: bielliptic_intercept,
+    InterceptMethod.PLANE_CHANGE: plane_change_intercept,
+    InterceptMethod.J2_DRIFT: j2_drift_intercept,
+    InterceptMethod.MANOEUVRE_DETECT: manoeuvre_detect_intercept,
+    InterceptMethod.INTENT_PREDICT: intent_predict_intercept,
+    InterceptMethod.STABILITY: stability_intercept,
+    InterceptMethod.FINGERPRINT: fingerprint_intercept,
+    InterceptMethod.TERRAIN: terrain_intercept,
+}
+
+#: Methods whose solver arguments are shaped from the panel's inputs first:
+#: a standoff floor, a revolution count, a budget. Each lambda is one branch of
+#: the old chain, and only the method it is keyed on reaches it.
+_SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolution]] = {
+    InterceptMethod.LAMBERT: _lambert_transfer,
+    InterceptMethod.PROXIMITY: _lambert_transfer,
+    # Phasing counts whole revolutions rather than taking a time of flight, so
+    # the panel's intercept hours have no part in it.
+    InterceptMethod.PHASING:
+        lambda a: phasing_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start, n_revolutions=_hop_count(a.coast_s, 1),
+        ),
+    InterceptMethod.RBAR_HOP:
+        lambda a: cw_radial_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            desired_separation_km=max(a.target_km, 5.0),
+            time_s=a.tof_s,
+            coast_s=a.coast_s,
+        ),
+    InterceptMethod.VBAR_HOP:
+        lambda a: vbar_hop_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            n_hops=_hop_count(a.coast_s, 3),
+            hop_distance_km=_hop_distance_km(a.target_km),
+            coast_s=0.0,
+        ),
+    InterceptMethod.HBAR_HOP:
+        lambda a: hbar_hop_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            n_hops=_hop_count(a.coast_s, 3),
+            hop_distance_km=_hop_distance_km(a.target_km),
+            coast_s=0.0,
+        ),
+    InterceptMethod.CW_DRIFT:
+        lambda a: cw_drift_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            desired_drift_km=max(a.target_km, 10.0),
+            time_s=a.tof_s,
+            coast_s=a.coast_s,
+        ),
+    InterceptMethod.COLA:
+        lambda a: cola_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            desired_miss_km=max(a.target_km, 1.0),
+            time_before_tca_s=a.tof_s,
+            coast_s=a.coast_s,
+        ),
+    InterceptMethod.GEO_DRIFT:
+        lambda a: geo_drift_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            drift_time_days=_geo_drift_days(a.coast_s),
+        ),
+    InterceptMethod.NMC:
+        lambda a: nmc_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            along_track_km=max(a.target_km, 2.0),
+            coast_s=a.coast_s,
+        ),
+    InterceptMethod.DETECTABILITY:
+        lambda a: detectability_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            tof_s=a.tof_s, coast_s=a.coast_s,
+        ),
+    InterceptMethod.EVASION:
+        lambda a: evasion_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            desired_miss_km=max(a.target_km, 10.0),
+            time_before_tca_s=a.tof_s,
+            fuel_budget_km_s=_evasion_fuel_km_s(a.coast_s),
+            coast_s=0.0,
+        ),
+    InterceptMethod.INTERCEPT_ENVELOPE:
+        lambda a: intercept_envelope_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start, tof_s=a.tof_s,
+            coast_s=a.coast_s, target_distance_km=a.target_km,
+        ),
+    InterceptMethod.FORMATION:
+        lambda a: formation_intercept(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            desired_miss_km=max(a.target_km, 5.0),
+            tof_s=a.tof_s, coast_s=a.coast_s,
+        ),
+    InterceptMethod.MIN_TIME:
+        lambda a: min_time_intercept_wrapper(
+            red_tle=a.red_tle, blue_tle=a.blue_tle,
+            manoeuvre_start=a.start,
+            max_delta_v=a.max_dv_m_s / 1000.0,  # astro takes km/s
+            coast_s=a.coast_s,
+        ),
+}
+
+
 def _run_intercept(
     method: InterceptMethod,
     red_tle: str,
@@ -1146,159 +1396,18 @@ def _run_intercept(
     that defect; the first was recorded in 0.5.13 for
     ``intercept_envelope_intercept``.
     """
-    if method in (InterceptMethod.LAMBERT, InterceptMethod.PROXIMITY):
-        return lambert_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, tof_s=tof_s, coast_s=coast_s,
-            target_distance_km=target_km,
-        )
-    elif method in (InterceptMethod.HOHMANN, InterceptMethod.RENDEZVOUS):
-        return hohmann_intercept(
+    coast_only = _COAST_ONLY_SOLVERS.get(method)
+    if coast_only is not None:
+        return coast_only(
             red_tle=red_tle, blue_tle=blue_tle,
             manoeuvre_start=start, coast_s=coast_s,
         )
-    elif method == InterceptMethod.BIELLIPTIC:
-        return bielliptic_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.PHASING:
-        # Use coast_hours as n_revolutions (integer), tof_s is unused
-        n_revs = max(1, int(coast_s / 3600.0)) if coast_s > 3600 else 1
-        return phasing_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, n_revolutions=n_revs,
-        )
-    elif method == InterceptMethod.RBAR_HOP:
-        return cw_radial_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            desired_separation_km=max(target_km, 5.0),
-            time_s=tof_s,
-            coast_s=coast_s,
-        )
-    elif method == InterceptMethod.VBAR_HOP:
-        n_hops = max(1, int(coast_s / 3600.0)) if coast_s > 3600 else 3
-        hop_km = target_km if target_km > 0 else None
-        return vbar_hop_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            n_hops=n_hops,
-            hop_distance_km=hop_km,
-            coast_s=0.0,
-        )
-    elif method == InterceptMethod.HBAR_HOP:
-        n_hops = max(1, int(coast_s / 3600.0)) if coast_s > 3600 else 3
-        hop_km = target_km if target_km > 0 else None
-        return hbar_hop_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            n_hops=n_hops,
-            hop_distance_km=hop_km,
-            coast_s=0.0,
-        )
-    elif method == InterceptMethod.CW_DRIFT:
-        return cw_drift_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            desired_drift_km=max(target_km, 10.0),
-            time_s=tof_s,
-            coast_s=coast_s,
-        )
-    elif method == InterceptMethod.PLANE_CHANGE:
-        return plane_change_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.J2_DRIFT:
-        return j2_drift_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.COLA:
-        return cola_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            desired_miss_km=max(target_km, 1.0),
-            time_before_tca_s=tof_s,
-            coast_s=coast_s,
-        )
-    elif method == InterceptMethod.GEO_DRIFT:
-        drift_days = coast_s / 3600.0 if coast_s > 3600 else None
-        return geo_drift_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            drift_time_days=drift_days,
-        )
-    elif method == InterceptMethod.MANOEUVRE_DETECT:
-        return manoeuvre_detect_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.NMC:
-        return nmc_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            along_track_km=max(target_km, 2.0),
-            coast_s=coast_s,
-        )
-    elif method == InterceptMethod.DETECTABILITY:
-        return detectability_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            tof_s=tof_s, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.EVASION:
-        return evasion_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            desired_miss_km=max(target_km, 10.0),
-            time_before_tca_s=tof_s,
-            fuel_budget_km_s=coast_s / 3600.0 if coast_s > 0 else 0.5,
-            coast_s=0.0,
-        )
-    elif method == InterceptMethod.INTENT_PREDICT:
-        return intent_predict_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.INTERCEPT_ENVELOPE:
-        return intercept_envelope_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, tof_s=tof_s,
-            coast_s=coast_s, target_distance_km=target_km,
-        )
-    elif method == InterceptMethod.STABILITY:
-        return stability_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.FINGERPRINT:
-        return fingerprint_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.FORMATION:
-        return formation_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            desired_miss_km=max(target_km, 5.0),
-            tof_s=tof_s, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.TERRAIN:
-        return terrain_intercept(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start, coast_s=coast_s,
-        )
-    elif method == InterceptMethod.MIN_TIME:
-        return min_time_intercept_wrapper(
-            red_tle=red_tle, blue_tle=blue_tle,
-            manoeuvre_start=start,
-            max_delta_v=max_dv_m_s / 1000.0,  # astro takes km/s
-            coast_s=coast_s,
-        )
-    else:
+    shaped = _SHAPED_SOLVERS.get(method)
+    if shaped is None:
         raise ValueError(f"Unsupported intercept method: {method}")
+    return shaped(
+        _InterceptArgs(red_tle, blue_tle, start, coast_s, tof_s, target_km, max_dv_m_s)
+    )
 
 
 def _solution_to_result(

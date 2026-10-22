@@ -7,6 +7,132 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.24] - 2026-10-22
+
+The SonarQube Code Quality gate. 57 findings reported, 55 cleared, 2 left for a
+stated reason. Every refactor was reviewed by an independent second pass whose
+only brief was to find behaviour change, and that pass found six real problems
+in work the first had reported clean.
+
+### Added
+
+- **`scripts/cognitive_complexity.py`**, an implementation of SonarSource's
+  Cognitive Complexity (python:S3776) calibrated against the sixteen functions
+  whose exact Sonar scores the report gave. Fifteen reproduced first time; the
+  sixteenth exposed a real bug, because an `else:` whose body is a single `if`
+  is the same AST node as an `elif` and only the column offset separates them.
+  All sixteen now reproduce exactly.
+
+  Ruff's C901 cannot stand in for it: C901 counts decision points, S3776 adds a
+  nesting penalty, and the two diverge by a factor of three on real code. A
+  function at C901 8 can be at S3776 38.
+
+  Its `--changed` mode reproduces the gate's new-code scoping, measuring the
+  merge base against the WORKING TREE because the artefact is built from the
+  working tree. It is wired into `scripts/check-quality.sh`.
+
+- **`spectre/web/log_safety.log_safe()`**, which strips line breaks and control
+  characters from any value before it reaches a log record, and leaves every
+  legitimate value alone including accented and non-Latin names.
+
+- **A theme-aware caution text colour.** `--spectre-color-caution-amber-text`
+  resolves to `#EF9F27` on the dark theme and `#8A5600` on the light one.
+
+- **`spectreActivate`** in `base.html`, the shared keyboard equivalent for
+  clickable rows and sortable headers.
+
+- Tests for the status ladder constants, the UDL selection helpers, the
+  complexity meter and the keyboard contract.
+
+### Fixed
+
+- **Sixteen functions over the cognitive-complexity cap**, all now at or below
+  15: `threat_sweep` 55, `_assess_intel` 47, `pol_notso_correlate` 38,
+  `build_breakdown` 37, `analyse_pattern_of_life` 37,
+  `extract_behaviour_profile` 29, `estimate_dv_epoch_swept` 27,
+  `fetch_targets` 24, `_assess_anomaly` 21, `_judge` 21, `_compute_worst_coa`
+  20, `state_to_keplerian` 19, `solve_lambert` 17, `_burn_breakdown` 17,
+  `parse_hrr_notification` 16, `assess_threat` 16.
+
+- **Three more the fix work pulled INTO the gate's window**, which is the trap
+  this gate sets: every line a refactor touches is re-scanned. `fetch_tle`,
+  the worst function in the repository at 67, entered scope because one
+  `log_safe()` call was added inside it. It is now 12. `_run_intercept` 38 to
+  2 and `apply_all_intercepts` 27 to 12 went the same way.
+
+- **Nine duplicated literals**, now module constants, the operator-facing ones
+  character-identical because they are table headings and panel copy.
+
+- **Five nested conditional expressions**, three unused parameters, one block
+  of commented-out code, four FastAPI dependencies converted to `Annotated`,
+  and one sort-to-find-a-minimum.
+
+- **Eighteen malformed suppression comments.** Ruff's grammar is
+  `# noqa: CODE` and nothing else on the line; the rationale moved above the
+  directive and was never dropped.
+
+- **A log-injection vulnerability, at every site rather than the one
+  reported.** The sharpest was never flagged: `login.py` logs a form field on
+  the UNAUTHENTICATED path, so an attacker picks the value outright and a
+  newline forges a second record reading as a successful login.
+
+- **Fifty mouse-only rows and headers**, not the seven reported. The other
+  forty-three were invisible only because their lines had not changed.
+
+- **A contrast failure across the whole caution vocabulary.** `#EF9F27` is
+  9.00:1 on console black and 1.98:1 on the light theme's `#F3F4F6`, which
+  fails WCAG AA outright, and the light theme never overrode it.
+
+- **`sonar.projectVersion`**, stuck at 0.4.0 through eight releases, so the
+  gate's own report named the wrong build.
+
+### Fixed, found by the review of the fixes
+
+- **A keyboard regression inside the fix for a keyboard finding.** Adding
+  `spectreActivate` to the All-Intercepts row made the "Load" button inside it
+  unreachable from the keyboard: `keydown` bubbles, so a key press on the
+  button reached the row's handler, which called `preventDefault()` and clicked
+  the row. The mouse path had always been guarded; the key path had nothing.
+  Fixed at the site and then generally, so every nested control is protected.
+
+- **A threshold with no test, proved by mutation.** Three constants governing
+  the operator-facing threat ladder had no coverage: set to nonsense values,
+  the 274 tests offered as assurance still passed.
+
+- **A section label that parses as Python.** Of seven box-drawing labels in
+  `pol_assessment.py`, `# Propellant` is the only one that is a legal
+  expression statement, which is what SonarPython's commented-code check looks
+  for. The first pass rewrote a different comment.
+
+- **Log hardening applied to the wrong argument.** The UDL route wrapped the
+  value the auth layer sets and left the two that arrive as free-text query
+  parameters.
+
+- **`role="button"` on three rows** flattened each into a single accessible
+  name and cancelled the `scope="col"` headers added in the same change.
+
+- **Two moved findings.** Lifting helpers out moved a broad catch and a magic
+  value onto added lines, which is what turns a pre-existing smell into a new
+  one under a gate scoped to new code.
+
+### Known, not fixed
+
+- **`_entrypoint.py:27` and `gcat.py:274`.** Each needs two suppression
+  directives on one line, one for ruff and one for bandit, and Python allows
+  one comment per line. Moving a narrow, justified, per-line suppression into a
+  project-wide bandit skip is worse security hygiene than a comment Sonar
+  dislikes. Neither line is in the gate's window.
+
+- **23 functions tree-wide remain over the cap**, down from 43, none of them in
+  the gate's window. They are measurable at any time with the new tool.
+
+- **104 `Depends(...)` defaults** not yet converted to `Annotated`. Converting
+  them forces parameter reordering across a hundred route signatures, where a
+  mistake is a 500 on a live route rather than a scanner finding.
+
+- **33 ruff findings on changed lines**, mostly magic-value debt from 0.5.19 to
+  0.5.22. None corresponds to a rule in the Sonar report.
+
 ## [0.5.23] - 2026-10-22
 
 Four App Store gates, four root causes. The dependency one had survived twelve

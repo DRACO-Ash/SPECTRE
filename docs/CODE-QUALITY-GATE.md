@@ -118,6 +118,34 @@ function in `scripts/` does not fail a loop over code the gate never sees.
   `--spectre-color-caution-amber-text` token resolves to `#8A5600` on light
   surfaces (5.59:1 on `#F3F4F6`, 6.16:1 on `#FFFFFF`).
 
+## What clearing them cost, and the trap to expect
+
+Clearing the sixteen reported functions pulled THREE MORE into the window that
+had never been reported, because the fixes for other findings added a line
+inside each of them:
+
+| function | score | how it entered the window |
+|---|---|---|
+| `udl.py:fetch_tle` | 67 | one `log_safe()` call added for the S5145 fix |
+| `maneuver.py:_run_intercept` | 38 | a duplicated-literal fix on a line inside it |
+| `maneuver.py:apply_all_intercepts` | 27 | the same |
+
+`fetch_tle` was the worst function in the repository and the gate had never
+seen it. All three are now cleared, 12, 2 and 12 respectively, but the lesson
+generalises: **budget a second pass.** Clearing a report moves code, moving
+code enlarges the window, and the window is where the gate looks.
+
+The same mechanism applies to findings rather than functions. Lifting a helper
+out of `threat_sweep` moved the file's one unsuppressed broad catch onto an
+added line, and lifting the diagnostics block out of `fetch_tle` did the same
+for a magic value. Neither was a new defect; both became new findings. Check
+with `--changed` before you call a file done.
+
+That check had to be corrected before it could see any of this. It compared
+commits, so it reported the tree clean while the artefact, which is built from
+the working tree, was not. It now measures the merge base against the working
+tree.
+
 ## What is deliberately not fixed
 
 ● **The out-of-scope population**, measured above. Clearing all 43 complex

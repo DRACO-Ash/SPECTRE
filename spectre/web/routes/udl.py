@@ -53,6 +53,9 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
         return None
 
 _UDL_BASE = "https://unifieddatalibrary.com/udl"
+# TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
+# than this cannot hold one and is logged whole rather than sliced to nothing.
+_TLE_EPOCH_FIELD_END = 32
 
 
 async def fetch_tle_history_for_satno(
@@ -378,6 +381,162 @@ async def udl_logout(
 # ── TLE fetch proxy ────────────────────────────────────────────────────────
 
 
+def _tle_precheck_error(state: SessionState, mode: str) -> str | None:
+    """Return the operator-facing reason a TLE fetch cannot proceed, or None.
+
+    Credentials live only in session state, so a missing pair means the
+    operator never logged in; epoch mode has nothing to measure an elset
+    against until scenario time is set.
+    """
+    if not state.udl_username or not state.udl_password:
+        return "Not connected to UDL — use the UDL panel to log in first."
+    if mode == "epoch" and state.scenario_start is None:
+        return "No scenario time set. Configure scenario time in the Scenario Configuration panel first."
+    return None
+
+
+def _elset_request_spec(
+    state: SessionState,
+    satno: int,
+    mode: str,
+    data_mode: str,
+) -> tuple[str, dict[str, Any], float]:
+    """Return the (url, params, timeout) for the elset query *mode* calls for.
+
+    Epoch mode asks /elset for up to ten elsets at or before scenario start;
+    latest mode asks /elset/current, which takes no epoch filter. dataMode is
+    sent only when it is not REAL, and the operator's source override applies
+    to the current-elset query alone.
+    """
+    if mode == "epoch":
+        epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+        params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
+        if data_mode != "REAL":
+            params["dataMode"] = data_mode
+        return f"{_UDL_BASE}/elset", params, 10.0
+
+    latest_params: dict[str, Any] = {"satNo": satno}
+    if data_mode != "REAL":
+        latest_params["dataMode"] = data_mode
+    if state.udl_tle_source:
+        latest_params["source"] = state.udl_tle_source
+    return f"{_UDL_BASE}/elset/current", latest_params, 15.0
+
+
+def _normalise_elset_records(data: Any) -> list[Any]:
+    """Return the UDL elset payload as a list of records.
+
+    /elset/current answers with a bare object when a single elset matches and
+    with a list when several do, so neither shape can be assumed.
+    """
+    if isinstance(data, dict):
+        return [data]
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _log_elset_diagnostics(records: list[Any]) -> None:
+    """Log the record field names and every candidate's parsed line 1 epoch.
+
+    Field names drift between UDL sources and a wrong pick is only ever
+    diagnosed from the epochs that were on offer, so both go in the log.
+    """
+    # Log the keys from the first record so we can verify field names.
+    if records:
+        sample = records[0]
+        logger.info("UDL elset record keys: %s", list(sample.keys()))
+        # Also check for any epoch-like top-level field
+        for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
+            if key in sample:
+                logger.info("  record[%r] = %s", key, str(sample[key])[:80])
+
+    # Log every candidate's TLE line1 epoch for diagnostics.
+    for i, candidate in enumerate(records):
+        l1_raw = str(
+            candidate.get("line1") or candidate.get("TLE_LINE1") or candidate.get("tle1") or ""
+        ).strip()
+        ep = _parse_tle_epoch(l1_raw)
+        logger.info(
+            "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
+            i,
+            l1_raw[18:_TLE_EPOCH_FIELD_END] if len(l1_raw) > _TLE_EPOCH_FIELD_END else l1_raw,
+            ep.isoformat() if ep else "None",
+            candidate.get("objectName") or candidate.get("OBJECT_NAME") or "?",
+        )
+
+
+def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any | None:
+    """Return the record whose TLE epoch is closest to, and not after, *scenario_start*.
+
+    An elset published after the scenario starts answers a question the
+    operator did not ask, so those are skipped rather than ranked. Returns
+    None when no candidate survives that filter.
+    """
+    best_rec = None
+    best_delta = inf
+    for candidate in records:
+        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
+        ep = _parse_tle_epoch(l1)
+        if ep is None or ep > scenario_start:
+            continue
+        delta = (scenario_start - ep).total_seconds()
+        if delta < best_delta:
+            best_delta = delta
+            best_rec = candidate
+    return best_rec
+
+
+def _select_latest_elset(records: list[Any]) -> Any:
+    """Return the record with the newest TLE epoch.
+
+    /elset/current can answer with several records and does not order them,
+    so the newest is chosen here rather than taken on trust.
+    """
+    best_rec = records[0]
+    best_epoch = _parse_tle_epoch(
+        str(best_rec.get("line1") or best_rec.get("TLE_LINE1") or "").strip()
+    )
+    for candidate in records[1:]:
+        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
+        ep = _parse_tle_epoch(l1)
+        if ep is not None and (best_epoch is None or ep > best_epoch):
+            best_epoch = ep
+            best_rec = candidate
+    logger.info(
+        "Latest mode selected record with epoch=%s",
+        best_epoch.isoformat() if best_epoch else "None",
+    )
+    return best_rec
+
+
+def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, str, str]:
+    """Return the (name, two-line TLE, line 1) carried by *rec*.
+
+    UDL spells the fields in camelCase or upper case depending on source, so
+    both are read before falling back to the catalogue number.
+    """
+    name = name_override.strip() or str(rec.get("objectName") or rec.get("OBJECT_NAME") or satno).strip()
+    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
+    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
+    return name, f"{line1}\n{line2}", line1
+
+
+def _tle_epoch_metadata(line1: str, scenario_start: datetime | None) -> tuple[str | None, float | None]:
+    """Return the display epoch and the age in days of TLE *line1*.
+
+    Either is None when it cannot be derived: an unparsable line 1, or no
+    scenario time to measure the age against.
+    """
+    tle_epoch_dt = _parse_tle_epoch(line1)
+    if tle_epoch_dt is None:
+        return None, None
+    tle_epoch_str = tle_epoch_dt.strftime("%Y-%m-%d %H:%M UTC")
+    if scenario_start is None:
+        return tle_epoch_str, None
+    return tle_epoch_str, abs((scenario_start - tle_epoch_dt).total_seconds()) / 86400.0
+
+
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
@@ -402,45 +561,27 @@ async def fetch_tle(
     _empty = {"name": "", "tle": "", "tle_epoch_str": None,
                "tle_age_days": None, "mode": mode, "error": None}
 
-    if not state.udl_username or not state.udl_password:
+    precheck_error = _tle_precheck_error(state, mode)
+    if precheck_error is not None:
         return render(request,
             "partials/tle_fields.html",
-            {**_empty, "error": "Not connected to UDL — use the UDL panel to log in first."},
-        )
-
-    if mode == "epoch" and state.scenario_start is None:
-        return render(request,
-            "partials/tle_fields.html",
-            {**_empty, "error": "No scenario time set. Configure scenario time in the Scenario Configuration panel first."},
+            {**_empty, "error": precheck_error},
         )
 
     # ── Fetch from UDL ───────────────────────────────────────────────────────
     try:
         async with httpx.AsyncClient() as client:
             dm = state.udl_data_mode or "REAL"
-            if mode == "epoch":
-                epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
-                params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
-                if dm != "REAL":
-                    params["dataMode"] = dm
-                resp = await client.get(
-                    f"{_UDL_BASE}/elset",
-                    params=params,
-                    auth=(state.udl_username, state.udl_password),
-                    timeout=10.0,
-                )
-            else:
-                latest_params: dict[str, Any] = {"satNo": satno}
-                if dm != "REAL":
-                    latest_params["dataMode"] = dm
-                if state.udl_tle_source:
-                    latest_params["source"] = state.udl_tle_source
-                resp = await client.get(
-                    f"{_UDL_BASE}/elset/current",
-                    params=latest_params,
-                    auth=(state.udl_username, state.udl_password),
-                    timeout=15.0,
-                )
+            url, params, timeout = _elset_request_spec(state, satno, mode, dm)
+            resp = await client.get(
+                url,
+                params=params,
+                # Both credentials are non-None once _tle_precheck_error has
+                # passed, but that narrowing now happens in the helper rather
+                # than in this frame, so mypy cannot see it here.
+                auth=(state.udl_username, state.udl_password),  # type: ignore[arg-type]
+                timeout=timeout,
+            )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as exc:
@@ -464,12 +605,7 @@ async def fetch_tle(
         )
 
     # Normalise: /elset/current may return a single dict or a list
-    if isinstance(data, dict):
-        records: list[Any] = [data]
-    elif isinstance(data, list):
-        records = data
-    else:
-        records = []
+    records = _normalise_elset_records(data)
 
     if not records:
         return render(request,
@@ -483,43 +619,12 @@ async def fetch_tle(
         len(records), satno, log_safe(mode), dm,
     )
 
-    # Log the keys from the first record so we can verify field names.
-    if records:
-        sample = records[0]
-        logger.info("UDL elset record keys: %s", list(sample.keys()))
-        # Also check for any epoch-like top-level field
-        for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
-            if key in sample:
-                logger.info("  record[%r] = %s", key, str(sample[key])[:80])
-
-    # Log every candidate's TLE line1 epoch for diagnostics.
-    for i, candidate in enumerate(records):
-        l1_raw = str(
-            candidate.get("line1") or candidate.get("TLE_LINE1") or candidate.get("tle1") or ""
-        ).strip()
-        ep = _parse_tle_epoch(l1_raw)
-        logger.info(
-            "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
-            i,
-            l1_raw[18:32] if len(l1_raw) > 32 else l1_raw,
-            ep.isoformat() if ep else "None",
-            candidate.get("objectName") or candidate.get("OBJECT_NAME") or "?",
-        )
+    _log_elset_diagnostics(records)
 
     if mode == "epoch":
         # Pick the record whose TLE epoch is closest to (and ≤) scenario_start.
-        best_rec = None
-        best_delta = inf
-        for candidate in records:
-            l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-            ep = _parse_tle_epoch(l1)
-            if ep is None or ep > state.scenario_start:  # type: ignore[operator]
-                continue
-            delta = (state.scenario_start - ep).total_seconds()  # type: ignore[operator]
-            if delta < best_delta:
-                best_delta = delta
-                best_rec = candidate
-        if best_rec is None:
+        rec = _select_elset_by_epoch(records, state.scenario_start)  # type: ignore[arg-type]
+        if rec is None:
             return render(request,
                 "partials/tle_fields.html",
                 {**_empty, "error": (
@@ -527,39 +632,15 @@ async def fetch_tle(
                     f"{state.scenario_start.strftime('%Y-%m-%d %H:%M UTC')}."  # type: ignore[union-attr]
                 )},
             )
-        rec = best_rec
     else:
         # For "latest" mode: pick the record with the newest TLE epoch.
-        best_rec = records[0]
-        best_epoch = _parse_tle_epoch(
-            str(best_rec.get("line1") or best_rec.get("TLE_LINE1") or "").strip()
-        )
-        for candidate in records[1:]:
-            l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-            ep = _parse_tle_epoch(l1)
-            if ep is not None and (best_epoch is None or ep > best_epoch):
-                best_epoch = ep
-                best_rec = candidate
-        rec = best_rec
-        logger.info(
-            "Latest mode selected record with epoch=%s",
-            best_epoch.isoformat() if best_epoch else "None",
-        )
+        rec = _select_latest_elset(records)
 
     # ── Extract fields ───────────────────────────────────────────────────────
-    name = name_override.strip() or str(rec.get("objectName") or rec.get("OBJECT_NAME") or satno).strip()
-    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
-    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
-    tle = f"{line1}\n{line2}"
+    name, tle, line1 = _extract_tle_fields(rec, name_override, satno)
 
     # TLE epoch metadata for the partial
-    tle_epoch_dt = _parse_tle_epoch(line1)
-    tle_epoch_str: str | None = None
-    tle_age_days: float | None = None
-    if tle_epoch_dt is not None:
-        tle_epoch_str = tle_epoch_dt.strftime("%Y-%m-%d %H:%M UTC")
-        if state.scenario_start is not None:
-            tle_age_days = abs((state.scenario_start - tle_epoch_dt).total_seconds()) / 86400.0
+    tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
 
     state.append_log(
         f"[UDL] Fetched TLE for SATNO {satno} ({name}) mode={mode}"
