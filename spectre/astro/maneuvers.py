@@ -848,9 +848,8 @@ def geo_drift_intercept(
     # Compute subsatellite longitudes (approximate — use atan2 of x,y in ECI)
     # For GEO, the ECI longitude rotates with Earth; we use the angular
     # separation between the two position vectors projected onto the equatorial plane.
-    import math as _m
-    lon_red = _m.degrees(_m.atan2(sv_red.r[1], sv_red.r[0]))
-    lon_blue = _m.degrees(_m.atan2(sv_blue.r[1], sv_blue.r[0]))
+    lon_red = math.degrees(math.atan2(sv_red.r[1], sv_red.r[0]))
+    lon_blue = math.degrees(math.atan2(sv_blue.r[1], sv_blue.r[0]))
     gap = lon_blue - lon_red
     if gap > 180:
         gap -= 360
@@ -916,14 +915,16 @@ def manoeuvre_detect_intercept(
     kep_after = state_to_keplerian(sv_after)
 
     # Time between TLE epochs
-    import math as _m
     dt_s = abs((blue_orbit._sat.jdsatepoch - red_orbit._sat.jdsatepoch) * 86400.0)
     if dt_s < 1.0:
         dt_s = 86400.0  # default 1 day if epochs are same
 
+    # KeplerianElements angles are already degrees. They were passed through
+    # degrees() again here, under a local alias the static guard could not
+    # see, so TLE noise read as a plane change 57x too costly (audit F-001).
     result = classify_manoeuvre(
-        kep_before.a, kep_before.ecc, _m.degrees(kep_before.inc), _m.degrees(kep_before.raan),
-        kep_after.a, kep_after.ecc, _m.degrees(kep_after.inc), _m.degrees(kep_after.raan),
+        kep_before.a, kep_before.ecc, kep_before.inc, kep_before.raan,
+        kep_after.a, kep_after.ecc, kep_after.inc, kep_after.raan,
         dt_s, mu,
     )
 
