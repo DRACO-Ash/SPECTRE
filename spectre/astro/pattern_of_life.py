@@ -61,9 +61,9 @@ _EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 # What the cut does buy is that a record carries element set data and nothing
 # else, so every future consumer of rec.tle starts from a bounded value.
 #
-# The length guard in parse_tle_history still spells the number out: editing
-# that line would pull its pre-existing complexity score into the quality
-# gate's new-code window, so it waits for the pass that reduces that function.
+# The length guard that used to spell the number out now reads this constant:
+# parse_tle_history was split into helpers, so editing that line no longer
+# drags its old complexity score into the quality gate's new-code window.
 _TLE_LINE_COLUMNS = 69
 
 #: Longitudes east of this wrap to the western hemisphere, so the drift series
@@ -728,17 +728,38 @@ def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
     A history block routinely carries the same element set twice from two
     providers, and a malformed pair must drop out rather than stop the parse.
     """
-    try:
-        rec = _satrec_to_record(f"{l1}\n{l2}")
-    except Exception:  # noqa: BLE001
-        # BLE001: sgp4 raises several unrelated types for a bad element set,
-        # and one unusable pair must not end the history.
-        return None
+    rec = _satrec_to_record(f"{l1}\n{l2}")
     key = rec.epoch.strftime("%Y%j%H%M%S")
     if key in seen:
         return None
     seen.add(key)
     return rec
+
+
+def _apply_metadata(
+    rec: TLERecord,
+    l1: str,
+    metadata: dict[str, tuple[str, str]] | None,
+    rms_metadata: dict[str, float | None] | None,
+) -> bool:
+    """Attach the UDL provenance for *l1*, or False when it was unusable.
+
+    Before parse_tle_history was split into helpers this assignment sat inside
+    the try that wrapped the whole record, so a metadata value that would not
+    unpack into two names dropped that one element set and the history carried
+    on. The split moved it out and the same value then ended the entire parse,
+    silently, which this module never chose. The catch is back and as broad as
+    the one it restores: provenance arriving in an unexpected shape is a reason
+    to lose one element set, not a reason to lose the object's whole history.
+    """
+    try:
+        if metadata and l1 in metadata:
+            rec.data_mode, rec.source = metadata[l1]
+        if rms_metadata and l1 in rms_metadata:
+            rec.rms_residual = rms_metadata[l1]
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 def parse_tle_history(
@@ -764,10 +785,8 @@ def parse_tle_history(
         rec = _record_from_pair(l1, l2, seen)
         if rec is None:
             continue
-        if metadata and l1 in metadata:
-            rec.data_mode, rec.source = metadata[l1]
-        if rms_metadata and l1 in rms_metadata:
-            rec.rms_residual = rms_metadata[l1]
+        if not _apply_metadata(rec, l1, metadata, rms_metadata):
+            continue
         records.append(rec)
 
     records.sort(key=lambda r: r.epoch)

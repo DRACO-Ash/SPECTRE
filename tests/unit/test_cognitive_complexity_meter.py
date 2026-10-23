@@ -29,6 +29,11 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "cognitive_complexity.py"
 
+#: Marks a file the suite itself wrote into the tree while probing the
+#: quality gate. Dirt like that is not an operator's work in progress, so
+#: the clean-tree check below must not accept it as a reason to stand down.
+_PROBE_MARKER = "_scope_probe"
+
 
 def _load():
     if not _SCRIPT.is_file():
@@ -196,7 +201,13 @@ class TestTheNewCodeScoping:
         assert not "scripts/x.py".startswith(meter._SONAR_SOURCE_ROOTS)
 
     def test_changed_mode_runs_against_a_clean_tree(self) -> None:
-        """End to end, but only where the premise holds."""
+        """End to end, against the real tree.
+
+        It stands down only for dirt that could change the answer, which is
+        dirt inside the scanned roots. A blanket clean-tree premise made this
+        leg skip on any uncommitted work anywhere, including the suite's own,
+        so the one check that runs the meter end to end almost never ran.
+        """
         if not _SCRIPT.is_file():
             pytest.skip("scripts/ is excluded from the submission package")
         git = shutil.which("git")
@@ -206,8 +217,15 @@ class TestTheNewCodeScoping:
             [git, "status", "--porcelain"],
             cwd=_ROOT, capture_output=True, text=True, check=False,
         ).stdout.strip()
-        if dirty:
-            pytest.skip("the working tree has uncommitted changes, which are in scope by design")
+        leaked = [line for line in dirty.splitlines() if _PROBE_MARKER in line]
+        assert not leaked, (
+            "a gate probe was left in the real tree. This check used to SKIP "
+            "on that dirt, so the suite silently switched off the one leg "
+            f"that runs the meter end to end: {leaked}"
+        )
+        roots = _load()._SONAR_SOURCE_ROOTS
+        if [line for line in dirty.splitlines() if line[3:].strip().startswith(roots)]:
+            pytest.skip("a scanned root has uncommitted changes, which are in scope by design")
         result = subprocess.run(  # noqa: S603
             [sys.executable, str(_SCRIPT), "--changed", "HEAD", "--max", "15"],
             cwd=_ROOT, capture_output=True, text=True, check=False,

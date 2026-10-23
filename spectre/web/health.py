@@ -11,9 +11,13 @@ module, each learned from a real deploy-stage failure:
    silently by kubelet liveness back-off, which is undiagnosable. The timeout
    here is strictly shorter than the platform probe, so a stall becomes a
    loud 503 rather than a silent SIGTERM.
-3. **Return the diagnosis in the body.** The 503 carries the resolved data
-   directory and the exact errno, so a screenshot of the response is a
-   complete diagnosis.
+3. **Return the diagnosis in the body, but only when there is one.** The 503
+   carries the resolved data directory and the exact errno, so a screenshot of
+   the response is a complete diagnosis. A 200 carries ``status`` and nothing
+   else: it is served continuously to any anonymous caller who can reach the
+   ingress, and the exact version and the resolved filesystem path are a free
+   start on a version-matched exploit search. Both go to the log instead,
+   where the platform's operators already read the boot lines.
 
 Both paths are exempt from authentication by design: the platform probes them
 before any session exists. They are GET, so the global CSRF dependency admits
@@ -79,7 +83,8 @@ async def healthz() -> JSONResponse:
     Deliberately does not touch storage: a liveness probe that fails on a
     storage fault causes a restart loop that cannot fix the fault.
     """
-    return JSONResponse({"status": "ok", "version": __version__})
+    logger.debug("Liveness probe served, version=%s", __version__)
+    return JSONResponse({"status": "ok"})
 
 
 @router.get("/readyz", include_in_schema=False)
@@ -88,18 +93,27 @@ async def readyz() -> JSONResponse:
     settings = get_settings()
     healthy, detail = await check_storage(settings.data_dir)
 
-    body: dict[str, Any] = {
-        "status": "ok" if healthy else "unavailable",
-        "version": __version__,
-        "data_dir": settings.data_dir,
-    }
     if healthy:
-        return JSONResponse(body)
+        logger.debug(
+            "Readiness probe served, version=%s data_dir=%s", __version__, settings.data_dir,
+        )
+        return JSONResponse({"status": "ok"})
 
-    body["detail"] = detail
-    body["remedy"] = (
-        "If this is the App Store FILE_STORAGE add-on, the pod needs "
-        "securityContext.fsGroup set so the non-root container can write to the volume."
+    # The failure body keeps its diagnosis, including the path inside the
+    # errno line. A readiness failure takes the pod out of rotation, so this
+    # is read by whoever is already debugging the deploy, whereas the 200
+    # above answers anyone who can reach the ingress, for as long as the pod
+    # lives. The log carries the same facts either way.
+    body: dict[str, Any] = {
+        "status": "unavailable",
+        "detail": detail,
+        "remedy": (
+            "If this is the App Store FILE_STORAGE add-on, the pod needs "
+            "securityContext.fsGroup set so the non-root container can write to the volume."
+        ),
+    }
+    logger.error(
+        "Readiness probe failed, version=%s data_dir=%s: %s",
+        __version__, settings.data_dir, detail,
     )
-    logger.error("Readiness probe failed — %s", detail)
     return JSONResponse(body, status_code=503)

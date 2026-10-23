@@ -55,6 +55,13 @@ BASE_URL = "https://planet4589.org/space/gcat"
 # controls in that path: the transport is httpx, which has no file: or ftp:
 # handler at all, and this list then narrows HTTP and HTTPS down to HTTPS.
 _ALLOWED_URL_SCHEMES = frozenset({"https"})
+
+# Redirect hops are taken one at a time so the scheme allowlist can be applied
+# to each. Five is generous: the only redirects GCAT has ever served are scheme
+# and trailing-slash normalisations, and the cap is what ends a redirect loop
+# rather than following it until the timeout.
+_MAX_REDIRECT_HOPS = 5
+
 PAGE_SIZE = 100
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gcat-dl")
 
@@ -270,6 +277,38 @@ _FETCH_ERRORS: list[str] = []
 
 # ── TSV fetcher (sync — runs in ThreadPoolExecutor) ───────────────────────────
 
+def _get_rechecking_every_hop(
+    client: httpx.Client, url: str, label: str,
+) -> httpx.Response | None:
+    """GET *url*, re-applying the scheme allowlist at every redirect hop.
+
+    ``follow_redirects=True`` carries no policy of its own, so the check made
+    once against the table's URL said nothing about where the transport
+    actually went: a 30x from planet4589.org could walk the fetch onto plain
+    http, or onto an address inside the cluster, with the allowlist never
+    consulted again (CWE-918). Returns ``None`` when a hop is refused or the
+    chain runs past :data:`_MAX_REDIRECT_HOPS`.
+    """
+    for _ in range(_MAX_REDIRECT_HOPS + 1):
+        resp = client.get(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        if not resp.is_redirect:
+            return resp
+        # Relative Location headers are legal, so the hop is resolved against
+        # the URL that served the redirect before its scheme is read.
+        url = urllib.parse.urljoin(url, resp.headers.get("location", ""))
+        scheme = urllib.parse.urlsplit(url).scheme
+        if scheme not in _ALLOWED_URL_SCHEMES:
+            log.error(
+                "[GCAT] ✗  Refusing %-20s: redirected to unsupported scheme '%s'",
+                label, scheme,
+            )
+            return None
+    log.error(
+        "[GCAT] ✗  Refusing %-20s: more than %d redirects", label, _MAX_REDIRECT_HOPS,
+    )
+    return None
+
+
 def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None]:
     """Download and parse one GCAT TSV.  Returns (key, df) or (key, None)."""
     url = meta["url"]
@@ -291,8 +330,10 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
         # https-only is narrower than what httpx allows. The rest of SPECTRE
         # already talks HTTP through httpx; this call was the outlier, and the
         # outlier was what the scanners objected to.
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            resp = client.get(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        with httpx.Client(timeout=30.0, follow_redirects=False) as client:
+            resp = _get_rechecking_every_hop(client, url, label)
+            if resp is None:
+                return key, None
             resp.raise_for_status()
             # Not resp.text: that runs charset detection, and GCAT serves
             # mixed encodings. Decoding as UTF-8 with replacement is what the

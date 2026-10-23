@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
@@ -318,34 +316,7 @@ async def set_scenario_time(
     )
 
 
-# ── Log streaming (SSE) ───────────────────────────────────────────────────────
-
-
-@router.get("/log/stream", response_model=None)
-async def log_stream(
-    request: Request,
-    current_user: User = Depends(require_login),
-) -> StreamingResponse:
-    """Server-Sent Events endpoint streaming per-session log entries."""
-
-
-    state = get_session_state(current_user.username)
-
-    async def _event_generator() -> AsyncGenerator[str, None]:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                msg = await asyncio.wait_for(state.log_queue.get(), timeout=15.0)
-                yield f"data: {msg}\n\n"
-            except TimeoutError:
-                yield ": heartbeat\n\n"
-
-    return StreamingResponse(
-        _event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# ── Run log ───────────────────────────────────────────────────────────────────
 
 
 @router.get("/log/entries", response_class=HTMLResponse)
@@ -353,7 +324,14 @@ async def log_entries(
     request: Request,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Return the run log partial (for polling fallback)."""
+    """Return the run log partial. The console polls this; nothing streams.
+
+    There was a Server-Sent Events endpoint beside it, built by interpolating
+    a session log line straight into the frame, so a newline in operator input
+    forged extra frames. No template, script or test ever opened it: the
+    console has always polled this route. Removed rather than sanitised,
+    because a live defect in code nobody runs is still a line in the scan.
+    """
     state = get_session_state(current_user.username)
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})
 

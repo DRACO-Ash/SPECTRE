@@ -8,6 +8,7 @@ does: parse element sets, difference them, measure drift, and keep statistics.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -194,6 +195,63 @@ class TestParseTleHistory:
         tle_text = "garbage line\n" + _LEO_TLE_A + "\nmore garbage"
         records = parse_tle_history(tle_text)
         assert len(records) == 1
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            ("REAL", "18SCS", "SPARE"),   # one name too many to unpack
+            ("REAL",),                    # one too few
+            None,                         # not iterable at all
+            7,                            # nor is this
+        ],
+    )
+    def test_a_malformed_provenance_value_costs_one_element_set(
+        self, bad_value: Any,
+    ) -> None:
+        """A provenance value that will not unpack drops its own record only.
+
+        Splitting this function into _tle_line_pairs and _record_from_pair
+        moved the metadata assignment out of the try that used to wrap the
+        whole record. One unusable value then ended the entire parse and the
+        operator got an empty history instead of a history short one element
+        set. Breaking _apply_metadata's catch turns this red.
+        """
+        l1_a = _LEO_TLE_A.split("\n")[0]
+        l1_b = _LEO_TLE_B.split("\n")[0]
+        records = parse_tle_history(
+            f"{_LEO_TLE_A}\n{_LEO_TLE_B}\n{_LEO_TLE_C}",
+            metadata={l1_a: ("REAL", "18SCS"), l1_b: bad_value},
+        )
+
+        epochs = [r.epoch for r in records]
+        assert len(records) == 2, "the two sound element sets must survive"
+        assert epochs == sorted(epochs), "the surviving records stay in epoch order"
+        # The sound value beside the bad one must still land: the catch covers
+        # one record, not the whole metadata pass.
+        assert (records[0].data_mode, records[0].source) == ("REAL", "18SCS")
+
+    def test_a_record_dropped_on_provenance_still_spends_its_epoch(self) -> None:
+        """The dropped record keeps its epoch out of the de-duplication set.
+
+        This is the half of the restored behaviour that is easy to lose. The
+        original added the epoch to ``seen`` BEFORE it touched the metadata, so
+        a second element set at the same epoch was a duplicate however the
+        first one ended. Re-admitting it would be a different parse from the
+        one this release was meant to preserve.
+        """
+        l1, l2 = _LEO_TLE_A.split("\n")
+        # Same epoch columns, different element set number, so the two line-1
+        # strings differ while the de-duplication key does not.
+        twin = l1[:64] + "9999" + l1[68]
+        assert twin != l1 and len(twin) == len(l1)
+
+        sound = parse_tle_history(f"{l1}\n{l2}\n{twin}\n{l2}")
+        assert len(sound) == 1, "the twin is a duplicate epoch either way"
+
+        dropped = parse_tle_history(
+            f"{l1}\n{l2}\n{twin}\n{l2}", metadata={l1: ("REAL", "18SCS", "SPARE")},
+        )
+        assert dropped == [], "the spent epoch must not let the twin back in"
 
 
 # ── _dominant_element ─────────────────────────────────────────────────────────

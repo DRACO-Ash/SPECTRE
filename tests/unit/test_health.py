@@ -70,17 +70,10 @@ class TestHealthEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_healthz_carries_the_version_stamp(self, client: object) -> None:
-        from spectre import __version__
-
-        assert client.get("/healthz").json()["version"] == __version__  # type: ignore[attr-defined]
-
     def test_readyz_is_unauthenticated_and_200(self, client: object) -> None:
         resp = client.get("/readyz")  # type: ignore[attr-defined]
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "ok"
-        assert "data_dir" in body
+        assert resp.json()["status"] == "ok"
 
     def test_readyz_reports_503_with_diagnosis_when_storage_fails(
         self, client: object, monkeypatch: pytest.MonkeyPatch
@@ -98,9 +91,50 @@ class TestHealthEndpoints:
         assert body["status"] == "unavailable"
         assert "errno 13" in body["detail"]
         assert "fsGroup" in body["remedy"]
-        assert "data_dir" in body
 
     def test_health_paths_are_exempt_from_csrf(self, client: object) -> None:
         """GET is a safe method, so the global CSRF dependency must admit it."""
         assert client.get("/healthz").status_code == 200  # type: ignore[attr-defined]
         assert client.get("/readyz").status_code == 200  # type: ignore[attr-defined]
+
+
+class TestTheProbesTellAnAnonymousCallerNothingElse:
+    """Both probes answer before any session exists, so both answer everyone.
+
+    They used to hand back the exact application version and the resolved data
+    directory for the asking. That is a version-matched exploit search and the
+    container's filesystem layout, given to anyone who can reach the ingress,
+    for as long as the pod is alive. The facts did not stop being useful; they
+    moved to the log, where the platform's own operators read them.
+    """
+
+    @pytest.mark.parametrize("path", ["/healthz", "/readyz"])
+    def test_a_healthy_body_carries_status_and_nothing_else(
+        self, client: object, path: str
+    ) -> None:
+        body = client.get(path).json()  # type: ignore[attr-defined]
+        assert list(body) == ["status"], f"{path} discloses {sorted(set(body) - {'status'})}"
+
+    @pytest.mark.parametrize("path", ["/healthz", "/readyz"])
+    def test_no_healthy_body_quotes_the_version_anywhere(
+        self, client: object, path: str
+    ) -> None:
+        """Pinned on the text, not the key, so a rename cannot smuggle it back."""
+        from spectre import __version__
+
+        assert __version__ not in client.get(path).text  # type: ignore[attr-defined]
+
+    def test_the_version_and_the_data_directory_reach_the_log(
+        self, client: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Removing them from the body is only safe if they are still readable."""
+        import logging
+
+        from spectre import __version__
+        from spectre.config.settings import get_settings
+
+        with caplog.at_level(logging.DEBUG, logger="spectre.web.health"):
+            client.get("/readyz")  # type: ignore[attr-defined]
+        logged = "\n".join(record.getMessage() for record in caplog.records)
+        assert __version__ in logged
+        assert get_settings().data_dir in logged

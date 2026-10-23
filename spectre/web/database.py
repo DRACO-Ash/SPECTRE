@@ -151,16 +151,15 @@ async def _apply_migrations(conn: Any) -> None:
 
     # Each entry is a table, a column, and the definition used to add it.
     #
-    # session_epoch carries no NOT NULL and no DEFAULT on purpose. SQLite
-    # rejects ALTER TABLE ADD COLUMN NOT NULL whose default is not a constant,
-    # CURRENT_TIMESTAMP included, and a literal timestamp needs the hyphens and
-    # colons that _SQL_COLUMN_DEFINITION above deliberately refuses. An
-    # existing row therefore arrives with NULL, which the session check reads
-    # as "nothing revoked yet" - correct for an account whose sessions predate
-    # the feature.
+    # session_generation takes a CONSTANT default, which is the one kind
+    # SQLite accepts in ALTER TABLE ADD COLUMN NOT NULL, and the definition
+    # carries only uppercase letters, digits and spaces so it passes
+    # _SQL_COLUMN_DEFINITION above without that guard being widened. A row
+    # predating the column arrives at 0, which is where a fresh account
+    # starts, so a migrated account and a new one behave identically.
     migrations: list[tuple[str, str, str]] = [
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
-        ("users", "session_epoch", "TIMESTAMP WITH TIME ZONE"),
+        ("users", "session_generation", "INTEGER NOT NULL DEFAULT 0"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

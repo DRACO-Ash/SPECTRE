@@ -14,7 +14,6 @@ one, the test counts the work instead.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -219,25 +218,157 @@ class TestSessionRevocation:
         assert "/login" in after.headers["location"]
 
 
-class TestEpochComparison:
-    """The two shapes the stored epoch arrives in, neither of which is a session."""
+class TestGenerationComparison:
+    """The two shapes the stored counter arrives in, neither of which is a session."""
 
-    def test_a_row_written_before_the_column_existed_is_never_revoked(self) -> None:
+    def test_a_row_written_before_the_column_existed_starts_at_zero(self) -> None:
         from spectre.web.auth import _session_revoked
         from spectre.web.models import User
 
         migrated = User(username="row_from_before", hashed_password="x", role="operator")
-        assert migrated.session_epoch is None
-        assert _session_revoked(migrated, datetime.now(tz=UTC)) is False
+        # The migration gives an existing row 0, the same value a fresh
+        # account starts at, so a token carrying 0 is not revoked.
+        migrated.session_generation = 0
+        assert _session_revoked(migrated, 0) is False
 
-    def test_an_epoch_read_back_without_a_time_zone_still_compares(self) -> None:
-        """SQLite hands back a naive datetime for a column declared with a zone."""
+    def test_a_token_from_before_the_claim_existed_reads_as_generation_zero(self) -> None:
+        """An operator signed in across the upgrade must not be thrown out."""
+        from spectre.web.auth import _decode_session, _serializer
+
+        legacy = str(_serializer().dumps({"sub": "signed_in_before_upgrade"}))
+        claims = _decode_session(legacy)
+        assert claims is not None
+        assert claims == ("signed_in_before_upgrade", 0)
+
+    def test_an_older_generation_is_revoked_and_the_current_one_is_not(self) -> None:
         from spectre.web.auth import _session_revoked
         from spectre.web.models import User
 
-        user = User(username="row_from_sqlite", hashed_password="x", role="operator")
-        now = datetime.now(tz=UTC)
-        user.session_epoch = now.replace(tzinfo=None)
+        user = User(username="rotated", hashed_password="x", role="operator")
+        user.session_generation = 3
+        assert _session_revoked(user, 2) is True
+        assert _session_revoked(user, 3) is False
+        # A token from the future is not a thing this can produce, but it must
+        # not be treated as revoked if it ever were: that would lock an account
+        # out rather than let a stale token through.
+        assert _session_revoked(user, 4) is False
 
-        assert _session_revoked(user, now - timedelta(seconds=5)) is True
-        assert _session_revoked(user, now + timedelta(seconds=5)) is False
+
+class TestRevocationDoesNotRefuseTheNextSession:
+    """The epoch must never refuse a token minted AFTER it was stamped.
+
+    Every write to ``session_epoch`` goes through ``session_epoch_now``, which
+    truncates to whole seconds. That is not tidiness. itsdangerous stamps a
+    token's issue time in whole seconds, so an epoch carrying microseconds is a
+    hair later than a token minted in the same second, and that token reads as
+    revoked.
+
+    The account-creation case was spotted and guarded when the feature was
+    written. The two sites that actually MOVE the epoch, logout and the
+    password-change listener, both kept ``datetime.now(tz=UTC)`` and so kept
+    the defect: signing out and straight back in inside the same second
+    returned the operator to the login page, and only waiting for the clock to
+    tick cleared it.
+
+    It also made this suite fail about half the time, which is how it surfaced:
+    every test in test_threat_screen_route.py got the login page instead of the
+    panel, because the shared session cookie had been minted in the wrong
+    microsecond.
+    """
+
+    def test_signing_straight_back_in_after_logout_works(self, client: TestClient) -> None:
+        """The whole cycle inside one second, which is where it used to break."""
+        admin = _admin_cookies(client)
+        _create_operator(client, admin, "same_second_user", "back-in-immediately")
+
+        client.cookies.clear()
+        first = str(_login(client, "same_second_user", "back-in-immediately").cookies["spectre_session"])
+
+        client.cookies.clear()
+        out = client.post(
+            "/logout",
+            cookies={"spectre_session": first},
+            headers=csrf_headers(first),
+            follow_redirects=False,
+        )
+        assert out.status_code == 302
+
+        # No sleep. The sign-in lands in the same second as the logout before
+        # it, which is the case a timestamp epoch could not answer: the two
+        # tokens were byte-identical. The generation counter changes the
+        # payload, so they differ and the old one is refused exactly.
+        client.cookies.clear()
+        second = str(_login(client, "same_second_user", "back-in-immediately").cookies["spectre_session"])
+        assert second != first, "the second sign-in reused the first token"
+
+        client.cookies.clear()
+        resp = client.get(_PANEL, cookies={"spectre_session": second}, follow_redirects=False)
+        assert resp.status_code == 200, (
+            "the session minted after the logout was refused by the logout's own epoch"
+        )
+
+    def test_a_password_change_does_not_refuse_the_session_that_follows_it(
+        self, client: TestClient
+    ) -> None:
+        """Same defect, the other write site."""
+        admin = _admin_cookies(client)
+        _create_operator(client, admin, "rotated_then_in", "first-credential")
+
+        user_id = _user_id(client, admin, "rotated_then_in")
+        client.cookies.clear()
+        reset = client.post(
+            f"/admin/users/{user_id}",
+            data={"role": "operator", "new_password": "second-credential"},
+            cookies=admin,
+            headers=csrf_headers(admin),
+        )
+        assert reset.status_code == 200
+
+        client.cookies.clear()
+        session = str(_login(client, "rotated_then_in", "second-credential").cookies["spectre_session"])
+
+        client.cookies.clear()
+        resp = client.get(_PANEL, cookies={"spectre_session": session}, follow_redirects=False)
+        assert resp.status_code == 200, (
+            "the session opened with the new password was refused by the epoch "
+            "that the password change stamped"
+        )
+
+    def test_every_generation_write_only_ever_increments(self) -> None:
+        """The guard that stops the timestamp design creeping back.
+
+        A write that SETS the generation rather than incrementing it, or that
+        reaches for a clock, is the defect this feature was rewritten to
+        remove. It reads as harmless and the suite would only catch it by
+        luck, so it is enforced here rather than remembered.
+        """
+        import ast
+        import pathlib as _pathlib
+
+        from spectre.web import models
+        from spectre.web.routes import login as login_module
+
+        allowed = {
+            "(target.session_generation or 0) + 1",
+            "(user.session_generation or 0) + 1",
+        }
+        offenders: list[str] = []
+        for module in (models, login_module):
+            name = _pathlib.Path(module.__file__).name
+            source = _pathlib.Path(module.__file__).read_text(encoding="utf-8")
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.Assign):
+                    continue
+                if not any(
+                    isinstance(t, ast.Attribute) and t.attr == "session_generation"
+                    for t in node.targets
+                ):
+                    continue
+                assigned = ast.unparse(node.value)
+                if assigned not in allowed:
+                    offenders.append(f"{name}:{node.lineno} -> {assigned}")
+
+        assert not offenders, (
+            "session_generation must only ever be incremented, never set from a "
+            f"clock or a literal; these do not: {offenders}"
+        )

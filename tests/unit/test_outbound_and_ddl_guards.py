@@ -103,6 +103,123 @@ class TestTheCatalogFetcherSpeaksHttpsOnly:
         assert "urlopen" not in code, "urlopen is back in gcat.py"
 
 
+class TestTheCatalogFetcherRechecksEveryRedirectHop:
+    """The scheme check above was made once, against the table's own URL.
+
+    The transport was then built with ``follow_redirects=True``, which carries
+    no policy of its own, so a 30x from planet4589.org walked the fetch
+    wherever it liked: plain http, or an address inside the cluster, with the
+    allowlist never consulted again. Narrow, because it needs control of
+    planet4589.org, but the check was advertised as covering the transport and
+    it did not.
+    """
+
+    @staticmethod
+    def _fetch_with_scripted_hops(
+        start: str, script: dict[str, tuple[int, str]],
+    ) -> tuple[object, list[str], list[bool]]:
+        """Run the fetcher against a client replaying *script*, recording the hops.
+
+        The trap the stub above describes applies here word for word: a
+        sentinel that raises proves nothing, because ``_fetch_one`` catches
+        ``Exception`` so one unreachable dataset cannot take the other
+        eighteen down with it, and it would swallow the sentinel and return
+        ``(key, None)`` exactly as a refusal does. What is asserted here is
+        therefore the list of URLs the transport was actually asked for.
+        Following a refused redirect records the second hop; refusing it does
+        not, and no except clause can absorb the difference.
+        """
+        import httpx
+
+        from spectre.web.routes import gcat
+
+        requested: list[str] = []
+        follow_flags: list[bool] = []
+
+        class _ScriptedClient:
+            def __init__(self, **kwargs: object) -> None:
+                follow_flags.append(bool(kwargs.get("follow_redirects")))
+
+            def __enter__(self) -> _ScriptedClient:
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                return False
+
+            def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+                requested.append(url)
+                status, location = script.get(url, (200, ""))
+                return httpx.Response(
+                    status,
+                    headers={"location": location} if location else {},
+                    content=b"#name\tvalue\nALPHA\t1\n",
+                    request=httpx.Request("GET", url),
+                )
+
+        original = httpx.Client
+        httpx.Client = _ScriptedClient  # type: ignore[misc, assignment]
+        try:
+            _, df = gcat._fetch_one("probe", {"url": start, "label": "PROBE"})
+        finally:
+            httpx.Client = original  # type: ignore[misc]
+        return df, requested, follow_flags
+
+    _START = "https://planet4589.org/space/gcat/tsv/derived/currentcat.tsv"
+
+    @pytest.mark.parametrize("destination", [
+        "http://planet4589.org/space/gcat/tsv/derived/currentcat.tsv",
+        "http://169.254.169.254/latest/meta-data/",
+        "ftp://planet4589.org/space/gcat/tsv/derived/currentcat.tsv",
+    ])
+    def test_a_redirect_off_https_is_refused(self, destination: str) -> None:
+        """The hop the first check never saw: downgrade, and the metadata service."""
+        df, requested, _ = self._fetch_with_scripted_hops(
+            self._START, {self._START: (302, destination)},
+        )
+        assert destination not in requested, f"the fetcher followed a 302 to {destination}"
+        assert requested == [self._START], f"unexpected hops: {requested}"
+        assert df is None, "a refused redirect still produced a dataframe"
+
+    def test_a_redirect_within_https_is_still_followed(self) -> None:
+        """Otherwise a fetcher that refuses everything would pass the test above."""
+        onward = "https://planet4589.org/space/gcat/tsv/derived/moved.tsv"
+        df, requested, _ = self._fetch_with_scripted_hops(
+            self._START, {self._START: (302, onward)},
+        )
+        assert requested == [self._START, onward], f"unexpected hops: {requested}"
+        assert df is not None, "an allowed redirect was refused as well"
+
+    def test_a_relative_location_is_resolved_against_the_hop_that_served_it(self) -> None:
+        """A relative Location is legal, and has no scheme of its own to read."""
+        df, requested, _ = self._fetch_with_scripted_hops(
+            self._START, {self._START: (302, "/space/gcat/tsv/derived/moved.tsv")},
+        )
+        assert requested[-1] == "https://planet4589.org/space/gcat/tsv/derived/moved.tsv"
+        assert df is not None, "a relative redirect inside the allowlist was refused"
+
+    def test_a_redirect_loop_stops_at_the_cap(self) -> None:
+        """Unbounded hops are a hang, which on a probe reads as a dead pod."""
+        from spectre.web.routes import gcat
+
+        other = "https://planet4589.org/space/gcat/tsv/derived/other.tsv"
+        df, requested, _ = self._fetch_with_scripted_hops(
+            self._START, {self._START: (302, other), other: (302, self._START)},
+        )
+        assert len(requested) == gcat._MAX_REDIRECT_HOPS + 1, (
+            f"the chain ran to {len(requested)} hops against a cap of "
+            f"{gcat._MAX_REDIRECT_HOPS}"
+        )
+        assert df is None, "a redirect loop produced a dataframe"
+
+    def test_the_transport_is_not_left_to_follow_redirects_by_itself(self) -> None:
+        """With follow_redirects on, httpx consumes the 30x and the loop never runs."""
+        _, _, follow_flags = self._fetch_with_scripted_hops(self._START, {})
+        assert follow_flags == [False], (
+            "httpx.Client was built with follow_redirects enabled, which hides every "
+            "hop from the scheme check above"
+        )
+
+
 class TestTheMigrationDdlGuard:
     """ALTER TABLE is the one statement in this codebase built by interpolation.
 

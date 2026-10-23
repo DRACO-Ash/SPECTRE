@@ -4,25 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, event
+from sqlalchemy import DateTime, Integer, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
 from spectre.web.database import Base
-
-
-def _session_epoch_default() -> datetime:
-    """Return the creation instant, truncated to whole seconds.
-
-    The epoch is weighed against the issue time itsdangerous signs into a
-    session token, and that stamp carries whole seconds only. A creation
-    instant with microseconds on it is therefore a hair LATER than the second
-    stamped into the very first token the account mints, which would make a
-    brand new operator's first authenticated request look like a session that
-    had already been revoked. Truncating gives away precision in the one
-    direction that cannot refuse a legitimate session.
-    """
-    return datetime.now(tz=UTC).replace(microsecond=0)
 
 
 class User(Base):
@@ -34,10 +20,16 @@ class User(Base):
         hashed_password: bcrypt hash of the password; never store plaintext.
         role: ``"operator"`` or ``"admin"``.
         created_at: UTC timestamp of account creation.
-        session_epoch: UTC instant before which session tokens for this account
-            are refused. Starts at the creation time and moves forward on
-            logout and on a password change. ``None`` on rows written before
-            the column existed, which means nothing has ever been revoked.
+        session_generation: counter stamped into every session token this
+            account mints. Logout and a password change increment it, which
+            refuses every token carrying an older value. A counter rather than
+            a timestamp because itsdangerous records a token's issue time to
+            the WHOLE SECOND, so a logout and the sign-in that follows it
+            inside the same second are indistinguishable by clock: the token
+            minted after the logout is byte-for-byte the token minted before
+            it. No timestamp comparison can accept one and refuse the other.
+            Incrementing a counter changes the payload, so the new token is a
+            different string and the old one is refused exactly.
     """
 
     __tablename__ = "users"
@@ -51,15 +43,18 @@ class User(Base):
         default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
-    # Nullable because the additive migration cannot fill it in: SQLite refuses
-    # ALTER TABLE ADD COLUMN NOT NULL with a non-constant default such as
-    # CURRENT_TIMESTAMP, and a literal timestamp needs hyphens and colons,
-    # which _SQL_COLUMN_DEFINITION in database.py deliberately excludes. A row
-    # that predates the column has revoked nothing, so NULL says exactly that.
-    session_epoch: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        default=_session_epoch_default,
-        nullable=True,
+    # NOT NULL DEFAULT 0 is a CONSTANT default, which SQLite accepts in
+    # ALTER TABLE ADD COLUMN, and "INTEGER NOT NULL DEFAULT 0" carries only
+    # uppercase letters, digits and spaces, so it satisfies the
+    # _SQL_COLUMN_DEFINITION guard in database.py without widening it. A row
+    # that predates the column therefore arrives at generation 0, which is
+    # where a fresh account starts, so migrated accounts and new ones behave
+    # identically and there is no None case to reason about.
+    session_generation: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
     )
 
 
@@ -77,12 +72,10 @@ class User(Base):
 def _revoke_sessions_on_password_change(
     target: User, _value: str, oldvalue: object, _initiator: object
 ) -> None:
-    """Move *target*'s session epoch to now when its password hash is replaced."""
+    """Advance *target*'s session generation when its password hash is replaced."""
     if oldvalue is NO_VALUE or not oldvalue:
         # Account creation, or the empty placeholder the break-glass path
         # writes before it hashes: no password means no session can have been
-        # opened with one, so there is nothing to revoke. Stamping the epoch
-        # here would also overwrite the whole-second creation default with a
-        # microsecond value and refuse the account's own first token.
+        # opened with one, so there is nothing to revoke.
         return
-    target.session_epoch = datetime.now(tz=UTC)
+    target.session_generation = (target.session_generation or 0) + 1

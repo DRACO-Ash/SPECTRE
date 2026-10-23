@@ -1,12 +1,15 @@
 """CSRF protection for SPECTRE.
 
 Token = itsdangerous HMAC of a fixed payload keyed on (SECRET_KEY, session_cookie).
-Same session → same token. Automatically invalidated on login/logout because the
-session cookie changes.
+The whole cookie is keyed in, so the same session yields the same token and any
+new cookie yields a new one. Login and logout both mint or clear the cookie, so
+a token really is invalidated by either, and a token minted before a session
+epoch moved forward dies with the cookie it was bound to.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from fastapi import HTTPException, Request, status
@@ -30,9 +33,18 @@ def _signer(session_cookie: str) -> Signer:
     settings = get_settings()
     if not settings.secret_key:
         raise RuntimeError("SECRET_KEY environment variable is not set.")
-    # Incorporate first 32 chars of the session cookie into the salt so the
-    # token is unique per session without requiring a DB lookup.
-    return Signer(settings.secret_key, salt=f"spectre-csrf:{session_cookie[:32]}")
+    # The WHOLE cookie, digested. Truncating it to 32 characters stopped short
+    # of the signature, which is the only part that differs between two
+    # sessions minted moments apart. For a realistic operator name the window
+    # ended three characters into the timestamp, and those three encode the
+    # high bits of the clock, which hold still for hours: the token therefore
+    # outlived logout, came back identical at the next login and was unmoved
+    # by the session epoch, which is the opposite of what this module claimed.
+    # Digesting keeps the salt a fixed length whatever the cookie is. Every
+    # token minted under the old salt stops verifying, so a tab left open
+    # across the deploy gets one 403 and recovers on reload.
+    digest = hashlib.sha256(session_cookie.encode()).hexdigest()
+    return Signer(settings.secret_key, salt=f"spectre-csrf:{digest}")
 
 
 def make_csrf_token(session_cookie: str) -> str:

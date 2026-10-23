@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -121,7 +120,7 @@ async def post_login(
         return render(request, "login.html", {"error": "Invalid username or password."}, status_code=401)
 
     logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
-    token = make_session_cookie(username)
+    token = make_session_cookie(username, user.session_generation or 0)
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
         key=_COOKIE_NAME,
@@ -145,7 +144,7 @@ async def _revoke_sessions(db: AsyncSession, username: str) -> None:
     user = result.scalar_one_or_none()
     if user is None:
         return
-    user.session_epoch = datetime.now(tz=UTC)
+    user.session_generation = (user.session_generation or 0) + 1
     await db.commit()
 
 

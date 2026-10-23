@@ -33,6 +33,50 @@ class TestTokenBinding:
         b = make_csrf_token("session-b-" + "b" * 32)
         assert a != b
 
+    def test_two_cookies_sharing_a_32_character_prefix_differ(self) -> None:
+        """The salt once saw the first 32 characters of the cookie and no more.
+
+        A session cookie is payload.timestamp.signature, so 32 characters
+        reach the payload and part of the timestamp. For a username of 15
+        characters or more that is the username alone, which made the token a
+        pure function of the username: it survived logout, came back identical
+        at the next login and was untouched when the session epoch moved. The
+        security gate proved it with exactly this comparison.
+        """
+        shared = "x" * 32
+        assert make_csrf_token(shared + "-first-tail") != make_csrf_token(
+            shared + "-COMPLETELY-DIFFERENT-TAIL"
+        )
+
+    def test_a_token_does_not_verify_against_a_cookie_sharing_its_prefix(self) -> None:
+        """Differing is not enough; the other cookie must also be refused."""
+        shared = "x" * 32
+        stolen = make_csrf_token(shared + "-first-tail")
+        assert verify_csrf_token(shared + "-COMPLETELY-DIFFERENT-TAIL", stolen) is False
+
+    def test_the_old_truncation_point_never_reached_the_signature(self) -> None:
+        """Why 32 characters could not tell two sessions apart.
+
+        A cookie is payload.timestamp.signature, and the signature is the only
+        part that differs between two sessions minted moments apart. For a
+        realistic operator name the payload plus the separator already runs to
+        29 characters, so a 32-character window stopped three characters into
+        the timestamp and never saw the signature at all. Those three encode
+        the high bits of the clock, which hold still for hours, so logging out
+        and back in returned the identical token.
+
+        Pinned against the real cookie format rather than asserted in prose,
+        so a change to how sessions are minted cannot quietly make the comment
+        in ``csrf._signer`` wrong.
+        """
+        from spectre.web.auth import make_session_cookie
+
+        body, timestamp, _signature = make_session_cookie("operator.highland").rsplit(".", 2)
+        assert len(body) + 1 + len(timestamp) >= 32, (
+            "a 32-character window now reaches the signature; re-read the comment "
+            "in csrf._signer before trusting it"
+        )
+
     @pytest.mark.parametrize("bad", ["", "not-a-token", "csrf.tampered", "..", "x" * 200])
     def test_rejects_malformed_tokens(self, bad: str) -> None:
         assert verify_csrf_token("a-session-cookie-value", bad) is False
