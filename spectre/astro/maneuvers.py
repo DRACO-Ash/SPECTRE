@@ -579,11 +579,19 @@ def hbar_hop_intercept(
     )
 
 
+# Below this |h| (km^2/s) the state is rectilinear and has no orbit plane.
+_DEGENERATE_ANGULAR_MOMENTUM: float = 1e-10
+# A position this close to the plane (km) is on it.
+_ON_PLANE_KM: float = 1e-6
+# Plane-crossing time refined to this resolution (seconds).
+_CROSSING_RESOLUTION_S: float = 0.1
+
+
 def _unit_normal(sv: StateVector) -> np.ndarray:
     """Return the unit orbit normal h / |h| for *sv*."""
     h = np.cross(sv.r, sv.v)
     h_mag = float(np.linalg.norm(h))
-    return h / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+    return h / h_mag if h_mag > _DEGENERATE_ANGULAR_MOMENTUM else np.array([0.0, 0.0, 1.0])
 
 
 def _next_plane_crossing(
@@ -600,14 +608,14 @@ def _next_plane_crossing(
 
     step = timedelta(seconds=60.0)
     t0, f0 = start, height(start)
-    if abs(f0) < 1e-6:
+    if abs(f0) < _ON_PLANE_KM:
         return start
     end = start + timedelta(seconds=period_s)
     while t0 < end:
         t1 = t0 + step
         f1 = height(t1)
         if f0 * f1 <= 0.0:
-            while (t1 - t0).total_seconds() > 0.1:
+            while (t1 - t0).total_seconds() > _CROSSING_RESOLUTION_S:
                 tm = t0 + (t1 - t0) / 2
                 fm = height(tm)
                 if f0 * fm <= 0.0:

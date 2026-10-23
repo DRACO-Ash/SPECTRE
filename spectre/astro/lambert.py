@@ -86,7 +86,6 @@ def solve_lambert(
 
     # Cross product to determine transfer direction.
     cross = np.cross(r1, r2)
-    cross_z = cross[2]
 
     # Transfer angle.
     cos_dnu = np.dot(r1, r2) / (r1_mag * r2_mag)
@@ -97,17 +96,7 @@ def solve_lambert(
     # retrograde cases are mirror images of one another rather than two separate
     # rules: the long way round is taken whenever the requested direction
     # disagrees with the sign of the orbit normal.
-    if prograde is None and v1_initial is not None:
-        # Follow the satellite's own sense of motion. Keyed to +z alone, as it
-        # was, every retrograde orbit (inclination above 90 deg, so every
-        # sun-synchronous orbit) took the arc running against its motion, and
-        # the departure burn had to reverse it: about 15 km/s in LEO instead
-        # of a few hundred m/s (audit F-003).
-        h_departure = np.cross(r1, np.asarray(v1_initial, dtype=float))
-        long_way = float(np.dot(cross, h_departure)) < 0.0
-    else:
-        heading_plus_z = True if prograde is None else prograde
-        long_way = (cross_z < 0) if heading_plus_z else (cross_z >= 0)
+    long_way = _takes_long_way(r1, cross, prograde, v1_initial)
     dnu = 2.0 * math.pi - math.acos(cos_dnu) if long_way else math.acos(cos_dnu)
 
     # Collinear geometry has no unique transfer plane, and the guard for it has
@@ -172,6 +161,29 @@ def solve_lambert(
         total_delta_v=float(np.linalg.norm(dv1) + np.linalg.norm(dv2)),
         tof=tof,
     )
+
+
+def _takes_long_way(
+    r1: np.ndarray,
+    cross: np.ndarray,
+    prograde: bool | None,
+    v1_initial: np.ndarray | None,
+) -> bool:
+    """Return ``True`` when the transfer takes the reflex (2*pi - angle) arc.
+
+    *cross* is r1 x r2. With *prograde* ``None`` and a departure velocity
+    known, the arc follows the satellite's own sense of motion. Keyed to +z
+    alone, as it was, every retrograde orbit (inclination above 90 deg, so
+    every sun-synchronous orbit) took the arc running against its motion and
+    the departure burn had to reverse it: about 15 km/s in LEO instead of a
+    few hundred m/s (audit F-003). An explicit ``True`` or ``False`` keeps
+    Curtis's convention: positive or negative z component of r1 x r2.
+    """
+    if prograde is None and v1_initial is not None:
+        h_departure = np.cross(r1, np.asarray(v1_initial, dtype=float))
+        return float(np.dot(cross, h_departure)) < 0.0
+    heading_plus_z = True if prograde is None else prograde
+    return bool(cross[2] < 0) if heading_plus_z else bool(cross[2] >= 0)
 
 
 # ── Stumpff functions ─────────────────────────────────────────────────────────
