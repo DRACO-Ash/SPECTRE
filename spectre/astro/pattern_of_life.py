@@ -43,6 +43,37 @@ from spectre.astro.dv_estimation import (
 
 _EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
+# ── Element set format ────────────────────────────────────────────────────────
+
+# A TLE line is 69 columns by definition, the last of them the checksum, so
+# anything past column 69 is not element set data. The whole supplied line was
+# being stored on the record and rendered to the operator from there, which let
+# text appended past the checksum reach the console verbatim.
+#
+# THIS CUT IS NOT THE CONTROL, and reading it as one is how the escaping gets
+# weakened later. It BOUNDS a payload to 69 columns per line; it does not
+# sanitise one. A complete, working `<img src=x onerror=...>` fits inside 69
+# columns, survives this truncation intact, and still reaches the record and
+# the DOM. The load-bearing control is that pol_results.html renders the stored
+# text with no `| safe`, and the integration test that holds it there carries
+# its payload INSIDE the columns for exactly this reason.
+#
+# What the cut does buy is that a record carries element set data and nothing
+# else, so every future consumer of rec.tle starts from a bounded value.
+#
+# The length guard in parse_tle_history still spells the number out: editing
+# that line would pull its pre-existing complexity score into the quality
+# gate's new-code window, so it waits for the pass that reduces that function.
+_TLE_LINE_COLUMNS = 69
+
+#: Longitudes east of this wrap to the western hemisphere, so the drift series
+#: reads as a continuous track rather than jumping the dateline.
+_LONGITUDE_WRAP_DEG = 180.0
+
+#: Two intervals give one gap and no spread; three is the smallest sample from
+#: which a next-manoeuvre estimate carries any uncertainty worth printing.
+_MIN_INTERVALS_FOR_PREDICTION = 3
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 
 # Floor on the operator-supplied ΔV threshold (km/s). The real detection
@@ -61,6 +92,16 @@ _LONG_GAP_WARN_DAYS = 10.0  # days
 # catalogue interval of each other. Detections whose measured burn epochs fall
 # inside this window are merged into one event.
 _MERGE_WINDOW_FLOOR_DAYS = 0.25
+
+# Fewest distinct attribution keys a history must carry before its fits are
+# split by source. With fewer, every consecutive pair crosses the attribution
+# boundary, which is the cross-provider differencing the split exists to
+# prevent; the measurement behind that is recorded at the call site.
+_MIN_DISTINCT_SOURCES_TO_SPLIT = 2
+
+# Fewest detections for a merge to be possible at all. One detection has
+# nothing beside it to be a duplicate of.
+_MIN_MANOEUVRES_TO_MERGE = 2
 
 
 # Full forensic breakdowns are ~1.8 ms each against ~0.01 ms for the screening
@@ -311,7 +352,9 @@ def _gst_deg(epoch: datetime) -> float:
 
 
 def _satrec_to_record(tle: str) -> TLERecord:
-    lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]
+    # Cut to _TLE_LINE_COLUMNS here rather than only at the template, so the
+    # record carries element set data and nothing else. See the constant.
+    lines = [ln.strip()[:_TLE_LINE_COLUMNS] for ln in tle.strip().splitlines() if ln.strip()]
     if len(lines) < 2:
         raise ValueError("Need at least 2 TLE lines")
     l1, l2 = lines[-2], lines[-1]
@@ -338,7 +381,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
         mean_lon_eci = (raan_deg + argp_deg + ma_deg) % 360.0
         gst          = _gst_deg(epoch)
         lon          = (mean_lon_eci - gst) % 360.0
-        geo_lon      = lon - 360.0 if lon > 180.0 else lon
+        geo_lon      = lon - 360.0 if lon > _LONGITUDE_WRAP_DEG else lon
         # Drift rate: positive = east
         geo_drift = 360.0 * (n_revday - _EARTH_ROT)
 
@@ -349,7 +392,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
         esn = 0
 
     return TLERecord(
-        epoch=epoch, tle=tle,
+        epoch=epoch, tle="\n".join(lines),
         sma_km=sma, ecc=ecc, inc_deg=inc_deg,
         raan_deg=raan_deg, argp_deg=argp_deg, mean_anomaly_deg=ma_deg,
         mean_motion_revday=n_revday, bstar=sat.bstar,
@@ -430,7 +473,7 @@ def _build_pairs(records: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, f
     # cross-provider differencing this function exists to prevent, and it
     # defeated the cross_source warning too, because one side had no source to
     # compare.
-    if not attributed or (len(keys) < 2):
+    if not attributed or (len(keys) < _MIN_DISTINCT_SOURCES_TO_SPLIT):
         return [
             (records[i - 1], records[i],
              (records[i].epoch - records[i - 1].epoch).total_seconds() / 86400.0)
@@ -473,7 +516,7 @@ def _merge_duplicate_detections(manoeuvres: list[Manoeuvre],
     The sources that corroborated a surviving detection are recorded on it, so
     the evidence is auditable rather than reduced to a count.
     """
-    if len(manoeuvres) < 2:
+    if len(manoeuvres) < _MIN_MANOEUVRES_TO_MERGE:
         return manoeuvres, 0
 
     order = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "UNASSESSED": 3}
@@ -518,12 +561,32 @@ def _pick_best(cluster: list[Manoeuvre], order: dict[str, int]) -> Manoeuvre:
     return best
 
 
+#: Name of the inclination element as this module reports it. Held once because
+#: it is a map value, a score key and a return value in the same file (S1192).
+_ELEMENT_INCLINATION = "inclination"
+
 #: Which orbital element each ΔV channel moves.
 _CHANNEL_ELEMENT = {
     "along_track": "altitude",
-    "cross_track": "inclination",
+    "cross_track": _ELEMENT_INCLINATION,
     "radial":      "eccentricity",
 }
+
+#: Share of the total ΔV one channel must carry before it is named as the
+#: element this manoeuvre moved. Below it the burn moved more than one element,
+#: so "mixed" is the honest answer rather than whichever channel was largest.
+_DOMINANT_CHANNEL_SHARE = 0.6
+
+#: Floor on the scaled element deltas used by the fallback below. The scaling
+#: (km, degrees × 100, eccentricity × 1000) has no physical basis, as the
+#: function's docstring says, so this is a screening cut and not a measurement:
+#: under it nothing moved far enough to name an element at all.
+_ELEMENT_SCORE_FLOOR = 0.5
+
+#: Inclination change in degrees above which the fallback names a plane change
+#: outright, provided it also outweighs the altitude change. Same caveat: a
+#: screening cut on a path that runs only where no forensic breakdown exists.
+_PLANE_CHANGE_INC_DEG = 0.05
 
 
 def _dominant_element(d_alt: float, d_inc: float, d_ecc: float,
@@ -542,16 +605,16 @@ def _dominant_element(d_alt: float, d_inc: float, d_ecc: float,
     if breakdown is not None and breakdown.components:
         top = max(breakdown.components, key=lambda c: c.dv_km_s)
         total = sum(c.dv_km_s for c in breakdown.components)
-        if total > 0 and top.dv_km_s / total >= 0.6:
+        if total > 0 and top.dv_km_s / total >= _DOMINANT_CHANNEL_SHARE:
             return _CHANNEL_ELEMENT.get(top.channel, "mixed")
         return "mixed"
 
-    scores = {"altitude": abs(d_alt), "inclination": abs(d_inc) * 100,
+    scores = {"altitude": abs(d_alt), _ELEMENT_INCLINATION: abs(d_inc) * 100,
               "eccentricity": abs(d_ecc) * 1000}
-    if all(v < 0.5 for v in scores.values()):
+    if all(v < _ELEMENT_SCORE_FLOOR for v in scores.values()):
         return "mixed"
-    if abs(d_inc) > 0.05 and abs(d_inc) > abs(d_alt) * 0.1:
-        return "inclination"
+    if abs(d_inc) > _PLANE_CHANGE_INC_DEG and abs(d_inc) > abs(d_alt) * 0.1:
+        return _ELEMENT_INCLINATION
     return max(scores, key=lambda k: scores[k])
 
 
@@ -634,6 +697,50 @@ def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _tle_line_pairs(tle_text: str) -> list[tuple[str, str]]:
+    """Every line-1 and line-2 pairing in *tle_text*, in the order found.
+
+    A history block interleaves element sets with blank lines and occasional
+    stray text, so the scan steps two lines at a time only where a line 1 of
+    full width is actually followed by a line 2.
+    """
+    raw_lines = [ln.rstrip() for ln in tle_text.splitlines()]
+    pairs: list[tuple[str, str]] = []
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index].strip()
+        following = raw_lines[index + 1].strip() if index + 1 < len(raw_lines) else ""
+        if (
+            line.startswith("1 ")
+            and len(line) >= _TLE_LINE_COLUMNS
+            and following.startswith("2 ")
+        ):
+            pairs.append((line, following))
+            index += 2
+            continue
+        index += 1
+    return pairs
+
+
+def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
+    """Parse one pair, or None when it is unusable or a duplicate epoch.
+
+    A history block routinely carries the same element set twice from two
+    providers, and a malformed pair must drop out rather than stop the parse.
+    """
+    try:
+        rec = _satrec_to_record(f"{l1}\n{l2}")
+    except Exception:  # noqa: BLE001
+        # BLE001: sgp4 raises several unrelated types for a bad element set,
+        # and one unusable pair must not end the history.
+        return None
+    key = rec.epoch.strftime("%Y%j%H%M%S")
+    if key in seen:
+        return None
+    seen.add(key)
+    return rec
+
+
 def parse_tle_history(
     tle_text: str,
     satno: int | None = None,
@@ -651,40 +758,17 @@ def parse_tle_history(
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
     """
-    raw_lines = [ln.rstrip() for ln in tle_text.splitlines()]
-    pairs: list[tuple[str, str]] = []
-    i = 0
-    while i < len(raw_lines):
-        line = raw_lines[i].strip()
-        if not line:
-            i += 1
-            continue
-        if (
-            line.startswith("1 ")
-            and len(line) >= 69
-            and i + 1 < len(raw_lines)
-            and raw_lines[i + 1].strip().startswith("2 ")
-        ):
-            pairs.append((line, raw_lines[i + 1].strip()))
-            i += 2
-            continue
-        i += 1
-
     records: list[TLERecord] = []
     seen: set[str] = set()
-    for l1, l2 in pairs:
-        try:
-            rec = _satrec_to_record(f"{l1}\n{l2}")
-            key = rec.epoch.strftime("%Y%j%H%M%S")
-            if key not in seen:
-                seen.add(key)
-                if metadata and l1 in metadata:
-                    rec.data_mode, rec.source = metadata[l1]
-                if rms_metadata and l1 in rms_metadata:
-                    rec.rms_residual = rms_metadata[l1]
-                records.append(rec)
-        except Exception:
+    for l1, l2 in _tle_line_pairs(tle_text):
+        rec = _record_from_pair(l1, l2, seen)
+        if rec is None:
             continue
+        if metadata and l1 in metadata:
+            rec.data_mode, rec.source = metadata[l1]
+        if rms_metadata and l1 in rms_metadata:
+            rec.rms_residual = rms_metadata[l1]
+        records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
     return records
@@ -834,31 +918,32 @@ def analyse_pattern_of_life(
     # disagree by 4 m/s does not make 1 m/s detectable.
     effective_threshold = max(dv_threshold, noise.floor_km_s)
 
-    candidates = [(rp, rc, gap, dv)
-                  for (rp, rc, gap), dv in zip(pairs, screen_dv, strict=True)
-                  if dv >= effective_threshold]
+    screened_pairs = [(rp, rc, gap, dv)
+                      for (rp, rc, gap), dv in zip(pairs, screen_dv, strict=True)
+                      if dv >= effective_threshold]
     # Rank by screening ΔV so the largest events always get the full forensic
     # treatment even when the budget binds.
-    candidates.sort(key=lambda c: c[3], reverse=True)
-    rejected_below_floor = len(pairs) - len(candidates)
-    # Captured before `candidates` is rebound to the candidate-TIER manoeuvre
-    # list below. Reading it after the rebind made this counter the number of
-    # low-confidence manoeuvres minus the budget, which is negative in every
-    # realistic case and so reported zero however many detections were actually
-    # truncated.
-    pairs_over_forensic_budget = max(0, len(candidates) - _MAX_FULL_BREAKDOWNS)
+    screened_pairs.sort(key=lambda c: c[3], reverse=True)
+    rejected_below_floor = len(pairs) - len(screened_pairs)
+    # This used to be called `candidates`, and so did the candidate-TIER
+    # manoeuvre list two dozen lines below. Reading the counter after the
+    # rebind made it the number of low-confidence manoeuvres minus the budget,
+    # which is negative in every realistic case and so reported zero however
+    # many detections were actually truncated. Capturing it early fixed the
+    # count; the two names are now distinct, which is what stops it recurring.
+    pairs_over_forensic_budget = max(0, len(screened_pairs) - _MAX_FULL_BREAKDOWNS)
 
-    manoeuvres = _detect_manoeuvres(candidates, noise)
+    detected = _detect_manoeuvres(screened_pairs, noise)
 
-    rejected_on_evidence = len(candidates[:_MAX_FULL_BREAKDOWNS]) - sum(
-        1 for m in manoeuvres if m.breakdown is not None
+    rejected_on_evidence = len(screened_pairs[:_MAX_FULL_BREAKDOWNS]) - sum(
+        1 for m in detected if m.breakdown is not None
     )
 
     # One burn seen by two providers is one burn.
     gaps_seen = sorted(g for _, _, g in pairs)
     median_gap = gaps_seen[len(gaps_seen) // 2] if gaps_seen else 0.0
     detections, merged_duplicates = _merge_duplicate_detections(
-        manoeuvres, max(_MERGE_WINDOW_FLOOR_DAYS, median_gap),
+        detected, max(_MERGE_WINDOW_FLOOR_DAYS, median_gap),
     )
 
     # Two tiers. A detection is confirmed only where two independent estimators
@@ -880,16 +965,17 @@ def analyse_pattern_of_life(
     total_dv  = float(sum(dv_vals))
     sorted_m  = sorted(manoeuvres, key=lambda m: m.epoch)
 
-    intervals: list[float] = []
-    for j in range(1, len(sorted_m)):
-        intervals.append((sorted_m[j].epoch - sorted_m[j-1].epoch).total_seconds() / 86400.0)
+    intervals: list[float] = [
+        (sorted_m[j].epoch - sorted_m[j - 1].epoch).total_seconds() / 86400.0
+        for j in range(1, len(sorted_m))
+    ]
 
     dv_stats       = _pol_stats(dv_vals)
     interval_stats = _pol_stats(intervals)
 
     # Prediction
     next_est = next_unc = None
-    if interval_stats and interval_stats.n >= 3 and sorted_m:
+    if interval_stats and interval_stats.n >= _MIN_INTERVALS_FOR_PREDICTION and sorted_m:
         pred = sorted_m[-1].epoch + timedelta(days=interval_stats.mean)
         next_est = pred.strftime("%Y-%m-%d %H:%M UTC")
         next_unc = round(interval_stats.std * 2.0, 1)

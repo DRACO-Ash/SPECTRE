@@ -29,7 +29,6 @@ from spectre.astro.tactical import (
     formation_defence_burn,
     geo_drift,
     hbar_hop_sequence,
-    intercept_envelope_analytical,
     j2_drift_plan,
     min_time_intercept_analytical,
     nmc_safety_ellipse,
@@ -1174,7 +1173,6 @@ def intercept_envelope_intercept(
 
     t_epoch = manoeuvre_start + timedelta(seconds=coast_s)
     sv_red = red_orbit.propagate(t_epoch)
-    sv_blue = blue_orbit.propagate(t_epoch)
 
     # A true Lambert sweep, which is what this function's description always
     # claimed and never did. It previously called the radius-only analytic

@@ -384,6 +384,25 @@ def changed_line_ranges(base: str) -> dict[str, list[tuple[int, int]]]:
         if count == 0:  # a pure deletion touches no line of the new file
             continue
         ranges.setdefault(current, []).append((start, start + count - 1))
+
+    # An untracked file appears in no diff, so a module this branch ADDED would
+    # be scored by nothing. The whole of a new file is new code.
+    status = subprocess.run(  # noqa: S603
+        [git, "status", "--porcelain"],
+        cwd=_ROOT, capture_output=True, text=True, check=False,
+    )
+    for entry in status.stdout.splitlines():
+        if not entry.startswith("?? "):
+            continue
+        candidate = _ROOT / entry[3:].strip()
+        files = [candidate] if candidate.is_file() else sorted(candidate.rglob("*.py"))
+        for file in files:
+            if file.suffix != ".py":
+                continue
+            relative = str(file.relative_to(_ROOT))
+            line_count = len(file.read_text(encoding="utf-8").splitlines())
+            ranges.setdefault(relative, []).append((1, max(line_count, 1)))
+
     return ranges
 
 

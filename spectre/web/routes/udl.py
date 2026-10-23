@@ -57,6 +57,17 @@ _UDL_BASE = "https://unifieddatalibrary.com/udl"
 # than this cannot hold one and is logged whole rather than sliced to nothing.
 _TLE_EPOCH_FIELD_END = 32
 
+# One wording for the one action an operator can take about it, used by every
+# route that can be reached without credentials. It is also the literal whose
+# three copies raised python:S1192 once the precheck helper moved the first one
+# onto a changed line, so it has to stay a single definition.
+_NOT_CONNECTED_MESSAGE = "Not connected to UDL — use the UDL panel to log in first."
+
+# UDL spells the object name in camelCase or in upper case depending on which
+# provider filed the record, so both spellings are read at every site. Naming
+# the upper-case one keeps its three copies to a single literal (python:S1192).
+_UDL_NAME_KEY_UPPER = "OBJECT_NAME"
+
 
 async def fetch_tle_history_for_satno(
     satno: int,
@@ -227,7 +238,7 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
             if rec.get("source") and str(rec.get("source")).strip()
         })
         state.udl_available_sources = sources
-        logger.info("UDL TLE sources discovered: %s", sources)
+        logger.info("UDL TLE sources discovered: %s", log_safe(sources))
     except Exception as exc:
         logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
 
@@ -267,7 +278,10 @@ async def udl_login(
         if not resp.is_success:
             body = resp.text[:300].strip() or "(empty)"
             error = f"UDL probe returned HTTP {resp.status_code}: {body}"
-            logger.warning("UDL login probe %d for operator %s: %s", resp.status_code, log_safe(current_user.username), body)
+            logger.warning(
+                "UDL login probe %d for operator %s: %s",
+                resp.status_code, log_safe(current_user.username), log_safe(body),
+            )
             return render(request,
                 "partials/udl_status.html",
                 {"udl_user": None, "error": error},
@@ -296,7 +310,7 @@ async def udl_login(
     state.udl_username = username
     state.udl_password = password
     state.append_log(f"[UDL] Connected as {username}")
-    logger.info("UDL credentials stored for operator: %s", log_safe(current_user.username))
+    logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
     # Kick off background tasks (no-op for catalog if already loaded).
     asyncio.create_task(_fetch_onorbit_background(username, password))
@@ -370,7 +384,7 @@ async def udl_logout(
     state.udl_username = None
     state.udl_password = None
     state.append_log("[UDL] Disconnected")
-    logger.info("UDL credentials cleared for operator: %s", log_safe(current_user.username))
+    logger.info("UDL session closed for operator: %s", log_safe(current_user.username))
 
     return render(request,
         "partials/udl_status.html",
@@ -389,7 +403,7 @@ def _tle_precheck_error(state: SessionState, mode: str) -> str | None:
     against until scenario time is set.
     """
     if not state.udl_username or not state.udl_password:
-        return "Not connected to UDL — use the UDL panel to log in first."
+        return _NOT_CONNECTED_MESSAGE
     if mode == "epoch" and state.scenario_start is None:
         return "No scenario time set. Configure scenario time in the Scenario Configuration panel first."
     return None
@@ -442,14 +456,21 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
     Field names drift between UDL sources and a wrong pick is only ever
     diagnosed from the epochs that were on offer, so both go in the log.
     """
+    # Everything logged here comes off the wire, the record's own field names
+    # included, and a newline in any of it forges an audit entry
+    # (pythonsecurity:S5145), so each value goes through log_safe.
     # Log the keys from the first record so we can verify field names.
     if records:
         sample = records[0]
-        logger.info("UDL elset record keys: %s", list(sample.keys()))
+        # A real UDL elset carries twenty-odd fields, so the default 120
+        # character cap would truncate the very list this line exists to show.
+        # The cap is a flood guard, not the control: control characters are
+        # neutralised at any limit.
+        logger.info("UDL elset record keys: %s", log_safe(list(sample.keys()), limit=2000))
         # Also check for any epoch-like top-level field
         for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
             if key in sample:
-                logger.info("  record[%r] = %s", key, str(sample[key])[:80])
+                logger.info("  record[%r] = %s", key, log_safe(str(sample[key])[:80]))
 
     # Log every candidate's TLE line1 epoch for diagnostics.
     for i, candidate in enumerate(records):
@@ -460,9 +481,9 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
         logger.info(
             "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
             i,
-            l1_raw[18:_TLE_EPOCH_FIELD_END] if len(l1_raw) > _TLE_EPOCH_FIELD_END else l1_raw,
+            log_safe(l1_raw[18:_TLE_EPOCH_FIELD_END] if len(l1_raw) > _TLE_EPOCH_FIELD_END else l1_raw),
             ep.isoformat() if ep else "None",
-            candidate.get("objectName") or candidate.get("OBJECT_NAME") or "?",
+            log_safe(candidate.get("objectName") or candidate.get(_UDL_NAME_KEY_UPPER) or "?"),
         )
 
 
@@ -516,7 +537,7 @@ def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, 
     UDL spells the fields in camelCase or upper case depending on source, so
     both are read before falling back to the catalogue number.
     """
-    name = name_override.strip() or str(rec.get("objectName") or rec.get("OBJECT_NAME") or satno).strip()
+    name = name_override.strip() or str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER) or satno).strip()
     line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
     line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
     return name, f"{line1}\n{line2}", line1
@@ -587,7 +608,9 @@ async def fetch_tle(
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:300].strip() or "(empty)"
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}: {body}"
-        logger.warning(error)
+        # The message embeds the remote response body, so it cannot be used as
+        # the record verbatim (pythonsecurity:S5145).
+        logger.warning("%s", log_safe(error))
         return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": error},
@@ -689,7 +712,7 @@ async def fetch_statevector(
             {
     
                 "sv": None,
-                "error": "Not connected to UDL — use the UDL panel to log in first.",
+                "error": _NOT_CONNECTED_MESSAGE,
             },
         )
 
@@ -736,7 +759,7 @@ async def fetch_statevector(
 
     rec = data[0]
     sv = {
-        "name": str(rec.get("objectName") or rec.get("OBJECT_NAME", satno)).strip(),
+        "name": str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER, satno)).strip(),
         "epoch": rec.get("epoch", "—"),
         "x": rec.get("xpos"),
         "y": rec.get("ypos"),
@@ -753,7 +776,7 @@ async def fetch_statevector(
     logger.info(
         "State vector fetched for SATNO %s (%s) by operator %s",
         satno,
-        sv["name"],
+        log_safe(sv["name"]),
         log_safe(current_user.username),
     )
 
@@ -907,7 +930,7 @@ async def fetch_hrr(
     if not state.udl_username or not state.udl_password:
         return render(request,
             "partials/hrr_panel.html",
-            {**_empty_err, "error": "Not connected to UDL — use the UDL panel to log in first."},
+            {**_empty_err, "error": _NOT_CONNECTED_MESSAGE},
         )
 
     dm = state.udl_data_mode or "REAL"
@@ -916,7 +939,7 @@ async def fetch_hrr(
     )
 
     if error:
-        logger.warning("HRR fetch error for operator %s: %s", log_safe(current_user.username), error)
+        logger.warning("HRR fetch error for operator %s: %s", log_safe(current_user.username), log_safe(error))
         return render(request,
             "partials/hrr_panel.html", {**_empty_err, "error": error},
         )

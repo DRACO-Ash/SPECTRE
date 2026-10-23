@@ -6,7 +6,14 @@
    performs NO arithmetic on any ΔV. See the _pol_view docstring for why. #}
 
 {% set CONF_COL = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
-{% set POSTURE_COL = {"BENIGN":"#22c55e","ANNOYANCE":"#f59e0b","AGGRESSIVE":"#ef4444","BEYOND PLATFORM":"#a855f7"} %}
+{# Posture colour comes from the status tokens, not hex of its own. Five
+   competing maps for the same four postures had BEYOND PLATFORM rendering
+   #a855f7 here and #a78bfa on the sweep and screening panels, two violets
+   close enough to read as a rendering fault rather than a distinction,
+   which teaches the eye that the colour carries no meaning. The band each
+   posture maps to is the one threat_sweep.html already uses. Hex also did
+   not swap on the light theme, where every one of these failed WCAG AA. #}
+{% set POSTURE_COL = {"BENIGN":"var(--spectre-status-low)","ANNOYANCE":"var(--spectre-status-high)","AGGRESSIVE":"var(--spectre-status-critical)","BEYOND PLATFORM":"var(--spectre-status-violet)"} %}
 {% set CHAN_COL = {"along_track":"var(--ops-blue)","radial":"#a855f7","cross_track":"#f59e0b"} %}
 
 <div style="background:var(--panel-bg); border:1px solid rgba(59,139,235,0.4); border-radius:6px;

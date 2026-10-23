@@ -189,7 +189,7 @@ class TestSweepHelpers:
         assert epochs[0][1] == now
 
     def test_sweep_all_methods(self) -> None:
-        from spectre.web.routes.threat import _SweepRequest, _sweep_all_methods
+        from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)
@@ -213,7 +213,7 @@ class TestSweepHelpers:
         assert entries[0].delta_v_m_s > 0
 
     def test_sweep_all_methods_filters_by_max_dv(self) -> None:
-        from spectre.web.routes.threat import _SweepRequest, _sweep_all_methods
+        from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
 
         target = ThreatTarget("B_SAT_T", "", "blue", None)
         now = datetime(2024, 1, 1, tzinfo=UTC)

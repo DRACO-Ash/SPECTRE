@@ -732,8 +732,14 @@ function fetchOrbitalEvents() {
       document.getElementById('orbital-events').innerHTML = html;
     })
     .catch(function(err) {
-      document.getElementById('orbital-events').innerHTML =
-        '<p class="error-msg">Query failed: ' + err.message + '</p>';
+      /* textContent, not innerHTML: an Error message is not ours to trust as
+         markup, and nothing here needs it to be markup. */
+      var box = document.getElementById('orbital-events');
+      box.replaceChildren();
+      var p = document.createElement('p');
+      p.className = 'error-msg';
+      p.textContent = 'Query failed: ' + err.message;
+      box.appendChild(p);
     })
     .finally(function() {
       btn.disabled = false;
@@ -1203,31 +1209,67 @@ function switchToTradeSpace() {
       return;
     }
 
-    var html = '';
+    /* Built as DOM nodes, not as an HTML string.
+       _hrrGatherRows reads each cell with textContent, which DECODES what
+       Jinja escaped on the way out: a satellite name rendered into the table
+       as &lt;img src=x onerror=...&gt; is live markup again by the time it
+       reaches this function. Concatenating it into innerHTML executed it in
+       the analyst's authenticated session as soon as they typed one matching
+       character into the search box. Names reach the HRR tables from UDL and
+       from manual entry, so the payload needed no privilege to plant.
+       createTextNode and textContent cannot be talked out of treating their
+       argument as text, which is why they are used for every field below. */
+    dropdown.replaceChildren();
     matches.forEach(function(m, i) {
       var e = m.e;
-      var sideClass = e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue';
-      html += '<div class="hrr-dd-item ' + sideClass + '" data-idx="' + i + '" '
-            + 'onmousedown="_hrrSelect(' + i + ')">'
-            + '<span class="hrr-dd-name">' + _hrrHighlightText(e.name, query) + '</span>'
-            + '<span class="hrr-dd-meta">' + e.satno + ' &middot; ' + e.country
-            + ' &middot; ' + e.orbit + ' &middot; Rank ' + e.rank
-            + ' &middot; <em>' + e.side + '</em></span>'
-            + '</div>';
+      var item = document.createElement('div');
+      item.className = 'hrr-dd-item '
+                     + (e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue');
+      item.setAttribute('data-idx', String(i));
+      /* A listener rather than an onmousedown attribute: the attribute had to
+         be assembled as markup, which is the habit this change removes. */
+      item.addEventListener('mousedown', function() { window._hrrSelect(i); });
+
+      var name = document.createElement('span');
+      name.className = 'hrr-dd-name';
+      _hrrAppendHighlighted(name, e.name, query);
+
+      var meta = document.createElement('span');
+      meta.className = 'hrr-dd-meta';
+      meta.appendChild(document.createTextNode(
+        e.satno + ' \u00b7 ' + e.country + ' \u00b7 ' + e.orbit
+        + ' \u00b7 Rank ' + e.rank + ' \u00b7 '
+      ));
+      var side = document.createElement('em');
+      side.textContent = e.side;
+      meta.appendChild(side);
+
+      item.appendChild(name);
+      item.appendChild(meta);
+      dropdown.appendChild(item);
     });
-    dropdown.innerHTML = html;
     dropdown.style.display = '';
 
     /* Stash matches for select handler. */
     window._hrrMatches = matches;
   }
 
-  function _hrrHighlightText(text, query) {
+  /* Appends *text* to *parent* with the matched run wrapped in <mark>.
+     The predecessor returned an HTML string for the caller to concatenate,
+     which is how the payload got in. This one builds the <mark> as an element
+     and everything around it as text nodes, so there is no string for markup
+     to hide in. */
+  function _hrrAppendHighlighted(parent, text, query) {
     var idx = text.toLowerCase().indexOf(query);
-    if (idx < 0) return text;
-    return text.substring(0, idx)
-         + '<mark>' + text.substring(idx, idx + query.length) + '</mark>'
-         + text.substring(idx + query.length);
+    if (idx < 0) {
+      parent.appendChild(document.createTextNode(text));
+      return;
+    }
+    parent.appendChild(document.createTextNode(text.substring(0, idx)));
+    var mark = document.createElement('mark');
+    mark.textContent = text.substring(idx, idx + query.length);
+    parent.appendChild(mark);
+    parent.appendChild(document.createTextNode(text.substring(idx + query.length)));
   }
 
   window._hrrSelect = function(idx) {

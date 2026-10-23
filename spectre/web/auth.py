@@ -119,8 +119,12 @@ async def require_admin(
 
 
 async def optional_login(
+    # Annotated rather than a Depends default (python:S8410). Annotated carries
+    # no default, so this parameter has to precede the cookie, which does have
+    # one. FastAPI resolves dependencies by name and the only call site is
+    # Depends(optional_login), so no caller passes these positionally.
+    db: Annotated[AsyncSession, Depends(get_db)],
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
-    db: AsyncSession = Depends(get_db),
 ) -> User | None:
     """Return the authenticated user, or ``None`` when there is no valid session.
 

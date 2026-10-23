@@ -30,10 +30,33 @@ def _git(*args: str) -> str:
 
 
 def changed_lines(base: str) -> dict[str, set[int]]:
-    """Return ``{repo-relative path: {lines added or modified}}`` against *base*."""
+    """Return ``{repo-relative path: {lines added or modified}}`` against *base*.
+
+    Against the MERGE BASE and the WORKING TREE, not against HEAD.
+
+    This read ``base...HEAD`` until 0.5.25, which compares COMMITS while the
+    linter above reads the WORKING TREE. The two then disagree by exactly the
+    number of lines the uncommitted edits add or remove, and every finding
+    below the first such edit is scored against the wrong line. It shows up as
+    four pre-existing smells appearing from nowhere, which is the harmless
+    direction; the same offset silently moves a real finding OUT of scope,
+    which is not. The artefact is built from the working tree, so the working
+    tree is what has to be measured.
+    """
+    git_dir_check = _git("rev-parse", "--is-inside-work-tree").strip()
+    if git_dir_check != "true":
+        return {}
+
+    # merge-base, so that commits landing on the base branch after this one
+    # started do not read as this branch's work.
+    try:
+        anchor = _git("merge-base", base, "HEAD").strip() or base
+    except subprocess.CalledProcessError:
+        anchor = base
+
     changed: dict[str, set[int]] = {}
     path = ""
-    for line in _git("diff", "-U0", f"{base}...HEAD").splitlines():
+    for line in _git("diff", "-U0", anchor).splitlines():
         if line.startswith("+++ b/"):
             path = line[6:]
             changed.setdefault(path, set())
@@ -43,6 +66,19 @@ def changed_lines(base: str) -> dict[str, set[int]]:
                 start = int(match.group(1))
                 count = int(match.group(2) or 1)
                 changed[path].update(range(start, start + count))
+
+    # An untracked file is in no diff at all, so without this every finding in
+    # a file added by this branch is dropped and the gate reports clean on code
+    # it never looked at. A new file is entirely new code.
+    for entry in _git("status", "--porcelain").splitlines():
+        if not entry.startswith("?? "):
+            continue
+        candidate = Path(entry[3:].strip())
+        for file in ([candidate] if candidate.is_file() else candidate.rglob("*.py")):
+            if file.suffix == ".py":
+                line_count = len(file.read_text(encoding="utf-8").splitlines())
+                changed.setdefault(str(file), set()).update(range(1, line_count + 2))
+
     return changed
 
 

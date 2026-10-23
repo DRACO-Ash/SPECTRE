@@ -68,11 +68,15 @@ class TestTheAssessmentsOwnEventsAreNotCalledRoutine:
         ("Rapid GEO relocation, 90° in 3 days",        170.0, "along_track", "GEO", 35800.0, 2342.0),
     ]
 
-    @pytest.mark.parametrize(("label", "dv", "channel", "regime", "alt", "d_alt"), _EVENTS)
+    # Taken as one parameter rather than six because six trips the project's
+    # argument-count rules (PLR0913 and PLR0917) on new code. The cases, the
+    # order they run in and what each asserts are unchanged, and ids= keeps
+    # each case named by its label.
+    @pytest.mark.parametrize("event", _EVENTS, ids=[case[0] for case in _EVENTS])
     def test_a_named_counterspace_event_is_never_routine(
-        self, label: str, dv: float, channel: str, regime: str,
-        alt: float, d_alt: float,
+        self, event: tuple[str, float, str, str, float, float],
     ) -> None:
+        label, dv, channel, regime, alt, d_alt = event
         classification, _, _ = _classify(dv, channel, regime, _geo_ceiling(), alt, d_alt)
         assert classification != "station keeping", (
             f"{label} at {dv} m/s classified as routine station-keeping"
@@ -552,12 +556,13 @@ class TestReviewFindings:
         from spectre.domain.threat_assessment import CapabilityEvidence
 
         platform = platform_class_for_regime("GEO")
-        bands = []
-        for spent in (0.0, 150.0, 200.0):
-            bands.append(CapabilityEvidence(
+        bands = [
+            CapabilityEvidence(
                 discretionary_remaining_m_s=max(0.0, platform.discretionary_max_m_s - spent),
                 discretionary_max_m_s=platform.discretionary_max_m_s,
-            ).band())
+            ).band()
+            for spent in (0.0, 150.0, 200.0)
+        ]
         assert len(set(bands)) > 1, "the signal must vary with what is left"
         assert bands[0] > bands[-1]
 

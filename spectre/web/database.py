@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -102,6 +103,41 @@ def _existing_columns(sync_conn: Any, table: str) -> set[str]:
     return {column["name"] for column in inspector.get_columns(table)}
 
 
+# ALTER TABLE accepts no bind parameters. The table, the column and the type
+# are part of the statement text rather than values, so this one statement has
+# to be assembled by interpolation; there is no parameterised form of it to
+# reach for. Every entry in the migration list is a literal declared three
+# lines above the loop, so nothing operator-supplied reaches it today.
+#
+# This guard is what keeps that true. A migration sourced later from settings,
+# an environment variable or a plugin would otherwise be concatenated into DDL
+# unexamined, and the statement runs as the application's own database user.
+# Anything that is not a bare identifier, or a type clause drawn from a narrow
+# vocabulary, stops here rather than at the database.
+_SQL_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
+
+# Uppercase keywords, digits, spaces, brackets and quotes: enough for the
+# column types this project declares and nothing that can end a statement or
+# open a comment. No semicolon, no hyphen, no slash, no double quote.
+_SQL_COLUMN_DEFINITION = re.compile(r"[A-Z0-9 ()']{1,64}")
+
+
+def _assert_safe_ddl(table: str, column: str, definition: str) -> None:
+    """Raise unless all three parts of an ALTER TABLE are safe to interpolate.
+
+    Raising is deliberate. A migration that fails this check is a programming
+    error, and the alternative - skipping it - leaves the schema silently
+    short of a column while the application starts and serves traffic.
+    """
+    for label, value, pattern in (
+        ("table", table, _SQL_IDENTIFIER),
+        ("column", column, _SQL_IDENTIFIER),
+        ("definition", definition, _SQL_COLUMN_DEFINITION),
+    ):
+        if not pattern.fullmatch(value):
+            raise ValueError(f"unsafe migration {label}: {value!r}")
+
+
 async def _apply_migrations(conn: Any) -> None:
     """Apply additive ALTER TABLE migrations that are safe to re-run.
 
@@ -118,6 +154,7 @@ async def _apply_migrations(conn: Any) -> None:
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ]
     for table, column, definition in migrations:
+        _assert_safe_ddl(table, column, definition)
         existing = await conn.run_sync(_existing_columns, table)
         if not existing:
             continue  # table absent, so create_all will build it complete

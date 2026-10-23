@@ -1,3 +1,13 @@
+{#- The one posture-to-band map for this panel, so nothing here can drift into
+    a sixth palette. Five competing maps for the same four postures is what
+    taught the eye that the colour was not meaningful. Whitespace is trimmed
+    either side so the fragment still starts at its first element. -#}
+{%- set posture_bands = {
+      'BENIGN': 'low',
+      'ANNOYANCE': 'high',
+      'AGGRESSIVE': 'critical',
+      'BEYOND PLATFORM': 'violet'
+    } -%}
 {% if error %}
 <p class="error-msg">{{ error }}</p>
 {% elif not assessment %}
@@ -14,11 +24,14 @@
   </div>
 
   {% if manual_red_confidence %}
-  {% set conf_color = "#22c55e" if manual_red_confidence == "CONFIRMED" else "#f59e0b" if manual_red_confidence == "HIGH" else "#3b8beb" if manual_red_confidence == "MEDIUM" else "#94a3b8" if manual_red_confidence == "LOW" else "#64748b" %}
-  <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.7rem; margin:0.3rem 0; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.3); border-radius:4px; font-size:0.75rem">
+  {# The confidence scale borrows the band palette rather than carrying hex of
+     its own: hex here did not swap on the light theme, where every one of
+     these five failed WCAG AA as text. #}
+  {% set conf_band = "low" if manual_red_confidence == "CONFIRMED" else "high" if manual_red_confidence == "HIGH" else "medium" if manual_red_confidence == "MEDIUM" else "unknown" if manual_red_confidence == "LOW" else "minimal" %}
+  <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.7rem; margin:0.3rem 0; background:rgba(var(--spectre-status-high-rgb), 0.07); border:1px solid rgba(var(--spectre-status-high-rgb), 0.30); border-radius:4px; font-size:0.75rem">
     <span style="font-size:0.8rem">&#9888;</span>
     <span style="color:var(--text-dim)">Red TLE source: <strong style="color:var(--text-primary)">MANUAL OVERRIDE</strong> &mdash; orbital mechanics computed from operator-supplied TLE.</span>
-    <span style="background:{{ conf_color }}22; color:{{ conf_color }}; font-size:0.65rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em; white-space:nowrap">{{ manual_red_confidence }}</span>
+    <span style="background:rgba(var(--spectre-status-{{ conf_band }}-rgb), 0.13); color:var(--spectre-status-{{ conf_band }}); font-size:0.65rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em; white-space:nowrap">{{ manual_red_confidence }}</span>
   </div>
   {% endif %}
 
@@ -27,7 +40,10 @@
 
     {# ── Banner header ── #}
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap">
-      <span style="background:{{ worst_coa.threat_color }}; color:#fff; font-size:0.7rem; font-weight:700; padding:0.2rem 0.5rem; border-radius:3px; letter-spacing:0.05em; text-transform:uppercase">&#9888; {{ worst_coa.threat_level }} THREAT</span>
+      {# White on the band's own colour measured 2.15:1 for HIGH and 2.28:1
+         for LOW. .spectre-band-badge carries the darkened fill token, which
+         clears 4.5:1 in both themes. #}
+      <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
       <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
       <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
     </div>
@@ -54,14 +70,9 @@
        A delta-v figure on its own means nothing to an operator: 50 m/s is one
        routine year at GEO and fifty years of it at MEO. The posture reads it
        against what satellites actually do. #}
-    {% set _posture_colour = {
-         'BENIGN': '#22c55e',
-         'ANNOYANCE': '#f59e0b',
-         'AGGRESSIVE': '#ef4444',
-         'BEYOND PLATFORM': '#a78bfa'
-       }.get(worst_coa.posture_label, '#94a3b8') %}
+    {% set _posture_band = posture_bands.get(worst_coa.posture_label, 'unknown') %}
     <div style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.5rem; font-size:0.72rem">
-      <span style="background:{{ _posture_colour }}22; color:{{ _posture_colour }}; border:1px solid {{ _posture_colour }}66;
+      <span style="background:rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.13); color:var(--spectre-status-{{ _posture_band }}); border:1px solid rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.40);
                    font-size:0.65rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:3px;
                    letter-spacing:0.05em; white-space:nowrap">{{ worst_coa.posture_label }}</span>
       <span style="color:var(--text-dim)" title="{{ worst_coa.posture_basis }}">{{ worst_coa.posture_rationale }}</span>
@@ -71,9 +82,9 @@
     {# Reserve is not the ability to spend it in time. An all-electric bus holds
        1,500 m/s but thrusts at 0.27 N, so it needs about 64 days to deliver
        500 m/s. An impulsive solution arriving in an hour is not flyable. #}
-    <div style="border-left:3px solid #a78bfa; background:rgba(167,139,250,0.07); padding:0.4rem 0.6rem;
+    <div style="border-left:3px solid var(--spectre-status-violet); background:rgba(var(--spectre-status-violet-rgb), 0.07); padding:0.4rem 0.6rem;
                 margin-bottom:0.5rem; font-size:0.72rem; color:var(--text-dim)">
-      <strong style="color:#a78bfa">NOT FLYABLE</strong> &#183; {{ worst_coa.undeliverable_reason }}
+      <strong style="color:var(--spectre-status-violet)">NOT FLYABLE</strong> &#183; {{ worst_coa.undeliverable_reason }}
     </div>
     {% endif %}
 
@@ -122,15 +133,15 @@
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Prograde {{ worst_coa.pro_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:#3b8beb; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Normal {{ worst_coa.nor_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:#a855f7; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Radial {{ worst_coa.rad_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:#f59e0b; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
       </div>
     </div>
 
@@ -204,7 +215,8 @@
           <th onclick="threatSort(3,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">HRR <span class="hrr-sort-ind"></span></th>
           <th onclick="threatSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Best &#916;V <span class="hrr-sort-ind"></span></th>
           <th onclick="threatSort(5,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Best Method <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(6,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Profiles <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Posture <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col">Profiles <span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -228,11 +240,12 @@
             {% if group.target.target_source == "manual" %}
               manual
               {% set conf = group.target.confidence | upper %}
-              {% if conf == "CONFIRMED" %}<span style="background:#22c55e22;color:#22c55e;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "HIGH" %}<span style="background:#f59e0b22;color:#f59e0b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "MEDIUM" %}<span style="background:#3b8beb22;color:#3b8beb;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "LOW" %}<span style="background:#94a3b822;color:#94a3b8;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf %}<span style="background:#64748b22;color:#64748b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% if conf %}
+              {# Same five-step scale as the manual-override banner, on the same
+                 band tokens, so one confidence word cannot render in two
+                 colours and neither of them swaps with the theme. #}
+              {% set row_conf_band = "low" if conf == "CONFIRMED" else "high" if conf == "HIGH" else "medium" if conf == "MEDIUM" else "unknown" if conf == "LOW" else "minimal" %}
+              <span style="background:rgba(var(--spectre-status-{{ row_conf_band }}-rgb), 0.13);color:var(--spectre-status-{{ row_conf_band }});font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
               {% endif %}
             {% else %}
               {{ group.target.target_source }}
@@ -241,6 +254,11 @@
           <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
           <td class="mnv-dv"><strong>{{ "%.3f" | format(group.best_dv) }}</strong></td>
           <td class="col-dim">{{ group.best_method }}</td>
+          {# The row tint encodes this posture, so the word has to be on the
+             collapsed row as well. Carried by colour alone it was invisible to
+             a colourblind operator, to a greyscale print and to the light
+             theme, where both tints wash out. #}
+          <td class="col-dim">{{ group.best_posture or '—' }}</td>
           <td class="col-dim">
             <span class="threat-profile-badge">{{ group.profile_count }}</span>
           </td>
@@ -250,7 +268,7 @@
         {% if group.osint %}
         {% set pair = group.osint %}
         <tr class="threat-child threat-children-{{ loop.index0 }}" style="display:none">
-          <td colspan="7" style="padding:0 0.5rem 0.4rem 2.5rem">
+          <td colspan="8" style="padding:0 0.5rem 0.4rem 2.5rem">
             {% set pair_label = "TARGET INTEL" %}
             {% include "partials/pair_card.html" %}
           </td>
@@ -271,6 +289,7 @@
           <th onclick="childSort({{ group_idx }},3,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-3">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
           <th onclick="childSort({{ group_idx }},4,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-4">TOF <span class="hrr-sort-ind"></span></th>
           <th onclick="childSort({{ group_idx }},5,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-5">Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},6,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-6">Posture <span class="hrr-sort-ind"></span></th>
           <th class="no-sort">Action</th>
         </tr>
         {% for child in group.children %}
@@ -286,6 +305,10 @@
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
             {{ child.entry.method }}
           </td>
+          {# data-threat on the row above tints it by posture. Printing the
+             posture here means the tint reinforces a word the operator can
+             read rather than being the only place it appears. #}
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ child.entry.posture_label or '—' }}</td>
           <td class="col-actions" style="white-space:nowrap">
             {% if child.entry.method == "hohmann" %}
             <button class="btn-secondary btn-sm"

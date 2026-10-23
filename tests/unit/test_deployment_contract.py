@@ -8,6 +8,7 @@ unzip of the artefact, and the platform's own checkout.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -15,6 +16,10 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
+
+# Named once because the packaging allowlist assertion below is its third
+# reader, and three occurrences of one literal is what python:S1192 reports.
+_DOCKERIGNORE = ".dockerignore"
 
 
 
@@ -206,7 +211,7 @@ class TestImageHardening:
 
 class TestPackaging:
     def test_dockerignore_exists_and_excludes_secrets(self) -> None:
-        body = _repo_only(".dockerignore").read_text(encoding="utf-8")
+        body = _repo_only(_DOCKERIGNORE).read_text(encoding="utf-8")
         assert ".env" in body
         assert ".git" in body
 
@@ -838,7 +843,7 @@ class TestBuildContextContract:
         pattern we cannot evaluate is skipped rather than guessed at, so the
         test never invents a failure it cannot justify.
         """
-        body = _repo_only(".dockerignore").read_text(encoding="utf-8")
+        body = _repo_only(_DOCKERIGNORE).read_text(encoding="utf-8")
         patterns = []
         for raw in body.splitlines():
             line = raw.strip()
@@ -991,13 +996,30 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
     _TEMPLATES = _REPO_ROOT / "spectre" / "web" / "templates"
     _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bonclick\b[^>]*>", re.IGNORECASE | re.DOTALL)
     _KEYBOARD = re.compile(r"\bon(keydown|keypress|keyup)\b", re.IGNORECASE)
+    _TABINDEX = re.compile(r'\btabindex\s*=\s*"(-?\d+)"', re.IGNORECASE)
+
+    def _answers_the_keyboard(self, element: str) -> bool:
+        """A key handler on an element the keyboard cannot reach fires for nobody.
+
+        Neither <tr> nor <th> is focusable by default, and those two tags
+        are the whole population this class matches, so nothing natively
+        focusable is dragged in by requiring the attribute. Until this was
+        added the test accepted an onkeydown with no tabindex, which is the
+        exact shape its own failure message tells the author to fix: the
+        element never receives the key event, so the keyboard equivalent is
+        dead while the test reports green.
+        """
+        if not self._KEYBOARD.search(element):
+            return False
+        tabindex = self._TABINDEX.search(element)
+        return tabindex is not None and int(tabindex.group(1)) >= 0
 
     def _offenders(self) -> list[str]:
         offenders = []
         for path in sorted(self._TEMPLATES.rglob("*.html")):
             body = path.read_text(encoding="utf-8")
             for match in self._CLICKABLE.finditer(body):
-                if self._KEYBOARD.search(match.group(0)):
+                if self._answers_the_keyboard(match.group(0)):
                     continue
                 line = body[: match.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(_REPO_ROOT)}:{line}")
@@ -1006,7 +1028,8 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
     def test_no_clickable_row_or_header_is_mouse_only(self) -> None:
         offenders = self._offenders()
         assert not offenders, (
-            f"{len(offenders)} clickable <tr>/<th> have no keyboard equivalent: "
+            f"{len(offenders)} clickable <tr>/<th> are unreachable from the "
+            f"keyboard, for want of a handler or of a focusable tabindex: "
             f'{offenders[:8]}. Add tabindex="0" onkeydown="spectreActivate(event)".'
         )
 
@@ -1062,11 +1085,21 @@ class TestThePackagerShipsWhatTheGatesRead:
 
     def test_the_stages_that_read_a_file_still_get_it(self) -> None:
         """Each entry is named with the stage that fails without it."""
+        # README.md is deliberately absent: no stage reads it, it is there to
+        # be read by a reviewer, so dropping it would cost a submission
+        # nothing and requiring it would assert more than we know.
         required = {
             "Dockerfile": "Container Build; also what selects the container template",
             "requirements.txt": "Dependency Scanning reads it, and the Test stage installs from it",
             "requirements-runtime.txt": "the image build installs from it",
             "pyproject.toml": "carries the pytest and coverage configuration the Test stage uses",
+            _DOCKERIGNORE: "shapes the Container Build context",
+            "sonar-project.properties": (
+                "the archive carries the Code Quality configuration, sonar.projectVersion "
+                "and sonar.sources. 0.5.24 proved the platform may scan a checkout that "
+                "does not have it, which is a question for the platform team and not a "
+                "reason to stop shipping it"
+            ),
             "spectre": "the application",
             "tests": "the Test stage runs them",
             "tle_clustering": "imported under a try/except, so its absence degrades silently",
@@ -1092,6 +1125,208 @@ class TestThePackagerShipsWhatTheGatesRead:
         )
 
 
+#: Paths under these roots are application code. They travel in every package
+#: and in the platform's checkout, so reading one directly assumes nothing.
+_APPLICATION_PREFIXES = ("spectre", "tests", "tle_clustering")
+
+#: Asking a path whether it is there is the question the guard exists to force.
+_PRESENCE_ATTRS = ("is_file", "exists", "is_dir")
+
+#: Both shapes a test can be written in, since an async one is a function
+#: the guard would otherwise climb straight past.
+_FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+#: What a test module binds its own repository root to, whatever it calls it:
+#: _REPO_ROOT here, _ROOT in four other modules under tests/.
+_ROOT_EXPRESSION = re.compile(r"Path\(__file__\)(?:\.resolve\(\))?\.parents\[\d+\]")
+
+
+def _ast_parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    """Child-to-parent index, because ast nodes carry no parent reference."""
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def _root_names(tree: ast.Module) -> set[str]:
+    """The names a module binds to its own repository root.
+
+    Resolved per module rather than hardcoding _REPO_ROOT, which is what kept
+    this rule inside one file while the same assumption elsewhere under tests/
+    could still fail the platform's Test stage.
+    """
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and _ROOT_EXPRESSION.fullmatch(ast.unparse(node.value)):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def _skip_guards(tree: ast.Module) -> set[str]:
+    """Module-level functions that skip, so opening a test with one is a guard.
+
+    _repo_only() here, _repository_only() in test_docs_are_committable.py and
+    test_hrr_bootstrap.py: each decides once whether the environment carries
+    the material the test reads, and skips when it does not.
+    """
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, _FUNCTION_NODES) and "pytest.skip" in ast.unparse(node)
+    }
+
+
+def _whole_path(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST:
+    """The whole ``root / "a" / "b"`` expression, not its leftmost segment.
+
+    Without this a chained path reads as unguarded even where the expression
+    it belongs to is presence-checked, which is how scripts/ is reached in
+    tests/unit/test_cognitive_complexity_meter.py.
+    """
+    parent = parents.get(node)
+    while isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Div):
+        node, parent = parent, parents.get(parent)
+    return node
+
+
+def _inside_an_assert(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Asserting a path is present is the defect, not a guard against it.
+
+    This is the whole class of failure: three releases died on a test that
+    asked whether a file was there and then asserted the answer, rather
+    than skipping on it.
+    """
+    while node is not None and not isinstance(node, ast.stmt):
+        node = parents.get(node)
+    return isinstance(node, ast.Assert)
+
+
+def _enclosing_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
+    while node is not None and not isinstance(node, _FUNCTION_NODES):
+        node = parents.get(node)
+    return node
+
+
+def _bound_name(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str | None:
+    """The single name this path expression is assigned to, if any."""
+    parent = parents.get(node)
+    if not isinstance(parent, ast.Assign) or len(parent.targets) != 1:
+        return None
+    target = parent.targets[0]
+    return target.id if isinstance(target, ast.Name) else None
+
+
+def _opens_with_a_guard(function: ast.AST | None, guards: set[str]) -> bool:
+    """True when the test's FIRST statement calls one of the module's guards.
+
+    Only the first statement counts, so a guard taken out for one file cannot
+    be read as cover for a later, unrelated read.
+    """
+    if not isinstance(function, _FUNCTION_NODES) or not function.body:
+        return False
+    first = function.body[0]
+    call = first.value if isinstance(first, (ast.Expr, ast.Assign)) else None
+    return (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id in guards
+    )
+
+
+def _name_is_presence_checked(
+    name: str | None, function: ast.AST | None, parents: dict[ast.AST, ast.AST],
+) -> bool:
+    """True when the name the path was bound to is asked whether it is there.
+
+    tests/unit/test_operator_sees_metres_per_second.py takes its guard this
+    way: it binds docs/generate_guide.py to a local, then skips on .exists().
+
+    Two conditions, and both are load-bearing. The attribute must actually be
+    CALLED, because ``path.is_file`` without parentheses is a truthy bound
+    method and guards nothing. And it must not sit inside an assert, because
+    asserting a file is present is the defect this whole class exists to
+    catch, not a guard against it.
+
+    Without the second condition this allowance is strictly WEAKER than the
+    inline rule beside it: binding the path to a local first would launder
+    exactly the construct that killed 0.5.24,
+
+        p = _REPO_ROOT / "sonar-project.properties"
+        assert p.is_file()
+
+    which reads as a guard to the walker and dies on the platform.
+    """
+    if name is None or function is None:
+        return False
+    return any(
+        isinstance(sub, ast.Call)
+        and isinstance(sub.func, ast.Attribute)
+        and sub.func.attr in _PRESENCE_ATTRS
+        and isinstance(sub.func.value, ast.Name)
+        and sub.func.value.id == name
+        and not _inside_an_assert(sub, parents)
+        for sub in ast.walk(function)
+    )
+
+
+def _is_the_root(node: ast.AST, roots: set[str]) -> bool:
+    """The repository root, named or written out at the point of use.
+
+    Both forms occur under tests/, and a rule that saw only the named one
+    would miss the shape it is most likely to be written in by someone who
+    has not read this class.
+    """
+    if isinstance(node, ast.Name):
+        return node.id in roots
+    return bool(_ROOT_EXPRESSION.fullmatch(ast.unparse(node)))
+
+
+def _non_application_name(node: ast.AST, roots: set[str]) -> str | None:
+    """The literal in ``root / "name"`` when it is not application code."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+        return None
+    left, right = node.left, node.right
+    if not _is_the_root(left, roots):
+        return None
+    if not (isinstance(right, ast.Constant) and isinstance(right.value, str)):
+        return None
+    if right.value.startswith(_APPLICATION_PREFIXES):
+        return None
+    return right.value
+
+
+def _is_guarded(node: ast.AST, parents: dict[ast.AST, ast.AST], tree: ast.Module,
+                guards: set[str]) -> bool:
+    """True when this read skips, rather than fails, where the file is absent."""
+    whole = _whole_path(node, parents)
+    parent = parents.get(whole)
+    if isinstance(parent, ast.Attribute) and parent.attr in _PRESENCE_ATTRS:
+        return not _inside_an_assert(whole, parents)
+    if isinstance(parent, ast.Assign) and parents.get(parent) is tree:
+        return True
+    function = _enclosing_function(whole, parents)
+    if _opens_with_a_guard(function, guards):
+        return True
+    return _name_is_presence_checked(_bound_name(whole, parents), function, parents)
+
+
+def _unguarded_reads(module: Path) -> list[str]:
+    """Every non-application path this module reads with nothing to skip on."""
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    roots = _root_names(tree)
+    parents = _ast_parents(tree)
+    guards = _skip_guards(tree)
+    offenders = []
+    for node in ast.walk(tree):
+        name = _non_application_name(node, roots)
+        if name is None or _is_guarded(node, parents, tree, guards):
+            continue
+        offenders.append(f"{module.relative_to(_REPO_ROOT)}:{node.lineno}: {name}")
+    return offenders
+
+
 class TestNoTestAssertsAFileIsPresent:
     """The class that failed this project three times, pinned.
 
@@ -1101,56 +1336,87 @@ class TestNoTestAssertsAFileIsPresent:
     sonar-project.properties absent from the platform's checkout. Each time the
     fix was applied to the instance and the class was left alone.
 
-    The rule is simple and checkable: inside this module, a path that is not
-    application code is reached through _repo_only(), which SKIPS when the file
-    is not there. Assertions about what must ship belong in the class above,
-    which only runs in the repository.
+    The rule is simple and checkable: anywhere under tests/, a path that is not
+    application code is reached through something that SKIPS when the file is
+    not there, whether that is _repo_only(), a module guard taken out in the
+    test's first statement, or a presence check on the name it was bound to.
+    Assertions about what must ship belong in the class above, which only runs
+    in the repository.
+
+    The scan parsed only this module until the widening above, so the rule
+    stopped at the file boundary while the same assumption in any other
+    module would have failed the Test stage exactly as before.
     """
 
-    _SELF = Path(__file__)
-    _APPLICATION = ("spectre", "tests", "tle_clustering")
-
-    _PRESENCE = {"is_file", "exists", "is_dir"}
-
     def test_every_non_application_path_goes_through_the_guard(self) -> None:
-        import ast
-
-        tree = ast.parse(self._SELF.read_text(encoding="utf-8"))
-        parents = {}
-        for node in ast.walk(tree):
-            for child in ast.iter_child_nodes(node):
-                parents[child] = node
-
-        def is_presence_check(node: ast.AST) -> bool:
-            """True when the path is only asked whether it exists."""
-            parent = parents.get(node)
-            return (
-                isinstance(parent, ast.Attribute)
-                and parent.attr in self._PRESENCE
-            )
-
-        def is_module_constant(node: ast.AST) -> bool:
-            """A module-level constant is consumed by a fixture that skips."""
-            parent = parents.get(node)
-            return isinstance(parent, ast.Assign) and parents.get(parent) is tree
-
-        offenders = []
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
-                continue
-            left, right = node.left, node.right
-            if not (isinstance(left, ast.Name) and left.id == "_REPO_ROOT"):
-                continue
-            if not (isinstance(right, ast.Constant) and isinstance(right.value, str)):
-                continue
-            if right.value.startswith(self._APPLICATION):
-                continue
-            if is_presence_check(node) or is_module_constant(node):
-                continue
-            offenders.append(f"line {node.lineno}: {right.value}")
+        offenders: list[str] = []
+        for module in sorted((_REPO_ROOT / "tests").rglob("*.py")):
+            offenders.extend(_unguarded_reads(module))
         assert not offenders, (
-            "these read a non-application file without the skip guard, so they "
-            f"fail wherever the platform does not supply it: {offenders}. "
-            "Use _repo_only(name), and put any must-ship assertion in "
-            "TestThePackagerShipsWhatTheGatesRead."
+            "these read a non-application file with nothing to skip on, so "
+            f"they fail wherever the platform does not supply it: {offenders}. "
+            "Use _repo_only(name), or a guard that skips, and put any "
+            "must-ship assertion in TestThePackagerShipsWhatTheGatesRead."
+        )
+
+
+class TestHtmxSwapFragmentsMatchTheirTable:
+    """A fragment swapped into a table must have that table's column count.
+
+    threat_sweep_row.html replaces a child row of the threat sweep table via
+    hx-swap="outerHTML". When the Posture column was added the table went from
+    seven columns to eight and the fragment was left at seven, so every row an
+    operator refined silently shifted its Action cell under the Posture
+    heading. Rendering the parent template alone does not catch that, which is
+    exactly what the engineer who made the change did; only rendering both and
+    comparing does.
+
+    Counted statically rather than rendered, so this holds inside the
+    submission package where there is no running application.
+    """
+
+    _PARTIALS = _REPO_ROOT / "spectre" / "web" / "templates" / "partials"
+
+    def _cells_in_last_row(self, body: str) -> int:
+        """Cells in the final <tr> block, which is the data row in both files."""
+        rows = re.split(r"<tr\b", body)
+        return rows[-1].count("<td")
+
+    def test_the_refined_row_has_the_same_width_as_the_row_it_replaces(self) -> None:
+        fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
+        table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
+
+        fragment_cells = self._cells_in_last_row(fragment)
+        # The child data row in the parent table is the one carrying the burn
+        # location cell, which is unique to it.
+        # The header row names burn_location too, in its headers= wiring, so
+        # require actual data cells rather than just the mention.
+        child_rows = [
+            block for block in re.split(r"<tr\b", table)
+            if "burn_location" in block and block.count("<td") > 0
+        ]
+        assert child_rows, "the sweep table no longer has a child row to compare against"
+        table_cells = child_rows[0].count("<td")
+
+        assert fragment_cells == table_cells, (
+            f"threat_sweep_row.html emits {fragment_cells} cells but the child row "
+            f"it replaces in threat_sweep.html has {table_cells}. Every refined row "
+            "would shift its remaining cells one column left."
+        )
+
+    def test_the_error_branch_spans_the_whole_table(self) -> None:
+        """A short colspan leaves a ragged row rather than a clean message."""
+        fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
+        table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
+        child_rows = [
+            b for b in re.split(r"<tr\b", table)
+            if "burn_location" in b and b.count("<td") > 0
+        ]
+        assert child_rows
+        width = child_rows[0].count("<td")
+
+        spans = [int(m) for m in re.findall(r'colspan="(\d+)"', fragment)]
+        assert spans, "the fragment's error branch no longer declares a colspan"
+        assert all(s == width for s in spans), (
+            f"the fragment's colspan {spans} does not match the table's {width} columns"
         )

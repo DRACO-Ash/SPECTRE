@@ -183,6 +183,16 @@ _GEO_PROTECTED_MAX_ALT_KM: float = 36186.0
 #: the routine test that reads it back, and the Monte Carlo archetype map.
 _LABEL_STATION_KEEPING: str = "station keeping"
 
+#: Thrust duration, hours, beyond which a burn is reported as slow. A
+#: manoeuvre an electric bus has to spend more than a day delivering is not
+#: something an operator can read as an impulsive event on one element set.
+_SLOW_BURN_HOURS: float = 24.0
+
+#: Share of the measured ΔV the largest channel must carry before the
+#: manoeuvre is attributed to that channel. Below it the burn moved altitude
+#: and plane together, which is the inspection signature, not one of either.
+_DOMINANT_CHANNEL_FRACTION: float = 0.6
+
 
 @dataclass(frozen=True)
 class ManoeuvreView:
@@ -251,7 +261,7 @@ class ManoeuvreView:
     @property
     def burn_is_slow(self) -> bool:
         """True when delivering this ΔV takes more than a day of thrust."""
-        return self.burn_hours is not None and self.burn_hours > 24.0
+        return self.burn_hours is not None and self.burn_hours > _SLOW_BURN_HOURS
 
 
 def _dominant_channel(manoeuvre: Any) -> str:
@@ -262,12 +272,21 @@ def _dominant_channel(manoeuvre: Any) -> str:
         return ""
     top = max(components, key=lambda c: c.dv_km_s)
     total = sum(c.dv_km_s for c in components)
-    if total <= 0 or top.dv_km_s / total < 0.6:
+    if total <= 0 or top.dv_km_s / total < _DOMINANT_CHANNEL_FRACTION:
         return "mixed"
-    return top.channel
+    # components arrives through getattr, so its element type is unknown to
+    # the checker however well typed the breakdown is.
+    return str(top.channel)
 
 
-def _classify(delta_v_m_s: float, channel: str, regime: str,
+# Six measured quantities about one burn, with no sub-group that travels
+# together anywhere else: the ΔV, the channel it came out of, the regime and
+# ceiling it is judged against, and the two altitude figures that separate a
+# graveyard raise from the start of a drift. A holder object would carry the
+# same six values behind a constructor without reducing what the classifier
+# has to know, and the caller and the direct unit tests both pass them
+# positionally.
+def _classify(delta_v_m_s: float, channel: str, regime: str,  # noqa: PLR0913, PLR0917
               sk_ceiling_m_s: float,
               alt_after_km: float | None = None,
               delta_alt_km: float = 0.0) -> tuple[str, str, ManoeuvreKind]:
@@ -533,6 +552,13 @@ def _assess_propellant(
 # Anomaly scoring, measured against the object's own regime
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Confirmed manoeuvres needed before an anomaly score means anything. Three of
+#: the five terms are about the spread across a series: longitude coverage,
+#: drift and station-keeping regularity are all undefined for a single burn,
+#: so scoring one would report the floor as a measurement.
+_MIN_VIEWS_FOR_ANOMALY: int = 2
+
+
 @dataclass(frozen=True)
 class AnomalyAssessment:
     dv_magnitude:  float
@@ -561,7 +587,7 @@ def _assess_anomaly(
     views: list[ManoeuvreView], pol: Any, regime: str,
     propellant: PropellantAssessment,
 ) -> AnomalyAssessment | None:
-    if len(views) < 2:
+    if len(views) < _MIN_VIEWS_FOR_ANOMALY:
         return None
 
     routine = station_keeping_m_s_per_year(regime)
@@ -623,6 +649,13 @@ def _assess_anomaly(
 # What the detector can and cannot see
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: One GEO north-south station-keeping burn, m/s, from Table 3 and listed among
+#: the reference events above. A detection floor at or below it is the floor
+#: that separates "this object is quiet" from "this method cannot see routine
+#: housekeeping", which is the distinction the panel exists to make.
+_GEO_NS_STATION_KEEPING_M_S: float = 1.8
+
+
 @dataclass(frozen=True)
 class DetectionLimits:
     """The measured floor, stated in terms of real manoeuvres.
@@ -646,7 +679,7 @@ class DetectionLimits:
 
     @property
     def sees_routine_station_keeping(self) -> bool:
-        return self.floor_m_s <= 1.8
+        return self.floor_m_s <= _GEO_NS_STATION_KEEPING_M_S
 
 
 # *_regime* is not read: the reference events and the measured floor are both
@@ -695,6 +728,13 @@ def _assess_detection(noise: Any, _regime: str) -> DetectionLimits | None:
 # The assembled assessment
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Measured inter-manoeuvre intervals needed before the observed cadence is
+#: used in place of the regime's assumed one. With one or two gaps a single
+#: long one sets the mean, and the mean sets the per-event station-keeping
+#: ceiling that decides routine from not.
+_MIN_INTERVALS_FOR_CADENCE: int = 3
+
+
 @dataclass(frozen=True)
 class PolAssessment:
     """Everything a Pattern of Life measurement means, in m/s, with citations."""
@@ -742,7 +782,7 @@ def assess_pattern_of_life(
     candidates = list(getattr(pol, "candidate_manoeuvres", []) or [])
 
     intervals = getattr(pol, "interval_stats", None)
-    observed_cadence = intervals.mean if intervals and intervals.n >= 3 else None
+    observed_cadence = intervals.mean if intervals and intervals.n >= _MIN_INTERVALS_FOR_CADENCE else None
     sk_ceiling, sk_basis = per_event_station_keeping_m_s(regime, observed_cadence)
 
     confirmed_views = [_view(m, regime, sk_ceiling, sk_basis, True) for m in confirmed]
@@ -769,7 +809,10 @@ def assess_pattern_of_life(
     if propellant.exceeds_lifetime_budget:
         escalations = (*escalations, propellant.narrative)
 
-    intel = _assess_intel(pol, regime, confirmed_views, anomaly, propellant, detection)
+    intel = _assess_intel(
+        pol, regime, confirmed_views,
+        _Components(anomaly=anomaly, propellant=propellant, detection=detection),
+    )
 
     return PolAssessment(
         regime=regime,
@@ -797,6 +840,11 @@ _STATIONARY_DRIFT_DEG_DAY: float = 0.05
 #: How far ahead the longitude predictions run, days. Fixed by the three
 #: predicted_lon_* fields the panel renders.
 _PREDICTION_HORIZON_DAYS: tuple[int, int, int] = (30, 60, 90)
+#: Longitude travelled, degrees, before a drift phase is listed as notable.
+#: A GEO slot is about a tenth of a degree wide, so a few degrees is already a
+#: deliberate move; below this the list fills with slot-keeping wander and the
+#: periods that matter stop standing out.
+_NOTABLE_DRIFT_DEGREES: float = 5.0
 
 #: The anomaly score needs two manoeuvres to say anything, so a single
 #: large burn used to fall through to MINIMAL: a 450 m/s AGGRESSIVE
@@ -981,10 +1029,23 @@ def _operational_signature(
     return " · ".join(parts)
 
 
+@dataclass(frozen=True)
+class _Components:
+    """The three component assessments the narrative is written from.
+
+    They are derived together in :func:`assess_pattern_of_life`, travel
+    together from there, and every one of them is optional to the narrative in
+    a different way, so they are passed as one value rather than as three
+    positional arguments the caller has to keep in order.
+    """
+
+    anomaly:    AnomalyAssessment | None
+    propellant: PropellantAssessment
+    detection:  DetectionLimits | None
+
+
 def _assess_intel(
-    pol: Any, regime: str, views: list[ManoeuvreView],
-    anomaly: AnomalyAssessment | None, propellant: PropellantAssessment,
-    detection: DetectionLimits | None,
+    pol: Any, regime: str, views: list[ManoeuvreView], components: _Components,
 ) -> IntelAssessment:
     records = list(getattr(pol, "records", []) or [])
     span_days = float(getattr(pol, "span_days", 0.0) or 0.0)
@@ -1003,22 +1064,24 @@ def _assess_intel(
         f"{p.start_epoch:%Y-%m-%d} to {p.end_epoch:%Y-%m-%d}: {p.direction} drift "
         f"{abs(p.distance_deg):.1f}° at {abs(p.rate_deg_day):.2f}°/day"
         for p in (getattr(pol, "drift_phases", []) or [])
-        if p.direction != "STATIONARY" and abs(p.distance_deg) > 5.0
+        if p.direction != "STATIONARY" and abs(p.distance_deg) > _NOTABLE_DRIFT_DEGREES
     ][:8]
 
     above_routine = sum(1 for v in views if not v.is_routine)
 
     mission, bclass = _mission_profile(regime, is_geo, lon_range, views, above_routine)
-    risk = _risk_with_posture_floor(anomaly, views)
+    risk = _risk_with_posture_floor(components.anomaly, views)
 
-    if not views and detection is not None:
-        narrative = _quiet_narrative(detection, span_days)
+    if not views and components.detection is not None:
+        narrative = _quiet_narrative(components.detection, span_days)
     elif is_geo and lon_range > _GEO_ROAMER_DEGREES:
         narrative = _roamer_narrative(lon_range, span_days, direction, drift)
     else:
-        narrative = _rate_narrative(regime, views, span_days, propellant, above_routine)
+        narrative = _rate_narrative(
+            regime, views, span_days, components.propellant, above_routine,
+        )
 
-    signature = _operational_signature(views, propellant, lon_range)
+    signature = _operational_signature(views, components.propellant, lon_range)
 
     return IntelAssessment(
         mission_profile=mission, behaviour_class=bclass, risk_level=risk,

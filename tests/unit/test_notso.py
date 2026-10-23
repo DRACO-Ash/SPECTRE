@@ -372,15 +372,16 @@ class TestExtractBehaviourProfile:
         assert p.low_notification_rate is True, "sanity: the fixture is unreported"
 
         above_every_fixture_burn = 1.0   # km/s
-        correlations = []
         start = _dt("2025-01-01T00:00:00")
-        for i in range(10):
-            correlations.append(NOTSOManoeuvreCorrelation(
+        correlations = [
+            NOTSOManoeuvreCorrelation(
                 notso=None,
                 manoeuvre=_FakeManoeuvre(start + timedelta(days=i * 5), 0.001),
                 correlation_type="manoeuvre_only",
                 time_offset_hours=None, magnitude_ratio=None,
-            ))
+            )
+            for i in range(10)
+        ]
         routine = extract_behaviour_profile(
             43689, correlations, start, start + timedelta(days=200),
             reportable_threshold_km_s=above_every_fixture_burn,

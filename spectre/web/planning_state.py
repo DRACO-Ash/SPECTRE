@@ -195,7 +195,13 @@ _default_hrr_tle_modes: dict[str, str] = {}
 
 def set_default_hrr_tles(tles: dict[str, str], modes: dict[str, str]) -> None:
     """Store element sets that came with the default watchlist."""
-    global _default_hrr_tles, _default_hrr_tle_modes
+    # Boot-time default state, written once by the startup loader and read-only
+    # for the rest of the process, exactly like the catalogue and HRR-object
+    # setters above. This module IS the single-node store, as its docstring
+    # says; wrapping one of the four module globals in a holder object would
+    # leave the other three as they are and make this pair the odd case a
+    # reader has to work out, which is a loss, not an improvement.
+    global _default_hrr_tles, _default_hrr_tle_modes  # noqa: PLW0603
     _default_hrr_tles = dict(tles)
     _default_hrr_tle_modes = dict(modes)
     synthetic = sum(1 for m in modes.values() if m != "REAL")

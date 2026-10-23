@@ -512,6 +512,15 @@ def correlate_notsos_with_manoeuvres(
 # single observation is not a spread, it is zero information.
 _MIN_SAMPLES_FOR_STD = 2
 
+# Band edges on the notification rate, which is counted over REPORTABLE
+# manoeuvres only: rate > _CONSISTENT_NOTIFIER_RATE is a consistent notifier,
+# rate < _LOW_NOTIFIER_RATE is a low notification rate, and the inclusive span
+# between them is an inconsistent notifier. Named because the same two figures
+# decide three flags, and as bare numbers at the call site it was not visible
+# that the middle band closes on both edges and so leaves no gap.
+_CONSISTENT_NOTIFIER_RATE = 0.90
+_LOW_NOTIFIER_RATE        = 0.30
+
 
 def _dv(c: NOTSOManoeuvreCorrelation) -> float:
     return float(getattr(c.manoeuvre, "delta_v_km_s", 0.0) or 0.0)
@@ -579,7 +588,12 @@ def _undetected_notso_types(notso_only: list[NOTSOManoeuvreCorrelation]) -> dict
     return undetected_types
 
 
-def extract_behaviour_profile(
+# PLR0913, PLR0917: six inputs, and each is a separate question the profile
+# has to answer: whose behaviour, over which correlations, across what window,
+# and what counts as reportable. Grouping them into a holder would hide that
+# the window and the threshold are independent of each other, and every call
+# site passes all six by keyword already.
+def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
     norad_id: int,
     correlations: list[NOTSOManoeuvreCorrelation],
     analysis_start: datetime,
@@ -656,9 +670,10 @@ def extract_behaviour_profile(
         below_reporting_threshold=below_threshold,
         reporting_threshold_km_s=reportable_threshold_km_s,
         behaviour_unassessable=not assessable,
-        consistent_notifier=assessable and notif_rate > 0.90,
-        inconsistent_notifier=assessable and 0.30 <= notif_rate <= 0.90,
-        low_notification_rate=assessable and notif_rate < 0.30,
+        consistent_notifier=assessable and notif_rate > _CONSISTENT_NOTIFIER_RATE,
+        inconsistent_notifier=(assessable
+                               and _LOW_NOTIFIER_RATE <= notif_rate <= _CONSISTENT_NOTIFIER_RATE),
+        low_notification_rate=assessable and notif_rate < _LOW_NOTIFIER_RATE,
         predictable_timing=bool(std_lt is not None and std_lt < 6.0),
     )
     return profile

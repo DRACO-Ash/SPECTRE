@@ -12,13 +12,12 @@ cannot drift from what the route passes.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
-
-from datetime import UTC, datetime
 
 from spectre.domain.models import ThreatActor, ThreatSweepEntry, ThreatTarget
 from spectre.domain.threat_assessment import (

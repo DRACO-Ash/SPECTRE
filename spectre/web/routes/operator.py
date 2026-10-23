@@ -45,7 +45,7 @@ def _list_response(request: Request, template: str, context: dict[str, Any]) -> 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
-    current_user: User | None = Depends(optional_login),
+    current_user: Annotated[User | None, Depends(optional_login)],
 ) -> HTMLResponse:
     """Render the main operator console, or the login page when anonymous.
 
@@ -292,8 +292,15 @@ async def set_scenario_time(
     try:
         start_dt = datetime.fromisoformat(scenario_start.strip()).replace(tzinfo=UTC)
         stop_dt = datetime.fromisoformat(scenario_stop.strip()).replace(tzinfo=UTC)
-    except ValueError as exc:
-        return HTMLResponse(f'<p class="error-msg">Invalid date: {exc}</p>')
+    except ValueError:
+        # datetime.fromisoformat quotes the offending input verbatim in its
+        # message, and this response is built by hand rather than by Jinja, so
+        # echoing the exception reflected the operator's form field into the
+        # page as live markup. Nothing from the exception reaches the browser.
+        return HTMLResponse(
+            '<p class="error-msg">Invalid date. Use ISO 8601, for example '
+            '2026-01-01T00:00:00.</p>'
+        )
 
     if stop_dt <= start_dt:
         return HTMLResponse('<p class="error-msg">Stop must be after start.</p>')

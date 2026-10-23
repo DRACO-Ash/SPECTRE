@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
-
 from spectre.domain.manoeuvre_calibration import DEFAULT_SWEEP_BUDGET_M_S
 
 

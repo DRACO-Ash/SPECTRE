@@ -33,17 +33,17 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.propagator import TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
-from spectre.domain.models import (
-    ThreatActor,
-    ThreatAssessment,
-    ThreatSweepEntry,
-    ThreatTarget,
-)
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
     from_km_s,
     kind_for_method,
+)
+from spectre.domain.models import (
+    ThreatActor,
+    ThreatAssessment,
+    ThreatSweepEntry,
+    ThreatTarget,
 )
 from spectre.domain.threat_assessment import (
     AccessEvidence,
@@ -56,6 +56,7 @@ from spectre.domain.threat_assessment import (
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import format_tof_label
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -139,9 +140,17 @@ async def red_orbit_info(
             "pair": pair,
         })
     except Exception as exc:
-        logger.warning("red_orbit_info failed for %s: %s", red_sat, exc)
+        # red_sat is a query parameter and the exception text is built from an
+        # operator-supplied element set, so both can carry a newline and forge
+        # an audit record (pythonsecurity:S5145).
+        logger.warning(
+            "red_orbit_info failed for %s: %s", log_safe(red_sat), log_safe(exc)
+        )
+        # The reason stays in the log, not in the markup. This response bypasses
+        # Jinja, so an interpolated exception reaches the browser unescaped,
+        # which is the reflected-value defect found at operator.py:296.
         return HTMLResponse(
-            f'<p class="error-msg" style="font-size:0.75rem">Orbit info unavailable: {exc}</p>'
+            '<p class="error-msg" style="font-size:0.75rem">Orbit info unavailable for this track.</p>'
         )
 
 
@@ -357,6 +366,12 @@ async def fetch_targets(
     if not tgt_group:
         return HTMLResponse("")
 
+    # Bound before the branch. Only the else: suite below assigns them, but the
+    # log line at the end of this function reads both, so the "all" path raised
+    # UnboundLocalError and returned HTTP 500 after every TLE had been fetched.
+    side = ""
+    rank: int | None = None
+
     if tgt_group == "all":
         objects = list(state.hrr_objects)
     elif ":" not in tgt_group:
@@ -403,8 +418,9 @@ async def fetch_targets(
     failed = len(outcomes) - fetched
 
     total = len(satnos)
+    group_label = f"{side.title()} HRR Rank {rank}" if rank is not None else "all HRR objects"
     state.append_log(
-        f"[THREAT] Pre-fetched {side.title()} HRR Rank {rank}: "
+        f"[THREAT] Pre-fetched {group_label}: "
         f"{fetched}/{total} TLEs ({failed} failed)"
     )
 
@@ -434,7 +450,8 @@ def _needs_live_tle(state: object, satno: str) -> bool:
     """
     if satno not in state.hrr_tle_cache:  # type: ignore[attr-defined]
         return True
-    return state.hrr_tle_data_mode.get(satno, "REAL") != "REAL"  # type: ignore[attr-defined]
+    mode = state.hrr_tle_data_mode.get(satno, "REAL")  # type: ignore[attr-defined]
+    return str(mode) != "REAL"
 
 
 def _build_target_list(
@@ -556,12 +573,17 @@ _ZERO_VECTOR_M_S: float = 1e-12
 #: axis on its own; below it the burn is reported as "Combined".
 _DOMINANT_AXIS_FRACTION: float = 0.7
 
+#: (text colour, panel wash) per band, as design tokens rather than hex.
+#: Raw hex here did not move when the operator picked Steel (Light), so every
+#: band failed WCAG AA as text on the light surfaces. The values now live in
+#: spectre/web/static/spectre-theme.css, which restates them per theme; the
+#: badge fill that carries white text is the .spectre-band-* class there.
 _BAND_COLOURS: dict[str, tuple[str, str]] = {
-    "CRITICAL": ("#ef4444", "rgba(239,68,68,0.06)"),
-    "HIGH":     ("#f59e0b", "rgba(245,158,11,0.06)"),
-    "MEDIUM":   ("#3b8beb", "rgba(59,139,235,0.06)"),
-    "LOW":      ("#22c55e", "rgba(34,197,94,0.06)"),
-    "MINIMAL":  ("#64748b", "rgba(100,116,139,0.06)"),
+    "CRITICAL": ("var(--spectre-status-critical)", "rgba(var(--spectre-status-critical-rgb), 0.06)"),
+    "HIGH":     ("var(--spectre-status-high)",     "rgba(var(--spectre-status-high-rgb), 0.06)"),
+    "MEDIUM":   ("var(--spectre-status-medium)",   "rgba(var(--spectre-status-medium-rgb), 0.06)"),
+    "LOW":      ("var(--spectre-status-low)",      "rgba(var(--spectre-status-low-rgb), 0.06)"),
+    "MINIMAL":  ("var(--spectre-status-minimal)",  "rgba(var(--spectre-status-minimal-rgb), 0.06)"),
 }
 
 
@@ -764,7 +786,8 @@ def _compute_worst_coa(
     )
     threat_level = assessment.verdict_label
     threat_color, threat_bg = _BAND_COLOURS.get(
-        threat_level, ("#94a3b8", "rgba(148,163,184,0.06)")
+        threat_level,
+        ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)"),
     )
 
     _sweep_intents: dict[str, str] = {
@@ -1362,8 +1385,8 @@ async def threat_sweep(
     )
     logger.info(
         "threat_sweep: %s vs %d targets (%s), %d solutions, %.1fs by %s",
-        red_sat, len(targets), group_label, len(entries), elapsed,
-        current_user.username,
+        log_safe(red_sat), len(targets), log_safe(group_label), len(entries), elapsed,
+        log_safe(current_user.username),
     )
 
     return render(request, "partials/threat_sweep.html", {
@@ -1506,8 +1529,9 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
             "screen against. Fetch the HRR list from the UDL panel first."
         ))
 
+    hrr_objects = state.hrr_objects  # type: ignore[attr-defined]
     red_population = sum(
-        1 for o in state.hrr_objects  # type: ignore[attr-defined]
+        1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
     actors = _build_actor_list(state, asset_regime)
@@ -1607,7 +1631,7 @@ async def screen_config(
     )
     # Provenance. Element sets that did not come from live tracking must be
     # declared where the operator chooses an asset, not only in a server log.
-    modes = {state.hrr_tle_data_mode.get(a["satno"], "REAL") for a in assets}
+    modes = {state.hrr_tle_data_mode.get(str(a["satno"]), "REAL") for a in assets}
     return render(request, "partials/screen_config.html", {
         "has_udl": bool(state.udl_username),
         "has_hrr": bool(state.hrr_objects),

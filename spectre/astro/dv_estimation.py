@@ -132,6 +132,11 @@ _NOISE_SIGMA_MULTIPLIER = 5.0
 #: about 3.5 m/s. A floor of 50 m/s cannot be scatter.
 _NOISE_IMPLAUSIBLE_CEILING_KM_S = 0.050
 
+#: Fewest per-step ΔV samples a median and a MAD may be quoted from. Below this
+#: the object's own scatter has not been measured at all, so the absolute floor
+#: stands rather than a "measured" floor taken from two or three pairs.
+_MIN_SAMPLES_FOR_NOISE = 4
+
 #: A single impulse leaves the two orbits sharing a point, so the epoch-swept
 #: estimate is only a ΔV measurement where the two trajectories actually come
 #: together. Two exceptions are expected and benign: a pure energy change
@@ -148,9 +153,27 @@ _SWEPT_MISS_TOLERANCE = 3.0
 #: orbit itself had moved 0.05 km, and arbitrary everywhere else.
 _SWEPT_MISS_FLOOR_FRACTION = 3.0e-4
 
+#: Closest approach across the whole gap beyond which the two fits never come
+#: together at all (km). At this separation they are not two views of one object
+#: either side of one impulse, so the note says so rather than leaving an
+#: arbitrary minimum to be read as a measurement.
+_SWEPT_NEVER_CLOSE_KM = 50.0
+
 #: Operator-facing name of the epoch-swept estimator. Held once so a failed
 #: estimate and a successful one are labelled identically in the panel.
 _SWEPT_ESTIMATOR_LABEL = "Epoch-swept propagation"
+
+#: Machine-readable name of the same estimator, carried on every DvEstimate it
+#: returns. Held once so the two failure paths and the success path cannot drift
+#: apart, and so the literal is not repeated across the module (S1192).
+_SWEPT_METHOD = "epoch_swept"
+
+#: Resolution of the closest-approach search: coarse samples across the gap to
+#: bracket the minimum, then golden-section steps to narrow it. Module constants
+#: rather than parameters because no caller has ever varied them and carrying
+#: them on the signature put it over the project's argument limit.
+_SWEPT_COARSE_STEPS = 64
+_SWEPT_REFINE_STEPS = 24
 
 #: The closest-approach search stops once its bracket is this small a fraction
 #: of the gap, which is far below the resolution of the fits either side of it.
@@ -160,6 +183,18 @@ _REFINE_CONVERGED_FRACTION = 1e-9
 #: flagged: one side is far better observed than the other, so the difference
 #: between them is as likely to be fit quality as a manoeuvre.
 _RMS_DISPARITY_RATIO = 3.0
+
+#: Δa/a above which the first-order along-track relation over-reports by enough
+#: to be worth saying so in the note. Measured against the exact two-burn
+#: Hohmann total it runs about 1% high at Δa/a = 0.015 and 11% high at 0.145,
+#: as this module's docstring records; below this the note is withheld.
+_ALONG_TRACK_LINEARITY_LIMIT = 0.01
+
+#: Multiple of the headline figure at which the legacy propagation estimate is
+#: annotated. Anything this far above the measured ΔV is the along-track phase
+#: that method cannot separate from a burn, and the note exists because the
+#: panel's ΔV figures changed when the headline stopped being that method.
+_LEGACY_PHASE_INFLATION = 10.0
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -530,10 +565,8 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
     # Molniya objects sit squarely in that range.
     d_sma = after.sma_km - before.sma_km
     r_peri = before.sma_km * (1.0 - before.ecc)
-    if r_peri > 0:
-        v_peri = math.sqrt(MU_EARTH * (2.0 / r_peri - 1.0 / before.sma_km))
-    else:
-        v_peri = before.orbital_speed_km_s
+    v_peri = (math.sqrt(MU_EARTH * (2.0 / r_peri - 1.0 / before.sma_km))
+              if r_peri > 0 else before.orbital_speed_km_s)
     dv_along = (abs(MU_EARTH * d_sma / (2.0 * before.sma_km ** 2 * v_peri))
                 if v_peri > 0 else 0.0)
     # First order in Δa/a. Over-reports the exact two-burn Hohmann total by
@@ -547,7 +580,7 @@ def estimate_dv_mean_elements(before: StateSnapshot, after: StateSnapshot,
         along_note = "Prograde"
     else:
         along_note = "Retrograde"
-    if ratio > 0.01:
+    if ratio > _ALONG_TRACK_LINEARITY_LIMIT:
         along_note += (f". Δa is {ratio * 100:.1f}% of the semi-major axis, where this "
                        "first-order relation over-reports the exact two-burn total by "
                        f"roughly {ratio * 75:.0f}%.")
@@ -723,7 +756,6 @@ def _refine_minimum(probe: _Probe, best: _Sample,
 def estimate_dv_epoch_swept(
     before_tle: str, after_tle: str,
     t_before: datetime, t_after: datetime,
-    coarse_steps: int = 64, refine_steps: int = 24,
 ) -> DvEstimate:
     """Find the instant inside the gap at which the two trajectories coincide.
 
@@ -749,14 +781,12 @@ def estimate_dv_epoch_swept(
     # BLE001: a malformed element set is reportable.
     except Exception as exc:  # noqa: BLE001
         return DvEstimate(
-            method="epoch_swept", label=_SWEPT_ESTIMATOR_LABEL,
+            method=_SWEPT_METHOD, label=_SWEPT_ESTIMATOR_LABEL,
             dv_km_s=0.0, failed=True,
             failure_reason=f"Could not build propagator: {type(exc).__name__}: {exc}",
         )
 
-    span_s = (t_after - t_before).total_seconds()
-    if span_s <= 0.0:
-        span_s = 0.0
+    span_s = max(0.0, (t_after - t_before).total_seconds())
 
     def _probe(frac: float) -> tuple[float, float] | None:
         """(position mismatch km, velocity difference km/s) at this point in the gap."""
@@ -771,18 +801,19 @@ def estimate_dv_epoch_swept(
         dv = math.sqrt(sum((float(y) - float(x)) ** 2 for x, y in zip(sa.v, sb.v, strict=True)))
         return dr, dv
 
-    coarse, best = _coarse_scan(_probe, coarse_steps)
+    coarse, best = _coarse_scan(_probe, _SWEPT_COARSE_STEPS)
     sampled = len(coarse)
 
     if sampled == 0:
         return DvEstimate(
-            method="epoch_swept", label=_SWEPT_ESTIMATOR_LABEL,
+            method=_SWEPT_METHOD, label=_SWEPT_ESTIMATOR_LABEL,
             dv_km_s=0.0, failed=True,
             failure_reason="SGP4 failed at every sample across the gap.",
         )
 
     # Golden-section refine around the coarse minimum.
-    best_frac, best_dr, best_dv = _refine_minimum(_probe, best, coarse_steps, refine_steps)
+    best_frac, best_dr, best_dv = _refine_minimum(
+        _probe, best, _SWEPT_COARSE_STEPS, _SWEPT_REFINE_STEPS)
 
     # A burn that only changes the orbit plane leaves the two trajectories
     # crossing at every node passage, so many instants look equally close and
@@ -801,12 +832,12 @@ def estimate_dv_epoch_swept(
         notes.append(f"{comparable} instants across the gap are equally close, so the "
                      "burn time is indicative only. Typical of a plane change, where "
                      "the orbits cross at every node passage.")
-    if best_dr > 50.0:
+    if best_dr > _SWEPT_NEVER_CLOSE_KM:
         notes.append("The two element sets never come close together inside the gap. "
                      "They may not describe the same object, or the gap may not "
                      "contain the manoeuvre.")
     return DvEstimate(
-        method="epoch_swept",
+        method=_SWEPT_METHOD,
         label=_SWEPT_ESTIMATOR_LABEL,
         dv_km_s=best_dv,
         notes=tuple(notes),
@@ -858,7 +889,7 @@ def calibrate_noise(dv_samples: list[float]) -> NoiseModel:
     burns cannot move either.
     """
     n = len(dv_samples)
-    if n < 4:
+    if n < _MIN_SAMPLES_FOR_NOISE:
         return NoiseModel(
             median_km_s=0.0, mad_km_s=0.0,
             floor_km_s=_NOISE_ABSOLUTE_FLOOR_KM_S,
@@ -1034,7 +1065,7 @@ def build_breakdown(before: _RecordLike, after: _RecordLike, gap_days: float,
     warnings = _provenance_warnings(b, a, gap_days)
     warnings.extend(_estimator_warnings(swept, swept_usable, miss, expected_miss, ratio))
 
-    if not legacy.failed and dv > 0 and legacy.dv_km_s / dv > 10.0:
+    if not legacy.failed and dv > 0 and legacy.dv_km_s / dv > _LEGACY_PHASE_INFLATION:
         legacy = replace(legacy, notes=(*legacy.notes,
             f"{legacy.dv_km_s / dv:.0f}× the headline figure. That multiple is the "
             "along-track phase this method cannot separate from ΔV, and is why the "

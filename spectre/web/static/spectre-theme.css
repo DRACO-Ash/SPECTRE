@@ -66,6 +66,62 @@
   --spectre-color-intel-blue-dim:   #185FA5;
   --spectre-color-intel-blue-bg:    rgba(55, 138, 221, 0.08);
 
+  /* -- Colour: Threat bands and postures ------------------------------------
+     A verdict band is a status, so it belongs in the token block rather than
+     in a Python map in spectre/web/routes/threat.py and in per-template Jinja
+     colour maps. As raw hex it did not move when the operator picked Steel
+     (Light), and every band then failed WCAG AA as text: amber measured
+     1.94:1 on the #f0f4f8 base surface.
+
+     Three values per band, because one colour cannot do three jobs:
+       <band>       text and borders on a panel surface
+       <band>-rgb   the same colour's channels, comma separated for the
+                    rgba(var(--<band>-rgb), a) form, so each call site keeps
+                    the wash alpha it already had instead of needing a token
+                    per alpha level
+       <band>-fill  a solid fill dark enough to carry white text
+     The violet below is a posture rather than a band and never carries white
+     text, so it has no fill.
+
+     Dark-theme text ratios against the two surfaces the threat panels sit on,
+     #0A0C10 (surface-base) and #141820 (surface-raised):
+       critical 5.20/4.72  high 9.11/8.28  medium 5.67/5.15  low 8.59/7.80
+       minimal  5.66/5.14  unknown 7.63/6.93  violet 7.19/6.53
+     minimal was #64748b, which measured 4.11/3.74 and failed; it is now the
+     sensor-grey value. White on the fills: critical 6.47, high 4.92,
+     medium 6.70, low 5.02, minimal and unknown 7.58. */
+  --spectre-status-critical:        #EF4444;
+  --spectre-status-critical-rgb:    239, 68, 68;
+  --spectre-status-critical-fill:   #B91C1C;
+
+  --spectre-status-high:            #F59E0B;
+  --spectre-status-high-rgb:        245, 158, 11;
+  --spectre-status-high-fill:       #A16207;
+
+  --spectre-status-medium:          #3B8BEB;
+  --spectre-status-medium-rgb:      59, 139, 235;
+  --spectre-status-medium-fill:     #1D4ED8;
+
+  --spectre-status-low:             #22C55E;
+  --spectre-status-low-rgb:         34, 197, 94;
+  --spectre-status-low-fill:        #15803D;
+
+  --spectre-status-minimal:         #7A8BA6;
+  --spectre-status-minimal-rgb:     122, 139, 166;
+  --spectre-status-minimal-fill:    #475569;
+
+  /* The band a verdict falls back to when the server emits a label the
+     palette does not know. */
+  --spectre-status-unknown:         #94A3B8;
+  --spectre-status-unknown-rgb:     148, 163, 184;
+  --spectre-status-unknown-fill:    #475569;
+
+  /* BEYOND PLATFORM, which is a posture rather than a band. */
+  --spectre-status-violet:          #A78BFA;
+  --spectre-status-violet-rgb:      167, 139, 250;
+
+  --spectre-status-on-fill:         #FFFFFF;
+
   /* -- Colour: Surfaces (Dark mode — default) ------------------------------- */
   --spectre-surface-base:           var(--spectre-color-console-black);
   --spectre-surface-raised:         var(--spectre-color-deep-space);
@@ -187,6 +243,43 @@
   --spectre-surface-input:          #FFFFFF;
   --spectre-surface-input-hover:    #F9FAFB;
   --spectre-surface-input-focus:    #FFFFFF;
+
+  /* Threat bands, restated for a light surface. Measured against the four
+     surfaces themes.css sets for Steel, #FFFFFF / #f0f4f8 / #e8eef5 /
+     #e0e8f2, rather than the base block's own, because themes.css loads
+     after this file and wins:
+       critical 6.47/5.85/5.54/5.24   high    6.16/5.57/5.27/4.98
+       medium   6.70/6.06/5.74/5.42   low     7.13/6.45/6.10/5.77
+       minimal  7.58/6.86/6.49/6.13   unknown 7.58/6.86/6.49/6.13
+       violet   7.10/6.43/6.08/5.75
+     Each of these is dark enough to carry white text as a fill too, so the
+     fill tokens repeat the text value rather than darkening it again. */
+  --spectre-status-critical:        #B91C1C;
+  --spectre-status-critical-rgb:    185, 28, 28;
+  --spectre-status-critical-fill:   #B91C1C;
+
+  --spectre-status-high:            #8A5600;
+  --spectre-status-high-rgb:        138, 86, 0;
+  --spectre-status-high-fill:       #8A5600;
+
+  --spectre-status-medium:          #1D4ED8;
+  --spectre-status-medium-rgb:      29, 78, 216;
+  --spectre-status-medium-fill:     #1D4ED8;
+
+  --spectre-status-low:             #166534;
+  --spectre-status-low-rgb:         22, 101, 52;
+  --spectre-status-low-fill:        #166534;
+
+  --spectre-status-minimal:         #475569;
+  --spectre-status-minimal-rgb:     71, 85, 105;
+  --spectre-status-minimal-fill:    #475569;
+
+  --spectre-status-unknown:         #475569;
+  --spectre-status-unknown-rgb:     71, 85, 105;
+  --spectre-status-unknown-fill:    #475569;
+
+  --spectre-status-violet:          #6D28D9;
+  --spectre-status-violet-rgb:      109, 40, 217;
 
   --spectre-text-primary:           #111827;
   --spectre-text-secondary:         #4B5563;
@@ -821,6 +914,32 @@ a:hover,
 .spectre-info     { color: var(--spectre-color-intel-blue);    }
 .spectre-muted    { color: var(--spectre-text-secondary);      }
 .spectre-disabled { color: var(--spectre-text-disabled);       }
+
+/* Verdict badge: the band word on a solid fill.
+   The fill is a separate token from the band's text colour because the panel
+   text colour is tuned for a dark or light surface, not for white text on
+   top of it: white measured 2.15:1 on the HIGH colour and 2.28:1 on LOW,
+   against a 4.5:1 floor. On the fills white measures 6.47 / 4.92 / 6.70 /
+   5.02 / 7.58 in the dark theme and 6.47 / 6.16 / 6.70 / 7.13 / 7.58 in
+   Steel, so the verdict reads in both. A band the palette does not know
+   keeps the base rule's unknown fill rather than rendering unstyled. */
+.spectre-band-badge {
+  display: inline-block;
+  background: var(--spectre-status-unknown-fill);
+  color: var(--spectre-status-on-fill);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.spectre-band-critical { background: var(--spectre-status-critical-fill); }
+.spectre-band-high     { background: var(--spectre-status-high-fill);     }
+.spectre-band-medium   { background: var(--spectre-status-medium-fill);   }
+.spectre-band-low      { background: var(--spectre-status-low-fill);      }
+.spectre-band-minimal  { background: var(--spectre-status-minimal-fill);  }
 
 /* Pulsing dot for live status indicators */
 .spectre-status-dot {

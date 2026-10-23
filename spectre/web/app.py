@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -25,8 +25,8 @@ from spectre.config.settings import (
 )
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
-from spectre.web.health import router as health_router
 from spectre.web.format_units import format_m_s, format_tof_label
+from spectre.web.health import router as health_router
 from spectre.web.planning_state import set_default_hrr_objects, set_default_hrr_tles
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
@@ -214,12 +214,132 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("SPECTRE %s shutting down", __version__)
 
 
+# ── Security response headers ─────────────────────────────────────────────────
+#
+# The console shipped with no security headers at all, so this round's two
+# cross-site scripting defects had nothing behind the output escaping: an
+# injected handler reads the CSRF token out of the DOM and posts to
+# /admin/users. These headers are that second line.
+#
+# The policy is as tight as the shipped templates allow and no tighter, because
+# a policy that blanks a panel is worse than no policy. Every loosening below is
+# forced by something already in the tree, and each is a KNOWN GAP recorded with
+# the work needed to close it:
+#
+#   script-src 'unsafe-inline'. 18 templates carry inline <script>; base.html
+#     holds two of them, the pre-paint theme bootstrap and the shared
+#     spectreActivate keyboard handler, and 159 inline onclick and onkeydown
+#     attributes drive the panels. A nonce does not cover event handler
+#     attributes at all, and hashes would need 'unsafe-hashes' and a hash per
+#     handler. To close: move the base.html blocks into /static and convert the
+#     handlers to delegated listeners, then drop the token.
+#   script-src 'unsafe-eval'. htmx 1.9.12 compiles hx-on::* attributes with
+#     new Function (static/htmx.min.js). Six of them clear forms and open panels
+#     in catalog_results, admin/users, operator and training_scenario_list.
+#     Without the token htmx raises htmx:evalDisallowedError and those six stop
+#     working. To close: replace the six attributes with listeners in a static
+#     file, then drop the token.
+#   style-src 'unsafe-inline'. Roughly 1500 inline style attributes and two
+#     inline <style> blocks. To close: move them into the stylesheet.
+#   style-src and font-src on the Google Fonts hosts. static/spectre-theme.css
+#     opens with two @import rules against fonts.googleapis.com, which its own
+#     comment marks as a development convenience. Blocking them would silently
+#     change console typography. To close: self-host JetBrains Mono and IBM Plex
+#     Sans under /static and delete the two @import lines.
+#   frame-src and frame-ancestors 'self'. The training Console tab embeds the
+#     console itself: templates/training.html sets an iframe src of '/'.
+#     'none', or X-Frame-Options: DENY, blanks that tab. 'self' still refuses
+#     the cross-origin framing the clickjacking finding describes.
+#
+# BE PRECISE ABOUT WHAT THIS DOES NOT STOP. With 'unsafe-inline' in script-src,
+# an injected inline script or event handler EXECUTES. This policy is therefore
+# not a mitigation for the stored-XSS class that the escaping in the templates
+# addresses; it is a second perimeter around it. Treating it as the control
+# would be exactly the mistake that let one `| safe` reach the DOM.
+#
+# What it does buy, and these are real: injected script cannot load external
+# code, exfiltrate over fetch or XHR to another origin, submit a form off-site,
+# load a plugin, or rewrite the document base.
+#
+# KNOWN GAP, with the work it needs. Dropping 'unsafe-inline' requires the two
+# inline <script> blocks in base.html to move to a file under static/ or carry
+# a per-response nonce, and the inline onclick/onkeydown attributes across the
+# partials to become delegated listeners. That is a large, separately testable
+# change; until it lands, script-src is a perimeter and not a shield, and it is
+# recorded here rather than implied away.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-src 'self'; "
+    "frame-ancestors 'self'; "
+    "form-action 'self'; "
+    "base-uri 'none'; "
+    "object-src 'none'"
+)
+
+#: Sent on every response. Strict-Transport-Security is not here because it is
+#: conditional; see :func:`_is_https`.
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": _CSP,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "no-referrer",
+}
+
+#: One year, covering the host's own subdomains.
+_HSTS = "max-age=31536000; includeSubDomains"
+
+
+def _is_https(request: Request) -> bool:
+    """Return ``True`` when the browser's leg of *request* was TLS.
+
+    TLS terminates at the platform router, so the scheme inside the container is
+    plain http and the forwarded header is the only honest signal. Uvicorn
+    trusts that header from loopback only and the router is not on loopback, so
+    it is read here rather than relying on the resolved scheme.
+    """
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    scheme = forwarded.split(",")[0].strip() or request.url.scheme
+    return scheme == "https"
+
+
 app = FastAPI(
     title="SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine",
     version=__version__,
     lifespan=lifespan,
     dependencies=[Depends(require_csrf)],
+    # The interactive documentation and the schema are off, not gated. An
+    # anonymous GET /openapi.json answered 200 with all 69 routes and their
+    # parameter names, which is a complete attack-surface map of an
+    # authenticated console sitting on a public ingress. Nothing in the
+    # deployment consumes the schema, so there is nothing to gate: only the
+    # health probes are public, and they stay public.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+
+@app.middleware("http")
+async def _add_security_headers(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Attach the security response headers to every response.
+
+    ``setdefault`` rather than assignment, so a route that has deliberately
+    set one of these for itself keeps its own value.
+    """
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if _is_https(request):
+        response.headers.setdefault("Strict-Transport-Security", _HSTS)
+    return response
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

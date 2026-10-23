@@ -45,7 +45,14 @@
                 letter-spacing:0.07em; margin-bottom:0.3rem">How to Complete This Scenario</div>
     <div style="font-size:0.63rem; color:var(--text-dim); line-height:1.7">
       {% if scenario.tool_workflow %}
-        {{ scenario.tool_workflow | replace('\n', '<br>') | safe }}
+        {# Same sink as the UDL element-set viewer in pol_results.html: replace-to-<br> does not
+           escape and | safe then disabled autoescaping on the whole value, so anything editable
+           into scenarios.yaml rendered as markup. white-space:pre-line gives the breaks instead
+           and collapses the folded-YAML indentation exactly as the old <br> rendering did. The
+           value sits hard against the span so this template's own newlines are not preserved
+           with it, and the style stays off the parent div so the fallback prose below is
+           unaffected. #}
+        <span style="white-space:pre-line">{{ scenario.tool_workflow }}</span>
       {% else %}
         Work through the objectives below using the SPECTRE panels.
         Tick each objective once you have completed the required action and are confident in your answer.

@@ -923,9 +923,15 @@
           <td style="font-family:monospace; font-size:0.58rem; white-space:nowrap">
             <details style="display:inline">
               <summary style="cursor:pointer; color:var(--ops-blue); list-style:none; font-size:0.6rem">view</summary>
-              <div style="position:absolute; z-index:99; background:var(--panel-bg); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; margin-top:0.2rem; font-size:0.6rem; line-height:1.6; max-width:min(90vw,700px); word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.4)">
-                {{ rec.tle | replace('\n', '<br>') | safe }}
-              </div>
+              {# rec.tle is raw UDL element-set text, so it must never reach the DOM as markup.
+                 A line 1 carrying a payload after column 69 survives the parser, and the old
+                 replace-to-<br> did not escape it (Jinja's replace leaves plain-string arguments
+                 alone) while | safe then switched autoescaping off for the whole value, so the
+                 payload executed in the analyst's authenticated session. The line break now comes
+                 from white-space:pre-wrap, which needs no HTML at all and keeps the TLE's fixed
+                 columns aligned. The expression sits hard against the tags because pre-wrap would
+                 otherwise render this template's own indentation. #}
+              <div style="position:absolute; z-index:99; background:var(--panel-bg); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; margin-top:0.2rem; font-size:0.6rem; line-height:1.6; max-width:min(90vw,700px); white-space:pre-wrap; word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.4)">{{ rec.tle }}</div>
             </details>
           </td>
         </tr>

@@ -27,10 +27,14 @@
 
   {# ── Most dangerous actor ─────────────────────────────────────────────── #}
   {% set worst = screening.most_dangerous %}
-  {% set wc = band_colours.get(worst.verdict_label, ("#94a3b8", "rgba(148,163,184,0.06)")) %}
+  {% set wc = band_colours.get(worst.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
   <div style="border-left:4px solid {{ wc[0] }}; background:{{ wc[1] }}; border-radius:6px; padding:0.75rem 1rem; margin:0.6rem 0">
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap">
-      <span style="background:{{ wc[0] }}; color:#fff; font-size:0.7rem; font-weight:700; padding:0.2rem 0.5rem; border-radius:3px; letter-spacing:0.05em; text-transform:uppercase">&#9888; {{ worst.verdict_label }}</span>
+      {# White on the band's own colour measured 2.15:1 for HIGH and 2.28:1
+         for LOW, so the verdict word on the highest-priority actor was the
+         least readable thing on the panel. .spectre-band-badge carries the
+         darkened fill token instead, which clears 4.5:1 in both themes. #}
+      <span class="spectre-band-badge spectre-band-{{ worst.verdict_label | lower }}">&#9888; {{ worst.verdict_label }}</span>
       <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS ACTOR</span>
       <strong style="font-size:0.82rem">{{ worst.actor_name }}</strong>
       <span style="font-size:0.72rem; color:var(--text-muted)">[{{ worst.actor_satno }}]{% if worst.country %} &#183; {{ worst.country }}{% endif %}</span>
@@ -77,9 +81,9 @@
   {# ── Earliest arrival, and the disagreement if there is one ───────────── #}
   {% set soon = screening.earliest_arrival %}
   {% if screening.disagreement %}
-  <div style="border-left:4px solid #a78bfa; background:rgba(167,139,250,0.07); border-radius:6px; padding:0.6rem 0.9rem; margin:0.5rem 0">
+  <div style="border-left:4px solid var(--spectre-status-violet); background:rgba(var(--spectre-status-violet-rgb), 0.07); border-radius:6px; padding:0.6rem 0.9rem; margin:0.5rem 0">
     <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.35rem; flex-wrap:wrap">
-      <span style="font-size:0.7rem; font-weight:700; color:#a78bfa; letter-spacing:0.05em">EARLIEST ARRIVAL</span>
+      <span style="font-size:0.7rem; font-weight:700; color:var(--spectre-status-violet); letter-spacing:0.05em">EARLIEST ARRIVAL</span>
       <strong style="font-size:0.78rem">{{ soon.actor_name }}</strong>
       <span style="font-size:0.72rem; color:var(--text-muted)">[{{ soon.actor_satno }}] &#183; {{ soon.warning_hours | tof }} &#183; {{ soon.delta_v_m_s | m_s }} m/s &#183; assessed {{ soon.verdict_label }}</span>
     </div>
@@ -107,7 +111,7 @@
       </thead>
       <tbody>
         {% for v in screening.ranked %}
-        {% set vc = band_colours.get(v.verdict_label, ("#94a3b8", "rgba(148,163,184,0.06)")) %}
+        {% set vc = band_colours.get(v.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
         {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
         {% set row_id = 'scr-' ~ loop.index0 %}
         <tr class="threat-parent" onclick="scrToggle('{{ row_id }}')" style="cursor:pointer"

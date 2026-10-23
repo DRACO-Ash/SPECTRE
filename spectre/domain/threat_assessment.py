@@ -39,13 +39,13 @@ gather.
 from __future__ import annotations
 
 import contextlib
-
 from dataclasses import dataclass, field
 from enum import IntEnum
 
 from spectre.domain.manoeuvre_calibration import (
     ManoeuvreKind,
     Posture,
+    PostureAssessment,
     classify_posture,
     fastest_delivery_hours,
     kind_for_method,
@@ -121,6 +121,10 @@ _IMPAIRED_STATUS_MARKERS: tuple[str, ...] = (
 _PROPELLANT_SPENT_PCT: float = 95.0
 # Propellant remaining above this adds nothing; the object is simply capable.
 _PROPELLANT_AMPLE_PCT: float = 50.0
+# The same cut applied to the discretionary reserve, as a share rather than a
+# percentage because that reading divides remaining by maximum directly. Half
+# the reserve still unspent is a platform that can still act against someone.
+_DISCRETIONARY_AMPLE_SHARE: float = 0.5
 
 # A platform can hold propellant and still be unable to act: most of a GEO
 # comsat's remaining tank is committed to fifteen years of station-keeping, and
@@ -158,7 +162,7 @@ class AccessEvidence:
         """The operational kind of manoeuvre the winning method represents."""
         return kind_for_method(self.method)
 
-    def posture(self):  # -> PostureAssessment
+    def posture(self) -> PostureAssessment:
         """What this cost says about how the actor would have to behave."""
         return classify_posture(self.best_delta_v_m_s, self.regime, self.kind)
 
@@ -285,7 +289,9 @@ class CapabilityEvidence:
                 and self.discretionary_max_m_s is not None
                 and self.discretionary_max_m_s > 0):
             share = self.discretionary_remaining_m_s / self.discretionary_max_m_s
-            candidates.append(Band.HIGH if share >= 0.5 else Band.MEDIUM)
+            candidates.append(
+                Band.HIGH if share >= _DISCRETIONARY_AMPLE_SHARE else Band.MEDIUM
+            )
         elif self.propellant_used_pct is not None:
             remaining = 100.0 - self.propellant_used_pct
             candidates.append(

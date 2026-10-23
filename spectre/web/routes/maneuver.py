@@ -177,6 +177,24 @@ _POSTURE_PRESENTATION: dict[Posture, tuple[str, str, str]] = {
 # pinned by tests/unit/test_intercept_intel_characterisation.py.
 
 
+#: The ΔV bands an operator reads, each as (upper edge in m/s, label), lowest
+#: first. A burn takes the label of the first band whose edge it is below.
+#: A table rather than a ladder of seven returns: the edges above already carry
+#: their own provenance, and in this form an edge out of order, or a label
+#: reused between two bands, is visible on one screen instead of spread down a
+#: chain that has to be read in order to be checked.
+_DV_BANDS: tuple[tuple[float, str], ...] = (
+    (_CAM_SCALE_M_S, "Micro-manoeuvre"),
+    (_SINGLE_SK_BURN_M_S, "Station-keeping scale"),
+    (_ANNUAL_STATION_KEEPING_M_S, "Within a year's station-keeping budget"),
+    (_MOST_AGGRESSIVE_OBSERVED_M_S, "Minor Transfer"),
+    (_ANOMALY_M_S, "Moderate Transfer"),
+    (_BEYOND_PLATFORM_M_S, "Major Transfer"),
+)
+#: Reported above every band edge.
+_DV_BAND_ABOVE_ALL: str = "High-Energy Transfer"
+
+
 def _dv_classification(dv: float) -> str:
     """Name the scale of a burn, given its magnitude in m/s.
 
@@ -191,19 +209,10 @@ def _dv_classification(dv: float) -> str:
     "station-keeping scale" describes the arithmetic while hiding the
     behaviour.
     """
-    if dv < _CAM_SCALE_M_S:
-        return "Micro-manoeuvre"
-    if dv < _SINGLE_SK_BURN_M_S:
-        return "Station-keeping scale"
-    if dv < _ANNUAL_STATION_KEEPING_M_S:
-        return "Within a year's station-keeping budget"
-    if dv < _MOST_AGGRESSIVE_OBSERVED_M_S:
-        return "Minor Transfer"
-    if dv < _ANOMALY_M_S:
-        return "Moderate Transfer"
-    if dv < _BEYOND_PLATFORM_M_S:
-        return "Major Transfer"
-    return "High-Energy Transfer"
+    for edge_m_s, label in _DV_BANDS:
+        if dv < edge_m_s:
+            return label
+    return _DV_BAND_ABOVE_ALL
 
 
 def _observability(dv: float) -> tuple[str, str, str]:
@@ -346,7 +355,10 @@ _TRANSFER_LAMBERT_ARC: str = "Lambert arc"
 #: intelligence panel ever did. A table says what it actually is: a lookup, not
 #: a decision. Adding a method is one row, and a method with no row of its own
 #: still gets its miss distance rather than nothing.
-_METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, Any] = {
+#: Typed rather than ``Any``: an untyped value here makes every call site's
+#: return type Any, which silently switches off checking in the callers.
+_InsightBuilder = Callable[[InterceptResult, float, float], list[dict[str, Any]]]
+_METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.RBAR_HOP:
         lambda result, dv, miss: (
             [
@@ -524,75 +536,103 @@ def _method_insights(
     return builder(result, dv, miss)
 
 
+# Two sentences are shared by more than one method, so they are named rather
+# than written twice: a repeated f-string is where the Lambert wording comes to
+# differ between the proximity and the rendezvous solver. Every builder takes
+# the same five values whether or not it quotes them, so the table can call any
+# row the same way; in these two the unused ones carry the leading underscore
+# this codebase already uses for a deliberately unread parameter.
+def _lambert_summary(
+    result: InterceptResult, dv: float, miss: float, tof_label: str, _arrival: str,
+) -> str:
+    return (
+        f"Lambert transfer achieves {miss:.1f} km close approach to {result.blue_name} "
+        f"with {dv:.0f} m/s total \u0394V in {tof_label}."
+    )
+
+
+def _hohmann_summary(
+    result: InterceptResult, dv: float, _miss: float, _tof_label: str, arrival: str,
+) -> str:
+    return (
+        f"Hohmann transfer to {result.blue_name} requires {dv:.0f} m/s across "
+        f"{len(result.burns)} burn(s), arriving {arrival}."
+    )
+
+
+#: Intercept method -> the one sentence its panel leads with.
+#:
+#: The same shape as _METHOD_INSIGHT_BUILDERS above, for the same reason: this
+#: was an eleven-way if/elif chain over a fixed set of methods, which is a
+#: lookup written as a decision. A method with no row of its own still gets the
+#: generic sentence rather than nothing.
+_SummaryBuilder = Callable[[InterceptResult, float, float, str, str], str]
+_METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
+    InterceptMethod.RBAR_HOP:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"R-Bar hop places {result.red_name} {miss:.1f} km radially from "
+            f"{result.blue_name} using {dv:.0f} m/s \u0394V in {tof_label}."
+        ),
+    InterceptMethod.VBAR_HOP:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"V-Bar hop sequence advances {result.red_name} {miss:.1f} km along V-bar "
+            f"toward {result.blue_name} via {len(result.burns)} burns "
+            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
+            f"Low observability — each hop mimics natural drift."
+        ),
+    InterceptMethod.HBAR_HOP:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"H-Bar hop sequence advances {result.red_name} {miss:.1f} km in orbit-normal "
+            f"toward {result.blue_name} via {len(result.burns)} normal burns "
+            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
+            f"Low observability — consistent with ACS activity."
+        ),
+    InterceptMethod.LAMBERT:    _lambert_summary,
+    InterceptMethod.PROXIMITY:  _lambert_summary,
+    InterceptMethod.RENDEZVOUS: _lambert_summary,
+    InterceptMethod.HOHMANN:    _hohmann_summary,
+    InterceptMethod.BIELLIPTIC: _hohmann_summary,
+    InterceptMethod.INTENT_PREDICT:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"Intent assessment indicates {int(miss)}% probability of intercept "
+            f"intent against {result.blue_name}."
+        ),
+    InterceptMethod.DETECTABILITY:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"Detectability assessment scores {int(miss)}/100 observability for "
+            f"{result.red_name} manoeuvre against {result.blue_name}."
+        ),
+    InterceptMethod.COLA:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"COLA manoeuvre achieves {miss:.1f} km miss distance with "
+            f"{dv:.0f} m/s \u0394V, arriving {arrival}."
+        ),
+    InterceptMethod.EVASION:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"Evasion manoeuvre places {result.red_name} {miss:.1f} km from threat "
+            f"using {dv:.0f} m/s \u0394V."
+        ),
+    InterceptMethod.MIN_TIME:
+        lambda result, dv, miss, tof_label, arrival: (
+            f"Minimum-time intercept of {result.blue_name} achieved in {tof_label} "
+            f"with {dv:.0f} m/s \u0394V."
+        ),
+}
+
+
 def _summary_text(
     result: InterceptResult, dv: float, miss: float,
     intent_label: str, tof_label: str,
 ) -> str:
     """One sentence describing what this intercept would do."""
-    method = result.method
-    arrival_str = result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC")
-    if method == InterceptMethod.RBAR_HOP:
-        summary = (
-            f"R-Bar hop places {result.red_name} {miss:.1f} km radially from "
-            f"{result.blue_name} using {dv:.0f} m/s \u0394V in {tof_label}."
-        )
-    elif method == InterceptMethod.VBAR_HOP:
-        summary = (
-            f"V-Bar hop sequence advances {result.red_name} {miss:.1f} km along V-bar "
-            f"toward {result.blue_name} via {len(result.burns)} burns "
-            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
-            f"Low observability — each hop mimics natural drift."
-        )
-    elif method == InterceptMethod.HBAR_HOP:
-        summary = (
-            f"H-Bar hop sequence advances {result.red_name} {miss:.1f} km in orbit-normal "
-            f"toward {result.blue_name} via {len(result.burns)} normal burns "
-            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
-            f"Low observability — consistent with ACS activity."
-        )
-    elif method in (InterceptMethod.LAMBERT, InterceptMethod.PROXIMITY, InterceptMethod.RENDEZVOUS):
-        summary = (
-            f"Lambert transfer achieves {miss:.1f} km close approach to {result.blue_name} "
-            f"with {dv:.0f} m/s total \u0394V in {tof_label}."
-        )
-    elif method in (InterceptMethod.HOHMANN, InterceptMethod.BIELLIPTIC):
-        summary = (
-            f"Hohmann transfer to {result.blue_name} requires {dv:.0f} m/s across "
-            f"{len(result.burns)} burn(s), arriving {arrival_str}."
-        )
-    elif method == InterceptMethod.INTENT_PREDICT:
-        likelihood_pct = int(miss)
-        summary = (
-            f"Intent assessment indicates {likelihood_pct}% probability of intercept "
-            f"intent against {result.blue_name}."
-        )
-    elif method == InterceptMethod.DETECTABILITY:
-        score_pct = int(miss)
-        summary = (
-            f"Detectability assessment scores {score_pct}/100 observability for "
-            f"{result.red_name} manoeuvre against {result.blue_name}."
-        )
-    elif method == InterceptMethod.COLA:
-        summary = (
-            f"COLA manoeuvre achieves {miss:.1f} km miss distance with "
-            f"{dv:.0f} m/s \u0394V, arriving {arrival_str}."
-        )
-    elif method == InterceptMethod.EVASION:
-        summary = (
-            f"Evasion manoeuvre places {result.red_name} {miss:.1f} km from threat "
-            f"using {dv:.0f} m/s \u0394V."
-        )
-    elif method == InterceptMethod.MIN_TIME:
-        summary = (
-            f"Minimum-time intercept of {result.blue_name} achieved in {tof_label} "
-            f"with {dv:.0f} m/s \u0394V."
-        )
-    else:
-        summary = (
+    arrival = result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC")
+    builder = _METHOD_SUMMARY_BUILDERS.get(result.method)
+    if builder is None:
+        return (
             f"{intent_label} for {result.red_name} \u2192 {result.blue_name}: "
-            f"{dv:.0f} m/s \u0394V, arriving {arrival_str}."
+            f"{dv:.0f} m/s \u0394V, arriving {arrival}."
         )
-    return summary
+    return builder(result, dv, miss, tof_label, arrival)
 
 
 def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:

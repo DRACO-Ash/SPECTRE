@@ -49,10 +49,26 @@ TEST_IGNORED="$IGNORED,S101,S105,S106,SLF001,PLR2004"
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; exit 1; }
 
+# The MERGE BASE, so commits that landed on the base branch after this one
+# started are not scored as this branch's work.
+ANCHOR=$(git merge-base "$BASE" HEAD 2>/dev/null || printf '%s' "$BASE")
+
 changed_in() {
     # $1 = space-separated directories
+    #
+    # Against the merge base and the WORKING TREE, and including untracked
+    # files. This read "$BASE...HEAD" until 0.5.25, which names only files
+    # changed in COMMITS: a file edited but not yet committed was never handed
+    # to ruff at all, and a file this branch ADDED was invisible to every leg
+    # below. The gate then printed "0 findings on changed lines" about code it
+    # had not opened, which is the most expensive thing a gate can do. The
+    # artefact is built from the working tree, so the working tree is the
+    # thing to analyse.
     # shellcheck disable=SC2086
-    git diff --name-only "$BASE...HEAD" -- $1 2>/dev/null | while read -r f; do
+    {
+        git diff --name-only "$ANCHOR" -- $1 2>/dev/null
+        git ls-files --others --exclude-standard -- $1 2>/dev/null
+    } | sort -u | while read -r f; do
         case "$f" in
             *.py) [ -f "$f" ] && printf '%s\n' "$f" ;;
             *) ;;  # non-Python paths are not analysed

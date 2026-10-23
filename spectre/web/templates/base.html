@@ -13,12 +13,19 @@
   <script>(function(){var t=localStorage.getItem('spectre-theme');var valid=['ops','steel'];if(t&&valid.indexOf(t)!==-1){document.documentElement.setAttribute('data-theme',t);document.documentElement.setAttribute('data-spectre-theme',t==='steel'?'light':'dark');}else if(t){localStorage.removeItem('spectre-theme');}})();</script>
   {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}" />{% endif %}
   <script src="/static/htmx.min.js"></script>
-  <script src="/static/chart.umd.min.js"
-          onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'"></script>
-  <script src="/static/hammer.min.js"
-          onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js'"></script>
-  <script src="/static/chartjs-plugin-zoom.min.js"
-          onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js'"></script>
+  {# chart.js 4.4.7, hammerjs 2.0.8 and chartjs-plugin-zoom 2.0.1 load from the vendored
+     copies in spectre/web/static and from nowhere else. Each used to carry an onerror
+     fallback to cdn.jsdelivr.net with no Subresource Integrity attribute, so any failure of
+     a local asset silently turned an authenticated console into one executing unpinned
+     third-party JavaScript, and in a restricted-egress deployment it was an unexpected
+     outbound call from every operator browser. The fallbacks are removed rather than pinned
+     with integrity hashes because nothing needs them: the vendored files ship in the image,
+     and a chart that fails to draw is a far better outcome than a supply-chain path into an
+     operator session. Keeping them would also force cdn.jsdelivr.net into the script-src of
+     the Content-Security-Policy being added for this release. #}
+  <script src="/static/chart.umd.min.js"></script>
+  <script src="/static/hammer.min.js"></script>
+  <script src="/static/chartjs-plugin-zoom.min.js"></script>
   {# Keyboard equivalent for the sortable headers and expandable rows.
 
      A table header or row that only answers to onclick is unreachable without

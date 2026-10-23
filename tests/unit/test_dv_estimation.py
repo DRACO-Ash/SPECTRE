@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from datetime import timedelta
+from typing import NamedTuple
 
 import pytest
 from sgp4.api import Satrec
@@ -50,23 +51,52 @@ _A0 = (MU_EARTH / ((_N0 * 2 * math.pi / 86400.0) ** 2)) ** (1 / 3)
 _V0 = math.sqrt(MU_EARTH / _A0)
 
 
+def _digit_value(char: str) -> int:
+    """One character's contribution to a TLE line checksum.
+
+    Spelled out rather than nested in a conditional expression, which the
+    gate reports as python:S3358 on new code. The arithmetic is unchanged:
+    a digit counts for its value, a minus sign counts one, anything else
+    counts nothing.
+    """
+    if char.isdigit():
+        return int(char)
+    return 1 if char == "-" else 0
+
+
 def _checksum(line: str) -> int:
-    return sum(int(c) if c.isdigit() else (1 if c == "-" else 0) for c in line) % 10
+    return sum(_digit_value(c) for c in line) % 10
 
 
-def _tle(n: float, e: float, i: float, raan: float, argp: float,
-         ma: float, epoch: float) -> str:
+class _Elements(NamedTuple):
+    """The mean elements and epoch one synthetic element set is built from.
+
+    Carried as one argument because seven separate parameters trip the
+    project's argument-count rules (PLR0913 and PLR0917) on new code. The
+    values, their order and the element set they produce are unchanged.
+    """
+
+    n: float
+    e: float
+    i: float
+    raan: float
+    argp: float
+    ma: float
+    epoch: float
+
+
+def _tle(el: _Elements) -> str:
     """A well-formed two-line element set from mean elements."""
-    l1 = f"1 62902U 25001A   {epoch:14.8f}  .00000000  00000-0  00000-0 0  999"
+    l1 = f"1 62902U 25001A   {el.epoch:14.8f}  .00000000  00000-0  00000-0 0  999"
     l1 += str(_checksum(l1))
-    l2 = (f"2 62902 {i % 360:8.4f} {raan % 360:8.4f} {f'{abs(e):.7f}'[2:9]} "
-          f"{argp % 360:8.4f} {ma % 360:8.4f} {n:11.8f}    1")
+    l2 = (f"2 62902 {el.i % 360:8.4f} {el.raan % 360:8.4f} {f'{abs(el.e):.7f}'[2:9]} "
+          f"{el.argp % 360:8.4f} {el.ma % 360:8.4f} {el.n:11.8f}    1")
     l2 += str(_checksum(l2))
     return f"{l1}\n{l2}"
 
 
 def _base() -> str:
-    return _tle(_N0, _E0, _I0, _RA0, _AP0, _MA0, _EP0)
+    return _tle(_Elements(_N0, _E0, _I0, _RA0, _AP0, _MA0, _EP0))
 
 
 def _sgp4_rates(tle: str) -> tuple[float, float, float]:
@@ -82,11 +112,12 @@ def _coast(tle: str, days: float) -> str:
     s = Satrec.twoline2rv(*tle.splitlines())
     nd, ad, md = _sgp4_rates(tle)
     epoch = float(tle.splitlines()[0][18:32])
-    return _tle(s.no_kozai * 1440.0 / (2 * math.pi), s.ecco, math.degrees(s.inclo),
-                math.degrees(s.nodeo) + nd * days,
-                math.degrees(s.argpo) + ad * days,
-                math.degrees(s.mo) + md * days,
-                epoch + days)
+    return _tle(_Elements(s.no_kozai * 1440.0 / (2 * math.pi), s.ecco,
+                          math.degrees(s.inclo),
+                          math.degrees(s.nodeo) + nd * days,
+                          math.degrees(s.argpo) + ad * days,
+                          math.degrees(s.mo) + md * days,
+                          epoch + days))
 
 
 def _burn(tle: str, d_alt_km: float = 0.0, d_inc_deg: float = 0.0,
@@ -94,10 +125,11 @@ def _burn(tle: str, d_alt_km: float = 0.0, d_inc_deg: float = 0.0,
     """Apply an impulse to an element set, at its own epoch."""
     s = Satrec.twoline2rv(*tle.splitlines())
     a = (MU_EARTH / ((s.no_kozai / 60.0) ** 2)) ** (1 / 3) + d_alt_km
-    return _tle(math.sqrt(MU_EARTH / a ** 3) * 86400.0 / (2 * math.pi),
-                s.ecco + d_ecc, math.degrees(s.inclo) + d_inc_deg,
-                math.degrees(s.nodeo), math.degrees(s.argpo), math.degrees(s.mo),
-                float(tle.splitlines()[0][18:32]))
+    return _tle(_Elements(math.sqrt(MU_EARTH / a ** 3) * 86400.0 / (2 * math.pi),
+                          s.ecco + d_ecc, math.degrees(s.inclo) + d_inc_deg,
+                          math.degrees(s.nodeo), math.degrees(s.argpo),
+                          math.degrees(s.mo),
+                          float(tle.splitlines()[0][18:32])))
 
 
 def _pair(gap_days: float, burn_frac: float = 0.0, *, d_alt: float = 0.0,
@@ -159,7 +191,7 @@ class TestPhaseIsNotDeltaV:
         """
         before = _satrec_to_record(_base())
         after = _satrec_to_record(
-            _tle(_N0, _E0, _I0, _RA0, _AP0, _MA0 + phase_deg, _EP0)
+            _tle(_Elements(_N0, _E0, _I0, _RA0, _AP0, _MA0 + phase_deg, _EP0))
         )
         assert _estimate_dv(before, after) * 1000.0 < 0.01, (
             f"{phase_deg}° of phase must not register as ΔV; the old method "
@@ -171,7 +203,7 @@ class TestPhaseIsNotDeltaV:
         b = snapshot_from_record(_satrec_to_record(_base()))
         for ma in (0.0, 90.0, 180.0, 270.0, 359.9):
             a = snapshot_from_record(
-                _satrec_to_record(_tle(_N0, _E0, _I0, _RA0, _AP0, ma, _EP0))
+                _satrec_to_record(_tle(_Elements(_N0, _E0, _I0, _RA0, _AP0, ma, _EP0)))
             )
             assert estimate_dv_mean_elements(b, a, 0.0).dv_km_s == pytest.approx(0.0, abs=1e-12)
 

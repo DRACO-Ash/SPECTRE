@@ -1,6 +1,6 @@
 {# Single refined child row — replaces via hx-swap="outerHTML" on the <tr>. #}
 {% if error %}
-<tr id="threat-row-{{ index }}"><td colspan="7" class="error-msg">{{ error }}</td></tr>
+<tr id="threat-row-{{ index }}"><td colspan="8" class="error-msg">{{ error }}</td></tr>
 {% elif entry %}
 <tr class="threat-child"
     id="threat-row-{{ index }}"
@@ -13,6 +13,14 @@
   <td class="col-dim" title="Pro {{ entry.dv_prograde | m_s }}  Nor {{ entry.dv_normal | m_s }}  Rad {{ entry.dv_radial | m_s }}">
     {{ entry.method }}
   </td>
+  {# The Posture column. This fragment REPLACES a child row of the sweep table
+     via hx-swap="outerHTML", so its cell count has to match that table exactly.
+     When Posture was added to threat_sweep.html the table went from seven
+     columns to eight and this fragment was left at seven, so every refined row
+     silently shifted its own Action cell under the Posture heading. Rendering
+     the parent template alone does not catch that; only rendering both and
+     comparing does, which is what the contract test now does. #}
+  <td class="col-dim">{{ entry.posture_label or '—' }}</td>
   <td class="col-actions" style="white-space:nowrap">
     {% if entry.method == "hohmann" %}
     <button class="btn-secondary btn-sm"
