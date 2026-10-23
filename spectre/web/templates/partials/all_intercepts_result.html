@@ -52,13 +52,17 @@
   <thead>
     <tr>
       <th></th>
-      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      {# aria-sort="none" is the resting state of a SORTABLE column, so it is
+         markup, not script: it says the column can be sorted before anyone has
+         clicked, and it gives aiSort a selector that cannot touch the two
+         columns that do not sort. #}
+      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -397,12 +401,16 @@ function aiSort(col, type) {
   if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
   else { _aiSortCol = col; _aiSortAsc = true; }
 
-  /* Update sort indicators in header */
+  /* Update sort indicators in header.
+     The glyph and aria-sort are the same fact for two different operators, so
+     they are written together and can never drift apart. */
   table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
+  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
   var th = table.querySelectorAll('thead th')[col];
   if (th) {
     var ind = th.querySelector('.hrr-sort-ind');
     if (ind) ind.textContent = _aiSortAsc ? ' \u25b2' : ' \u25bc';
+    th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
   }
 
   /* Collect parent+detail pairs; non-parent rows (failed) go to the bottom */

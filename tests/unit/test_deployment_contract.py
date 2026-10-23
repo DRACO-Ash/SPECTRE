@@ -1454,3 +1454,138 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         assert all(s == width for s in spans), (
             f"the fragment's colspan {spans} does not match the table's {width} columns"
         )
+
+    # ── What the swapped row CARRIES, not just how wide it is ────────────
+    #
+    # The cell count above caught the column shift and nothing else, so two
+    # further mismatches rode in behind it.
+    #
+    # The Load button. The fragment called loadInEngine with three arguments
+    # where the row it replaces passes four. JavaScript does not object: the
+    # target name arrived as redSat, the burn epoch as blueSat, the method as
+    # epoch, and method itself as undefined. A Refine followed by a Load
+    # pre-filled the intercept engine with the wrong objects and showed the
+    # operator nothing to say so.
+    #
+    # The headers= binding. Every cell of the row the fragment replaces names
+    # its group's heading id, because the headings are a repeated in-tbody
+    # header row rather than a thead and scope="col" would claim the rest of
+    # the column. The fragment carried no binding at all, so the one row an
+    # operator asked the solver to improve was the one row a screen reader
+    # could not name the columns of.
+
+    @staticmethod
+    def _split_arguments(markup: str, start: int) -> list[str]:
+        """Top-level arguments of a call whose '(' ends at ``start``.
+
+        Depth-aware: the epoch argument is itself a call,
+        ``strftime('%Y-%m-%dT%H:%M')``, and every argument is wrapped in
+        Jinja's ``{{ }}``.
+        """
+        depth = 0
+        args: list[str] = []
+        current = ""
+        for ch in markup[start:]:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif ch == "," and depth == 0:
+                args.append(current.strip())
+                current = ""
+                continue
+            current += ch
+        args.append(current.strip())
+        return [a for a in args if a]
+
+    @classmethod
+    def _load_call(cls, markup: str) -> list[str]:
+        """The arguments of the one loadInEngine CALL in ``markup``.
+
+        Anchored on the onclick= attribute, which keeps the function's own
+        declaration and any prose about it out of the match. threat_sweep.html
+        holds the declaration as well as a call.
+        """
+        calls = [
+            cls._split_arguments(markup, m.end())
+            for m in re.finditer(r'onclick="[^"]*?\bloadInEngine\(', markup)
+        ]
+        assert len(calls) == 1, (
+            f"expected exactly one loadInEngine call site, found {len(calls)}"
+        )
+        return calls[0]
+
+    @staticmethod
+    def _header_bindings(row: str) -> list[str]:
+        return re.findall(r'headers="([^"]*)"', row)
+
+    @classmethod
+    def _child_row_of_table(cls, table: str) -> str:
+        rows = [
+            b for b in re.split(r"<tr\b", table)
+            if "burn_location" in b and b.count("<td") > 0
+        ]
+        assert rows, "the sweep table no longer has a child row to compare against"
+        return rows[0]
+
+    def test_the_refined_row_loads_the_same_objects_into_the_engine(self) -> None:
+        fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
+        table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
+
+        declared = re.search(r"function\s+loadInEngine\(([^)]*)\)", table)
+        assert declared, "threat_sweep.html no longer declares loadInEngine"
+        params = [p.strip() for p in declared.group(1).split(",") if p.strip()]
+        assert params == ["redSat", "blueSat", "epoch", "method"], (
+            f"loadInEngine's signature changed to {params}; this test's "
+            "argument-by-argument assertions below need to change with it"
+        )
+
+        parent_args = self._load_call(table)
+        fragment_args = self._load_call(fragment)
+
+        assert len(parent_args) == len(params), (
+            f"the sweep table calls loadInEngine with {len(parent_args)} "
+            f"argument(s) and it takes {len(params)}"
+        )
+        assert len(fragment_args) == len(params), (
+            f"threat_sweep_row.html calls loadInEngine with "
+            f"{len(fragment_args)} argument(s) and it takes {len(params)} "
+            f"({', '.join(params)}). htmx swaps this row in over one that "
+            "passes all four, so after a Refine every argument shifts one "
+            f"place left: {fragment_args}. The engine is pre-filled with the "
+            "wrong objects and nothing is shown to the operator."
+        )
+        assert "red_name" in fragment_args[0], (
+            "the refined row's Load passes "
+            f"{fragment_args[0]} as redSat where the row it replaces passes "
+            f"{parent_args[0]}. redSat is the interceptor, not the target."
+        )
+        assert "red_name" in parent_args[0], (
+            "the sweep table's Load no longer leads with the red satellite; "
+            "the fragment is now matching the wrong thing"
+        )
+        assert "method" in fragment_args[-1] and "method" in parent_args[-1], (
+            "method must be the last argument in both, or ieUpdate() runs on "
+            "undefined"
+        )
+
+    def test_the_refined_row_binds_its_cells_to_the_same_column_headings(self) -> None:
+        fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
+        table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
+
+        parent = self._header_bindings(self._child_row_of_table(table))
+        assert parent, (
+            "the sweep table's child row no longer binds its cells to the "
+            "per-group headings, so there is nothing for the fragment to match"
+        )
+        refined = self._header_bindings(re.split(r"<tr\b", fragment)[-1])
+        assert refined == parent, (
+            f"the refined row binds its cells to {refined} where the row it "
+            f"replaces binds to {parent}. The headings are a repeated row "
+            "inside the tbody, one set per group, so a cell with no headers= "
+            "has no column name at all: after a Refine the operator using a "
+            "screen reader loses the column names on exactly the row they "
+            "asked the solver to improve."
+        )

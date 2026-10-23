@@ -24,6 +24,11 @@ function hrrSort(th) {
   rows.forEach(function(r) { tbody.appendChild(r); });
   table.querySelectorAll('.hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
   th.querySelector('.hrr-sort-ind').textContent = asc ? ' ▲' : ' ▼';
+  /* Same fact as the glyph, for an operator who cannot see it. Only the
+     headers that carry aria-sort are reset, so the leading actions column
+     is never told it is an unsorted sortable column. */
+  table.querySelectorAll('th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
+  th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
 }
 </script>
 
@@ -33,11 +38,11 @@ function hrrSort(th) {
     <thead>
       <tr>
         <th class="no-sort"></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Name<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">SATNO<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Country<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Orbit<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Rank<span class="hrr-sort-ind"></span></th>
+        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
+        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
+        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
+        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
+        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
       </tr>
     </thead>
     <tbody>
@@ -84,11 +89,11 @@ function hrrSort(th) {
       <thead>
         <tr>
           <th class="no-sort"></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Name<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">SATNO<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Country<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Orbit<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col">Rank<span class="hrr-sort-ind"></span></th>
+          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
+          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
+          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
+          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
+          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>

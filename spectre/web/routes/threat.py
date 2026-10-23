@@ -1738,17 +1738,33 @@ async def threat_screen(
 async def refine_entry(
     request: Request,
     entry_index: Annotated[int, Form()],
+    group_idx: Annotated[int, Form(ge=0)] = 0,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Refine a single threat sweep entry with Lambert solver."""
+    """Refine a single threat sweep entry with Lambert solver.
+
+    ``group_idx`` arrives with ``entry_index`` from the row being replaced.
+    The fragment swaps in over one child row of threat_sweep.html, whose
+    column headings are a repeated in-tbody header row with ids of the form
+    ``tsw-child-<group>-N``; the refined cells bind to those with ``headers=``
+    and so have to name the same group. It is not recomputed here on purpose:
+    ``_group_entries`` ranks the groups on best time-of-flight and delta-v,
+    which is exactly what a refine changes, so a grouping derived after the
+    fact can disagree with the table the row is still sitting in.
+    """
     state = get_session_state(current_user.username)
 
     if not state.last_threat_assessment or entry_index >= len(state.last_threat_assessment.entries):
         return render(request, "partials/threat_sweep_row.html", {
-            "entry": None, "index": entry_index, "error": "Invalid entry",
+            "entry": None, "index": entry_index, "group_idx": group_idx,
+            "red_name": "", "error": "Invalid entry",
         })
 
     entry = state.last_threat_assessment.entries[entry_index]
+    # The interceptor. It is the FIRST argument the row's Load button passes
+    # to loadInEngine, and the fragment has no assessment of its own to read
+    # it from the way threat_sweep.html does.
+    red_name = state.last_threat_assessment.red_name
 
     # Find TLEs.
     red_tle = _find_tle(state, state.last_threat_assessment.red_name)
@@ -1759,7 +1775,8 @@ async def refine_entry(
 
     if not red_tle or not target_tle:
         return render(request, "partials/threat_sweep_row.html", {
-            "entry": entry, "index": entry_index, "error": "TLE not found",
+            "entry": entry, "index": entry_index, "group_idx": group_idx,
+            "red_name": red_name, "error": "TLE not found",
         })
 
     def _refine() -> ThreatSweepEntry:
@@ -1784,5 +1801,6 @@ async def refine_entry(
     )
 
     return render(request, "partials/threat_sweep_row.html", {
-        "entry": refined, "index": entry_index, "error": None,
+        "entry": refined, "index": entry_index, "group_idx": group_idx,
+        "red_name": red_name, "error": None,
     })

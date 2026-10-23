@@ -38,7 +38,24 @@
   --spectre-color-deep-space:       #141820;
   --spectre-color-orbital-grey:     #1E2430;
   --spectre-color-panel-grey:       #252B38;
-  --spectre-color-sensor-grey:      #7A8BA6;
+  /* Raised from #7A8BA6. This is the token the failing rules actually read.
+     .htab (style.css:440), .hrr-table th (style.css:896) and
+     .sidebar-collapse-btn (style.css:417) all take
+     var(--spectre-text-secondary), which resolves here. Measured composited
+     in Chromium at #7A8BA6, all three painted 4.10:1 on surface-panel
+     #252B38 against a 4.5 floor, and .atab came to 4.4964:1 on
+     surface-overlay #1E2430 -- which rounds to 4.50 and is below the floor,
+     not on it. #8696AE clears every dark surface --spectre-text-secondary
+     lands on: 4.72 on panel #252B38, 4.84 on the GCAT tab bar wash #232934,
+     5.17 on overlay #1E2430, 5.92 on raised #141820, 6.51 on base #0A0C10.
+     This is a DARK-THEME text colour and the raise is safe only because of
+     that. Every light theme restates --spectre-text-secondary (#4B5563) and
+     never resolves through this token, so no light surface moves. The one
+     rule that did read it in both themes, .spectre-badge-neutral, now takes
+     --spectre-badge-neutral-text instead: a lighter grey is correct on a
+     dark surface and wrong on a light one, so the two jobs cannot share a
+     value. */
+  --spectre-color-sensor-grey:      #8696AE;
   --spectre-color-ice-white:        #D0D4DC;
   --spectre-color-pure-white:       #ECEEF2;
 
@@ -106,13 +123,23 @@
   --spectre-status-low-rgb:         34, 197, 94;
   --spectre-status-low-fill:        #15803D;
 
-  /* Raised from #7A8BA6. That value was audited against surface-base and
-     surface-raised only, and it is also used on surface-panel #252B38, where
-     it measured 4.10:1 against a 4.5 floor: the inactive hero tabs and the
-     HRR table headers in the dark theme. #8696AE clears all three surfaces,
-     at 4.72:1 on panel, 5.92 on raised and 6.51 on base. */
+  /* The MINIMAL verdict's text colour. It reaches the page through
+     _BAND_COLOURS in spectre/web/routes/threat.py:586 and through nothing
+     else: that is the token's only consumer in the repository. Raised from
+     #7A8BA6 for the dark surfaces a verdict lands on, 5.92:1 on
+     surface-raised #141820 and 6.51:1 on surface-base #0A0C10.
+     It does NOT render as the inactive hero tabs or the HRR table headers.
+     An earlier revision of this comment claimed it did, and the raise was
+     made on that basis. Those two rules are .htab (style.css:440) and
+     .hrr-table th (style.css:896); both read var(--spectre-text-secondary)
+     and were unaffected, still painting 4.10:1 on #252B38 after the raise.
+     They are fixed at --spectre-color-sensor-grey above, which is the token
+     the browser actually resolves for them.
+     The -rgb companion is this same colour in channel form, used for the 6%
+     row wash in threat.py. It was left behind at the pre-raise 122, 139, 166
+     and now matches the value above. */
   --spectre-status-minimal:         #8696AE;
-  --spectre-status-minimal-rgb:     122, 139, 166;
+  --spectre-status-minimal-rgb:     134, 150, 174;
   --spectre-status-minimal-fill:    #475569;
 
   /* A classification marking is the one label on the console that must never
@@ -161,12 +188,45 @@
   --spectre-text-inverse:           var(--spectre-color-console-black);
   --spectre-text-link:              var(--spectre-color-intel-blue);
 
+  /* The label inside .spectre-badge-neutral. It used to read
+     --spectre-color-sensor-grey directly, and the core palette is never
+     restated per theme, so the badge carried a dark-theme grey onto a light
+     surface: measured in Chromium on /admin/users in Steel it was 2.90:1 on
+     the user table's row tint (around #E7ECF1) and 3.19:1 on #F4F6F8,
+     against a 4.5 floor at 11px/500, before any raise. Raising sensor-grey
+     for the dark surfaces would have taken those to roughly 2.54 and 2.77.
+     No single grey serves a dark backdrop and a light one, so the
+     badge gets its own token and each theme restates it, the same remedy
+     --spectre-classification-nominal-fill and --spectre-tab-active-text
+     already use below. */
+  --spectre-badge-neutral-text:     var(--spectre-color-sensor-grey);
+
   /* -- Colour: Borders (Dark mode — default) -------------------------------- */
   --spectre-border-default:         rgba(122, 139, 166, 0.15);
   --spectre-border-hover:           rgba(122, 139, 166, 0.30);
   --spectre-border-active:          rgba(122, 139, 166, 0.45);
   --spectre-border-focus:           var(--spectre-color-intel-blue);
   --spectre-border-threat:          var(--spectre-color-threat-red);
+
+  /* -- Colour: Keyboard focus ----------------------------------------------
+     A focus ring is a non-text indicator, so its floor is 3:1 against every
+     surface it can land on, not 4.5:1.  --spectre-focus-ring follows the
+     theme; this is its dark value.  The ratios are computed from the tokens
+     below, and every one of them was also read back as painted pixels in
+     Chromium, agreeing to within 0.06:
+       console black #0A0C10 7.83    sweep row / sidebar tabs #141820 7.12
+       asset tab bar #1E2430 6.23    header / hero tab bar #252B38 5.67
+       sweep row CRITICAL tint 6.38  HIGH tint 6.08   VIOLET tint 6.10
+       active hero tab, the intel-blue wash on #252B38, 5.12
+     It is a light blue because these are dark surfaces: the light theme's
+     #1D4ED8 would measure 2.65:1 on #141820 and 2.92:1 on console black.
+
+     --spectre-focus-ring-on-dark is deliberately NOT re-declared for light
+     themes.  The engine tab bar is var(--navy-deep) in both of them, #001529
+     in ops and #0F1E2E in steel, so a ring that followed the theme would go
+     dark-on-dark there at 2.52:1.  This one holds at 7.38 and 6.75. */
+  --spectre-focus-ring:             #5FA8F5;
+  --spectre-focus-ring-on-dark:     #5FA8F5;
 
   /* -- Typography: Font Families -------------------------------------------- */
   --spectre-font-display:           'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
@@ -266,14 +326,30 @@
   --spectre-surface-input-hover:    #F9FAFB;
   --spectre-surface-input-focus:    #FFFFFF;
 
-  /* Threat bands, restated for a light surface. Measured against the four
-     surfaces themes.css sets for Steel, #FFFFFF / #f0f4f8 / #e8eef5 /
-     #e0e8f2, rather than the base block's own, because themes.css loads
-     after this file and wins:
-       critical 6.47/5.85/5.54/5.24   high    6.16/5.57/5.27/4.98
-       medium   6.70/6.06/5.74/5.42   low     7.13/6.45/6.10/5.77
-       minimal  7.58/6.86/6.49/6.13   unknown 7.58/6.86/6.49/6.13
-       violet   7.10/6.43/6.08/5.75
+  /* Threat bands, restated for a light surface.
+
+     Load order does not decide which surfaces these land on. SPECIFICITY
+     does. The prefers-color-scheme: light block further down this file
+     selects
+       :root:not([data-spectre-theme="dark"]):not(.spectre-dark):not([data-theme="ops"])
+     which is (0,4,0), and that beats themes.css's [data-theme="steel"] at
+     (0,1,0) however late themes.css loads. Steel therefore has two surface
+     sets, and which one paints depends on the operator's OS preference:
+       prefers light  raised #FFFFFF  base #F3F4F6  overlay #FFFFFF  panel #E5E7EB
+       prefers dark   raised #ffffff  base #f0f4f8  overlay #e8eef5  panel #e0e8f2
+     Steel's sidebar rule in themes.css hardcodes #e8eef5 rather than reading
+     a token, so that surface is on both paths.
+
+     Measured in Chromium, prefers-color-scheme: light with data-theme="steel",
+     the path Steel is actually read on and the one these values govern.
+     Ratios raised/base/overlay/panel:
+       critical 6.47/5.88/6.47/5.23   high    6.16/5.59/6.16/4.97
+       medium   6.70/6.09/6.70/5.41   low     7.13/6.48/7.13/5.76
+       minimal  7.58/6.89/7.58/6.12   unknown 7.58/6.89/7.58/6.12
+       violet   7.10/6.46/7.10/5.74
+     #E5E7EB is the darkest of all eight surfaces above (L 0.7981, against
+     #e0e8f2's 0.7997), so the panel column is the floor for both paths and
+     every band clears 4.5 on it.
      Each of these is dark enough to carry white text as a fill too, so the
      fill tokens repeat the text value rather than darkening it again. */
   --spectre-status-critical:        #B91C1C;
@@ -309,9 +385,25 @@
   --spectre-text-disabled:          #D1D5DB;
   --spectre-text-inverse:           var(--spectre-color-ice-white);
 
+  /* 6.35:1 on the user table's row tint and 6.99:1 on #F4F6F8, the two
+     backdrops the badge was measured on in Steel, and 6.12:1 on
+     surface-panel #E5E7EB. */
+  --spectre-badge-neutral-text:     #475569;
+
   --spectre-border-default:         rgba(0, 0, 0, 0.10);
   --spectre-border-hover:           rgba(0, 0, 0, 0.20);
   --spectre-border-active:          rgba(0, 0, 0, 0.30);
+
+  /* The light themes need their own ring: the dark #5FA8F5 measures 2.50:1
+     on #FFFFFF, 2.02:1 on #E5E7EB and 1.83:1 on the active hero tab's wash.
+     This value against the light surfaces these controls paint on, in both
+     token sets that can win here — this file's, and themes.css's when the
+     browser does not prefer light:
+       row #FFFFFF 6.70              base #F3F4F6 6.09 / #f0f4f8 6.06
+       header / hero tab bar #E5E7EB 5.41 / #e0e8f2 5.42
+       sweep row CRITICAL tint 5.48  sidebar tab bar #dde5ef 5.27
+       active hero tab wash 4.91 / 4.92 */
+  --spectre-focus-ring:             #1D4ED8;
 
   --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.06);
   --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.08);
@@ -335,10 +427,21 @@
     --spectre-text-tertiary:          #9CA3AF;
     --spectre-text-disabled:          #D1D5DB;
     --spectre-text-inverse:           var(--spectre-color-ice-white);
+    /* Restated here as well. This block is reached by a page that carries no
+       data-theme on <html> under a light system preference, and without it
+       the badge would fall back to :root's dark-theme grey on a light
+       surface, which is the failure the token exists to stop. */
+    --spectre-badge-neutral-text:     #475569;
 
     --spectre-border-default:         rgba(0, 0, 0, 0.10);
     --spectre-border-hover:           rgba(0, 0, 0, 0.20);
     --spectre-border-active:          rgba(0, 0, 0, 0.30);
+
+    /* Restated here because this block's selector carries four compound
+       parts and therefore OUTRANKS themes.css's [data-theme="steel"]: on a
+       browser that prefers light it is this block, not themes.css, that
+       supplies Steel's surfaces, so it has to supply the ring too. */
+    --spectre-focus-ring:             #1D4ED8;
 
     --spectre-shadow-sm:              0 1px 2px rgba(0, 0, 0, 0.06);
     --spectre-shadow-md:              0 2px 8px rgba(0, 0, 0, 0.08);
@@ -826,7 +929,7 @@ a:hover,
 
 .spectre-badge-neutral {
   background: rgba(122, 139, 166, 0.08);
-  color: var(--spectre-color-sensor-grey);
+  color: var(--spectre-badge-neutral-text);
   border: 0.5px solid rgba(122, 139, 166, 0.2);
 }
 

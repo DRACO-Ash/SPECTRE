@@ -36,6 +36,7 @@
   --navy-deep:     #001529;
   --navy-light:    #003366;
   --gold:          #C8A415;
+  --gold-chrome:   #C8A415;
   --gold-dim:      rgba(200, 164, 21, 0.15);
   --gold-mid:      rgba(200, 164, 21, 0.35);
 
@@ -148,13 +149,13 @@ html, body {
   letter-spacing: 0.04em;
 }
 .nav-title-accent {
-  color: var(--gold);
+  color: var(--gold-chrome);
   font-weight: 800;
 }
 .nav-subtitle {
   font-size: 0.65rem;
   font-weight: 600;
-  color: var(--gold);
+  color: var(--gold-chrome);
   text-transform: uppercase;
   letter-spacing: 0.15em;
   line-height: 1;
@@ -336,8 +337,16 @@ main:has(.console-layout) { padding: 0; }
   transition: color 0.15s, border-color 0.15s;
 }
 .stab:hover { color: var(--spectre-text-primary); }
+/* Same stateful-navigation job as .htab.active, so the same token. The shared
+   --spectre-color-intel-blue is a foreground colour tuned for dark surfaces;
+   on the steel sidebar tab strip (#DDE5EF) it measured 3.66:1 at a computed
+   9.52px/700, which is nowhere near the 18.66px-bold large-text exemption, so
+   the 4.5 floor governs. --spectre-tab-active-text is the token the hero tab
+   was moved to for exactly this reason. The 2px underline is a non-text
+   indicator on a 3:1 floor and keeps the shared blue, matching
+   .htab.active::after below. */
 .stab.active {
-  color: var(--spectre-color-intel-blue);
+  color: var(--spectre-tab-active-text);
   border-bottom-color: var(--spectre-color-intel-blue);
 }
 
@@ -519,7 +528,7 @@ main:has(.console-layout) { padding: 0; }
   transition: color 0.15s, border-color 0.15s;
 }
 .etab:hover { color: var(--text); }
-.etab.active { color: var(--gold); border-bottom-color: var(--gold); }
+.etab.active { color: var(--gold-chrome); border-bottom-color: var(--gold-chrome); }
 .engine-tab-panel { display: none; overflow-y: auto; flex: 1; padding: 0.75rem 1rem; }
 .engine-tab-panel.active { display: block; }
 .engine-hero.active { display: flex; flex-direction: column; padding: 0; }
@@ -556,8 +565,8 @@ main:has(.console-layout) { padding: 0; }
 }
 .ltab:hover { color: var(--text); }
 .ltab.active {
-  color: var(--gold);
-  border-bottom-color: var(--gold);
+  color: var(--gold-chrome);
+  border-bottom-color: var(--gold-chrome);
 }
 .ltab-badge {
   font-size: 0.62rem;
@@ -651,6 +660,45 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 2px var(--ops-blue-a25);
 }
 textarea { resize: vertical; }
+
+/* ── Keyboard focus on the non-input controls ─────────────────────
+   Everything that opts into keyboard operation with
+   tabindex="0" onkeydown="spectreActivate(event)" — the expandable sweep,
+   screening and all-intercepts rows, every sortable column header, and the
+   four tab bars — had no focus rule of any kind, in either theme.  The only
+   focus rules in this file are the three input ones, and two of those set
+   outline: none.  So the ring came entirely from Chromium's UA default, and
+   with no color-scheme declared on the ops root that default was the
+   LIGHT-mode ring, rgb(16, 16, 16): 1.07:1 on a sweep row, 1.03:1 on an
+   engine tab, 1.47:1 on the active hero tab.  Chromium's own white
+   companion line is the only part that cleared 3:1, and the table's
+   overflow container clips it off the rows' left and right edges, so along
+   the whole height of a focused row the operator had 1.07:1 and nothing
+   else.
+
+   :focus-visible, not :focus, so a mouse click on a row does not leave a
+   ring behind it; keyboard focus and spectreActivate's Enter/Space path both
+   still match it in Chromium.
+
+   outline-offset is negative so the ring is drawn INSIDE the element.  An
+   outside ring on a <tr> is clipped by the scroll container, and on a tab it
+   is overdrawn by the flex sibling next to it; that is exactly how the UA
+   ring lost three of its four edges on the hero tabs.                    */
+.threat-parent:focus-visible,
+th[tabindex="0"]:focus-visible,
+.stab:focus-visible,
+.atab:focus-visible,
+.htab:focus-visible {
+  outline: 2px solid var(--spectre-focus-ring);
+  outline-offset: -2px;
+}
+
+/* The engine tab bar is var(--navy-deep) in BOTH themes, so it keeps the
+   dark-surface ring when the rest of the console goes light. */
+.etab:focus-visible {
+  outline: 2px solid var(--spectre-focus-ring-on-dark);
+  outline-offset: -2px;
+}
 
 /* ── Buttons ─────────────────────────────────────────────────── */
 .btn-primary {
@@ -991,7 +1039,7 @@ textarea { resize: vertical; }
   white-space: nowrap;
 }
 .mnv-table th.no-sort { cursor: default; }
-.mnv-table th:hover:not(.no-sort) { color: var(--gold); }
+.mnv-table th:hover:not(.no-sort) { color: var(--gold-chrome); }
 .mnv-table td { padding: 0.25rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: middle; font-family: var(--font-mono); }
 .mnv-table tr:last-child td { border-bottom: none; }
 .mnv-table .mnv-dv { color: var(--gold); font-weight: 700; }
@@ -1400,9 +1448,8 @@ button[disabled] {
   cursor: pointer;
   transition: background 0.12s;
 }
-.threat-parent:hover {
-  background: var(--ops-blue-a08) !important;
-}
+/* The hover rule that used to sit here is now below the posture tints, under
+   "Hover feedback for sweep rows", because it has to outrank them. */
 .threat-chevron-cell {
   text-align: center;
   width: 1.6rem;
@@ -1470,6 +1517,34 @@ button[disabled] {
 .threat-parent[data-posture-band="violet"] {
   background: rgba(var(--spectre-status-violet-rgb), 0.10) !important;
 }
+/* UNKNOWN is a band the palette has to answer for. Both sweep templates call
+   posture_bands.get(..., 'unknown'), and posture_label defaults to "" on
+   ThreatSweepEntry and on ThreatAssessment, so the band is one omitted
+   keyword argument away.
+
+   It is latent today: _sol_to_entry in routes/threat.py is the only site that
+   builds an entry, and it always sets the label from classify_posture, whose
+   enum carries exactly the four labels the map covers. The rule is here
+   because the rendering defect itself reproduced exactly. With no rule for
+   the value, an unknown row came out pixel-identical to a BENIGN one in both
+   themes, which draws a missing assessment as the quiet case the note below
+   invites the operator to skim past, and the worst-COA badge above already
+   renders an unmapped posture in slate, so the row and the badge would have
+   contradicted each other from the first occurrence. A label the palette does
+   not recognise is not a label that has been cleared.
+
+   Slate rather than a threat hue: the row is not making a threat claim, it is
+   saying the claim is absent.
+
+   0.08 rather than the 0.10 to 0.12 the hue bands carry, because slate is a
+   far brighter colour than those hues and the same alpha lifts an ops row
+   further. Measured in Chromium: at 0.10 the row's .col-dim text falls to
+   4.39:1 against a 4.5 floor, at 0.08 it holds 4.56:1, and the row still
+   separates from BENIGN by 1.13:1, which is the step the hue bands deliver
+   (1.12:1 to 1.17:1). */
+.threat-parent[data-posture-band="unknown"] {
+  background: rgba(var(--spectre-status-unknown-rgb), 0.08) !important;
+}
 /* BENIGN is deliberately untinted. An untinted row is the quiet case, which
    is what the operator should be able to skim past. */
 .threat-parent[data-posture-band="critical"] td.mnv-dv {
@@ -1487,9 +1562,6 @@ button[disabled] {
   background: var(--bg) !important;
   font-size: 0.72rem;
 }
-.threat-child:hover {
-  background: var(--alliance-a06) !important;
-}
 .threat-child[data-posture-band="critical"] {
   background: rgba(var(--spectre-status-critical-rgb), 0.07) !important;
 }
@@ -1499,6 +1571,47 @@ button[disabled] {
 .threat-child[data-posture-band="violet"] {
   background: rgba(var(--spectre-status-violet-rgb), 0.06) !important;
 }
+/* Same reasoning as the parent rule above, at the quieter child alpha. */
+.threat-child[data-posture-band="unknown"] {
+  background: rgba(var(--spectre-status-unknown-rgb), 0.07) !important;
+}
+
+/* ── Hover feedback for sweep rows ───────────────────────────────
+   Both rules sit below every tint, and each carries a second selector with
+   [data-posture-band] on it, so a tinted row is matched at (0,3,0) against a
+   tint's (0,2,0).
+
+   They used to sit beside their row's base rule at (0,2,0). When the sweep
+   tints moved from classes to attribute selectors their specificity rose from
+   (0,1,0) to (0,2,0) and TIED the hover. Both sides carry !important and the
+   tints come later in the file, so the tint won, and critical, high and
+   violet rows lost hover feedback completely: measured in Chromium, a hovered
+   critical parent row was pixel-identical to its resting state in both
+   themes. The legacy .threat-high rows in all_intercepts_result.html kept
+   theirs, because (0,1,0) still loses, so two tables on one screen disagreed
+   about whether a row was clickable. The three rows that lost it are the
+   three an operator is most likely to click.
+
+   Moving them would have been enough today. The extra attribute is there so a
+   tint added later at (0,2,0) cannot take the affordance back in silence, and
+   tests/unit/test_threat_sweep_row_styles.py holds both halves of that.
+
+   Still a background, not an inset box-shadow laid over the tint. Chromium
+   does paint an inset shadow on a <tr> inside border-collapse: collapse, so
+   that option works, but an overlay can only lighten these rows: in the ops
+   theme it took .col-dim on a hovered tinted row from 4.61:1 down to 4.45:1
+   at this alpha, and to 4.14:1 at an alpha strong enough to see, both under
+   the 4.5 floor. Replacing the tint darkens the row instead, and every
+   hovered row measures 4.88:1. */
+.threat-parent:hover,
+.threat-parent[data-posture-band]:hover {
+  background: var(--ops-blue-a08) !important;
+}
+.threat-child:hover,
+.threat-child[data-posture-band]:hover {
+  background: var(--alliance-a06) !important;
+}
+
 /* Child sub-header row */
 .threat-child-header th {
   background: var(--navy-deep);
@@ -1514,7 +1627,7 @@ button[disabled] {
   white-space: nowrap;
 }
 .threat-child-header th.no-sort { cursor: default; }
-.threat-child-header th:hover:not(.no-sort) { color: var(--gold); }
+.threat-child-header th:hover:not(.no-sort) { color: var(--gold-chrome); }
 .threat-child-indent {
   border-left: 2px solid var(--border-light);
 }
@@ -1742,7 +1855,7 @@ button[disabled] {
 .gcat-brand { display: flex; align-items: center; gap: 0.6rem; }
 .gcat-brand-glyph {
   font-size: 1.5rem;
-  color: var(--gold);
+  color: var(--gold-chrome);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -1762,7 +1875,7 @@ button[disabled] {
 }
 .gcat-brand-credit { font-size: 0.6rem; color: var(--text-dim); line-height: 1.2; }
 .gcat-brand-credit a { color: var(--ops-blue); text-decoration: none; }
-.gcat-brand-credit a:hover { text-decoration: underline; color: var(--gold); }
+.gcat-brand-credit a:hover { text-decoration: underline; color: var(--gold-chrome); }
 
 .gcat-header-chips { display: flex; gap: 1.25rem; margin-left: auto; }
 .gcat-chip { display: flex; flex-direction: column; align-items: center; gap: 1px; }
@@ -1901,8 +2014,8 @@ button[disabled] {
 .gcat-ds-btn:hover { background: var(--ops-blue-a10); color: var(--text); }
 .gcat-ds-btn.active {
   background: var(--gold-a08);
-  color: var(--gold);
-  border-left-color: var(--gold);
+  color: var(--gold-chrome);
+  border-left-color: var(--gold-chrome);
   font-weight: 600;
 }
 .gcat-ds-unloaded { opacity: 0.5; }
@@ -2060,7 +2173,7 @@ button[disabled] {
   width: 240px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.gcat-search:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-a12); }
+.gcat-search:focus { outline: none; border-color: var(--gold-chrome); box-shadow: 0 0 0 2px var(--gold-a12); }
 .gcat-search::placeholder { color: var(--text-dim); }
 .gcat-search::-webkit-search-cancel-button { display: none; }
 .gcat-search-clr {
@@ -2191,7 +2304,7 @@ button[disabled] {
   justify-content: center;
   min-width: 2.1rem;
   padding: 0.22rem 0.55rem;
-  background: var(--gold);
+  background: var(--gold-chrome);
   color: var(--navy-deep);
   font-family: var(--font-ui);
   font-size: 0.67rem;
