@@ -1426,6 +1426,23 @@ button[disabled] {
   text-align: center;
 }
 
+/* ── Threat-level colouring (comparison table) ────────────────────
+   all_intercepts_result.html tints its rows by THREAT LEVEL, which is a
+   different axis from the sweep's posture and is not inverted. These rules
+   were deleted when the sweep's access-driven tints went, which left that
+   table emitting threat-high and threat-med against no selector at all: every
+   row rendered untinted with a default-coloured delta-v figure. Kept here,
+   and the sweep's posture rules are separate below so the two axes cannot be
+   confused again. */
+.threat-high {
+  background: var(--gold-a12) !important;
+}
+.threat-high td.mnv-dv { color: var(--gold); }
+.threat-med {
+  background: var(--amber-a08) !important;
+}
+.threat-med td.mnv-dv { color: var(--amber); }
+
 /* ── Posture colouring (sweep rows) ──────────────────────────────
    Driven by POSTURE, the same map the posture badge reads, so colour means
    one thing in this panel.

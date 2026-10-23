@@ -1,13 +1,9 @@
-{#- The one posture-to-band map for this panel, so nothing here can drift into
-    a sixth palette. Five competing maps for the same four postures is what
-    taught the eye that the colour was not meaningful. Whitespace is trimmed
-    either side so the fragment still starts at its first element. -#}
-{%- set posture_bands = {
-      'BENIGN': 'low',
-      'ANNOYANCE': 'high',
-      'AGGRESSIVE': 'critical',
-      'BEYOND PLATFORM': 'violet'
-    } -%}
+{#- The posture-to-band map comes from partials/_posture_bands.html so this
+    panel and the refine fragment that replaces rows inside it cannot drift
+    apart. They had: this file tinted by posture and that one by geometric
+    access, which inverts it. -#}
+{%- import "partials/_posture_bands.html" as posture -%}
+{%- set posture_bands = posture.posture_bands -%}
 {% if error %}
 <p class="error-msg">{{ error }}</p>
 {% elif not assessment %}
@@ -233,12 +229,20 @@
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
             tabindex="0" onkeydown="spectreActivate(event)"
-            {# The branch made these reachable by keyboard. Without a role and
-               a state, a screen reader still announces a row and gives no
-               sign it opens anything, so the keyboard half was done and the
-               announcement half was not. #}
-            role="button" aria-expanded="false"
-            aria-controls="threat-children-{{ loop.index0 }}"
+            {# aria-expanded, and deliberately NO role="button".
+               role="button" on a <tr> overrides the implicit row role, which
+               takes the parent rows out of the table: with every group open
+               the accessibility tree reported two buttons and six rows, the
+               six being the children, so the rows carrying the target name
+               and the summary figures were no longer reachable by table
+               navigation. An unannounced row was traded for a row outside the
+               grid. aria-expanded on its own keeps both.
+
+               No aria-controls either: threat-children-N is a class on three
+               sibling <tr> elements and never an id, so the reference did not
+               resolve. The children are not one node, so there is nothing
+               honest to point at. #}
+            aria-expanded="false"
             title="Click to expand {{ group.profile_count }} manoeuvre profiles">
           <td class="threat-chevron-cell">
             <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>

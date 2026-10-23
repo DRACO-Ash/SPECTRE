@@ -44,7 +44,10 @@ class TestKeysAreNotRetainedForever:
             return len(limiter._calls)
 
         retained = _drain(exercise())
-        assert retained < 2000, (
+        # Near the real bound, not merely "fewer than offered". The measured
+        # value is a single key; "< 2000" would certify a sweep that evicted
+        # only half and still grew without limit.
+        assert retained <= 50, (
             f"{retained} of 2000 offered keys are still held, so the "
             "dictionary grows with every distinct value a caller sends"
         )
@@ -68,9 +71,19 @@ class TestKeysAreNotRetainedForever:
         """
         import time as _time
 
-        limiter = SlidingWindowLimiter(max_calls=3, window_seconds=30.0)
+        limiter = SlidingWindowLimiter(max_calls=3, window_seconds=10.0)
         now = _time.monotonic()
-        limiter._calls["victim"].extend([now, now, now])
+        # SPREAD ACROSS THE WINDOW, not three identical stamps.
+        #
+        # Seeding [now, now, now] made calls[0] and calls[-1] the same value,
+        # so the predicate could not be told apart from one reading the OLDEST
+        # call instead of the newest. That is not hypothetical: it is the
+        # idiom the prune loop four lines below uses, and with it the whole
+        # suite stayed green while a victim whose most recent attempt was one
+        # second into a ten second window was evicted and handed back three
+        # fresh guesses. The oldest call here is already outside the window
+        # and the newest is well inside it, so the two readings disagree.
+        limiter._calls["victim"].extend([now - 11.0, now - 5.0, now - 1.0])
         limiter._calls["long-gone"].append(now - 600.0)
         limiter._calls["emptied"]  # touch, so the defaultdict holds an empty deque
         limiter._last_sweep = now - 600.0   # force the sweep due
@@ -81,7 +94,7 @@ class TestKeysAreNotRetainedForever:
             "a key inside its window was evicted, so a flood of unrelated keys "
             "can restore an attacker's budget against that account"
         )
-        assert list(limiter._calls["victim"]) == [now, now, now], (
+        assert len(limiter._calls["victim"]) == 3, (
             "the victim's spent budget was altered by the sweep"
         )
         assert "long-gone" not in limiter._calls, "an elapsed key was retained"

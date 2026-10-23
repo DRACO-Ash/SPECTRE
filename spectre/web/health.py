@@ -87,6 +87,24 @@ async def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@router.get("/livez", include_in_schema=False)
+@router.get("/ping", include_in_schema=False)
+async def livez() -> JSONResponse:
+    """The same liveness answer under the two other names the platform probes.
+
+    The App Store contract names /healthz, /readyz, /livez and /ping as all
+    returning 200 unauthenticated, and only the first two existed. A probe
+    path that 404s reads to an orchestrator as a dead pod, so the names are
+    aliased rather than left to chance about which one it picks.
+
+    Aliases of the liveness answer, not the readiness one: a probe that fails
+    on a storage fault causes a restart loop that cannot fix the fault, which
+    is the reasoning healthz above already carries.
+    """
+    logger.debug("Liveness probe served via alias, version=%s", __version__)
+    return JSONResponse({"status": "ok"})
+
+
 @router.get("/readyz", include_in_schema=False)
 async def readyz() -> JSONResponse:
     """Readiness probe. 200 only when storage genuinely accepts a write."""

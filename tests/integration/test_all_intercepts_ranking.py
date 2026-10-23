@@ -194,8 +194,14 @@ class TestAnUnreachableInterceptSortsLast:
 
         failed_at = [i for i, (_, failed) in enumerate(rows) if failed]
         solved_at = [i for i, (_, failed) in enumerate(rows) if not failed]
-        if not failed_at or not solved_at:
-            pytest.skip("this geometry produced no mixture of failed and solved rows")
+        # Asserted, not skipped. This is the single test that kills the
+        # _sort_key mutant, and a change making every method succeed would
+        # have retired it silently.
+        assert failed_at, (
+            "no method failed at a 1 m/s budget, so this test no longer "
+            "exercises the ordering it exists for"
+        )
+        assert solved_at, "no method succeeded, so there is no ordering to check"
         assert min(failed_at) > max(solved_at), (
             f"a failed row is ranked above a solved one: failed at {failed_at}, "
             f"solved at {solved_at}"

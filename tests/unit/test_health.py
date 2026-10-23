@@ -138,3 +138,29 @@ class TestTheProbesTellAnAnonymousCallerNothingElse:
         logged = "\n".join(record.getMessage() for record in caplog.records)
         assert __version__ in logged
         assert get_settings().data_dir in logged
+
+
+class TestEveryProbePathTheContractNames:
+    """The App Store contract names four paths; only two existed.
+
+    An orchestrator reads a 404 on its configured probe path as a dead pod, so
+    which of the four the platform picks must not matter. All four answer the
+    same shape, and none of them discloses the version or the data directory,
+    which was closed separately after the security gate found it.
+    """
+
+    @pytest.mark.parametrize("path", ["/healthz", "/livez", "/ping"])
+    def test_the_liveness_paths_all_answer_200_unauthenticated(
+        self, client: object, path: str
+    ) -> None:
+        resp = client.get(path)  # type: ignore[attr-defined]
+        assert resp.status_code == 200, f"{path} is not a live probe path"
+        assert resp.json() == {"status": "ok"}
+
+    @pytest.mark.parametrize("path", ["/healthz", "/livez", "/ping", "/readyz"])
+    def test_no_probe_path_discloses_the_version_or_the_data_directory(
+        self, client: object, path: str
+    ) -> None:
+        body = client.get(path).text  # type: ignore[attr-defined]
+        assert "version" not in body.lower(), f"{path} leaks the version"
+        assert "data_dir" not in body, f"{path} leaks the data directory"

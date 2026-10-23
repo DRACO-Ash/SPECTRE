@@ -1,0 +1,18 @@
+{#- The one posture-to-band map, for every template that tints or badges a
+    posture. Imported rather than repeated.
+
+    It lived in threat_sweep.html alone, so the refine fragment that htmx
+    swaps in carried a SECOND map of its own, keyed on geometric access, which
+    the domain deliberately inverts. A row therefore changed colour when it
+    was refined, and the two files disagreed about what BENIGN looks like.
+
+    Jinja exposes a top-level `set` on the imported module, so
+    `{% import "partials/_posture_bands.html" as posture %}` then
+    `posture.posture_bands.get(label, 'unknown')` reads the same dictionary in
+    both places and a divergence is no longer expressible. -#}
+{%- set posture_bands = {
+      'BENIGN': 'low',
+      'ANNOYANCE': 'high',
+      'AGGRESSIVE': 'critical',
+      'BEYOND PLATFORM': 'violet'
+    } -%}

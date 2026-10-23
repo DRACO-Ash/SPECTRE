@@ -1,10 +1,13 @@
-{# Single refined child row — replaces via hx-swap="outerHTML" on the <tr>. #}
+{# Single refined child row, replacing its in-table neighbour via
+   hx-swap="outerHTML". It must therefore render the SAME way that neighbour
+   does, or a Refine changes how a row looks without changing what it says. #}
+{%- import "partials/_posture_bands.html" as posture -%}
 {% if error %}
 <tr id="threat-row-{{ index }}"><td colspan="8" class="error-msg">{{ error }}</td></tr>
 {% elif entry %}
 <tr class="threat-child"
     id="threat-row-{{ index }}"
-    {% if entry.posture_label in ('BENIGN', 'ANNOYANCE') %}data-threat="high"{% elif entry.posture_label == 'AGGRESSIVE' %}data-threat="med"{% endif %}>
+    data-posture-band="{{ posture.posture_bands.get(entry.posture_label, 'unknown') }}">
   <td class="threat-child-indent"></td>
   <td class="col-dim">{{ entry.burn_location }}</td>
   <td class="col-dim">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>

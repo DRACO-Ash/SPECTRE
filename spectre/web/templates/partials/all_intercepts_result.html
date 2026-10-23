@@ -73,7 +73,10 @@
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
       tabindex="0" onkeydown="spectreActivate(event)"
-      role="button" aria-expanded="false"
+      {# No role="button": it would override the implicit row role and take
+         this row out of the table. ai-detail-N IS a real id, so aria-controls
+         resolves here, unlike in the sweep. #}
+      aria-expanded="false"
       aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
       data-sort-1="{{ item.result.method.value }}"

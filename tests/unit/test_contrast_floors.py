@@ -89,12 +89,14 @@ def _over(foreground: str, alpha: float, background: str) -> str:
 #: The dark theme is the :root block. The steel theme inherits it and then
 #: overrides, first within spectre-theme.css and then in themes.css, which
 #: loads afterwards. The merge order below mirrors the cascade.
+#:
+#: themes.css carries no :root block, so a fourth merge step reading one was
+#: inert and only made this look as though a cascade step were being modelled.
 _DARK = _tokens("spectre-theme.css", ":root {")
 _STEEL = {
     **_DARK,
     **_tokens("spectre-theme.css", '[data-theme="steel"]'),
     **_tokens("themes.css", '[data-theme="steel"]'),
-    **_tokens("themes.css", ":root"),
 }
 
 

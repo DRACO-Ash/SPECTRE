@@ -323,8 +323,7 @@
 <script>
 /* Escape closes the geometry panel. The close control is the only other way
    out and it is a single glyph in a corner, which is a mouse-shaped exit on a
-   keyboard-reachable panel. The listener removes itself with the panel so a
-   later Escape cannot reach a dead node. */
+   keyboard-reachable panel. */
 (function () {
   function spectreCloseGeometryPanel() {
     var panel = document.getElementById('geom-panel');
@@ -334,6 +333,18 @@
   function onKeydown(event) {
     if (event.key === 'Escape') { spectreCloseGeometryPanel(); }
   }
+  /* The listener is REPLACED on each panel load, not merely added.
+     This fragment is swapped into its container with hx-swap="innerHTML", so
+     re-running the geometry form without dismissing first re-executes this
+     script. The listener lives on document and outlives a panel htmx
+     replaces, so four consecutive opens left four live closures. They drained
+     on the first Escape and never touched a removed node, so nothing was
+     broken, but the previous comment claimed the listener "removes itself
+     with the panel" and that is only true of the button path. */
+  if (window.__spectreGeometryKeydown) {
+    document.removeEventListener('keydown', window.__spectreGeometryKeydown);
+  }
+  window.__spectreGeometryKeydown = onKeydown;
   window.spectreCloseGeometryPanel = spectreCloseGeometryPanel;
   document.addEventListener('keydown', onKeydown);
 })();

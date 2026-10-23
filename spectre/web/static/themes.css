@@ -127,7 +127,13 @@
 /* Hero tab bar */
 [data-theme="steel"] .hero-tab-bar       { background: var(--spectre-surface-panel); border-bottom-color: var(--spectre-border-default); }
 [data-theme="steel"] .htab              { color: var(--spectre-text-secondary); }
-[data-theme="steel"] .htab.active        { color: var(--spectre-color-intel-blue); background: var(--spectre-color-intel-blue-bg); }
+/* --spectre-tab-active-text, not the shared intel blue. This rule is more
+   specific than .htab.active in style.css AND themes.css loads after it, so
+   retargeting the base rule alone left the steel tab painting #0077cc at
+   3.41:1 against a 4.5 floor: the fix was in the stylesheet and never on the
+   screen. A token pinned by a contrast test is worth nothing if the rule the
+   browser obeys names a different one. */
+[data-theme="steel"] .htab.active        { color: var(--spectre-tab-active-text); background: var(--spectre-color-intel-blue-bg); }
 [data-theme="steel"] .asset-tabs         { background: var(--spectre-surface-overlay); }
 [data-theme="steel"] .hero-panel         { background: var(--spectre-surface-raised); }
 
