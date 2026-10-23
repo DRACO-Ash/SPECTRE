@@ -216,8 +216,10 @@ class TestParseTleHistory:
         operator got an empty history instead of a history short one element
         set. Breaking _apply_metadata's catch turns this red.
         """
-        l1_a = _LEO_TLE_A.split("\n")[0]
-        l1_b = _LEO_TLE_B.split("\n")[0]
+        # split("\n", 1)[0], not split("\n")[0]: only the first line is
+        # wanted and splitting the rest is work thrown away (PLC0207).
+        l1_a = _LEO_TLE_A.split("\n", 1)[0]
+        l1_b = _LEO_TLE_B.split("\n", 1)[0]
         records = parse_tle_history(
             f"{_LEO_TLE_A}\n{_LEO_TLE_B}\n{_LEO_TLE_C}",
             metadata={l1_a: ("REAL", "18SCS"), l1_b: bad_value},
