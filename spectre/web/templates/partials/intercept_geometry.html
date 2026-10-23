@@ -29,7 +29,14 @@
         ✓ CW VALID
       </span>
       {% endif %}
-      <button onclick="document.getElementById('geom-panel').remove()"
+      {# The glyph is the whole control, so without a name a screen reader
+         announces "button" and nothing else. This is also the panel's ONLY
+         dismissal route: no scrim, and the panel is destroyed rather than
+         hidden, so Escape is added here rather than assumed. #}
+      <button type="button"
+              onclick="spectreCloseGeometryPanel()"
+              aria-label="Close geometry panel"
+              title="Close geometry panel"
               class="btn-secondary" style="font-size:0.65rem; padding:0.15rem 0.5rem">✕</button>
     </div>
   </div>
@@ -310,5 +317,24 @@
   /* Init first tab immediately */
   _initVR();
 
+})();
+</script>
+
+<script>
+/* Escape closes the geometry panel. The close control is the only other way
+   out and it is a single glyph in a corner, which is a mouse-shaped exit on a
+   keyboard-reachable panel. The listener removes itself with the panel so a
+   later Escape cannot reach a dead node. */
+(function () {
+  function spectreCloseGeometryPanel() {
+    var panel = document.getElementById('geom-panel');
+    if (panel) { panel.remove(); }
+    document.removeEventListener('keydown', onKeydown);
+  }
+  function onKeydown(event) {
+    if (event.key === 'Escape') { spectreCloseGeometryPanel(); }
+  }
+  window.spectreCloseGeometryPanel = spectreCloseGeometryPanel;
+  document.addEventListener('keydown', onKeydown);
 })();
 </script>

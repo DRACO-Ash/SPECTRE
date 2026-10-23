@@ -456,7 +456,7 @@ main:has(.console-layout) { padding: 0; }
   background: var(--spectre-surface-input-hover);
 }
 .htab.active {
-  color: var(--spectre-color-intel-blue);
+  color: var(--spectre-tab-active-text);
   background: var(--spectre-color-intel-blue-bg);
 }
 .htab.active::after {
@@ -1426,15 +1426,44 @@ button[disabled] {
   text-align: center;
 }
 
-/* ── Threat-level colouring (parent rows) ────────────────────── */
-.threat-high {
-  background: var(--gold-a12) !important;
+/* ── Posture colouring (sweep rows) ──────────────────────────────
+   Driven by POSTURE, the same map the posture badge reads, so colour means
+   one thing in this panel.
+
+   It used to be driven by geometric ACCESS, which the domain deliberately
+   inverts: a manoeuvre inside an object's routine budget is the most
+   permissive geometry there is, so BENIGN carries CRITICAL access. The badge
+   said BENIGN in green while the row carrying it was tinted high-threat gold,
+   and a comment beside it claimed the tint "reinforces a word the operator
+   can read" when it contradicted that word.
+
+   Both maps were right about different questions. Rendering them in the same
+   channel with opposite polarity is what was wrong, and it re-introduced the
+   very conflation the summary block above was redesigned to remove: access
+   and capability are shown there as separate labelled values precisely
+   because one combined word used to contradict the intelligence panel on the
+   same screen. Access keeps that labelled text; colour now carries posture
+   alone. */
+.threat-parent[data-posture-band="critical"] {
+  background: rgba(var(--spectre-status-critical-rgb), 0.12) !important;
 }
-.threat-high td.mnv-dv { color: var(--gold); }
-.threat-med {
-  background: var(--amber-a08) !important;
+.threat-parent[data-posture-band="high"] {
+  background: rgba(var(--spectre-status-high-rgb), 0.10) !important;
 }
-.threat-med td.mnv-dv { color: var(--amber); }
+.threat-parent[data-posture-band="violet"] {
+  background: rgba(var(--spectre-status-violet-rgb), 0.10) !important;
+}
+/* BENIGN is deliberately untinted. An untinted row is the quiet case, which
+   is what the operator should be able to skim past. */
+.threat-parent[data-posture-band="critical"] td.mnv-dv {
+  color: var(--spectre-status-critical);
+}
+.threat-parent[data-posture-band="high"] td.mnv-dv {
+  color: var(--spectre-status-high);
+}
+.threat-parent[data-posture-band="violet"] td.mnv-dv {
+  color: var(--spectre-status-violet);
+}
 
 /* ── Child (detail) rows ─────────────────────────────────────── */
 .threat-child {
@@ -1444,11 +1473,14 @@ button[disabled] {
 .threat-child:hover {
   background: var(--alliance-a06) !important;
 }
-.threat-child[data-threat="high"] {
-  background: var(--gold-a06) !important;
+.threat-child[data-posture-band="critical"] {
+  background: rgba(var(--spectre-status-critical-rgb), 0.07) !important;
 }
-.threat-child[data-threat="med"] {
-  background: var(--amber-a04) !important;
+.threat-child[data-posture-band="high"] {
+  background: rgba(var(--spectre-status-high-rgb), 0.06) !important;
+}
+.threat-child[data-posture-band="violet"] {
+  background: rgba(var(--spectre-status-violet-rgb), 0.06) !important;
 }
 /* Child sub-header row */
 .threat-child-header th {

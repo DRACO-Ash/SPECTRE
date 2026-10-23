@@ -49,11 +49,21 @@
   --spectre-color-intel-blue-dim:   #005aaa;
   --spectre-color-intel-blue-bg:    rgba(0, 119, 204, 0.08);
 
+  /* Steel counterparts of the two tokens added in spectre-theme.css. The
+     banner's green already clears the floor here at 5.39:1, so it is carried
+     over unchanged; the tab text does not, at 3.42:1 on the wash over this
+     theme's panel surface, and #1D4ED8 gives 4.84:1. */
+  --spectre-classification-nominal-fill: #1a7a3c;
+  --spectre-tab-active-text:        #1D4ED8;
+
   /* ── Bluestaq brand overrides for light mode ── */
   --navy:          #1a2a3a;
   --navy-deep:     #0f1e2e;
   --navy-light:    #243548;
-  --gold:          #a07a00;
+  /* Darkened from #a07a00, which measured 3.98:1 as .callout-gold text on
+     white against a 4.5 floor. #8A5600 gives 6.16:1 and is the same value
+     --spectre-status-high already uses in this theme. */
+  --gold:          #8A5600;
   --gold-dim:      rgba(160, 122, 0, 0.12);
   --gold-mid:      rgba(160, 122, 0, 0.30);
   --bar-navy:      #1a2a3a;

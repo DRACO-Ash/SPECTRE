@@ -73,6 +73,8 @@
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
       tabindex="0" onkeydown="spectreActivate(event)"
+      role="button" aria-expanded="false"
+      aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
       data-sort-1="{{ item.result.method.value }}"
       data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"
@@ -362,6 +364,9 @@ function aiToggle(idx) {
   var open = det.style.display !== 'none';
   det.style.display = open ? 'none' : '';
   if (chev) chev.innerHTML = open ? '&#9654;' : '&#9660;';
+  /* Same fact as the chevron, for an operator who cannot see it. */
+  var row = document.querySelector('[aria-controls="ai-detail-' + idx + '"]');
+  if (row) row.setAttribute('aria-expanded', open ? 'false' : 'true');
 }
 
 /* ── Pre-fill the intercept engine ── */

@@ -10,7 +10,7 @@
   <td class="col-dim">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
   <td class="mnv-dv">{{ entry.delta_v_m_s | m_s }}</td>
   <td class="col-dim">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
-  <td class="col-dim" title="Pro {{ entry.dv_prograde | m_s }}  Nor {{ entry.dv_normal | m_s }}  Rad {{ entry.dv_radial | m_s }}">
+  <td class="col-dim" title="Pro {{ entry.dv_prograde | m_s }} m/s  Nor {{ entry.dv_normal | m_s }} m/s  Rad {{ entry.dv_radial | m_s }} m/s">
     {{ entry.method }}
   </td>
   {# The Posture column. This fragment REPLACES a child row of the sweep table

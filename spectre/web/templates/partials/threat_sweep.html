@@ -222,13 +222,23 @@
       <tbody>
         {% for group in grouped %}
         {# ── Parent row (one per target) ── #}
-        {# Colour by posture, not by a delta-v threshold. The thresholds here were
-   0.5 and 1.0 km/s, which in m/s shade every row above 1 m/s identically. #}
-        <tr class="threat-parent {% if group.best_posture in ('BENIGN', 'ANNOYANCE') %}threat-high{% elif group.best_posture == 'AGGRESSIVE' %}threat-med{% endif %}"
+        {# Tinted from posture_bands, the SAME map the posture badge above
+           reads. It used to be tinted by geometric access, which the domain
+           deliberately inverts, so a BENIGN badge sat in a high-threat gold
+           row. Two correct answers to different questions, rendered in one
+           colour channel with opposite polarity. #}
+        <tr class="threat-parent"
+            data-posture-band="{{ posture_bands.get(group.best_posture, 'unknown') }}"
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
             tabindex="0" onkeydown="spectreActivate(event)"
+            {# The branch made these reachable by keyboard. Without a role and
+               a state, a screen reader still announces a row and gives no
+               sign it opens anything, so the keyboard half was done and the
+               announcement half was not. #}
+            role="button" aria-expanded="false"
+            aria-controls="threat-children-{{ loop.index0 }}"
             title="Click to expand {{ group.profile_count }} manoeuvre profiles">
           <td class="threat-chevron-cell">
             <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>
@@ -296,18 +306,18 @@
         <tr class="threat-child threat-children-{{ group_idx }}"
             id="threat-row-{{ child.flat_idx }}"
             style="display:none"
-            {% if child.entry.posture_label in ('BENIGN', 'ANNOYANCE') %}data-threat="high"{% elif child.entry.posture_label == 'AGGRESSIVE' %}data-threat="med"{% endif %}>
+            data-posture-band="{{ posture_bands.get(child.entry.posture_label, 'unknown') }}">
           <td class="threat-child-indent"></td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ child.entry.burn_location }}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ child.entry.delta_v_m_s | m_s }}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
-          <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ child.entry.dv_prograde | m_s }} m/s  Nor {{ child.entry.dv_normal | m_s }} m/s  Rad {{ child.entry.dv_radial | m_s }} m/s">
             {{ child.entry.method }}
           </td>
-          {# data-threat on the row above tints it by posture. Printing the
-             posture here means the tint reinforces a word the operator can
-             read rather than being the only place it appears. #}
+          {# data-posture-band on the row above tints it from the same map
+             this word comes from, so the colour and the word now agree. They
+             did not: the tint read geometric access, which inverts posture. #}
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ child.entry.posture_label or '—' }}</td>
           <td class="col-actions" style="white-space:nowrap">
             {% if child.entry.method == "hohmann" %}
@@ -339,16 +349,31 @@
     var visible = rows.length > 0 && rows[0].style.display !== 'none';
     rows.forEach(function(r) { r.style.display = visible ? 'none' : ''; });
     if (chevron) chevron.innerHTML = visible ? '&#9654;' : '&#9660;';
+    /* The chevron is a glyph, so it carries the state for sighted operators
+       only. aria-expanded is the same fact for everyone else, and it has to
+       move with the rows rather than being set once in the markup. */
+    var parent = document.getElementById('threat-group-' + gIdx);
+    if (parent) parent.setAttribute('aria-expanded', visible ? 'false' : 'true');
   }
 
   /* ── Expand / Collapse all ── */
   function threatExpandAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = ''; });
     document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9660;'; });
+    _threatSetAllExpanded(true);
   }
   function threatCollapseAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = 'none'; });
     document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9654;'; });
+    _threatSetAllExpanded(false);
+  }
+  /* Expand-all and collapse-all move every row, so they have to move every
+     state with them. Setting it in threatToggle alone would leave the
+     announcement stale for every row these two touch. */
+  function _threatSetAllExpanded(expanded) {
+    document.querySelectorAll('.threat-parent').forEach(function(row) {
+      row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
   }
 
   /* ── Search filter (matches parent target name + all child content) ── */

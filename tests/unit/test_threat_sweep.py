@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from spectre.domain.models import (
     ThreatAssessment,
@@ -309,3 +310,81 @@ class TestSweepHelpers:
         assert entries[0].delta_v_m_s == 0.5
         assert entries[1].delta_v_m_s == 1.0
         assert entries[2].delta_v_m_s == 2.0
+
+
+class TestColourAndWordsAgreeInTheSweep:
+    """One colour map for this panel, and one format for the same quantity.
+
+    Two defects the design review found, both of the same kind: a second
+    encoding of something already shown, disagreeing with the first.
+
+    THE COLOUR. The posture badge read ``posture_bands`` (BENIGN low/green,
+    AGGRESSIVE critical/red) while the row tint read geometric ACCESS, which
+    the domain deliberately inverts in ``_POSTURE_TO_ACCESS``: a manoeuvre
+    inside an object's routine budget is the most permissive geometry there
+    is, so BENIGN carries CRITICAL access. A BENIGN badge therefore sat in a
+    high-threat gold row, and the comment beside it claimed the tint
+    "reinforces a word the operator can read".
+
+    Both maps were right about different questions. Putting them in one colour
+    channel with opposite polarity re-introduced exactly the conflation the
+    summary block was redesigned to remove: access and capability are printed
+    there as separate labelled values because one combined word used to
+    contradict the intelligence panel on the same screen.
+
+    THE UNITS. The parent's Method tooltip printed ``'%.4f' | format(...)``, a
+    km/s-era format applied to a value that is now m/s, with no unit, under a
+    header reading dV (m/s). The refined row that htmx swaps in printed the
+    same field through ``| m_s``. The same cell read "Pro 11.0000" before a
+    Refine and "Pro 11" after it.
+    """
+
+    _TEMPLATES = (
+        Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates" / "partials"
+    )
+    _SWEEP = _TEMPLATES / "threat_sweep.html"
+    _REFINED = _TEMPLATES / "threat_sweep_row.html"
+
+    def test_the_rows_are_tinted_from_the_posture_map(self) -> None:
+        markup = self._SWEEP.read_text(encoding="utf-8")
+        assert markup.count("posture_bands.get(") >= 3, (
+            "the parent row, the child row and the badge must all read the "
+            "single posture map; one of them is using a map of its own"
+        )
+
+    def test_no_row_is_tinted_by_the_inverted_access_bands(self) -> None:
+        """The literal shape of the defect, which is one edit away from returning."""
+        markup = self._SWEEP.read_text(encoding="utf-8")
+        assert "'BENIGN', 'ANNOYANCE'" not in markup, (
+            "a row is grouping BENIGN with ANNOYANCE again, which is the "
+            "access ordering and inverts the posture the badge shows"
+        )
+        assert 'data-threat="high"' not in markup, "the access-driven tint is back"
+        assert 'threat-med' not in markup, "the access-driven tint is back"
+
+    def test_the_delta_v_tooltip_carries_its_unit_in_both_templates(self) -> None:
+        for path in (self._SWEEP, self._REFINED):
+            markup = path.read_text(encoding="utf-8")
+            tooltip = [ln for ln in markup.splitlines() if 'title="Pro ' in ln]
+            assert tooltip, f"{path.name} no longer has the component tooltip"
+            assert "m/s" in tooltip[0], (
+                f"{path.name} prints delta-v components with no unit, under a "
+                "column header that reads m/s"
+            )
+            assert "%.4f" not in tooltip[0], (
+                f"{path.name} is back on the km/s-era four-decimal format"
+            )
+
+    def test_both_templates_format_the_components_identically(self) -> None:
+        """An htmx swap must not change how a number reads."""
+        import re
+
+        def components(path: Path) -> list[str]:
+            markup = path.read_text(encoding="utf-8")
+            line = next(ln for ln in markup.splitlines() if 'title="Pro ' in ln)
+            return re.findall(r"\|\s*(\w+)\s*\}\}", line)
+
+        assert components(self._SWEEP) == components(self._REFINED), (
+            "the in-table row and the refined row that replaces it format the "
+            "same field differently, so the cell changes on a Refine"
+        )

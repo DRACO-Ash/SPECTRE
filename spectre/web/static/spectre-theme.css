@@ -106,9 +106,31 @@
   --spectre-status-low-rgb:         34, 197, 94;
   --spectre-status-low-fill:        #15803D;
 
-  --spectre-status-minimal:         #7A8BA6;
+  /* Raised from #7A8BA6. That value was audited against surface-base and
+     surface-raised only, and it is also used on surface-panel #252B38, where
+     it measured 4.10:1 against a 4.5 floor: the inactive hero tabs and the
+     HRR table headers in the dark theme. #8696AE clears all three surfaces,
+     at 4.72:1 on panel, 5.92 on raised and 6.51 on base. */
+  --spectre-status-minimal:         #8696AE;
   --spectre-status-minimal-rgb:     122, 139, 166;
   --spectre-status-minimal-fill:    #475569;
+
+  /* A classification marking is the one label on the console that must never
+     be ambiguous, so it gets its own token rather than borrowing the status
+     green. --spectre-color-nominal-green is a FOREGROUND colour elsewhere
+     (.spectre-nominal, the nominal badge text), where a light green on a dark
+     surface is correct; darkening it there would break those. As a banner
+     FILL under white text it measured 3.39:1 against a 4.5 floor, 11px bold.
+     #15803D gives 5.02:1. */
+  --spectre-classification-nominal-fill: #15803D;
+
+  /* The selected hero tab. --spectre-color-intel-blue is foreground text in
+     several other rules, so the tab gets its own token for the same reason as
+     the banner above. On the 8% intel-blue wash over surface-panel the shared
+     value measured 3.56:1 at 11.5px bold; #5FA8F5 gives 4.95:1 and stays in
+     the same blue family. This is the stateful fill on the primary
+     navigation, which is the state an operator is acting on. */
+  --spectre-tab-active-text:        #5FA8F5;
 
   /* The band a verdict falls back to when the server emits a label the
      palette does not know. */
@@ -827,7 +849,7 @@ a:hover,
 }
 
 .spectre-classification-banner.unclassified {
-  background: var(--spectre-color-nominal-green);
+  background: var(--spectre-classification-nominal-fill);
   color: #FFFFFF;
 }
 
