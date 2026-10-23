@@ -484,6 +484,9 @@ Excluded rows: 13. Rows carried to phase 5 as PENDING: 332.
 | 1 Inventory and charter | DONE | 2026-10-23 | `audit/LEDGER.md` | 345 ledger rows = 345 index entries = 344 files on disk + 1 gitlink |
 | 2 Deterministic sweep | DONE | 2026-10-23 | `audit/TOOLS.md`, `audit/tools-raw/` (36 files) | every tool produced output or is recorded unavailable: safety UNAVAILABLE (no network route to its database); Docker-dependent gate scripts not run (no daemon) |
 | 3 Architecture and flow | DONE | 2026-10-23 | `audit/ARCHITECTURE.md` | 9 entry-point classes, 74 HTTP handlers traced by router group to sinks; 10 documented-versus-code divergences (A1 to A10) |
-| 4 Claims reconciliation | IN PROGRESS | | slice reviews S01 to S10 | |
+| 4 Claims reconciliation | DONE | 2026-10-23 | `audit/CLAIMS.md` | 316 claims, none blank: 94 PROVEN, 126 DRIFTED, 72 IMPLEMENTED-UNTESTED, 13 ABSENT, 11 UNDOCUMENTED-BEHAVIOUR |
 | 4b Prior-audit verification | DONE | 2026-10-23 | `audit/PRIORS-STATUS.md` | 10 of 10 priors carry a verdict and citation; gates tested by mutation (P1 fires, P3 does not) |
-| 5 to 8 | IN PROGRESS | | `audit/LENS-BRIEF.md`, slice outputs | resume with `/audit-repo resume from phase 5` if interrupted |
+| 5 Lens review | DONE | 2026-10-23 | slice reviews S01 to S10 under `audit/LENS-BRIEF.md` | no PENDING rows: 216 REVIEWED, 116 CLEAN, 13 EXCLUDED with reasons |
+| 6 Test and assertion audit | DONE | 2026-10-23 | `audit/TESTS.md` | 76 of 76 test files classified; 457 risk-bearing branch arcs named; 22 mutants, 8 meaningful survivors |
+| 7 Refutation | DONE | 2026-10-23 | `audit/REFUTATION.md` | 317 candidates: 296 CONFIRMED, 14 REFUTED, 4 UNPROVEN, 3 DUPLICATE; quote mismatch 0 of 317 |
+| 8 Synthesis | DONE | 2026-10-23 | `audit/FINDINGS.md`, `audit/REMEDIATION.md`, `audit/MANIFEST.json`, `audit/GAPS.md` | 8 Blocker, 49 High, 127 Medium, 112 Low; every finding gated |

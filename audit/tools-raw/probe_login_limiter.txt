@@ -6,7 +6,7 @@ correct after lockout: 302 True
 """Exhaust the login limiter with wrong passwords, then try the right one."""
 import os, sys, tempfile
 d = tempfile.mkdtemp()
-os.environ.update(SECRET_KEY="probe-secret-key-0123456789abcdef", SPECTRE_COOKIE_SECURE="false",
+os.environ.update(SECRET_KEY="ci-only-ephemeral-signing-key-not-a-secret", SPECTRE_COOKIE_SECURE="false",
                   SPECTRE_DATA_DIR=d, SPECTRE_SQLITE_DIR=d, SPECTRE_ADMIN_USER="admin", SPECTRE_ADMIN_PASS="correct-horse-battery")
 sys.path.insert(0, sys.argv[1])
 from fastapi.testclient import TestClient

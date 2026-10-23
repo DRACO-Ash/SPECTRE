@@ -1,0 +1,13 @@
+"""Exhaust the login limiter with wrong passwords, then try the right one."""
+import os, sys, tempfile
+d = tempfile.mkdtemp()
+os.environ.update(SECRET_KEY="ci-only-ephemeral-signing-key-not-a-secret", SPECTRE_COOKIE_SECURE="false",
+                  SPECTRE_DATA_DIR=d, SPECTRE_SQLITE_DIR=d, SPECTRE_ADMIN_USER="admin", SPECTRE_ADMIN_PASS="correct-horse-battery")
+sys.path.insert(0, sys.argv[1])
+from fastapi.testclient import TestClient
+from spectre.web.app import app
+with TestClient(app) as c:
+    codes = [c.post("/login", data={"username": "admin", "password": f"wrong{i}"}, follow_redirects=False).status_code for i in range(15)]
+    print("wrong attempts:", codes)
+    r = c.post("/login", data={"username": "admin", "password": "correct-horse-battery"}, follow_redirects=False)
+    print("correct after lockout:", r.status_code, "set-cookie" in r.headers)

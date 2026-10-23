@@ -1,0 +1,21 @@
+GitHub Actions, DRACO-Ash/SPECTRE, workflow CI, run 40020299345 (run_number 48)
+head_sha e87783ae9fc901f79e7cdbfde0399c5052788883 (the audited base), event push, branch master
+conclusion: failure. 3 of 7 jobs failed. The previous master run, 39737885937 (137ea49), also concluded failure.
+Retrieved 23 October 2026 through the GitHub MCP get_job_logs, failed_only=true. Extract, verbatim:
+
+[Quality Gate (changed code)]
+/home/runner/work/_temp/edcc3182-9e46-448e-9b36-a07bd2ba38f0.sh: line 1: pytest: command not found
+##[error]Process completed with exit code 127.
+fatal: No url found for submodule path 'SPECTRE-1' in .gitmodules
+##[warning]The process '/usr/bin/git' failed with exit code 128
+
+[Tests (pytest)]
+/home/runner/work/_temp/ac47a790-1ba9-4969-afa1-c7138b8900b6.sh: line 1: pytest: command not found
+##[error]Process completed with exit code 127.
+fatal: No url found for submodule path 'SPECTRE-1' in .gitmodules
+
+[Lint & Type Check]
+/home/runner/work/_temp/08be98d4-c418-4156-aaa7-1aea211521fb.sh: line 1: ruff: command not found
+##[error]Process completed with exit code 127.
+fatal: No url found for submodule path 'SPECTRE-1' in .gitmodules
+##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, actions/setup-python@v5.

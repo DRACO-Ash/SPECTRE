@@ -155,3 +155,30 @@ $ git grep -n -i -E "\bSTK\b|astrogator|win32com|comtypes" -- 'spectre/*' 'tle_c
 ● **Solvers without a reference-case gate:** at least 2 on the critical path (Hohmann weakly gated, bi-elliptic ungated), plus vis-viva. More may come from the S01 and S02 slices.
 ● **Mutation evidence:** a fully green suite of 1,896 tests did not notice a reintroduced July defect (P3).
 Static cleanliness and correctness remain different properties.
+
+## Final mapping after phase 7
+
+Each provisional candidate (P-F1 to P-F10) raised above went through refutation, folded into the matching slice or orchestrator finding. Where refutation changed the severity this file proposed, the refuted severity governs and the change is shown.
+
+| Prior | Provisional | Origin ID | Final ID | Verdict | Severity proposed here → final | Subject |
+|---|---|---|---|---|---|---|
+| P1 | P-F1 | F-S01-13 | F-068 | CONFIRMED | Medium → Medium | function docstring still credits Izzo |
+| P1 | P-F1 | F-S10-01 | F-173 | CONFIRMED | Medium → Medium | docs place the Lambert solver in transfers.py |
+| P2 | P-F2 | F-S05-02 | F-034 | CONFIRMED | High → High | Decision Engine constants presented as computed |
+| P3 | P-F3 | F-S00-02 | F-058 | CONFIRMED | Medium → Medium | July fix ungated (mutation-proven) |
+| P3 | P-F4 | F-S06-12 | F-234 | CONFIRMED | Medium → Low | silent regime assumptions in the sweep |
+| P4 | P-F5 | F-S00-03 | F-059 | CONFIRMED | Medium → Medium | Secure flag ungated at the call site |
+| P5 | P-F6 | F-S07-01 | F-044 | CONFIRMED | High → High | UDL password process-global, outlives the session |
+| P5 | P-F6 | F-S08-03 | F-148 | CONFIRMED | High → Medium | delete, reset and expiry never clear SessionState |
+| P6 | P-F7 | F-S05-17 | F-121 | CONFIRMED | Medium → Medium | no code version or input identity on outputs |
+| P7 | P-F8 | F-S01-23 | F-194 | CONFIRMED | Medium → Low | R_EARTH literal duplicated |
+| P7 | P-F8 | F-S05-22 | F-232 | CONFIRMED | Medium → Low | dead 6371.0 km constants |
+| P8 | P-F9 | F-S10-32 | F-293 | CONFIRMED | Medium → Low | STK COM notes read as live guides |
+| P9 | P-F10 | F-S01-21 | F-070 | CONFIRMED | High → Medium | only Lambert pinned to a reference; Hohmann banded, bi-elliptic unpinned |
+
+Corrections to the provisional grading above, fact:
+● P-F8 (Earth radius) was proposed as Medium. Both refuters graded the duplicates Low, because the two divergent 6371.0 km constants are dead (one occurrence each), so no live calculation diverges today. Low governs.
+● P-F4 (silent regime assumptions) was proposed as Medium. Refuter R3 showed by execution that an unreadable red TLE also fails in every solver, so no entry is scored against a wrong regime. Only the misleading skip message remains. Low governs.
+● P-F10 (solver gates) was proposed as High. The refuter graded the test gap Medium. The confirmed numerical Blockers in `audit/FINDINGS.md` are the consequence of that gap, and they are graded on their own.
+● P-F9 (STK notes) was proposed as Medium. Refuter R5 confirmed it and graded it Low, without stating a reason for the grade. The orchestrator agrees with Low on its own evidence (fact): the notes sit in `docs/`, which the packaging script strips (`scripts/package-appstore.sh:171,215`), so no deployer or operator receives them. R5 also found `SPECTRE_logo.svg:226` reading "STK INTERCEPT". Low governs.
+● P-F6 has two parts. The process-global credential holder (F-S07-01) stays High. Deleting a user without clearing their state (F-S08-03) was graded Medium by refuter R4b, against the other R4 pass's High; R4b's grading is adopted, with the reason in `audit/REFUTATION.md`.
