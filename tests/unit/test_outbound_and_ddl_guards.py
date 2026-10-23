@@ -151,6 +151,12 @@ class TestTheMigrationDdlGuard:
         )
         loop = next(node for node in ast.walk(function) if isinstance(node, ast.For))
         body = ast.unparse(loop)
+        # Asserted before the index is taken. Reaching straight for .index()
+        # meant that removing the guard raised ValueError: substring not found
+        # from inside the test, so whoever read the failure saw a crash rather
+        # than the sentence explaining what had been removed.
+        assert "_assert_safe_ddl" in body, "the guard is no longer called in the migration loop"
+        assert "ALTER TABLE" in body, "the migration loop no longer assembles the statement"
         guard_at = body.index("_assert_safe_ddl")
         execute_at = body.index("ALTER TABLE")
         assert guard_at < execute_at, "the guard runs after the statement is assembled"
