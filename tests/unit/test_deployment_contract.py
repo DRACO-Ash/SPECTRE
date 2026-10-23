@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -404,20 +405,53 @@ class TestDependencyScannerContract:
     )
 
     # Directories that never reach the scanner: not shipped, or not source.
+    # Kept as a fallback for a checkout with no usable git, and as a fast path.
     _IGNORED = frozenset(
         {".git", ".venv", "venv", "dist", "build", "node_modules", "__pycache__", ".cache"}
     )
 
+    @staticmethod
+    def _git_ignores(candidates: list[Path]) -> set[Path]:
+        """Of these paths, the ones git excludes. Empty if git cannot answer.
+
+        A hardcoded directory list cannot anticipate every tool that writes
+        inside a checkout. This test failed against nine manifests under
+        .claude/worktrees/, which an agent harness had created and .gitignore
+        line 74 already excluded: a false positive, because the dependency
+        scanner reads a CI checkout and an ignored file is not in one.
+
+        Asking git is the faithful question. One batched subprocess, and on
+        any failure the caller falls back to _IGNORED rather than passing
+        vacuously, so a broken git cannot turn this test green.
+        """
+        if not candidates:
+            return set()
+        payload = "\n".join(str(c) for c in candidates)
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(_REPO_ROOT), "check-ignore", "--stdin"],
+                input=payload, capture_output=True, text=True, timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):  # pragma: no cover - no git
+            return set()
+        # 0 = some ignored, 1 = none ignored. Anything else is a real failure.
+        if result.returncode not in (0, 1):  # pragma: no cover - broken git
+            return set()
+        return {Path(line) for line in result.stdout.splitlines() if line}
+
     def test_no_manifest_outside_the_repository_root(self) -> None:
-        strays = []
-        for path in _REPO_ROOT.rglob("*"):
-            if not path.is_file() or path.name not in self._MANIFEST_NAMES:
-                continue
-            if any(part in self._IGNORED for part in path.relative_to(_REPO_ROOT).parts):
-                continue
-            if path.parent == _REPO_ROOT:
-                continue
-            strays.append(str(path.relative_to(_REPO_ROOT)))
+        candidates = [
+            path
+            for path in _REPO_ROOT.rglob("*")
+            if path.is_file()
+            and path.name in self._MANIFEST_NAMES
+            and path.parent != _REPO_ROOT
+            and not any(part in self._IGNORED for part in path.relative_to(_REPO_ROOT).parts)
+        ]
+        ignored = self._git_ignores(candidates)
+        strays = [
+            str(path.relative_to(_REPO_ROOT)) for path in candidates if path not in ignored
+        ]
 
         assert not strays, (
             "these files sit below the root and are named like dependency manifests, so "

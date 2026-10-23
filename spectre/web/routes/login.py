@@ -49,9 +49,18 @@ _LOGIN_ADDRESS_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
 # address tier is counting, so the address tier cannot bound them.
 #
 # A brute force is a search over PASSWORDS for ONE account, so the account is
-# the thing to meter. Rotating the header no longer buys anything: ten wrong
-# passwords against a given username in five minutes is the ceiling however
-# many addresses they are spread across.
+# the thing to meter. Rotating the header no longer buys anything AGAINST THAT
+# SEARCH: ten wrong passwords against a given username in five minutes is the
+# ceiling however many addresses they are spread across.
+#
+# It bounds brute force, NOT spraying, and the distinction is worth stating
+# because the sentence above reads wider than it is. Spraying is a search over
+# ACCOUNTS for one password, so it presents a new username each time and meets
+# a fresh budget every time. Measured: with both the header and the username
+# rotated, 40 of 40 attempts answered 401 and neither tier fired. Bounding it
+# would mean metering something neither the caller nor the account supplies,
+# such as the failure rate of the endpoint as a whole, which trades an
+# availability risk for a credential one. That trade has not been made here.
 #
 # Two consequences, both deliberate:
 #
