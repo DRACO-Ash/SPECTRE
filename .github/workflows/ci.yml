@@ -49,6 +49,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the cognitive-complexity meter's calibration test
+          # replays the commit SonarQube scanned, which a depth-1 checkout
+          # does not contain.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
