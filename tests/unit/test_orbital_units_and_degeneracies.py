@@ -276,10 +276,13 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
         assert solution.miss_distance_km == pytest.approx(128.243, abs=0.01)
 
         # A plane-alignment assist is a small altitude trim, not a transfer.
-        # Fourteen metres per second is right for LEO. Note that delta-v alone
-        # would NOT hold this: it moves only from 0.014364 to 0.014232 when
-        # the defect is reinstated, well inside any tolerance worth writing.
-        # The angle is the quantity that moves, which is why it is asserted.
+        # Fourteen metres per second is right for LEO.
+        #
+        # An earlier note here claimed delta-v could not hold this, because it
+        # moves only from 0.014364 to 0.014232. That was wrong: 0.014232 is
+        # thirteen times outside the 1e-5 tolerance below, so this assertion
+        # kills the inclination mutant on its own. The angle still carries the
+        # RAAN half, where the move is 128 to 6988.
         assert solution.total_delta_v == pytest.approx(0.014364, abs=1e-5)
         assert 0.001 < solution.total_delta_v < 0.1
 

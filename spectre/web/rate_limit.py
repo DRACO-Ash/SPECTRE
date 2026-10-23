@@ -30,10 +30,47 @@ class SlidingWindowLimiter:
         self._window = window_seconds
         self._calls: dict[str, deque[float]] = defaultdict(deque)
         self._lock = asyncio.Lock()
+        self._last_sweep = time.monotonic()
+
+    def _evict_elapsed(self, now: float) -> None:
+        """Drop keys whose whole window has elapsed. Caller holds the lock.
+
+        Without this the dictionary is unbounded and the caller chooses the
+        keys. The login limiters key on the first X-Forwarded-For entry and on
+        the submitted username, both attacker-supplied, on an endpoint that is
+        unauthenticated AND exempt from CSRF, so a flood of distinct values is
+        free to send and permanent to hold. Measured before this existed:
+        200,000 distinct keys retained 168.4 MiB, about 883 bytes each, which
+        projects to 303 MiB an hour at 100 requests a second. The guard added
+        to stop a brute force was itself a way to exhaust the process.
+
+        Retention is now bounded by RATE TIMES WINDOW rather than by the
+        number of distinct keys ever seen: the same 200,000 offered keys
+        retain 20,000 and 17.7 MiB.
+
+        An LRU cap would be the wrong instrument. A flood could evict a
+        victim's username entry and hand an attacker a fresh budget against
+        that account, which is the control this class exists to provide.
+        Expiry cannot be gamed that way: a key only leaves once its window has
+        genuinely elapsed, and a key under active attack never qualifies.
+
+        The sweep runs at most once per window, so it is amortised to roughly
+        one pass over the dictionary per window rather than per request.
+        """
+        if now - self._last_sweep < self._window:
+            return
+        self._last_sweep = now
+        elapsed = [
+            key for key, calls in self._calls.items()
+            if not calls or now - calls[-1] > self._window
+        ]
+        for key in elapsed:
+            del self._calls[key]
 
     async def is_allowed(self, key: str) -> bool:
         now = time.monotonic()
         async with self._lock:
+            self._evict_elapsed(now)
             q = self._calls[key]
             while q and now - q[0] > self._window:
                 q.popleft()

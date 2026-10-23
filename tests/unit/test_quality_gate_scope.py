@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -85,8 +86,11 @@ def _code(path: Path) -> str:
     The gate names the ``BASE...HEAD`` defect in prose in order to explain it,
     so a search over the whole file matches the explanation rather than any
     instruction. Reading only the executable lines lets the explanation stay
-    without standing in as evidence, and a defect smuggled back across two
-    lines is still caught because no match has to share a line with anything.
+    without standing in as evidence. Dropping comment LINES is not by itself
+    enough: a trailing comment on an executable line survives, and a literal
+    split across two lines leaves no single line carrying the defect. The
+    tests below therefore read the anchor assignment and search the joined
+    text rather than trusting this helper to do that work.
     """
     return "\n".join(
         line for line in _script(path).splitlines() if not line.lstrip().startswith("#")
@@ -181,16 +185,46 @@ class TestTheGateScriptIsStillAnchoredCorrectly:
     """
 
     def test_no_git_call_uses_a_commit_only_range(self) -> None:
-        offenders = [line.strip() for line in _code(_GATE).splitlines() if "...HEAD" in line]
-        assert not offenders, (
-            "a commit-only range is back, so uncommitted work is unanalysed: "
-            f"{offenders}"
+        """The whole executable text, with no line boundaries to hide behind.
+
+        Matching line by line is defeated by splitting the literal:
+        ``RANGE="$ANCHOR..."`` on one line and ``"${RANGE}HEAD"`` on the next
+        reassembles the defect without any single line carrying it. The
+        executable text is therefore joined before it is searched, so a
+        two-line smuggle reads the same as a one-line one.
+        """
+        executable = _code(_GATE)
+        assert "..." not in executable, (
+            "a three-dot range appears in the gate's executable text. That is "
+            "the commit-only comparison, and it means uncommitted work goes "
+            "unanalysed. The token is banned outright rather than matched "
+            "against HEAD, because a split literal defeats any narrower "
+            'pattern: RANGE="$ANCHOR..." on one line and "${RANGE}HEAD" on '
+            "the next reassembles the defect with no single line carrying it, "
+            "and joining the lines does not help either because the two "
+            "halves are no longer adjacent. The script has no other use for "
+            "the token, so its absence is the cleanest statement of the rule."
+        )
+        assert "$ANCHOR" in executable, (
+            "the gate no longer measures against the resolved anchor"
         )
 
     def test_the_merge_base_is_used_as_the_anchor(self) -> None:
-        assert "merge-base" in _code(_GATE), (
-            "without a merge base, commits landing on the base branch after "
-            "this one started are scored as this branch's work"
+        """Asserted on the assignment, not on the token appearing somewhere.
+
+        The previous form was ``"merge-base" in _code(_GATE)``. Stripping
+        comment LINES is not enough: deleting the real call and writing
+        ``ANCHOR="$BASE"  # anchored on the merge base`` leaves the token on
+        an executable line and the test passes. The anchor has to be read from
+        the assignment that produces it.
+        """
+        assignment = re.search(r"^\s*ANCHOR=(.+)$", _code(_GATE), re.M)
+        assert assignment is not None, "check-quality.sh no longer sets ANCHOR"
+        produced = assignment.group(1).split("#")[0].strip()
+        assert "merge-base" in produced, (
+            "ANCHOR is not derived from a merge base, so commits landing on "
+            f"the base branch after this one started are scored as this "
+            f"branch's work; the assignment reads: {produced}"
         )
 
 

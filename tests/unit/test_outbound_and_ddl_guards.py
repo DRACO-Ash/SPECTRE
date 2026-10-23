@@ -229,11 +229,36 @@ class TestTheMigrationDdlGuard:
     it directly so that it is covered anyway.
     """
 
-    def test_the_real_migration_list_passes(self) -> None:
-        """The guard must not reject what the application actually ships."""
+    def test_every_real_migration_passes(self) -> None:
+        """The guard must not reject what the application actually ships.
+
+        Read from _apply_migrations rather than restated here. The previous
+        form hardcoded one entry, so the session_generation migration added
+        later was never checked against the guard it has to satisfy: the test
+        would have stayed green while a new migration crashed at boot.
+        """
+        import ast
+        import pathlib as _pathlib
+
+        from spectre.web import database
         from spectre.web.database import _assert_safe_ddl
 
-        _assert_safe_ddl("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE")
+        source = _pathlib.Path(database.__file__).read_text(encoding="utf-8")
+        function = next(
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_apply_migrations"
+        )
+        literals = [
+            ast.literal_eval(node) for node in ast.walk(function)
+            if isinstance(node, ast.List)
+        ]
+        migrations = next((lit for lit in literals if lit and isinstance(lit[0], tuple)), [])
+        assert migrations, "no migration list found, so this test checks nothing"
+        assert len(migrations) >= 2, (
+            f"expected the shipped migrations, found only {migrations}"
+        )
+        for table, column, definition in migrations:
+            _assert_safe_ddl(table, column, definition)
 
     @pytest.mark.parametrize(("table", "column", "definition"), [
         ("users; DROP TABLE users", "scored", "BOOLEAN"),

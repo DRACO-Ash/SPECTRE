@@ -33,18 +33,30 @@ _url, _connect_args = split_database_url(_settings.database_url)
 # test replaces an object the rest of the suite is already holding.
 def build_pool_kwargs(url: str, recycle_seconds: int) -> dict[str, object]:
     """Return the pool arguments appropriate to *url*."""
+    # Recycling exists to drop a TCP connection a database server or a
+    # firewall may have closed under us. SQLite has no server and no socket,
+    # and on an in-memory URL the pool IS the database: StaticPool holds one
+    # connection and recycling it discards every table in it. Proved against
+    # this helper's own output, with recycle at 2 seconds:
+    #     immediately   -> 1 row
+    #     after recycle -> OperationalError: no such table: users
+    # Production is file-backed so the application was never affected, but the
+    # test harness ran on a 300-second fuse, which is a second and independent
+    # way for the Test stage to fail at random.
+    if url.startswith("sqlite"):
+        return {}
+
     kwargs: dict[str, object] = {
         "pool_pre_ping": True,
         "pool_recycle": recycle_seconds,
     }
-    # Sizing is a queue-pool concept for a networked server. SQLite is local and
-    # single-writer, so the arguments are meaningless there.
-    if not url.startswith("sqlite"):
-        kwargs["pool_size"] = 5
-        kwargs["max_overflow"] = 10
-        # Do not queue behind an exhausted pool indefinitely; fail the request
-        # rather than hanging the worker that is holding it.
-        kwargs["pool_timeout"] = 30
+    # Sizing is a queue-pool concept for a networked server, which is what is
+    # left once SQLite has returned above.
+    kwargs["pool_size"] = 5
+    kwargs["max_overflow"] = 10
+    # Do not queue behind an exhausted pool indefinitely; fail the request
+    # rather than hanging the worker that is holding it.
+    kwargs["pool_timeout"] = 30
     return kwargs
 
 

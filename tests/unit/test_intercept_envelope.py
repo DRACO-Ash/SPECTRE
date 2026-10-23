@@ -399,3 +399,69 @@ class TestTheOperatorsBudgetArrivesInKilometresPerSecond:
             max_delta_v_km_s=to_km_s(10.0),
         )
         assert solution.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
+
+
+class TestTheTwoMutantsThatSurvivedTheFirstPass:
+    """Two single-token changes the first round of tests did not notice.
+
+    The engineering gate found both. Neither is an equivalent mutant: each
+    changes an answer an operator reads, just not at the one window and the
+    one budget every other test in this module happens to use.
+    """
+
+    def test_the_sweep_grid_covers_the_window_the_form_actually_offers(self) -> None:
+        """``(index + 1)``, not ``index``, and the difference needs the right window.
+
+        ``tof = tof_max_s * (index + 1) / n_steps`` steps from one slice to the
+        full window. Dropping the ``+ 1`` starts at zero, which is not a time
+        of flight, and shifts every subsequent step down one slice.
+
+        At the 48 h window used elsewhere in this module both forms report 11
+        feasible arrivals and the same cheapest cost, so the mutant survives.
+        At 21600 s, which is the ``intercept_hours = 6.0`` default the
+        operator's form actually posts, the real sweep reports 21 feasible and
+        0.072568 km/s while the mutant reports 20 and 0.076125. The window an
+        operator gets by default was the one window nothing swept.
+        """
+        solution = intercept_envelope_intercept(
+            _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
+            tof_s=21600.0, max_delta_v_km_s=0.5,
+        )
+        assert solution.miss_distance_km == pytest.approx(21.0), (
+            "the six-hour sweep lost a step, so the grid no longer starts at "
+            "one slice in"
+        )
+        assert solution.total_delta_v == pytest.approx(0.072568, abs=1e-6)
+
+    def test_the_budget_is_inclusive_of_an_arc_that_costs_exactly_it(self) -> None:
+        """``dv <= budget``, not ``dv < budget``.
+
+        No other test sits on the boundary, so ``<=`` to ``<`` survived. The
+        distinction is not academic: an operator who reads a cost off the
+        table and types that exact figure back into the budget field is asking
+        whether this arc is affordable, and the honest answer is yes.
+        """
+        reachable = intercept_envelope_intercept(
+            _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.5,
+        )
+        exactly = reachable.total_delta_v
+
+        at_the_boundary = intercept_envelope_intercept(
+            _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=exactly,
+        )
+        assert at_the_boundary.miss_distance_km == pytest.approx(1.0), (
+            "an arc costing exactly the budget was refused, so the budget is "
+            "exclusive and the cheapest solution is unreachable by its own price"
+        )
+        assert at_the_boundary.total_delta_v == pytest.approx(exactly)
+
+    def test_a_budget_a_hair_under_the_cheapest_arc_refuses(self) -> None:
+        """The other side of the same boundary, so the test above is not one-sided."""
+        reachable = intercept_envelope_intercept(
+            _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.5,
+        )
+        with pytest.raises(ValueError, match="No intercept within"):
+            intercept_envelope_intercept(
+                _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
+                max_delta_v_km_s=reachable.total_delta_v * 0.999999,
+            )

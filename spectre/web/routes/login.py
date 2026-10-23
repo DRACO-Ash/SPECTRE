@@ -167,7 +167,7 @@ async def post_login(
 
 
 async def _revoke_sessions(db: AsyncSession, username: str) -> None:
-    """Move *username*'s session epoch to now, ending every live session.
+    """Advance *username*'s session generation, ending every live session.
 
     Every session, not only the cookie that asked: the operator signing out of
     a shared terminal has no way to know which other copies of their token are

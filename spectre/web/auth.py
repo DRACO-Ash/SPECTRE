@@ -132,7 +132,7 @@ async def require_login(
     result = await db.execute(select(User).where(User.username == username))
     user: User | None = result.scalar_one_or_none()
     if user is None:
-        logger.warning("Session for unknown user: %s", username)
+        logger.warning("Session for unknown user: %s", log_safe(username))
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},

@@ -19,6 +19,7 @@ scanned, so it is repository-only.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -223,11 +224,33 @@ class TestTheNewCodeScoping:
             "on that dirt, so the suite silently switched off the one leg "
             f"that runs the meter end to end: {leaked}"
         )
-        roots = _load()._SONAR_SOURCE_ROOTS
-        if [line for line in dirty.splitlines() if line[3:].strip().startswith(roots)]:
-            pytest.skip("a scanned root has uncommitted changes, which are in scope by design")
+        # --all, not --changed HEAD. Two defects in one line:
+        #
+        # ● --changed HEAD on a clean tree is an EMPTY diff, so the script
+        #   printed "no diff against HEAD" and exited 0 whatever its scoring
+        #   did. Asserting that exit code proved the script STARTS, not that
+        #   it measures anything.
+        # ● It also had to stand down whenever a scanned root was dirty, which
+        #   on a working branch is most of the time, so the one leg that runs
+        #   the meter end to end almost never ran.
+        #
+        # --all depends on no diff at all, so it is deterministic on a dirty
+        # tree and the skip above is no longer needed for this leg.
         result = subprocess.run(  # noqa: S603
-            [sys.executable, str(_SCRIPT), "--changed", "HEAD", "--max", "15"],
+            [sys.executable, str(_SCRIPT), "--all", "--max", "15"],
             cwd=_ROOT, capture_output=True, text=True, check=False,
         )
-        assert result.returncode == 0, result.stdout
+        measured = re.search(r"(\d+) function\(s\) measured", result.stdout)
+        assert measured is not None, (
+            "the meter printed no measurement summary, so it did not score; "
+            f"stdout was:\n{result.stdout[-400:]}"
+        )
+        assert int(measured.group(1)) > 100, (
+            f"the meter measured only {measured.group(1)} functions across "
+            "the whole source tree, which means it is not walking it"
+        )
+        # The exit code is NOT asserted. --all reports every function over the
+        # limit, and the tree carries pre-existing ones that SonarQube does
+        # not score because they are not new code. A non-zero exit here is the
+        # meter working, not failing.
+        assert "ok " in result.stdout, "no function scored under the limit"
