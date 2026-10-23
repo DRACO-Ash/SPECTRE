@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
+from spectre.astro.cw_geometry import _initial_hill_state
 from spectre.astro.lambert import LambertSolution, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
@@ -1276,33 +1277,19 @@ def stability_intercept(
     Computes the CW relative state and assesses whether the motion
     is bounded (non-drifting) or secular (drifting).
     """
-    red_orbit = TLEOrbit(red_tle)
-    blue_orbit = TLEOrbit(blue_tle)
-
     t_epoch = manoeuvre_start + timedelta(seconds=coast_s)
-    sv_red = red_orbit.propagate(t_epoch)
-    sv_blue = blue_orbit.propagate(t_epoch)
 
-    # Compute relative state in CW frame (centred on blue)
-    r_ref = sv_blue.r_mag
-    dr = sv_red.r - sv_blue.r
-    dv = sv_red.v - sv_blue.v
+    # The CW boundedness test needs the relative velocity in the ROTATING Hill
+    # frame. Projecting the inertial difference onto the axes, as this did,
+    # omits the omega x r term, so a truly bounded state with a 1 km radial
+    # offset read as drifting by 3 pi km per orbit (audit F-006). The Hill
+    # state is built in one place, with the correction, and reused here.
+    state, n, _range_km, _ecc = _initial_hill_state(red_tle, blue_tle, t_epoch)
+    r_ref = (mu / n**2) ** (1.0 / 3.0)
 
-    # Transform to CW frame (radial, along-track, cross-track)
-    v_hat = sv_blue.v / sv_blue.v_mag
-    h = np.cross(sv_blue.r, sv_blue.v)
-    h_mag = float(np.linalg.norm(h))
-    n_hat = h / h_mag if h_mag > 1e-10 else np.array([0, 0, 1], dtype=float)
-    b_hat = np.cross(v_hat, n_hat)
-
-    dx0 = float(np.dot(dr, b_hat))   # radial
-    dy0 = float(np.dot(dr, v_hat))   # along-track
-    dz0 = float(np.dot(dr, n_hat))   # cross-track
-    dvx0 = float(np.dot(dv, b_hat))
-    dvy0 = float(np.dot(dv, v_hat))
-    dvz0 = float(np.dot(dv, n_hat))
-
-    result = relative_motion_stability(r_ref, dx0, dy0, dz0, dvx0, dvy0, dvz0, mu)
+    result = relative_motion_stability(
+        r_ref, state.x, state.y, state.z, state.xd, state.yd, state.zd, mu,
+    )
 
     return InterceptSolution(
         method="stability",

@@ -1555,7 +1555,10 @@ def relative_motion_stability(
 
     # CW boundedness condition: dvy0 + 2*n*dx0 = 0 for no secular drift
     drift_indicator = dvy0 + 2.0 * n * dx0
-    secular_drift_per_orbit = 3.0 * math.pi * drift_indicator / n  # km per orbit
+    # Secular along-track term of the CW solution is -3 t (ydot0 + 2 n x0)
+    # (Curtis eq. 7.53), so over one orbit, t = 2 pi / n, it is -6 pi D / n.
+    # This read +3 pi D / n, half the size and the wrong sign (audit F-005).
+    secular_drift_per_orbit = -6.0 * math.pi * drift_indicator / n  # km per orbit
 
     # Radial amplitude: from CW in-plane solution
     # x(t) = (4-3cos(nt))*dx0 + sin(nt)*dvx0/n + 2*(1-cos(nt))*dvy0/n
