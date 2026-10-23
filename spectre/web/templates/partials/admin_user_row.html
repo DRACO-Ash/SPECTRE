@@ -30,7 +30,7 @@
     <button class="spectre-btn spectre-btn-ghost"
             style="font-size:var(--spectre-size-xsmall); color:var(--spectre-color-threat-red)"
             hx-delete="/admin/users/{{ u.id }}"
-            hx-target="#user-tbody"
+            hx-target="#user-table-region"
             hx-swap="innerHTML"
             hx-confirm="Delete user '{{ u.username }}'? This cannot be undone."
             title="Permanently delete {{ u.username }}">

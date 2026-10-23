@@ -49,13 +49,45 @@
   --spectre-color-intel-blue-dim:   #005aaa;
   --spectre-color-intel-blue-bg:    rgba(0, 119, 204, 0.08);
 
+  /* Steel counterparts of the two tokens added in spectre-theme.css. The
+     banner's green already clears the floor here at 5.39:1, so it is carried
+     over unchanged; the tab text does not. Measured in Chromium with
+     prefers-color-scheme: light, the wash under the selected tab composites
+     to #D3DEE9, an 8% intel-blue over #E5E7EB. That is the media block's
+     panel value in spectre-theme.css, not this block's #e0e8f2: the media
+     block's selector is (0,4,0) and beats [data-theme="steel"] at (0,1,0)
+     however late this file loads. On #D3DEE9 the shared #0077cc is 3.41:1
+     and #1D4ED8 is 4.91:1. */
+  --spectre-classification-nominal-fill: #1a7a3c;
+  --spectre-tab-active-text:        #1D4ED8;
+
   /* ── Bluestaq brand overrides for light mode ── */
   --navy:          #1a2a3a;
   --navy-deep:     #0f1e2e;
   --navy-light:    #243548;
-  --gold:          #a07a00;
-  --gold-dim:      rgba(160, 122, 0, 0.12);
-  --gold-mid:      rgba(160, 122, 0, 0.30);
+  /* Gold is two jobs in this theme, and one value cannot do both.
+
+     --gold is the ink this theme writes on its OWN light surfaces. #8A5600
+     measures 6.16:1 as .callout-gold text on white, and is the value
+     --spectre-status-high already uses here. The --gold-dim / --gold-mid /
+     --gold-aNN ladder below is restated from this same #8A5600, so a tint
+     can never be a different hue from the text standing on it; it was left
+     at rgba(160, 122, 0) when --gold moved, which is what made .threat-high
+     tint one gold and print its delta-V in another.
+
+     --gold-chrome is the navy chrome this theme deliberately keeps dark:
+     .engine-tab-bar and .lower-tab-bar (--navy-deep #0f1e2e, --navy #1a2a3a),
+     the nav bar, the GCAT header, nav rail, table heads and pagination chip.
+     #8A5600 measures 2.74:1 on #0f1e2e and 2.38:1 on #1a2a3a, both below the
+     4.5 floor. No darkening of a single token escapes this: clearing 4.5:1 on
+     #0f1e2e needs a relative luminance of at least 0.236, clearing 4.5:1 on
+     white needs at most 0.183, and the two do not overlap. The brand #C8A415
+     measures 6.91:1 on #0f1e2e and 6.11:1 on #1a2a3a, so the chrome keeps it.
+     Same carve-out as --spectre-tab-active-text above. */
+  --gold:          #8A5600;
+  --gold-chrome:   #C8A415;
+  --gold-dim:      rgba(138, 86, 0, 0.12);
+  --gold-mid:      rgba(138, 86, 0, 0.30);
   --bar-navy:      #1a2a3a;
   --bar-blue:      #005aaa;
   --bar-mid:       #0077cc;
@@ -74,14 +106,16 @@
   --alliance-a06:    rgba(0, 90, 170, 0.06);
   --alliance-a08:    rgba(0, 90, 170, 0.08);
   --alliance-a15:    rgba(0, 90, 170, 0.15);
-  --gold-a04:        rgba(160, 122, 0, 0.04);
-  --gold-a05:        rgba(160, 122, 0, 0.05);
-  --gold-a06:        rgba(160, 122, 0, 0.06);
-  --gold-a08:        rgba(160, 122, 0, 0.08);
-  --gold-a12:        rgba(160, 122, 0, 0.12);
-  --gold-a15:        rgba(160, 122, 0, 0.15);
-  --gold-a20:        rgba(160, 122, 0, 0.20);
-  --gold-a25:        rgba(160, 122, 0, 0.25);
+  /* Restated from --gold #8A5600. These tints land on light surfaces, under
+     text that is --gold, so they follow --gold and not --gold-chrome. */
+  --gold-a04:        rgba(138, 86, 0, 0.04);
+  --gold-a05:        rgba(138, 86, 0, 0.05);
+  --gold-a06:        rgba(138, 86, 0, 0.06);
+  --gold-a08:        rgba(138, 86, 0, 0.08);
+  --gold-a12:        rgba(138, 86, 0, 0.12);
+  --gold-a15:        rgba(138, 86, 0, 0.15);
+  --gold-a20:        rgba(138, 86, 0, 0.20);
+  --gold-a25:        rgba(138, 86, 0, 0.25);
   --red-a25:         rgba(192, 57, 43, 0.25);
   --red-a30:         rgba(192, 57, 43, 0.30);
   --red-a50:         rgba(192, 57, 43, 0.50);
@@ -100,6 +134,22 @@
   color-scheme: light;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+   THEME: ops  — Deep Night (dark operational, the default)
+   Only the colour scheme is declared here; every ops colour token is the
+   base value in spectre-theme.css.  Steel declared color-scheme: light and
+   ops declared nothing, so the root computed `normal` and Chromium drew its
+   LIGHT-mode UA focus ring, rgb(16, 16, 16), on console-black surfaces:
+   measured 1.07:1 on a sweep row and 1.03:1 on an engine tab, against a 3:1
+   floor for a non-text indicator.  It also lets the UA paint its own
+   controls dark rather than light-on-dark.
+   ══════════════════════════════════════════════════════════════════════ */
+[data-theme="ops"] {
+  color-scheme: dark;
+}
+
+
 /* ── Component overrides that can't be expressed via tokens alone ── */
 
 /* Nav stays dark even in steel theme (Bluestaq identity requirement) */
@@ -107,23 +157,105 @@
 [data-theme="steel"] .nav-user           { color: #a0b8cc; }
 [data-theme="steel"] .nav-dropdown-panel { background: #1a2a3a; border-color: #243548; }
 [data-theme="steel"] .btn-logout         { background: transparent; border-color: #c2cede; color: #a0b8cc; }
+/* The rest of what paints on that dark chrome. Keeping a surface dark in a
+   light theme is only half a decision: every foreground on it has to be
+   re-pointed as well, and .nav-user and .btn-logout were the only two that
+   were. The others stayed on the light tokens and were measured in Chromium
+   on the composited surface, steel theme, prefers-color-scheme light:
+     .spectre-badge-nominal  2.54:1 -> 4.76:1  (11px/500, floor 4.5)
+     .udl-disconnected       1.93:1 -> 7.12:1
+     .udl-connected          2.71:1 -> 5.09:1
+     .udl-error              4.13:1 -> 6.81:1
+     .nav-dropdown-panel .btn-secondary  2.23:1 -> 7.12:1
+   #a0b8cc is the value .nav-user already carries. #27AE60 is the Bluestaq
+   green and is the rgba base of --green-a30 in the ops palette; #f59e0b is
+   the amber the Training chip on this same bar already uses. No token is
+   retuned, so nothing outside .nav-bar moves. */
+[data-theme="steel"] .nav-bar .spectre-badge-nominal         { color: #27AE60; }
+[data-theme="steel"] .nav-dropdown-panel .udl-disconnected .udl-label { color: #a0b8cc; }
+[data-theme="steel"] .nav-dropdown-panel .udl-connected .udl-label    { color: #27AE60; }
+[data-theme="steel"] .nav-dropdown-panel .udl-error .udl-label        { color: #f59e0b; }
+[data-theme="steel"] .nav-dropdown-panel .btn-secondary      { color: #a0b8cc; border-color: #41566b; }
 
 /* Sidebar */
 [data-theme="steel"] .sidebar            { background: #e8eef5; border-right: 1px solid rgba(0,0,0,0.10); }
 [data-theme="steel"] .sidebar-tabs       { background: #dde5ef; border-bottom-color: rgba(0,0,0,0.10); }
 [data-theme="steel"] .stab              { color: var(--spectre-text-secondary); }
-[data-theme="steel"] .stab.active        { color: var(--spectre-color-intel-blue); border-bottom-color: var(--spectre-color-intel-blue); background: transparent; }
+/* The sidebar twin of the .htab.active fix 11 lines below: this rule is what
+   the browser obeys in steel, so retargeting the base rule in style.css alone
+   would have left #0077cc painting here at 3.66:1 on the #dde5ef strip, at a
+   computed 9.52px/700 against a 4.5 floor. --spectre-tab-active-text (#1D4ED8)
+   gives 5.27:1. The underline stays on the shared blue: a 2px non-text
+   indicator on a 3:1 floor, measured at 3.66:1. */
+[data-theme="steel"] .stab.active        { color: var(--spectre-tab-active-text); border-bottom-color: var(--spectre-color-intel-blue); background: transparent; }
 
 /* Hero tab bar */
 [data-theme="steel"] .hero-tab-bar       { background: var(--spectre-surface-panel); border-bottom-color: var(--spectre-border-default); }
 [data-theme="steel"] .htab              { color: var(--spectre-text-secondary); }
-[data-theme="steel"] .htab.active        { color: var(--spectre-color-intel-blue); background: var(--spectre-color-intel-blue-bg); }
+/* --spectre-tab-active-text, not the shared intel blue. This rule is more
+   specific than .htab.active in style.css AND themes.css loads after it, so
+   retargeting the base rule alone left the steel tab painting #0077cc at
+   3.41:1 against a 4.5 floor: the fix was in the stylesheet and never on the
+   screen. A token pinned by a contrast test is worth nothing if the rule the
+   browser obeys names a different one. */
+[data-theme="steel"] .htab.active        { color: var(--spectre-tab-active-text); background: var(--spectre-color-intel-blue-bg); }
 [data-theme="steel"] .asset-tabs         { background: var(--spectre-surface-overlay); }
 [data-theme="steel"] .hero-panel         { background: var(--spectre-surface-raised); }
+
+/* Engine sub-tab bar, one level below the hero tab bar above.
+   style.css pins .engine-tab-bar to var(--navy-deep), which steel keeps at
+   #0f1e2e, while every foreground on it follows the light tokens. Measured in
+   Chromium on the composited surface, steel, prefers-color-scheme light:
+     .etab                   #4B5563 on #0F1E2E  2.23:1  (10.08px/700)
+     .etab.active            #8A5600 on #0F1E2E  2.74:1
+     .etab.active underline  #8A5600 on #0F1E2E  2.74:1  (2px, floor 3)
+     #ts-badge .ltab-badge   #4B5563 on #0F1E2E  2.23:1  (8.68px/600)
+     .etab:hover             #111827 on #0F1E2E  1.05:1
+   The hover figure is the tell: hovering made the tab less readable, which is
+   only possible when the surface and its foregrounds were decided apart.
+   Nothing here carries the identity requirement that keeps .nav-bar dark, and
+   it sits directly under a .hero-tab-bar that is already light in this theme,
+   so the surface is re-tokened rather than kept dark. That alone lifts .etab
+   and the badge to 6.10:1 and hover to 14.33:1 with no further overrides. */
+[data-theme="steel"] .engine-tab-bar     { background: var(--spectre-surface-panel); border-bottom-color: var(--spectre-border-default); }
+/* var(--spectre-tab-active-text), not var(--gold), for the same reason
+   .htab.active carries it. Gold is a light-surface foreground here: at the
+   current #8A5600 it measures 4.97:1 on this panel, but 3.21:1 if --gold is
+   restored to #a07a00, which would put the text under the 4.5 floor and the
+   underline on 3.21:1 against a 3 floor. #1D4ED8 gives 5.41:1 for both and
+   does not read --gold at all, so the restore cannot move it. */
+[data-theme="steel"] .etab.active        { color: var(--spectre-tab-active-text); border-bottom-color: var(--spectre-tab-active-text); }
+
+/* Lower tab bar, same defect and same treatment. It paints nothing today:
+   style.css keeps the block for backwards compatibility and no template
+   emits .lower-tab-bar, confirmed as 0 nodes on the rendered console. The
+   rules are here so the surface and its foregrounds cannot drift apart again
+   if it returns. Synthesised against the real stylesheet in Chromium, steel:
+     .ltab                   #4B5563 on #1A2A3A  1.93:1 -> 6.10:1
+     .ltab.active            #8A5600 on #1A2A3A  2.38:1 -> 5.41:1
+     .ltab.active underline  #8A5600 on #1A2A3A  2.38:1 -> 5.41:1 (floor 3)
+     .ltab-badge             #4B5563 on #1A2A3A  1.93:1 -> 6.10:1
+   .ltab-badge is NOT dead: #ts-badge renders it inside .engine-tab-bar, and
+   the surface change above is what carries it. */
+[data-theme="steel"] .lower-tab-bar      { background: var(--spectre-surface-panel); border-bottom-color: var(--spectre-border-default); }
+[data-theme="steel"] .ltab.active        { color: var(--spectre-tab-active-text); border-bottom-color: var(--spectre-tab-active-text); }
 
 /* Tables */
 [data-theme="steel"] .hrr-table th       { background: var(--spectre-surface-panel); color: var(--spectre-text-secondary); }
 [data-theme="steel"] .hrr-table tr:hover { background: #f0f5fa; }
+
+/* --gold ink standing on its own strongest tints.
+
+   In the dark theme a gold wash LIGHTENS the surface under the ink and the
+   ratio grows with alpha. In steel the same wash DARKENS a white one and the
+   ratio falls, so at the top of the ladder the theme's own ink goes under
+   4.5. Two rules reach that far, and they take a lower step here rather than
+   the ladder being bent out of a true alpha ramp for them. Measured on the
+   composited fill, steel: the selected category badge is 4.31:1 at --gold-a20
+   and 4.85:1 at --gold-a12 (7.73px/700); the hovered gold button is 4.24:1 at
+   --gold-a25 and 4.95:1 at --gold-a15 (12px/600). */
+[data-theme="steel"] .gcat-ctab.active .gcat-ctab-badge { background: var(--gold-a12); }
+[data-theme="steel"] .btn-gold:hover                    { background: var(--gold-a15); }
 
 /* Misc */
 [data-theme="steel"] details summary     { color: #4a6070; }

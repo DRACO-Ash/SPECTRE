@@ -5,11 +5,16 @@
 {% set RISK_BG     = {"CRITICAL":"rgba(239,68,68,0.04)","HIGH":"rgba(245,158,11,0.04)","MEDIUM":"rgba(234,179,8,0.04)","LOW":"rgba(59,139,235,0.04)","MINIMAL":"rgba(34,197,94,0.04)"} %}
 {% set RISK_ICON   = {"CRITICAL":"⚠","HIGH":"⚠","MEDIUM":"◈","LOW":"◉","MINIMAL":"✓"} %}
 {% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444"} %}
-{% set TYPE_LABEL  = {"station_keeping":"Station Keeping","plane_change":"Plane Change","repositioning":"Repositioning","unknown":"Unknown","none_detected":"None detected"} %}
+{% set ELSET_TABLE_CAP = 400 %}
+{% set CONF_COL    = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
+{# Manoeuvre labels and posture colours come from the domain assessment now.
+   The old TYPE_LABEL map keyed on an astro-layer classification that applied
+   Table 3's ANNUAL station-keeping budgets as per-event limits. #}
+{% set POSTURE_COL = {"BENIGN":"#22c55e","ANNOYANCE":"#f59e0b","AGGRESSIVE":"#ef4444","BEYOND PLATFORM":"#a855f7"} %}
 {% set DRIFT_COLOR = {"EAST":"#22c55e","WEST":"#ef4444","STATIONARY":"#6b7280"} %}
 {% set DRIFT_ICON  = {"EAST":"→","WEST":"←","STATIONARY":"—"} %}
 
-{% set risk_level  = pol.intel_assessment.risk_level if pol.intel_assessment else "MINIMAL" %}
+{% set risk_level  = intel.risk_level if intel else "MINIMAL" %}
 {% set rc          = RISK_COLOR.get(risk_level, "#6b7280") %}
 {% set rb          = RISK_BG.get(risk_level, "rgba(107,114,128,0.10)") %}
 {% set is_geo      = pol.regime in ("GEO","DEEP") or (pol.records and pol.records[-1].geo_longitude_deg is not none) %}
@@ -27,9 +32,9 @@
       <div style="font-size:0.6rem; font-weight:900; color:{{ rc }}; text-transform:uppercase; letter-spacing:0.12em; margin-top:0.2rem">
         {{ risk_level }}
       </div>
-      {% if pol.anomaly_score %}
+      {% if anomaly %}
       <div style="font-size:1.5rem; font-weight:900; color:{{ rc }}; line-height:1; margin-top:0.2rem">
-        {{ pol.anomaly_score.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
+        {{ anomaly.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
       </div>
       <div style="font-size:0.58rem; color:var(--text-dim)">anomaly score</div>
       {% endif %}
@@ -50,21 +55,21 @@
         </span>
         {% endif %}
       </div>
-      {% if pol.intel_assessment %}
+      {% if intel %}
       <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
-        {{ pol.intel_assessment.mission_profile }}
+        {{ intel.mission_profile }}
       </div>
       <div style="font-size:0.68rem; color:var(--ops-gold); font-style:italic; margin-bottom:0.4rem">
-        {{ pol.intel_assessment.behaviour_class }}
+        {{ intel.behaviour_class }}
       </div>
       <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.5; max-width:52rem">
-        {{ pol.intel_assessment.anomaly_narrative }}
+        {{ intel.anomaly_narrative }}
       </div>
-      {% if pol.intel_assessment.operational_signature %}
+      {% if intel.operational_signature %}
       <div style="margin-top:0.45rem; font-size:0.64rem; color:var(--text-dim);
                   border-top:1px solid var(--border); padding-top:0.35rem">
         <span style="color:var(--text-primary); font-weight:600">Operational Signature:</span>
-        {{ pol.intel_assessment.operational_signature }}
+        {{ intel.operational_signature }}
       </div>
       {% endif %}
       {% else %}
@@ -144,8 +149,8 @@
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
       Anomaly Score — Component Breakdown
     </div>
-    {% if pol.anomaly_score %}
-    {% set anoms = pol.anomaly_score %}
+    {% if anomaly %}
+    {% set anoms = anomaly %}
     {% macro score_bar(label, val, tooltip="") %}
     <div style="margin-bottom:0.35rem" {% if tooltip %}title="{{ tooltip }}"{% endif %}>
       <div style="display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-dim); margin-bottom:0.1rem">
@@ -184,10 +189,9 @@
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
       Propellant Budget Estimate
     </div>
-    {% if pol.propellant_budget %}
-    {% set pb = pol.propellant_budget %}
-    {# Circular gauge using SVG #}
-    {% set pct = [pb.propellant_used_pct, 100] | min | round(1) %}
+    {% if propellant %}
+    {% set pb = propellant %}
+    {% set pct = [pb.propellant_used_pct, 100] | min %}
     {% set circ = 100 %}
     {% set dash = (pct / 100 * circ) | round(2) %}
     <div style="display:flex; gap:1rem; align-items:center; margin-bottom:0.6rem">
@@ -195,47 +199,85 @@
         <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.2"/>
         <circle cx="18" cy="18" r="15.9" fill="none"
           stroke="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}"
-          stroke-width="3.2"
-          stroke-dasharray="{{ dash }} {{ circ - dash }}"
-          stroke-dashoffset="25"
-          stroke-linecap="round"
-          transform="rotate(-90 18 18)"/>
+          stroke-width="3.2" stroke-dasharray="{{ dash }} {{ circ - dash }}"
+          stroke-dashoffset="25" stroke-linecap="round" transform="rotate(-90 18 18)"/>
         <text x="18" y="19" text-anchor="middle" font-size="6.5" font-weight="700"
               fill="{% if pct > 70 %}#ef4444{% elif pct > 45 %}#f59e0b{% else %}#3b8beb{% endif %}">
           {{ pct | round(0) | int }}%
         </text>
-        <text x="18" y="25" text-anchor="middle" font-size="3.5" fill="#8899aa">used</text>
+        <text x="18" y="25" text-anchor="middle" font-size="3.5" fill="#8899aa">of tank</text>
       </svg>
       <div>
-        <div style="font-size:0.72rem; font-weight:700; color:var(--text-primary)">{{ pb.budget_class }}</div>
-        <div style="font-size:0.64rem; color:var(--text-dim); margin-top:0.15rem">
-          ISP {{ pb.assumed_isp_s | round(0) | int }} s (bipropellant GEO)<br>
-          Assumes {{ pb.assumed_propellant_kg | round(0) | int }} kg propellant load
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-primary)">{{ pb.rate_class }}</div>
+        <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.15rem; line-height:1.5">
+          {{ pb.platform.name }}<br>
+          Isp {{ pb.assumed_isp_s | round(0) | int }} s · propellant {{ (pb.propellant_fraction * 100) | round(0) | int }}% of mass
         </div>
       </div>
     </div>
     <table style="width:100%; font-size:0.67rem; border-collapse:collapse">
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Cumulative ΔV</td>
-        <td style="text-align:right; font-weight:600">{{ (pb.total_dv_km_s * 1000) | round(1) }} m/s</td>
+        <td style="text-align:right; font-weight:600">{{ budget_total_dv_m_s | m_s }} m/s</td>
       </tr>
+      {% if reserve_reset %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.15rem 0">Annual burn rate</td>
-        <td style="text-align:right; font-weight:600">{{ (pb.annual_dv_km_s * 1000) | round(1) }} m/s/yr</td>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Since reserve reset</td>
+        <td style="text-align:right; font-weight:600; color:var(--ops-gold)">
+          {{ pb.spent_since_reset_m_s | m_s }} m/s
+        </td>
       </tr>
+      {% endif %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.15rem 0">Est. remaining life</td>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Annual rate</td>
+        <td style="text-align:right; font-weight:600">{{ budget_annual_dv_m_s | m_s }} m/s/yr</td>
+      </tr>
+      {% if pb.routine_annual_m_s %}
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Against routine ({{ pb.regime }})</td>
         <td style="text-align:right; font-weight:600">
-          {% if pb.remaining_life_years %}
-            <span style="color:{% if pb.remaining_life_years < 2 %}#ef4444{% elif pb.remaining_life_years < 5 %}#f59e0b{% else %}#22c55e{% endif %}">
-              ~{{ pb.remaining_life_years | round(1) }} yr
-            </span>
-          {% else %}N/A{% endif %}
+          <span style="color:{% if pb.rate_multiple >= 5 %}#ef4444{% elif pb.rate_multiple >= 2 %}#f59e0b{% else %}#22c55e{% endif %}">
+            {{ pb.rate_multiple }}&times;</span>
+          <span style="color:var(--text-dim); font-weight:400">of {{ pb.routine_annual_m_s | m_s }} m/s/yr</span>
+        </td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td style="color:var(--text-dim); padding:0.15rem 0">Discretionary reserve left</td>
+        <td style="text-align:right; font-weight:600">
+          <span style="color:{% if pb.discretionary_remaining_m_s <= 0 %}#ef4444{% elif pb.discretionary_remaining_m_s < pb.discretionary_max_m_s * 0.5 %}#f59e0b{% else %}#22c55e{% endif %}">
+            {{ pb.discretionary_remaining_m_s | m_s }} m/s</span>
+          <span style="color:var(--text-dim); font-weight:400">of {{ pb.discretionary_max_m_s | m_s }}</span>
         </td>
       </tr>
     </table>
-    <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
-      ⚠ Indicative only — assumes ~30% propellant mass fraction. Actual margins unknown.
+    <div style="font-size:0.63rem; color:var(--text-primary); margin-top:0.45rem; line-height:1.5">
+      {{ pb.narrative }}
+    </div>
+
+    {# ── Refuelling, the capability multiplier ─────────────────────────── #}
+    <form hx-post="/pol/reserve-reset" hx-target="#pol-results" hx-swap="innerHTML"
+          style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.4rem">
+      <input type="hidden" name="satno" value="{{ pol.satno }}">
+      {# The label carries "for" and the input an "id" so a screen reader reads
+         the two as one control (Web:S6853, Web:InputWithoutLabelCheck). The id
+         is a literal because this partial is included once per panel, never in
+         a loop, so it stays unique in the rendered page. #}
+      <label for="pol-reserve-reset-date" style="font-size:0.6rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
+        Reserve reset (refuelling) — cumulative ΔV counts from this date
+      </label>
+      <div style="display:flex; gap:0.3rem; align-items:center">
+        <input type="date" id="pol-reserve-reset-date" name="reset_date" class="form-input"
+               value="{{ reserve_reset.strftime('%Y-%m-%d') if reserve_reset else '' }}"
+               style="font-size:0.62rem; padding:0.15rem 0.3rem; flex:1">
+        <button type="submit" class="btn-secondary" style="font-size:0.6rem; padding:0.15rem 0.5rem">
+          {{ "Update" if reserve_reset else "Set" }}
+        </button>
+      </div>
+    </form>
+
+    <div style="margin-top:0.4rem; font-size:0.58rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem; line-height:1.5">
+      {% for caveat in pb.caveats %}● {{ caveat }}<br>{% endfor %}
     </div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Propellant budget unavailable.</p>
@@ -259,15 +301,18 @@
   {% endmacro %}
 
   {{ stat_card("Manoeuvres", pol.manoeuvres | length, "detected total") }}
-  {{ stat_card("Total ΔV", (pol.total_dv_km_s * 1000) | round(1) ~ " m/s", "cumulative budget") }}
+  {{ stat_card("Total ΔV", (total_dv_m_s | m_s) ~ " m/s", "cumulative budget") }}
   {% if pol.dv_stats %}
-  {{ stat_card("Mean ΔV", (pol.dv_stats.mean * 1000) | round(2) ~ " m/s", "σ = " ~ (pol.dv_stats.std * 1000) | round(2) ~ " m/s") }}
+  {{ stat_card("Mean ΔV", (dv_mean_m_s | m_s) ~ " m/s", "σ = " ~ (dv_std_m_s | m_s) ~ " m/s") }}
   {% endif %}
   {% if pol.interval_stats %}
   {{ stat_card("Mean Interval", pol.interval_stats.mean | round(1) ~ " d", "σ = " ~ pol.interval_stats.std | round(1) ~ " d") }}
   {% endif %}
-  {{ stat_card("Primary Activity", TYPE_LABEL.get(pol.dominant_activity, pol.dominant_activity), color="var(--ops-blue)") }}
-  {{ stat_card("SK Profile", pol.sk_type) }}
+  {{ stat_card("Primary Activity", intel.mission_profile, color="var(--ops-blue)") }}
+  {% if assessment.manoeuvres %}
+  {{ stat_card("Routine Burn Ceiling", (assessment.sk_ceiling_m_s | m_s) ~ " m/s",
+               "derived from Table 3, not asserted") }}
+  {% endif %}
   {% if pol.next_manoeuvre_est %}
   {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
   {% endif %}
@@ -352,11 +397,11 @@
     {% if pol.dv_stats %}
     <table style="width:100%; font-size:0.66rem; border-collapse:collapse">
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV Mean</td>
-          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.mean*1000)|round(2) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ dv_mean_m_s | m_s }} m/s</td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV ±2σ band</td>
-          <td style="text-align:right; font-weight:600">{{ [pol.dv_stats.low_2sigma*1000, 0]|max|round(1) }} – {{ (pol.dv_stats.high_2sigma*1000)|round(1) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ [dv_low_2sigma_m_s, 0]|max | m_s }} – {{ dv_high_2sigma_m_s | m_s }} m/s</td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">ΔV p95</td>
-          <td style="text-align:right; font-weight:600">{{ (pol.dv_stats.p95*1000)|round(2) }} m/s</td></tr>
+          <td style="text-align:right; font-weight:600">{{ dv_p95_m_s | m_s }} m/s</td></tr>
       {% if pol.interval_stats %}
       <tr><td colspan="2" style="border-top:1px solid var(--border); padding-top:0.25rem; margin-top:0.25rem"></td></tr>
       <tr><td style="color:var(--text-dim); padding:0.15rem 0">Interval Mean</td>
@@ -369,7 +414,7 @@
     </table>
     <div style="margin-top:0.5rem; font-size:0.62rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
       <strong>Out-of-PoL trigger:</strong> ΔV &gt;
-      <span style="color:var(--ops-gold)">{{ pol.pol_high_dv and (pol.pol_high_dv*1000)|round(1) or "N/A" }} m/s</span>
+      <span style="color:var(--ops-gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
       or gap &gt;
       <span style="color:var(--ops-gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
     </div>
@@ -452,7 +497,7 @@
 {# ══════════════════════════════════════════════════════════════════════════════
    § 8 — LONGITUDE PREDICTIONS + NOTABLE PERIODS (GEO only)
    ══════════════════════════════════════════════════════════════════════════════ #}
-{% if is_geo and pol.intel_assessment and pol.intel_assessment.predicted_lon_30d is not none %}
+{% if is_geo and intel and intel.predicted_lon_30d is not none %}
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.6rem">
 
   {# 30/60/90-day predictions #}
@@ -462,7 +507,7 @@
     </div>
     <div style="font-size:0.6rem; color:var(--text-dim); margin-bottom:0.5rem; font-style:italic">
       Assumes current drift of
-      {{ pol.intel_assessment.current_drift_rate | round(4) if pol.intel_assessment.current_drift_rate else "?" }}°/d continues unchanged.
+      {{ intel.current_drift_rate | round(4) if intel.current_drift_rate else "?" }}°/d continues unchanged.
       Manoeuvres will alter trajectory.
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem">
@@ -478,20 +523,20 @@
         {% endif %}
       </div>
       {% endmacro %}
-      {{ pred_card("30 d", pol.intel_assessment.predicted_lon_30d, pol.intel_assessment.current_drift_dir) }}
-      {{ pred_card("60 d", pol.intel_assessment.predicted_lon_60d, pol.intel_assessment.current_drift_dir) }}
-      {{ pred_card("90 d", pol.intel_assessment.predicted_lon_90d, pol.intel_assessment.current_drift_dir) }}
+      {{ pred_card("30 d", intel.predicted_lon_30d, intel.current_drift_dir) }}
+      {{ pred_card("60 d", intel.predicted_lon_60d, intel.current_drift_dir) }}
+      {{ pred_card("90 d", intel.predicted_lon_90d, intel.current_drift_dir) }}
     </div>
   </div>
 
   {# Notable activity periods #}
-  {% if pol.intel_assessment.notable_periods %}
+  {% if intel.notable_periods %}
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.45rem">
       Notable Activity Periods
     </div>
     <ul style="list-style:none; padding:0; margin:0">
-      {% for note in pol.intel_assessment.notable_periods %}
+      {% for note in intel.notable_periods %}
       <li style="font-size:0.64rem; color:var(--text-dim); padding:0.2rem 0;
                  border-bottom:1px solid rgba(255,255,255,0.04)">
         {% if "EAST" in note %}
@@ -522,42 +567,122 @@
 {# ══════════════════════════════════════════════════════════════════════════════
    § 9 — MANOEUVRE CATALOGUE
    ══════════════════════════════════════════════════════════════════════════════ #}
+{# ── Escalations: the assessment's watchlist, acted on ─────────────────── #}
+{% if assessment.escalations %}
+<div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.5); border-radius:5px;
+            padding:0.6rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:#ef4444; text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">High Priority</div>
+  {% for note in assessment.escalations %}
+  <div style="font-size:0.64rem; color:var(--text-primary); margin-bottom:0.3rem; line-height:1.5">
+    ● {{ note }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── R3: state what the floor excludes, rather than implying "passive" ─── #}
+{% if limits %}
+<div style="background:var(--panel-bg); border:1px solid rgba(245,158,11,0.3); border-radius:5px;
+            padding:0.55rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.62rem; font-weight:700; color:#f59e0b; text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">What This Analysis Can And Cannot See</div>
+  <div style="font-size:0.63rem; color:var(--text-primary); line-height:1.55; margin-bottom:0.35rem">
+    {{ limits.narrative }}
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; font-size:0.6rem">
+    <div>
+      <div style="color:#22c55e; font-weight:700; margin-bottom:0.15rem">
+        Above the floor, would be caught</div>
+      {% for label, dv in limits.visible %}
+      <div style="color:var(--text-dim)">● {{ dv | m_s }} m/s &mdash; {{ label }}</div>
+      {% endfor %}
+      {% if not limits.visible %}<div style="color:var(--text-dim)">Nothing on open record.</div>{% endif %}
+    </div>
+    <div>
+      <div style="color:#ef4444; font-weight:700; margin-bottom:0.15rem">
+        Below the floor, invisible to this method</div>
+      {% for label, dv in limits.invisible %}
+      <div style="color:var(--text-dim)">● {{ dv | m_s }} m/s &mdash; {{ label }}</div>
+      {% endfor %}
+      {% if not limits.invisible %}<div style="color:var(--text-dim)">Nothing on open record.</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Detection provenance: what was examined, and what was discarded ───── #}
+{% if detection.noise_floor_m_s is not none %}
+<div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+            padding:0.55rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">Detection Provenance</div>
+  <div style="font-size:0.63rem; color:var(--text-primary); line-height:1.5">
+    {{ detection.pairs_examined }} consecutive element set pairs examined.
+    Detection floor <strong>{{ detection.noise_floor_m_s | m_s }} m/s</strong>, measured from this
+    object's own fit scatter (median {{ detection.noise_median_m_s | m_s }},
+    median absolute deviation {{ detection.noise_mad_m_s | m_s }} m/s over
+    {{ detection.noise_samples }} pairs), not assumed.
+  </div>
+  <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem; line-height:1.5">
+    ● {{ detection.rejected_below_floor }} pairs fell below the floor
+    {% if detection.rejected_on_evidence %}● {{ detection.rejected_on_evidence }} cleared the floor but failed the forensic checks{% endif %}
+    {% if detection.merged_duplicates %}● {{ detection.merged_duplicates }} merged as the same burn seen by more than one provider{% endif %}
+    {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
+    {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
+    <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>
+    and <strong style="color:#f59e0b">{{ detection.candidates }} unconfirmed candidates</strong>.
+    Only confirmed events feed the cumulative ΔV, the propellant budget and the anomaly score.
+  </div>
+</div>
+{% endif %}
+
 {% if pol.manoeuvres %}
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem; margin-bottom:0.6rem">
   <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.4rem">
-    Manoeuvre Catalogue — {{ pol.manoeuvres | length }} events
-    <span style="font-size:0.6rem; font-weight:400">(ΔV threshold: {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s)</span>
+    Manoeuvre Catalogue — {{ pol.manoeuvres | length }} confirmed events
+    <span style="font-size:0.6rem; font-weight:400">(ΔV threshold: {{ dv_threshold_m_s | m_s }} m/s)</span>
   </div>
   <div class="hrr-scroll" style="max-height:280px">
     <table class="hrr-table" style="font-size:0.66rem">
       <thead>
         <tr>
-          <th onclick="polSort(this)" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
-          {% if is_geo %}<th onclick="polSort(this)" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
-          <th onclick="polSort(this)" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
+          {% if is_geo %}<th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
           <th style="text-align:right">Alt After</th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Confidence<span class="hrr-sort-ind"></span></th>
+          <th style="text-align:center">Working</th>
           <th style="text-align:center">MC</th>
         </tr>
       </thead>
       <tbody>
-        {% set TYPE_COL = {"station_keeping":"var(--ops-blue)","plane_change":"#f59e0b","repositioning":"#ef4444","unknown":"var(--text-dim)"} %}
-        {% for m in pol.manoeuvres | sort(attribute="epoch", reverse=True) %}
+        {% for row in manoeuvre_rows | sort(attribute="m.epoch", reverse=True) %}
+        {% set m = row.m %}{% set v = row.v %}
+        {% set pcol = POSTURE_COL.get(v.posture_label, "var(--text-dim)") %}
         <tr>
           <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
-          <td data-val="{{ (m.delta_v_km_s*1000)|round(3) }}">
-            <strong style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-primary)') }}">
-              {{ (m.delta_v_km_s*1000)|round(3) }}
-            </strong>
+          <td data-val="{{ row.delta_v_m_s }}">
+            <strong style="color:{{ pcol }}">{{ row.delta_v_m_s | m_s }}</strong>
           </td>
-          <td style="color:{{ TYPE_COL.get(m.manoeuvre_type,'var(--text-dim)') }}; white-space:nowrap">
-            {{ TYPE_LABEL.get(m.manoeuvre_type, m.manoeuvre_type) }}
-            {% if m.sk_subtype %}<span class="label-dim">({{ m.sk_subtype }})</span>{% endif %}
+          <td style="white-space:nowrap">
+            {{ v.classification }}
+            {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <span style="color:{{ pcol }}; font-weight:700" title="{{ v.posture.rationale }}">
+              {{ v.posture_label }}</span>
+            {% if v.burn_is_slow %}
+            <span style="color:#a855f7; font-size:0.56rem" title="Delivering this ΔV on a {{ v.burn_platform }} takes {{ v.burn_days | round(1) }} days of continuous thrust, so it cannot have been executed at short notice.">
+              &#9201; {{ v.burn_days | round(1) }} d
+            </span>
+            {% endif %}
           </td>
           <td data-val="{{ m.delta_alt_km|round(3) }}">
             {% if m.delta_alt_km > 0.5 %}<span style="color:#22c55e">+{% elif m.delta_alt_km < -0.5 %}<span style="color:#ef4444">{% else %}<span>{% endif %}{{ m.delta_alt_km|round(2) }}</span>
@@ -576,13 +701,30 @@
           <td class="col-dim">{{ m.dominant_element }}</td>
           <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
           <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
+          <td style="white-space:nowrap">
+            <span style="color:{{ CONF_COL.get(m.confidence, 'var(--text-dim)') }}; font-weight:700">
+              {{ m.confidence }}</span>
+          </td>
+          <td style="text-align:center">
+            <button type="button"
+                    class="btn-secondary"
+                    style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
+                    title="Show every number behind this ΔV: both element sets, each channel, all three estimators"
+                    hx-post="/pol/manoeuvre-detail"
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}"}'
+                    hx-target="#pol-detail"
+                    hx-swap="innerHTML"
+                    hx-indicator="#pol-detail-indicator">
+              &#9432; Detail
+            </button>
+          </td>
           <td style="text-align:center">
             <button type="button"
                     class="btn-secondary"
                     style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
                     title="Run Monte Carlo simulation for this manoeuvre"
                     hx-post="/pol/monte-carlo"
-                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "dv_km_s": "{{ m.delta_v_km_s }}", "manoeuvre_type": "{{ m.manoeuvre_type }}"}'
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}", "manoeuvre_type": "{{ v.monte_carlo_archetype }}"}'
                     hx-target="#pol-mc-results"
                     hx-swap="innerHTML"
                     hx-indicator="#pol-mc-indicator">
@@ -597,10 +739,68 @@
 </div>
 {% else %}
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.8rem; margin-bottom:0.6rem; text-align:center">
-  <p class="empty-msg">No manoeuvres detected above the {{ (pol.dv_threshold_km_s*1000)|round(1) }} m/s threshold.
-  This object appears <strong>passive</strong> or non-manoeuvring.</p>
+  <p class="empty-msg">No manoeuvres confirmed above the
+  {{ detection.noise_floor_m_s | m_s if detection.noise_floor_m_s is not none else dv_threshold_m_s | m_s }} m/s
+  detection floor. This object appears <strong>passive</strong> or non-manoeuvring.</p>
 </div>
 {% endif %}
+
+{# ── Unconfirmed candidates ─────────────────────────────────────────────── #}
+{% if candidate_rows %}
+<div style="background:var(--panel-bg); border:1px solid rgba(245,158,11,0.35); border-radius:5px;
+            padding:0.65rem 0.8rem; margin-bottom:0.6rem">
+  <div style="font-size:0.68rem; font-weight:700; color:#f59e0b; text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">
+    Unconfirmed Candidates — {{ candidate_rows | length }}
+  </div>
+  <div style="font-size:0.61rem; color:var(--text-dim); margin-bottom:0.4rem; line-height:1.5">
+    Above the detection floor, but the two independent estimators disagree, the signal sits
+    close to this object's own fit scatter, or the element sets' provenance is in question.
+    Shown because the evidence exists; excluded from the cumulative ΔV and the propellant
+    budget because an unconfirmed detection is not evidence of expended fuel.
+  </div>
+  <div class="hrr-scroll" style="max-height:200px">
+    <table class="hrr-table" style="font-size:0.64rem">
+      <thead>
+        <tr>
+          <th>Date</th><th>ΔV (m/s)</th><th>Grade</th><th>Why not confirmed</th>
+          <th style="text-align:center">Working</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in candidate_rows | sort(attribute="m.epoch", reverse=True) %}
+        {% set m = row.m %}{% set v = row.v %}
+        <tr>
+          <td class="col-dim">{{ m.epoch.strftime("%Y-%m-%d") }}</td>
+          <td><strong>{{ row.delta_v_m_s | m_s }}</strong></td>
+          <td style="color:{{ CONF_COL.get(m.confidence, 'var(--text-dim)') }}; font-weight:700">
+            {{ m.confidence }}</td>
+          <td class="col-dim" style="font-size:0.6rem">
+            {{ m.breakdown.confidence_reason if m.breakdown else "Beyond the forensic budget; screening estimate only." }}
+          </td>
+          <td style="text-align:center">
+            <button type="button" class="btn-secondary"
+                    style="font-size:0.58rem; padding:0.15rem 0.4rem; white-space:nowrap"
+                    hx-post="/pol/manoeuvre-detail"
+                    hx-vals='{"satno": "{{ pol.satno }}", "manoeuvre_epoch": "{{ m.epoch.strftime('%Y-%m-%dT%H:%M:%S') }}"}'
+                    hx-target="#pol-detail" hx-swap="innerHTML" hx-indicator="#pol-detail-indicator">
+              &#9432; Detail
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Drill-down target — populated when the operator clicks ⓘ Detail ────── #}
+<div id="pol-detail" style="margin-bottom:0.6rem">
+  <span id="pol-detail-indicator" class="htmx-indicator" style="font-size:0.7rem; color:var(--text-dim)">
+    <span class="spinner"></span>Recomputing the ΔV working&hellip;
+  </span>
+</div>
 
 {# ── Monte Carlo results placeholder — populated when operator clicks ▶ MC ── #}
 <div id="pol-mc-results" style="margin-bottom:0.6rem">
@@ -672,19 +872,19 @@
     <table class="hrr-table" style="font-size:0.64rem; width:100%">
       <thead>
         <tr>
-          <th onclick="polSort(this)" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
           {% if pol.records | selectattr("data_mode") | list %}
-          <th onclick="polSort(this)" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
           {% endif %}
           {% if pol.records | selectattr("source") | list %}
-          <th onclick="polSort(this)" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
           {% endif %}
           <th style="white-space:nowrap">TLE</th>
         </tr>
@@ -692,8 +892,13 @@
       <tbody>
         {% set has_dm = pol.records | selectattr("data_mode") | list | length > 0 %}
         {% set has_src = pol.records | selectattr("source") | list | length > 0 %}
+        {# Each row carries the full element set text, so an uncapped table is
+           roughly 2 kB per record: a 3,676-set catalogue rendered 7.3 MB into a
+           340px scroll box. Newest first, capped, and the omission is stated
+           below rather than left silent. #}
         {% set sorted_records = pol.records | sort(attribute="epoch", reverse=True) %}
-        {% for rec in sorted_records %}
+        {% set shown_records = sorted_records[:ELSET_TABLE_CAP] %}
+        {% for rec in shown_records %}
         {% set is_newest = loop.first %}
         <tr>
           <td style="white-space:nowrap{% if is_newest %}; color:var(--ops-blue); font-weight:700{% endif %}" data-val="{{ rec.epoch.strftime('%Y%m%d%H%M%S') }}">
@@ -718,15 +923,28 @@
           <td style="font-family:monospace; font-size:0.58rem; white-space:nowrap">
             <details style="display:inline">
               <summary style="cursor:pointer; color:var(--ops-blue); list-style:none; font-size:0.6rem">view</summary>
-              <div style="position:absolute; z-index:99; background:var(--panel-bg); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; margin-top:0.2rem; font-size:0.6rem; line-height:1.6; max-width:min(90vw,700px); word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.4)">
-                {{ rec.tle | replace('\n', '<br>') | safe }}
-              </div>
+              {# rec.tle is raw UDL element-set text, so it must never reach the DOM as markup.
+                 A line 1 carrying a payload after column 69 survives the parser, and the old
+                 replace-to-<br> did not escape it (Jinja's replace leaves plain-string arguments
+                 alone) while | safe then switched autoescaping off for the whole value, so the
+                 payload executed in the analyst's authenticated session. The line break now comes
+                 from white-space:pre-wrap, which needs no HTML at all and keeps the TLE's fixed
+                 columns aligned. The expression sits hard against the tags because pre-wrap would
+                 otherwise render this template's own indentation. #}
+              <div style="position:absolute; z-index:99; background:var(--panel-bg); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; margin-top:0.2rem; font-size:0.6rem; line-height:1.6; max-width:min(90vw,700px); white-space:pre-wrap; word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.4)">{{ rec.tle }}</div>
             </details>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+      {% if pol.records | length > ELSET_TABLE_CAP %}
+      <p style="font-size:0.6rem; color:var(--text-dim); margin:0.35rem 0 0">
+        Showing the newest {{ ELSET_TABLE_CAP }} of {{ pol.records | length }} element sets.
+        The remaining {{ pol.records | length - ELSET_TABLE_CAP }} were analysed in full and
+        are not listed here only to keep the page loadable.
+      </p>
+      {% endif %}
   </div>
 </div>
 {% endif %}

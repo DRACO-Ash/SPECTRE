@@ -3,14 +3,39 @@
    Chart data is injected via a JSON.parse of a server-rendered safe string.
    Autoescape is ON; chart_json is emitted with |tojson filter for HTML-safe embedding. #}
 
+<style>
+  /* The heading takes focus when the panel opens, so the move has to be seen
+     as well as announced. :focus rather than :focus-visible, because the focus
+     is moved programmatically and Chromium will not always treat that as
+     focus-visible. currentColor is the heading's own --ops-blue, measured at
+     4.95:1 on the ops panel background and 4.66:1 on steel, both clear of the
+     3:1 floor for a non-text indicator. */
+  #geom-panel-heading:focus { outline: 2px solid currentColor; }
+</style>
+
 <div id="geom-panel"
+     role="region"
+     aria-labelledby="geom-panel-heading"
      style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;
             padding:0.85rem 1rem; margin-top:0.7rem">
 
   {# ── Header ── #}
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem; flex-wrap:wrap; gap:0.4rem">
     <div>
-      <span style="font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em">
+      {# A heading, so the panel has something to name it and something to send
+         focus to when it opens. tabindex="-1" makes it programmatically
+         focusable without putting it in the tab order; the focus ring is
+         currentColor, the same --ops-blue this text already paints in, so the
+         indicator cannot be weaker than the heading it marks.
+
+         role="heading" on the existing span rather than an <h3>: the theme
+         sets h1-h6 to the JetBrains Mono display face, and a real h3 here
+         measured 9.13px wider in Chromium and pushed the method line beside it
+         from x=487 to x=496. This is a panel label, set in the body face like
+         the labels either side of it, and it has no business changing typeface
+         to gain a role it can carry as an attribute. #}
+      <span id="geom-panel-heading" role="heading" aria-level="3" tabindex="-1"
+            style="font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em; outline-offset:3px">
         Relative Geometry — Hill Frame
       </span>
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.6rem">
@@ -29,7 +54,14 @@
         ✓ CW VALID
       </span>
       {% endif %}
-      <button onclick="document.getElementById('geom-panel').remove()"
+      {# The glyph is the whole control, so without a name a screen reader
+         announces "button" and nothing else. This is also the panel's ONLY
+         dismissal route: no scrim, and the panel is destroyed rather than
+         hidden, so Escape is added here rather than assumed. #}
+      <button type="button"
+              onclick="spectreCloseGeometryPanel()"
+              aria-label="Close geometry panel"
+              title="Close geometry panel"
               class="btn-secondary" style="font-size:0.65rem; padding:0.15rem 0.5rem">✕</button>
     </div>
   </div>
@@ -116,13 +148,13 @@
                 background:var(--bg-secondary); padding:0.4rem 0.6rem; border-radius:4px;
                 display:grid; grid-template-columns:repeat(3,1fr); gap:0.2rem">
       <span>x (R-bar): {{ "%.4f"|format(geom.burn_state.x) }} km</span>
-      <span>ẋ: {{ "%.5f"|format(geom.burn_state.xd) }} km/s</span>
+      <span>ẋ: {{ burn_xd_m_s | m_s }} m/s</span>
       <span>n: {{ "%.6f"|format(geom.n_rad_s) }} rad/s</span>
       <span>y (V-bar): {{ "%.4f"|format(geom.burn_state.y) }} km</span>
-      <span>ẏ: {{ "%.5f"|format(geom.burn_state.yd) }} km/s</span>
+      <span>ẏ: {{ burn_yd_m_s | m_s }} m/s</span>
       <span>burn: {{ geom.burn_epoch.strftime('%Y-%m-%d %H:%M UTC') }}</span>
       <span>z (H-bar): {{ "%.4f"|format(geom.burn_state.z) }} km</span>
-      <span>ż: {{ "%.5f"|format(geom.burn_state.zd) }} km/s</span>
+      <span>ż: {{ burn_zd_m_s | m_s }} m/s</span>
       <span>method: {{ geom.method }}</span>
     </div>
   </details>
@@ -310,5 +342,59 @@
   /* Init first tab immediately */
   _initVR();
 
+})();
+</script>
+
+<script>
+/* Escape closes the geometry panel. The close control is the only other way
+   out and it is a single glyph in a corner, which is a mouse-shaped exit on a
+   keyboard-reachable panel.
+
+   The listener is on the PANEL, not on document. On document it fired for
+   every Escape anywhere on the console: the one that dismisses a browser
+   autocomplete in the threat sweep search box destroyed a geometry panel
+   sitting in another hero tab, and the operator found it gone on returning.
+   Scoped to the panel subtree, keydown still reaches it from every control
+   inside the panel, because keydown bubbles, and from nowhere else. The
+   listener also dies with the node, so there is no global to replace on the
+   next swap and nothing left behind when htmx removes the panel.
+
+   For that scoping to be usable, focus has to be inside the panel to begin
+   with, which is the other half of this block: the heading takes focus on
+   open, and the control that opened the panel takes it back on close. */
+(function () {
+  var panel = document.getElementById('geom-panel');
+  if (!panel) { return; }
+
+  /* The one control that can open this panel. Falls back to whatever had
+     focus when the fragment landed, which is that same button on the keyboard
+     path. */
+  var opener = document.querySelector(
+    "form[hx-post='/plan/geometry/intercept'] button[type=submit]");
+  if (!opener) {
+    var active = document.activeElement;
+    if (active && active !== document.body && typeof active.focus === 'function') {
+      opener = active;
+    }
+  }
+
+  function spectreCloseGeometryPanel() {
+    var p = document.getElementById('geom-panel');
+    if (p) { p.remove(); }
+    /* Without this, focus falls to body and the keyboard operator restarts
+       from the top of the console at the moment the exit was meant to help. */
+    if (opener && document.contains(opener)) { opener.focus(); }
+  }
+
+  panel.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') { return; }
+    event.stopPropagation();
+    spectreCloseGeometryPanel();
+  });
+
+  window.spectreCloseGeometryPanel = spectreCloseGeometryPanel;
+
+  var heading = document.getElementById('geom-panel-heading');
+  if (heading) { heading.focus(); }
 })();
 </script>

@@ -1,3 +1,9 @@
+{#- The posture-to-band map comes from partials/_posture_bands.html so this
+    panel and the refine fragment that replaces rows inside it cannot drift
+    apart. They had: this file tinted by posture and that one by geometric
+    access, which inverts it. -#}
+{%- import "partials/_posture_bands.html" as posture -%}
+{%- set posture_bands = posture.posture_bands -%}
 {% if error %}
 <p class="error-msg">{{ error }}</p>
 {% elif not assessment %}
@@ -14,11 +20,14 @@
   </div>
 
   {% if manual_red_confidence %}
-  {% set conf_color = "#22c55e" if manual_red_confidence == "CONFIRMED" else "#f59e0b" if manual_red_confidence == "HIGH" else "#3b8beb" if manual_red_confidence == "MEDIUM" else "#94a3b8" if manual_red_confidence == "LOW" else "#64748b" %}
-  <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.7rem; margin:0.3rem 0; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.3); border-radius:4px; font-size:0.75rem">
+  {# The confidence scale borrows the band palette rather than carrying hex of
+     its own: hex here did not swap on the light theme, where every one of
+     these five failed WCAG AA as text. #}
+  {% set conf_band = "low" if manual_red_confidence == "CONFIRMED" else "high" if manual_red_confidence == "HIGH" else "medium" if manual_red_confidence == "MEDIUM" else "unknown" if manual_red_confidence == "LOW" else "minimal" %}
+  <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.7rem; margin:0.3rem 0; background:rgba(var(--spectre-status-high-rgb), 0.07); border:1px solid rgba(var(--spectre-status-high-rgb), 0.30); border-radius:4px; font-size:0.75rem">
     <span style="font-size:0.8rem">&#9888;</span>
     <span style="color:var(--text-dim)">Red TLE source: <strong style="color:var(--text-primary)">MANUAL OVERRIDE</strong> &mdash; orbital mechanics computed from operator-supplied TLE.</span>
-    <span style="background:{{ conf_color }}22; color:{{ conf_color }}; font-size:0.65rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em; white-space:nowrap">{{ manual_red_confidence }}</span>
+    <span style="background:rgba(var(--spectre-status-{{ conf_band }}-rgb), 0.13); color:var(--spectre-status-{{ conf_band }}); font-size:0.65rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:3px; letter-spacing:0.04em; white-space:nowrap">{{ manual_red_confidence }}</span>
   </div>
   {% endif %}
 
@@ -27,10 +36,53 @@
 
     {# ── Banner header ── #}
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap">
-      <span style="background:{{ worst_coa.threat_color }}; color:#fff; font-size:0.7rem; font-weight:700; padding:0.2rem 0.5rem; border-radius:3px; letter-spacing:0.05em; text-transform:uppercase">&#9888; {{ worst_coa.threat_level }} THREAT</span>
+      {# White on the band's own colour measured 2.15:1 for HIGH and 2.28:1
+         for LOW. .spectre-band-badge carries the darkened fill token, which
+         clears 4.5:1 in both themes. #}
+      <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
       <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
       <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
     </div>
+
+    {# The two findings the single word used to conflate. Geometric access and
+       assessed capability are different questions with different answers, and
+       showing only their combination is how the verdict came to contradict the
+       intelligence panel on the same screen. #}
+    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; flex-wrap:wrap; font-size:0.7rem">
+      <span style="color:var(--text-muted)">GEOMETRIC ACCESS</span>
+      <strong>{{ worst_coa.access_level }}</strong>
+      <span style="color:var(--text-muted)">&#183; ASSESSED CAPABILITY</span>
+      <strong>{{ worst_coa.capability_level }}</strong>
+      <span style="color:var(--text-muted)">&#183; CONFIDENCE</span>
+      <strong>{{ worst_coa.assessment_confidence }}</strong>
+      {% if worst_coa.inputs_missing %}
+      <span style="color:var(--text-muted)" title="Evidence not available for this object: {{ worst_coa.inputs_missing | join(', ') }}">
+        &#183; {{ worst_coa.inputs_missing | length }} input(s) unavailable
+      </span>
+      {% endif %}
+    </div>
+
+    {# What the cost says about how the actor would have to behave.
+       A delta-v figure on its own means nothing to an operator: 50 m/s is one
+       routine year at GEO and fifty years of it at MEO. The posture reads it
+       against what satellites actually do. #}
+    {% set _posture_band = posture_bands.get(worst_coa.posture_label, 'unknown') %}
+    <div style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.5rem; font-size:0.72rem">
+      <span style="background:rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.13); color:var(--spectre-status-{{ _posture_band }}); border:1px solid rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.40);
+                   font-size:0.65rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:3px;
+                   letter-spacing:0.05em; white-space:nowrap">{{ worst_coa.posture_label }}</span>
+      <span style="color:var(--text-dim)" title="{{ worst_coa.posture_basis }}">{{ worst_coa.posture_rationale }}</span>
+    </div>
+
+    {% if worst_coa.undeliverable_reason %}
+    {# Reserve is not the ability to spend it in time. An all-electric bus holds
+       1,500 m/s but thrusts at 0.27 N, so it needs about 64 days to deliver
+       500 m/s. An impulsive solution arriving in an hour is not flyable. #}
+    <div style="border-left:3px solid var(--spectre-status-violet); background:rgba(var(--spectre-status-violet-rgb), 0.07); padding:0.4rem 0.6rem;
+                margin-bottom:0.5rem; font-size:0.72rem; color:var(--text-dim)">
+      <strong style="color:var(--spectre-status-violet)">NOT FLYABLE</strong> &#183; {{ worst_coa.undeliverable_reason }}
+    </div>
+    {% endif %}
 
     {# ── Stat cards ── #}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
@@ -41,12 +93,12 @@
         <div class="stat-lbl">Primary Target</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val" style="color:{{ worst_coa.threat_color }}">{{ worst_coa.dv }} <span style="font-size:0.7rem; font-weight:400">km/s</span></div>
-        <div class="stat-lbl">Min. &#916;V Required</div>
+        <div class="stat-val" style="color:{{ worst_coa.threat_color }}">{{ worst_coa.tof_label }}</div>
+        <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ worst_coa.tof_label }}</div>
-        <div class="stat-lbl">Time of Flight</div>
+        <div class="stat-val">{{ "%.3f" | format(worst_coa.dv) }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
+        <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.method | upper }}</div>
@@ -66,7 +118,7 @@
     <div style="margin-bottom:0.5rem">
       <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:0.2rem">
         <span>&#916;V Budget Utilisation</span>
-        <span>{{ worst_coa.dv_budget_pct }}% of 3 km/s</span>
+        <span>{{ worst_coa.dv_budget_pct }}% of {{ worst_coa.budget_m_s | m_s }} m/s budget</span>
       </div>
       <div style="height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden">
         <div style="height:100%; width:{{ worst_coa.dv_budget_pct }}%; background:{{ worst_coa.threat_color }}; border-radius:3px"></div>
@@ -77,15 +129,15 @@
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Prograde {{ worst_coa.pro_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:#3b8beb; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Normal {{ worst_coa.nor_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:#a855f7; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Radial {{ worst_coa.rad_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:#f59e0b; border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
       </div>
     </div>
 
@@ -102,6 +154,29 @@
     <p style="margin:0.15rem 0; font-size:0.78rem">&#9888; {{ err }}</p>
     {% endfor %}
   </div>
+  {% endif %}
+
+  {# Methods that produced nothing, and why.
+
+     These were previously discarded by a bare except, so the analyst could not
+     tell a method that was tried and found unviable from one that threw, or
+     see that it had been attempted at all. The omission biased the sweep
+     towards under-reporting the fastest approaches: refusals cluster on the
+     aggressive end, where the geometry is degenerate or the orbit unflyable. #}
+  {% if method_refusals %}
+  <details style="margin:0.4rem 0">
+    <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
+      {{ method_refusals | length }} method(s) produced no solution
+    </summary>
+    <div style="padding:0.4rem 0.6rem">
+      {% for method, reason in method_refusals %}
+      <p style="margin:0.15rem 0; font-size:0.74rem">
+        <strong>{{ method | upper }}</strong>
+        <span style="color:var(--text-muted)">{{ reason }}</span>
+      </p>
+      {% endfor %}
+    </div>
+  </details>
   {% endif %}
 
   {% if grouped %}
@@ -131,24 +206,62 @@
       <thead>
         <tr>
           <th style="width:2rem">&nbsp;</th>
-          <th onclick="threatSort(1,'str')">Target <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(2,'str')">Source <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(3,'num')">HRR <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(4,'num')">Best &#916;V <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(5,'str')">Best Method <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(6,'num')">Profiles <span class="hrr-sort-ind"></span></th>
+          {# aria-sort="none" is the resting state of a sortable column. These
+             headers had an indicator span that threatSort never wrote to, so
+             the sort state was carried by row order alone — nothing to see and
+             nothing to announce. #}
+          <th onclick="threatSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Target <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(2,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Source <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(3,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">HRR <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Best &#916;V <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(5,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Best Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
+          <th onclick="threatSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Profiles <span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>
         {% for group in grouped %}
         {# ── Parent row (one per target) ── #}
-        <tr class="threat-parent {% if group.best_dv < 0.5 %}threat-high{% elif group.best_dv < 1.0 %}threat-med{% endif %}"
+        {# Tinted from posture_bands, the SAME map the posture badge above
+           reads. It used to be tinted by geometric access, which the domain
+           deliberately inverts, so a BENIGN badge sat in a high-threat gold
+           row. Two correct answers to different questions, rendered in one
+           colour channel with opposite polarity. #}
+        <tr class="threat-parent"
+            data-posture-band="{{ posture_bands.get(group.best_posture, 'unknown') }}"
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
-            title="Click to expand {{ group.profile_count }} manoeuvre profiles">
+            tabindex="0" onkeydown="spectreActivate(event)"
+            {# aria-expanded, and deliberately NO role="button".
+               role="button" on a <tr> overrides the implicit row role, which
+               takes the parent rows out of the table: with every group open
+               the accessibility tree reported two buttons and six rows, the
+               six being the children, so the rows carrying the target name
+               and the summary figures were no longer reachable by table
+               navigation. An unannounced row was traded for a row outside the
+               grid. aria-expanded on its own keeps both.
+
+               No aria-controls either: threat-children-N is a class on three
+               sibling <tr> elements and never an id, so the reference did not
+               resolve. The children are not one node, so there is nothing
+               honest to point at. #}
+            {# The profile count used to sit in a title attribute worded for a
+               mouse, on a row that answers to Enter and Space, and a title on
+               a <tr> is not reliably announced by anything in the first place.
+               It now names the chevron, which is the symbol actually
+               carrying the meaning, so it is spoken with the row instead of
+               hovered. The wording is device-neutral and stays true in both
+               states, because aria-expanded above already says which state the
+               row is in. It is an aria-label rather than visually hidden text
+               so the row's textContent is unchanged: threatFilter() searches
+               that text, and a hidden "manoeuvre profiles" on every parent row
+               would make a search for "manoeuvre" match all of them. #}
+            aria-expanded="false">
           <td class="threat-chevron-cell">
-            <span class="threat-chevron" id="chevron-{{ loop.index0 }}">&#9654;</span>
+            <span class="threat-chevron" id="chevron-{{ loop.index0 }}"
+                  role="img"
+                  aria-label="{{ group.profile_count }} manoeuvre profile{{ 's' if group.profile_count != 1 else '' }}">&#9654;</span>
           </td>
           <td class="col-name" title="{{ group.target.target_name }}{% if group.target.target_satno %} [{{ group.target.target_satno }}]{% endif %}">
             {{ group.target.target_name }}{% if group.target.target_satno %} <span style="opacity:0.6; font-size:0.75em">[{{ group.target.target_satno }}]</span>{% endif %}
@@ -157,19 +270,25 @@
             {% if group.target.target_source == "manual" %}
               manual
               {% set conf = group.target.confidence | upper %}
-              {% if conf == "CONFIRMED" %}<span style="background:#22c55e22;color:#22c55e;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "HIGH" %}<span style="background:#f59e0b22;color:#f59e0b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "MEDIUM" %}<span style="background:#3b8beb22;color:#3b8beb;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf == "LOW" %}<span style="background:#94a3b822;color:#94a3b8;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
-              {% elif conf %}<span style="background:#64748b22;color:#64748b;font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
+              {% if conf %}
+              {# Same five-step scale as the manual-override banner, on the same
+                 band tokens, so one confidence word cannot render in two
+                 colours and neither of them swaps with the theme. #}
+              {% set row_conf_band = "low" if conf == "CONFIRMED" else "high" if conf == "HIGH" else "medium" if conf == "MEDIUM" else "unknown" if conf == "LOW" else "minimal" %}
+              <span style="background:rgba(var(--spectre-status-{{ row_conf_band }}-rgb), 0.13);color:var(--spectre-status-{{ row_conf_band }});font-size:0.65rem;font-weight:700;padding:0.1rem 0.35rem;border-radius:3px;margin-left:0.25rem">{{ conf }}</span>
               {% endif %}
             {% else %}
               {{ group.target.target_source }}
             {% endif %}
           </td>
           <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
-          <td class="mnv-dv"><strong>{{ "%.4f" | format(group.best_dv) }}</strong></td>
+          <td class="mnv-dv"><strong>{{ "%.3f" | format(group.best_dv) }}</strong></td>
           <td class="col-dim">{{ group.best_method }}</td>
+          {# The row tint encodes this posture, so the word has to be on the
+             collapsed row as well. Carried by colour alone it was invisible to
+             a colourblind operator, to a greyscale print and to the light
+             theme, where both tints wash out. #}
+          <td class="col-dim">{{ group.best_posture or '—' }}</td>
           <td class="col-dim">
             <span class="threat-profile-badge">{{ group.profile_count }}</span>
           </td>
@@ -179,40 +298,59 @@
         {% if group.osint %}
         {% set pair = group.osint %}
         <tr class="threat-child threat-children-{{ loop.index0 }}" style="display:none">
-          <td colspan="7" style="padding:0 0.5rem 0.4rem 2.5rem">
+          <td colspan="8" style="padding:0 0.5rem 0.4rem 2.5rem">
             {% set pair_label = "TARGET INTEL" %}
             {% include "partials/pair_card.html" %}
           </td>
         </tr>
         {% endif %}
         {% set group_idx = loop.index0 %}
+        {# These five are a repeated header row emitted once per group inside
+           the single tbody, not a thead row. scope="col" would claim the whole
+           remainder of the column, so with several groups expanded a cell would
+           answer to every earlier group's heading as well as its own. An id per
+           group, referenced by headers= on that group's child cells, binds each
+           cell to its own heading and satisfies Web:TableHeaderHasIdOrScopeCheck
+           just as scope does. #}
         <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
           <td></td>
-          <th onclick="childSort({{ group_idx }},1,'str')">Location <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},2,'str')">Burn Epoch <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},3,'num')">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},4,'num')">TOF <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},5,'str')">Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},1,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-1" aria-sort="none">Location <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},2,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-2" aria-sort="none">Burn Epoch <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},3,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-3" aria-sort="none">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},4,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-4" aria-sort="none">TOF <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},5,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-5" aria-sort="none">Method <span class="hrr-sort-ind"></span></th>
+          <th onclick="childSort({{ group_idx }},6,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-6" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
           <th class="no-sort">Action</th>
         </tr>
         {% for child in group.children %}
         <tr class="threat-child threat-children-{{ group_idx }}"
             id="threat-row-{{ child.flat_idx }}"
             style="display:none"
-            {% if child.entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif child.entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+            data-posture-band="{{ posture_bands.get(child.entry.posture_label, 'unknown') }}">
           <td class="threat-child-indent"></td>
-          <td class="col-dim">{{ child.entry.burn_location }}</td>
-          <td class="col-dim">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td class="mnv-dv">{{ "%.4f" | format(child.entry.delta_v_km_s) }}</td>
-          <td class="col-dim">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
-          <td class="col-dim" title="Pro {{ '%.4f' | format(child.entry.dv_prograde) }}  Nor {{ '%.4f' | format(child.entry.dv_normal) }}  Rad {{ '%.4f' | format(child.entry.dv_radial) }}">
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ child.entry.burn_location }}</td>
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ child.entry.delta_v_m_s | m_s }}</td>
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ child.entry.dv_prograde | m_s }} m/s  Nor {{ child.entry.dv_normal | m_s }} m/s  Rad {{ child.entry.dv_radial | m_s }} m/s">
             {{ child.entry.method }}
           </td>
+          {# data-posture-band on the row above tints it from the same map
+             this word comes from, so the colour and the word now agree. They
+             did not: the tint read geometric access, which inverts posture. #}
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ child.entry.posture_label or '—' }}</td>
           <td class="col-actions" style="white-space:nowrap">
+            {# group_idx travels with entry_index so the fragment that comes
+               back can bind its own cells to THIS group's headings with
+               headers=. The server cannot recover it afterwards:
+               _group_entries ranks the groups on best time-of-flight and
+               delta-v, which is precisely what a refine changes, so a
+               grouping recomputed after the solve can disagree with the
+               table the swapped row is still sitting in. #}
             {% if child.entry.method == "hohmann" %}
             <button class="btn-secondary btn-sm"
                     hx-post="/plan/threat/refine"
-                    hx-vals='{"entry_index": {{ child.flat_idx }}}'
+                    hx-vals='{"entry_index": {{ child.flat_idx }}, "group_idx": {{ group_idx }}}'
                     hx-target="#threat-row-{{ child.flat_idx }}"
                     hx-swap="outerHTML"
                     hx-disabled-elt="this"
@@ -238,16 +376,31 @@
     var visible = rows.length > 0 && rows[0].style.display !== 'none';
     rows.forEach(function(r) { r.style.display = visible ? 'none' : ''; });
     if (chevron) chevron.innerHTML = visible ? '&#9654;' : '&#9660;';
+    /* The chevron is a glyph, so it carries the state for sighted operators
+       only. aria-expanded is the same fact for everyone else, and it has to
+       move with the rows rather than being set once in the markup. */
+    var parent = document.getElementById('threat-group-' + gIdx);
+    if (parent) parent.setAttribute('aria-expanded', visible ? 'false' : 'true');
   }
 
   /* ── Expand / Collapse all ── */
   function threatExpandAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = ''; });
     document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9660;'; });
+    _threatSetAllExpanded(true);
   }
   function threatCollapseAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = 'none'; });
     document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9654;'; });
+    _threatSetAllExpanded(false);
+  }
+  /* Expand-all and collapse-all move every row, so they have to move every
+     state with them. Setting it in threatToggle alone would leave the
+     announcement stale for every row these two touch. */
+  function _threatSetAllExpanded(expanded) {
+    document.querySelectorAll('.threat-parent').forEach(function(row) {
+      row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
   }
 
   /* ── Search filter (matches parent target name + all child content) ── */
@@ -299,7 +452,13 @@
     var dataRows = [];
     all.forEach(function(r) {
       if (r.classList.contains('threat-child-header')) { headerRow = r; }
-      else { dataRows.push(r); }
+      /* Only the real child rows carry a threat-row- id. The PAIR intel row is
+         also .threat-children-N but it is a single cell with colspan="8", so
+         a.cells[col] came back undefined and the comparator threw on
+         .textContent: for every group that had target intel, child sort did
+         nothing at all, and an aria-sort written after the sort would never
+         have been reached. */
+      else if (r.id.indexOf('threat-row-') === 0) { dataRows.push(r); }
     });
 
     dataRows.sort(function(a, b) {
@@ -317,6 +476,24 @@
       ref.parentNode.insertBefore(r, ref.nextSibling);
       ref = r;
     });
+
+    /* Say which column is sorted and which way, to the eye and to the
+       accessibility tree, and only within THIS group's header row: each
+       expanded group sorts independently, so a shared reset would wipe the
+       state of a group the operator did not touch. */
+    if (headerRow) {
+      headerRow.querySelectorAll('th').forEach(function(h) {
+        if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
+        var i = h.querySelector('.hrr-sort-ind');
+        if (i) { i.textContent = ''; }
+      });
+      var th = headerRow.querySelector('#tsw-child-' + gIdx + '-' + col);
+      if (th) {
+        th.setAttribute('aria-sort', state.asc ? 'ascending' : 'descending');
+        var ind = th.querySelector('.hrr-sort-ind');
+        if (ind) { ind.textContent = state.asc ? ' ▲' : ' ▼'; }
+      }
+    }
   }
 
   /* ── Sort parent rows (re-orders groups in the table) ── */
@@ -328,6 +505,21 @@
 
     if (_threatSortCol === col) { _threatSortAsc = !_threatSortAsc; }
     else { _threatSortCol = col; _threatSortAsc = true; }
+
+    /* Which column is sorted and which way — glyph and aria-sort written
+       together, from one branch, so they cannot disagree. */
+    var ths = table.querySelectorAll('thead th');
+    ths.forEach(function(h) {
+      if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
+      var i = h.querySelector('.hrr-sort-ind');
+      if (i) { i.textContent = ''; }
+    });
+    var sortedTh = ths[col];
+    if (sortedTh) {
+      sortedTh.setAttribute('aria-sort', _threatSortAsc ? 'ascending' : 'descending');
+      var sortedInd = sortedTh.querySelector('.hrr-sort-ind');
+      if (sortedInd) { sortedInd.textContent = _threatSortAsc ? ' ▲' : ' ▼'; }
+    }
 
     /* Collect groups: each group = [parentRow, ...childRows] */
     var groups = [];

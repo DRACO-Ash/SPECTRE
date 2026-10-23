@@ -18,6 +18,7 @@ validity.  Validation failures are logged at WARNING.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -29,6 +30,8 @@ from fastapi.responses import HTMLResponse
 from spectre.astro.cw_geometry import RelativeGeometryError, compute_relative_geometry
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.format_units import to_m_s
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -37,7 +40,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plan/geometry", tags=["geometry"])
 
 # Maximum absolute values accepted for each form field.
-_DV_MAX_KM_S   = 20.0
+#
+# The burn components arrive in m/s, because they are posted straight back from
+# the intercept result panel, which the operator reads in m/s. They are handed
+# to the astro layer in km/s. That conversion is the whole reason this constant
+# changed: at ±20 km/s the clamp silently rejected any burn above 20 m/s the
+# moment the panel started emitting m/s, and anything that got through would
+# have reached the Clohessy-Wiltshire propagator a thousand times too large.
+_DV_MAX_M_S    = 20_000.0
 _TOF_MAX_HOURS = 168.0   # one week
 _COAST_MAX_H   = 24.0
 
@@ -89,9 +99,9 @@ async def intercept_geometry(
     red_sat:          Annotated[str,   Form()],
     blue_sat:         Annotated[str,   Form()],
     burn_epoch_str:   Annotated[str,   Form()],
-    dv_prograde:      Annotated[float, Form()] = 0.0,
-    dv_normal:        Annotated[float, Form()] = 0.0,
-    dv_radial:        Annotated[float, Form()] = 0.0,
+    dv_prograde_m_s:  Annotated[float, Form(alias="dv_prograde")] = 0.0,
+    dv_normal_m_s:    Annotated[float, Form(alias="dv_normal")] = 0.0,
+    dv_radial_m_s:    Annotated[float, Form(alias="dv_radial")] = 0.0,
     tof_hours:        Annotated[float, Form()] = 1.0,
     coast_hours:      Annotated[float, Form()] = 0.0,
     method:           Annotated[str,   Form()] = "unknown",
@@ -104,20 +114,28 @@ async def intercept_geometry(
     """
 
     def _err(msg: str) -> HTMLResponse:
+        """Render a validation error. The message is escaped, never trusted.
+
+        Callers interpolate user-supplied values (satellite names, epoch
+        strings) into *msg*, and this response bypasses Jinja, so escaping here
+        is the only thing standing between a crafted form field and reflected
+        script execution in the operator's browser.
+        """
         logger.warning(
             "geometry/intercept validation error for %r: %s",
-            current_user.username, msg,
+            log_safe(current_user.username), log_safe(msg),
         )
+        safe = html.escape(msg, quote=True)
         return HTMLResponse(
             f'<div class="callout callout-amber" style="font-size:0.75rem;padding:0.5rem">'
-            f"&#9888; Geometry error: {msg}</div>"
+            f"&#9888; Geometry error: {safe}</div>"
         )
 
     # ── Validate numeric inputs ───────────────────────────────────────────────
     try:
-        _clamp_validate(dv_prograde, -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_prograde")
-        _clamp_validate(dv_normal,   -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_normal")
-        _clamp_validate(dv_radial,   -_DV_MAX_KM_S, _DV_MAX_KM_S, "dv_radial")
+        _clamp_validate(dv_prograde_m_s, -_DV_MAX_M_S, _DV_MAX_M_S, "dv_prograde")
+        _clamp_validate(dv_normal_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_normal")
+        _clamp_validate(dv_radial_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_radial")
         _clamp_validate(tof_hours,   0.0, _TOF_MAX_HOURS, "tof_hours")
         _clamp_validate(coast_hours, 0.0, _COAST_MAX_H,   "coast_hours")
     except ValueError as exc:
@@ -144,9 +162,10 @@ async def intercept_geometry(
             red_tle          = red_tle,
             blue_tle         = blue_tle,
             burn_epoch       = burn_epoch,
-            dv_radial_km_s   = dv_radial,
-            dv_prograde_km_s = dv_prograde,
-            dv_normal_km_s   = dv_normal,
+            # The astro layer takes km/s; the form carries m/s. One conversion.
+            dv_radial_km_s   = dv_radial_m_s / 1000.0,
+            dv_prograde_km_s = dv_prograde_m_s / 1000.0,
+            dv_normal_km_s   = dv_normal_m_s / 1000.0,
             tof_s            = tof_hours * 3600.0,
             method           = method,
             red_name         = red_sat,
@@ -159,7 +178,7 @@ async def intercept_geometry(
     except Exception as exc:
         logger.exception(
             "geometry/intercept unexpected error for %r: %s",
-            current_user.username, exc,
+            log_safe(current_user.username), log_safe(exc),
         )
         return _err(f"Internal computation error: {exc}")
 
@@ -180,11 +199,17 @@ async def intercept_geometry(
 
     logger.info(
         "geometry/intercept: %r red=%r blue=%r method=%r arrival_range=%.3f km valid=%s",
-        current_user.username, red_sat, blue_sat, method,
+        log_safe(current_user.username), log_safe(red_sat), log_safe(blue_sat), log_safe(method),
         geom.arrival_range_km, geom.cw_valid,
     )
 
     return render(request, "partials/intercept_geometry.html", {
         "geom":       geom,
+        # THIS IS THE UNIT BOUNDARY for the Hill-frame panel. CWState carries
+        # km/s (cw_geometry.py), the operator reads m/s. Converted here so the
+        # template performs no arithmetic of its own.
+        "burn_xd_m_s": to_m_s(geom.burn_state.xd),
+        "burn_yd_m_s": to_m_s(geom.burn_state.yd),
+        "burn_zd_m_s": to_m_s(geom.burn_state.zd),
         "chart_json": json.dumps(chart_data),
     })

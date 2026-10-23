@@ -40,7 +40,7 @@ scenarios:
     briefing: >
       BLUE-01 has drifted 0.08° from its assigned longitude slot at 45.0° East.
       Station-keeping budget: 50 m/s residual.
-      Mission computer output: required corrective ΔV = 2.0 m/s (0.002 km/s)
+      Mission computer output: required corrective ΔV = 2.0 m/s
       north-south component — well within budget.  Execute by 2025-06-15 12:00Z.
       No threat object is present.  This is a single-asset maintenance task.
     scenario_epoch_utc: "2025-06-15T00:00:00Z"
@@ -60,7 +60,7 @@ scenarios:
       3. Click BLUE-01 in the Assets panel to expand its orbital elements.
          Read the RAAN field — for a GEO satellite this equals the sub-satellite longitude in degrees East.
          Record this value to answer Objective 2.
-      4. Read the briefing: the mission computer ΔV of 2.0 m/s (0.002 km/s) is stated directly.
+      4. Read the briefing: the mission computer ΔV of 2.0 m/s is stated directly.
          Confirm it is within the 50 m/s budget and enter this value for Objective 3.
       5. Tick all objectives and click Submit & Score.
     objectives:
@@ -76,12 +76,12 @@ scenarios:
         tolerance: 0.5
         unit: "degrees East"
       - id: obj_confirm_dv
-        description: "Enter the corrective ΔV stated by the mission computer in the briefing (km/s)"
+        description: "Enter the corrective ΔV stated by the mission computer in the briefing (m/s)"
         skill_axis: manoeuvre_planning
         points: 30
-        answer: "0.002"
-        tolerance: 0.001
-        unit: "km/s"
+        answer: "2.0"
+        tolerance: 1.0
+        unit: "m/s"
     time_limit_minutes: null
     scoring:
       passing_score: 50
@@ -161,10 +161,10 @@ scenarios:
     briefing: >
       RED-01 is on a confirmed intercept trajectory.  Intelligence TCA: T+4.5h,
       predicted range 1.2 km — below the 5 km safe threshold.  Residual ΔV budget
-      for BLUE-02: 30 m/s (0.030 km/s).
+      for BLUE-02: 30 m/s.
       Run ≥2 Intercept Engine solver methods.  For each result examine the total ΔV
       and post-manoeuvre miss distance.  Discard any option that fails either constraint
-      (miss distance < 5 km, or ΔV > 0.030 km/s).  Select the minimum-ΔV feasible option.
+      (miss distance < 5 km, or ΔV > 30 m/s).  Select the minimum-ΔV feasible option.
     scenario_epoch_utc: "2025-07-20T08:00:00Z"
     horizon_hours: 8
     objects:
@@ -184,9 +184,9 @@ scenarios:
       1. SPECTRE Console → Assets panel → confirm BLUE-02 and RED-01 are pre-loaded.
       2. Intercept Engine → select BLUE-02 (Blue) and RED-01 (Red).
       3. Run ≥2 solver methods — at minimum try Hohmann In-Track and Lambert (or Radial).
-         For each result record: total ΔV (km/s) and miss distance (intercept_range_km).
+         For each result record: total ΔV (m/s) and miss distance (intercept_range_km).
       4. Discard any result with miss distance < 5 km (constraint 1 failure).
-         Discard any result with total ΔV > 0.030 km/s (constraint 2 failure).
+         Discard any result with total ΔV > 30 m/s (constraint 2 failure).
       5. From the remaining feasible options, select the one with the lowest total ΔV.
          Tick all objectives and Submit within the time limit.
     objectives:
@@ -195,7 +195,7 @@ scenarios:
         skill_axis: manoeuvre_planning
         points: 30
       - id: obj_eliminate_infeasible
-        description: "Identify and discard any solver results with miss distance < 5 km or ΔV > 0.030 km/s"
+        description: "Identify and discard any solver results with miss distance < 5 km or ΔV > 30 m/s"
         skill_axis: decision_quality
         points: 30
       - id: obj_select_optimal
@@ -380,7 +380,7 @@ scenarios:
       2. The pre-manoeuvre conjunction distance of 0.8 km is provided in the briefing —
          read it from the text and enter it for Objective 2.
       3. Intercept Engine → select BLUE-LEO (Blue) and DEBRIS-07 (Red).
-      4. Run ≥2 solver methods — for each result read: total ΔV (km/s) and post-manoeuvre
+      4. Run ≥2 solver methods — for each result read: total ΔV (m/s) and post-manoeuvre
          miss distance (intercept_range_km).
       5. Identify options achieving >5 km miss distance.  Select the one with the lowest ΔV.
          Tick Objective 3 once a valid avoidance manoeuvre is identified.
@@ -486,7 +486,7 @@ scenarios:
     briefing: >
       GEO-COMM is station-keeping at 75.0° E.  DRIFTER-09 entered the protected zone
       6 hours ago.  Conjunction screening predicts closest approach in 18 hours,
-      minimum separation 1.8 km.  Remaining ΔV budget: 2.5 m/s (0.0025 km/s).
+      minimum separation 1.8 km.  Remaining ΔV budget: 2.5 m/s.
       Use the Intercept Engine to find an avoidance manoeuvre within budget that
       achieves >5 km post-manoeuvre miss distance.  Select the minimum-ΔV option.
       NOTE: The T+18h TCA and 1.8 km pre-manoeuvre range come from the conjunction
@@ -512,8 +512,8 @@ scenarios:
       2. The conjunction TCA (T+18h) and pre-manoeuvre range (1.8 km) are from the briefing.
          Enter T+18h for Objective 2.
       3. Intercept Engine → select GEO-COMM and DRIFTER-09.
-         Run ≥2 solver methods — for each result read: total ΔV (km/s) and miss distance (km).
-      4. Identify results with post-manoeuvre miss distance >5 km AND total ΔV ≤ 0.0025 km/s.
+         Run ≥2 solver methods — for each result read: total ΔV (m/s) and miss distance (km).
+      4. Identify results with post-manoeuvre miss distance >5 km AND total ΔV ≤ 2.5 m/s.
       5. Select the minimum-ΔV feasible option.  Tick Objectives 3, 4, and 5 to confirm.
     objectives:
       - id: obj_load_assets
@@ -528,7 +528,7 @@ scenarios:
         tolerance: 2.0
         unit: "hours"
       - id: obj_dv_within_budget
-        description: "Use the Intercept Engine to find a manoeuvre with total ΔV ≤ 0.0025 km/s"
+        description: "Use the Intercept Engine to find a manoeuvre with total ΔV ≤ 2.5 m/s"
         skill_axis: efficiency
         points: 60
       - id: obj_miss_distance
@@ -620,9 +620,9 @@ scenarios:
       All comparison data is provided in the briefing — no Pattern of Life run required.
     briefing: >
       RSO-NOTSO filed a notification for 2025-08-05 04:00–06:00Z,
-      estimated ΔV 0.08–0.12 km/s, east-west station change.
+      estimated ΔV 80–120 m/s, east-west station change.
       Prior catalogue analysis detected: manoeuvre epoch 2025-08-05 05:12Z,
-      estimated ΔV 0.09 km/s, east-west direction.
+      estimated ΔV 90 m/s, east-west direction.
       Compliance criteria — all three must be met for a COMPLIANT verdict:
         a) Detected epoch falls within the notified window.
         b) Detected ΔV magnitude is within the notified range.
@@ -646,12 +646,12 @@ scenarios:
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm RSO-NOTSO (Red) and BLUE-GEO-REF (Blue) are loaded.
       2. Read the NOTSO notification from the briefing:
-         window 2025-08-05 04:00–06:00Z, ΔV 0.08–0.12 km/s, east-west station change.
+         window 2025-08-05 04:00–06:00Z, ΔV 80–120 m/s, east-west station change.
       3. Read the detection data from the briefing:
-         epoch 05:12Z on 2025-08-05, ΔV 0.09 km/s, east-west direction.
+         epoch 05:12Z on 2025-08-05, ΔV 90 m/s, east-west direction.
       4. Check each criterion:
          a. Timing: 05:12Z is within 04:00–06:00Z → criterion MET.
-         b. Magnitude: 0.09 km/s is within 0.08–0.12 km/s → criterion MET.
+         b. Magnitude: 90 m/s is within 80–120 m/s → criterion MET.
          c. Direction: east-west consistent with notification → criterion MET.
       5. All three criteria met → verdict is COMPLIANT.  Tick Objectives 3, 4, and 5.
          For Objective 5 enter "compliant" as your verdict.
@@ -661,7 +661,7 @@ scenarios:
         skill_axis: situational_awareness
         points: 15
       - id: obj_notso_parse
-        description: "Confirm the NOTSO window (04:00–06:00Z) and ΔV range (0.08–0.12 km/s) from the briefing"
+        description: "Confirm the NOTSO window (04:00–06:00Z) and ΔV range (80–120 m/s) from the briefing"
         skill_axis: situational_awareness
         points: 30
       - id: obj_timing_match
@@ -669,7 +669,7 @@ scenarios:
         skill_axis: decision_quality
         points: 45
       - id: obj_magnitude_match
-        description: "Confirm detected ΔV (0.09 km/s) is within the notified estimate range (0.08–0.12 km/s)"
+        description: "Confirm detected ΔV (90 m/s) is within the notified estimate range (80–120 m/s)"
         skill_axis: decision_quality
         points: 45
       - id: obj_verdict
@@ -696,8 +696,8 @@ scenarios:
     briefing: >
       SHADOW-01 has made two confirmed manoeuvres in the past 10 days per catalogue
       analysis (provided as pre-processed intelligence):
-        Manoeuvre 1 — 2025-09-22 08:30Z, ΔV ~0.04 km/s, westward reposition.
-        Manoeuvre 2 — 2025-09-28 14:15Z, ΔV ~0.07 km/s, directed toward BLUE-HVA.
+        Manoeuvre 1 — 2025-09-22 08:30Z, ΔV ~40 m/s, westward reposition.
+        Manoeuvre 2 — 2025-09-28 14:15Z, ΔV ~70 m/s, directed toward BLUE-HVA.
       Current state: SHADOW-01 range to BLUE-HVA ~850 km, slowly closing.
       Use the Intercept Engine to assess current geometry: a low intercept ΔV
       indicates SHADOW-01 is already in a favourable approach trajectory.

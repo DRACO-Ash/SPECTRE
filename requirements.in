@@ -1,0 +1,10 @@
+# The scanned set: runtime plus everything needed to run the suite. Compiled to
+# requirements.txt, which is the file the App Store's Dependency Scanning stage
+# reads and the platform Test stage installs. It is deliberately a superset of
+# requirements-runtime.in, so the gate scans at least what the image ships.
+-r requirements-runtime.in
+
+pytest>=8.3
+pytest-asyncio>=0.23
+pytest-cov>=6.0
+hypothesis>=6.0

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.config.settings import get_settings
 from spectre.web.database import get_db
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -47,9 +48,30 @@ def verify_password(plaintext: str, hashed: str) -> bool:
 # ── Cookie helpers ────────────────────────────────────────────────────────────
 
 
-def make_session_cookie(username: str) -> str:
-    """Create a signed, time-limited session token for *username*."""
-    return str(_serializer().dumps({"sub": username}))
+def make_session_cookie(username: str, generation: int = 0) -> str:
+    """Create a signed, time-limited session token for *username*.
+
+    *generation* is the account's session generation at the moment of signing
+    in. It travels in the payload so that a later logout or password change,
+    which increments the stored counter, refuses this token by value rather
+    than by clock.
+    """
+    return str(_serializer().dumps({"sub": username, "gen": int(generation)}))
+
+
+def _decode_session(token: str) -> tuple[str, int] | None:
+    """Return the username and the session generation carried by *token*.
+
+    ``None`` means expired, tampered with, or not one of ours. A token minted
+    before the generation claim existed carries no "gen" key and is read as
+    generation 0, which is where every account starts, so an operator signed
+    in across the upgrade is not thrown out by it.
+    """
+    try:
+        data = _serializer().loads(token, max_age=_SESSION_MAX_AGE)
+        return str(data["sub"]), int(data.get("gen", 0))
+    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError):
+        return None
 
 
 def decode_session_cookie(token: str) -> str | None:
@@ -57,11 +79,27 @@ def decode_session_cookie(token: str) -> str | None:
 
     Returns the username on success, or ``None`` if the token is expired/invalid.
     """
-    try:
-        data = _serializer().loads(token, max_age=_SESSION_MAX_AGE)
-        return str(data["sub"])
-    except (SignatureExpired, BadSignature, KeyError):
-        return None
+    claims = _decode_session(token)
+    return None if claims is None else claims[0]
+
+
+def _session_revoked(user: User, generation: int) -> bool:
+    """Return ``True`` when *generation* is older than the account's current one.
+
+    Deleting the cookie at logout only asks the browser to forget it. The
+    signed token stays good for its full 8 hours, so a copy taken from a
+    shared operations-room terminal outlived the operator who signed out, and
+    a password change left the sessions it was meant to answer untouched.
+
+    This was first written as a timestamp comparison and could not be made
+    correct. itsdangerous records a token's issue time to the WHOLE SECOND, so
+    a sign-in in the same second as the logout before it produces a token that
+    is byte-for-byte identical to the one being revoked: no comparison of
+    clocks can accept the new one and refuse the old, because they are the
+    same string. It also made the integration suite fail about half the time,
+    which is how it was found. A counter has no resolution to run out of.
+    """
+    return generation < (user.session_generation or 0)
 
 
 # ── FastAPI dependency ────────────────────────────────────────────────────────
@@ -83,17 +121,25 @@ async def require_login(
             headers={"Location": "/login"},
         )
 
-    username = decode_session_cookie(spectre_session)
-    if not username:
+    claims = _decode_session(spectre_session)
+    if claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/login"},
+        )
+    username, generation = claims
+
+    result = await db.execute(select(User).where(User.username == username))
+    user: User | None = result.scalar_one_or_none()
+    if user is None:
+        logger.warning("Session for unknown user: %s", log_safe(username))
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
         )
 
-    result = await db.execute(select(User).where(User.username == username))
-    user: User | None = result.scalar_one_or_none()
-    if user is None:
-        logger.warning("Session for unknown user: %s", username)
+    if _session_revoked(user, generation):
+        logger.info("Refused a session ended by logout or password change: %s", log_safe(username))
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
@@ -116,3 +162,36 @@ async def require_admin(
             detail="Admin access required.",
         )
     return current_user
+
+
+async def optional_login(
+    # Annotated rather than a Depends default (python:S8410). Annotated carries
+    # no default, so this parameter has to precede the cookie, which does have
+    # one. FastAPI resolves dependencies by name and the only call site is
+    # Depends(optional_login), so no caller passes these positionally.
+    db: Annotated[AsyncSession, Depends(get_db)],
+    spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
+) -> User | None:
+    """Return the authenticated user, or ``None`` when there is no valid session.
+
+    Unlike :func:`require_login` this never raises, so a route can serve a
+    public response to an anonymous caller. It exists for ``GET /``: the App
+    Store router probes the root and requires 200, not the 302 that
+    :func:`require_login` produces, while the console itself stays private.
+    """
+    if not spectre_session:
+        return None
+
+    claims = _decode_session(spectre_session)
+    if claims is None:
+        return None
+    username, generation = claims
+
+    result = await db.execute(select(User).where(User.username == username))
+    user: User | None = result.scalar_one_or_none()
+    # A session ended by logout or a password change must read as anonymous
+    # here too, or the console greets the operator by name on the public page
+    # after they have signed out of it.
+    if user is None or _session_revoked(user, generation):
+        return None
+    return user

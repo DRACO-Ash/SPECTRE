@@ -1,0 +1,137 @@
+"""Unauthenticated health and readiness endpoints for SPECTRE.
+
+Contract
+--------
+The Bluestaq App Store schedules the pod and probes it. Three rules shape this
+module, each learned from a real deploy-stage failure:
+
+1. **Prove storage with a real write.** An existence check passes on a
+   read-only or root-owned mount, so the probe writes a byte and removes it.
+2. **Race a hard timeout.** A probe that *hangs* on a stalled mount is killed
+   silently by kubelet liveness back-off, which is undiagnosable. The timeout
+   here is strictly shorter than the platform probe, so a stall becomes a
+   loud 503 rather than a silent SIGTERM.
+3. **Return the diagnosis in the body, but only when there is one.** The 503
+   carries the resolved data directory and the exact errno, so a screenshot of
+   the response is a complete diagnosis. A 200 carries ``status`` and nothing
+   else: it is served continuously to any anonymous caller who can reach the
+   ingress, and the exact version and the resolved filesystem path are a free
+   start on a version-matched exploit search. Both go to the log instead,
+   where the platform's operators already read the boot lines.
+
+Both paths are exempt from authentication by design: the platform probes them
+before any session exists. They are GET, so the global CSRF dependency admits
+them as safe methods.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+
+from spectre import __version__
+from spectre.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["health"])
+
+# Strictly shorter than the platform's probe timeout so a stalled mount surfaces
+# as a 503 we can read, never as a silent liveness kill.
+_STORAGE_PROBE_TIMEOUT_SECONDS = 2.0
+
+_PROBE_FILENAME = ".spectre-health-probe"
+
+
+def _write_probe(data_dir: str) -> None:
+    """Write and delete a probe file. Blocking; run in a worker thread."""
+    probe = Path(data_dir) / _PROBE_FILENAME
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink()
+
+
+async def check_storage(data_dir: str) -> tuple[bool, str | None]:
+    """Return ``(healthy, detail)`` for a real write to *data_dir*.
+
+    ``detail`` is ``None`` when the write succeeded, otherwise a human-readable
+    reason including the errno where the operating system supplied one.
+    """
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_write_probe, data_dir),
+            timeout=_STORAGE_PROBE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return False, (
+            f"storage write to {data_dir} did not complete within "
+            f"{_STORAGE_PROBE_TIMEOUT_SECONDS}s (mount may be stalled)"
+        )
+    except OSError as exc:
+        return False, f"storage write to {data_dir} failed: [errno {exc.errno}] {exc.strerror}"
+    return True, None
+
+
+@router.get("/healthz", include_in_schema=False)
+async def healthz() -> JSONResponse:
+    """Liveness probe. 200 while the process is able to serve.
+
+    Deliberately does not touch storage: a liveness probe that fails on a
+    storage fault causes a restart loop that cannot fix the fault.
+    """
+    logger.debug("Liveness probe served, version=%s", __version__)
+    return JSONResponse({"status": "ok"})
+
+
+@router.get("/livez", include_in_schema=False)
+@router.get("/ping", include_in_schema=False)
+async def livez() -> JSONResponse:
+    """The same liveness answer under the two other names the platform probes.
+
+    The App Store contract names /healthz, /readyz, /livez and /ping as all
+    returning 200 unauthenticated, and only the first two existed. A probe
+    path that 404s reads to an orchestrator as a dead pod, so the names are
+    aliased rather than left to chance about which one it picks.
+
+    Aliases of the liveness answer, not the readiness one: a probe that fails
+    on a storage fault causes a restart loop that cannot fix the fault, which
+    is the reasoning healthz above already carries.
+    """
+    logger.debug("Liveness probe served via alias, version=%s", __version__)
+    return JSONResponse({"status": "ok"})
+
+
+@router.get("/readyz", include_in_schema=False)
+async def readyz() -> JSONResponse:
+    """Readiness probe. 200 only when storage genuinely accepts a write."""
+    settings = get_settings()
+    healthy, detail = await check_storage(settings.data_dir)
+
+    if healthy:
+        logger.debug(
+            "Readiness probe served, version=%s data_dir=%s", __version__, settings.data_dir,
+        )
+        return JSONResponse({"status": "ok"})
+
+    # The failure body keeps its diagnosis, including the path inside the
+    # errno line. A readiness failure takes the pod out of rotation, so this
+    # is read by whoever is already debugging the deploy, whereas the 200
+    # above answers anyone who can reach the ingress, for as long as the pod
+    # lives. The log carries the same facts either way.
+    body: dict[str, Any] = {
+        "status": "unavailable",
+        "detail": detail,
+        "remedy": (
+            "If this is the App Store FILE_STORAGE add-on, the pod needs "
+            "securityContext.fsGroup set so the non-root container can write to the volume."
+        ),
+    }
+    logger.error(
+        "Readiness probe failed, version=%s data_dir=%s: %s",
+        __version__, settings.data_dir, detail,
+    )
+    return JSONResponse(body, status_code=503)

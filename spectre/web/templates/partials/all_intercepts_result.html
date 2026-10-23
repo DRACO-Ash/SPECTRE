@@ -14,7 +14,7 @@
   {% if best %}
   <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
     Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
-    &mdash; {{ "%.4f" | format(best.result.total_delta_v_km_s) }} km/s
+    &mdash; {{ best.result.total_delta_v_m_s | m_s }} m/s
   </span>
   {% endif %}
   <span class="intercept-detail">
@@ -52,13 +52,17 @@
   <thead>
     <tr>
       <th></th>
-      <th onclick="aiSort(1,'str')" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(2,'num')" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(3,'str')" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" style="cursor:pointer; user-select:none; text-align:right">&#916;V (km/s) <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(5,'num')" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(6,'str')" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(7,'num')" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      {# aria-sort="none" is the resting state of a SORTABLE column, so it is
+         markup, not script: it says the column can be sorted before anyone has
+         clicked, and it gives aiSort a selector that cannot touch the two
+         columns that do not sort. #}
+      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -72,11 +76,17 @@
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
+      tabindex="0" onkeydown="spectreActivate(event)"
+      {# No role="button": it would override the implicit row role and take
+         this row out of the table. ai-detail-N IS a real id, so aria-controls
+         resolves here, unlike in the sweep. #}
+      aria-expanded="false"
+      aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
       data-sort-1="{{ item.result.method.value }}"
       data-sort-2="{{ _tord.get(item.intel.threat_level, 5) }}"
       data-sort-3="{{ item.intel.manoeuvre_type }}"
-      data-sort-4="{{ item.result.total_delta_v_km_s }}"
+      data-sort-4="{{ item.result.total_delta_v_m_s }}"
       data-sort-5="{{ item.intel.tof_hours }}"
       data-sort-6="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
       data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}">
@@ -102,7 +112,7 @@
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.manoeuvre_type }}</td>
     <td class="mnv-dv" style="text-align:right; color:{{ item.intel.threat_color }}">
-      <strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong>
+      <strong>{{ item.result.total_delta_v_m_s | m_s }}</strong>
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.tof_label }}</td>
     <td style="font-size:0.67rem; color:var(--text-dim)">
@@ -114,8 +124,15 @@
       </span>
     </td>
     <td class="col-actions">
+      {# The row above opts into spectreActivate, which calls preventDefault()
+         on Enter and Space. keydown bubbles, so without this guard a key press
+         on the button reached the row's handler instead: the button's own
+         activation was cancelled and the row toggled, so a keyboard operator
+         staged nothing. The mouse path has always been guarded the same way,
+         in onclick. #}
       <button class="btn-secondary btn-sm"
               type="button"
+              onkeydown="event.stopPropagation()"
               onclick="event.stopPropagation(); aiLoadEngine('{{ item.result.red_name }}','{{ item.result.blue_name }}','{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}','{{ item.result.method.value }}')"
               title="Pre-fill intercept engine with this result">Load</button>
     </td>
@@ -158,9 +175,9 @@
             Total &#916;V
           </div>
           <div style="font-size:1rem; font-weight:700; color:var(--gold)">
-            {{ "%.4f" | format(item.result.total_delta_v_km_s) }}
+            {{ item.result.total_delta_v_m_s | m_s }}
           </div>
-          <div style="font-size:0.55rem; color:var(--text-dim)">km/s</div>
+          <div style="font-size:0.55rem; color:var(--text-dim)">m/s</div>
         </div>
         <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
                     padding:0.4rem 0.6rem; border-left:3px solid var(--ops-blue)">
@@ -278,6 +295,7 @@
             &#916;V Budget
             <span style="float:right; font-weight:600; color:var(--text-bright)">
               {{ "%.1f" | format(item.intel.dv_budget_pct) }}%
+              <span class="label-dim">of {{ item.intel.dv_budget_m_s | m_s }}</span>
             </span>
           </div>
           <div style="height:5px; border-radius:3px; background:rgba(255,255,255,0.07); overflow:hidden">
@@ -300,7 +318,7 @@
             <thead>
               <tr>
                 <th>Burn #</th><th>Segment</th><th>Epoch (UTC)</th>
-                <th>&#916;V km/s</th><th>Prograde</th><th>Normal</th><th>Radial</th>
+                <th>&#916;V m/s</th><th>Prograde</th><th>Normal</th><th>Radial</th>
               </tr>
             </thead>
             <tbody>
@@ -309,17 +327,17 @@
                 <td>{{ burn.burn_number }}</td>
                 <td class="col-dim">{{ burn.segment_name }}</td>
                 <td class="col-dim">{{ burn.burn_epoch.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                <td class="mnv-dv"><strong>{{ "%.4f" | format(burn.delta_v_km_s) }}</strong></td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_prograde) }}</td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_normal) }}</td>
-                <td class="col-dim">{{ "%.4f" | format(burn.dv_radial) }}</td>
+                <td class="mnv-dv"><strong>{{ burn.delta_v_m_s | m_s }}</strong></td>
+                <td class="col-dim">{{ burn.dv_prograde | m_s }}</td>
+                <td class="col-dim">{{ burn.dv_normal | m_s }}</td>
+                <td class="col-dim">{{ burn.dv_radial | m_s }}</td>
               </tr>
               {% endfor %}
             </tbody>
             <tfoot>
               <tr class="intercept-totals">
                 <td colspan="3"><strong>Total</strong></td>
-                <td class="mnv-dv"><strong>{{ "%.4f" | format(item.result.total_delta_v_km_s) }}</strong></td>
+                <td class="mnv-dv"><strong>{{ item.result.total_delta_v_m_s | m_s }}</strong></td>
                 <td colspan="3"></td>
               </tr>
             </tfoot>
@@ -353,6 +371,9 @@ function aiToggle(idx) {
   var open = det.style.display !== 'none';
   det.style.display = open ? 'none' : '';
   if (chev) chev.innerHTML = open ? '&#9654;' : '&#9660;';
+  /* Same fact as the chevron, for an operator who cannot see it. */
+  var row = document.querySelector('[aria-controls="ai-detail-' + idx + '"]');
+  if (row) row.setAttribute('aria-expanded', open ? 'false' : 'true');
 }
 
 /* ── Pre-fill the intercept engine ── */
@@ -380,12 +401,16 @@ function aiSort(col, type) {
   if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
   else { _aiSortCol = col; _aiSortAsc = true; }
 
-  /* Update sort indicators in header */
+  /* Update sort indicators in header.
+     The glyph and aria-sort are the same fact for two different operators, so
+     they are written together and can never drift apart. */
   table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
+  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
   var th = table.querySelectorAll('thead th')[col];
   if (th) {
     var ind = th.querySelector('.hrr-sort-ind');
     if (ind) ind.textContent = _aiSortAsc ? ' \u25b2' : ' \u25bc';
+    th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
   }
 
   /* Collect parent+detail pairs; non-parent rows (failed) go to the bottom */

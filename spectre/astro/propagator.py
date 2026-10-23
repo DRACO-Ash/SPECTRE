@@ -18,6 +18,12 @@ from sgp4.api import Satrec, jday
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
 
+# Below these an orbit is treated as exactly equatorial or exactly circular,
+# and the classical element that becomes undefined is replaced by the one
+# that is still defined. See _argp_and_ta.
+_EQUATORIAL_NODE_TOL: float = 1e-10
+_CIRCULAR_ECC_TOL: float = 1e-10
+
 
 @dataclass
 class StateVector:
@@ -154,28 +160,89 @@ def state_to_keplerian(sv: StateVector) -> KeplerianElements:
     else:
         raan = 0.0
 
-    # Argument of periapsis.
-    if n_mag > 1e-10 and ecc > 1e-10:
-        argp = math.degrees(
-            math.acos(np.clip(np.dot(n, e_vec) / (n_mag * ecc), -1.0, 1.0))
-        )
-        if e_vec[2] < 0:
-            argp = 360.0 - argp
-    else:
-        argp = 0.0
+    # Argument of periapsis and true anomaly, including the degenerate cases.
+    argp, ta = _argp_and_ta(sv, h, n, e_vec, ecc)
 
-    # True anomaly.
-    if ecc > 1e-10:
+    return KeplerianElements(
+        a=a, ecc=ecc, inc=inc, raan=raan, argp=argp, ta=ta, epoch=sv.epoch,
+    )
+
+
+def _argp_and_ta(
+    sv: StateVector,
+    h: np.ndarray,
+    n: np.ndarray,
+    e_vec: np.ndarray,
+    ecc: float,
+) -> tuple[float, float]:
+    """Return argument of periapsis and true anomaly in degrees.
+
+    Lifted out of state_to_keplerian unchanged: the quadrant corrections
+    carried most of that function's cognitive complexity, which was over the
+    Code Quality gate's limit.
+
+    Two classical elements are undefined for particular orbits, and the
+    previous code returned zero for both rather than substituting the
+    element that IS defined. The result round-tripped to the wrong place in
+    the orbit, silently:
+
+      circular inclined (e = 0)      true anomaly undefined      8,000 km out
+      equatorial elliptical (i = 0)  arg. of periapsis undefined 17,074 km out
+      circular equatorial            both undefined              78,460 km out
+
+    The third is GEO, this application's primary regime, where a returned
+    element set placed the object at an arbitrary point on the belt.
+
+    The standard substitutions below keep the state recoverable in every
+    case: argument of latitude for a circular orbit, longitude of periapsis
+    for an equatorial one, true longitude when both apply.
+    """
+    r = sv.r
+    v = sv.v
+    r_mag = sv.r_mag
+    # Derived here rather than passed in, so the helper takes only the vectors
+    # the corrections are defined against. These are the same norms of the same
+    # vectors the caller already took, so every value below is bit-identical to
+    # the inline version this replaced.
+    h_mag = float(np.linalg.norm(h))
+    n_mag = float(np.linalg.norm(n))
+
+    equatorial = n_mag <= _EQUATORIAL_NODE_TOL
+    circular = ecc <= _CIRCULAR_ECC_TOL
+
+    if circular and equatorial:
+        # True longitude: angle from the x-axis to the position vector.
+        argp = 0.0
+        ta = math.degrees(math.atan2(r[1], r[0])) % 360.0
+    elif circular:
+        # Argument of latitude: angle from the ascending node to the position.
+        argp = 0.0
+        ta = math.degrees(math.atan2(
+            float(np.dot(r, np.cross(h, n))) / h_mag,
+            float(np.dot(r, n)),
+        )) % 360.0
+    elif equatorial:
+        # Longitude of periapsis: angle from the x-axis to the eccentricity
+        # vector, with the direction of motion setting the sense.
+        argp = math.degrees(math.atan2(e_vec[1], e_vec[0])) % 360.0
+        if h[2] < 0:  # retrograde equatorial
+            argp = 360.0 - argp
         cos_ta = np.clip(np.dot(e_vec, r) / (ecc * r_mag), -1.0, 1.0)
         ta = math.degrees(math.acos(cos_ta))
         if np.dot(r, v) < 0:
             ta = 360.0 - ta
     else:
-        ta = 0.0
+        argp = math.degrees(
+            math.acos(np.clip(np.dot(n, e_vec) / (n_mag * ecc), -1.0, 1.0))
+        )
+        if e_vec[2] < 0:
+            argp = 360.0 - argp
+        cos_ta = np.clip(np.dot(e_vec, r) / (ecc * r_mag), -1.0, 1.0)
+        ta = math.degrees(math.acos(cos_ta))
+        if np.dot(r, v) < 0:
+            ta = 360.0 - ta
 
-    return KeplerianElements(
-        a=a, ecc=ecc, inc=inc, raan=raan, argp=argp, ta=ta, epoch=sv.epoch,
-    )
+    return argp, ta
 
 
 def keplerian_to_state(

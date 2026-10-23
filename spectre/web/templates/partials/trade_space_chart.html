@@ -112,7 +112,7 @@
                   const pt = ctx.raw;
                   return [
                     pt.label,
-                    '\u0394V: ' + pt.y.toFixed(4) + ' km/s',
+                    '\u0394V: ' + pt.y.toFixed(4) + ' m/s',
                     'Transfer: ' + fmtTime(pt.x),
                     'Miss: ' + pt.miss.toFixed(1) + ' km',
                   ];
@@ -137,7 +137,7 @@
             },
             y: {
               type: useLogY ? 'logarithmic' : 'linear',
-              title: { display: true, text: '\u0394V (km/s)', color: '#5A7A9A', font: { size: 11 } },
+              title: { display: true, text: '\u0394V (m/s)', color: '#5A7A9A', font: { size: 11 } },
               ticks: { color: '#5A7A9A' },
               grid: { color: 'rgba(10,51,85,0.4)' },
             },

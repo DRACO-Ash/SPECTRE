@@ -6,6 +6,7 @@ POST /plan/decision/evaluate → evaluates scenario, returns ranked results part
 
 from __future__ import annotations
 
+import html
 import logging
 from datetime import UTC, datetime
 from typing import Annotated
@@ -21,6 +22,21 @@ from spectre.web.planning_state import get_session_state
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/decision", tags=["decision"])
+
+
+def _err(msg: str) -> HTMLResponse:
+    """Return an inline error partial with the message escaped.
+
+    This partial is built by hand rather than rendered by Jinja, so nothing
+    autoescapes it. One call site passes exception text that an upstream
+    library could quote operator-supplied form input into, which is the
+    reflected-XSS shape already confirmed on the scenario-time route, so the
+    escape is applied here and covers every call site at once. It sits at
+    module level rather than nested in decision_evaluate so that this fix adds
+    no line inside that function, whose pre-existing cognitive complexity of 44
+    would otherwise be pulled into the quality gate's new-code window.
+    """
+    return HTMLResponse(f'<p class="error-msg">{html.escape(msg)}</p>')
 
 
 @router.get("/panel", response_class=HTMLResponse)
@@ -84,9 +100,6 @@ async def decision_evaluate(
     fr_costs   = fr_costs   or []
     fr_revs    = fr_revs    or []
     fr_times   = fr_times   or []
-    
-    def _err(msg: str) -> HTMLResponse:
-        return HTMLResponse(f'<p class="error-msg">{msg}</p>')
 
     if not adv_ids or not fr_ids:
         return _err("Define at least one adversary action and one friendly response.")

@@ -1,61 +1,81 @@
+# Shaped to the App Store gate contract.
+#
+# The Dependency Scanning analyser treats a non-Poetry pyproject.toml as a
+# resolution trigger: it feeds a pip-compile run whose output is what actually
+# gets scanned. Both applications known to clear the gate ship a [project]
+# table and NO [project.dependencies]. Dependencies live in the pip-compile
+# inputs and their hash-locked outputs, which is what the platform Test stage
+# and the image actually install. Declaring them here as well lets the two
+# drift, and drift is what the gate punishes.
+#
+# A pyproject.toml carrying only [build-system] and no [project] table is
+# skipped with a warning, so the [project] table below is load-bearing.
+#
+# The version is rewritten by scripts/bump-version.sh. Never edit it by hand.
+
+# The build backend is declared explicitly, and so are the packages.
+#
+# Without [build-system], PEP 517 defaults to setuptools. Any resolver that
+# reads this file calls the build hook to get requirements, and setuptools
+# flat-layout auto-discovery then sees TWO importable top-level directories and
+# refuses outright:
+#
+#     error: Multiple top-level packages discovered in a flat-layout:
+#            ['spectre', 'tle_clustering']
+#
+# That is a hard, immediate failure with the message on stderr. It is the most
+# likely explanation for a Dependency Scanning job that exits 1 after a few
+# seconds with no SBOM and no error text, and it is reproduced by
+# `pip install --dry-run --no-deps .` against the package root.
+#
+# PSIRENS, which clears this gate, has a single package under src/, so its
+# auto-discovery is unambiguous. Declaring the packages here achieves the same
+# certainty without restructuring the repository.
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["spectre*", "tle_clustering*"]
+namespaces = false
 
 [project]
 name = "spectre"
-version = "0.1.0"
-description = "Space Planning, Evaluation & Counter-Threat Response Engine — orbital mechanics, threat assessment, and manoeuvre planning"
-readme = "README.md"
-license = { text = "Proprietary" }
+version = "0.5.24"
+description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
-dependencies = [
-    "structlog>=25.0",
-    "fastapi>=0.111",
-    "uvicorn[standard]>=0.29",
-    "jinja2>=3.1",
-    "python-multipart",
-    "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite",
-    "bcrypt>=4.0",
-    "itsdangerous>=2.1",
-    "httpx>=0.27",
-    "sgp4>=2.22",
-    "numpy>=2.0",
-    "python-dotenv>=1.0",
-    "python-docx>=1.1",
-    "pandas>=2.0",
-    "scipy>=1.11",
-    "scikit-learn>=1.4",
+
+# ---------------------------------------------------------------------------
+# Pytest and coverage
+#
+# Held here rather than in pytest.ini and .coveragerc so the package root
+# carries no file the analyser has no reason to see. PSIRENS, which clears this
+# gate, ships seven files at its root and neither of those is among them.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
 ]
+addopts = "-ra -q"
+asyncio_mode = "auto"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.23",
-    "anyio[trio]>=4.0",
-    "httpx>=0.27",
-    "pytest-cov>=6.0",
-    "mypy>=1.14",
-    "types-PyYAML",
-    "ruff>=0.9",
-    "hypothesis>=6.0",
-    "bandit[toml]>=1.7",
-    "pip-audit>=2.7",
-]
+[tool.coverage.run]
+source = ["spectre", "tle_clustering"]
+# SQLAlchemy's async bridge switches greenlets on every await. Without this,
+# coverage loses the trace after `await session.execute(...)` and under-reports
+# lines that demonstrably run, which would understate coverage to SonarQube.
+concurrency = ["thread", "greenlet"]
+omit = ["tests/*", "spectre/app_logging/config.py"]
 
-[project.scripts]
-spectre-serve = "spectre.web._entrypoint:main"
+[tool.coverage.report]
+# Ratchet, not an aspiration. Set to the measured whole-repository figure so
+# coverage cannot slip, and raised as it improves. The HOUSE STANDARD is 80,
+# declared once in scripts/check-quality.sh and reported against on every run:
+# this file must never claim a floor the standard does not accept silently.
+fail_under = 74
+show_missing = true
 
-# ---------------------------------------------------------------------------
-# Hatch
-# ---------------------------------------------------------------------------
-[tool.hatch.build.targets.wheel]
-packages = ["spectre"]
-
-# ---------------------------------------------------------------------------
-# Ruff
-# ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 120
 target-version = "py312"
@@ -90,25 +110,3 @@ targets = ["spectre"]
 severity = "medium"   # gate on medium+; high+ will always block
 confidence = "medium"
 exclude_dirs = ["tests", ".venv"]
-
-# ---------------------------------------------------------------------------
-# Pytest
-# ---------------------------------------------------------------------------
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
-]
-addopts = "-ra -q"
-asyncio_mode = "auto"
-
-# ---------------------------------------------------------------------------
-# Coverage
-# ---------------------------------------------------------------------------
-[tool.coverage.run]
-source = ["spectre"]
-omit = ["tests/*", "spectre/app_logging/setup.py"]
-
-[tool.coverage.report]
-fail_under = 70
-show_missing = true

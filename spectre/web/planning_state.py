@@ -24,6 +24,7 @@ from spectre.domain.models import (
     RedTrack,
     ThreatAssessment,
 )
+from spectre.web.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -115,15 +116,27 @@ _store: dict[str, SessionState] = {}
 def get_session_state(username: str) -> SessionState:
     """Return the :class:`SessionState` for *username*, creating it if absent.
 
-    New sessions are pre-populated with the default HRR object list so the
-    threat sweep is usable immediately without a live UDL connection.
+    New sessions are pre-populated with the default HRR object list, and with
+    any element sets that came with it, so the threat sweep and the asset
+    screen are usable immediately without a live UDL connection. An object
+    list on its own is not enough: both capabilities need an element set per
+    object, so seeding the list alone would populate a dropdown that then
+    refuses to run.
     """
     if username not in _store:
         state = SessionState()
         if _default_hrr_objects:
             state.hrr_objects = list(_default_hrr_objects)
+        if _default_hrr_tles:
+            state.hrr_tle_cache.update(_default_hrr_tles)
+            state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
         _store[username] = state
-        logger.debug("Created new session state for user: %s", username)
+        # The session key arrives from the signed cookie, and before that from
+        # whatever an administrator typed into the create-user form, so it
+        # reaches this record from outside. A name carrying a newline would
+        # split one debug entry into two, and the second line is then
+        # indistinguishable from a genuine audit record (pythonsecurity:S5145).
+        logger.debug("Created new session state for user: %s", log_safe(username))
     return _store[username]
 
 
@@ -178,3 +191,33 @@ def set_default_hrr_objects(objects: list[dict[str, Any]]) -> None:
 def get_default_hrr_objects() -> list[dict[str, Any]]:
     """Return the default HRR object list (loaded at startup)."""
     return _default_hrr_objects
+
+
+#: Element sets that arrived with the default watchlist, keyed by satno, with
+#: the provenance of each. Empty unless the loaded list carried them.
+_default_hrr_tles: dict[str, str] = {}
+_default_hrr_tle_modes: dict[str, str] = {}
+
+
+def set_default_hrr_tles(tles: dict[str, str], modes: dict[str, str]) -> None:
+    """Store element sets that came with the default watchlist."""
+    # Boot-time default state, written once by the startup loader and read-only
+    # for the rest of the process, exactly like the catalogue and HRR-object
+    # setters above. This module IS the single-node store, as its docstring
+    # says; wrapping one of the four module globals in a holder object would
+    # leave the other three as they are and make this pair the odd case a
+    # reader has to work out, which is a loss, not an improvement.
+    global _default_hrr_tles, _default_hrr_tle_modes  # noqa: PLW0603
+    _default_hrr_tles = dict(tles)
+    _default_hrr_tle_modes = dict(modes)
+    synthetic = sum(1 for m in modes.values() if m != "REAL")
+    if tles:
+        logger.info(
+            "Default HRR element sets loaded: %d (%d not from live tracking)",
+            len(tles), synthetic,
+        )
+
+
+def get_default_hrr_tles() -> tuple[dict[str, str], dict[str, str]]:
+    """Return the default element sets and their provenance."""
+    return _default_hrr_tles, _default_hrr_tle_modes

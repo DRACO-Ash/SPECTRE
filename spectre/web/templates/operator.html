@@ -378,6 +378,10 @@
       <button class="htab active" data-panel="hero-sweep" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-red"></span>Threat Sweep
       </button>
+      <button class="htab" data-panel="hero-screen" onclick="heroTab(this)"
+              title="Asset Screening — select a blue HRR object and rank every red object that could reach it">
+        <span class="htab-icon htab-icon-blue"></span>Asset Screening
+      </button>
       <button class="htab" data-panel="hero-engine" onclick="heroTab(this)">
         <span class="htab-icon htab-icon-gold"></span>Intercept Engine
       </button>
@@ -472,8 +476,8 @@
                 <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
                   <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
                 </label>
-                <label title="Maximum delta-V budget (km/s)">Max &#916;V (km/s)
-                  <input type="number" name="max_dv" value="3.000" min="0.001" step="any" />
+                <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
+                  <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
                 </label>
               </div>
 
@@ -556,8 +560,9 @@
                   {% include "partials/red_options.html" %}
                 </select>
               </label>
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Max &#916;V (km/s)
-                <input type="number" name="max_dv" value="3.0" step="0.1" min="0.1" />
+              <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
+                     title="Budget in metres per second. 500 m/s is the point at which an on-station manoeuvre becomes a strong anomaly: every counterspace manoeuvre on open record costs less (the largest measured about 170 m/s), and 500 m/s is the lower bound of what an orbital transfer vehicle offers.">Max &#916;V (m/s)
+                <input type="number" name="max_dv_m_s" value="500" step="10" min="1" />
               </label>
             </div>
             <div id="ts-red-orbit-info" style="margin-bottom:0.3rem"></div>
@@ -609,6 +614,63 @@
           </div>
         </section>
       </div><!-- end hero-sweep -->
+
+      <!-- ── ASSET SCREENING ───────────────────────────────── -->
+      <div class="hero-panel" id="hero-screen">
+        <section class="panel panel-blue">
+          <h2>Asset Screening</h2>
+          <p class="callout callout-gold" style="margin-bottom:0.6rem">
+            Select a blue HRR object. Every red object in a regime that could reach it is screened, assessed and ranked, with the earliest possible arrival called out separately.
+          </p>
+
+          <form id="threat-screen-form">
+            <div id="scr-asset-config"
+                 hx-get="/plan/threat/screen-config"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+              <p class="label-dim" style="font-size:0.72rem">Loading asset list&hellip;</p>
+            </div>
+
+            {# Manual asset override, for when the watchlist has no cached element set #}
+            <details id="scr-manual-asset-toggle" style="margin:0.4rem 0">
+              <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+                <span style="display:inline-block; font-size:0.65rem">&#9654;</span>
+                Manual Asset TLE
+                <span style="font-size:0.65rem; font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0">- screen an asset whose element set is not cached</span>
+              </summary>
+              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:4px">
+                <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+                  TLE (lines 1 &amp; 2)
+                  <textarea name="manual_asset_tle" id="scr-manual-asset-tle"
+                            rows="2"
+                            placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
+                            style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)"></textarea>
+                </label>
+                <p style="margin:0.3rem 0 0; font-size:0.68rem; color:var(--text-dim); font-style:italic">
+                  If set, this element set is used <strong>instead of</strong> the selected asset.
+                </p>
+              </div>
+            </details>
+
+            <div class="submit-row" style="margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid var(--border)">
+              <button type="button" class="btn-danger"
+                      hx-post="/plan/threat/screen"
+                      hx-target="#threat-screen-results"
+                      hx-swap="innerHTML"
+                      hx-indicator="#threat-screen-indicator"
+                      hx-include="closest form"
+                      hx-disabled-elt="this">Screen Asset</button>
+              <span id="threat-screen-indicator" class="htmx-indicator">
+                <span class="spinner"></span>Screening&hellip;
+              </span>
+            </div>
+          </form>
+
+          <div id="threat-screen-results" style="margin-top:0.5rem">
+            <p class="empty-msg">No asset screened yet &mdash; select a blue asset and click Screen Asset.</p>
+          </div>
+        </section>
+      </div><!-- end hero-screen -->
 
       <!-- ── HISTORICAL PATTERN OF LIFE ───────────────────── -->
       <div class="hero-panel" id="hero-pol"
@@ -670,8 +732,14 @@ function fetchOrbitalEvents() {
       document.getElementById('orbital-events').innerHTML = html;
     })
     .catch(function(err) {
-      document.getElementById('orbital-events').innerHTML =
-        '<p class="error-msg">Query failed: ' + err.message + '</p>';
+      /* textContent, not innerHTML: an Error message is not ours to trust as
+         markup, and nothing here needs it to be markup. */
+      var box = document.getElementById('orbital-events');
+      box.replaceChildren();
+      var p = document.createElement('p');
+      p.className = 'error-msg';
+      p.textContent = 'Query failed: ' + err.message;
+      box.appendChild(p);
     })
     .finally(function() {
       btn.disabled = false;
@@ -986,7 +1054,7 @@ function switchToTradeSpace() {
                 callbacks: {
                   label: function(ctx) {
                     var pt = ctx.raw;
-                    return [pt.label, '\u0394V: ' + pt.y.toFixed(4) + ' km/s',
+                    return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
                             'Transfer: ' + fmtTime(pt.x), 'Miss: ' + pt.miss.toFixed(1) + ' km'];
                   }
                 },
@@ -1003,7 +1071,7 @@ function switchToTradeSpace() {
               },
               y: {
                 type: useLogY ? 'logarithmic' : 'linear',
-                title: { display: true, text: '\u0394V (km/s)', color: '#5A7A9A', font: { size: 11 } },
+                title: { display: true, text: '\u0394V (m/s)', color: '#5A7A9A', font: { size: 11 } },
                 ticks: { color: '#5A7A9A' },
                 grid: { color: 'rgba(10,51,85,0.4)' }
               }
@@ -1141,31 +1209,67 @@ function switchToTradeSpace() {
       return;
     }
 
-    var html = '';
+    /* Built as DOM nodes, not as an HTML string.
+       _hrrGatherRows reads each cell with textContent, which DECODES what
+       Jinja escaped on the way out: a satellite name rendered into the table
+       as &lt;img src=x onerror=...&gt; is live markup again by the time it
+       reaches this function. Concatenating it into innerHTML executed it in
+       the analyst's authenticated session as soon as they typed one matching
+       character into the search box. Names reach the HRR tables from UDL and
+       from manual entry, so the payload needed no privilege to plant.
+       createTextNode and textContent cannot be talked out of treating their
+       argument as text, which is why they are used for every field below. */
+    dropdown.replaceChildren();
     matches.forEach(function(m, i) {
       var e = m.e;
-      var sideClass = e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue';
-      html += '<div class="hrr-dd-item ' + sideClass + '" data-idx="' + i + '" '
-            + 'onmousedown="_hrrSelect(' + i + ')">'
-            + '<span class="hrr-dd-name">' + _hrrHighlightText(e.name, query) + '</span>'
-            + '<span class="hrr-dd-meta">' + e.satno + ' &middot; ' + e.country
-            + ' &middot; ' + e.orbit + ' &middot; Rank ' + e.rank
-            + ' &middot; <em>' + e.side + '</em></span>'
-            + '</div>';
+      var item = document.createElement('div');
+      item.className = 'hrr-dd-item '
+                     + (e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue');
+      item.setAttribute('data-idx', String(i));
+      /* A listener rather than an onmousedown attribute: the attribute had to
+         be assembled as markup, which is the habit this change removes. */
+      item.addEventListener('mousedown', function() { window._hrrSelect(i); });
+
+      var name = document.createElement('span');
+      name.className = 'hrr-dd-name';
+      _hrrAppendHighlighted(name, e.name, query);
+
+      var meta = document.createElement('span');
+      meta.className = 'hrr-dd-meta';
+      meta.appendChild(document.createTextNode(
+        e.satno + ' \u00b7 ' + e.country + ' \u00b7 ' + e.orbit
+        + ' \u00b7 Rank ' + e.rank + ' \u00b7 '
+      ));
+      var side = document.createElement('em');
+      side.textContent = e.side;
+      meta.appendChild(side);
+
+      item.appendChild(name);
+      item.appendChild(meta);
+      dropdown.appendChild(item);
     });
-    dropdown.innerHTML = html;
     dropdown.style.display = '';
 
     /* Stash matches for select handler. */
     window._hrrMatches = matches;
   }
 
-  function _hrrHighlightText(text, query) {
+  /* Appends *text* to *parent* with the matched run wrapped in <mark>.
+     The predecessor returned an HTML string for the caller to concatenate,
+     which is how the payload got in. This one builds the <mark> as an element
+     and everything around it as text nodes, so there is no string for markup
+     to hide in. */
+  function _hrrAppendHighlighted(parent, text, query) {
     var idx = text.toLowerCase().indexOf(query);
-    if (idx < 0) return text;
-    return text.substring(0, idx)
-         + '<mark>' + text.substring(idx, idx + query.length) + '</mark>'
-         + text.substring(idx + query.length);
+    if (idx < 0) {
+      parent.appendChild(document.createTextNode(text));
+      return;
+    }
+    parent.appendChild(document.createTextNode(text.substring(0, idx)));
+    var mark = document.createElement('mark');
+    mark.textContent = text.substring(idx, idx + query.length);
+    parent.appendChild(mark);
+    parent.appendChild(document.createTextNode(text.substring(idx + query.length)));
   }
 
   window._hrrSelect = function(idx) {

@@ -8,6 +8,8 @@
     {{ current_user.username }} &middot; admin
   </span>
   <form method="post" action="/logout" style="margin:0">
+    {# Plain POST: the token must be a field, not the hx-headers header. #}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <button type="submit" class="spectre-btn spectre-btn-ghost">Sign Out</button>
   </form>
 </div>
@@ -44,7 +46,7 @@
       <span class="spectre-panel-title" style="font-size:var(--spectre-size-small)">Add New User</span>
     </div>
     <form hx-post="/admin/users"
-          hx-target="#user-tbody"
+          hx-target="#user-table-region"
           hx-swap="innerHTML"
           hx-on::after-request="if(event.detail.successful) this.reset()"
           style="display:flex; flex-wrap:wrap; gap:var(--spectre-space-3); align-items:flex-end;
@@ -77,29 +79,9 @@
     </form>
   </div>
 
-  <!-- User table -->
-  <div class="spectre-panel">
-    <table style="width:100%; border-collapse:collapse; font-size:var(--spectre-size-small)">
-      <thead>
-        <tr style="border-bottom:1px solid var(--spectre-color-border)">
-          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
-                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
-                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Username</th>
-          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
-                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
-                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Role</th>
-          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
-                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
-                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Created</th>
-          <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:right;
-                     color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
-                     letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="user-tbody">
-        {% include "partials/admin_user_table.html" %}
-      </tbody>
-    </table>
+  <!-- User table. Swapped as a whole: see the partial for why. -->
+  <div id="user-table-region" class="spectre-panel">
+    {% include "partials/admin_user_table_region.html" %}
   </div>
 
 </div>

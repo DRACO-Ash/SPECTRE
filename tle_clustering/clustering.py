@@ -21,7 +21,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
@@ -35,9 +34,6 @@ from tle_clustering.models import (
     TLERecord,
 )
 from tle_clustering.selection import select_representative
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +136,7 @@ def cluster_records(
     labels: NDArray[np.intp] = db.fit_predict(X)
 
     # --- Partition records into clusters and noise ----------------------------
-    unique_labels = sorted(set(int(lbl) for lbl in labels))
+    unique_labels = sorted({int(lbl) for lbl in labels})
 
     clusters: list[Cluster] = []
     noise_list: list[NoiseTLE] = []

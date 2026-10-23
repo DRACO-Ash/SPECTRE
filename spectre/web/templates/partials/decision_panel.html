@@ -57,7 +57,13 @@
         <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
                placeholder="Conf" style="font-size:0.63rem" title="Intel confidence [0,1]">
         <span style="font-size:0.6rem; color:var(--text-dim)">P · Conf</span>
-        <button type="button" onclick="removeRow(this,'adv-row')"
+        {# The glyph is the whole of the button, so without aria-label a screen
+           reader announced these four row controls as an unnamed "button" and an
+           operator navigating by control could not tell one from another
+           (WCAG 4.1.2). The name states the action, which is removing a row,
+           not closing the panel. The same name is repeated on the rows the
+           script below builds. #}
+        <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
@@ -90,7 +96,7 @@
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
         <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
-        <button type="button" onclick="removeRow(this,'fr-row')"
+        <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
@@ -170,7 +176,7 @@ function addAdvRow() {
     <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Probability">
     <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Confidence">
     <span style="font-size:0.6rem;color:var(--text-dim)">P · Conf</span>
-    <button type="button" onclick="removeRow(this,'adv-row')" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
+    <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
   document.getElementById('adv-rows').appendChild(div);
 }
 
@@ -192,7 +198,7 @@ function addFrRow() {
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Cost">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility">
     <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5" style="font-size:0.63rem" title="Time to execute (h)">
-    <button type="button" onclick="removeRow(this,'fr-row')" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
+    <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
   document.getElementById('fr-rows').appendChild(div);
 }
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Integer, String, event
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm.base import NO_VALUE
 
 from spectre.web.database import Base
 
@@ -19,6 +20,16 @@ class User(Base):
         hashed_password: bcrypt hash of the password; never store plaintext.
         role: ``"operator"`` or ``"admin"``.
         created_at: UTC timestamp of account creation.
+        session_generation: counter stamped into every session token this
+            account mints. Logout and a password change increment it, which
+            refuses every token carrying an older value. A counter rather than
+            a timestamp because itsdangerous records a token's issue time to
+            the WHOLE SECOND, so a logout and the sign-in that follows it
+            inside the same second are indistinguishable by clock: the token
+            minted after the logout is byte-for-byte the token minted before
+            it. No timestamp comparison can accept one and refuse the other.
+            Incrementing a counter changes the payload, so the new token is a
+            different string and the old one is refused exactly.
     """
 
     __tablename__ = "users"
@@ -32,3 +43,39 @@ class User(Base):
         default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
+    # NOT NULL DEFAULT 0 is a CONSTANT default, which SQLite accepts in
+    # ALTER TABLE ADD COLUMN, and "INTEGER NOT NULL DEFAULT 0" carries only
+    # uppercase letters, digits and spaces, so it satisfies the
+    # _SQL_COLUMN_DEFINITION guard in database.py without widening it. A row
+    # that predates the column therefore arrives at generation 0, which is
+    # where a fresh account starts, so migrated accounts and new ones behave
+    # identically and there is no None case to reason about.
+    session_generation: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+
+
+# A password change has to end the sessions that were opened with the old
+# password. It did not: a cookie captured beforehand stayed valid for its full
+# 8 hours, so the reset answered the theft it was meant to answer in name only.
+#
+# This is an attribute listener rather than a line in the admin reset handler
+# because two places already rewrite a hash - the admin form and the
+# break-glass bootstrap in database.py - and a listener cannot be forgotten by
+# whoever adds the third. active_history makes SQLAlchemy load the previous
+# value before the assignment, so the test below distinguishes "this account
+# never had a password" from "the column simply was not loaded".
+@event.listens_for(User.hashed_password, "set", active_history=True)
+def _revoke_sessions_on_password_change(
+    target: User, _value: str, oldvalue: object, _initiator: object
+) -> None:
+    """Advance *target*'s session generation when its password hash is replaced."""
+    if oldvalue is NO_VALUE or not oldvalue:
+        # Account creation, or the empty placeholder the break-glass path
+        # writes before it hashes: no password means no session can have been
+        # opened with one, so there is nothing to revoke.
+        return
+    target.session_generation = (target.session_generation or 0) + 1

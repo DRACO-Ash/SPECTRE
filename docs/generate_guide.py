@@ -934,7 +934,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
         "flight values across the vis-viva equation to determine the set of "
         "orbits achievable within a ΔV budget."
     )
-    _add_bullet(doc, "Vis-viva TOF sweep: evaluates reachable semi-major axes for ΔV budgets from 0.01 to 5.0 km/s.")
+    _add_bullet(doc, "Vis-viva TOF sweep: evaluates reachable semi-major axes for ΔV budgets from 10 to 5,000 m/s.")
     _add_bullet(doc, "Produces altitude-vs-time contour showing the reachability envelope.")
     _add_bullet(doc, "Identifies which blue assets fall within the adversary's reachable set at each time step.")
     _add_bullet(doc, "Supports both prograde-only and arbitrary-direction burn assumptions.")
@@ -1031,7 +1031,7 @@ def _section_08_tactical_theory(doc: Document) -> None:
         "on TOF, evaluating Lambert solutions at each step to find the minimum "
         "transfer time that satisfies the fuel constraint."
     )
-    _add_bullet(doc, "Input: blue asset, red track, maximum ΔV budget (km/s).")
+    _add_bullet(doc, "Input: blue asset, red track, maximum ΔV budget (m/s).")
     _add_bullet(doc, "Binary search converges on TOF to within 1-second precision.")
     _add_bullet(doc, "Reports the minimum achievable TOF, required ΔV, and the corresponding Lambert solution.")
     _add_bullet(doc, "If no solution exists within the ΔV budget, reports the minimum ΔV required and the corresponding TOF.")
@@ -1105,7 +1105,7 @@ def _section_09_threat_sweep(doc: Document) -> None:
         [
             ["Target", "Satellite name and NORAD ID"],
             ["Orbit", "Orbit regime compatibility badge"],
-            ["\u0394V (km/s)", "Minimum Lambert transfer cost (refined)"],
+            ["\u0394V (m/s)", "Minimum Lambert transfer cost (refined)"],
             ["Miss Distance (km)", "Closest approach distance at intercept epoch"],
             ["Epoch", "Optimal manoeuvre start epoch"],
             ["Method", "Screening method (Hohmann/Lambert)"],
@@ -1157,7 +1157,7 @@ def _section_10_intercept_calculations(doc: Document) -> None:
             ["Manoeuvre Start", "UTC epoch for the first burn", "Current UTC time"],
             ["Coast Hours", "Coast duration before first burn (hours)", "1.0"],
             ["Intercept Hours", "Time of flight for Lambert solver (hours)", "6.0"],
-            ["Max ΔV", "Upper bound on acceptable ΔV (km/s)", "3.0"],
+            ["Max ΔV", "Upper bound on acceptable ΔV (m/s)", "500"],
             ["Intercept Data Mode", "Re-fetch red/blue TLEs from UDL under this data mode before computing. Leave blank to use session TLEs.", "Session default (REAL)"],
         ],
     )
@@ -1169,7 +1169,7 @@ def _section_10_intercept_calculations(doc: Document) -> None:
     _add_bullet(doc, "Burn # — sequential burn index (1-based).")
     _add_bullet(doc, "Segment — descriptive name of the manoeuvre segment.")
     _add_bullet(doc, "Burn Epoch — UTC time of the impulsive burn.")
-    _add_bullet(doc, "ΔV km/s — total delta-V magnitude for this burn.")
+    _add_bullet(doc, "ΔV m/s — total delta-V magnitude for this burn.")
     _add_bullet(doc, "Prograde — velocity-direction component (VNB frame).")
     _add_bullet(doc, "Normal — orbit-normal component (VNB frame).")
     _add_bullet(doc, "Radial — co-normal/radial component (VNB frame).")
@@ -1193,7 +1193,7 @@ def _section_11_trade_space(doc: Document) -> None:
 
     _add_body(doc,
         "The trade-space scatter plot visualises all intercept solutions computed "
-        "during the current session. It plots ΔV (km/s) against transfer time (minutes), "
+        "during the current session. It plots ΔV (m/s) against transfer time (minutes), "
         "with points colour-coded by method:"
     )
     _add_bullet(doc, "Lambert / Proximity — Ops Blue (#00659E)")
@@ -1505,7 +1505,7 @@ def _section_15_notso_correlation(doc: Document) -> None:
     _add_bullet(doc, "NORAD catalogue number (from SATNO, NORAD ID, or COSPAR fields).")
     _add_bullet(doc, "Effective window: start and end UTC datetime (defaulting to a 24-hour window if end is not specified).")
     _add_bullet(doc, "NOTSO type: MANOEUVRE, DEORBIT, LAUNCH, PROXIMITY_OPS, TEST, or OTHER (inferred from free text).")
-    _add_bullet(doc, "Predicted ΔV magnitude (km/s) if stated in the message.")
+    _add_bullet(doc, "Predicted ΔV magnitude (m/s) if stated in the message.")
     _add_bullet(doc, "Predicted burn direction if stated.")
 
     _add_heading_h2(doc, "Correlation Logic")
@@ -1696,7 +1696,7 @@ def _section_17_scenarios(doc: Document) -> None:
     _add_bullet(doc, "Set the scenario window to cover the predicted conjunction epoch \u00B1 12 hours.")
     _add_bullet(doc, "Run Orbital Events to identify the closest approach geometry.")
     _add_bullet(doc, "Run a Lambert intercept at the conjunction epoch to determine the ΔV required for a collision avoidance manoeuvre.")
-    _add_bullet(doc, "If ΔV < 0.01 km/s, a small adjustment is sufficient. If ΔV > 0.1 km/s, consider alternative timing.")
+    _add_bullet(doc, "If ΔV is below about 10 m/s the adjustment is within routine station-keeping. Above about 100 m/s it is an aggressive profile: consider alternative timing.")
 
     # Scenario 2.
     _add_heading_h2(doc, "Scenario 2: Defensive Repositioning of Blue Asset")

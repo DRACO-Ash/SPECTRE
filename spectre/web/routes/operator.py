@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
+import html
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
-from spectre.web.auth import require_login
+from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
@@ -43,9 +43,18 @@ def _list_response(request: Request, template: str, context: dict[str, Any]) -> 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User | None, Depends(optional_login)],
 ) -> HTMLResponse:
-    """Render the main operator console."""
+    """Render the main operator console, or the login page when anonymous.
+
+    Returns 200 in both cases. The App Store router probes ``GET /`` and treats
+    a 302 as a failed deploy, so an anonymous caller is served the login page
+    directly rather than redirected. No console state is rendered without a
+    valid session.
+    """
+    if current_user is None:
+        return render(request, "login.html", {"error": None})
+
     state = get_session_state(current_user.username)
     return render(request, "operator.html", {
         "user": current_user,
@@ -140,8 +149,10 @@ async def quick_add_blue_asset(
 
     oob_badge = ""
     if btn_id:
+        # btn_id arrives from a form field and is written into an id
+        # attribute, so it must be escaped before it reaches the browser.
         oob_badge = (
-            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f'<span id="{html.escape(btn_id, quote=True)}" hx-swap-oob="true"'
             f' class="badge-ok" style="font-size:0.68rem">&#10003; Added</span>'
         )
     body = resp_html.body
@@ -199,8 +210,10 @@ async def quick_add_red_track(
 
     oob_badge = ""
     if btn_id:
+        # btn_id arrives from a form field and is written into an id
+        # attribute, so it must be escaped before it reaches the browser.
         oob_badge = (
-            f'<span id="{btn_id}" hx-swap-oob="true"'
+            f'<span id="{html.escape(btn_id, quote=True)}" hx-swap-oob="true"'
             f' class="badge-red" style="font-size:0.68rem">&#10003; Added</span>'
         )
     body2 = resp_html.body
@@ -277,8 +290,15 @@ async def set_scenario_time(
     try:
         start_dt = datetime.fromisoformat(scenario_start.strip()).replace(tzinfo=UTC)
         stop_dt = datetime.fromisoformat(scenario_stop.strip()).replace(tzinfo=UTC)
-    except ValueError as exc:
-        return HTMLResponse(f'<p class="error-msg">Invalid date: {exc}</p>')
+    except ValueError:
+        # datetime.fromisoformat quotes the offending input verbatim in its
+        # message, and this response is built by hand rather than by Jinja, so
+        # echoing the exception reflected the operator's form field into the
+        # page as live markup. Nothing from the exception reaches the browser.
+        return HTMLResponse(
+            '<p class="error-msg">Invalid date. Use ISO 8601, for example '
+            '2026-01-01T00:00:00.</p>'
+        )
 
     if stop_dt <= start_dt:
         return HTMLResponse('<p class="error-msg">Stop must be after start.</p>')
@@ -296,36 +316,7 @@ async def set_scenario_time(
     )
 
 
-# ── Log streaming (SSE) ───────────────────────────────────────────────────────
-
-
-@router.get("/log/stream", response_model=None)
-async def log_stream(
-    request: Request,
-    current_user: User = Depends(require_login),
-) -> StreamingResponse:
-    """Server-Sent Events endpoint streaming per-session log entries."""
-
-
-    state = get_session_state(current_user.username)
-
-    from collections.abc import AsyncGenerator  # noqa: PLC0415
-
-    async def _event_generator() -> AsyncGenerator[str, None]:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                msg = await asyncio.wait_for(state.log_queue.get(), timeout=15.0)
-                yield f"data: {msg}\n\n"
-            except TimeoutError:
-                yield ": heartbeat\n\n"
-
-    return StreamingResponse(
-        _event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# ── Run log ───────────────────────────────────────────────────────────────────
 
 
 @router.get("/log/entries", response_class=HTMLResponse)
@@ -333,7 +324,14 @@ async def log_entries(
     request: Request,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
-    """Return the run log partial (for polling fallback)."""
+    """Return the run log partial. The console polls this; nothing streams.
+
+    There was a Server-Sent Events endpoint beside it, built by interpolating
+    a session log line straight into the frame, so a newline in operator input
+    forged extra frames. No template, script or test ever opened it: the
+    console has always polled this route. Removed rather than sanitised,
+    because a live defect in code nobody runs is still a line in the scan.
+    """
     state = get_session_state(current_user.username)
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})
 

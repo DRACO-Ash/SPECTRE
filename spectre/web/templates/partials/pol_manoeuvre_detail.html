@@ -1,0 +1,290 @@
+{# Manoeuvre drill-down — rendered into #pol-detail after a ⓘ Detail click.
+
+   Context comes from pol.py::_breakdown_view, which is the unit boundary:
+   every ΔV arrives in m/s already. Element values arrive in the units their
+   formulas are written in, each carrying its own unit label. This template
+   performs NO arithmetic on any ΔV. See the _pol_view docstring for why. #}
+
+{% set CONF_COL = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
+{# Posture colour comes from the status tokens, not hex of its own. Five
+   competing maps for the same four postures had BEYOND PLATFORM rendering
+   #a855f7 here and #a78bfa on the sweep and screening panels, two violets
+   close enough to read as a rendering fault rather than a distinction,
+   which teaches the eye that the colour carries no meaning. The band each
+   posture maps to is the one threat_sweep.html already uses. Hex also did
+   not swap on the light theme, where every one of these failed WCAG AA. #}
+{% set POSTURE_COL = {"BENIGN":"var(--spectre-status-low)","ANNOYANCE":"var(--spectre-status-high)","AGGRESSIVE":"var(--spectre-status-critical)","BEYOND PLATFORM":"var(--spectre-status-violet)"} %}
+{% set CHAN_COL = {"along_track":"var(--ops-blue)","radial":"#a855f7","cross_track":"#f59e0b"} %}
+
+<div style="background:var(--panel-bg); border:1px solid rgba(59,139,235,0.4); border-radius:6px;
+            padding:0.75rem 0.9rem; margin-bottom:0.6rem">
+
+  {# ── Header ──────────────────────────────────────────────────────────── #}
+  <div style="display:flex; justify-content:space-between; align-items:baseline;
+              flex-wrap:wrap; gap:0.4rem; margin-bottom:0.6rem">
+    <div>
+      <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue);
+                   text-transform:uppercase; letter-spacing:0.06em">
+        ΔV Working — {{ m.epoch.strftime("%Y-%m-%d %H:%M") }}Z
+      </span>
+      <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
+        SATNO {{ satno }} · {{ "confirmed" if confirmed else "candidate" }}
+      </span>
+    </div>
+    <div style="font-size:0.62rem">
+      <span style="color:var(--text-dim)">Headline</span>
+      <strong style="font-size:0.86rem; color:{{ CONF_COL.get(confidence, 'var(--text-primary)') }};
+                     margin-left:0.3rem">{{ delta_v_m_s | m_s }} m/s</strong>
+      {% if has_breakdown %}
+      <span style="margin-left:0.5rem; padding:0.08rem 0.35rem; border-radius:3px;
+                   font-weight:700; letter-spacing:0.04em;
+                   color:{{ CONF_COL.get(confidence) }};
+                   border:1px solid {{ CONF_COL.get(confidence) }}">{{ confidence }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── What the cost means, and how long delivering it takes ──────────── #}
+  {% if v %}
+  <div style="border:1px solid var(--border); border-radius:4px; padding:0.45rem 0.6rem;
+              margin-bottom:0.6rem">
+    <div style="display:flex; flex-wrap:wrap; gap:0.9rem; align-items:baseline; font-size:0.64rem">
+      <span><span style="color:var(--text-dim)">Classified</span>
+        <strong style="margin-left:0.25rem">{{ v.classification }}</strong>
+        {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}</span>
+      <span><span style="color:var(--text-dim)">Posture</span>
+        <strong style="color:{{ POSTURE_COL.get(v.posture_label, 'var(--text-primary)') }}; margin-left:0.25rem">
+          {{ v.posture_label }}</strong></span>
+      <span><span style="color:var(--text-dim)">Routine burn ceiling</span>
+        <strong style="margin-left:0.25rem">{{ v.sk_ceiling_m_s | m_s }} m/s</strong></span>
+    </div>
+    <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.3rem; line-height:1.5">
+      {{ v.posture.rationale }}
+    </div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem; line-height:1.5">
+      Band from {{ v.posture.basis }}
+    </div>
+    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem; line-height:1.5">
+      Ceiling: {{ v.sk_ceiling_basis }}
+    </div>
+    {% if v.burn_hours is not none %}
+    <div style="font-size:0.62rem; margin-top:0.35rem; padding-top:0.3rem;
+                border-top:1px solid var(--border); line-height:1.5;
+                color:{% if v.burn_is_slow %}#a855f7{% else %}var(--text-dim){% endif %}">
+      Delivering {{ delta_v_m_s | m_s }} m/s on a {{ v.burn_platform }} takes
+      <strong>{{ "%.1f"|format(v.burn_hours) }} h</strong>
+      {% if v.burn_is_slow %}(<strong>{{ "%.1f"|format(v.burn_days) }} days</strong>) of
+      continuous thrust, so this manoeuvre cannot have been executed at short notice
+      and must have begun well before its measured epoch{% endif %}.
+      The fastest flown platform class, a {{ v.fastest_platform }}, would need
+      {{ "%.2f"|format(v.fastest_burn_hours) if v.fastest_burn_hours is not none else "?" }} h.
+    </div>
+    {% endif %}
+    {% if v.escalation %}
+    <div style="font-size:0.63rem; margin-top:0.4rem; padding:0.35rem 0.5rem;
+                background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.4);
+                border-radius:3px; color:var(--text-primary); line-height:1.5">
+      <strong style="color:#ef4444">High priority.</strong> {{ v.escalation }}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if not has_breakdown %}
+  <p class="empty-msg" style="font-size:0.66rem">
+    This detection fell outside the forensic budget, so only the screening estimate
+    was computed. The figure above is mean element differencing, with no cross-check
+    and no confidence verdict. Raise the ΔV threshold to bring fewer detections into
+    the budget, or narrow the date range.
+  </p>
+  {% else %}
+
+  {# ── Verdict and objections ──────────────────────────────────────────── #}
+  <div style="font-size:0.64rem; color:var(--text-dim); border-left:2px solid {{ CONF_COL.get(confidence) }};
+              padding-left:0.5rem; margin-bottom:0.6rem">
+    {{ confidence_reason }}
+  </div>
+
+  {% if warnings %}
+  <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.35);
+              border-radius:4px; padding:0.4rem 0.55rem; margin-bottom:0.6rem">
+    <div style="font-size:0.6rem; font-weight:700; color:#ef4444; text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.2rem">Objections</div>
+    {% for w in warnings %}
+    <div style="font-size:0.63rem; color:var(--text-primary); margin-bottom:0.15rem">● {{ w }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── The three estimators ────────────────────────────────────────────── #}
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">Estimators</div>
+  <table class="hrr-table" style="font-size:0.64rem; margin-bottom:0.6rem">
+    <thead>
+      <tr><th>Method</th><th style="text-align:right">ΔV (m/s)</th><th>Reading</th></tr>
+    </thead>
+    <tbody>
+      {% for e in estimates %}
+      <tr>
+        <td style="white-space:nowrap">
+          {% if e.is_headline %}<strong style="color:var(--ops-blue)">▸ {{ e.label }}</strong>
+          {% else %}<span style="color:var(--text-dim)">{{ e.label }}</span>{% endif %}
+        </td>
+        <td style="text-align:right; white-space:nowrap">
+          {% if e.failed %}<span style="color:#ef4444">failed</span>
+          {% else %}<strong>{{ e.dv_m_s | m_s }}</strong>{% endif %}
+        </td>
+        <td class="col-dim" style="font-size:0.6rem">
+          {% if e.failed %}{{ e.failure }}
+          {% else %}{% for n in e.notes %}{{ n }}{% if not loop.last %} {% endif %}{% endfor %}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="display:flex; flex-wrap:wrap; gap:0.9rem; font-size:0.62rem;
+              color:var(--text-dim); margin-bottom:0.7rem">
+    <span>Epoch gap <strong style="color:var(--text-primary)">{{ "%.4f"|format(gap_days) }} d</strong></span>
+    {% if agreement_ratio is not none %}
+    <span>Estimators agree within
+      <strong style="color:{% if agreement_ratio <= 1.5 %}#22c55e{% elif agreement_ratio <= 3.0 %}#f59e0b{% else %}#ef4444{% endif %}">
+        {{ "%.2f"|format(agreement_ratio) }}&times;</strong></span>
+    {% endif %}
+    {% if snr is not none %}
+    <span>Signal-to-noise
+      <strong style="color:{% if snr >= 10 %}#22c55e{% elif snr >= 5 %}#f59e0b{% else %}#ef4444{% endif %}">
+        {{ "%.1f"|format(snr) }}&times;</strong></span>
+    {% endif %}
+    {% if position_mismatch_km is not none %}
+    <span>Closest approach of the two fits
+      <strong style="color:var(--text-primary)">{{ "%.3f"|format(position_mismatch_km) }} km</strong></span>
+    {% endif %}
+    {% if burn_epoch %}
+    <span>Burn dated
+      <strong style="color:var(--text-primary)">{{ burn_epoch.strftime("%Y-%m-%d %H:%M:%S") }}Z</strong>
+      {% if burn_ambiguous %}<span style="color:#f59e0b">(indicative)</span>{% endif %}</span>
+    {% endif %}
+  </div>
+
+  {# ── Per-channel decomposition: the magnitude of every variable ──────── #}
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">
+    Decomposition — {{ component_total_m_s | m_s }} m/s total, root-sum-square of three orthogonal channels
+  </div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:0.5rem;
+              margin-bottom:0.7rem">
+    {% for c in components %}
+    <div style="border:1px solid var(--border); border-radius:4px; padding:0.45rem 0.55rem">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.2rem">
+        <span style="font-size:0.63rem; font-weight:700; color:{{ CHAN_COL.get(c.channel, 'var(--text-primary)') }}">
+          {{ c.label }}</span>
+        <strong style="font-size:0.72rem; color:{{ CHAN_COL.get(c.channel, 'var(--text-primary)') }}">
+          {{ c.dv_m_s | m_s }} m/s</strong>
+      </div>
+      <div style="font-size:0.58rem; color:var(--text-dim); margin-bottom:0.3rem">
+        drives {{ c.driver }} &nbsp;·&nbsp; <code style="font-size:0.58rem">{{ c.formula }}</code>
+      </div>
+      {# The label cell is the heading for its row, not for a column, so it is a
+         <th scope="row">: this readout is a label and value list, and a table
+         with no header at all cannot be navigated by a screen reader
+         (Web:S5256). The two declarations appended to the original style only
+         undo the browser defaults a <th> brings with it (bold, centred), so the
+         rendering is unchanged. -#}
+      <table style="width:100%; font-size:0.58rem; border-collapse:collapse">
+        {% for row in c.inputs %}
+        <tr>
+          <th scope="row" style="color:var(--text-dim); padding:0.05rem 0.3rem 0.05rem 0; white-space:nowrap; font-weight:400; text-align:left">{{ row.label }}</th>
+          <td style="text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap">{{ row.text }}</td>
+          <td style="color:var(--text-dim); padding-left:0.25rem; white-space:nowrap">{{ row.unit }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% if c.note %}
+      <div style="font-size:0.57rem; color:var(--text-dim); margin-top:0.25rem; font-style:italic">{{ c.note }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ── Pre and post state, side by side ────────────────────────────────── #}
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+              letter-spacing:0.05em; margin-bottom:0.3rem">Element sets</div>
+  <table class="hrr-table" style="font-size:0.63rem; margin-bottom:0.5rem">
+    <thead>
+      <tr>
+        <th>Element</th>
+        <th style="text-align:right">Before</th>
+        <th style="text-align:right">After</th>
+        <th style="text-align:right">Change</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% macro erow(label, b, a, d, fmt, unit) %}
+      <tr>
+        <td class="col-dim">{{ label }}{% if unit %} <span style="font-size:0.56rem">({{ unit }})</span>{% endif %}</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ fmt|format(b) }}</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ fmt|format(a) }}</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums;
+                   color:{% if d > 0 %}#22c55e{% elif d < 0 %}#ef4444{% else %}var(--text-dim){% endif %}">
+          {{ '+' if d > 0 else '' }}{{ fmt|format(d) }}</td>
+      </tr>
+      {% endmacro %}
+      <tr>
+        <td class="col-dim">Epoch</td>
+        <td style="text-align:right">{{ before.epoch.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        <td style="text-align:right">{{ after.epoch.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        <td style="text-align:right" class="col-dim">{{ "%.4f"|format(gap_days) }} d</td>
+      </tr>
+      {{ erow("Semi-major axis", before.sma_km, after.sma_km, deltas.sma_km, "%.4f", "km") }}
+      {{ erow("Altitude", before.alt_km, after.alt_km, deltas.alt_km, "%.4f", "km") }}
+      {{ erow("Eccentricity", before.ecc, after.ecc, deltas.ecc, "%.7f", "") }}
+      {{ erow("Inclination", before.inc_deg, after.inc_deg, deltas.inc_deg, "%.5f", "°") }}
+      {{ erow("RAAN", before.raan_deg, after.raan_deg, deltas.raan_deg, "%.5f", "°") }}
+      {{ erow("Arg perigee", before.argp_deg, after.argp_deg, deltas.argp_deg, "%.5f", "°") }}
+      {{ erow("Mean motion", before.mm_revday, after.mm_revday, deltas.mm_revday, "%.8f", "rev/day") }}
+      {{ erow("Period", before.period_min, after.period_min, deltas.period_min, "%.5f", "min") }}
+      <tr>
+        <td class="col-dim">Mean anomaly <span style="font-size:0.56rem">(°)</span></td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.5f"|format(before.ma_deg) }}</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.5f"|format(after.ma_deg) }}</td>
+        <td style="text-align:right" class="col-dim" title="Phase carries no ΔV information and is never read by the estimator.">not used</td>
+      </tr>
+      <tr>
+        <td class="col-dim">B*</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.6g"|format(before.bstar) }}</td>
+        <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.6g"|format(after.bstar) }}</td>
+        <td style="text-align:right" class="col-dim">—</td>
+      </tr>
+      <tr style="border-top:1px solid var(--border)">
+        <td class="col-dim">Provenance</td>
+        <td style="text-align:right">{{ before.provenance }}</td>
+        <td style="text-align:right;
+                   color:{% if cross_source %}#ef4444{% else %}var(--text-primary){% endif %}">
+          {{ after.provenance }}</td>
+        <td style="text-align:right" class="col-dim">
+          {% if cross_source %}<span style="color:#ef4444">differs</span>{% else %}same{% endif %}</td>
+      </tr>
+      {% if before.rms_residual is not none or after.rms_residual is not none %}
+      <tr>
+        <td class="col-dim">RMS fit residual</td>
+        <td style="text-align:right">{{ "%.5g"|format(before.rms_residual) if before.rms_residual is not none else "—" }}</td>
+        <td style="text-align:right">{{ "%.5g"|format(after.rms_residual) if after.rms_residual is not none else "—" }}</td>
+        <td style="text-align:right" class="col-dim">—</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {# ── The threshold this object's own element sets forced ─────────────── #}
+  {% if noise_floor_m_s is not none %}
+  <div style="font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.4rem">
+    Detection floor for this object <strong style="color:var(--text-primary)">{{ noise_floor_m_s | m_s }} m/s</strong>,
+    measured from {{ noise_samples }} consecutive element set pairs
+    (median {{ noise_median_m_s | m_s }}, median absolute deviation {{ noise_mad_m_s | m_s }} m/s).
+    Nothing below that floor can be told apart from the disagreement between successive fits.
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>

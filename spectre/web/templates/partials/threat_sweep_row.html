@@ -1,32 +1,58 @@
-{# Single refined child row — replaces via hx-swap="outerHTML" on the <tr>. #}
+{# Single refined child row, replacing its in-table neighbour via
+   hx-swap="outerHTML". It must therefore render the SAME way that neighbour
+   does, or a Refine changes how a row looks without changing what it says. #}
+{%- import "partials/_posture_bands.html" as posture -%}
 {% if error %}
-<tr id="threat-row-{{ index }}"><td colspan="7" class="error-msg">{{ error }}</td></tr>
+<tr id="threat-row-{{ index }}"><td colspan="8" class="error-msg">{{ error }}</td></tr>
 {% elif entry %}
 <tr class="threat-child"
     id="threat-row-{{ index }}"
-    {% if entry.delta_v_km_s < 0.5 %}data-threat="high"{% elif entry.delta_v_km_s < 1.0 %}data-threat="med"{% endif %}>
+    data-posture-band="{{ posture.posture_bands.get(entry.posture_label, 'unknown') }}">
+  {# headers=, matching threat_sweep.html cell for cell. The column headings
+     are a repeated header row emitted once per group inside the single
+     tbody, so they carry an id each rather than scope="col", and a cell with
+     no headers= has no column name at all. This fragment had none, which
+     made the refined row the one row in the group a screen reader could not
+     name the columns of — on exactly the row the operator had just asked the
+     solver to improve. group_idx rides in on the refine request beside
+     entry_index, because only the row being replaced knows which group's
+     headings it answers to. #}
   <td class="threat-child-indent"></td>
-  <td class="col-dim">{{ entry.burn_location }}</td>
-  <td class="col-dim">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
-  <td class="mnv-dv">{{ "%.4f" | format(entry.delta_v_km_s) }}</td>
-  <td class="col-dim">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
-  <td class="col-dim" title="Pro {{ '%.4f' | format(entry.dv_prograde) }}  Nor {{ '%.4f' | format(entry.dv_normal) }}  Rad {{ '%.4f' | format(entry.dv_radial) }}">
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ entry.burn_location }}</td>
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
+  <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ entry.delta_v_m_s | m_s }}</td>
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ entry.dv_prograde | m_s }} m/s  Nor {{ entry.dv_normal | m_s }} m/s  Rad {{ entry.dv_radial | m_s }} m/s">
     {{ entry.method }}
   </td>
+  {# The Posture column. This fragment REPLACES a child row of the sweep table
+     via hx-swap="outerHTML", so its cell count has to match that table exactly.
+     When Posture was added to threat_sweep.html the table went from seven
+     columns to eight and this fragment was left at seven, so every refined row
+     silently shifted its own Action cell under the Posture heading. Rendering
+     the parent template alone does not catch that; only rendering both and
+     comparing does, which is what the contract test now does. #}
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ entry.posture_label or '—' }}</td>
   <td class="col-actions" style="white-space:nowrap">
     {% if entry.method == "hohmann" %}
     <button class="btn-secondary btn-sm"
             hx-post="/plan/threat/refine"
-            hx-vals='{"entry_index": {{ index }}}'
+            hx-vals='{"entry_index": {{ index }}, "group_idx": {{ group_idx }}}'
             hx-target="#threat-row-{{ index }}"
             hx-swap="outerHTML"
             hx-disabled-elt="this"
             title="Refine with Lambert solver">Refine</button>
     {% endif %}
+    {# loadInEngine(redSat, blueSat, epoch, method) — four arguments, led by
+       the interceptor, exactly as threat_sweep.html passes them. This passed
+       three: the target name landed in redSat, the burn epoch in blueSat and
+       the method in epoch, with method undefined by the time ieUpdate() ran
+       on it. A Refine then a Load pre-filled the engine with the wrong
+       objects and showed the operator nothing to say so. #}
     <button class="btn-secondary btn-sm"
             type="button"
-            onclick="event.stopPropagation(); loadInEngine('{{ entry.target.target_name }}', '{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ entry.method }}')"
-            title="Load in intercept engine">Load</button>
+            onclick="event.stopPropagation(); loadInEngine('{{ red_name }}', '{{ entry.target.target_name }}', '{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ entry.method }}')"
+            title="Pre-fill the intercept engine with this solution">Load</button>
   </td>
 </tr>
 {% endif %}

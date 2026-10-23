@@ -28,7 +28,6 @@ from spectre.astro.tactical import (
     formation_defence_burn,
     geo_drift,
     hbar_hop_sequence,
-    intercept_envelope_analytical,
     j2_drift_plan,
     min_time_intercept_analytical,
     nmc_safety_ellipse,
@@ -609,6 +608,11 @@ def plane_change_intercept(
     kep_red = state_to_keplerian(sv_red)
     kep_blue = state_to_keplerian(sv_blue)
 
+    # KeplerianElements stores inc/raan/argp/ta in DEGREES. These angles were
+    # being passed through math.degrees() a second time, multiplying every one
+    # by 57.3: plane-change delta-V came out 14x to 57x too high, the J2 drift
+    # plan used a meaningless inclination, and the manoeuvre-direction
+    # classifier answered "normal" for almost any burn.
     inc_diff = abs(kep_blue.inc - kep_red.inc)
     r_red = sv_red.r_mag
     r_blue = sv_blue.r_mag
@@ -616,7 +620,7 @@ def plane_change_intercept(
 
     if alt_diff < 50.0:
         # Similar altitude — pure plane change
-        pc = plane_change(r_red, math.degrees(inc_diff), kep_red.ecc, mu)
+        pc = plane_change(r_red, inc_diff, kep_red.ecc, mu)
 
         # Single burn at optimal location, in the normal direction
         h = np.cross(sv_red.r, sv_red.v)
@@ -627,7 +631,7 @@ def plane_change_intercept(
 
         t_arrival = t_departure  # instantaneous
         _notes = (
-            f"Plane change: Δi={math.degrees(inc_diff):.2f}°, "
+            f"Plane change: Δi={inc_diff:.2f}°, "
             f"optimal at {pc.optimal_location}, "
             f"node ΔV={pc.delta_v_at_node:.4f}, apogee ΔV={pc.delta_v_at_apogee:.4f} km/s"
         )
@@ -643,7 +647,7 @@ def plane_change_intercept(
     else:
         # Different altitudes — combined transfer
         cpc = combined_altitude_plane_change(
-            r_red, r_blue, math.degrees(inc_diff), mu
+            r_red, r_blue, inc_diff, mu
         )
 
         v_hat = sv_red.v / sv_red.v_mag
@@ -703,15 +707,15 @@ def j2_drift_intercept(
     kep_blue = state_to_keplerian(sv_blue)
 
     # RAAN difference
-    delta_raan = math.degrees(kep_red.raan - kep_blue.raan)
+    delta_raan = kep_red.raan - kep_blue.raan
     if delta_raan > 180.0:
         delta_raan -= 360.0
     elif delta_raan < -180.0:
         delta_raan += 360.0
 
     result = j2_drift_plan(
-        kep_red.a, kep_red.ecc, math.degrees(kep_red.inc),
-        kep_blue.a, kep_blue.ecc, math.degrees(kep_blue.inc),
+        kep_red.a, kep_red.ecc, kep_red.inc,
+        kep_blue.a, kep_blue.ecc, kep_blue.inc,
         delta_raan, mu,
     )
 
@@ -1119,8 +1123,8 @@ def intent_predict_intercept(
     kep_blue = state_to_keplerian(sv_blue)
 
     delta_a = kep_blue.a - kep_red.a
-    delta_inc = math.degrees(kep_blue.inc - kep_red.inc)
-    delta_raan = math.degrees(kep_blue.raan - kep_red.raan)
+    delta_inc = kep_blue.inc - kep_red.inc
+    delta_raan = kep_blue.raan - kep_red.raan
     if delta_raan > 180:
         delta_raan -= 360
     elif delta_raan < -180:
@@ -1155,36 +1159,108 @@ def intercept_envelope_intercept(
     manoeuvre_start: datetime,
     tof_s: float = 172800.0,
     coast_s: float = 0.0,
-    target_distance_km: float = 0.0,
+    max_delta_v_km_s: float = 0.5,
     mu: float = MU_EARTH,
 ) -> InterceptSolution:
-    """Compute probabilistic intercept envelope (reachability analysis).
+    """Sweep arrival times for the cheapest intercept inside a ΔV budget.
 
-    Sweeps TOF range and estimates ΔV for each, producing an envelope
-    of feasible intercept solutions within the operator's ΔV budget.
+    Propagates red once, then solves Lambert's problem against blue at 24
+    arrival times spread evenly across *tof_s*, and reports the cheapest arc
+    costing no more than *max_delta_v_km_s*.
+
+    The sweep reports that minimum and a count of feasible arrival times, not
+    the envelope itself. No view in the interface draws an envelope, so the
+    per-step points were built 24 times a call and dropped unread;
+    ``intercept_envelope_analytical`` still returns a full points list for a
+    caller that ever needs one.
+
+    Args:
+        red_tle: TLE of the interceptor (red) satellite.
+        blue_tle: TLE of the target (blue) satellite.
+        manoeuvre_start: UTC time when the manoeuvre sequence begins.
+        tof_s: Widest time of flight to sweep (seconds), floored at one hour.
+        coast_s: Coast time before the sweep begins (seconds).
+        max_delta_v_km_s: The operator's ΔV budget (km/s). This replaces a
+            parameter named ``target_distance_km``, a distance, which the
+            sweep had stopped reading in favour of a hardcoded 3.0 km/s: six
+            times the 500 m/s the operator's form offers, and a budget they
+            neither chose nor could see. The default mirrors that 500 m/s.
+        mu: Gravitational parameter (km³/s²).
+
+    Returns:
+        :class:`InterceptSolution` whose ``total_delta_v`` is the cheapest
+        feasible arc and whose ``miss_distance_km`` carries the number of
+        feasible arrival times rather than a miss distance.
+
+    Raises:
+        ValueError: if no arrival time in the sweep is reachable within
+            budget. Returning zero ΔV instead made an unreachable intercept
+            the cheapest row of the operator's comparison table, which ranks
+            ascending on cost. The batch runner catches this, keeps the row,
+            shows the message and sorts the row behind every assessment.
     """
     red_orbit = TLEOrbit(red_tle)
     blue_orbit = TLEOrbit(blue_tle)
 
     t_epoch = manoeuvre_start + timedelta(seconds=coast_s)
     sv_red = red_orbit.propagate(t_epoch)
-    sv_blue = blue_orbit.propagate(t_epoch)
 
-    max_dv = target_distance_km if target_distance_km > 0 else 3.0
-    tof_max_h = tof_s / 3600.0
+    # A true Lambert sweep, which is what this function's description always
+    # claimed and never did. It previously called the radius-only analytic
+    # estimate, throwing away the full state vectors it holds: the angular
+    # separation, which dominates a co-orbital intercept, never entered the
+    # calculation. Measured against real Lambert solutions that estimate was
+    # between 1.3x and 121x optimistic, and underestimating an intercept cost
+    # is the dangerous direction for both threat assessment and planning.
+    #
+    # The budget is a delta-V in km/s and now arrives as one. It was first
+    # taken from a parameter named target_distance_km, a distance, and then
+    # from a hardcoded 3.0 km/s once that parameter went dead, so the
+    # operator's "Max dV" field reached this sweep in neither form.
+    tof_max_s = max(tof_s, 3600.0)
 
-    result = intercept_envelope_analytical(
-        sv_red.r_mag, sv_blue.r_mag, max_dv,
-        tof_max_hours=max(tof_max_h, 1.0), mu=mu,
-    )
+    n_steps = 24
+    feasible = 0
+    min_feasible_tof_h = float("inf")
+    min_feasible_dv = float("inf")
+
+    for index in range(n_steps):
+        tof = tof_max_s * (index + 1) / n_steps
+        arrival = t_epoch + timedelta(seconds=tof)
+        try:
+            sv_target = blue_orbit.propagate(arrival)
+            solution = solve_lambert(
+                sv_red.r, sv_target.r, tof,
+                mu=mu, v1_initial=sv_red.v, v2_target=sv_target.v,
+            )
+        except (ValueError, RuntimeError):
+            # A degenerate geometry or an unreachable time of flight is not a
+            # cheap intercept; it is no intercept. Dropping the step keeps it
+            # out of the feasible count rather than letting a gap in the sweep
+            # read as an easy option.
+            continue
+        dv = solution.total_delta_v
+        if dv <= max_delta_v_km_s:
+            feasible += 1
+            min_feasible_tof_h = min(min_feasible_tof_h, tof / 3600.0)
+            min_feasible_dv = min(min_feasible_dv, dv)
+
+    if not feasible:
+        # Raising is what makes the ranked table honest: a zero here was read
+        # as free and sorted ahead of every real assessment.
+        raise ValueError(
+            f"No intercept within the {max_delta_v_km_s:.3f} km/s budget: none of "
+            f"{n_steps} arrival times swept across {tof_max_s / 3600.0:.1f} h "
+            "is reachable"
+        )
 
     return InterceptSolution(
         method="intercept_envelope",
         burns=[],
-        total_delta_v=result.min_feasible_dv_km_s,
+        total_delta_v=min_feasible_dv,
         departure_epoch=t_epoch,
-        arrival_epoch=t_epoch + timedelta(hours=result.min_feasible_tof_hours),
-        miss_distance_km=result.feasible_count,
+        arrival_epoch=t_epoch + timedelta(hours=min_feasible_tof_h),
+        miss_distance_km=float(feasible),
     )
 
 
@@ -1263,7 +1339,7 @@ def fingerprint_intercept(
 
     # Estimate ΔV and burn direction from element changes
     da = kep_after.a - kep_before.a
-    di = math.degrees(kep_after.inc - kep_before.inc)
+    di = kep_after.inc - kep_before.inc
     dv_est = abs(da) * math.sqrt(mu / kep_before.a**3) / 2.0  # vis-viva approx
 
     if abs(di) > 0.1:
@@ -1279,7 +1355,7 @@ def fingerprint_intercept(
 
     result = fingerprint_manoeuvre(
         dv_est, direction, altitude,
-        math.degrees(kep_before.inc), kep_before.ecc,
+        kep_before.inc, kep_before.ecc,
     )
 
     return InterceptSolution(
@@ -1364,7 +1440,7 @@ def terrain_intercept(
     kep_red = state_to_keplerian(sv_red)
 
     altitude = kep_red.a - R_EARTH
-    result = orbital_terrain(altitude, math.degrees(kep_red.inc))
+    result = orbital_terrain(altitude, kep_red.inc)
 
     return InterceptSolution(
         method="terrain",

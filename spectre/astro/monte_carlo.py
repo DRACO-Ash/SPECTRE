@@ -90,9 +90,19 @@ class ManoeuvreType:
     timing_1sigma_seconds: float
 
 
+# Archetype magnitudes, checked against "Satellite Manoeuvre Delta-v:
+# Feasibility Above 0.5 km/s and Budgets by Regime" (Bluestaq Limited Space
+# Watch, v1.0, 13 October 2026). Values are km/s because this module is part of
+# the astro package, which works in km and km/s throughout; the operator-facing
+# calibration in spectre/domain/manoeuvre_calibration.py is in m/s.
+#
+# Six of the seven already matched the published figures. The one that did not
+# is noted at its entry.
 MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     "station_keeping": ManoeuvreType(
         name="Station Keeping",
+        # Table 3: GEO north-south is 43-50 m/s per year and east-west 1-5,
+        # spread across routine burns, so a single burn is 1-2 m/s.
         description="GEO east-west or north-south station keeping",
         typical_delta_v_km_s=0.002,
         delta_v_1sigma_fraction=0.10,
@@ -101,6 +111,7 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "orbit_raise": ManoeuvreType(
         name="Orbit Raise",
+        # Table 4: 500 to 600 km costs about 55 m/s.
         description="LEO/MEO altitude change manoeuvre",
         typical_delta_v_km_s=0.050,
         delta_v_1sigma_fraction=0.05,
@@ -109,6 +120,8 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "plane_change": ManoeuvreType(
         name="Plane Change",
+        # Table 4: 54 m/s per degree at GEO, 133 m/s per degree at LEO, so
+        # 100 m/s is about 1.9 degrees at GEO or 0.75 at LEO.
         description="Inclination or RAAN adjustment",
         typical_delta_v_km_s=0.100,
         delta_v_1sigma_fraction=0.05,
@@ -117,6 +130,8 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "phasing": ManoeuvreType(
         name="Phasing Manoeuvre",
+        # Table 4: a 62 degree GEO relocation over 30 days costs about 11 m/s,
+        # matching the observed Luch/Olymp-K 2 move.
         description="Along-track repositioning within same orbit",
         typical_delta_v_km_s=0.010,
         delta_v_1sigma_fraction=0.08,
@@ -125,6 +140,8 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "intercept_approach": ManoeuvreType(
         name="Intercept / Approach",
+        # Table 4: the most aggressive observed GEO repositioning, 90 degrees
+        # in 3 days, cost about 170 m/s. 200 m/s sits just above it.
         description="Co-orbital approach towards a target",
         typical_delta_v_km_s=0.200,
         delta_v_1sigma_fraction=0.03,
@@ -133,14 +150,23 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "evasive": ManoeuvreType(
         name="Evasive Manoeuvre",
+        # CORRECTED. This was 30 m/s, which does not match any published
+        # figure. Table 4 puts a collision avoidance manoeuvre at centimetres
+        # per second to about 1 m/s, and notes that the screening threshold
+        # drives how OFTEN one is flown, not how large it is: Starlink flew
+        # 207,152 of them in six months. A threat-evasion burn is larger than a
+        # debris CAM but still small, so 2 m/s with a wide dispersion spans
+        # both rather than modelling a manoeuvre thirty times too big.
         description="Rapid unplanned manoeuvre to avoid threat or conjunction",
-        typical_delta_v_km_s=0.030,
+        typical_delta_v_km_s=0.002,
         delta_v_1sigma_fraction=0.15,
         pointing_1sigma_deg=5.0,
         timing_1sigma_seconds=120.0,
     ),
     "repositioning": ManoeuvreType(
         name="Repositioning",
+        # Table 4: 34 m/s for 180 degrees over 30 days, 170 m/s for 90 degrees
+        # in 3 days. 80 m/s sits between the patient and the hurried case.
         description="Large orbital repositioning / transfer",
         typical_delta_v_km_s=0.080,
         delta_v_1sigma_fraction=0.05,

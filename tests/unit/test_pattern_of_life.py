@@ -1,21 +1,22 @@
-"""Unit tests for spectre.astro.pattern_of_life — PoL analysis engine."""
+"""Unit tests for spectre.astro.pattern_of_life — the PoL MEASUREMENT engine.
+
+Interpretation moved to :mod:`spectre.domain.pol_assessment` and is covered by
+``tests/unit/test_pol_assessment.py``. What is left here is what astro still
+does: parse element sets, difference them, measure drift, and keep statistics.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
 from spectre.astro.pattern_of_life import (
-    Manoeuvre,
-    PropellantBudget,
     TLERecord,
     _angle_diff,
-    _clamp01,
-    _classify_manoeuvre,
-    _compute_anomaly_score,
     _compute_drift_phases,
-    _compute_propellant_budget,
+    _dominant_element,
     _downsample,
     _epoch_to_jd,
     _gst_deg,
@@ -80,17 +81,6 @@ class TestAngleDiff:
 
     def test_zero(self) -> None:
         assert _angle_diff(90.0, 90.0) == 0.0
-
-
-class TestClamp01:
-    def test_clamps_below(self) -> None:
-        assert _clamp01(-5.0) == 0.0
-
-    def test_clamps_above(self) -> None:
-        assert _clamp01(5.0) == 1.0
-
-    def test_passes_through(self) -> None:
-        assert _clamp01(0.5) == 0.5
 
 
 class TestPercentile:
@@ -206,58 +196,89 @@ class TestParseTleHistory:
         records = parse_tle_history(tle_text)
         assert len(records) == 1
 
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            ("REAL", "18SCS", "SPARE"),   # one name too many to unpack
+            ("REAL",),                    # one too few
+            None,                         # not iterable at all
+            7,                            # nor is this
+        ],
+    )
+    def test_a_malformed_provenance_value_costs_one_element_set(
+        self, bad_value: Any,
+    ) -> None:
+        """A provenance value that will not unpack drops its own record only.
 
-# ── _classify_manoeuvre ───────────────────────────────────────────────────────
-
-class TestClassifyManoeuvre:
-    def test_small_dv_is_station_keeping(self) -> None:
-        dom, mtype, sk_sub = _classify_manoeuvre(
-            dv=0.005, d_alt=0.5, d_inc=0.01, d_ecc=0.00001, regime="GEO"
+        Splitting this function into _tle_line_pairs and _record_from_pair
+        moved the metadata assignment out of the try that used to wrap the
+        whole record. One unusable value then ended the entire parse and the
+        operator got an empty history instead of a history short one element
+        set. Breaking _apply_metadata's catch turns this red.
+        """
+        # split("\n", 1)[0], not split("\n")[0]: only the first line is
+        # wanted and splitting the rest is work thrown away (PLC0207).
+        l1_a = _LEO_TLE_A.split("\n", 1)[0]
+        l1_b = _LEO_TLE_B.split("\n", 1)[0]
+        records = parse_tle_history(
+            f"{_LEO_TLE_A}\n{_LEO_TLE_B}\n{_LEO_TLE_C}",
+            metadata={l1_a: ("REAL", "18SCS"), l1_b: bad_value},
         )
-        assert mtype == "station_keeping"
 
-    def test_large_plane_change(self) -> None:
-        dom, mtype, sk_sub = _classify_manoeuvre(
-            dv=0.5, d_alt=5.0, d_inc=2.0, d_ecc=0.0001, regime="LEO"
+        epochs = [r.epoch for r in records]
+        assert len(records) == 2, "the two sound element sets must survive"
+        assert epochs == sorted(epochs), "the surviving records stay in epoch order"
+        # The sound value beside the bad one must still land: the catch covers
+        # one record, not the whole metadata pass.
+        assert (records[0].data_mode, records[0].source) == ("REAL", "18SCS")
+
+    def test_a_record_dropped_on_provenance_still_spends_its_epoch(self) -> None:
+        """The dropped record keeps its epoch out of the de-duplication set.
+
+        This is the half of the restored behaviour that is easy to lose. The
+        original added the epoch to ``seen`` BEFORE it touched the metadata, so
+        a second element set at the same epoch was a duplicate however the
+        first one ended. Re-admitting it would be a different parse from the
+        one this release was meant to preserve.
+        """
+        l1, l2 = _LEO_TLE_A.split("\n")
+        # Same epoch columns, different element set number, so the two line-1
+        # strings differ while the de-duplication key does not.
+        twin = l1[:64] + "9999" + l1[68]
+        assert twin != l1 and len(twin) == len(l1)
+
+        sound = parse_tle_history(f"{l1}\n{l2}\n{twin}\n{l2}")
+        assert len(sound) == 1, "the twin is a duplicate epoch either way"
+
+        dropped = parse_tle_history(
+            f"{l1}\n{l2}\n{twin}\n{l2}", metadata={l1: ("REAL", "18SCS", "SPARE")},
         )
-        assert mtype == "plane_change"
-
-    def test_large_alt_change_is_repositioning(self) -> None:
-        dom, mtype, sk_sub = _classify_manoeuvre(
-            dv=0.5, d_alt=200.0, d_inc=0.01, d_ecc=0.0001, regime="LEO"
-        )
-        assert mtype == "repositioning"
+        assert dropped == [], "the spent epoch must not let the twin back in"
 
 
-# ── _compute_propellant_budget ────────────────────────────────────────────────
+# ── _dominant_element ─────────────────────────────────────────────────────────
 
-class TestPropellantBudget:
-    def test_returns_propellant_budget(self) -> None:
-        pb = _compute_propellant_budget(0.050, 365.0, "GEO")
-        assert isinstance(pb, PropellantBudget)
-        assert pb.total_dv_km_s > 0
-        assert pb.assumed_isp_s > 0
+class TestDominantElement:
+    """Which element moved is a measurement. Whether that is station-keeping is
+    a judgement against cited budgets, and lives in the domain layer now."""
 
-    def test_leo_uses_monoprop(self) -> None:
-        pb = _compute_propellant_budget(0.020, 365.0, "LEO")
-        assert pb.assumed_isp_s == pytest.approx(220.0)
+    def test_altitude_dominant(self) -> None:
+        assert _dominant_element(d_alt=200.0, d_inc=0.01, d_ecc=0.0001) == "altitude"
 
-    def test_geo_uses_biprop(self) -> None:
-        pb = _compute_propellant_budget(0.050, 365.0, "GEO")
-        assert pb.assumed_isp_s == pytest.approx(320.0)
+    def test_inclination_dominant(self) -> None:
+        assert _dominant_element(d_alt=5.0, d_inc=2.0, d_ecc=0.0001) == "inclination"
 
-    def test_zero_dv_span(self) -> None:
-        # Should not raise even with very small values
-        pb = _compute_propellant_budget(0.0, 1.0, "LEO")
-        assert pb.propellant_used_pct == pytest.approx(0.0, abs=0.01)
+    def test_nothing_moved_is_mixed(self) -> None:
+        assert _dominant_element(d_alt=0.01, d_inc=0.0001, d_ecc=1e-9) == "mixed"
 
-    def test_budget_class_conservative(self) -> None:
-        pb = _compute_propellant_budget(0.001, 365.0, "LEO")
-        assert pb.budget_class == "Conservative"
+    def test_a_breakdown_decides_it_directly(self) -> None:
+        """With a measured decomposition there is nothing to infer."""
+        from spectre.astro.dv_estimation import build_breakdown
+        from tests.unit.test_dv_estimation import _pair
 
-    def test_budget_class_very_high(self) -> None:
-        pb = _compute_propellant_budget(5.0, 365.0, "LEO")
-        assert pb.budget_class == "Very High"
+        before, after, _ = _pair(1.0, 0.5, d_inc=1.0)
+        bd = build_breakdown(before, after, 1.0)
+        assert _dominant_element(0.0, 0.0, 0.0, bd) == "inclination"
 
 
 # ── _j2_raan_rate and _j2_argp_rate ──────────────────────────────────────────
@@ -313,36 +334,6 @@ class TestComputeDriftPhases:
         assert any(p.direction == "EAST" for p in phases)
 
 
-# ── _compute_anomaly_score ────────────────────────────────────────────────────
-
-class TestComputeAnomalyScore:
-    def test_returns_none_for_insufficient_manoeuvres(self) -> None:
-        result = _compute_anomaly_score([], [], None, None, 365.0, "GEO")
-        assert result is None
-
-    def test_returns_none_for_single_manoeuvre(self) -> None:
-        rec = _make_record()
-        mnv = Manoeuvre(
-            epoch=rec.epoch,
-            gap_days=7.0,
-            delta_v_km_s=0.010,
-            delta_alt_km=2.0,
-            delta_inc_deg=0.01,
-            delta_ecc=0.0001,
-            delta_raan_corrected_deg=0.0,
-            delta_argp_corrected_deg=0.0,
-            delta_period_s=10.0,
-            delta_drift_deg_day=None,
-            dominant_element="altitude",
-            manoeuvre_type="station_keeping",
-            sk_subtype="EW",
-            tle_before=rec,
-            tle_after=rec,
-        )
-        result = _compute_anomaly_score([mnv], [], None, None, 365.0, "GEO")
-        assert result is None
-
-
 # ── analyse_pattern_of_life ───────────────────────────────────────────────────
 
 class TestAnalysePatternOfLife:
@@ -356,7 +347,7 @@ class TestAnalysePatternOfLife:
         result = analyse_pattern_of_life(records, satno=25544, name="ISS")
         assert result.tle_count == 1
         assert len(result.manoeuvres) == 0
-        assert result.dominant_activity == "none_detected"
+        assert result.candidate_manoeuvres == []
 
     def test_multiple_leo_records(self) -> None:
         tle_text = f"{_LEO_TLE_A}\n{_LEO_TLE_B}\n{_LEO_TLE_C}"
@@ -374,19 +365,29 @@ class TestAnalysePatternOfLife:
         assert len(result.chart_alts) == 2
         assert len(result.chart_incs) == 2
 
-    def test_result_has_propellant_budget(self) -> None:
+    def test_result_carries_the_detection_audit(self) -> None:
+        """Measurement, not interpretation: what was examined and discarded."""
         tle_text = f"{_LEO_TLE_A}\n{_LEO_TLE_B}"
         records = parse_tle_history(tle_text)
         result = analyse_pattern_of_life(records)
-        assert result.propellant_budget is not None
-        assert result.propellant_budget.assumed_isp_s > 0
+        assert result.noise_model is not None
+        assert result.pairs_examined >= 0
 
-    def test_result_has_intel_assessment(self) -> None:
+    def test_the_astro_layer_no_longer_interprets(self) -> None:
+        """Every calibrated judgement now has exactly one home.
+
+        Two sets of numbers for the same physics is worse than one set that is
+        wrong, because only one of them ever gets updated.
+        """
         tle_text = f"{_LEO_TLE_A}\n{_LEO_TLE_B}"
-        records = parse_tle_history(tle_text)
-        result = analyse_pattern_of_life(records)
-        assert result.intel_assessment is not None
-        assert result.intel_assessment.mission_profile != ""
+        result = analyse_pattern_of_life(parse_tle_history(tle_text))
+        for gone in ("propellant_budget", "anomaly_score", "intel_assessment",
+                     "dominant_activity", "is_station_keeping", "sk_type"):
+            assert not hasattr(result, gone), (
+                f"{gone} is back on the astro result. It is a judgement against "
+                "cited per-regime budgets and belongs in "
+                "spectre.domain.pol_assessment."
+            )
 
     def test_geo_records(self) -> None:
         tle_text = f"{_GEO_TLE_A}\n{_GEO_TLE_B}\n{_GEO_TLE_C}"

@@ -1,0 +1,191 @@
+{% if error %}
+<p class="error-msg">{{ error }}</p>
+{% elif not screening %}
+<p class="empty-msg">No asset screened yet &mdash; select a blue asset and click Screen Asset.</p>
+{% else %}
+<div class="threat-sweep-result">
+
+  <div class="threat-sweep-summary">
+    <span class="badge-ok">Asset Screening: {{ asset_name }}{% if asset_satno %} [{{ asset_satno }}]{% endif %}</span>
+    <span class="intercept-detail">
+      {{ actors_considered }} candidate actor(s) in {{ asset_regime }},
+      {{ actors_reachable }} within {{ budget_m_s | m_s }} m/s,
+      {{ "%.1f" | format(elapsed_s) }}s
+    </span>
+  </div>
+
+  {% if not screening.ranked %}
+  {# Never render an empty list without a reason: "nothing listed" and
+     "nothing can reach you" must not look the same. #}
+  <div class="callout callout-gold" style="margin:0.6rem 0; font-size:0.75rem">
+    <strong>No candidate actor can reach this asset within {{ budget_m_s | m_s }} m/s.</strong>
+    {{ actors_considered }} red object(s) in a compatible regime were screened
+    and none produced a transfer inside the budget. That is a finding, not an
+    absence of data.
+  </div>
+  {% else %}
+
+  {# ── Most dangerous actor ─────────────────────────────────────────────── #}
+  {% set worst = screening.most_dangerous %}
+  {% set wc = band_colours.get(worst.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
+  <div style="border-left:4px solid {{ wc[0] }}; background:{{ wc[1] }}; border-radius:6px; padding:0.75rem 1rem; margin:0.6rem 0">
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap">
+      {# White on the band's own colour measured 2.15:1 for HIGH and 2.28:1
+         for LOW, so the verdict word on the highest-priority actor was the
+         least readable thing on the panel. .spectre-band-badge carries the
+         darkened fill token instead, which clears 4.5:1 in both themes. #}
+      <span class="spectre-band-badge spectre-band-{{ worst.verdict_label | lower }}">&#9888; {{ worst.verdict_label }}</span>
+      <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS ACTOR</span>
+      <strong style="font-size:0.82rem">{{ worst.actor_name }}</strong>
+      <span style="font-size:0.72rem; color:var(--text-muted)">[{{ worst.actor_satno }}]{% if worst.country %} &#183; {{ worst.country }}{% endif %}</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
+      <div class="stat-card">
+        <div class="stat-val" style="color:{{ wc[0] }}">{{ worst.warning_hours | tof }}</div>
+        <div class="stat-lbl">Warning Time</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">{{ worst.delta_v_m_s | m_s }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
+        <div class="stat-lbl">&#916;V Required</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst.method | upper }}</div>
+        <div class="stat-lbl">Method</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst.assessment.posture_label }}</div>
+        <div class="stat-lbl">Posture</div>
+      </div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem; flex-wrap:wrap; font-size:0.7rem">
+      <span style="color:var(--text-muted)">GEOMETRIC ACCESS</span>
+      <strong>{{ worst.assessment.access_label }}</strong>
+      <span style="color:var(--text-muted)">&#183; ASSESSED CAPABILITY</span>
+      <strong>{{ worst.assessment.capability_label }}</strong>
+      <span style="color:var(--text-muted)">&#183; CONFIDENCE</span>
+      <strong>{{ worst.assessment.confidence }}</strong>
+      {% if worst.assessment.inputs_missing %}
+      <span style="color:var(--text-muted)" title="Evidence not available: {{ worst.assessment.inputs_missing | join(', ') }}">
+        &#183; {{ worst.assessment.inputs_missing | length }} input(s) unavailable
+      </span>
+      {% endif %}
+    </div>
+
+    <p style="margin:0; font-size:0.73rem; color:var(--text-dim)" title="{{ worst.assessment.posture_basis }}">
+      {{ worst.assessment.rationale }}
+    </p>
+  </div>
+
+  {# ── Earliest arrival, and the disagreement if there is one ───────────── #}
+  {% set soon = screening.earliest_arrival %}
+  {% if screening.disagreement %}
+  <div style="border-left:4px solid var(--spectre-status-violet); background:rgba(var(--spectre-status-violet-rgb), 0.07); border-radius:6px; padding:0.6rem 0.9rem; margin:0.5rem 0">
+    <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.35rem; flex-wrap:wrap">
+      <span style="font-size:0.7rem; font-weight:700; color:var(--spectre-status-violet); letter-spacing:0.05em">EARLIEST ARRIVAL</span>
+      <strong style="font-size:0.78rem">{{ soon.actor_name }}</strong>
+      <span style="font-size:0.72rem; color:var(--text-muted)">[{{ soon.actor_satno }}] &#183; {{ soon.warning_hours | tof }} &#183; {{ soon.delta_v_m_s | m_s }} m/s &#183; assessed {{ soon.verdict_label }}</span>
+    </div>
+    <p style="margin:0; font-size:0.73rem; color:var(--text-dim)">{{ screening.disagreement }}</p>
+  </div>
+  {% endif %}
+
+  {# ── Ranked actor table ───────────────────────────────────────────────── #}
+  <div class="hrr-scroll" style="max-height:340px; margin-top:0.5rem">
+    <table class="hrr-table" style="font-size:0.68rem">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">Actor</th>
+          <th scope="col">SATNO</th>
+          <th scope="col">Country</th>
+          <th scope="col">Verdict</th>
+          <th scope="col">Access</th>
+          <th scope="col">Capability</th>
+          <th scope="col">Posture</th>
+          <th scope="col" style="text-align:right">Warning</th>
+          <th scope="col" style="text-align:right">&#916;V (m/s)</th>
+          <th scope="col">Method</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in screening.ranked %}
+        {% set vc = band_colours.get(v.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
+        {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
+        {% set row_id = 'scr-' ~ loop.index0 %}
+        <tr class="threat-parent" onclick="scrToggle('{{ row_id }}')" style="cursor:pointer"
+            tabindex="0" onkeydown="spectreActivate(event)"
+            title="Open the profiles behind this verdict">
+          <td class="col-dim">{{ loop.index }}</td>
+          <td><strong>{{ v.actor_name }}</strong></td>
+          <td class="col-dim">{{ v.actor_satno }}</td>
+          <td class="col-dim">{{ v.country or "-" }}</td>
+          <td><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></td>
+          <td class="col-dim">{{ v.assessment.access_label }}</td>
+          <td class="col-dim">{{ v.assessment.capability_label }}</td>
+          <td class="col-dim">{{ v.assessment.posture_label }}</td>
+          <td style="text-align:right">{{ v.warning_hours | tof }}</td>
+          <td class="mnv-dv" style="text-align:right">{{ v.delta_v_m_s | m_s }}</td>
+          <td class="col-dim">{{ v.method }}
+            {% if profiles %}<span class="threat-profile-badge">{{ profiles | length }}</span>{% endif %}
+          </td>
+        </tr>
+        {% for e in profiles %}
+        <tr class="scr-child {{ row_id }}" style="display:none">
+          <td></td>
+          <td class="col-dim" colspan="3">{{ e.burn_location }} &#183; {{ e.burn_epoch.strftime('%Y-%m-%d %H:%M') }}Z</td>
+          <td class="col-dim" colspan="4">{{ e.posture_label }}</td>
+          <td style="text-align:right" class="col-dim">{{ e.tof_hours | tof }}</td>
+          <td class="mnv-dv" style="text-align:right">{{ e.delta_v_m_s | m_s }}</td>
+          <td class="col-dim">{{ e.method }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {# ── What was refused, and what could not be screened ─────────────────── #}
+  {% if method_refusals %}
+  <details style="margin:0.4rem 0">
+    <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
+      {{ method_refusals | length }} method(s) produced no solution
+    </summary>
+    <div style="padding:0.4rem 0.6rem">
+      {% for method, reason in method_refusals %}
+      <p style="margin:0.15rem 0; font-size:0.74rem">
+        <strong>{{ method | upper }}</strong>
+        <span style="color:var(--text-muted)">{{ reason }}</span>
+      </p>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if errors %}
+  <details style="margin:0.4rem 0">
+    <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
+      {{ errors | length }} candidate(s) not assessed
+    </summary>
+    <div style="padding:0.4rem 0.6rem">
+      {% for e in errors %}
+      <p style="margin:0.15rem 0; font-size:0.74rem; color:var(--text-muted)">{{ e }}</p>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+</div>
+
+<script>
+  /* Open one actor's profiles. Kept here rather than in the page shell so the
+     behaviour arrives with the fragment that needs it. */
+  function scrToggle(cls) {
+    document.querySelectorAll('.scr-child.' + cls).forEach(function (row) {
+      row.style.display = row.style.display === 'none' ? '' : 'none';
+    });
+  }
+</script>
+{% endif %}

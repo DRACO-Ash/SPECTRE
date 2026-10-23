@@ -6,7 +6,7 @@
   <span class="mnv-selected-detail">
     {{ selected.burn_location.value | replace("_", " ") | title }}
     &mdash; {{ selected.burn_type.value | title }}
-    &mdash; ΔV <strong>{{ "%.3f" | format(selected.delta_v_km_s) }} km/s</strong>
+    &mdash; ΔV <strong>{{ selected.delta_v_m_s | m_s }} m/s</strong>
     &mdash; burn {{ selected.burn_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
   </span>
 </div>

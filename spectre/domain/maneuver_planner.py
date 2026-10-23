@@ -30,9 +30,9 @@ def validate_search_config(config: ManeuverSearchConfig) -> None:
         raise ManeuverPlannerError(
             "search_window_stop must be after search_window_start."
         )
-    if config.max_delta_v_km_s <= 0:
+    if config.max_delta_v_m_s <= 0:
         raise ManeuverPlannerError(
-            f"max_delta_v_km_s must be positive (got {config.max_delta_v_km_s})."
+            f"max_delta_v_m_s must be positive (got {config.max_delta_v_m_s})."
         )
     if not config.burn_types:
         raise ManeuverPlannerError("At least one BurnType must be selected.")

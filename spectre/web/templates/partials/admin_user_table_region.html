@@ -1,0 +1,28 @@
+{# The whole table, so a flash-carrying response can be rooted at a <div>.
+   htmx 1.9.12 parses a response whose first tag is <tr> by wrapping it in
+   <table><tbody>, and the HTML parser then foster-parents any sibling <div>
+   out of the table. htmx received a non-element, threw
+   "e.querySelectorAll is not a function", and abandoned the entire swap, so
+   created, edited and deleted users never appeared until a manual refresh.
+   Swapping this region keeps the out-of-band flash a legal sibling. #}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--spectre-size-small)">
+    <thead>
+      <tr style="border-bottom:1px solid var(--spectre-color-border)">
+        <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                   color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                   letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Username</th>
+        <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                   color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                   letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Role</th>
+        <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:left;
+                   color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                   letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Created</th>
+        <th style="padding:var(--spectre-space-3) var(--spectre-space-4); text-align:right;
+                   color:var(--spectre-color-text-muted); font-weight:600; text-transform:uppercase;
+                   letter-spacing:0.05em; font-size:var(--spectre-size-xsmall)">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="user-tbody">
+      {% include "partials/admin_user_table.html" %}
+    </tbody>
+  </table>

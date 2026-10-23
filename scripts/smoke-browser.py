@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Drive the real console in a real browser and fail on anything it reports.
+
+Why this exists
+---------------
+Two defects reached production returning HTTP 200 with a working server and a
+broken page, and 850 server-side tests could see neither:
+
+  * Creating a user committed the row, returned the new table, and then threw
+    ``TypeError: e.querySelectorAll is not a function`` in the browser, so the
+    swap was abandoned and the operator saw nothing happen.
+  * The sidebar "Return to Operations" form submitted without a CSRF token and
+    answered 403, stranding the operator inside training mode.
+
+Both are failures of what the browser did with a correct response. A status
+code cannot see them. A console-error assertion sees both immediately.
+
+What it does
+------------
+Boots the application itself on a free port against a throwaway SQLite
+database, drives the paths an operator actually walks, and fails on any
+uncaught exception, any HTMX swap error, or any same-origin console error.
+
+It is deliberately loud rather than skippable. A probe that quietly does
+nothing when its browser is missing is worse than no probe, because the run
+still goes green. Set SMOKE_BROWSER_SKIP=1 to skip it on purpose; anything
+else that goes wrong is a failure.
+
+Usage
+-----
+    python3 scripts/smoke-browser.py            # boots its own instance
+    python3 scripts/smoke-browser.py --base-url http://127.0.0.1:8099
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ADMIN_USER = "smoke_admin"
+_ADMIN_PASS = "smoke-probe-password-not-a-secret"
+_SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
+
+# A real catalogued GEO element set, used only to give the sweep a red object
+# without needing UDL credentials.
+_PROBE_ASSET_TLE = (
+    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9995\n"
+    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46210"
+)
+
+_PROBE_RED_TLE = (
+    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
+    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
+)
+
+# Network failures reaching outside the app are the sandbox or the network, not
+# a defect in the page. Everything else, including any same-origin request that
+# fails, is ours and fails the probe.
+_EXTERNAL_NETWORK_MARKERS = (
+    "net::err_connection_reset",
+    "net::err_name_not_resolved",
+    "net::err_internet_disconnected",
+    "net::err_connection_refused",
+    "net::err_blocked_by_client",
+)
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _find_chromium() -> str | None:
+    """Return an explicit Chromium path, or None to let Playwright decide.
+
+    The pre-provisioned browser directory is versioned, so the path is
+    discovered rather than pinned; a hard-coded version would rot silently.
+    """
+    for root in (Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")),):
+        if not root.is_dir():
+            continue
+        for candidate in sorted(root.glob("chromium-*/chrome-linux/chrome")):
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+class _AppUnderTest:
+    """Boot the application on a free port against a throwaway database."""
+
+    def __init__(self) -> None:
+        self.port = _free_port()
+        self.base_url = f"http://127.0.0.1:{self.port}"
+        self._tmp = tempfile.mkdtemp(prefix="spectre-smoke-")
+        self._proc: subprocess.Popen[bytes] | None = None
+        self.log_path = Path(self._tmp) / "server.log"
+
+    def __enter__(self) -> _AppUnderTest:
+        data_dir = Path(self._tmp) / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        env = {
+            **os.environ,
+            "SECRET_KEY": _SECRET_KEY,
+            "SPECTRE_ADMIN_USER": _ADMIN_USER,
+            "SPECTRE_ADMIN_PASS": _ADMIN_PASS,
+            "SPECTRE_SQLITE_DIR": str(data_dir),
+            "SPECTRE_DATA_DIR": str(data_dir),
+            "SPECTRE_SESSION_COOKIE_SECURE": "false",
+            "PORT": str(self.port),
+        }
+        log = self.log_path.open("wb")
+        self._proc = subprocess.Popen(  # noqa: S603
+            [sys.executable, "-m", "uvicorn", "spectre.web.app:app",
+             "--host", "127.0.0.1", "--port", str(self.port), "--log-level", "warning"],
+            cwd=_REPO_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
+        )
+        self._wait_until_ready()
+        return self
+
+    def _wait_until_ready(self, timeout: float = 60.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._proc is not None and self._proc.poll() is not None:
+                raise RuntimeError(
+                    f"the application exited during boot:\n{self.log_path.read_text('utf-8', 'replace')[-2000:]}"
+                )
+            try:
+                with urllib.request.urlopen(f"{self.base_url}/login", timeout=2):  # noqa: S310
+                    return
+            except (urllib.error.URLError, OSError, TimeoutError):
+                time.sleep(0.5)
+        raise RuntimeError(f"the application did not answer within {timeout:.0f}s")
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._proc is not None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+
+class _Recorder:
+    """Collect everything the browser complains about, classified."""
+
+    def __init__(self) -> None:
+        self.fatal: list[str] = []
+        self.ignored: list[str] = []
+
+    def attach(self, page: object) -> None:
+        page.on("console", self._on_console)  # type: ignore[attr-defined]
+        page.on("pageerror", lambda exc: self.fatal.append(f"uncaught exception: {exc}"))  # type: ignore[attr-defined]
+
+    def _on_console(self, message: object) -> None:
+        if message.type != "error":  # type: ignore[attr-defined]
+            return
+        text = str(message.text)  # type: ignore[attr-defined]
+        lowered = text.lower()
+        if any(marker in lowered for marker in _EXTERNAL_NETWORK_MARKERS):
+            self.ignored.append(text)
+            return
+        self.fatal.append(f"console error: {text}")
+
+    def drain(self, step: str) -> list[str]:
+        found = [f"[{step}] {entry}" for entry in self.fatal]
+        self.fatal.clear()
+        return found
+
+
+async def _run(base_url: str) -> list[str]:
+    from playwright.async_api import async_playwright
+
+    failures: list[str] = []
+    executable = _find_chromium()
+    launch: dict[str, object] = {"args": ["--no-sandbox"]}
+    if executable:
+        launch["executable_path"] = executable
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(**launch)  # type: ignore[arg-type]
+        page = await browser.new_page()
+        rec = _Recorder()
+        rec.attach(page)
+        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+
+        def check(step: str, condition: bool, detail: str) -> None:
+            failures.extend(rec.drain(step))
+            if not condition:
+                failures.append(f"[{step}] {detail}")
+
+        # 1. Sign in.
+        await page.goto(f"{base_url}/login")
+        await page.fill('input[name="username"]', _ADMIN_USER)
+        await page.fill('input[name="password"]', _ADMIN_PASS)
+        await page.click('button[type="submit"]')
+        await page.wait_for_load_state("networkidle")
+        check("login", page.url.rstrip("/") == base_url.rstrip("/"),
+              f"expected the console at {base_url}, landed on {page.url}")
+
+        # 2. The operator console renders.
+        check("console", await page.locator("body").count() == 1, "no body rendered")
+
+        # 3. Create a user and see it appear WITHOUT a reload. This is the
+        #    exact motion that failed silently in production.
+        await page.goto(f"{base_url}/admin/users")
+        await page.wait_for_load_state("networkidle")
+        before = await page.locator("#user-tbody tr").count()
+        await page.fill("#new-username", "smoke_operator")
+        await page.fill("#new-password", "smoke-operator-password")
+        await page.select_option("#new-role", "operator")
+        await page.click('button:has-text("Create User")')
+        await page.wait_for_timeout(1500)
+        after = await page.locator("#user-tbody tr").count()
+        flash = (await page.locator("#admin-flash").inner_text()).strip()
+        check("admin-create", after == before + 1,
+              f"the new row never appeared without a reload ({before} -> {after})")
+        check("admin-create-flash", bool(flash), "no confirmation message was shown")
+        check("admin-create-reset", await page.input_value("#new-username") == "",
+              "the create form did not clear after a successful submit")
+
+        # 4. Delete it again, the other flash-carrying swap.
+        row = page.locator("#user-tbody tr").nth(after - 1).locator('button:has-text("Delete")')
+        if await row.count():
+            await row.first.click()
+            await page.wait_for_timeout(1500)
+            check("admin-delete", await page.locator("#user-tbody tr").count() == before,
+                  "the deleted row did not disappear without a reload")
+
+        # 4b. The threat sweep, the capability Phase 1 changed.
+        #
+        #     Honest limit, stated rather than hidden: the sweep button only
+        #     renders once a red satellite is selected, and that dropdown is
+        #     populated from UDL. A throwaway instance has no credentials, so
+        #     the sweep CANNOT be driven end to end here. What the probe can do
+        #     is reach the panel, confirm the form and the override control are
+        #     present and usable, and drive the sweep whenever data does exist.
+        #
+        #     A step that silently does nothing is the exact failure this probe
+        #     was written to catch, so it says which of the two happened.
+        await page.goto(f"{base_url}/")
+        await page.wait_for_load_state("networkidle")
+        sweep_form = page.locator('form:has(textarea[name="manual_red_tle"])')
+        check("threat-sweep", await sweep_form.count() > 0,
+              "the sweep form is not reachable from the console")
+
+        # The override lives inside a collapsed <details>; a hidden control
+        # cannot be filled, so open it the way an operator would.
+        toggle = page.locator("#ts-manual-red-tle-toggle > summary")
+        check("threat-sweep-override", await toggle.count() > 0,
+              "the manual red TLE override control is missing")
+        if await toggle.count():
+            await toggle.first.click()
+            await page.wait_for_timeout(300)
+            await page.locator('textarea[name="manual_red_tle"]').fill(_PROBE_RED_TLE)
+
+        sweep_button = page.locator('button:has-text("Sweep Targets")')
+        if await sweep_button.count():
+            await sweep_button.first.click()
+            await page.wait_for_timeout(6000)
+            body = await page.content()
+            check("threat-sweep-run", "Internal Server Error" not in body,
+                  "the sweep returned a server error")
+            check("threat-sweep-verdict",
+                  ("GEOMETRIC ACCESS" in body) or ("No intercept solutions" in body),
+                  "the sweep rendered neither a verdict nor an explanation")
+            print("        threat sweep driven end to end; verdict panel rendered")
+        else:
+            print("        threat sweep NOT driven: no red satellite available "
+                  "without UDL credentials. Form and override reached only.")
+
+        # 4c. Asset screening, the inverse of the sweep.
+        #
+        #     Unlike the sweep this CAN be driven without UDL, because the
+        #     manual asset override needs no watchlist entry to resolve. What
+        #     it cannot do is produce a ranked list, since the candidate actors
+        #     all come from the HRR watchlist. Both outcomes are legitimate and
+        #     the probe says which one it got.
+        await page.locator('button.htab[data-panel="hero-screen"]').click()
+        await page.wait_for_timeout(600)
+        screen_form = page.locator("#threat-screen-form")
+        check("asset-screening", await screen_form.count() > 0,
+              "the asset screening panel is not reachable from the console")
+
+        toggle = page.locator("#scr-manual-asset-toggle > summary")
+        check("asset-screening-override", await toggle.count() > 0,
+              "the manual asset TLE control is missing")
+        if await toggle.count():
+            await toggle.first.click()
+            await page.wait_for_timeout(300)
+            await page.locator('textarea[name="manual_asset_tle"]').fill(_PROBE_ASSET_TLE)
+
+        screen_button = page.locator('button:has-text("Screen Asset")')
+        check("asset-screening-button", await screen_button.count() > 0,
+              "the Screen Asset button is missing")
+        if await screen_button.count():
+            await screen_button.first.click()
+            await page.wait_for_timeout(5000)
+            body = await page.content()
+            check("asset-screening-run", "Internal Server Error" not in body,
+                  "screening returned a server error")
+            ranked = "MOST DANGEROUS ACTOR" in body
+            explained = (
+                "No HRR watchlist" in body
+                or "No red HRR objects" in body
+                or "No candidate actor can reach" in body
+            )
+            check("asset-screening-result", ranked or explained,
+                  "screening rendered neither a ranking nor an explanation")
+            check("asset-screening-units", "km/s" not in body,
+                  "screening put a km/s figure on screen")
+            print("        asset screening "
+                  + ("ranked candidate actors" if ranked
+                     else "explained why it had no candidates (no watchlist)"))
+
+        # 5. Enter training and leave it by the sidebar button, which is the
+        #    form that answered 403 in production.
+        await page.goto(f"{base_url}/training")
+        await page.wait_for_load_state("networkidle")
+        leave = page.locator('form[action="/training/leave"]')
+        count = await leave.count()
+        check("training-enter", count > 0, "no Return to Operations control on the training page")
+        if count:
+            await leave.nth(count - 1).locator('button[type="submit"]').click()
+            await page.wait_for_load_state("networkidle")
+            body = await page.content()
+            check("training-leave", "CSRF validation failed" not in body,
+                  "leaving training mode was rejected by the CSRF guard")
+            check("training-leave-lands", page.url.rstrip("/") == base_url.rstrip("/"),
+                  f"leaving training did not return to the console, landed on {page.url}")
+
+        # 6. Sign out from the admin page, the second CSRF-less form found.
+        await page.goto(f"{base_url}/admin/users")
+        await page.wait_for_load_state("networkidle")
+        await page.locator('form[action="/logout"] button[type="submit"]').first.click()
+        await page.wait_for_load_state("networkidle")
+        body = await page.content()
+        check("sign-out", "CSRF validation failed" not in body,
+              "signing out was rejected by the CSRF guard")
+
+        if rec.ignored:
+            print(f"  {len(rec.ignored)} external network message(s) ignored, e.g. {rec.ignored[0][:80]}")
+        await browser.close()
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", help="probe a running instance instead of booting one")
+    args = parser.parse_args()
+
+    if os.environ.get("SMOKE_BROWSER_SKIP") == "1":
+        print("  SKIPPED by SMOKE_BROWSER_SKIP=1")
+        return 0
+
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        print("  FAIL  playwright is not installed. It is in requirements-dev.txt.")
+        print("        This probe does not skip itself: a silent skip is how the")
+        print("        defects it exists to catch reached production.")
+        return 1
+
+    print("== Browser smoke probe ==")
+    if args.base_url:
+        failures = asyncio.run(_run(args.base_url))
+    else:
+        with _AppUnderTest() as app:
+            print(f"  booted a throwaway instance on {app.base_url}")
+            failures = asyncio.run(_run(app.base_url))
+
+    if failures:
+        print(f"  FAIL  {len(failures)} problem(s) the browser reported:")
+        for failure in failures:
+            print(f"    {failure}")
+        return 1
+    print("  PASS  login, admin create and delete, threat sweep panel,\n        asset screening, training exit and sign out, no console errors")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

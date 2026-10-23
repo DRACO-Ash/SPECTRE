@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
+from spectre.domain.manoeuvre_calibration import DEFAULT_SWEEP_BUDGET_M_S
 
 
 @dataclass
@@ -198,10 +199,10 @@ class ManeuverOption:
         burn_type: Impulsive or finite burn.
         burn_location: Orbital geometry tag for the burn point.
         burn_epoch: UTC datetime at which the burn is executed.
-        delta_v_km_s: Total delta-V magnitude in km/s.
-        dv_prograde: VNC prograde (along-track) component in km/s.
-        dv_normal: VNC normal (orbit-normal) component in km/s.
-        dv_radial: VNC radial (cross-track) component in km/s.
+        delta_v_m_s: Total delta-V magnitude in m/s.
+        dv_prograde: VNC prograde (along-track) component in m/s.
+        dv_normal: VNC normal (orbit-normal) component in m/s.
+        dv_radial: VNC radial (cross-track) component in m/s.
         intercept_epoch: UTC datetime when the intercept occurs.
         transfer_duration_s: Coast time from burn to intercept in seconds.
         intercept_range_km: Miss distance at intercept in km.
@@ -213,7 +214,7 @@ class ManeuverOption:
     burn_type: BurnType
     burn_location: BurnLocation
     burn_epoch: datetime
-    delta_v_km_s: float
+    delta_v_m_s: float
     dv_prograde: float
     dv_normal: float
     dv_radial: float
@@ -233,7 +234,7 @@ class ManeuverSearchConfig:
         blue_sat: Object name of the blue satellite (target).
         search_window_start: UTC start of the maneuver search window.
         search_window_stop: UTC end of the maneuver search window.
-        max_delta_v_km_s: Solutions requiring more than this ΔV are discarded.
+        max_delta_v_m_s: Solutions costing more than this, in m/s, are discarded.
         burn_types: Which burn types to include in the search.
         burn_locations: Which orbital positions to evaluate for the burn.
     """
@@ -242,7 +243,7 @@ class ManeuverSearchConfig:
     blue_sat: str
     search_window_start: datetime
     search_window_stop: datetime
-    max_delta_v_km_s: float = 3.0
+    max_delta_v_m_s: float = DEFAULT_SWEEP_BUDGET_M_S
     burn_types: list[BurnType] = field(
         default_factory=lambda: [BurnType.IMPULSIVE, BurnType.FINITE]
     )
@@ -287,7 +288,7 @@ class InterceptConfig:
         number_of_burns: Number of burn segments (reserved for future use).
         target_distance_m: Desired miss distance in metres (Proximity).
         minimize_delta_v: Minimise total ΔV (reserved for future use).
-        max_delta_v_km_s: ΔV budget constraint.
+        max_delta_v_m_s: ΔV budget constraint, in m/s.
     """
 
     red_sat: str
@@ -299,7 +300,7 @@ class InterceptConfig:
     number_of_burns: int = 1
     target_distance_m: float = 0.0
     minimize_delta_v: bool = True
-    max_delta_v_km_s: float = 3.0
+    max_delta_v_m_s: float = DEFAULT_SWEEP_BUDGET_M_S
 
 
 @dataclass
@@ -322,10 +323,10 @@ class BurnResult:
     burn_number: int
     segment_name: str
     burn_epoch: datetime
-    delta_v_km_s: float
-    dv_prograde: float = 0.0
-    dv_normal: float = 0.0
-    dv_radial: float = 0.0
+    delta_v_m_s: float          # m/s
+    dv_prograde: float = 0.0    # m/s
+    dv_normal: float = 0.0      # m/s
+    dv_radial: float = 0.0      # m/s
 
 
 @dataclass
@@ -334,7 +335,7 @@ class InterceptResult:
 
     Attributes:
         burns: Per-burn breakdown (epoch, ΔV components for each manoeuvre).
-        total_delta_v_km_s: Sum of all burn magnitudes.
+        total_delta_v_m_s: Sum of all burn magnitudes, in m/s.
         arrival_epoch: UTC time when the red satellite reaches its final position.
         intercept_range_km: Miss distance at arrival in km.
     """
@@ -343,7 +344,7 @@ class InterceptResult:
     blue_name: str
     method: InterceptMethod
     burns: list[BurnResult] = field(default_factory=list)
-    total_delta_v_km_s: float = 0.0
+    total_delta_v_m_s: float = 0.0
     arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     intercept_range_km: float = 0.0
     notes: str = ""
@@ -362,19 +363,51 @@ class ThreatTarget:
 
 
 @dataclass
+class ThreatActor:
+    """A candidate threat object: the thing that would have to manoeuvre.
+
+    The red-out sweep has one of these and never needs to name it, because
+    every entry belongs to the same object. Screening a blue asset inverts
+    that: there are many candidates and the question is which of them matters,
+    so the actor has to travel with the entry.
+    """
+
+    actor_name: str
+    actor_satno: str
+    country: str = ""
+    hrr_rank: int | None = None
+    regime: str = ""
+    #: True when the object was supplied by the operator rather than the HRR
+    #: watchlist, so the screen can say where its element set came from.
+    manual: bool = False
+
+
+@dataclass
 class ThreatSweepEntry:
     """One (target, epoch) intercept result."""
 
     target: ThreatTarget
     burn_epoch: datetime
     burn_location: str         # "now" | "apogee" | "perigee" | "asc_node" | "desc_node"
-    delta_v_km_s: float
+    delta_v_m_s: float         # m/s, converted once at the route boundary
     tof_hours: float
-    dv_prograde: float
-    dv_normal: float
-    dv_radial: float
+    dv_prograde: float         # m/s
+    dv_normal: float           # m/s
+    dv_radial: float           # m/s
     method: str                # "hohmann" | "lambert"
     notes: str = ""
+    #: Orbital regime of the manoeuvring object, needed to read the cost.
+    #: 50 m/s is a routine year at GEO and a major event at MEO.
+    regime: str = ""
+    #: BENIGN / ANNOYANCE / AGGRESSIVE / BEYOND PLATFORM, from
+    #: ``manoeuvre_calibration``. Computed once at the route boundary so no
+    #: template has to carry a delta-v threshold of its own.
+    posture_label: str = ""
+    #: Which object would fly this. None in the red-out sweep, where every
+    #: entry belongs to the one selected red satellite; set when screening a
+    #: blue asset against many candidate actors. Defaulted last so every
+    #: existing construction site stays valid.
+    actor: ThreatActor | None = None
 
 
 @dataclass

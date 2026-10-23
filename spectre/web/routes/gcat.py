@@ -25,20 +25,23 @@ Citation: data from GCAT (J. McDowell, planet4589.org/space/gcat)
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import logging
 import time
-import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 
 log = logging.getLogger(__name__)
@@ -46,6 +49,19 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/gcat", tags=["gcat"])
 
 BASE_URL = "https://planet4589.org/space/gcat"
+# Every URL in the table below is https. The fetcher checks the scheme anyway,
+# so a URL a later contributor sources from configuration or from an operator
+# cannot reach the network over anything else. This is the narrower of the two
+# controls in that path: the transport is httpx, which has no file: or ftp:
+# handler at all, and this list then narrows HTTP and HTTPS down to HTTPS.
+_ALLOWED_URL_SCHEMES = frozenset({"https"})
+
+# Redirect hops are taken one at a time so the scheme allowlist can be applied
+# to each. Five is generous: the only redirects GCAT has ever served are scheme
+# and trailing-slash normalisations, and the cap is what ends a redirect loop
+# rather than following it until the timeout.
+_MAX_REDIRECT_HOPS = 5
+
 PAGE_SIZE = 100
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gcat-dl")
 
@@ -261,17 +277,68 @@ _FETCH_ERRORS: list[str] = []
 
 # ── TSV fetcher (sync — runs in ThreadPoolExecutor) ───────────────────────────
 
+def _get_rechecking_every_hop(
+    client: httpx.Client, url: str, label: str,
+) -> httpx.Response | None:
+    """GET *url*, re-applying the scheme allowlist at every redirect hop.
+
+    ``follow_redirects=True`` carries no policy of its own, so the check made
+    once against the table's URL said nothing about where the transport
+    actually went: a 30x from planet4589.org could walk the fetch onto plain
+    http, or onto an address inside the cluster, with the allowlist never
+    consulted again (CWE-918). Returns ``None`` when a hop is refused or the
+    chain runs past :data:`_MAX_REDIRECT_HOPS`.
+    """
+    for _ in range(_MAX_REDIRECT_HOPS + 1):
+        resp = client.get(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        if not resp.is_redirect:
+            return resp
+        # Relative Location headers are legal, so the hop is resolved against
+        # the URL that served the redirect before its scheme is read.
+        url = urllib.parse.urljoin(url, resp.headers.get("location", ""))
+        scheme = urllib.parse.urlsplit(url).scheme
+        if scheme not in _ALLOWED_URL_SCHEMES:
+            log.error(
+                "[GCAT] ✗  Refusing %-20s: redirected to unsupported scheme '%s'",
+                label, scheme,
+            )
+            return None
+    log.error(
+        "[GCAT] ✗  Refusing %-20s: more than %d redirects", label, _MAX_REDIRECT_HOPS,
+    )
+    return None
+
+
 def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None]:
     """Download and parse one GCAT TSV.  Returns (key, df) or (key, None)."""
     url = meta["url"]
     label = meta["label"]
+    scheme = urllib.parse.urlsplit(url).scheme
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        log.error("[GCAT] ✗  Refusing %-20s: unsupported URL scheme '%s'", label, scheme)
+        return key, None
+
     log.info("[GCAT] ↓  %-24s  %s", label, url)
     t0 = time.perf_counter()
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 — URL from hardcoded GCAT table, not user input
-            raw = resp.read().decode("utf-8", errors="replace")
+        # httpx, not urlopen. urlopen honours the file: and ftp: schemes, so a
+        # URL reaching it from anywhere but the table above could read the
+        # container's filesystem (CWE-918); httpx speaks HTTP and HTTPS only,
+        # so that whole class of URL now fails to resolve rather than
+        # depending on the scheme check to stop it. The check stays, because
+        # https-only is narrower than what httpx allows. The rest of SPECTRE
+        # already talks HTTP through httpx; this call was the outlier, and the
+        # outlier was what the scanners objected to.
+        with httpx.Client(timeout=30.0, follow_redirects=False) as client:
+            resp = _get_rechecking_every_hop(client, url, label)
+            if resp is None:
+                return key, None
+            resp.raise_for_status()
+            # Not resp.text: that runs charset detection, and GCAT serves
+            # mixed encodings. Decoding as UTF-8 with replacement is what the
+            # parser below has always been handed.
+            raw = resp.content.decode("utf-8", errors="replace")
     except Exception as exc:
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
         return key, None
@@ -407,7 +474,7 @@ def _page_data(
             .any(axis=1)
         )
         df = df[mask]
-        log.debug("[GCAT] search '%s' on %s: %d → %d rows", q, key, total_rows, len(df))
+        log.debug("[GCAT] search '%s' on %s: %d → %d rows", log_safe(q), key, total_rows, len(df))
 
     filtered_rows = len(df)
 
@@ -415,9 +482,9 @@ def _page_data(
         try:
             df = df.sort_values(sort, ascending=bool(asc), key=lambda s: s.str.lower())
         except Exception as exc:
-            log.warning("[GCAT] sort failed for '%s': %s", sort, exc)
+            log.warning("[GCAT] sort failed for '%s': %s", log_safe(sort), exc)
     elif sort:
-        log.warning("[GCAT] sort column '%s' not found in %s", sort, key)
+        log.warning("[GCAT] sort column '%s' not found in %s", log_safe(sort), key)
         sort = ""
 
     total_pages = max(1, (filtered_rows + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -427,7 +494,7 @@ def _page_data(
 
     log.info(
         "[GCAT] table %-14s  q='%s'  sort='%s'  page=%d/%d  rows=%d/%d",
-        key, q, sort, page, total_pages, filtered_rows, total_rows,
+        key, log_safe(q), log_safe(sort), page, total_pages, filtered_rows, total_rows,
     )
 
     return {
@@ -460,7 +527,7 @@ async def gcat_panel(
     """
     log.info(
         "[GCAT] Panel opened by %s — %d/%d datasets in cache",
-        current_user.username, len(_CACHE), len(DATASETS),
+        log_safe(current_user.username), len(_CACHE), len(DATASETS),
     )
     return render(request, "partials/gcat_panel.html", _panel_context())
 
@@ -481,17 +548,20 @@ async def gcat_table(
     Subsequent requests for the same key are served from in-memory cache.
     """
     if dataset not in DATASETS:
-        log.warning("[GCAT] Unknown dataset key '%s' requested by %s", dataset, current_user.username)
+        log.warning(
+            "[GCAT] Unknown dataset key '%s' requested by %s",
+            log_safe(dataset), log_safe(current_user.username),
+        )
         return HTMLResponse(
             '<div class="gcat-error-state">'
             f'<span class="gcat-error-icon">⚠</span>'
-            f'Unknown dataset: <code>{dataset}</code>'
+            f'Unknown dataset: <code>{html.escape(dataset)}</code>'
             '</div>',
             status_code=404,
         )
 
     if dataset not in _CACHE:
-        log.info("[GCAT] On-demand download: '%s' for %s", dataset, current_user.username)
+        log.info("[GCAT] On-demand download: '%s' for %s", dataset, log_safe(current_user.username))
         loop = asyncio.get_event_loop()
         _, df_result = await loop.run_in_executor(
             _EXECUTOR, _fetch_one, dataset, DATASETS[dataset]
@@ -534,7 +604,7 @@ async def gcat_refresh(
     global _CACHE_FETCH_TIME
     log.info(
         "[GCAT] ══ Manual refresh by %s — clearing %d cached datasets ══",
-        current_user.username, len(_CACHE),
+        log_safe(current_user.username), len(_CACHE),
     )
     _CACHE.clear()
     _CACHE_FETCH_TIME = None
@@ -542,6 +612,6 @@ async def gcat_refresh(
 
     log.info(
         "[GCAT] Refresh complete for %s — %d datasets, %d total rows",
-        current_user.username, len(_CACHE), sum(v["rows"] for v in _CACHE.values()),
+        log_safe(current_user.username), len(_CACHE), sum(v["rows"] for v in _CACHE.values()),
     )
     return render(request, "partials/gcat_panel.html", _panel_context())
