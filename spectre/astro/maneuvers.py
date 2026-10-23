@@ -15,6 +15,7 @@ import numpy as np
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
 from spectre.astro.cw_geometry import _initial_hill_state
+from spectre.astro.kepler import propagate_two_body
 from spectre.astro.lambert import LambertSolution, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
@@ -181,16 +182,16 @@ def hohmann_intercept(
     result = hohmann(r1, r2, mu)
     t_arrival = t_departure + timedelta(seconds=result.transfer_time_s)
 
-    # Departure burn is along velocity direction (prograde).
-    v_hat = sv_red.v / sv_red.v_mag
-    dv1_vec = v_hat * result.delta_v_1
+    # transfers.hohmann returns magnitudes. Raising burns are prograde and
+    # lowering burns retrograde, along the interceptor's own velocity at each
+    # burn; the arrival state comes from propagating the transfer arc.
+    sense = 1.0 if r2 >= r1 else -1.0
+    dv1_vec = sense * result.delta_v_1 * sv_red.v / sv_red.v_mag
     burn1 = _make_burn(1, t_departure, dv1_vec, sv_red)
 
-    # Arrival burn — propagate blue to arrival time for frame reference.
-    sv_blue_arr = blue_orbit.propagate(t_arrival)
-    v_hat_arr = sv_blue_arr.v / sv_blue_arr.v_mag
-    dv2_vec = v_hat_arr * result.delta_v_2
-    burn2 = _make_burn(2, t_arrival, dv2_vec, sv_blue_arr)
+    sv_arr = _coast(sv_red, dv1_vec, t_arrival, mu)
+    dv2_vec = sense * result.delta_v_2 * sv_arr.v / sv_arr.v_mag
+    burn2 = _make_burn(2, t_arrival, dv2_vec, sv_arr)
 
     return InterceptSolution(
         method="hohmann",
@@ -198,7 +199,7 @@ def hohmann_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=0.0,
+        miss_distance_km=_separation(sv_arr, blue_orbit),
         transfer_result=result,
     )
 
@@ -240,20 +241,25 @@ def bielliptic_intercept(
     result = bielliptic(r1, r2, rb_km, mu)
     t_arrival = t_departure + timedelta(seconds=result.transfer_time_s)
 
-    # Burns: departure, intermediate apoapsis, circularise at target.
-    v_hat = sv_red.v / sv_red.v_mag
-    burn1 = _make_burn(1, t_departure, v_hat * result.delta_v_1, sv_red)
+    # Burn 1 raises apoapsis to rb. Burn 2, at rb, moves perigee to r2:
+    # prograde when that raises it, retrograde when it lowers it. Burn 3
+    # circularises at the perigee of the second ellipse, which is always a
+    # retrograde burn. Each is pointed along the interceptor's velocity on the
+    # transfer arc at that instant, from propagating the arc.
+    dv1_vec = result.delta_v_1 * sv_red.v / sv_red.v_mag
+    burn1 = _make_burn(1, t_departure, dv1_vec, sv_red)
 
-    # Intermediate burn at apoapsis of first transfer ellipse.
     t_mid = t_departure + timedelta(
         seconds=math.pi * math.sqrt(((r1 + rb_km) / 2.0) ** 3 / mu)
     )
-    sv_red_mid = red_orbit.propagate(t_mid)
-    burn2 = _make_burn(2, t_mid, v_hat * result.delta_v_2, sv_red_mid)
+    sv_mid = _coast(sv_red, dv1_vec, t_mid, mu)
+    sense = 1.0 if r2 >= r1 else -1.0
+    dv2_vec = sense * result.delta_v_2 * sv_mid.v / sv_mid.v_mag
+    burn2 = _make_burn(2, t_mid, dv2_vec, sv_mid)
 
-    sv_blue_arr = blue_orbit.propagate(t_arrival)
-    v_hat_arr = sv_blue_arr.v / sv_blue_arr.v_mag
-    burn3 = _make_burn(3, t_arrival, v_hat_arr * result.delta_v_3, sv_blue_arr)
+    sv_arr = _coast(sv_mid, dv2_vec, t_arrival, mu)
+    dv3_vec = -result.delta_v_3 * sv_arr.v / sv_arr.v_mag
+    burn3 = _make_burn(3, t_arrival, dv3_vec, sv_arr)
 
     return InterceptSolution(
         method="bielliptic",
@@ -261,7 +267,7 @@ def bielliptic_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=0.0,
+        miss_distance_km=_separation(sv_arr, blue_orbit),
         transfer_result=result,
     )
 
@@ -1575,6 +1581,16 @@ def min_time_intercept_wrapper(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _coast(sv: StateVector, dv: np.ndarray, until: datetime, mu: float) -> StateVector:
+    """Apply *dv* to *sv* and propagate two-body to *until*."""
+    r, v = propagate_two_body(sv.r, sv.v + dv, (until - sv.epoch).total_seconds(), mu)
+    return StateVector(epoch=until, r=r, v=v)
+
+
+def _separation(sv: StateVector, target: TLEOrbit) -> float:
+    """Distance (km) from *sv* to *target* at the same epoch."""
+    return float(np.linalg.norm(sv.r - target.propagate(sv.epoch).r))
 
 def _make_burn(
     number: int,
