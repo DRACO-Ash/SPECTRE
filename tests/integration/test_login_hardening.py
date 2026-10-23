@@ -104,13 +104,24 @@ class TestFailedLoginRateLimit:
         monkeypatch.setattr("spectre.web.routes.login.verify_password", lambda *_: False)
         exhausted = "203.0.113.20"
         untouched = "203.0.113.21"
+        # Its own account name. The username tier is module-level state, so a
+        # name shared with the test above arrives already exhausted and this
+        # test reports the address tier throttling too early when nothing of
+        # the sort has happened.
+        victim = "ghost-operator-two"
 
         for _ in range(10):
-            assert _login(client, "ghost-operator", "wrong", address=exhausted).status_code == 401
-        assert _login(client, "ghost-operator", "wrong", address=exhausted).status_code == 429
+            assert _login(client, victim, "wrong", address=exhausted).status_code == 401
+        assert _login(client, victim, "wrong", address=exhausted).status_code == 429
 
         # One address under attack must not sign out everyone else.
-        assert _login(client, "ghost-operator", "wrong", address=untouched).status_code == 401
+        #
+        # A DIFFERENT username, deliberately. There is a second tier metering
+        # the account, so reusing "ghost-operator" here would be refused by
+        # that tier and this test would report the address tier leaking when
+        # it was the username tier doing its job. The two budgets are only
+        # separable by varying one at a time.
+        assert _login(client, "other-ghost", "wrong", address=untouched).status_code == 401
 
 
 class TestTimingEquivalence:
@@ -372,3 +383,88 @@ class TestRevocationDoesNotRefuseTheNextSession:
             "session_generation must only ever be incremented, never set from a "
             f"clock or a literal; these do not: {offenders}"
         )
+
+
+class TestTheLimiterCannotBeOutrunByRotatingTheHeader:
+    """The address tier alone was decorative, and measurement is what showed it.
+
+    ``_client_address`` reads the first X-Forwarded-For entry, and the comment
+    beside it argued the platform router rewrites that header. That is an
+    assumption about an ingress this code cannot see, and if the router
+    APPENDS instead, the caller chooses the key the limiter counts.
+
+    Measured against the real application before the username tier existed:
+    25 failed sign-ins with the header rotated per request produced 25 x 401
+    and not one 429, while 25 from a fixed address produced 10 x 401 then
+    15 x 429. The guard was perfect against an attacker who chose not to
+    defeat it.
+
+    A brute force is a search over passwords for ONE account, so the account
+    is what must be bounded. These tests hold that.
+    """
+
+    @staticmethod
+    def _fail(client: TestClient, username: str, address: str) -> int:
+        return client.post(
+            "/login",
+            data={"username": username, "password": "not-the-password"},
+            headers={"X-Forwarded-For": address},
+            follow_redirects=False,
+        ).status_code
+
+    def test_a_rotating_source_address_still_hits_the_ceiling(
+        self, client: TestClient
+    ) -> None:
+        """Every request from a fresh address, which defeated the old guard."""
+        codes = [
+            self._fail(client, "rotating_target", f"198.51.100.{i}")
+            for i in range(25)
+        ]
+        assert 429 in codes, (
+            "25 failed sign-ins against one account went unbounded because "
+            "each arrived from a different address"
+        )
+
+    def test_an_account_that_does_not_exist_is_metered_the_same_way(
+        self, client: TestClient
+    ) -> None:
+        """Otherwise 429 answers the question 401 was made generic to hide.
+
+        The enumeration defect closed on this endpoint was a 103x timing gap.
+        Metering only real accounts would reopen it as a status code, which is
+        a cleaner read-out than the clock ever was.
+        """
+        codes = [
+            self._fail(client, "no_such_operator_at_all", f"198.51.101.{i}")
+            for i in range(14)
+        ]
+        assert 429 in codes, "an unknown username is not metered, so 429 means 'real'"
+
+    def test_one_account_being_locked_does_not_lock_another(
+        self, client: TestClient
+    ) -> None:
+        """The budget is per account, so a noisy neighbour is not a lockout."""
+        for i in range(14):
+            self._fail(client, "noisy_neighbour", f"198.51.102.{i}")
+        assert self._fail(client, "quiet_neighbour", "198.51.102.200") == 401, (
+            "a second account was refused because the first had exhausted its budget"
+        )
+
+    def test_a_successful_sign_in_is_never_charged(self, client: TestClient) -> None:
+        """A shift change is a dozen legitimate sign-ins through one address.
+
+        Charging those would lock an operations room out of its own console,
+        which is a worse outage than the attack being prevented.
+        """
+        admin = _admin_cookies(client)
+        _create_operator(client, admin, "shift_change_user", "handover-credential")
+        client.cookies.clear()
+        for _ in range(15):
+            resp = client.post(
+                "/login",
+                data={"username": "shift_change_user", "password": "handover-credential"},
+                headers={"X-Forwarded-For": "198.51.103.7"},
+                follow_redirects=False,
+            )
+            assert resp.status_code == 302, "a correct sign-in was rate limited"
+            client.cookies.clear()

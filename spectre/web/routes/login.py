@@ -38,7 +38,32 @@ _SESSION_COOKIE_MAX_AGE = 28_800
 # inside a minute; charging those against the same budget would lock the room
 # out of its own console, which is a worse outage than the attack. A brute
 # force is made of failures, so failures are what is counted.
-_LOGIN_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
+_LOGIN_ADDRESS_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
+
+# The second tier, and the one that actually stops a brute force.
+#
+# The address tier alone is decorative against anyone who sets the header.
+# Measured against this application: 25 failed sign-ins with X-Forwarded-For
+# rotated per request produced 25 x 401 and not one 429, while 25 from a fixed
+# address produced 10 x 401 then 15 x 429. An attacker chooses the key the
+# address tier is counting, so the address tier cannot bound them.
+#
+# A brute force is a search over PASSWORDS for ONE account, so the account is
+# the thing to meter. Rotating the header no longer buys anything: ten wrong
+# passwords against a given username in five minutes is the ceiling however
+# many addresses they are spread across.
+#
+# Two consequences, both deliberate:
+#
+# ● The submitted username is metered whether or not the account exists. If
+#   only real accounts were counted, a 429 would mean "this name is real" and
+#   the enumeration oracle closed above would reopen as a status code.
+# ● Someone who knows an operator's username can keep that one account locked
+#   for five minutes at a time. That is a bounded nuisance against an
+#   unbounded password search, and the break-glass admin path does not go
+#   through this endpoint. It is the right way round, but it IS a trade and it
+#   is recorded here rather than discovered later.
+_LOGIN_USERNAME_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
 
 # Username enumeration (CWE-204). "user is None or not verify_password(...)"
 # short-circuits, so an unknown name never reached bcrypt and the endpoint
@@ -99,10 +124,18 @@ async def post_login(
 
     if user is None or not matched:
         address = _client_address(request)
-        if not await _LOGIN_LIMITER.is_allowed(address):
-            # The address is header-supplied, so it is flattened for the same
-            # reason the username below is (pythonsecurity:S5145).
-            logger.warning("Login rate limit reached for source address: %s", log_safe(address))
+        # Both tiers are charged before either is judged, so an attempt always
+        # costs both budgets. Short-circuiting on the first would let a caller
+        # who has exhausted the address tier keep probing a username for free.
+        address_ok = await _LOGIN_ADDRESS_LIMITER.is_allowed(address)
+        username_ok = await _LOGIN_USERNAME_LIMITER.is_allowed(username)
+        if not (address_ok and username_ok):
+            # Both values are caller-supplied, so both are flattened before
+            # they reach the log (pythonsecurity:S5145).
+            logger.warning(
+                "Login rate limit reached: address=%s username=%s",
+                log_safe(address), log_safe(username),
+            )
             # A browser is what reaches this endpoint, so the refusal is the
             # login page carrying an explanation, not a bare JSON body the
             # operator would have to read in the network tab.
