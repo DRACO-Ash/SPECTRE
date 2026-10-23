@@ -483,7 +483,7 @@ Excluded rows: 13. Rows carried to phase 5 as PENDING: 332.
 | Pre-flight | DONE | 2026-10-23 | this file | tree clean, HEAD `a34e273` |
 | 1 Inventory and charter | DONE | 2026-10-23 | `audit/LEDGER.md` | 345 ledger rows = 345 index entries = 344 files on disk + 1 gitlink |
 | 2 Deterministic sweep | DONE | 2026-10-23 | `audit/TOOLS.md`, `audit/tools-raw/` (36 files) | every tool produced output or is recorded unavailable: safety UNAVAILABLE (no network route to its database); Docker-dependent gate scripts not run (no daemon) |
-| 3 Architecture and flow | NOT STARTED | | | out of scope for this run |
-| 4 Claims reconciliation | NOT STARTED | | | out of scope for this run |
-| 4b Prior-audit verification | NOT STARTED | | | `audit/PRIORS.md` deliberately not consulted in phases 1 to 2 |
-| 5 to 8 | NOT STARTED | | | 332 rows remain PENDING by design; resume with `/audit-repo resume from phase 3` |
+| 3 Architecture and flow | DONE | 2026-10-23 | `audit/ARCHITECTURE.md` | 9 entry-point classes, 74 HTTP handlers traced by router group to sinks; 10 documented-versus-code divergences (A1 to A10) |
+| 4 Claims reconciliation | IN PROGRESS | | slice reviews S01 to S10 | |
+| 4b Prior-audit verification | DONE | 2026-10-23 | `audit/PRIORS-STATUS.md` | 10 of 10 priors carry a verdict and citation; gates tested by mutation (P1 fires, P3 does not) |
+| 5 to 8 | IN PROGRESS | | `audit/LENS-BRIEF.md`, slice outputs | resume with `/audit-repo resume from phase 5` if interrupted |
