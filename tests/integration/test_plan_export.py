@@ -288,3 +288,128 @@ class TestNoRowBypassesTheEscape:
             and node.func.attr == "writerow"
         ]
         assert len(inside) == 1, "the surviving writerow call is not the wrapper's own"
+
+
+class TestRunIdCannotReachTheResponseHeader:
+    """Response-header injection, CWE-113, through the download filename.
+
+    ``run_id`` is an operator-supplied query value that lands inside the quoted
+    ``filename`` of Content-Disposition. RFC 6266 offers no escaping inside that
+    quoted string, so ``x"; name="evil`` closes the quote and appends a header
+    parameter the caller names, and a CR or an LF ends the header outright. The
+    CRLF form reached uvicorn's own validator rather than any check of ours, so
+    what the application produced was an unhandled exception. The route is a GET
+    and the session cookie is SameSite=lax, so a link in an email fires it
+    inside an authenticated operator's session with no CSRF token in play.
+
+    These are behavioural: each payload goes through the real route and the
+    assertions read the headers that come back. Deleting the ``_RUN_ID_PATTERN``
+    check in ``spectre/web/routes/plan.py`` turns
+    ``test_the_quote_breakout_payload_is_refused`` red.
+    """
+
+    # Exactly what the security gate drove through the header.
+    _BREAKOUT = 'x"; name="evil'
+
+    def test_the_quote_breakout_payload_is_refused(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        resp = client.get(  # type: ignore[attr-defined]
+            "/plan/export",
+            params={"run_id": self._BREAKOUT},
+            cookies={"spectre_session": auth_cookie},
+        )
+        assert resp.status_code == 400, "a quote-breakout run_id must be refused, not served"
+        disposition = resp.headers.get("content-disposition", "")
+        assert "evil" not in disposition, f"the payload reached the header: {disposition!r}"
+        assert "name=" not in disposition, f"a second header parameter was emitted: {disposition!r}"
+
+    def test_a_crlf_payload_is_refused(self, client: object, auth_cookie: str) -> None:
+        """The CRLF variant must be a handled 400, not uvicorn's RuntimeError."""
+        resp = client.get(  # type: ignore[attr-defined]
+            "/plan/export",
+            params={"run_id": "x\r\nX-Injected: yes"},
+            cookies={"spectre_session": auth_cookie},
+        )
+        assert resp.status_code == 400
+        assert "x-injected" not in {name.lower() for name in resp.headers}
+        assert "X-Injected" not in resp.headers.get("content-disposition", "")
+
+    def test_an_over_long_run_id_is_refused(self, client: object, auth_cookie: str) -> None:
+        """The length bound is part of the control, not decoration.
+
+        A 4 KB run_id made only of allowed characters carries no injection by
+        itself, but it is still reflected into a header and a filename, so the
+        bound is what stops the header growing without limit.
+        """
+        resp = client.get(  # type: ignore[attr-defined]
+            "/plan/export",
+            params={"run_id": "A" * 65},
+            cookies={"spectre_session": auth_cookie},
+        )
+        assert resp.status_code == 400
+
+    def test_a_legitimate_option_id_still_exports_end_to_end(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        """The fix must not be 'reject everything'.
+
+        ``INT_`` plus ten uppercase hex characters is exactly what
+        ``InterceptResult.option_id`` mints, so this is the identifier a real
+        operator follows out of the results table. It has to filter the file and
+        still name the download.
+        """
+        from datetime import UTC, datetime
+
+        from spectre.domain.models import InterceptMethod, InterceptResult
+        from spectre.web.planning_state import get_session_state
+
+        run_id = "INT_9F3C1A77B2"
+        state = get_session_state("testadmin")
+        epoch = datetime(2026, 1, 1, tzinfo=UTC)
+        state.intercept_history.append(
+            InterceptResult(
+                red_name="RED-1",
+                blue_name="BLUE-1",
+                method=InterceptMethod.LAMBERT,
+                burns=[],
+                total_delta_v_m_s=0.0,
+                arrival_epoch=epoch,
+                intercept_range_km=1.0,
+                notes="",
+                option_id=run_id,
+            ),
+        )
+        try:
+            resp = client.get(  # type: ignore[attr-defined]
+                "/plan/export",
+                params={"run_id": run_id},
+                cookies={"spectre_session": auth_cookie},
+            )
+            assert resp.status_code == 200, "a legitimate option_id was refused"
+            disposition = resp.headers["content-disposition"]
+            assert run_id in disposition, f"the run_id left the filename: {disposition!r}"
+            assert disposition.startswith('attachment; filename="')
+            assert disposition.endswith('.csv"')
+            rows = [r for r in _rows(resp.text) if r and r[0] == run_id]
+            assert rows, "the filter dropped the run it was given"
+        finally:
+            state.intercept_history.clear()
+
+    def test_the_filename_builder_neutralises_a_breakout_on_its_own(self) -> None:
+        """The second barrier is pinned directly, because the first one hides it.
+
+        ``_RUN_ID_PATTERN`` refuses the payload long before the filename is
+        built, so no request arriving over HTTP can reach this helper with a
+        hostile value and prove it does its job. It exists so that a later
+        widening of the pattern cannot reopen CWE-113 in silence, and that is
+        only true while something holds it in place.
+        """
+        from spectre.web.routes.plan import _attachment_disposition
+
+        built = _attachment_disposition('spectre_x"; name="evil_20261023.csv')
+        assert built.count('"') == 2, f"the filename broke out of its quotes: {built!r}"
+        assert ";" not in built[built.index('"'):], f"a second header parameter survived: {built!r}"
+
+        wrapped = _attachment_disposition("spectre_x\r\nX-Injected: yes.csv")
+        assert "\r" not in wrapped and "\n" not in wrapped, f"the header was split: {wrapped!r}"

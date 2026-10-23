@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import logging
+import secrets
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from spectre.config.settings import get_settings
-from spectre.web.auth import _COOKIE_NAME, make_session_cookie, verify_password
+from spectre.web.auth import _COOKIE_NAME, hash_password, make_session_cookie, verify_password
 from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
+from spectre.web.rate_limit import SlidingWindowLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,49 @@ router = APIRouter()
 
 # Session lifetime in seconds (8 hours), matching auth._SESSION_MAX_AGE.
 _SESSION_COOKIE_MAX_AGE = 28_800
+
+# 10 failed attempts per source address per 300 s. This is the console's only
+# unauthenticated credential endpoint and it is CSRF-exempt, so until this
+# guard existed 40 consecutive wrong passwords from one address answered 40 x
+# 401 and nothing ever answered 429: a password list could be walked at the
+# speed of the network.
+#
+# Only FAILURES are metered. An operations room reaches the console from one
+# source address and a shift change puts 12 legitimate sign-ins through it
+# inside a minute; charging those against the same budget would lock the room
+# out of its own console, which is a worse outage than the attack. A brute
+# force is made of failures, so failures are what is counted.
+_LOGIN_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
+
+# Username enumeration (CWE-204). "user is None or not verify_password(...)"
+# short-circuits, so an unknown name never reached bcrypt and the endpoint
+# answered it in 2.6 ms against 270.2 ms for a name that exists. A 103x gap is
+# a clean read-out of which operators the system knows, however generic the
+# error text is, and an attacker who knows the names has halved the work.
+#
+# An attempt against an account that does not exist is compared against this
+# hash instead, so every attempt does the same bcrypt work. The plaintext is a
+# throwaway secret generated at import and never written down anywhere, so no
+# submitted password can match it.
+_ABSENT_USER_HASH = hash_password(secrets.token_urlsafe(32))
+
+
+def _client_address(request: Request) -> str:
+    """Return the source address the login limiter should charge *request* to.
+
+    Read the same way :func:`spectre.web.app._is_https` reads
+    X-Forwarded-Proto: first entry, stripped, falling back to the socket. TLS
+    and the client address both terminate at the platform router, so inside
+    the container the peer is the router and the forwarded header is the only
+    account of who is actually calling. The router rewrites that header, which
+    is what stops a caller nominating its own address to get a fresh budget.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    address = forwarded.split(",")[0].strip()
+    if address:
+        return address
+    client = request.client
+    return client.host if client else "unknown"
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -42,7 +89,30 @@ async def post_login(
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(password, user.hashed_password):
+    # One bcrypt comparison every time, whether or not the account exists, and
+    # never on the event loop. bcrypt costs about 270 ms by design; run inline
+    # it IS the worker, and 32 concurrent anonymous requests took /healthz
+    # from a 0.9 ms median to 833 ms, which is long enough for the platform to
+    # mark a pod unready while it is still answering logins correctly. The
+    # readiness probe is the first casualty of an attack on this endpoint.
+    hashed = user.hashed_password if user is not None else _ABSENT_USER_HASH
+    matched = await run_in_threadpool(verify_password, password, hashed)
+
+    if user is None or not matched:
+        address = _client_address(request)
+        if not await _LOGIN_LIMITER.is_allowed(address):
+            # The address is header-supplied, so it is flattened for the same
+            # reason the username below is (pythonsecurity:S5145).
+            logger.warning("Login rate limit reached for source address: %s", log_safe(address))
+            # A browser is what reaches this endpoint, so the refusal is the
+            # login page carrying an explanation, not a bare JSON body the
+            # operator would have to read in the network tab.
+            return render(
+                request,
+                "login.html",
+                {"error": "Too many failed sign-in attempts. Wait a few minutes and try again."},
+                status_code=429,
+            )
         # The only unauthenticated path that writes an operator-supplied value
         # into the audit log, so the only one an attacker can pick freely. A bare
         # %s here lets a newline in the form field forge a second record that
@@ -64,9 +134,27 @@ async def post_login(
     return response
 
 
+async def _revoke_sessions(db: AsyncSession, username: str) -> None:
+    """Move *username*'s session epoch to now, ending every live session.
+
+    Every session, not only the cookie that asked: the operator signing out of
+    a shared terminal has no way to know which other copies of their token are
+    still in circulation, and that is the case this control exists for.
+    """
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return
+    user.session_epoch = datetime.now(tz=UTC)
+    await db.commit()
+
+
 @router.post("/logout", response_model=None)
-async def post_logout(request: Request) -> RedirectResponse:
-    """Clear the session cookie, wipe planning state, then redirect."""
+async def post_logout(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RedirectResponse:
+    """Revoke the session, clear the cookie, wipe planning state, then redirect."""
     from spectre.web.auth import decode_session_cookie  # noqa: PLC0415
     from spectre.web.planning_state import clear_session_state  # noqa: PLC0415
 
@@ -74,6 +162,12 @@ async def post_logout(request: Request) -> RedirectResponse:
     if cookie:
         username = decode_session_cookie(cookie)
         if username:
+            # Deleting the cookie only asks the browser to forget it. The token
+            # itself stayed signed and valid for its full 8 hours, so a copy
+            # captured before this point still answered 200 from /admin/users.
+            # On a shared operations-room terminal logout is the operator's
+            # only way to end a session, so it has to end it on the server.
+            await _revoke_sessions(db, username)
             clear_session_state(username)
             logger.info("Session state cleared on logout for: %s", log_safe(username))
 

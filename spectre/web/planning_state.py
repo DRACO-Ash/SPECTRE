@@ -24,6 +24,7 @@ from spectre.domain.models import (
     RedTrack,
     ThreatAssessment,
 )
+from spectre.web.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,12 @@ def get_session_state(username: str) -> SessionState:
             state.hrr_tle_cache.update(_default_hrr_tles)
             state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
         _store[username] = state
-        logger.debug("Created new session state for user: %s", username)
+        # The session key arrives from the signed cookie, and before that from
+        # whatever an administrator typed into the create-user form, so it
+        # reaches this record from outside. A name carrying a newline would
+        # split one debug entry into two, and the second line is then
+        # indistinguishable from a genuine audit record (pythonsecurity:S5145).
+        logger.debug("Created new session state for user: %s", log_safe(username))
     return _store[username]
 
 

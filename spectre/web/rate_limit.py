@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from fastapi import Depends, HTTPException, status
 
 from spectre.web.auth import require_login
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,12 @@ _udl_sync_limiter = SlidingWindowLimiter(max_calls=3, window_seconds=600)
 
 async def _guard(limiter: SlidingWindowLimiter, user: User, label: str) -> None:
     if not await limiter.is_allowed(user.username):
-        logger.warning("Rate limit hit: %s for operator %s", label, user.username)
+        # The operator name is the only part of this record that came from
+        # outside the application, so it is the only part that can turn one
+        # warning into two log lines and forge an audit entry against another
+        # account (pythonsecurity:S5145). The label is a literal supplied by
+        # the three callers below and needs no flattening.
+        logger.warning("Rate limit hit: %s for operator %s", label, log_safe(user.username))
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Rate limit exceeded for {label}. Please wait before retrying.",

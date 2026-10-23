@@ -150,8 +150,17 @@ async def _apply_migrations(conn: Any) -> None:
     from sqlalchemy import text
 
     # Each entry is a table, a column, and the definition used to add it.
+    #
+    # session_epoch carries no NOT NULL and no DEFAULT on purpose. SQLite
+    # rejects ALTER TABLE ADD COLUMN NOT NULL whose default is not a constant,
+    # CURRENT_TIMESTAMP included, and a literal timestamp needs the hyphens and
+    # colons that _SQL_COLUMN_DEFINITION above deliberately refuses. An
+    # existing row therefore arrives with NULL, which the session check reads
+    # as "nothing revoked yet" - correct for an account whose sessions predate
+    # the feature.
     migrations: list[tuple[str, str, str]] = [
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
+        ("users", "session_epoch", "TIMESTAMP WITH TIME ZONE"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

@@ -56,6 +56,7 @@ from spectre.domain.manoeuvre_calibration import (
     from_km_s,
     kind_for_method,
     per_event_station_keeping_m_s,
+    to_km_s,
 )
 from spectre.domain.models import (
     BurnLocation,
@@ -1398,7 +1399,7 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: intercept_envelope_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start, tof_s=a.tof_s,
-            coast_s=a.coast_s, target_distance_km=a.target_km,
+            coast_s=a.coast_s, max_delta_v_km_s=to_km_s(a.max_dv_m_s),
         ),
     InterceptMethod.FORMATION:
         lambda a: formation_intercept(
@@ -1411,7 +1412,7 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: min_time_intercept_wrapper(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            max_delta_v=a.max_dv_m_s / 1000.0,  # astro takes km/s
+            max_delta_v=to_km_s(a.max_dv_m_s),  # astro takes km/s
             coast_s=a.coast_s,
         ),
 }

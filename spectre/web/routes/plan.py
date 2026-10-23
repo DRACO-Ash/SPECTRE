@@ -13,7 +13,7 @@ import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from spectre.web.auth import require_login
@@ -65,6 +65,44 @@ def _write_row(writer: Any, row: list[object]) -> None:
     writer.writerow([_csv_safe(field) for field in row])
 
 
+# RFC 6266 gives the filename parameter of Content-Disposition no escaping
+# mechanism whatsoever: inside the quoted string a double quote ends the value,
+# a semicolon starts the next header parameter, and a CR or an LF ends the
+# header. run_id is an operator-supplied query value that lands straight in that
+# filename, so ?run_id=x";%20name="evil closes the quote and appends a header
+# parameter the caller names. That is response-header injection, CWE-113. The
+# CRLF form of the same payload is stopped today only by uvicorn's own header
+# validator, which raises and drops the connection, so the application's answer
+# to it is an unhandled exception rather than a handled refusal. The route is a
+# GET and the session cookie is SameSite=lax, so a link in an email fires it
+# inside an authenticated operator's session with no CSRF token needed.
+#
+# An allow-list can afford to be this strict because every run identifier the
+# application mints already sits inside it: InterceptResult.option_id in
+# spectre/domain/models.py is "INT_" plus ten uppercase hex characters, and the
+# manoeuvre variant is the same shape behind an "MNV_" prefix. Sixty-four
+# characters leaves generous room above both while staying far too short to
+# carry a useful payload.
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+# Anything outside the set the accepted run_id is already confined to.
+_FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def _attachment_disposition(filename: str) -> str:
+    """Return a Content-Disposition value whose filename cannot break its quotes.
+
+    This is the second barrier rather than the first: _RUN_ID_PATTERN has
+    already refused everything outside the allow-list before a value reaches
+    here. It exists because the header is still assembled by string formatting,
+    and a later widening of that pattern, or a second export added here that
+    forgets to validate at all, would otherwise reopen CWE-113 unnoticed.
+    Substituting rather than rejecting keeps the worst case a slightly altered
+    saved filename instead of a download that fails.
+    """
+    return f'attachment; filename="{_FILENAME_UNSAFE.sub("_", filename)}"'
+
+
 @router.get("/export", response_model=None)
 async def export_intercepts(
     request: Request,
@@ -82,7 +120,28 @@ async def export_intercepts(
     a single row is emitted with blank burn columns.
 
     Optionally filtered to a single run via ``?run_id=<option_id>``.
+
+    A run_id outside _RUN_ID_PATTERN is refused with 400 before it is used
+    anywhere.
     """
+    if run_id is not None and not _RUN_ID_PATTERN.fullmatch(run_id):
+        # 400 rather than quietly dropping the filter. Ignoring it would answer
+        # a request for one run with the operator's entire intercept history,
+        # which is a wider egress than the caller asked for and gives no sign
+        # anything went wrong: the operator opens the file believing it holds
+        # only the run they named. The refusal is decided by the shape of the
+        # string alone and never by whether a matching run exists, so repeating
+        # it with different values tells a caller nothing about what the session
+        # holds, and the pattern it has to satisfy is readable in this file.
+        logger.warning(
+            "Intercept export refused: operator=%s malformed run_id=%s",
+            log_safe(current_user.username), log_safe(run_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid run_id.",
+        )
+
     state = get_session_state(current_user.username)
 
     if run_id:
@@ -163,7 +222,7 @@ async def export_intercepts(
         iter([buf.getvalue()]),
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": _attachment_disposition(filename),
             "Cache-Control": "no-store",
         },
     )

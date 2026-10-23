@@ -64,9 +64,10 @@ Units
 -----
 Everything in this module is METRES PER SECOND. The astro package computes in
 km/s because MU_EARTH is in km^3/s^2 and SGP4 returns km and km/s; that is
-left alone deliberately. Conversion happens once, at this boundary, in
-``from_km_s``. There is no other conversion point, by design: a second one is
-how a value ends up 1,000,000x wrong.
+left alone deliberately. Conversion happens at this boundary and nowhere else,
+in ``from_km_s`` on the way out to the operator and ``to_km_s`` on the way in
+to a solver. The two of them hold the factor between them, by design: a third
+conversion point is how a value ends up 1,000,000x wrong.
 """
 
 from __future__ import annotations
@@ -90,6 +91,7 @@ __all__ = [
     "platform_total_budget_m_s",
     "propellant_mass_fraction",
     "station_keeping_m_s_per_year",
+    "to_km_s",
 ]
 
 #: Metres per second in one kilometre per second. The single conversion factor.
@@ -99,10 +101,22 @@ _M_S_PER_KM_S: float = 1000.0
 def from_km_s(value_km_s: float) -> float:
     """Convert a km/s figure out of the astro layer into m/s for the operator.
 
-    This is the ONLY place the conversion is written. Everything downstream of
-    it is m/s and says so in its name.
+    This and ``to_km_s`` are the ONLY places the conversion is written.
+    Everything downstream of this one is m/s and says so in its name.
     """
     return value_km_s * _M_S_PER_KM_S
+
+
+def to_km_s(value_m_s: float) -> float:
+    """Convert an operator's m/s figure into the km/s a solver takes.
+
+    The inbound half of ``from_km_s``, and here for the same reason. A budget
+    carried into spectre.astro by a divide written at the call site is a
+    conversion point nobody is counting, and an operator's delta-V budget
+    reaching a solver as the wrong quantity is the defect recorded in 0.5.13
+    for the intercept envelope sweep and found again in MIN_TIME.
+    """
+    return value_m_s / _M_S_PER_KM_S
 
 
 class Posture(Enum):

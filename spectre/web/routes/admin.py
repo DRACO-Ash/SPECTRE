@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -21,6 +22,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 _VALID_ROLES = {"operator", "admin"}
+
+# Why a charset check and not just a length bound.
+#
+# A username is written into the audit log by this module, by the login route
+# and by the session store, and it is also the stable identity an operator is
+# judged by afterwards. str.strip() trims only the ends of a string and the
+# 64-character bound only counts characters, so neither touches a newline sat
+# in the middle of a name. A 61-character name carrying one was accepted and
+# stored, and a single logger.warning about that account then wrote two lines,
+# the second of which read exactly like a genuine audit record attributing an
+# action to somebody else. log_safe() repairs the log line at the point of
+# writing; this pattern stops the forged identity being created at all, which
+# is the half of the fix that also protects every sink added in future.
+#
+# The vocabulary is deliberately wider than any SPECTRE screen needs. The
+# bootstrap admin account takes its name from SPECTRE_ADMIN_USER, which this
+# repository's own deployments set to values such as "admin", "rescue-admin",
+# "smoke_admin" and "testadmin", and an operator identity sourced from a
+# directory is commonly an e-mail address. A pattern that rejected any of
+# those would stop the application starting rather than merely refuse a form,
+# so letters, digits, dot, underscore, at-sign and hyphen are all accepted.
+_USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,6 +125,11 @@ async def create_user(
         error = "Username is required."
     elif len(username) > 64:
         error = "Username must be 64 characters or fewer."
+    elif not _USERNAME_PATTERN.fullmatch(username):
+        error = (
+            "Username may contain only letters, digits, dot, underscore, "
+            "at-sign and hyphen."
+        )
     elif not password:
         error = "Password is required."
     else:
