@@ -1589,3 +1589,54 @@ class TestHtmxSwapFragmentsMatchTheirTable:
             "screen reader loses the column names on exactly the row they "
             "asked the solver to improve."
         )
+
+
+class TestContinuousIntegrationCanRun:
+    """CI on master installed no tools and failed before checking anything.
+
+    The install step named a ``dev`` extra that pyproject.toml never defined,
+    so pip installed the package alone and lint, tests and the quality gate
+    each died with "command not found" (audit F-S00-01). The obvious repair,
+    installing both locks, then failed too, because they pinned tomli
+    differently (audit F-S00-08). Each property below would have caught one.
+    """
+
+    _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
+
+    def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
+        workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        installs = [
+            ln.strip() for ln in workflow.splitlines()
+            if re.search(r"\bpip install\b", ln) and not ln.lstrip().startswith("#")
+        ]
+        assert not [ln for ln in installs if ".[" in ln], (
+            f"CI installs an extra: {installs}. pyproject.toml declares none, so pip "
+            "would install the package with no tools at all"
+        )
+        assert any("--require-hashes" in ln and "requirements-dev.txt" in ln for ln in installs)
+
+    def test_both_locks_agree_on_every_package_they_share(self) -> None:
+        runtime = dict(self._PIN.findall(_repo_only("requirements.txt").read_text(encoding="utf-8")))
+        dev = dict(self._PIN.findall(_repo_only("requirements-dev.txt").read_text(encoding="utf-8")))
+        clashes = {name: (runtime[name], dev[name]) for name in runtime.keys() & dev.keys() if runtime[name] != dev[name]}
+        assert not clashes, f"the locks cannot be installed together: {clashes}"
+
+    def test_ci_does_not_override_the_coverage_ratchet(self) -> None:
+        workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--cov-fail-under" not in workflow, (
+            "the floor lives in pyproject.toml [tool.coverage.report]; a lower CI "
+            "value let coverage fall unnoticed (audit F-S00-10)"
+        )
+
+    def test_no_orphan_submodule_pointer_is_tracked(self) -> None:
+        if not (_REPO_ROOT / ".git").exists():
+            pytest.skip("no git repository: running from the submission package")
+        try:
+            listing = subprocess.run(
+                ["git", "ls-files", "-s"],  # noqa: S607
+                cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+            ).stdout
+        except FileNotFoundError:
+            pytest.skip("no git executable: the runner's job image ships none")
+        gitlinks = [ln.split("\t", 1)[1] for ln in listing.splitlines() if ln.startswith("160000 ")]
+        assert not gitlinks, f"gitlinks with no .gitmodules break every CI checkout: {gitlinks}"

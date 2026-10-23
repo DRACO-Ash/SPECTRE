@@ -40,6 +40,19 @@ after it. The finding-to-commit map is `audit/REMEDIATION-LOG.md`.
   1 per cent of the Hohmann time at less than Hohmann cost. It is replaced
   by a Lambert sweep against the target's real position.
 
+### Changed (step 2 of 4: CI executes its checks)
+
+- **CI installs the locked sets.** The lint, test and quality jobs installed
+  an undefined `.[dev]` extra, so they had no tools and failed with exit 127
+  before checking anything. They now install `requirements.txt` and
+  `requirements-dev.txt` with hashes and confirm the tools are present.
+- **One version per shared package.** The dev lock is constrained by the
+  runtime lock, so the two install together. Dev-only pins moved for tomli,
+  urllib3, filelock and setuptools; the last three clear published advisories.
+- **SCA covers the dev lock**, and CI no longer overrides the pyproject
+  coverage floor.
+- **The orphan `SPECTRE-1` submodule pointer is removed.**
+
 ## [0.5.24] - 2026-10-22
 
 The SonarQube Code Quality gate. 57 findings reported, 55 cleared, 2 left for a
