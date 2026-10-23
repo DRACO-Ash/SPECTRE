@@ -30,7 +30,6 @@ from spectre.astro.tactical import (
     geo_drift,
     hbar_hop_sequence,
     j2_drift_plan,
-    min_time_intercept_analytical,
     nmc_safety_ellipse,
     optimal_evasion,
     orbital_terrain,
@@ -1486,40 +1485,84 @@ def min_time_intercept_wrapper(
     coast_s: float = 0.0,
     mu: float = MU_EARTH,
 ) -> InterceptSolution:
-    """Find the minimum-time intercept within a ΔV budget.
+    """Find the earliest arrival at blue reachable within a ΔV budget.
 
-    Uses analytical vis-viva approximation to binary-search for
-    the fastest feasible transfer.
+    Solves Lambert's problem from red's departure state to blue's propagated
+    position at arrival times spread across one red orbital period, takes the
+    first arrival whose two-burn cost is within *max_delta_v* (km/s), and
+    refines it by bisection to a second.
+
+    This replaces an analytic vis-viva search whose clamp made ΔV independent
+    of the time of flight, so it always returned 1 % of the Hohmann time at
+    less than Hohmann cost: LEO to GEO in 190 s (audit F-004).
+
+    Raises:
+        ValueError: no single-revolution transfer within the budget arrives
+            inside one red period. The solver is single-revolution only, so a
+            longer search would not be trustworthy.
     """
     red_orbit = TLEOrbit(red_tle)
     blue_orbit = TLEOrbit(blue_tle)
 
     t_epoch = manoeuvre_start + timedelta(seconds=coast_s)
     sv_red = red_orbit.propagate(t_epoch)
-    sv_blue = blue_orbit.propagate(t_epoch)
+    period_s = 2.0 * math.pi * math.sqrt(state_to_keplerian(sv_red).a ** 3 / mu)
 
-    result = min_time_intercept_analytical(
-        sv_red.r_mag, sv_blue.r_mag, max_delta_v, mu,
-    )
+    def solve(tof: float) -> tuple[LambertSolution, StateVector] | None:
+        sv_target = blue_orbit.propagate(t_epoch + timedelta(seconds=tof))
+        try:
+            sol = solve_lambert(
+                sv_red.r, sv_target.r, tof,
+                mu=mu, v1_initial=sv_red.v, v2_target=sv_target.v,
+            )
+        except ValueError:
+            # A degenerate or unreachable geometry is no intercept at this time.
+            return None
+        return sol, sv_target
 
-    t_arrival = t_epoch + timedelta(seconds=result.min_tof_s) if result.is_feasible else t_epoch
+    def feasible(tof: float) -> tuple[LambertSolution, StateVector] | None:
+        found = solve(tof)
+        return found if found is not None and found[0].total_delta_v <= max_delta_v else None
 
-    if result.is_feasible:
-        # Build approximate departure burn
-        v_hat = sv_red.v / sv_red.v_mag
-        dv_vec = v_hat * result.delta_v_km_s
-        burn1 = _make_burn(1, t_epoch, dv_vec, sv_red)
-        burns = [burn1]
-    else:
-        burns = []
+    steps = 96
+    previous = 0.0
+    best: tuple[float, tuple[LambertSolution, StateVector]] | None = None
+    for index in range(1, steps + 1):
+        tof = period_s * index / steps
+        hit = feasible(tof)
+        if hit is not None:
+            best = (tof, hit)
+            break
+        previous = tof
+    if best is None:
+        raise ValueError(
+            f"no single-revolution intercept within {max_delta_v * 1000.0:.0f} m/s "
+            f"arrives inside one orbital period ({period_s / 3600.0:.1f} h)"
+        )
+
+    # Bisect between the last infeasible and the first feasible arrival time,
+    # keeping the upper bound feasible so the answer is always flyable.
+    lo, (hi, hit) = previous, best
+    while hi - lo > 1.0:
+        mid = 0.5 * (lo + hi)
+        trial = feasible(mid)
+        if trial is None:
+            lo = mid
+        else:
+            hi, hit = mid, trial
+
+    sol, sv_target = hit
+    t_arrival = t_epoch + timedelta(seconds=hi)
+    burn1 = _make_burn(1, t_epoch, sol.delta_v1, sv_red)
+    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_target)
 
     return InterceptSolution(
         method="min_time",
-        burns=burns,
-        total_delta_v=result.delta_v_km_s,
+        burns=[burn1, burn2],
+        total_delta_v=sol.total_delta_v,
         departure_epoch=t_epoch,
         arrival_epoch=t_arrival,
-        miss_distance_km=0.0 if result.is_feasible else -1.0,
+        miss_distance_km=0.0,
     )
 
 

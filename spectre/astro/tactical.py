@@ -1948,103 +1948,12 @@ def orbital_terrain(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept (analytical approximation)
+#  17. Minimum-Time Intercept
+#
+#  Removed. The analytic search here could not depend on the time of flight
+#  (audit F-004); see maneuvers.min_time_intercept_wrapper, which solves
+#  Lambert's problem against the target's real position instead.
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class MinTimeResult:
-    """Result of minimum-time intercept search."""
-
-    min_tof_s: float         # minimum feasible TOF (seconds)
-    delta_v_km_s: float      # ΔV at minimum TOF
-    is_feasible: bool        # True if any solution exists within budget
-    max_delta_v_budget: float  # km/s — the ΔV budget used
-    hohmann_tof_s: float     # Hohmann TOF for reference
-    hohmann_dv_km_s: float   # Hohmann ΔV for reference
-    method: str = "min_time"
-
-
-def min_time_intercept_analytical(
-    r1: float,
-    r2: float,
-    max_delta_v: float,
-    mu: float = MU_EARTH,
-) -> MinTimeResult:
-    """Find the minimum transfer time within a ΔV budget (analytical estimate).
-
-    Uses the vis-viva equation to estimate ΔV as a function of transfer
-    SMA, then binary-searches for the smallest TOF that keeps ΔV within
-    budget. The TLE wrapper uses full Lambert for higher accuracy.
-
-    Args:
-        r1: Interceptor orbit radius (km).
-        r2: Target orbit radius (km).
-        max_delta_v: ΔV budget (km/s).
-        mu: Gravitational parameter.
-    """
-    v1 = math.sqrt(mu / r1)
-    v2 = math.sqrt(mu / r2)
-
-    # Hohmann reference
-    a_h = (r1 + r2) / 2.0
-    tof_h = math.pi * math.sqrt(a_h**3 / mu)
-    v_h_dep = math.sqrt(mu * (2.0 / r1 - 1.0 / a_h))
-    v_h_arr = math.sqrt(mu * (2.0 / r2 - 1.0 / a_h))
-    dv_h = abs(v_h_dep - v1) + abs(v2 - v_h_arr)
-
-    # If Hohmann exceeds budget, not feasible at all
-    if dv_h > max_delta_v:
-        return MinTimeResult(
-            min_tof_s=0.0, delta_v_km_s=dv_h,
-            is_feasible=False, max_delta_v_budget=max_delta_v,
-            hohmann_tof_s=tof_h, hohmann_dv_km_s=dv_h,
-        )
-
-    # Binary search: lower TOF requires higher ΔV
-    # Find minimum TOF where ΔV ≤ budget
-    lo, hi = tof_h * 0.01, tof_h  # search between 1% and 100% of Hohmann TOF
-
-    for _ in range(50):  # 50 iterations gives ~10⁻¹⁵ precision
-        mid = (lo + hi) / 2.0
-        # Estimate SMA from TOF (half-orbit approximation)
-        a_est = (mu * (mid / math.pi) ** 2) ** (1.0 / 3.0)
-        a_est = max(a_est, max(r1, r2))  # can't be smaller than larger orbit
-
-        try:
-            v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_est)))
-            v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_est)))
-        except (ValueError, ZeroDivisionError):
-            hi = mid
-            continue
-
-        dv_est = abs(v_dep - v1) + abs(v2 - v_arr)
-
-        if dv_est <= max_delta_v:
-            hi = mid  # can go faster
-        else:
-            lo = mid  # need more time
-
-    # Final estimate at the converged TOF
-    best_tof = hi
-    a_final = (mu * (best_tof / math.pi) ** 2) ** (1.0 / 3.0)
-    a_final = max(a_final, max(r1, r2))
-    try:
-        v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_final)))
-        v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_final)))
-    except (ValueError, ZeroDivisionError):
-        v_dep = v1
-        v_arr = v2
-    dv_final = abs(v_dep - v1) + abs(v2 - v_arr)
-
-    return MinTimeResult(
-        min_tof_s=best_tof,
-        delta_v_km_s=dv_final,
-        is_feasible=True,
-        max_delta_v_budget=max_delta_v,
-        hohmann_tof_s=tof_h,
-        hohmann_dv_km_s=dv_h,
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

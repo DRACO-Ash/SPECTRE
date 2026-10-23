@@ -23,7 +23,6 @@ from spectre.astro.tactical import (
     intercept_envelope_analytical,
     j2_drift_plan,
     j2_raan_rate,
-    min_time_intercept_analytical,
     nmc_safety_ellipse,
     optimal_evasion,
     orbital_terrain,
@@ -583,30 +582,3 @@ class TestOrbitalTerrain:
         """Low LEO (300 km) → moderate debris."""
         r = orbital_terrain(300.0, 51.6)
         assert r.debris_risk == "medium"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestMinTimeIntercept:
-    """Tests for min_time_intercept_analytical()."""
-
-    def test_feasible_transfer(self) -> None:
-        """LEO-to-LEO with generous budget → feasible."""
-        r = min_time_intercept_analytical(LEO_R, LEO_R + 200.0, max_delta_v=1.0)
-        assert r.is_feasible
-        assert r.min_tof_s > 0
-        assert r.delta_v_km_s <= 1.0
-
-    def test_infeasible_large_gap(self) -> None:
-        """LEO to GEO with tiny budget → infeasible."""
-        r = min_time_intercept_analytical(LEO_R, GEO_R, max_delta_v=0.01)
-        assert not r.is_feasible
-
-    def test_faster_with_more_dv(self) -> None:
-        """More ΔV budget → faster min transfer time."""
-        slow = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=0.5)
-        fast = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=2.0)
-        if slow.is_feasible and fast.is_feasible:
-            assert fast.min_tof_s <= slow.min_tof_s
