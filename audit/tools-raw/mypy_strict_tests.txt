@@ -1,0 +1,883 @@
+$ mypy --strict tests
+tests/unit/test_quality_gate_scope.py:107: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_quality_gate_scope.py:115: error: Argument 1 to "module_from_spec" has incompatible type "ModuleSpec | None"; expected "ModuleSpec"  [arg-type]
+tests/unit/test_quality_gate_scope.py:117: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]
+tests/unit/test_quality_gate_scope.py:117: error: Item "None" of "Loader | Any | None" has no attribute "exec_module"  [union-attr]
+tests/unit/test_quality_gate_scope.py:142: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_quality_gate_scope.py:152: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_quality_gate_scope.py:267: error: Call to untyped function "_load_scoper" in typed context  [no-untyped-call]
+tests/unit/test_photometry.py:72: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:72: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:75: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:75: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:79: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:79: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:83: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:83: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:91: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:91: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:97: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:97: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:105: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:105: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:113: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:113: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:119: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:119: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:122: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:122: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:125: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:125: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:134: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:134: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:139: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:139: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:144: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:144: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:149: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:149: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:154: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:154: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:163: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:163: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:198: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:198: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:203: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:203: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:210: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:210: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:215: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:215: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:231: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:231: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:269: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:269: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:276: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:276: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:312: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:312: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:317: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:317: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:322: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:322: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:328: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:328: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:333: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:333: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:341: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:341: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:347: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:347: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:353: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:353: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:373: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:373: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:377: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:377: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:382: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:382: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:386: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:386: note: Use "-> None" if function does not return a value
+tests/unit/test_photometry.py:391: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_photometry.py:391: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:70: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:70: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:74: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:74: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:79: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:79: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:83: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:83: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:86: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:86: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:93: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:93: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:96: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:96: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:99: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:99: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:102: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:102: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:105: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:105: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:108: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:108: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:115: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:115: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:118: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:118: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:121: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:121: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:124: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:124: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:131: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:131: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:135: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:135: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:139: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:139: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:146: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:146: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:150: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:150: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:154: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:154: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:159: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:159: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:169: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:169: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:173: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:173: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:177: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:177: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:181: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:181: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:185: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:185: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:189: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:189: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:193: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:193: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:197: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:197: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:201: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:201: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:205: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:205: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:208: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:208: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:238: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:238: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:246: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:246: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:253: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:253: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:260: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:260: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:267: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:267: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:274: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:274: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:282: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:282: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:291: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:291: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:350: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:350: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:355: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:355: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:360: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:360: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:397: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:397: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:413: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:413: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:418: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:418: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:424: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:424: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:429: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:429: note: Use "-> None" if function does not return a value
+tests/unit/test_notso.py:434: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_notso.py:434: note: Use "-> None" if function does not return a value
+tests/unit/test_hrr_dropdown_is_text.py:49: error: Returning Any from function declared to return "str"  [no-any-return]
+tests/unit/test_contrast_floors.py:577: error: Name "_rule_block" already defined on line 108  [no-redef]
+tests/unit/test_cognitive_complexity_meter.py:39: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cognitive_complexity_meter.py:43: error: Argument 1 to "module_from_spec" has incompatible type "ModuleSpec | None"; expected "ModuleSpec"  [arg-type]
+tests/unit/test_cognitive_complexity_meter.py:45: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]
+tests/unit/test_cognitive_complexity_meter.py:45: error: Item "None" of "Loader | Any | None" has no attribute "exec_module"  [union-attr]
+tests/unit/test_cognitive_complexity_meter.py:50: error: Call to untyped function "_load" in typed context  [no-untyped-call]
+tests/unit/test_cognitive_complexity_meter.py:53: error: Returning Any from function declared to return "int"  [no-any-return]
+tests/unit/test_cognitive_complexity_meter.py:177: error: Call to untyped function "_load" in typed context  [no-untyped-call]
+tests/unit/test_cognitive_complexity_meter.py:178: error: Returning Any from function declared to return "bool"  [no-any-return]
+tests/unit/test_cognitive_complexity_meter.py:200: error: Call to untyped function "_load" in typed context  [no-untyped-call]
+tests/unit/test_monte_carlo.py:50: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:50: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:56: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:56: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:62: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:62: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:72: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:72: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:77: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:77: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:82: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:82: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:91: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:91: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:96: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:96: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:102: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:102: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:108: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:108: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:115: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:115: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:123: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:123: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:133: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:133: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:136: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:136: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:141: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:141: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:153: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:153: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:160: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:160: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:166: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:166: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:171: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:171: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:178: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:178: note: Use "-> None" if function does not return a value
+tests/unit/test_monte_carlo.py:185: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_monte_carlo.py:185: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:44: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_decision.py:59: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:59: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:69: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:69: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:78: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:78: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:84: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:84: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:91: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:91: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:100: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:100: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:107: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:107: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:114: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:114: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:122: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:122: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:130: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:130: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:137: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:137: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:144: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:144: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:151: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:151: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:162: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:162: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:172: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:172: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:184: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:194: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:194: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:195: error: Call to untyped function "_two_adversary_scenario" in typed context  [no-untyped-call]
+tests/unit/test_decision.py:199: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:199: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:200: error: Call to untyped function "_two_adversary_scenario" in typed context  [no-untyped-call]
+tests/unit/test_decision.py:204: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:204: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:205: error: Call to untyped function "_two_adversary_scenario" in typed context  [no-untyped-call]
+tests/unit/test_decision.py:209: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:209: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:211: error: Call to untyped function "_two_adversary_scenario" in typed context  [no-untyped-call]
+tests/unit/test_decision.py:216: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:216: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:219: error: Need type annotation for "om"  [var-annotated]
+tests/unit/test_decision.py:227: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:227: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:232: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:232: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:240: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:240: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:248: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:248: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:254: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:254: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:259: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:259: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:269: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:269: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:279: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:279: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:289: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:289: note: Use "-> None" if function does not return a value
+tests/unit/test_decision.py:297: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_decision.py:297: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:57: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:57: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:60: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:60: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:64: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:64: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:69: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:69: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:72: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:72: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:75: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:75: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:83: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:90: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:90: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:91: error: Call to untyped function "_circular_leo_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:95: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:95: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:96: error: Call to untyped function "_circular_leo_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:101: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:101: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:103: error: Call to untyped function "_circular_leo_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:107: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:107: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:108: error: Call to untyped function "_circular_leo_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:113: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:113: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:121: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:121: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:135: error: Function is missing a type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:138: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:138: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:139: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:146: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:146: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:149: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:156: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:156: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:159: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:167: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:167: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:169: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:173: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:173: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:175: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:180: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:180: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:184: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:193: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:193: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:197: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:207: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:207: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:214: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:214: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:221: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:221: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:226: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:226: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:235: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:238: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:238: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:240: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:243: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:243: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:245: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:249: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:249: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:251: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:254: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:254: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:261: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:261: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:263: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:267: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:267: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:269: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:273: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:273: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:275: error: Call to untyped function "_state" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:282: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:282: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:287: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:287: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:292: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:292: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:297: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:297: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:303: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:303: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:308: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:308: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:313: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:313: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:321: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:321: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:328: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:328: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:332: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:332: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:336: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:336: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:340: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:340: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:345: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:345: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:353: error: Function is missing a type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:369: error: Argument 1 to "compute_relative_geometry" has incompatible type "**dict[str, object]"; expected "str"  [arg-type]
+tests/unit/test_cw_geometry.py:369: error: Argument 1 to "compute_relative_geometry" has incompatible type "**dict[str, object]"; expected "datetime"  [arg-type]
+tests/unit/test_cw_geometry.py:369: error: Argument 1 to "compute_relative_geometry" has incompatible type "**dict[str, object]"; expected "float"  [arg-type]
+tests/unit/test_cw_geometry.py:371: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:371: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:373: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:376: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:376: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:377: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:380: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:380: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:381: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:384: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:384: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:385: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:388: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:388: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:389: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:392: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:392: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:393: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:396: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:396: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:397: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:400: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:400: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:401: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:404: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:404: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:405: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:408: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:408: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:409: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:412: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:412: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:413: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:417: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:417: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:418: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:422: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:422: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:423: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:426: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:426: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:427: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:430: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:430: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:431: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:437: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:437: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:439: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:441: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:441: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:443: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:445: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:445: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:447: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:449: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:449: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:451: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:453: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:453: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:455: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:457: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:457: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:459: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:461: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:461: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:463: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:465: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:465: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:467: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:469: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:469: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:472: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:474: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:474: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:476: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:479: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:479: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:480: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:484: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:484: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:485: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:490: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:490: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:491: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:495: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:495: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:496: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:501: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:501: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:502: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:506: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:506: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:507: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:511: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:511: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:512: error: Call to untyped function "_call" in typed context  [no-untyped-call]
+tests/unit/test_cw_geometry.py:519: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:519: note: Use "-> None" if function does not return a value
+tests/unit/test_cw_geometry.py:524: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_cw_geometry.py:524: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:34: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:34: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:48: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:48: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:55: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:55: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:72: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:72: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:90: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:90: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:94: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:94: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:111: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:111: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:121: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:121: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:132: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:132: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:143: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:143: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:149: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:149: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:169: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:169: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:179: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:179: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:194: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:194: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:209: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:209: note: Use "-> None" if function does not return a value
+tests/unit/test_astro.py:223: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_astro.py:223: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:112: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:112: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:121: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:121: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:131: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:131: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:143: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:143: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:156: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:156: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:166: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:166: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:181: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:181: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:190: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:190: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:204: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:204: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:211: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:211: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:228: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:228: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:257: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:257: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:282: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:282: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:302: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:302: note: Use "-> None" if function does not return a value
+tests/integration/test_tle_clustering_pipeline.py:314: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_tle_clustering_pipeline.py:314: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:56: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:56: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:59: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:59: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:65: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:65: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:73: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:73: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:80: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:80: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:87: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:87: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:94: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:94: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:102: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:102: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:108: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:108: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:117: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:117: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:122: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:122: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:128: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:128: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:134: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:134: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:140: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:140: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:152: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:152: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:156: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:156: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:161: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:161: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:167: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:167: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:174: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:174: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:181: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:181: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:187: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:187: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:193: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:193: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:203: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:203: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:208: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:208: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:214: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:214: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:220: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:220: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:226: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:226: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:233: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:233: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:239: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:239: note: Use "-> None" if function does not return a value
+tests/unit/test_tle_filter.py:251: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_tle_filter.py:251: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:37: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:37: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:41: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:41: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:51: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:51: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:59: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:59: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:66: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:66: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:72: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:72: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:80: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:80: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:84: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:84: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:92: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:92: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:96: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:96: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:102: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:102: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:106: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:106: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:112: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:112: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:117: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:117: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:121: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:121: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:125: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:125: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:133: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:133: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:141: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:141: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:151: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:151: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:159: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:159: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:169: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:169: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:177: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:177: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:186: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:186: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:194: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:194: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:203: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:203: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:212: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:212: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:225: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:225: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:230: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:230: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:233: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:233: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:237: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:237: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:244: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:244: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:252: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:252: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:256: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:256: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:264: error: Argument 1 to "recommended_next_step" has incompatible type "dict[str, int]"; expected "dict[str, float]"  [arg-type]
+tests/unit/test_training_gamification.py:264: note: "dict" is invariant -- see https://mypy.readthedocs.io/en/stable/common_issues.html#variance
+tests/unit/test_training_gamification.py:264: note: Consider using "Mapping" instead, which is covariant in the value type
+tests/unit/test_training_gamification.py:267: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:267: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:277: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:277: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:281: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:281: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:284: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:284: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:288: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:288: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:292: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:292: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:296: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:296: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:300: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:300: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:304: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:304: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:309: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:309: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:312: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:312: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:318: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:318: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:323: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:323: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:328: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:328: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:334: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:334: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:339: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:339: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:345: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:345: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:351: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:351: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:357: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:357: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:367: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:367: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:372: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:372: note: Use "-> None" if function does not return a value
+tests/unit/test_training_gamification.py:377: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_training_gamification.py:377: note: Use "-> None" if function does not return a value
+tests/unit/test_db_pool_contract.py:108: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_db_pool_contract.py:112: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_db_pool_contract.py:118: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_entrypoint.py:26: error: Module "spectre.web._entrypoint" does not explicitly export attribute "uvicorn"  [attr-defined]
+tests/unit/test_rate_limit_memory.py:51: error: Unsupported operand types for >= ("int" and "object")  [operator]
+tests/unit/test_rate_limit_memory.py:142: error: Value of type "object" is not indexable  [index]
+tests/unit/test_rate_limit_memory.py:143: error: Value of type "object" is not indexable  [index]
+tests/unit/test_rate_limit_memory.py:180: error: Generator has incompatible item type "int"; expected "bool"  [misc]
+tests/unit/test_rate_limit_memory.py:180: note: Error code "misc" not covered by "type: ignore[attr-defined]" comment
+tests/unit/test_rate_limit_memory.py:189: error: Argument 1 to "_retained_bytes" of "TestTheKeyItselfIsBounded" has incompatible type "dict[str, deque[float]]"; expected "dict[str, object]"  [arg-type]
+tests/unit/test_rate_limit_memory.py:189: note: "dict" is invariant -- see https://mypy.readthedocs.io/en/stable/common_issues.html#variance
+tests/unit/test_rate_limit_memory.py:189: note: Consider using "Mapping" instead, which is covariant in the value type
+tests/unit/test_outbound_and_ddl_guards.py:146: error: "bool" is invalid as return type for "__exit__" that always returns False  [exit-return]
+tests/unit/test_outbound_and_ddl_guards.py:146: note: Use "typing.Literal[False]" as the return type or change it to "None"
+tests/unit/test_outbound_and_ddl_guards.py:146: note: If return type of "__exit__" implies that it may return True, the context manager may swallow exceptions
+tests/unit/test_outbound_and_ddl_guards.py:255: error: Need type annotation for "migrations"  [var-annotated]
+tests/unit/test_hrr_bootstrap.py:38: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:41: error: Returning Any from function declared to return "dict[Any, Any]"  [no-any-return]
+tests/unit/test_hrr_bootstrap.py:138: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:145: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:153: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:165: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:181: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_hrr_bootstrap.py:187: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_dv_estimation.py:723: error: Missing type arguments for generic type "list"  [type-arg]
+tests/unit/test_deployment_contract.py:893: error: Need type annotation for "sources" (hint: "sources: list[<type>] = ...")  [var-annotated]
+tests/unit/test_deployment_contract.py:1236: error: Incompatible types in assignment (expression has type "AST | None", variable has type "AST")  [assignment]
+tests/unit/test_deployment_contract.py:1242: error: Incompatible types in assignment (expression has type "AST | None", variable has type "AST")  [assignment]
+tests/unit/test_deployment_contract.py:1360: error: "AST" has no attribute "lineno"  [attr-defined]
+tests/unit/test_udl_tle_fetch.py:80: error: Missing type arguments for generic type "dict"  [type-arg]
+tests/unit/test_udl_tle_fetch.py:92: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:103: error: Function is missing a type annotation  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:109: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:115: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:125: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:147: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:150: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:161: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:172: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:175: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:187: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:197: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:200: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:208: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:232: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:235: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:245: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:270: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:273: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:281: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:305: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:308: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:316: error: Function is missing a type annotation for one or more parameters  [no-untyped-def]
+tests/unit/test_udl_tle_fetch.py:338: error: Call to untyped function "_make_request" in typed context  [no-untyped-call]
+tests/unit/test_udl_tle_fetch.py:341: error: Call to untyped function "_make_user" in typed context  [no-untyped-call]
+tests/unit/tle_clustering/test_clustering.py:13: error: Function is missing a return type annotation  [no-untyped-def]
+tests/integration/test_xss_escaping.py:236: error: "SessionState" has no attribute "last_pol_analysis"  [attr-defined]
+tests/integration/test_threat_screen_route.py:42: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:43: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:47: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:48: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:52: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:53: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:54: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:73: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:74: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:90: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:91: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:95: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:115: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:116: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:117: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:118: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:136: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_threat_screen_route.py:137: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_threat_screen_route.py:138: error: "object" has no attribute "text"  [attr-defined]
+tests/integration/test_all_intercepts_ranking.py:93: error: Returning Any from function declared to return "str"  [no-any-return]
+tests/integration/test_admin_routes.py:8: error: Unused "type: ignore" comment  [unused-ignore]
+tests/integration/test_admin_routes.py:19: error: Unused "type: ignore" comment  [unused-ignore]
+tests/unit/test_pol_assessment.py:146: error: Function is missing a return type annotation  [no-untyped-def]
+tests/unit/test_pol_assessment.py:146: error: Missing type arguments for generic type "list"  [type-arg]
+tests/unit/test_pol_assessment.py:269: error: Unsupported operand types for < ("float" and "None")  [operator]
+tests/unit/test_pol_assessment.py:269: note: Left operand is of type "float | None"
+tests/unit/test_pol_assessment.py:318: error: Argument 1 to "int" has incompatible type "float | None"; expected "str | Buffer | SupportsInt | SupportsIndex | SupportsTrunc"  [arg-type]
+tests/unit/test_pol_assessment.py:419: error: "object" not callable  [operator]
+tests/unit/test_pol_assessment.py:499: error: Argument 1 to "_merge_duplicate_detections" has incompatible type "list[_Stub]"; expected "list[Manoeuvre]"  [arg-type]
+tests/unit/test_pol_assessment.py:521: error: List item 0 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:521: error: List item 1 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:547: error: List item 0 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:547: error: List item 1 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:548: error: List item 2 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:548: error: List item 3 has incompatible type "_Stub"; expected "Manoeuvre"  [list-item]
+tests/unit/test_pol_assessment.py:567: error: Unsupported operand types for > ("Band" and "None")  [operator]
+tests/unit/test_pol_assessment.py:567: error: Unsupported operand types for < ("Band" and "None")  [operator]
+tests/unit/test_pol_assessment.py:567: error: Unsupported left operand type for > ("None")  [operator]
+tests/unit/test_pol_assessment.py:567: note: Both left and right operands are unions
+tests/unit/test_pattern_of_life.py:191: error: Argument "rms_metadata" to "parse_tle_history" has incompatible type "dict[str, float]"; expected "dict[str, float | None] | None"  [arg-type]
+tests/unit/test_pattern_of_life.py:191: note: "dict" is invariant -- see https://mypy.readthedocs.io/en/stable/common_issues.html#variance
+tests/unit/test_pattern_of_life.py:191: note: Consider using "Mapping" instead, which is covariant in the value type
+tests/unit/test_pattern_of_life.py:254: error: Dict entry 0 has incompatible type "str": "tuple[str, str, str]"; expected "str": "tuple[str, str]"  [dict-item]
+tests/unit/test_operator_sees_metres_per_second.py:421: error: Unsupported operand types for * ("None" and "float")  [operator]
+tests/unit/test_operator_sees_metres_per_second.py:421: note: Left operand is of type "float | None"
+tests/unit/test_operator_sees_metres_per_second.py:422: error: Unsupported operand types for * ("None" and "float")  [operator]
+tests/unit/test_operator_sees_metres_per_second.py:422: note: Left operand is of type "float | None"
+tests/unit/test_operator_sees_metres_per_second.py:431: error: "object" has no attribute "propellant"  [attr-defined]
+tests/unit/test_operator_sees_metres_per_second.py:434: error: "object" has no attribute "propellant"  [attr-defined]
+tests/unit/test_operator_sees_metres_per_second.py:439: error: Unsupported operand types for > ("float" and "object")  [operator]
+tests/unit/test_operator_sees_metres_per_second.py:439: error: Unsupported operand types for < ("float" and "object")  [operator]
+tests/unit/test_operator_sees_metres_per_second.py:441: error: Value of type "object" is not indexable  [index]
+tests/unit/test_operator_sees_metres_per_second.py:460: error: "object" has no attribute "propellant"  [attr-defined]
+tests/integration/test_web_routes.py:89: error: Returning Any from function declared to return "str"  [no-any-return]
+tests/integration/test_web_routes.py:120: error: Returning Any from function declared to return "str"  [no-any-return]
+tests/integration/test_web_routes.py:153: error: Returning Any from function declared to return "str"  [no-any-return]
+tests/integration/test_login_hardening.py:50: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:51: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:92: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:95: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:98: error: "object" has no attribute "content"  [attr-defined]
+tests/integration/test_login_hardening.py:99: error: "object" has no attribute "content"  [attr-defined]
+tests/integration/test_login_hardening.py:114: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:115: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:124: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:145: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:146: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:172: error: Argument 1 to "run_in_threadpool" has incompatible type "object"; expected "def (*object, **object) -> object"  [arg-type]
+tests/integration/test_login_hardening.py:177: error: "object" has no attribute "status_code"  [attr-defined]
+tests/integration/test_login_hardening.py:190: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:213: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:296: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:312: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:339: error: "object" has no attribute "cookies"  [attr-defined]
+tests/integration/test_login_hardening.py:368: error: Argument 1 to "Path" has incompatible type "str | None"; expected "str | PathLike[str]"  [arg-type]
+tests/integration/test_login_hardening.py:369: error: Argument 1 to "Path" has incompatible type "str | None"; expected "str | PathLike[str]"  [arg-type]
+tests/integration/test_login_hardening.py:408: error: Returning Any from function declared to return "int"  [no-any-return]
+Found 536 errors in 31 files (checked 84 source files)
+[exit 1]

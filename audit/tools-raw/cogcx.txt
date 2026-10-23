@@ -1,0 +1,19 @@
+$ python scripts/cognitive_complexity.py --help
+usage: cognitive_complexity.py [-h] [--max MAX] [--all] [--calibrate]
+                               [--changed BASE] [--json]
+                               [paths ...]
+
+Measure SonarSource Cognitive Complexity (python:S3776) over this tree.
+
+positional arguments:
+  paths           files or directories (default: spectre, tle_clustering)
+
+options:
+  -h, --help      show this help message and exit
+  --max MAX       the limit to report against (default 15)
+  --all           list every function, not just those over the limit
+  --calibrate     check the implementation against known Sonar scores
+  --changed BASE  report only functions whose lines changed against BASE, as
+                  Sonar scopes new code
+  --json          machine-readable output
+[exit 0]

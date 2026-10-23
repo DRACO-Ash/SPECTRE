@@ -1,0 +1,30 @@
+$ ruff check --no-cache --isolated --line-length 120 --target-version py312 --select F,E,W,B,SIM,C90,N,S,BLE,A,C4,DTZ,T20,PIE,RET,SLF,ERA,PL,TRY400,PERF,LOG,G,RUF100 --ignore E501,B008,PTH123,TRY003,EM101,EM102,PLC0415,ARG --statistics spectre tle_clustering
+203	PLR2004	[ ] magic-value-comparison
+ 40	PLR0913	[ ] too-many-arguments
+ 40	PLR0917	[ ] too-many-positional-arguments
+ 32	BLE001 	[ ] blind-except
+ 23	N806   	[ ] non-lowercase-variable-in-function
+ 13	SIM108 	[ ] if-else-block-instead-of-if-exp
+ 12	C901   	[ ] complex-structure
+ 11	PLW0603	[ ] global-statement
+  8	PLR0912	[ ] too-many-branches
+  7	PLR0915	[ ] too-many-statements
+  6	TRY400 	[ ] error-instead-of-exception
+  5	PERF401	[ ] manual-list-comprehension
+  5	PLR0911	[ ] too-many-return-statements
+  4	SLF001 	[ ] private-member-access
+  4	RUF100 	[*] unused-noqa
+  3	ERA001 	[ ] commented-out-code
+  2	W293   	[*] blank-line-with-whitespace
+  2	PLR1730	[*] if-stmt-min-max
+  2	N802   	[ ] invalid-function-name
+  2	PLW3301	[ ] nested-min-max
+  2	RET505 	[*] superfluous-else-return
+  2	RET504 	[ ] unnecessary-assign
+  1	DTZ007 	[ ] call-datetime-strptime-without-zone
+  1	PLR5501	[*] collapsible-else-if
+  1	PLW2901	[ ] redefined-loop-name
+  1	S110   	[ ] try-except-pass
+Found 432 errors.
+[*] 11 fixable with the `--fix` option (18 hidden fixes can be enabled with the `--unsafe-fixes` option).
+[exit 1]

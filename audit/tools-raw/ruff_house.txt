@@ -1,0 +1,435 @@
+spectre/astro/constants.py:63:5: PLR0911 Too many return statements (7 > 6)
+spectre/astro/constants.py:80:70: PLR2004 Magic value used in comparison, consider replacing `0.5` with a constant variable
+spectre/astro/constants.py:81:23: PLR2004 Magic value used in comparison, consider replacing `0.3` with a constant variable
+spectre/astro/cw_geometry.py:287:5: N806 Variable `R_hill` in function should be lowercase
+spectre/astro/cw_geometry.py:360:5: C901 `compute_relative_geometry` is too complex (16 > 10)
+spectre/astro/cw_geometry.py:360:5: PLR0913 Too many arguments in function definition (12 > 5)
+spectre/astro/cw_geometry.py:360:5: PLR0917 Too many positional arguments (11 > 5)
+spectre/astro/cw_geometry.py:457:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/astro/cw_geometry.py:497:24: PLR2004 Magic value used in comparison, consider replacing `10.0` with a constant variable
+spectre/astro/cw_geometry.py:536:12: RET504 Unnecessary assignment to `geom` before `return` statement
+spectre/astro/events.py:38:5: C901 `find_orbital_events` is too complex (12 > 10)
+spectre/astro/events.py:62:25: BLE001 Do not catch blind exception: `Exception`
+spectre/astro/events.py:96:18: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/events.py:110:26: PLR2004 Magic value used in comparison, consider replacing `180.0` with a constant variable
+spectre/astro/events.py:114:26: PLR2004 Magic value used in comparison, consider replacing `300.0` with a constant variable
+spectre/astro/events.py:114:41: PLR2004 Magic value used in comparison, consider replacing `60.0` with a constant variable
+spectre/astro/lambert.py:44:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/lambert.py:44:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/lambert.py:79:17: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/lambert.py:79:35: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/lambert.py:126:5: N806 Variable `A` in function should be lowercase
+spectre/astro/lambert.py:128:17: PLR2004 Magic value used in comparison, consider replacing `1e-14` with a constant variable
+spectre/astro/lambert.py:164:5: N802 Function name `_stumpff_C` should be lowercase
+spectre/astro/lambert.py:166:12: PLR2004 Magic value used in comparison, consider replacing `1e-6` with a constant variable
+spectre/astro/lambert.py:169:12: PLR2004 Magic value used in comparison, consider replacing `-1e-6` with a constant variable
+spectre/astro/lambert.py:175:5: N802 Function name `_stumpff_S` should be lowercase
+spectre/astro/lambert.py:177:12: PLR2004 Magic value used in comparison, consider replacing `1e-6` with a constant variable
+spectre/astro/lambert.py:180:12: PLR2004 Magic value used in comparison, consider replacing `-1e-6` with a constant variable
+spectre/astro/maneuvers.py:75:5: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/astro/maneuvers.py:75:5: PLR0917 Too many positional arguments (8 > 5)
+spectre/astro/maneuvers.py:206:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/maneuvers.py:206:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/maneuvers.py:269:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/maneuvers.py:269:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/maneuvers.py:335:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:335:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:374:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:395:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:395:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:445:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:445:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:491:38: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:501:42: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:515:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:515:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:552:46: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:562:38: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:569:50: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:621:19: PLR2004 Magic value used in comparison, consider replacing `50.0` with a constant variable
+spectre/astro/maneuvers.py:628:38: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:647:5: RET505 [*] Unnecessary `else` after `return` statement
+spectre/astro/maneuvers.py:656:38: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:711:21: PLR2004 Magic value used in comparison, consider replacing `180.0` with a constant variable
+spectre/astro/maneuvers.py:713:23: PLR2004 Magic value used in comparison, consider replacing `-180.0` with a constant variable
+spectre/astro/maneuvers.py:747:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:747:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:787:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:819:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/maneuvers.py:819:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/maneuvers.py:854:14: PLR2004 Magic value used in comparison, consider replacing `180` with a constant variable
+spectre/astro/maneuvers.py:856:16: PLR2004 Magic value used in comparison, consider replacing `-180` with a constant variable
+spectre/astro/maneuvers.py:919:17: SLF001 Private member accessed: `_sat`
+spectre/astro/maneuvers.py:919:46: SLF001 Private member accessed: `_sat`
+spectre/astro/maneuvers.py:936:53: PLR2004 Magic value used in comparison, consider replacing `1e-6` with a constant variable
+spectre/astro/maneuvers.py:944:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:944:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:983:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:1002:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/maneuvers.py:1002:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/maneuvers.py:1042:5: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/astro/maneuvers.py:1042:5: PLR0917 Too many positional arguments (8 > 5)
+spectre/astro/maneuvers.py:1084:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:1128:21: PLR2004 Magic value used in comparison, consider replacing `180` with a constant variable
+spectre/astro/maneuvers.py:1130:23: PLR2004 Magic value used in comparison, consider replacing `-180` with a constant variable
+spectre/astro/maneuvers.py:1138:62: PLR2004 Magic value used in comparison, consider replacing `5.0` with a constant variable
+spectre/astro/maneuvers.py:1156:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:1156:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:1295:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:1345:18: PLR2004 Magic value used in comparison, consider replacing `0.1` with a constant variable
+spectre/astro/maneuvers.py:1371:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/maneuvers.py:1371:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/maneuvers.py:1403:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:1455:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/maneuvers.py:1455:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/maneuvers.py:1510:14: PLR2004 Magic value used in comparison, consider replacing `1e-14` with a constant variable
+spectre/astro/maneuvers.py:1514:43: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/maneuvers.py:1517:34: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/monte_carlo.py:60:5: N806 Variable `_TABLE` in function should be lowercase
+spectre/astro/monte_carlo.py:73:23: N806 Variable `H` in function should be lowercase
+spectre/astro/monte_carlo.py:307:15: PLR2004 Magic value used in comparison, consider replacing `800.0` with a constant variable
+spectre/astro/monte_carlo.py:310:20: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/monte_carlo.py:330:50: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/monte_carlo.py:376:5: SIM108 Use ternary operator `ric_unit = np.array([0.0, 1.0, 0.0]) if ric_norm < 1e-15 else ric / ric_norm` instead of `if`-`else`-block
+spectre/astro/monte_carlo.py:376:19: PLR2004 Magic value used in comparison, consider replacing `1e-15` with a constant variable
+spectre/astro/monte_carlo.py:389:5: SIM108 Use ternary operator `perp1 = np.cross(ric_unit, [1.0, 0.0, 0.0]) if abs(ric_unit[0]) < 0.9 else np.cross(ric_unit, [0.0, 1.0, 0.0])` instead of `if`-`else`-block
+spectre/astro/monte_carlo.py:389:27: PLR2004 Magic value used in comparison, consider replacing `0.9` with a constant variable
+spectre/astro/monte_carlo.py:396:5: ERA001 Found commented-out code
+spectre/astro/monte_carlo.py:421:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/monte_carlo.py:421:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/monte_carlo.py:482:12: BLE001 Do not catch blind exception: `Exception`
+spectre/astro/monte_carlo.py:503:30: PLR2004 Magic value used in comparison, consider replacing `1e-9` with a constant variable
+spectre/astro/notso.py:247:28: PLR2004 Magic value used in comparison, consider replacing `999999` with a constant variable
+spectre/astro/notso.py:285:17: PERF401 Use `list.extend` to create a transformed list
+spectre/astro/notso.py:313:16: BLE001 Do not catch blind exception: `Exception`
+spectre/astro/notso.py:471:69: PLR2004 Magic value used in comparison, consider replacing `1e-9` with a constant variable
+spectre/astro/notso.py:497:13: PERF401 Use `list.extend` to create a transformed list
+spectre/astro/notso.py:677:65: PLR2004 Magic value used in comparison, consider replacing `6.0` with a constant variable
+spectre/astro/notso.py:679:12: RET504 Unnecessary assignment to `profile` before `return` statement
+spectre/astro/pattern_of_life.py:332:30: PLR2004 Magic value used in comparison, consider replacing `57` with a constant variable
+spectre/astro/pattern_of_life.py:358:21: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/pattern_of_life.py:380:53: PLR2004 Magic value used in comparison, consider replacing `15.0` with a constant variable
+spectre/astro/pattern_of_life.py:380:71: PLR2004 Magic value used in comparison, consider replacing `30000.0` with a constant variable
+spectre/astro/pattern_of_life.py:631:22: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/pattern_of_life.py:651:24: PLR2004 Magic value used in comparison, consider replacing `3` with a constant variable
+spectre/astro/pattern_of_life.py:668:18: PLR2004 Magic value used in comparison, consider replacing `0.5` with a constant variable
+spectre/astro/photometry.py:78:5: ERA001 Found commented-out code
+spectre/astro/photometry.py:177:48: PLR2004 Magic value used in comparison, consider replacing `0.80` with a constant variable
+spectre/astro/photometry.py:177:83: PLR2004 Magic value used in comparison, consider replacing `20.0` with a constant variable
+spectre/astro/photometry.py:178:41: PLR2004 Magic value used in comparison, consider replacing `15.0` with a constant variable
+spectre/astro/photometry.py:217:12: PLR2004 Magic value used in comparison, consider replacing `3` with a constant variable
+spectre/astro/photometry.py:231:5: N806 Variable `A` in function should be lowercase
+spectre/astro/photometry.py:246:35: PLR2004 Magic value used in comparison, consider replacing `1e-15` with a constant variable
+spectre/astro/photometry.py:282:22: PLR2004 Magic value used in comparison, consider replacing `5` with a constant variable
+spectre/astro/photometry.py:299:33: PLR2004 Magic value used in comparison, consider replacing `5` with a constant variable
+spectre/astro/photometry.py:312:20: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/photometry.py:367:13: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/photometry.py:367:23: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/photometry.py:376:13: PLR2004 Magic value used in comparison, consider replacing `1e-15` with a constant variable
+spectre/astro/photometry.py:384:36: PLR2004 Magic value used in comparison, consider replacing `1e-15` with a constant variable
+spectre/astro/photometry.py:401:5: N806 Variable `MAXIT` in function should be lowercase
+spectre/astro/photometry.py:402:5: N806 Variable `FPMIN` in function should be lowercase
+spectre/astro/photometry.py:403:5: N806 Variable `EPS` in function should be lowercase
+spectre/astro/photometry.py:455:5: RET505 [*] Unnecessary `else` after `return` statement
+spectre/astro/photometry.py:539:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/photometry.py:539:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/photometry.py:608:25: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/photometry.py:615:17: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/photometry.py:616:17: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/photometry.py:626:32: PLR2004 Magic value used in comparison, consider replacing `0.3` with a constant variable
+spectre/astro/photometry.py:664:5: C901 `parse_photometry_csv` is too complex (13 > 10)
+spectre/astro/propagator.py:83:25: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/propagator.py:147:5: SIM108 Use ternary operator `a = float("inf") if abs(energy) < 1e-14 else -MU_EARTH / (2.0 * energy)` instead of `if`-`else`-block
+spectre/astro/propagator.py:147:22: PLR2004 Magic value used in comparison, consider replacing `1e-14` with a constant variable
+spectre/astro/propagator.py:156:16: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/propagator.py:273:5: N806 Variable `cos_O` in function should be lowercase
+spectre/astro/propagator.py:273:12: N806 Variable `sin_O` in function should be lowercase
+spectre/astro/propagator.py:277:5: N806 Variable `R` in function should be lowercase
+spectre/astro/propagator.py:311:15: SLF001 Private member accessed: `_sat`
+spectre/astro/propagator.py:313:17: SLF001 Private member accessed: `_sat`
+spectre/astro/tactical.py:167:22: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:217:21: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:275:19: PLR2004 Magic value used in comparison, consider replacing `1e-15` with a constant variable
+spectre/astro/tactical.py:443:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/tactical.py:443:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/tactical.py:471:5: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/astro/tactical.py:471:5: PLR0917 Too many positional arguments (8 > 5)
+spectre/astro/tactical.py:501:25: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/tactical.py:511:41: PLR2004 Magic value used in comparison, consider replacing `90.0` with a constant variable
+spectre/astro/tactical.py:516:29: PLR2004 Magic value used in comparison, consider replacing `1e-10` with a constant variable
+spectre/astro/tactical.py:596:5: SIM108 Use ternary operator `dv_radial = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:596:22: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:604:5: SIM108 Use ternary operator `dv_along_track = desired_miss_km / coeff_y if coeff_y > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:604:18: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:611:5: SIM108 Use ternary operator `dv_oop = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:611:22: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:791:5: C901 `classify_manoeuvre` is too complex (16 > 10)
+spectre/astro/tactical.py:791:5: PLR0913 Too many arguments in function definition (10 > 5)
+spectre/astro/tactical.py:791:5: PLR0917 Too many positional arguments (10 > 5)
+spectre/astro/tactical.py:791:5: PLR0912 Too many branches (17 > 12)
+spectre/astro/tactical.py:791:5: PLR0915 Too many statements (59 > 50)
+spectre/astro/tactical.py:813:16: PLR2004 Magic value used in comparison, consider replacing `180.0` with a constant variable
+spectre/astro/tactical.py:824:68: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:830:89: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:835:30: PLR2004 Magic value used in comparison, consider replacing `5.0` with a constant variable
+spectre/astro/tactical.py:836:22: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/tactical.py:837:32: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/tactical.py:838:25: PLR2004 Magic value used in comparison, consider replacing `0.001` with a constant variable
+spectre/astro/tactical.py:853:19: PLR2004 Magic value used in comparison, consider replacing `0.001` with a constant variable
+spectre/astro/tactical.py:868:32: PLR2004 Magic value used in comparison, consider replacing `5.0` with a constant variable
+spectre/astro/tactical.py:948:5: N806 Variable `T` in function should be lowercase
+spectre/astro/tactical.py:957:28: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:1045:19: PLR2004 Magic value used in comparison, consider replacing `10.0` with a constant variable
+spectre/astro/tactical.py:1047:19: PLR2004 Magic value used in comparison, consider replacing `100.0` with a constant variable
+spectre/astro/tactical.py:1054:22: PLR2004 Magic value used in comparison, consider replacing `2000` with a constant variable
+spectre/astro/tactical.py:1057:24: PLR2004 Magic value used in comparison, consider replacing `35786` with a constant variable
+spectre/astro/tactical.py:1067:5: SIM108 Use ternary operator `time_hours = base_detection_time / math.log2(1.0 + dv_m_s) if dv_m_s > 0.01 else base_detection_time * 100.0` instead of `if`-`else`-block
+spectre/astro/tactical.py:1067:17: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:1135:5: C901 `optimal_evasion` is too complex (13 > 10)
+spectre/astro/tactical.py:1135:5: PLR0912 Too many branches (17 > 12)
+spectre/astro/tactical.py:1177:9: SIM108 Use ternary operator `dv_prograde = desired_miss_km / coeff_y if coeff_y > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:1177:22: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1183:9: SIM108 Use ternary operator `dv_normal = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:1183:26: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1189:9: SIM108 Use ternary operator `dv_radial = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > 1e-12 else float("inf")` instead of `if`-`else`-block
+spectre/astro/tactical.py:1189:26: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1197:22: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1199:50: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1200:20: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1293:5: C901 `assess_intercept_intent` is too complex (13 > 10)
+spectre/astro/tactical.py:1293:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/tactical.py:1293:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/tactical.py:1293:5: PLR0912 Too many branches (15 > 12)
+spectre/astro/tactical.py:1324:36: PLR2004 Magic value used in comparison, consider replacing `-0.001` with a constant variable
+spectre/astro/tactical.py:1331:28: PLR2004 Magic value used in comparison, consider replacing `100` with a constant variable
+spectre/astro/tactical.py:1334:30: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1344:26: PLR2004 Magic value used in comparison, consider replacing `5.0` with a constant variable
+spectre/astro/tactical.py:1344:52: PLR2004 Magic value used in comparison, consider replacing `200.0` with a constant variable
+spectre/astro/tactical.py:1349:29: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/tactical.py:1353:30: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/tactical.py:1359:16: PLR2004 Magic value used in comparison, consider replacing `0.7` with a constant variable
+spectre/astro/tactical.py:1360:9: SIM108 Use ternary operator `intent = "inspection" if relative_range_km < 50 and abs(range_rate_km_s) < 0.01 else "co_orbital_intercept"` instead of `if`-`else`-block
+spectre/astro/tactical.py:1360:32: PLR2004 Magic value used in comparison, consider replacing `50` with a constant variable
+spectre/astro/tactical.py:1360:62: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:1364:38: PLR2004 Magic value used in comparison, consider replacing `0.85` with a constant variable
+spectre/astro/tactical.py:1365:18: PLR2004 Magic value used in comparison, consider replacing `0.4` with a constant variable
+spectre/astro/tactical.py:1368:18: PLR2004 Magic value used in comparison, consider replacing `0.15` with a constant variable
+spectre/astro/tactical.py:1376:46: PLR2004 Magic value used in comparison, consider replacing `1e-6` with a constant variable
+spectre/astro/tactical.py:1418:5: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/astro/tactical.py:1418:5: PLR0917 Too many positional arguments (7 > 5)
+spectre/astro/tactical.py:1500:13: PLR1730 [*] Replace `if` statement with `min_feas_tof = min(min_feas_tof, tof_h)`
+spectre/astro/tactical.py:1502:13: PLR1730 [*] Replace `if` statement with `min_feas_dv = min(min_feas_dv, dv)`
+spectre/astro/tactical.py:1534:5: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/astro/tactical.py:1534:5: PLR0917 Too many positional arguments (8 > 5)
+spectre/astro/tactical.py:1554:5: N806 Variable `_T` in function should be lowercase
+spectre/astro/tactical.py:1563:5: N806 Variable `A_x` in function should be lowercase
+spectre/astro/tactical.py:1566:5: N806 Variable `A_z` in function should be lowercase
+spectre/astro/tactical.py:1569:49: PLR2004 Magic value used in comparison, consider replacing `0.1` with a constant variable
+spectre/astro/tactical.py:1570:39: PLR2004 Magic value used in comparison, consider replacing `0.001` with a constant variable
+spectre/astro/tactical.py:1572:41: PLR2004 Magic value used in comparison, consider replacing `0.1` with a constant variable
+spectre/astro/tactical.py:1576:41: PLR2004 Magic value used in comparison, consider replacing `10.0` with a constant variable
+spectre/astro/tactical.py:1617:5: C901 `fingerprint_manoeuvre` is too complex (25 > 10)
+spectre/astro/tactical.py:1617:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/tactical.py:1617:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/tactical.py:1617:5: PLR0912 Too many branches (24 > 12)
+spectre/astro/tactical.py:1617:5: PLR0915 Too many statements (67 > 50)
+spectre/astro/tactical.py:1649:8: PLR2004 Magic value used in comparison, consider replacing `35000` with a constant variable
+spectre/astro/tactical.py:1649:30: PLR2004 Magic value used in comparison, consider replacing `37000` with a constant variable
+spectre/astro/tactical.py:1651:20: PLR2004 Magic value used in comparison, consider replacing `5.0` with a constant variable
+spectre/astro/tactical.py:1655:41: PLR2004 Magic value used in comparison, consider replacing `10` with a constant variable
+spectre/astro/tactical.py:1655:69: PLR2004 Magic value used in comparison, consider replacing `20` with a constant variable
+spectre/astro/tactical.py:1661:16: PLR2004 Magic value used in comparison, consider replacing `50.0` with a constant variable
+spectre/astro/tactical.py:1665:23: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/astro/tactical.py:1667:22: PLR2004 Magic value used in comparison, consider replacing `2000` with a constant variable
+spectre/astro/tactical.py:1667:30: PLR2004 Magic value used in comparison, consider replacing `35000` with a constant variable
+spectre/astro/tactical.py:1667:52: PLR2004 Magic value used in comparison, consider replacing `37000` with a constant variable
+spectre/astro/tactical.py:1669:16: PLR2004 Magic value used in comparison, consider replacing `0.5` with a constant variable
+spectre/astro/tactical.py:1669:32: PLR2004 Magic value used in comparison, consider replacing `20.0` with a constant variable
+spectre/astro/tactical.py:1675:16: PLR2004 Magic value used in comparison, consider replacing `100.0` with a constant variable
+spectre/astro/tactical.py:1679:22: PLR2004 Magic value used in comparison, consider replacing `1500` with a constant variable
+spectre/astro/tactical.py:1681:23: PLR2004 Magic value used in comparison, consider replacing `0.1` with a constant variable
+spectre/astro/tactical.py:1687:16: PLR2004 Magic value used in comparison, consider replacing `10.0` with a constant variable
+spectre/astro/tactical.py:1691:22: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1699:8: PLR2004 Magic value used in comparison, consider replacing `10.0` with a constant variable
+spectre/astro/tactical.py:1699:23: PLR2004 Magic value used in comparison, consider replacing `500.0` with a constant variable
+spectre/astro/tactical.py:1701:23: PLR2004 Magic value used in comparison, consider replacing `0.05` with a constant variable
+spectre/astro/tactical.py:1707:16: PLR2004 Magic value used in comparison, consider replacing `20.0` with a constant variable
+spectre/astro/tactical.py:1711:37: PLR2004 Magic value used in comparison, consider replacing `20` with a constant variable
+spectre/astro/tactical.py:1711:65: PLR2004 Magic value used in comparison, consider replacing `180` with a constant variable
+spectre/astro/tactical.py:1713:8: PLR2004 Magic value used in comparison, consider replacing `50` with a constant variable
+spectre/astro/tactical.py:1713:31: PLR2004 Magic value used in comparison, consider replacing `100` with a constant variable
+spectre/astro/tactical.py:1722:21: PLR2004 Magic value used in comparison, consider replacing `0.3` with a constant variable
+spectre/astro/tactical.py:1756:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/astro/tactical.py:1756:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/astro/tactical.py:1788:5: N806 Variable `T` in function should be lowercase
+spectre/astro/tactical.py:1792:66: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tactical.py:1839:5: C901 `orbital_terrain` is too complex (17 > 10)
+spectre/astro/tactical.py:1839:5: PLR0912 Too many branches (19 > 12)
+spectre/astro/tactical.py:1839:5: PLR0915 Too many statements (60 > 50)
+spectre/astro/tactical.py:1862:8: PLR2004 Magic value used in comparison, consider replacing `700` with a constant variable
+spectre/astro/tactical.py:1862:30: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1865:10: PLR2004 Magic value used in comparison, consider replacing `400` with a constant variable
+spectre/astro/tactical.py:1865:32: PLR2004 Magic value used in comparison, consider replacing `700` with a constant variable
+spectre/astro/tactical.py:1865:39: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1865:61: PLR2004 Magic value used in comparison, consider replacing `1200` with a constant variable
+spectre/astro/tactical.py:1868:10: PLR2004 Magic value used in comparison, consider replacing `200` with a constant variable
+spectre/astro/tactical.py:1868:31: PLR2004 Magic value used in comparison, consider replacing `400` with a constant variable
+spectre/astro/tactical.py:1868:38: PLR2004 Magic value used in comparison, consider replacing `1200` with a constant variable
+spectre/astro/tactical.py:1868:60: PLR2004 Magic value used in comparison, consider replacing `1500` with a constant variable
+spectre/astro/tactical.py:1871:10: PLR2004 Magic value used in comparison, consider replacing `35500` with a constant variable
+spectre/astro/tactical.py:1871:34: PLR2004 Magic value used in comparison, consider replacing `36200` with a constant variable
+spectre/astro/tactical.py:1879:8: PLR2004 Magic value used in comparison, consider replacing `96` with a constant variable
+spectre/astro/tactical.py:1879:33: PLR2004 Magic value used in comparison, consider replacing `100` with a constant variable
+spectre/astro/tactical.py:1879:41: PLR2004 Magic value used in comparison, consider replacing `500` with a constant variable
+spectre/astro/tactical.py:1879:63: PLR2004 Magic value used in comparison, consider replacing `900` with a constant variable
+spectre/astro/tactical.py:1884:8: PLR2004 Magic value used in comparison, consider replacing `400` with a constant variable
+spectre/astro/tactical.py:1884:30: PLR2004 Magic value used in comparison, consider replacing `600` with a constant variable
+spectre/astro/tactical.py:1884:38: PLR2004 Magic value used in comparison, consider replacing `40` with a constant variable
+spectre/astro/tactical.py:1884:63: PLR2004 Magic value used in comparison, consider replacing `60` with a constant variable
+spectre/astro/tactical.py:1886:10: PLR2004 Magic value used in comparison, consider replacing `500` with a constant variable
+spectre/astro/tactical.py:1886:32: PLR2004 Magic value used in comparison, consider replacing `900` with a constant variable
+spectre/astro/tactical.py:1888:10: PLR2004 Magic value used in comparison, consider replacing `35500` with a constant variable
+spectre/astro/tactical.py:1888:34: PLR2004 Magic value used in comparison, consider replacing `36200` with a constant variable
+spectre/astro/tactical.py:1890:24: PLR2004 Magic value used in comparison, consider replacing `2000` with a constant variable
+spectre/astro/tactical.py:1899:8: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1899:31: PLR2004 Magic value used in comparison, consider replacing `5000` with a constant variable
+spectre/astro/tactical.py:1902:10: PLR2004 Magic value used in comparison, consider replacing `5000` with a constant variable
+spectre/astro/tactical.py:1902:32: PLR2004 Magic value used in comparison, consider replacing `12000` with a constant variable
+spectre/astro/tactical.py:1905:10: PLR2004 Magic value used in comparison, consider replacing `12000` with a constant variable
+spectre/astro/tactical.py:1905:33: PLR2004 Magic value used in comparison, consider replacing `20000` with a constant variable
+spectre/astro/tactical.py:1908:10: PLR2004 Magic value used in comparison, consider replacing `20000` with a constant variable
+spectre/astro/tactical.py:1908:33: PLR2004 Magic value used in comparison, consider replacing `35000` with a constant variable
+spectre/astro/tactical.py:1916:28: PLR2004 Magic value used in comparison, consider replacing `200` with a constant variable
+spectre/astro/tactical.py:1916:50: PLR2004 Magic value used in comparison, consider replacing `36000` with a constant variable
+spectre/astro/tactical.py:1918:54: PLR2004 Magic value used in comparison, consider replacing `30` with a constant variable
+spectre/astro/tactical.py:1918:75: PLR2004 Magic value used in comparison, consider replacing `1000` with a constant variable
+spectre/astro/tactical.py:1930:8: PLR2004 Magic value used in comparison, consider replacing `96` with a constant variable
+spectre/astro/tactical.py:1930:33: PLR2004 Magic value used in comparison, consider replacing `100` with a constant variable
+spectre/astro/tactical.py:1932:8: PLR2004 Magic value used in comparison, consider replacing `35500` with a constant variable
+spectre/astro/tactical.py:1932:32: PLR2004 Magic value used in comparison, consider replacing `36200` with a constant variable
+spectre/astro/tactical.py:2009:17: PLW3301 Nested `max` calls can be flattened
+spectre/astro/tactical.py:2028:15: PLW3301 Nested `max` calls can be flattened
+spectre/astro/tactical.py:2093:5: N806 Variable `T_orbit` in function should be lowercase
+spectre/astro/tactical.py:2159:5: N806 Variable `T_orbit` in function should be lowercase
+spectre/astro/tle_filter.py:63:29: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/tle_filter.py:157:20: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/tle_filter.py:184:30: PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+spectre/astro/tle_preprocessing.py:106:5: C901 `cluster_and_reduce_tle_cache` is too complex (11 > 10)
+spectre/astro/tle_preprocessing.py:106:5: PLR0915 Too many statements (64 > 50)
+spectre/astro/tle_preprocessing.py:170:28: PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+spectre/astro/tle_preprocessing.py:192:16: BLE001 Do not catch blind exception: `Exception`
+spectre/astro/tle_preprocessing.py:216:17: PERF401 Use `list.extend` to create a transformed list
+spectre/config/constants.py:46:1: ERA001 Found commented-out code
+spectre/data/intel.py:18:12: PLW0603 Using the global statement to update `_DATA` is discouraged
+spectre/data/intel.py:40:9: PLW2901 `for` loop variable `line` overwritten by assignment target
+spectre/data/intel.py:41:51: PLR2004 Magic value used in comparison, consider replacing `7` with a constant variable
+spectre/data/notso_cache.py:82:20: BLE001 Do not catch blind exception: `Exception`
+spectre/data/notso_cache.py:162:12: PLW0603 Using the global statement to update `_cache` is discouraged
+spectre/domain/decision.py:155:5: C901 `compute_outcome_metrics` is too complex (12 > 10)
+spectre/domain/decision.py:155:5: PLR0912 Too many branches (14 > 12)
+spectre/domain/decision.py:155:5: PLR0915 Too many statements (51 > 50)
+spectre/domain/decision.py:231:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+spectre/domain/decision.py:231:16: BLE001 Do not catch blind exception: `Exception`
+spectre/domain/decision.py:237:5: SIM108 Use ternary operator `dv_km_s = friendly.cost * 0.05 if friendly.action_type == ActionType.MANOEUVRE else 0.0` instead of `if`-`else`-block
+spectre/domain/scenario.py:70:24: BLE001 Do not catch blind exception: `Exception`
+spectre/domain/scenario.py:86:28: BLE001 Do not catch blind exception: `Exception`
+spectre/training/gamification.py:198:5: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/training/gamification.py:198:5: PLR0917 Too many positional arguments (6 > 5)
+spectre/training/scenarios.py:180:12: BLE001 Do not catch blind exception: `Exception`
+spectre/training/scenarios.py:181:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/training/tutorials.py:54:12: BLE001 Do not catch blind exception: `Exception`
+spectre/training/tutorials.py:55:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/web/csrf.py:90:20: BLE001 Do not catch blind exception: `Exception`
+spectre/web/deps.py:25:44: RUF100 [*] Unused `noqa` directive (non-enabled: `PLC0415`)
+spectre/web/deps.py:43:51: RUF100 [*] Unused `noqa` directive (non-enabled: `PLC0415`)
+spectre/web/planning_state.py:166:12: PLW0603 Using the global statement to update `_onorbit_catalog` is discouraged
+spectre/web/planning_state.py:166:30: PLW0603 Using the global statement to update `_catalog_status` is discouraged
+spectre/web/planning_state.py:174:12: PLW0603 Using the global statement to update `_catalog_status` is discouraged
+spectre/web/planning_state.py:186:12: PLW0603 Using the global statement to update `_default_hrr_objects` is discouraged
+spectre/web/routes/admin.py:110:11: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/web/routes/admin.py:110:11: PLR0917 Too many positional arguments (6 > 5)
+spectre/web/routes/admin.py:126:26: PLR2004 Magic value used in comparison, consider replacing `64` with a constant variable
+spectre/web/routes/admin.py:200:11: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/web/routes/admin.py:200:11: PLR0917 Too many positional arguments (6 > 5)
+spectre/web/routes/decision.py:56:11: PLR0913 Too many arguments in function definition (21 > 5)
+spectre/web/routes/decision.py:56:11: PLR0917 Too many positional arguments (21 > 5)
+spectre/web/routes/decision.py:145:18: PLR2004 Magic value used in comparison, consider replacing `0.01` with a constant variable
+spectre/web/routes/gcat.py:342:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/gcat.py:343:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/web/routes/gcat.py:362:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/gcat.py:363:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/web/routes/gcat.py:382:12: PLW0603 Using the global statement to update `_FETCHING` is discouraged
+spectre/web/routes/gcat.py:382:12: PLW0603 Using the global statement to update `_FETCHING` is discouraged
+spectre/web/routes/gcat.py:382:23: PLW0603 Using the global statement to update `_CACHE_FETCH_TIME` is discouraged
+spectre/web/routes/gcat.py:382:42: PLW0603 Using the global statement to update `_FETCH_ERRORS` is discouraged
+spectre/web/routes/gcat.py:484:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/gcat.py:536:11: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/web/routes/gcat.py:536:11: PLR0917 Too many positional arguments (7 > 5)
+spectre/web/routes/gcat.py:604:12: PLW0603 Using the global statement to update `_CACHE_FETCH_TIME` is discouraged
+spectre/web/routes/geometry.py:75:18: DTZ007 Naive datetime constructed using `datetime.datetime.strptime()` without %z
+spectre/web/routes/geometry.py:97:11: PLR0913 Too many arguments in function definition (11 > 5)
+spectre/web/routes/geometry.py:97:11: PLR0917 Too many positional arguments (11 > 5)
+spectre/web/routes/geometry.py:97:11: PLR0911 Too many return statements (7 > 6)
+spectre/web/routes/login.py:199:57: RUF100 [*] Unused `noqa` directive (non-enabled: `PLC0415`)
+spectre/web/routes/login.py:200:65: RUF100 [*] Unused `noqa` directive (non-enabled: `PLC0415`)
+spectre/web/routes/maneuver.py:784:11: PLR0913 Too many arguments in function definition (13 > 5)
+spectre/web/routes/maneuver.py:784:11: PLR0917 Too many positional arguments (13 > 5)
+spectre/web/routes/maneuver.py:842:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/maneuver.py:874:9: TRY400 Use `logging.exception` instead of `logging.error`
+spectre/web/routes/maneuver.py:1046:11: PLR0913 Too many arguments in function definition (10 > 5)
+spectre/web/routes/maneuver.py:1046:11: PLR0917 Too many positional arguments (10 > 5)
+spectre/web/routes/maneuver.py:1091:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/maneuver.py:1421:5: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/web/routes/maneuver.py:1421:5: PLR0917 Too many positional arguments (8 > 5)
+spectre/web/routes/pol.py:69:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/pol.py:278:11: PLR0913 Too many arguments in function definition (8 > 5)
+spectre/web/routes/pol.py:278:11: PLR0917 Too many positional arguments (8 > 5)
+spectre/web/routes/pol.py:278:11: PLR0911 Too many return statements (8 > 6)
+spectre/web/routes/pol.py:301:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/pol.py:319:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/pol.py:832:5: N806 Variable `TYPE_COLORS` in function should be lowercase
+spectre/web/routes/pol.py:1112:11: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/web/routes/pol.py:1112:11: PLR0917 Too many positional arguments (6 > 5)
+spectre/web/routes/pol.py:1131:32: PLR2004 Magic value used in comparison, consider replacing `5` with a constant variable
+spectre/web/routes/threat.py:142:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/threat.py:171:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/threat.py:258:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/threat.py:473:5: SIM108 Use ternary operator `raw_objects = list(state.hrr_objects) if side == "all" else _objects_for_group(state, side, rank or 0)` instead of `if`-`else`-block
+spectre/web/routes/threat.py:1313:5: N806 Variable `_MAX_SWEEP_TARGETS` in function should be lowercase
+spectre/web/routes/threat.py:1789:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/training.py:237:13: PLR5501 [*] Use `elif` instead of `else` then `if`, to reduce indentation
+spectre/web/routes/training.py:241:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/training.py:364:11: C901 `training_scenario_submit` is too complex (21 > 10)
+spectre/web/routes/training.py:364:11: PLR0913 Too many arguments in function definition (7 > 5)
+spectre/web/routes/training.py:364:11: PLR0917 Too many positional arguments (7 > 5)
+spectre/web/routes/training.py:364:11: PLR0912 Too many branches (21 > 12)
+spectre/web/routes/training.py:364:11: PLR0915 Too many statements (81 > 50)
+spectre/web/routes/udl.py:48:44: PLR2004 Magic value used in comparison, consider replacing `57` with a constant variable
+spectre/web/routes/udl.py:72:11: PLR0913 Too many arguments in function definition (6 > 5)
+spectre/web/routes/udl.py:72:11: PLR0917 Too many positional arguments (6 > 5)
+spectre/web/routes/udl.py:126:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:168:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:212:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:242:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:272:32: PLR2004 Magic value used in comparison, consider replacing `401` with a constant variable
+spectre/web/routes/udl.py:562:11: PLR0911 Too many return statements (7 > 6)
+spectre/web/routes/udl.py:713:1: W293 [*] Blank line contains whitespace
+spectre/web/routes/udl.py:754:1: W293 [*] Blank line contains whitespace
+spectre/web/routes/udl.py:821:5: N806 Variable `_HRR_MAX_LOOKBACK_DAYS` in function should be lowercase
+spectre/web/routes/udl.py:997:36: PLR2004 Magic value used in comparison, consider replacing `50` with a constant variable
+spectre/web/routes/udl.py:1008:11: PLR0911 Too many return statements (7 > 6)
+spectre/web/routes/udl.py:1027:5: N806 Variable `_UDL_BASE` in function should be lowercase
+spectre/web/routes/udl.py:1042:16: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:1049:13: PERF401 Use a list comprehension to create a transformed list
+spectre/web/routes/udl.py:1065:12: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:1071:11: C901 `udl_notso_sync` is too complex (13 > 10)
+spectre/web/routes/udl.py:1071:11: PLR0912 Too many branches (13 > 12)
+spectre/web/routes/udl.py:1071:11: PLR0915 Too many statements (57 > 50)
+spectre/web/routes/udl.py:1150:24: BLE001 Do not catch blind exception: `Exception`
+spectre/web/routes/udl.py:1163:35: PLR2004 Magic value used in comparison, consider replacing `500` with a constant variable
+spectre/web/routes/udl.py:1166:12: BLE001 Do not catch blind exception: `Exception`
+tle_clustering/clustering.py:129:5: N806 Variable `X` in function should be lowercase
+tle_clustering/clustering.py:150:17: PERF401 Use `list.extend` to create a transformed list
+Found 432 errors.
+[*] 11 fixable with the `--fix` option (18 hidden fixes can be enabled with the `--unsafe-fixes` option).
+[exit 1]

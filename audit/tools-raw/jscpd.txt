@@ -1,0 +1,3 @@
+$ jscpd spectre tle_clustering --min-lines 6 --reporters console --silent --format python,javascript,css,markup --ignore **/*.min.js --output <scratch>/cache/jscpd
+Duplications detection: Found 17 exact clones with 211(0.93%) duplicated lines in 150 (3 formats) files.
+[exit 0]

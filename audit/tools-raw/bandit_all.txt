@@ -1,0 +1,255 @@
+$ bandit -r spectre tle_clustering scripts query_UDL_Data.py docs -c pyproject.toml -f txt
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[main]	INFO	using config: pyproject.toml
+[main]	INFO	running on Python 3.12.3
+[tester]	WARNING	nosec encountered (B104), but no failed test on file spectre/web/_entrypoint.py:34
+Working... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:01
+Run started:2026-10-23 21:28:11.816966+00:00
+
+Test results:
+>> Issue: [B501:request_with_no_cert_validation] Call to requests with verify=False disabling SSL certificate checks, security issue.
+   Severity: High   Confidence: High
+   CWE: CWE-295 (https://cwe.mitre.org/data/definitions/295.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b501_request_with_no_cert_validation.html
+   Location: ./query_UDL_Data.py:22:9
+21	#Make the actual REST call (ignore the InsecureRequestWarning).
+22	result = requests.get(url, headers={'Authorization':basicAuth}, verify=False)
+23	
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b113_request_without_timeout.html
+   Location: ./query_UDL_Data.py:22:9
+21	#Make the actual REST call (ignore the InsecureRequestWarning).
+22	result = requests.get(url, headers={'Authorization':basicAuth}, verify=False)
+23	
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: docs/build_gcat_workbook_1.py:105:13
+104	        req = urllib.request.Request(url, headers={'User-Agent': 'GCAT-Workbook/2.0'})
+105	        with urllib.request.urlopen(req, timeout=180) as resp:
+106	            raw = resp.read().decode('utf-8', errors='replace')
+
+--------------------------------------------------
+>> Issue: [B112:try_except_continue] Try, Except, Continue detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b112_try_except_continue.html
+   Location: docs/build_gcat_workbook_1.py:193:8
+192	            return pd.to_datetime(s, format=fmt)
+193	        except Exception:
+194	            continue
+195	    try:
+
+--------------------------------------------------
+>> Issue: [B404:blacklist] Consider possible security implications associated with the subprocess module.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess
+   Location: scripts/cognitive_complexity.py:68:0
+67	import shutil
+68	import subprocess
+69	import sys
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/cognitive_complexity.py:354:17
+353	    # the moment of upload. That is exactly how this was found.
+354	    merge_base = subprocess.run(  # noqa: S603
+355	        [git, "merge-base", base, "HEAD"],
+356	        cwd=_ROOT, capture_output=True, text=True, check=False,
+357	    )
+358	    anchor = merge_base.stdout.strip() if merge_base.returncode == 0 else base
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/cognitive_complexity.py:360:13
+359	
+360	    result = subprocess.run(  # noqa: S603
+361	        [git, "diff", "-U0", anchor],
+362	        cwd=_ROOT, capture_output=True, text=True, check=False,
+363	    )
+364	    if result.returncode != 0:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/cognitive_complexity.py:390:13
+389	    # be scored by nothing. The whole of a new file is new code.
+390	    status = subprocess.run(  # noqa: S603
+391	        [git, "status", "--porcelain"],
+392	        cwd=_ROOT, capture_output=True, text=True, check=False,
+393	    )
+394	    for entry in status.stdout.splitlines():
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/cognitive_complexity.py:457:13
+456	        return None
+457	    result = subprocess.run(  # noqa: S603
+458	        [git, "show", f"{_CALIBRATION_REV}:{rel}"],
+459	        cwd=_ROOT, capture_output=True, text=True, check=False,
+460	    )
+461	    return result.stdout if result.returncode == 0 else None
+
+--------------------------------------------------
+>> Issue: [B404:blacklist] Consider possible security implications associated with the subprocess module.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess
+   Location: scripts/smoke-browser.py:42:0
+41	import socket
+42	import subprocess
+43	import sys
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'smoke-probe-password-not-a-secret'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: scripts/smoke-browser.py:52:14
+51	_ADMIN_USER = "smoke_admin"
+52	_ADMIN_PASS = "smoke-probe-password-not-a-secret"
+53	_SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'smoke-probe-secret-key-not-a-secret'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: scripts/smoke-browser.py:53:14
+52	_ADMIN_PASS = "smoke-probe-password-not-a-secret"
+53	_SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
+54	
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/smoke-browser.py:124:21
+123	        log = self.log_path.open("wb")
+124	        self._proc = subprocess.Popen(  # noqa: S603
+125	            [sys.executable, "-m", "uvicorn", "spectre.web.app:app",
+126	             "--host", "127.0.0.1", "--port", str(self.port), "--log-level", "warning"],
+127	            cwd=_REPO_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
+128	        )
+129	        self._wait_until_ready()
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: scripts/smoke-browser.py:140:21
+139	            try:
+140	                with urllib.request.urlopen(f"{self.base_url}/login", timeout=2):  # noqa: S310
+141	                    return
+
+--------------------------------------------------
+>> Issue: [B404:blacklist] Consider possible security implications associated with the subprocess module.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess
+   Location: scripts/sonar_scope.py:17:0
+16	import re
+17	import subprocess
+18	import sys
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html
+   Location: scripts/sonar_scope.py:26:11
+25	    """Run a git command and return its stdout."""
+26	    return subprocess.run(  # noqa: S603
+27	        ["git", *args],  # noqa: S607
+28	        capture_output=True, text=True, check=True,
+29	    ).stdout
+30	
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: scripts/sonar_scope.py:26:11
+25	    """Run a git command and return its stdout."""
+26	    return subprocess.run(  # noqa: S603
+27	        ["git", *args],  # noqa: S607
+28	        capture_output=True, text=True, check=True,
+29	    ).stdout
+30	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html
+   Location: spectre/domain/decision.py:231:8
+230	                ca_km = min(ca_km, sep * friendly.reversibility + base_ca_km * (1.0 - friendly.reversibility))
+231	        except Exception:
+232	            pass   # Fall back to analytic estimate
+233	
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: ''
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: spectre/web/csrf.py:91:24
+90	            except Exception:
+91	                token = ""
+92	
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: ''
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b106_hardcoded_password_funcarg.html
+   Location: spectre/web/database.py:213:29
+212	                if target is None:
+213	                    target = User(username=username, hashed_password="", role="admin")
+214	                    session.add(target)
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 23599
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 1
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 16
+		Medium: 3
+		High: 1
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 1
+		Medium: 4
+		High: 15
+Files skipped (0):
+[exit 1]

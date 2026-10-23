@@ -1,0 +1,23 @@
+$ python scripts/cognitive_complexity.py --calibrate
+Calibration against SonarQube's report for 0.5.23, at 047a9eb
+
+  sonar   ours  delta  location
+     38     38     +0  spectre/web/routes/pol.py:856  pol_notso_correlate
+     47     47     +0  spectre/domain/pol_assessment.py:774  _assess_intel
+     37     37     +0  spectre/astro/pattern_of_life.py:685  analyse_pattern_of_life
+     24     24     +0  spectre/web/routes/threat.py:304  fetch_targets
+     17     17     +0  spectre/web/routes/maneuver.py:227  _burn_breakdown
+     20     20     +0  spectre/web/routes/threat.py:664  _compute_worst_coa
+     21     21     +0  spectre/astro/dv_estimation.py:971  _judge
+     17     17     +0  spectre/astro/lambert.py:44  solve_lambert
+     29     29     +0  spectre/astro/notso.py:511  extract_behaviour_profile
+     55     55     +0  spectre/web/routes/threat.py:1002  threat_sweep
+     16     16     +0  spectre/web/routes/udl.py:754  parse_hrr_notification
+     19     19     +0  spectre/astro/propagator.py:125  state_to_keplerian
+     37     37     +0  spectre/astro/dv_estimation.py:843  build_breakdown
+     27     27     +0  spectre/astro/dv_estimation.py:647  estimate_dv_epoch_swept
+     21     21     +0  spectre/domain/pol_assessment.py:524  _assess_anomaly
+     16     16     +0  spectre/domain/threat_assessment.py:359  assess_threat
+
+  PASS: all 16 cases reproduce SonarQube's score exactly.
+[exit 0]

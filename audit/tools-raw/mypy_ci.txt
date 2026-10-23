@@ -1,0 +1,3 @@
+$ mypy spectre/ --ignore-missing-imports
+Success: no issues found in 66 source files
+[exit 0]

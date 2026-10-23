@@ -1,0 +1,124 @@
+$ mypy --strict scripts query_UDL_Data.py docs/generate_guide.py docs/build_gcat_workbook_1.py
+scripts/preflight-gate.py:89: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:130: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:152: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:174: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:195: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:239: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:286: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:290: error: Missing type arguments for generic type "dict"  [type-arg]
+scripts/preflight-gate.py:312: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:347: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:378: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:397: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:438: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/preflight-gate.py:501: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/cognitive_complexity.py:129: error: Missing type arguments for generic type "list"  [type-arg]
+scripts/cognitive_complexity.py:209: error: Incompatible types in assignment (expression has type "Callable[[Try], None]", base class "NodeVisitor" defined the type as "Callable[[TryStar], Any]")  [assignment]
+scripts/cognitive_complexity.py:292: error: Missing type arguments for generic type "dict"  [type-arg]
+scripts/cognitive_complexity.py:309: error: Missing type arguments for generic type "dict"  [type-arg]
+scripts/cognitive_complexity.py:320: error: Missing type arguments for generic type "dict"  [type-arg]
+scripts/cognitive_complexity.py:409: error: Missing type arguments for generic type "dict"  [type-arg]
+scripts/cognitive_complexity.py:447: error: Missing type arguments for generic type "dict"  [type-arg]
+docs/build_gcat_workbook_1.py:101: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:130: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:151: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:163: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:171: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:178: error: Call to untyped function "write_df" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:179: error: Call to untyped function "style_sheet" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:180: error: Call to untyped function "add_table" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:185: error: Function is missing a type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:201: error: Function is missing a return type annotation  [no-untyped-def]
+docs/build_gcat_workbook_1.py:212: error: Call to untyped function "download_tsv" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:342: error: Call to untyped function "build_sheet" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:347: error: Call to untyped function "build_sheet" in typed context  [no-untyped-call]
+docs/build_gcat_workbook_1.py:359: error: Call to untyped function "main" in typed context  [no-untyped-call]
+scripts/build-hrr-default.py:198: error: Missing type arguments for generic type "dict"  [type-arg]
+docs/generate_guide.py:53: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:53: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:74: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:74: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:76: error: Document? has no attribute "sections"  [attr-defined]
+docs/generate_guide.py:77: error: Document? has no attribute "sections"  [attr-defined]
+docs/generate_guide.py:88: error: Document? has no attribute "sections"  [attr-defined]
+docs/generate_guide.py:113: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:113: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:115: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:125: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:125: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:127: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:137: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:137: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:139: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:160: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:160: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:162: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:172: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:172: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:174: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:181: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:181: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:186: error: Document? has no attribute "add_paragraph"  [attr-defined]
+docs/generate_guide.py:199: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:199: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:201: error: Document? has no attribute "add_table"  [attr-defined]
+docs/generate_guide.py:236: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:236: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:239: error: Document? has no attribute "add_table"  [attr-defined]
+docs/generate_guide.py:275: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:275: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:277: error: Document? has no attribute "add_table"  [attr-defined]
+docs/generate_guide.py:311: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:311: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:313: error: Document? has no attribute "sections"  [attr-defined]
+docs/generate_guide.py:360: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:360: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:362: error: Document? has no attribute "add_page_break"  [attr-defined]
+docs/generate_guide.py:370: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:370: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:419: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:419: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:457: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:457: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:519: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:519: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:549: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:549: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:600: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:600: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:626: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:626: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:709: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:709: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1074: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1074: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1130: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1130: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1188: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1188: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1226: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1226: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1255: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1255: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1381: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1381: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1474: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1474: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1567: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1567: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1685: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1685: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1791: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1791: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1870: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1870: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1924: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1924: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:1971: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:1971: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:2040: error: Function "docx.api.Document" is not valid as a type  [valid-type]
+docs/generate_guide.py:2040: note: Perhaps you need "Callable[...]" or a callback protocol?
+docs/generate_guide.py:2165: error: Document? has no attribute "save"  [attr-defined]
+Found 86 errors in 5 files (checked 9 source files)
+[exit 1]
