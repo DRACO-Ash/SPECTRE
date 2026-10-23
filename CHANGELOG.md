@@ -40,6 +40,18 @@ after it. The finding-to-commit map is `audit/REMEDIATION-LOG.md`.
   1 per cent of the Hohmann time at less than Hohmann cost. It is replaced
   by a Lambert sweep against the target's real position.
 
+### Changed (step 3 of 4: decision engine relabelled)
+
+- **The Decision Engine says it is a modelled estimate.** Its Phase 1 outcomes
+  are lookup constants and weights, not propagated orbits. The result now
+  carries a `modelled` flag and a basis statement, the banner reads "Modelled
+  Recommendation" with "Modelled estimate, not a computed solution.", and each
+  cell marks its closest approach "(model)". This is the July 2026 agreed
+  remediation, built at last.
+- **"Maximin" is renamed "Minimin".** The selector minimised the best-case
+  cost, the optimistic rule; "maximin" names the cautious one. The form value
+  is now `minimin`.
+
 ### Changed (step 2 of 4: CI executes its checks)
 
 - **CI installs the locked sets.** The lint, test and quality jobs installed

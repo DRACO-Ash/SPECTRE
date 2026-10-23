@@ -64,3 +64,15 @@ Each was shown to fail against the original `master` file it guards.
 ● **The container job.** It was not run, because there is no Docker daemon in this environment. Nothing the image installs changed.
 
 **Status on GitHub.** CI runs only on pushes and pull requests to `master` (`ci.yml:6-10`), so this branch's push does not exercise it. The proof above is the local reproduction. The first real run will be the pull request or merge into `master`.
+
+## Step 3: single-location fixes and the rulings
+
+### Decision Engine relabelled (ruling: relabel)
+
+| Finding | Origin | Change | Gate |
+|---|---|---|---|
+| F-034 (High) | F-S05-02 | `OutcomeMetrics.modelled` and `ScenarioResult.modelled` and `.basis` mark every Phase 1 figure as a lookup estimate; the results banner reads "Modelled Recommendation" with "Modelled estimate, not a computed solution." and the basis text; each matrix cell marks its closest approach "(model)"; the session log says "Modelled recommendation" | `tests/unit/test_decision_labelling.py::TestTheResultSaysItIsModelled`, `::TestTheOperatorIsTold` |
+| F-110 (Medium) | F-S05-01 | The selector labelled "Maximin" computed minimin, the optimistic rule. It is renamed `MINIMIN`, value `minimin`, and offered as "Minimin: optimistic, best best case (not robust)"; Minimax is offered as "cautious, best worst case" | `::TestTheSelectorsDoWhatTheirNamesSay` (a 2x2 matrix on which the three rules choose differently); the three type-only selector tests are removed (F-S00-14) |
+| F-S09-13 (complexity part) | F-S09-13 | `decision_evaluate` (cognitive complexity 44) is decomposed into row builders, strategy and weight helpers. Proof of no behaviour change: the rendered result for five forms (short rows, a bad type, unnormalised and all-zero weights, every strategy and an unknown one) is byte-identical before and after, computation time masked | the quality gate's complexity leg; new route test `test_decision_evaluate_fills_short_rows_and_labels_the_result` |
+
+**Prior P2 status after this change:** the July 2026 agreed remediation, a "modelled estimate, not a computed solution" banner, is now implemented in all three layers: code, payload and rendered page. The constants themselves remain uncited; F-S05-03, where custody loss is scaled by reversibility, is still open in step 3.

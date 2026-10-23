@@ -46,7 +46,19 @@ class ActionType(Enum):
 class SelectorStrategy(Enum):
     MINIMAX           = "minimax"           # minimise worst-case cost
     EXPECTED_VALUE    = "expected_value"    # minimise expected cost (uses probability)
-    MAXIMIN           = "maximin"           # maximise worst-case benefit
+    # Minimise the BEST-case cost: the optimistic rule, not a robust one. It
+    # was labelled MAXIMIN, the name of the cautious rule, so an operator
+    # asking for caution got the riskiest response (audit F-S05-01).
+    MINIMIN           = "minimin"
+
+
+#: What every Phase 1 outcome rests on, shown to the operator with the result.
+MODELLED_BASIS = (
+    "Outcomes are Phase 1 lookup constants and weights, not propagated orbits: "
+    "closest approach is a fixed figure per action type scaled by response cost, "
+    "time to approach is a fixed fraction of the horizon, and custody follows a "
+    "rule of thumb. Use it to compare trade-offs, not as an operational answer."
+)
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -87,6 +99,9 @@ class OutcomeMetrics:
     time_to_closest_hours: float
     delta_v_cost_km_s:    float    # Friendly ΔV expended
     composite_score:      float    # Higher = worse for friendly
+    # Every figure above is a Phase 1 lookup or weighting, not a propagated
+    # result. Carried on the data so no consumer can present it as computed.
+    modelled:             bool = True
 
     def __str__(self) -> str:
         cust = "✓" if self.custody_maintained else "✗"
@@ -128,6 +143,11 @@ class ScenarioResult:
     robust_best_response:   FriendlyResponse
     robust_strategy:        SelectorStrategy
     computation_time_s:     float
+    # Phase 1 outcomes come from lookup constants, not propagation. The flag
+    # and basis travel with the result so the page can say so (audit
+    # F-S05-02, and the "modelled estimate" banner agreed in July 2026).
+    modelled:               bool = True
+    basis:                  str = MODELLED_BASIS
 
     def summary_table(self) -> str:
         """ASCII summary table for CLI / operator guide output."""
@@ -302,7 +322,8 @@ def find_robust_response(
     strategy:
         MINIMAX  — minimise the maximum (worst-case) composite score.
         EXPECTED_VALUE — minimise expected score weighted by adversary probabilities.
-        MAXIMIN  — maximise the minimum (best-case) composite score.
+        MINIMIN  — minimise the minimum (best-case) composite score: optimistic,
+                   not robust.
 
     Returns
     -------
@@ -332,7 +353,7 @@ def find_robust_response(
             )
         best_j = min(range(n_friendly), key=lambda j: scores[j])
 
-    else:  # MAXIMIN — maximise best-case score (here: minimise min score)
+    else:  # MINIMIN: minimise the best-case score, the optimistic rule
         for j in range(n_friendly):
             scores[j] = min(outcome_matrix[i][j].composite_score for i in range(n_adversary))
         best_j = min(range(n_friendly), key=lambda j: scores[j])

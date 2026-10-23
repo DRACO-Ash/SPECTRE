@@ -69,7 +69,7 @@ class TestSelectorStrategy:
     def test_all_strategies_accessible(self):
         assert SelectorStrategy.MINIMAX.value        == "minimax"
         assert SelectorStrategy.EXPECTED_VALUE.value == "expected_value"
-        assert SelectorStrategy.MAXIMIN.value        == "maximin"
+        assert SelectorStrategy.MINIMIN.value        == "minimin"
 
 
 # ── Data model validation ─────────────────────────────────────────────────────
@@ -191,20 +191,10 @@ class TestFindRobustResponse:
         om = [[compute_outcome_metrics(a, r, s) for r in [r1, r2, r3]] for a in [a1, a2]]
         return s, om
 
-    def test_minimax_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.MINIMAX)
-        assert isinstance(robust, FriendlyResponse)
-
-    def test_expected_value_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE)
-        assert isinstance(robust, FriendlyResponse)
-
-    def test_maximin_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.MAXIMIN)
-        assert isinstance(robust, FriendlyResponse)
+    # Which response each rule picks is pinned on a matrix built to separate
+    # them in tests/unit/test_decision_labelling.py. Three tests here only
+    # checked that some FriendlyResponse came back, which is why the
+    # mislabelled "Maximin" selector went unnoticed (audit F-S05-01, F-S00-14).
 
     def test_minimax_deterministic(self):
         """Same scenario → same minimax recommendation on repeated calls."""
