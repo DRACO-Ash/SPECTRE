@@ -35,7 +35,6 @@ from spectre.astro.tactical import (
     optimal_evasion,
     orbital_terrain,
     phasing_orbit,
-    plane_change,
     relative_motion_stability,
     vbar_hop_sequence,
 )
@@ -580,6 +579,46 @@ def hbar_hop_intercept(
     )
 
 
+def _unit_normal(sv: StateVector) -> np.ndarray:
+    """Return the unit orbit normal h / |h| for *sv*."""
+    h = np.cross(sv.r, sv.v)
+    h_mag = float(np.linalg.norm(h))
+    return h / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
+
+
+def _next_plane_crossing(
+    orbit: TLEOrbit, plane_normal: np.ndarray, start: datetime, period_s: float,
+) -> datetime:
+    """Return the first time at or after *start* that *orbit* crosses a plane.
+
+    The plane passes through the Earth's centre with unit normal
+    *plane_normal*. Sampled at one-minute steps over one period, then refined
+    by bisection to a tenth of a second. Coplanar orbits return *start*.
+    """
+    def height(t: datetime) -> float:
+        return float(np.dot(orbit.propagate(t).r, plane_normal))
+
+    step = timedelta(seconds=60.0)
+    t0, f0 = start, height(start)
+    if abs(f0) < 1e-6:
+        return start
+    end = start + timedelta(seconds=period_s)
+    while t0 < end:
+        t1 = t0 + step
+        f1 = height(t1)
+        if f0 * f1 <= 0.0:
+            while (t1 - t0).total_seconds() > 0.1:
+                tm = t0 + (t1 - t0) / 2
+                fm = height(tm)
+                if f0 * fm <= 0.0:
+                    t1 = tm
+                else:
+                    t0, f0 = tm, fm
+            return t1
+        t0, f0 = t1, f1
+    return start
+
+
 def plane_change_intercept(
     red_tle: str,
     blue_tle: str,
@@ -607,48 +646,46 @@ def plane_change_intercept(
     sv_blue = blue_orbit.propagate(t_departure)
 
     kep_red = state_to_keplerian(sv_red)
-    kep_blue = state_to_keplerian(sv_blue)
 
-    # KeplerianElements stores inc/raan/argp/ta in DEGREES. These angles were
-    # being passed through math.degrees() a second time, multiplying every one
-    # by 57.3: plane-change delta-V came out 14x to 57x too high, the J2 drift
-    # plan used a meaningless inclination, and the manoeuvre-direction
-    # classifier answered "normal" for almost any burn.
-    inc_diff = abs(kep_blue.inc - kep_red.inc)
+    # The angle between the two orbit PLANES, not the inclination difference.
+    # Two 53 deg planes 10 deg apart in RAAN are 8 deg apart, and using
+    # inclination alone priced aligning them at zero (audit F-002).
+    h_red_hat = _unit_normal(sv_red)
+    h_blue_hat = _unit_normal(sv_blue)
+    plane_angle_deg = math.degrees(math.acos(float(np.clip(np.dot(h_red_hat, h_blue_hat), -1.0, 1.0))))
     r_red = sv_red.r_mag
     r_blue = sv_blue.r_mag
     alt_diff = abs(r_blue - r_red)
 
     if alt_diff < 50.0:
-        # Similar altitude — pure plane change
-        pc = plane_change(r_red, inc_diff, kep_red.ecc, mu)
+        # Similar altitude: a pure plane change, which only aligns the planes
+        # if it is flown where the red orbit crosses the blue plane.
+        period_s = 2.0 * math.pi * math.sqrt(kep_red.a**3 / mu)
+        t_burn = _next_plane_crossing(red_orbit, h_blue_hat, t_departure, period_s)
+        sv_burn = red_orbit.propagate(t_burn)
 
-        # Single burn at optimal location, in the normal direction
-        h = np.cross(sv_red.r, sv_red.v)
-        h_mag = float(np.linalg.norm(h))
-        n_hat = h / h_mag if h_mag > 1e-10 else np.array([0, 0, 1], dtype=float)
-        dv_vec = n_hat * pc.optimal_delta_v
-        burn1 = _make_burn(1, t_departure, dv_vec, sv_red)
-
-        t_arrival = t_departure  # instantaneous
-        _notes = (
-            f"Plane change: Δi={inc_diff:.2f}°, "
-            f"optimal at {pc.optimal_location}, "
-            f"node ΔV={pc.delta_v_at_node:.4f}, apogee ΔV={pc.delta_v_at_apogee:.4f} km/s"
-        )
+        # Rotate the velocity into the blue plane about the radius vector,
+        # keeping the radial and transverse speeds. The burn is the difference.
+        r_hat = sv_burn.r / sv_burn.r_mag
+        v_radial = float(np.dot(sv_burn.v, r_hat))
+        h_mag = float(np.linalg.norm(np.cross(sv_burn.r, sv_burn.v)))
+        v_after = v_radial * r_hat + (h_mag / sv_burn.r_mag) * np.cross(h_blue_hat, r_hat)
+        dv_vec = v_after - sv_burn.v
+        burn1 = _make_burn(1, t_burn, dv_vec, sv_burn)
+        dv_mag = float(np.linalg.norm(dv_vec))
 
         return InterceptSolution(
             method="plane_change",
             burns=[burn1],
-            total_delta_v=pc.optimal_delta_v,
-            departure_epoch=t_departure,
-            arrival_epoch=t_arrival,
+            total_delta_v=dv_mag,
+            departure_epoch=t_burn,
+            arrival_epoch=t_burn,
             miss_distance_km=0.0,
         )
     else:
         # Different altitudes — combined transfer
         cpc = combined_altitude_plane_change(
-            r_red, r_blue, inc_diff, mu
+            r_red, r_blue, plane_angle_deg, mu
         )
 
         v_hat = sv_red.v / sv_red.v_mag
