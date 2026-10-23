@@ -203,3 +203,151 @@ class TestPhysicalInvariants:
         state = StateVector(epoch=_EPOCH, r=np.array([R_EARTH + 400.0, 0.0, 0.0]),
                             v=np.array([0.0, 7.67, 0.0]))
         assert state.altitude_km == pytest.approx(400.0, abs=1e-9)
+
+
+class TestTheDegreesCorrectionsAreHeldByNumbers:
+    """Four functions whose radians-to-degrees fix nothing executed.
+
+    The corrections landed with only the static scan above guarding them. A
+    regex cannot see a value laundered through an intermediate variable, and
+    it says nothing about whether the corrected numbers are RIGHT: it checks
+    that a token is absent, not that an answer is sound.
+
+    Each test below runs the real function and pins a number that MOVES when
+    ``math.degrees`` is reapplied. The geometry in each is not decorative: it
+    was chosen by measurement, because the four functions are not equally
+    exposed and most inputs hide the defect entirely.
+
+        function                 geometry          correct    reapplied
+        j2_drift_intercept       any              128.243      6987.805
+        intent_predict_intercept coplanar LEO      10.0          20.0
+        fingerprint_intercept    near-GEO trim     70.0          50.0
+        terrain_intercept        near-GEO          41.0          31.0
+
+    Three of the four returned byte-identical results with the defect
+    reinstated against a cross-plane LEO pair, and fingerprint was unmoved by
+    seven of eight plane changes. A characterisation test written on a
+    convenient geometry would have passed either way, which is the one thing
+    worse than no test. The geometries above were each found by reinstating
+    the defect and looking for an input where the answer moved.
+
+    ``miss_distance_km`` does not carry a miss distance in any of these. It
+    carries a wrapped RAAN difference in degrees for the drift analysis, and a
+    percentage for the other three (likelihood, confidence, operational risk).
+    The field is overloaded; that is pre-existing and worth knowing while
+    reading these numbers.
+    """
+
+    # Synthesised rather than real element sets, so the geometry says what it
+    # means instead of depending on where a catalogued object happened to be.
+    @staticmethod
+    def _tle(satno: int, inc: float, raan: float, mean_motion: float) -> str:
+        return (
+            f"1 {satno}U 17073A   24001.50000000  .00000100  00000-0  10000-4 0  9999\n"
+            f"2 {satno} {inc:8.4f} {raan:8.4f} 0010000 130.0000 230.0000 "
+            f"{mean_motion:11.8f}123456"
+        )
+
+    def test_the_drift_analysis_reports_a_raan_difference_inside_half_a_turn(
+        self,
+    ) -> None:
+        """The invariant, and it is the one the defect cannot satisfy.
+
+        A RAAN difference is wrapped into (-180, 180] by construction: the
+        function subtracts two angles and folds the result once. Any answer
+        outside that range means the inputs were not degrees. Reapplying
+        math.degrees multiplies by 57.3, so a single fold cannot bring 14079
+        back into range, and no plausible orbit can produce it honestly.
+
+        This is stronger than the pinned value beneath it, because it holds
+        for every input rather than for the one measured here.
+        """
+        from spectre.astro.maneuvers import j2_drift_intercept
+
+        solution = j2_drift_intercept(
+            red_tle=self._tle(25544, 51.6416, 247.4627, 15.72125391),
+            blue_tle=self._tle(43013, 71.6000, 282.0000, 15.10000000),
+            manoeuvre_start=_EPOCH,
+        )
+        assert abs(solution.miss_distance_km) <= 180.0, (
+            "the RAAN difference is outside half a turn, so its inputs were "
+            "radians being read as degrees"
+        )
+        assert solution.miss_distance_km == pytest.approx(128.243, abs=0.01)
+
+        # A plane-alignment assist is a small altitude trim, not a transfer.
+        # Fourteen metres per second is right for LEO. Note that delta-v alone
+        # would NOT hold this: it moves only from 0.014364 to 0.014232 when
+        # the defect is reinstated, well inside any tolerance worth writing.
+        # The angle is the quantity that moves, which is why it is asserted.
+        assert solution.total_delta_v == pytest.approx(0.014364, abs=1e-5)
+        assert 0.001 < solution.total_delta_v < 0.1
+
+    def test_intent_likelihood_is_scored_from_degrees(self) -> None:
+        """Coplanar, because a cross-plane pair hides this one completely.
+
+        The likelihood is banded, so the defect only shows where the corrupted
+        angle crosses a band edge. Against the cross-plane pair used above,
+        this function returns the same value with the defect reinstated.
+        """
+        from spectre.astro.maneuvers import intent_predict_intercept
+
+        solution = intent_predict_intercept(
+            red_tle=self._tle(25544, 51.6416, 247.4627, 15.72125391),
+            blue_tle=self._tle(43013, 51.7000, 248.0000, 15.70000000),
+            manoeuvre_start=_EPOCH,
+        )
+        # A percentage, not a distance: likelihood * 100.
+        assert solution.miss_distance_km == pytest.approx(10.0, abs=0.01)
+        assert 0.0 <= solution.miss_distance_km <= 100.0
+        # Assessment only. This method proposes no burn.
+        assert solution.total_delta_v == 0.0
+
+    def test_manoeuvre_fingerprint_confidence_is_scored_from_degrees(self) -> None:
+        """Before and after of ONE satellite, across a near-equatorial trim.
+
+        This function reads kep_after.inc and kep_before.inc, not the
+        kep_red and kep_blue the other three use. A sweep that mutated only
+        the latter reported it clean across eight geometries, which was the
+        sweep being wrong rather than the function being safe.
+
+        The geometry is a 0.05 to 0.15 degree inclination trim on a
+        near-equatorial LEO. Of eight plane changes tried at this epoch it is
+        the only one where the confidence band separates: the others,
+        including changes of 1, 5, 10 and 20 degrees, returned the identical
+        score either way. The archetype bands are coarse, so the corrupted
+        angle has to land across an edge before anything observable changes,
+        and an almost-zero inclination is where the smallest error does that.
+        """
+        from spectre.astro.maneuvers import fingerprint_intercept
+
+        before = self._tle(25544, 0.0500, 247.4627, 15.72125391)
+        after = self._tle(25544, 0.1500, 247.4627, 15.72125391)
+        solution = fingerprint_intercept(
+            red_tle=before, blue_tle=after, manoeuvre_start=_EPOCH,
+        )
+        # confidence * 100, and the band drops to 50.0 with the defect back.
+        assert solution.miss_distance_km == pytest.approx(70.0, abs=0.01)
+        assert 0.0 <= solution.miss_distance_km <= 100.0
+        # Delta-v is NOT asserted. Measured at 0.0000000666 km/s with the
+        # defect both present and absent, so pinning it would add a number
+        # without adding a guard. The score is the quantity that moves.
+
+    def test_orbital_terrain_risk_is_scored_from_inclination(self) -> None:
+        """Near-GEO, because the risk bands only separate there.
+
+        orbital_terrain takes an altitude and an INCLINATION. Feed it 57 times
+        the inclination and it scores a different regime, which is how a risk
+        read-out comes to describe an orbit nothing is in.
+        """
+        from spectre.astro.maneuvers import terrain_intercept
+
+        solution = terrain_intercept(
+            red_tle=self._tle(25544, 0.5000, 80.0000, 1.00270000),
+            blue_tle=self._tle(43013, 2.0000, 120.0000, 1.00300000),
+            manoeuvre_start=_EPOCH,
+        )
+        # operational_risk_score * 100, and 31.0 with the defect back.
+        assert solution.miss_distance_km == pytest.approx(41.0, abs=0.01)
+        assert 0.0 <= solution.miss_distance_km <= 100.0
+        assert solution.total_delta_v == 0.0
