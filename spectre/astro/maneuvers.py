@@ -19,6 +19,7 @@ from spectre.astro.kepler import propagate_two_body
 from spectre.astro.lambert import LambertSolution, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
+    EvasionResult,
     assess_intercept_intent,
     classify_manoeuvre,
     collision_avoidance,
@@ -1102,11 +1103,16 @@ def evasion_intercept(
     coast_s: float = 0.0,
     mu: float = MU_EARTH,
 ) -> InterceptSolution:
-    """Compute optimal defensive evasion manoeuvre.
+    """Plan a defensive evasion burn against the incoming threat.
 
-    The BLUE satellite evades an incoming RED threat. Unlike COLA
-    (which simply achieves a miss distance), the evasion planner
-    respects fuel constraints and optimises burn timing/direction.
+    The BLUE satellite evades an incoming RED threat. ``optimal_evasion``
+    sizes candidate burns (prograde, normal and radial, at several lead times)
+    from a Clohessy-Wiltshire model of BLUE's own orbit. Each candidate, and
+    its reverse, is then flown: BLUE's displacement at TCA under two-body
+    motion is added to its predicted position and measured against RED's
+    predicted position. The cheapest candidate that reaches the desired miss
+    is chosen; if none does within the budget, the one that opens the widest
+    miss. The reported miss is that achieved separation.
 
     Args:
         red_tle: TLE of the incoming threat.
@@ -1119,37 +1125,57 @@ def evasion_intercept(
         mu: Gravitational parameter.
     """
     blue_orbit = TLEOrbit(blue_tle)
+    red_orbit = TLEOrbit(red_tle)
 
     t_tca = manoeuvre_start + timedelta(seconds=coast_s)
     sv_blue = blue_orbit.propagate(t_tca)
+    separation_at_tca = sv_blue.r - red_orbit.propagate(t_tca).r
 
-    r_ref = sv_blue.r_mag
-    plan = optimal_evasion(r_ref, desired_miss_km, time_before_tca_s, fuel_budget_km_s, mu)
+    plan = optimal_evasion(sv_blue.r_mag, desired_miss_km, time_before_tca_s, fuel_budget_km_s, mu)
 
-    best = plan.best
-    t_burn = t_tca - timedelta(seconds=best.burn_epoch_offset_s)
-    sv_blue_burn = blue_orbit.propagate(t_burn)
-
-    # Build ΔV vector from components
-    v_hat = sv_blue_burn.v / sv_blue_burn.v_mag
-    h = np.cross(sv_blue_burn.r, sv_blue_burn.v)
-    h_mag = float(np.linalg.norm(h))
-    n_hat = h / h_mag if h_mag > 1e-10 else np.array([0, 0, 1], dtype=float)
-    b_hat = np.cross(v_hat, n_hat)
-
-    dv_vec = (v_hat * best.prograde_dv +
-              n_hat * best.normal_dv +
-              b_hat * best.radial_dv)
-    burn1 = _make_burn(1, t_burn, dv_vec, sv_blue_burn)
+    flown = [
+        _fly_evasion(blue_orbit, t_tca, candidate, sense, separation_at_tca, mu)
+        for candidate in plan.strategies or [plan.best]
+        for sense in (1.0, -1.0)
+    ]
+    enough = [f for f in flown if f[1] >= desired_miss_km]
+    burn1, miss = min(enough, key=lambda f: f[0].delta_v_mag) if enough else max(flown, key=lambda f: f[1])
 
     return InterceptSolution(
         method="evasion",
         burns=[burn1],
-        total_delta_v=best.delta_v,
-        departure_epoch=t_burn,
+        total_delta_v=burn1.delta_v_mag,
+        departure_epoch=burn1.epoch,
         arrival_epoch=t_tca,
-        miss_distance_km=best.resulting_miss_km,
+        miss_distance_km=miss,
     )
+
+
+def _fly_evasion(
+    blue_orbit: TLEOrbit,
+    t_tca: datetime,
+    candidate: EvasionResult,
+    sense: float,
+    separation_at_tca: np.ndarray,
+    mu: float,
+) -> tuple[Burn, float]:
+    """Apply one evasion candidate and return the burn and the miss it achieves.
+
+    The burn's effect is taken as the difference between two two-body coasts
+    from the same state, with and without the burn, so the propagator's own
+    model error cancels and only the displacement is added to the prediction.
+    """
+    t_burn = t_tca - timedelta(seconds=candidate.burn_epoch_offset_s)
+    sv = blue_orbit.propagate(t_burn)
+    v_hat = sv.v / sv.v_mag
+    h = np.cross(sv.r, sv.v)
+    n_hat = h / float(np.linalg.norm(h))
+    b_hat = np.cross(v_hat, n_hat)
+    dv = sense * (v_hat * candidate.prograde_dv + n_hat * candidate.normal_dv + b_hat * candidate.radial_dv)
+
+    displacement = _coast(sv, dv, t_tca, mu).r - _coast(sv, np.zeros(3), t_tca, mu).r
+    miss = float(np.linalg.norm(separation_at_tca + displacement))
+    return _make_burn(1, t_burn, dv, sv), miss
 
 
 def intent_predict_intercept(
