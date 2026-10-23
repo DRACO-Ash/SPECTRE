@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+Remediation of the whole-repository audit of 23 October 2026 (`audit/`).
+Step 1 of 4: the eight Blockers. Each fix landed test-first, with the defect
+reproduced by a failing test before the change and the full suite green
+after it. The finding-to-commit map is `audit/REMEDIATION-LOG.md`.
+
+### Fixed
+
+- **Login brute force** (F-008). An exhausted login budget refused only
+  wrong passwords; the correct one still signed in. Both limiter tiers are
+  now read, without charging, before the password is compared.
+- **GEO drift duration** (F-007). The coast time in hours reached the GEO
+  relocation solver as days, so a 48 h coast became a 48-day drift and the
+  reported delta-V was about 1/24 of the true cost.
+- **CW secular drift** (F-005). Along-track drift per orbit was reported at
+  -0.5 times the Clohessy-Wiltshire value.
+- **CW stability frame** (F-006). The stability analysis received inertial
+  rather than rotating-frame relative velocity, so bounded motion read as
+  drifting.
+- **Manoeuvre detection units** (F-001). Inclination and RAAN, already in
+  degrees, were converted to degrees again, pricing a 0.1 deg trim at
+  754 m/s instead of 13 m/s. The static guard now catches any alias.
+- **Plane-change cost** (F-002). The angle between planes ignored RAAN, so
+  aligning two 53 deg planes 10 deg apart in RAAN cost nothing. The burn is
+  now also placed at the line of nodes.
+- **Lambert arc direction** (F-003). Every retrograde or sun-synchronous
+  orbit took the arc running against its own motion, about 15 km/s per burn
+  in LEO. The arc now follows the departure orbit's sense by default.
+- **Minimum-time intercept** (F-004). The analytic search always returned
+  1 per cent of the Hohmann time at less than Hohmann cost. It is replaced
+  by a Lambert sweep against the target's real position.
+
 ## [0.5.24] - 2026-10-22
 
 The SonarQube Code Quality gate. 57 findings reported, 55 cleared, 2 left for a
