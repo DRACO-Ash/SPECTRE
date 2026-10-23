@@ -79,7 +79,7 @@ def lambert_intercept(
     tof_s: float,
     coast_s: float = 0.0,
     target_distance_km: float = 0.0,
-    prograde: bool = True,
+    prograde: bool | None = None,
     mu: float = MU_EARTH,
 ) -> InterceptSolution:
     """Compute a Lambert-based intercept from red to blue.
@@ -96,7 +96,8 @@ def lambert_intercept(
         tof_s: Time of flight for the transfer arc (seconds).
         coast_s: Coast time before the first burn (seconds).
         target_distance_km: Desired miss distance at arrival (km).
-        prograde: Use prograde (short-way) transfer arc.
+        prograde: Transfer sense passed to :func:`solve_lambert`; ``None``
+            (default) follows red's own direction of motion.
         mu: Gravitational parameter (km³/s²).
 
     Returns:

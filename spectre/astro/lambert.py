@@ -46,18 +46,23 @@ def solve_lambert(
     r2: np.ndarray,
     tof: float,
     mu: float = MU_EARTH,
-    prograde: bool = True,
+    prograde: bool | None = None,
     v1_initial: np.ndarray | None = None,
     v2_target: np.ndarray | None = None,
 ) -> LambertSolution:
-    """Solve Lambert's problem using Izzo's algorithm.
+    """Solve the single-revolution Lambert problem (Curtis Algorithm 5.2).
 
     Args:
         r1: Departure position vector (km), shape (3,).
         r2: Arrival position vector (km), shape (3,).
         tof: Time of flight (seconds).  Must be positive.
         mu: Gravitational parameter (km³/s²).
-        prograde: If True, assume prograde (short-way) transfer.
+        prograde: Transfer sense. ``True`` takes the arc whose angular momentum
+            has a positive z component (Curtis's "prograde"), ``False`` the
+            opposite. ``None`` (default) follows the departure orbit: with
+            *v1_initial* given, the arc continues the satellite's own direction
+            of motion; without it, ``True`` is assumed. Prograde is not the
+            same as short-way: which arc is shorter depends on the geometry.
         v1_initial: Current velocity at r1 (km/s) — used to compute delta_v1.
         v2_target: Target velocity at r2 (km/s) — used to compute delta_v2.
 
@@ -92,7 +97,17 @@ def solve_lambert(
     # retrograde cases are mirror images of one another rather than two separate
     # rules: the long way round is taken whenever the requested direction
     # disagrees with the sign of the orbit normal.
-    long_way = (cross_z < 0) if prograde else (cross_z >= 0)
+    if prograde is None and v1_initial is not None:
+        # Follow the satellite's own sense of motion. Keyed to +z alone, as it
+        # was, every retrograde orbit (inclination above 90 deg, so every
+        # sun-synchronous orbit) took the arc running against its motion, and
+        # the departure burn had to reverse it: about 15 km/s in LEO instead
+        # of a few hundred m/s (audit F-003).
+        h_departure = np.cross(r1, np.asarray(v1_initial, dtype=float))
+        long_way = float(np.dot(cross, h_departure)) < 0.0
+    else:
+        heading_plus_z = True if prograde is None else prograde
+        long_way = (cross_z < 0) if heading_plus_z else (cross_z >= 0)
     dnu = 2.0 * math.pi - math.acos(cos_dnu) if long_way else math.acos(cos_dnu)
 
     # Collinear geometry has no unique transfer plane, and the guard for it has
