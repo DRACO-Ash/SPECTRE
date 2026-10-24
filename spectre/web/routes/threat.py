@@ -1127,6 +1127,46 @@ def _append_manual_targets(
     return manual_tle_by_name
 
 
+#: Hard cap on one sweep, against runaway compute on a large group.
+_MAX_SWEEP_TARGETS = 100
+
+
+def _cap_targets(
+    state: object,
+    targets: list[ThreatTarget],
+    manual_tle_by_name: dict[str, str],
+    red_regime: str,
+    errors: list[str],
+) -> list[ThreatTarget]:
+    """Order, filter and cap the sweep's targets, naming whatever is left out.
+
+    Manual targets lead, because the operator pasted them on purpose; they
+    used to come last, so the cap dropped them first and silently (F-126).
+    A target whose cached element set is in an incompatible regime is
+    skipped here rather than after the cap, so it no longer takes a slot.
+    """
+    ordered = [t for t in targets if t.target_source == "manual"]
+    ordered += [t for t in targets if t.target_source != "manual"]
+    kept: list[ThreatTarget] = []
+    for target in ordered:
+        tle = (
+            manual_tle_by_name.get(target.target_name) if target.target_source == "manual"
+            else state.hrr_tle_cache.get(target.target_satno)  # type: ignore[attr-defined]
+        )
+        regime = _regime_of_tle(tle) if tle else ""
+        if regime and not regimes_compatible(red_regime, regime):
+            errors.append(
+                f"{target.target_name}: skipped — {red_regime} red vs {regime} target (regime mismatch)"
+            )
+            continue
+        kept.append(target)
+    if len(kept) > _MAX_SWEEP_TARGETS:
+        dropped = ", ".join(t.target_name for t in kept[_MAX_SWEEP_TARGETS:])
+        errors.append(f"Target list capped at {_MAX_SWEEP_TARGETS}; not swept: {dropped}.")
+        kept = kept[:_MAX_SWEEP_TARGETS]
+    return kept
+
+
 async def _fetch_missing_target_tles(
     state: object, targets: list[ThreatTarget], errors: list[str],
 ) -> None:
@@ -1355,11 +1395,14 @@ async def threat_sweep(
             "error": "No targets available — select an HRR group or add manual TLEs.",
         })
 
-    # Hard cap: prevent runaway compute on unexpectedly large groups.
-    _MAX_SWEEP_TARGETS = 100
-    if len(targets) > _MAX_SWEEP_TARGETS:
-        targets = targets[:_MAX_SWEEP_TARGETS]
-        errors.append(f"Target list truncated to {_MAX_SWEEP_TARGETS} (cap exceeded).")
+    # Classify red satellite's regime once — used to skip incompatible targets.
+    try:
+        red_regime = regime_from_tle(red_tle)
+    # BLE001: a malformed element set must not kill the sweep.
+    except Exception:  # noqa: BLE001
+        red_regime = "LEO"  # assume LEO on parse failure; sweep proceeds
+
+    targets = _cap_targets(state, targets, _manual_tle_by_name, red_regime, errors)
 
     # Any targets without a cached TLE get a last-chance fetch now.
     await _fetch_missing_target_tles(state, targets, errors)
@@ -1380,13 +1423,6 @@ async def threat_sweep(
 
     # Count total targets (HRR + manual).
     hrr_count = len(targets)
-
-    # Classify red satellite's regime once — used to skip incompatible targets.
-    try:
-        red_regime = regime_from_tle(red_tle)
-    # BLE001: a malformed element set must not kill the sweep.
-    except Exception:  # noqa: BLE001
-        red_regime = "LEO"  # assume LEO on parse failure; sweep proceeds
 
     # Run sweep in executor.
     loop = asyncio.get_running_loop()
