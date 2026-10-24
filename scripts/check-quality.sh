@@ -175,7 +175,7 @@ if command -v npx >/dev/null 2>&1; then
         cp "$f" "$SCAN/$f"
     done
     # Thresholds match Sonar's Python defaults: 10 lines / 100 tokens minimum.
-    npx --yes jscpd@4 "$SCAN" --min-lines 10 --min-tokens 100 \
+    npx --yes jscpd@4.3.0 "$SCAN" --min-lines 10 --min-tokens 100 \
         --formats-exts python:py --reporters console --silent \
         --threshold "$DUPLICATION_CEILING" >/tmp/jscpd.out 2>&1 && DUP_OK=0 || DUP_OK=1
     grep -E 'Found .* clones' /tmp/jscpd.out || true
