@@ -1557,7 +1557,7 @@ class StabilityResult:
     """Result of CW relative motion stability analysis."""
 
     is_bounded: bool                  # True if motion doesn't drift
-    radial_amplitude_km: float        # max radial oscillation
+    radial_amplitude_km: float        # largest radial distance over an orbit
     along_track_drift_km_per_orbit: float  # secular along-track drift per orbit
     cross_track_amplitude_km: float   # max cross-track oscillation
     stability_score: float            # 0.0–1.0 (1 = perfectly bounded)
@@ -1594,10 +1594,16 @@ def relative_motion_stability(
     # This read +3 pi D / n, half the size and the wrong sign (audit F-005).
     secular_drift_per_orbit = -6.0 * math.pi * drift_indicator / n  # km per orbit
 
-    # Radial amplitude: from CW in-plane solution
-    # x(t) = (4-3cos(nt))*dx0 + sin(nt)*dvx0/n + 2*(1-cos(nt))*dvy0/n
-    # Maximum occurs at specific nt values; estimate from initial conditions
-    A_x = math.sqrt(dx0**2 + (dvx0 / n)**2) if n > 0 else abs(dx0)
+    # Radial extent from the CW in-plane solution (Curtis eq. 7.53):
+    #   x(t) = (4 - 3 cos nt) dx0 + (sin nt) dvx0 / n + 2 (1 - cos nt) dvy0 / n
+    #        = c - b cos nt + (dvx0 / n) sin nt,
+    # with offset c = 4 dx0 + 2 dvy0 / n and b = 3 dx0 + 2 dvy0 / n, so the
+    # largest radial distance is |c| + sqrt(b^2 + (dvx0 / n)^2). The previous
+    # sqrt(dx0^2 + (dvx0 / n)^2) ignored dvy0 and the factor 3, and reported 0
+    # for an along-track kick from the origin that reaches 4 v / n (audit F-071).
+    offset = 4.0 * dx0 + 2.0 * dvy0 / n
+    swing = math.hypot(3.0 * dx0 + 2.0 * dvy0 / n, dvx0 / n)
+    A_x = abs(offset) + swing
 
     # Cross-track amplitude: z(t) = dz0*cos(nt) + dvz0*sin(nt)/n
     A_z = math.sqrt(dz0**2 + (dvz0 / n)**2) if n > 0 else abs(dz0)
