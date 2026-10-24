@@ -385,11 +385,13 @@ def combined_altitude_plane_change(
 ) -> CombinedTransferResult:
     """Combined altitude change + plane change in a Hohmann-like transfer.
 
-    The plane change is split across both burns using the cosine rule,
-    which is more efficient than performing them separately.
-
-    Strategy: perform all inclination change at the slower burn point
-    (typically at the higher-altitude burn), combined with the Hohmann impulse.
+    The whole plane change is made at the burn at the higher radius, where
+    the speed is lower, and combined with that burn's Hohmann impulse by the
+    cosine rule; the other burn is a plain Hohmann impulse. This is cheaper
+    than a separate plane change, though not optimal: splitting a small
+    fraction of the plane change onto the lower burn saves a little more
+    (Vallado, combined plane change), and is not implemented. The previous
+    docstring claimed the change was divided between the burns (audit F-075).
 
     Args:
         r1: Initial orbit radius (km).
