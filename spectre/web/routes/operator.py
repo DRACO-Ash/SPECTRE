@@ -53,7 +53,9 @@ async def dashboard(
     valid session.
     """
     if current_user is None:
-        return render(request, "login.html", {"error": None})
+        from spectre.web.routes.login import render_login  # noqa: PLC0415
+
+        return render_login(request)
 
     state = get_session_state(current_user.username)
     return render(request, "operator.html", {

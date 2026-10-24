@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from spectre.config.settings import get_settings
 from spectre.web.auth import _COOKIE_NAME, hash_password, make_session_cookie, verify_password
+from spectre.web.csrf import LOGIN_COOKIE, new_login_token
 from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
@@ -26,6 +27,8 @@ router = APIRouter()
 
 # Session lifetime in seconds (8 hours), matching auth._SESSION_MAX_AGE.
 _SESSION_COOKIE_MAX_AGE = 28_800
+# A login page left open longer than this asks for a reload before sign-in.
+_LOGIN_TOKEN_MAX_AGE = 3600
 
 # 10 failed attempts per source address per 300 s. This is the console's only
 # unauthenticated credential endpoint and it is CSRF-exempt, so until this
@@ -105,6 +108,26 @@ def _client_address(request: Request) -> str:
     return client.host if client else "unknown"
 
 
+def render_login(request: Request, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    """The login page, carrying a fresh login token as a cookie and a field.
+
+    Every rendering of the form issues one, so whichever page the operator
+    signs in from, the POST can prove it came from here (audit F-151).
+    """
+    token = new_login_token()
+    response = render(request, "login.html", {"error": error, "login_csrf": token}, status_code=status_code)
+    response.set_cookie(
+        key=LOGIN_COOKIE,
+        value=token,
+        httponly=True,
+        secure=get_settings().session_cookie_secure,
+        samesite="strict",
+        max_age=_LOGIN_TOKEN_MAX_AGE,
+        path="/login",
+    )
+    return response
+
+
 def _refuse_rate_limited(request: Request, address: str, username: str) -> HTMLResponse:
     """Log and render the 429 login page for an exhausted budget."""
     # Both values are caller-supplied, so both are flattened before they reach
@@ -116,18 +139,15 @@ def _refuse_rate_limited(request: Request, address: str, username: str) -> HTMLR
     # A browser is what reaches this endpoint, so the refusal is the login page
     # carrying an explanation, not a bare JSON body the operator would have to
     # read in the network tab.
-    return render(
-        request,
-        "login.html",
-        {"error": "Too many failed sign-in attempts. Wait a few minutes and try again."},
-        status_code=429,
+    return render_login(
+        request, "Too many failed sign-in attempts. Wait a few minutes and try again.", status_code=429,
     )
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
-    return render(request, "login.html", {"error": None})
+    return render_login(request)
 
 
 @router.post("/login", response_model=None)
@@ -172,7 +192,7 @@ async def post_login(
         # %s here lets a newline in the form field forge a second record that
         # reads exactly like a successful login (pythonsecurity:S5145).
         logger.warning("Failed login attempt for username: %s", log_safe(username))
-        return render(request, "login.html", {"error": "Invalid username or password."}, status_code=401)
+        return render_login(request, "Invalid username or password.", status_code=401)
 
     logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
     token = make_session_cookie(username, user.session_generation or 0)
