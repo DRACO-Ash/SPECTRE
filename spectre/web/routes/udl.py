@@ -1150,6 +1150,96 @@ async def udl_notso(
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
+_NOTSO_PAGE = 500
+
+
+def _notso_query(latest: datetime | None) -> dict[str, str | int]:
+    """UDL query for TACREP_NOTSO records newer than the cache holds.
+
+    An empty cache starts at 2024-01-01, to pull reasonable history without
+    hitting UDL too hard; otherwise the newest record plus 1 microsecond, so
+    the boundary record is not fetched again.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
+    return {
+        "createdAt":  f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z",
+        "dataMode":   "REAL",
+        "msgType":    "TACREP_NOTSO",
+        "source":     "JCO",
+        "maxResults": _NOTSO_PAGE,
+    }
+
+
+def _notso_page_records(resp: Any, page: int) -> tuple[list[Any] | None, str | None]:
+    """One page's records, or the reason paging stops here."""
+    if resp.status_code in (404, 405, 501):
+        return None, (
+            f"UDL /notification endpoint returned HTTP {resp.status_code} — "
+            "TACREP_NOTSO may not be available on this instance."
+        )
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return None, f"HTTP error on page {page}: {exc}"
+    try:
+        data = resp.json()
+    # BLE001: any undecodable body ends paging with a reason, not a 500.
+    except Exception:  # noqa: BLE001
+        return None, f"Non-JSON response on page {page}"
+    return (data if isinstance(data, list) else ([data] if data else [])), None
+
+
+async def _pull_notso_pages(
+    cache: Any, base_params: dict[str, str | int], auth: tuple[str, str],
+) -> tuple[int, int, list[str]]:
+    """Page through /notification into *cache*: (records added, pages, errors)."""
+    total_added = 0
+    page = 0
+    errors: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while True:
+                params: dict[str, str | int] = dict(base_params)
+                if page > 0:
+                    params["offset"] = page * _NOTSO_PAGE
+                resp = await client.get(f"{_UDL_BASE}/notification", params=params, auth=auth)
+                records, error = _notso_page_records(resp, page)
+                if error:
+                    errors.append(error)
+                if not records:
+                    break
+                # A sync page rewrites the whole file; off the event loop (F-141).
+                total_added += await asyncio.to_thread(cache.append, records)
+                page += 1
+                # Fewer than a full page means the end has been reached.
+                if len(records) < _NOTSO_PAGE:
+                    break
+    # BLE001: a failed sync is reported with what it had added so far.
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Sync failed: {exc}")
+        logger.warning("notso_sync failed: %s", exc)
+    return total_added, page, errors
+
+
+def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
+    """The status callout: red when nothing was added and something failed."""
+    if errors and total_added == 0:
+        error_html = "".join(f'<p style="margin:0.1rem 0">{e}</p>' for e in errors)
+        return f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
+    warn_html = "".join(
+        f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {e}</p>'
+        for e in errors
+    )
+    return (
+        f'<div class="callout callout-green" style="font-size:0.72rem; padding:0.4rem 0.6rem">'
+        f'<strong>+{total_added}</strong> new records added &mdash; '
+        f'{cache.total_records()} total in cache. Last sync: {cache.last_sync_utc() or "—"}.'
+        f'</div>{warn_html}'
+    )
+
+
 @router.post("/notso/sync", response_model=None)
 async def udl_notso_sync(
     request: Request,
@@ -1177,104 +1267,13 @@ async def udl_notso_sync(
         )
 
     cache = get_notso_cache()
-    latest = cache.latest_created_at()
-
-    # Build the createdAt lower-bound filter.  If the cache is empty, default
-    # to 2024-01-01 to pull reasonable history without hitting UDL too hard.
-    if latest is not None:
-        # Advance by 1 µs so we don't re-fetch the boundary record.
-        from datetime import timedelta
-        since = latest + timedelta(microseconds=1)
-    else:
-        from datetime import timedelta
-        since = datetime(2024, 1, 1, tzinfo=UTC)
-
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-    base_params: dict[str, str | int] = {
-        "createdAt":  f">{since_str}",
-        "dataMode":   "REAL",
-        "msgType":    "TACREP_NOTSO",
-        "source":     "JCO",
-        "maxResults": 500,
-    }
-
-    total_added = 0
-    page = 0
-    errors: list[str] = []
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while True:
-                params: dict[str, str | int] = dict(base_params)
-                if page > 0:
-                    params["offset"] = page * 500
-
-                resp = await client.get(
-                    f"{_UDL_BASE}/notification",
-                    params=params,
-                    auth=(state.udl_username, state.udl_password),
-                )
-
-                if resp.status_code in (404, 405, 501):
-                    errors.append(
-                        f"UDL /notification endpoint returned HTTP {resp.status_code} — "
-                        "TACREP_NOTSO may not be available on this instance."
-                    )
-                    break
-
-                try:
-                    resp.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    errors.append(f"HTTP error on page {page}: {exc}")
-                    break
-
-                try:
-                    data = resp.json()
-                except Exception:
-                    errors.append(f"Non-JSON response on page {page}")
-                    break
-
-                records = data if isinstance(data, list) else ([data] if data else [])
-                if not records:
-                    break  # No more pages
-
-                # A sync page rewrites the whole file; off the event loop (F-141).
-                added = await asyncio.to_thread(cache.append, records)
-                total_added += added
-                page += 1
-
-                # If we got fewer records than a full page, we've reached the end.
-                if len(records) < 500:
-                    break
-
-    except Exception as exc:
-        errors.append(f"Sync failed: {exc}")
-        logger.warning("notso_sync failed: %s", exc)
+    params = _notso_query(cache.latest_created_at())
+    total_added, page, errors = await _pull_notso_pages(
+        cache, params, (state.udl_username, state.udl_password),
+    )
 
     state.append_log(
         f"[NOTSO] Sync complete: +{total_added} new records "
         f"(total {cache.total_records()}, {page} page(s) fetched)"
     )
-
-    # Build status HTML
-    if errors and total_added == 0:
-        error_html = "".join(f'<p style="margin:0.1rem 0">{e}</p>' for e in errors)
-        return _HTMLResponse(
-            f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
-        )
-
-    warn_html = ""
-    if errors:
-        warn_html = "".join(
-            f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {e}</p>'
-            for e in errors
-        )
-
-    last_sync = cache.last_sync_utc() or "—"
-    total = cache.total_records()
-    return _HTMLResponse(
-        f'<div class="callout callout-green" style="font-size:0.72rem; padding:0.4rem 0.6rem">'
-        f'<strong>+{total_added}</strong> new records added &mdash; '
-        f'{total} total in cache. Last sync: {last_sync}.'
-        f'</div>{warn_html}'
-    )
+    return _HTMLResponse(_notso_sync_status(total_added, errors, cache))
