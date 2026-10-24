@@ -515,7 +515,7 @@ def j2_drift_plan(
             conv_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate)
 
     delta_a, accel_days = _j2_acceleration(
-        a_chaser, ecc_chaser, inc_chaser_deg, rate_t, delta_raan_deg, conv_days, mu,
+        (a_chaser, ecc_chaser, inc_chaser_deg), rate_t, delta_raan_deg, conv_days, mu,
     )
     accel_dv = hohmann(a_chaser, a_chaser + delta_a, mu).total_delta_v if delta_a else 0.0
 
@@ -532,15 +532,15 @@ def j2_drift_plan(
 
 
 def _j2_acceleration(
-    a_chaser: float,
-    ecc_chaser: float,
-    inc_chaser_deg: float,
+    chaser: tuple[float, float, float],
     rate_t: float,
     delta_raan_deg: float,
     conv_days: float,
     mu: float,
 ) -> tuple[float, float]:
     """Altitude change (km) that closes the RAAN gap the short way in half the time.
+
+    *chaser* is its (semi-major axis km, eccentricity, inclination deg).
 
     The nodal rate is monotonic in semi-major axis, so the change is found by
     bisection between a floor 200 km above the surface and 2,000 km above the
@@ -549,6 +549,7 @@ def _j2_acceleration(
     never happens is given a target of _J2_FALLBACK_DAYS. Returns (0, natural
     time) when no altitude in that range is fast enough.
     """
+    a_chaser, ecc_chaser, inc_chaser_deg = chaser
     if delta_raan_deg == 0.0:
         return 0.0, conv_days
     target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS

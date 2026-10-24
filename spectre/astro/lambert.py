@@ -88,7 +88,7 @@ def solve_lambert(
     return _solution(problem, z, mu, (v1_initial, v2_target), 0)
 
 
-def solve_lambert_all(
+def solve_lambert_all(  # noqa: PLR0913, PLR0917 - mirrors solve_lambert's signature
     r1: np.ndarray,
     r2: np.ndarray,
     tof: float,
@@ -123,7 +123,7 @@ def solve_lambert_all(
     return found
 
 
-def cheapest_lambert(
+def cheapest_lambert(  # noqa: PLR0913, PLR0917 - mirrors solve_lambert's signature
     r1: np.ndarray,
     r2: np.ndarray,
     tof: float,
@@ -229,16 +229,16 @@ def _solution(
 ) -> LambertSolution:
     """Build the velocities and impulses for a converged z."""
     r1, r2, geom, tof = problem
-    r1_mag, r2_mag, A = geom
+    r1_mag, r2_mag, chord = geom
     v1_initial, v2_target = refs
 
     # Lagrange coefficients.
     sz = _stumpff_S(z)
     cz = _stumpff_C(z)
-    y = r1_mag + r2_mag + A * (z * sz - 1.0) / math.sqrt(cz)
+    y = r1_mag + r2_mag + chord * (z * sz - 1.0) / math.sqrt(cz)
 
     f = 1.0 - y / r1_mag
-    g = A * math.sqrt(y / mu)
+    g = chord * math.sqrt(y / mu)
     g_dot = 1.0 - y / r2_mag
 
     v1_vec = (r2 - f * r1) / g

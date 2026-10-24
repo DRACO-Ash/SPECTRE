@@ -67,7 +67,7 @@ def test_a_short_flight_has_only_the_single_revolution_answer() -> None:
 
 
 def test_the_module_no_longer_claims_to_reject_multiple_revolutions() -> None:
-    import spectre.astro.lambert as lambert
+    from spectre.astro import lambert
 
     assert "rejected explicitly" not in (lambert.__doc__ or "")
 
