@@ -172,8 +172,9 @@ Blue:   {{ result.blue_name }}
 Method: {{ result.method.value | upper }}
 Total ΔV:     {{ result.total_delta_v_m_s | m_s }} m/s
 Arrival:      {{ result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
-Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
-Threat:       {{ intel.threat_level }}
+{% if intel.manoeuvre_type == "ASSESSMENT" %}Score:        {{ result.intercept_range_km | round(0) | int }}/100
+{% else %}Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
+{% endif %}Threat:       {{ intel.threat_level }}
 Observability:{{ intel.obs_level }}
 {% for b in result.burns %}  Burn {{ b.burn_number }} ({{ b.segment_name }})  epoch={{ b.burn_epoch.strftime('%Y-%m-%dT%H:%M:%SZ') }}  ΔV={{ b.delta_v_m_s | m_s }} m/s  [P={{ "%.4f"|format(b.dv_prograde) }} N={{ "%.4f"|format(b.dv_normal) }} R={{ "%.4f"|format(b.dv_radial) }}]
 {% endfor %}Notes: {{ result.notes }}{% endset %}

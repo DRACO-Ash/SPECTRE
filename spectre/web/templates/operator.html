@@ -1022,7 +1022,7 @@ function switchToTradeSpace() {
               pointRadius: 7, pointHoverRadius: 10, data: []
             };
           }
-          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km });
+          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km, score: pt.score });
         });
 
         var allX = data.map(function(p) { return p.transfer_time_min; });
@@ -1055,7 +1055,8 @@ function switchToTradeSpace() {
                   label: function(ctx) {
                     var pt = ctx.raw;
                     return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
-                            'Transfer: ' + fmtTime(pt.x), 'Miss: ' + pt.miss.toFixed(1) + ' km'];
+                            'Transfer: ' + fmtTime(pt.x),
+                            pt.score !== undefined ? 'Score: ' + pt.score + '/100' : 'Miss: ' + pt.miss.toFixed(1) + ' km'];
                   }
                 },
                 backgroundColor: '#001529', titleColor: '#C8A415',

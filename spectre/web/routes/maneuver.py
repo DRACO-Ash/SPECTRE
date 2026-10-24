@@ -1174,13 +1174,19 @@ async def trade_space_data(
             (r.arrival_epoch - r.burns[0].burn_epoch).total_seconds()
             if r.burns else 0.0
         )
-        points.append({
+        point: dict[str, Any] = {
             "method": r.method.value,
             "delta_v": round(r.total_delta_v_m_s, 1),  # m/s
             "transfer_time_min": round(transfer_s / 60.0, 2),
             "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
-            "miss_km": round(r.intercept_range_km, 2),
-        })
+        }
+        # An assessment method carries a 0-100 score in intercept_range_km;
+        # emitted as miss_km, a score of 73 was plotted as a 73 km miss (F-131).
+        if r.method in _ASSESSMENT_METHODS:
+            point["score"] = round(r.intercept_range_km)
+        else:
+            point["miss_km"] = round(r.intercept_range_km, 2)
+        points.append(point)
     return JSONResponse(content=points)
 
 
