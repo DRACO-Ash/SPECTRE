@@ -942,46 +942,20 @@ async def pol_notso_panel(
     })
 
 
-def _notso_message_text(rec: dict[str, Any]) -> str:
-    """The parseable NOTSO text for one cached record.
-
-    A cached record normally carries the whole notification in ``msgText``.
-    Some carry only the structured fields, and a minimal message is rebuilt
-    from those rather than the record being dropped: a declared burn the
-    operator never sees is indistinguishable from one that was never declared.
-    """
-    msg_text = str(rec.get("msgText") or rec.get("message") or "")
-    if msg_text:
-        return msg_text
-    # Reconstruct minimal parseable text from structured fields
-    created = rec.get("createdAt") or ""
-    return (
-        f"MSGID: {rec.get('msgId', '')}\n"
-        f"SATNO: {rec.get('satNo', '')}\n"
-        f"ISSUE DATE: {created}\n"
-        f"EFFECTIVE START: {created}\n"
-        f"TYPE: MANOEUVRE\n"
-        f"DESCRIPTION: {rec.get('msgType', 'TACREP_NOTSO')}"
-    )
-
-
-def _notsos_from_cache_records(raw_records: list[dict[str, Any]]) -> list[Any]:
-    """Cached NOTSO dicts as ``NOTSORecord`` objects.
+def _notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
+    """Cached NOTSO dicts as ``NOTSORecord`` objects, for one satellite.
 
     The cache holds raw dicts, so they go back through the same text parser the
     pasted-text path uses. One grammar, one set of results, whichever source
-    the operator correlated from.
+    the operator correlated from. A JCO record can name several objects, so
+    its text is built for the satellite under analysis (audit F-046).
     """
     from spectre.astro.notso import parse_notso_text
+    from spectre.data.notso_cache import message_text
 
     notsos: list[Any] = []
     for rec in raw_records:
-        parsed = parse_notso_text(_notso_message_text(rec))
-        # If parser couldn't extract satno, force it from the record
-        for p in parsed:
-            if p.norad_id == 0 or p.norad_id is None:
-                p.norad_id = int(rec.get("satNo") or 0)
-        notsos.extend(parsed)
+        notsos.extend(parse_notso_text(message_text(rec, satno)))
     return notsos
 
 
@@ -1050,7 +1024,7 @@ def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list
         )
     # Each cache record carries a msgText field (the full notification text),
     # or the text is reconstructed from its fields.
-    notsos = _notsos_from_cache_records(raw_records)
+    notsos = _notsos_from_cache_records(raw_records, pol.satno)
     if not notsos:
         return HTMLResponse(
             f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '

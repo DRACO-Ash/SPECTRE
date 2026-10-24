@@ -1161,7 +1161,7 @@ async def udl_notso_sync(
     Uses ``createdAt`` of the newest cached record as the lower bound for each
     pull.  Pages through the UDL ``/notification`` endpoint (500 records per
     page) until no more results are returned, then writes everything to
-    ``spectre/data/notso_cache.json``.
+    ``notso_cache.json`` in the configured data directory.
 
     Always returns an HTML partial suitable for ``hx-swap="innerHTML"`` on the
     NOTSO sync status ``<div>``.
@@ -1238,7 +1238,8 @@ async def udl_notso_sync(
                 if not records:
                     break  # No more pages
 
-                added = cache.append(records)
+                # A sync page rewrites the whole file; off the event loop (F-141).
+                added = await asyncio.to_thread(cache.append, records)
                 total_added += added
                 page += 1
 

@@ -7,6 +7,7 @@ check of that operator's own UDL session.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -67,3 +68,25 @@ def test_the_notso_cache_needs_a_udl_session(
         no_udl.last_pol_analysis = saved
     assert "Log in to UDL" in resp.text
     assert looked == [], "the shared cache was read for an operator with no UDL session"
+
+
+def test_the_cache_path_correlates_the_bundled_records(client: Any, auth_cookie: str, no_udl: Any) -> None:
+    """Audit F-046: the cache found nothing for any object, so this path always
+    answered "No NOTSOs in local cache". 40258 is named by 36 bundled records."""
+    no_udl.udl_username, no_udl.udl_password = "u", "p"
+    saved = getattr(no_udl, "last_pol_analysis", None)
+    no_udl.last_pol_analysis = SimpleNamespace(
+        satno=40258, regime="GEO", manoeuvres=[], candidate_manoeuvres=[],
+        records=[SimpleNamespace(epoch=datetime(2024, 1, 1, tzinfo=UTC)),
+                 SimpleNamespace(epoch=datetime(2025, 12, 1, tzinfo=UTC))],
+    )
+    try:
+        resp = client.post(
+            "/pol/notso-correlate", data={"notso_text": ""},
+            cookies={"spectre_session": auth_cookie}, headers=csrf_headers(auth_cookie),
+        )
+    finally:
+        no_udl.last_pol_analysis = saved
+    assert "No NOTSOs in local cache" not in resp.text
+    assert resp.status_code == 200
+    assert "error-msg" not in resp.text
