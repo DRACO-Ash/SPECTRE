@@ -83,7 +83,6 @@ def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "SKIP_PACKAGE_TESTS": "1",  # the suite is exercised by its own run
-        "SKIP_DS_VERIFY": "1",      # the advisory analyser needs a Go toolchain
     }
     # S603: fixed argv, no shell, and every path is test-controlled.
     return subprocess.run(  # noqa: S603

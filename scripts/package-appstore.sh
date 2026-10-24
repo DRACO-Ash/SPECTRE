@@ -328,7 +328,9 @@ if [ "$MODE" = "python" ] && [ -f scripts/preflight-gate.py ]; then
     echo
     python3 scripts/preflight-gate.py "$STAGE" || exit 1
 fi
-if [ "${SKIP_DS_VERIFY:-0}" != "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
+# Opt-in: it builds and runs a third-party analyser, which no packaging run
+# should do unasked (audit F-183). RUN_DS_VERIFY=1 to see its parse warnings.
+if [ "${RUN_DS_VERIFY:-0}" = "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
     echo
     sh scripts/verify-dependency-scan.sh "$ZIP_PATH" || true
 fi
