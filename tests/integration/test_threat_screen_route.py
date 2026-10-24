@@ -171,3 +171,30 @@ class TestTheAssetSelector:
         finally:
             state.hrr_objects = []
             state.udl_username = None
+
+
+class TestAFailedRefreshIsShown:
+    """Audit F-135: an actor screened after a failed refresh says so on the result."""
+
+    def test_the_note_reaches_the_provenance_banner(self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        from spectre.web.planning_state import get_session_state
+        from spectre.web.routes import udl
+
+        async def _down(*_a: object, **_k: object) -> None:
+            return None
+
+        monkeypatch.setattr(udl, "fetch_tle_for_satno", _down)
+        state = get_session_state("testadmin")
+        saved = (state.udl_username, state.udl_password, state.hrr_objects)
+        state.udl_username, state.udl_password = "u", "p"
+        state.hrr_objects = [{"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"}]
+        state.hrr_tle_cache["41838"] = _RED_TLE
+        state.hrr_tle_data_mode["41838"] = "SYNTHETIC"
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.udl_password, state.hrr_objects = saved
+            state.hrr_tle_cache.pop("41838", None)
+            state.hrr_tle_data_mode.pop("41838", None)
+        flat = " ".join(resp.text.split())  # type: ignore[attr-defined]
+        assert "SJ-17 (41838): live element set not fetched; screened on the set already held" in flat

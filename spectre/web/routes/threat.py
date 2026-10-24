@@ -1497,15 +1497,17 @@ async def threat_sweep(
 
 
 
-async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> None:
+async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[str]:
     """Fetch live element sets for actors that have none, or only synthetic.
 
     A no-op without UDL credentials, which is the normal case on a fresh
-    instance running from the bundled bootstrap watchlist.
+    instance running from the bundled bootstrap watchlist. Returns one note
+    per actor whose fetch failed: it is then screened on the set already
+    held, and the operator is told so (F-135), as the sweep does.
     """
     missing = [a for a in actors if _needs_live_tle(state, a.actor_satno)]
     if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return
+        return []
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -1513,19 +1515,28 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> None:
     user: str = state.udl_username  # type: ignore[attr-defined]
     password: str = state.udl_password  # type: ignore[attr-defined]
 
-    async def _fetch_one(actor: ThreatActor) -> None:
+    async def _fetch_one(actor: ThreatActor) -> bool:
         async with sem:
             got = await fetch_tle_for_satno(
                 int(actor.actor_satno), user, password,
                 data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
-            if got:
-                tle, mode = got
-                state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
-                state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+            if not got:
+                return False
+            tle, mode = got
+            state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
+            state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+            return True
 
-    await asyncio.gather(*[_fetch_one(a) for a in missing])
+    outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
+    held = "screened on the set already held"
+    return [
+        f"{a.actor_name} ({a.actor_satno}): live element set not fetched"
+        + (f" ({_refusal_reason(outcome)}); {held}" if isinstance(outcome, BaseException) else f"; {held}")
+        for a, outcome in zip(missing, outcomes, strict=True)
+        if outcome is not True
+    ]
 
 
 
@@ -1783,7 +1794,7 @@ async def threat_screen(
     errors.extend(candidates.notes)
 
     # ── Fetch any missing or synthetic actor element sets ────────────────────
-    await _refresh_actor_tles(state, actors)
+    refresh_notes = await _refresh_actor_tles(state, actors)
 
     # ── Screen, off the event loop ───────────────────────────────────────────
     loop = asyncio.get_running_loop()
@@ -1803,7 +1814,7 @@ async def threat_screen(
     provenance = _provenance_warnings(
         [(f"asset {asset_name}", asset_mode)]
         + [(f"actor {v.actor_name}", actor_modes[v.actor_satno]) for v in run.verdicts],
-    )
+    ) + refresh_notes
     profiles_by_actor = _profiles_by_actor(run.entries)
     entries = run.entries
     method_refusals = run.refusals
