@@ -381,7 +381,10 @@ def _t_test_two_sample(
     # Welch–Satterthwaite degrees of freedom
     num   = (var_a / na + var_b / nb) ** 2
     denom = (var_a / na) ** 2 / (na - 1) + (var_b / nb) ** 2 / (nb - 1)
-    df    = num / denom if denom > 1e-15 else 1.0
+    # Guarded on exact zero: denom is in mag^4 and an absolute 1e-15 cut-off
+    # sent precise or large samples to one degree of freedom, a Cauchy tail
+    # (audit F-101). With no spread to weight, the pooled count is used.
+    df    = num / denom if denom > 0.0 else float(na + nb - 2)
 
     # p-value via regularised incomplete Beta (I_x(a,b), x = df/(df+t^2))
     x   = df / (df + t * t)
