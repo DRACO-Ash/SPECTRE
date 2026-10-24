@@ -29,6 +29,7 @@ Typical use::
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -65,6 +66,12 @@ MODELLED_BASIS = (
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
+def _require_fraction(owner: str, field_name: str, value: float) -> None:
+    """Refuse a value outside [0, 1], NaN or infinite included (audit F-112)."""
+    if not (math.isfinite(value) and 0.0 <= value <= 1.0):
+        raise ValueError(f"{owner}.{field_name} must be in [0, 1]; got {value!r}")
+
+
 @dataclass
 class AdversaryAction:
     """A single adversary COA to evaluate."""
@@ -76,6 +83,10 @@ class AdversaryAction:
     confidence:  float            # [0, 1] — intelligence confidence
     description: str = ""
     # Phase 2: hypothesis: ManoeuvreHypothesis | None = None
+
+    def __post_init__(self) -> None:
+        _require_fraction("AdversaryAction", "probability", self.probability)
+        _require_fraction("AdversaryAction", "confidence", self.confidence)
 
 
 @dataclass
@@ -89,6 +100,15 @@ class FriendlyResponse:
     reversibility:        float    # [0, 1] — 1 = fully reversible
     time_to_execute_hours: float   # Execution latency
     description:          str = ""
+
+    def __post_init__(self) -> None:
+        _require_fraction("FriendlyResponse", "cost", self.cost)
+        _require_fraction("FriendlyResponse", "reversibility", self.reversibility)
+        if not (math.isfinite(self.time_to_execute_hours) and self.time_to_execute_hours >= 0.0):
+            raise ValueError(
+                f"FriendlyResponse.time_to_execute_hours must be finite and >= 0; "
+                f"got {self.time_to_execute_hours!r}"
+            )
 
 
 @dataclass
@@ -130,6 +150,13 @@ class Scenario:
     w_dv_cost:          float = 0.20    # Penalty for ΔV expenditure
     w_time_to_exec:     float = 0.10    # Penalty for slow response
     w_reversibility:    float = 0.10    # Reward for reversible actions
+
+    def __post_init__(self) -> None:
+        # A zero horizon divided by zero in the score (audit F-112).
+        if not (math.isfinite(self.horizon_hours) and self.horizon_hours > 0.0):
+            raise ValueError(f"Scenario.horizon_hours must be finite and > 0; got {self.horizon_hours!r}")
+        for name in ("w_custody", "w_closest_approach", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
+            _require_fraction("Scenario", name, getattr(self, name))
 
 
 @dataclass
