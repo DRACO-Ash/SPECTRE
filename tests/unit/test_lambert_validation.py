@@ -44,7 +44,7 @@ from spectre.astro.lambert import (
 
 # Stumpff functions written out here rather than imported from the solver, so
 # the reference propagator shares no code with what it checks (audit F-070).
-def _stumpff_C(z: float) -> float:
+def _stumpff_c(z: float) -> float:
     if z > 0:
         return (1.0 - math.cos(math.sqrt(z))) / z
     if z < 0:
@@ -52,7 +52,7 @@ def _stumpff_C(z: float) -> float:
     return 0.5
 
 
-def _stumpff_S(z: float) -> float:
+def _stumpff_s(z: float) -> float:
     if z > 0:
         sz = math.sqrt(z)
         return (sz - math.sin(sz)) / sz**3
@@ -78,7 +78,7 @@ def _propagate(r0: np.ndarray, v0: np.ndarray, dt: float, mu: float = MU_EARTH) 
     chi = math.sqrt(mu) * abs(alpha) * dt
     for _ in range(300):
         z = alpha * chi * chi
-        c, s = _stumpff_C(z), _stumpff_S(z)
+        c, s = _stumpff_c(z), _stumpff_s(z)
         f = (
             r0_mag * vr0 / math.sqrt(mu) * chi * chi * c
             + (1.0 - alpha * r0_mag) * chi**3 * s
@@ -98,7 +98,7 @@ def _propagate(r0: np.ndarray, v0: np.ndarray, dt: float, mu: float = MU_EARTH) 
         pytest.fail("the reference propagator did not converge; the check is void")
 
     z = alpha * chi * chi
-    c, s = _stumpff_C(z), _stumpff_S(z)
+    c, s = _stumpff_c(z), _stumpff_s(z)
     lagrange_f = 1.0 - chi * chi / r0_mag * c
     lagrange_g = dt - chi**3 / math.sqrt(mu) * s
     return lagrange_f * r0 + lagrange_g * v0
