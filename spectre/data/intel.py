@@ -1,8 +1,14 @@
 """Adversary satellite intelligence lookup.
 
-Provides instant access to PAIR-derived satellite intelligence records
-keyed by NORAD catalogue number.  Data sourced from the Adversary Satellite
-Activity Report (UNCLASSIFIED // PAIR, 30 March 2026).
+Satellite intelligence records keyed by NORAD catalogue number. Each record
+names its own sources in its ``source`` field. Across the set these are open
+sources (McDowell 2025; CSIS Space Threat Assessment 2025; Secure World
+Foundation Global Counterspace Capabilities 2025; RAND 2025), the JCO threat
+list, and the Iran Space order of battle (PAIR/PatchPlus, February 2026).
+This docstring used to credit the whole set to one PAIR report (audit F-146).
+
+``threat_level`` (CRITICAL, HIGH, MEDIUM, LOW) is an analyst judgement carried
+with the record, with no stated method; it is shown as such, not as a score.
 """
 
 from __future__ import annotations
