@@ -2081,17 +2081,21 @@ def vbar_hop_sequence(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# A hop cadence may differ from a whole number of half orbits by this fraction.
+_HOP_CADENCE_TOL = 1e-6
+
+
 @dataclass
 class HBarHopResult:
     """Result of an H-bar hop sequence in the orbit-normal direction."""
 
-    hop_distance_km: float       # orbit-normal advance per hop (km)
+    hop_distance_km: float       # out-of-plane amplitude added per hop (km)
     n_hops: int
-    total_advance_km: float      # total H-bar advance
+    total_advance_km: float      # peak out-of-plane offset reached, either side of the plane
     delta_v_per_hop: float       # km/s — single normal burn per hop
     total_delta_v: float         # km/s
-    time_per_hop_s: float        # seconds per hop (default T_orbit / 2)
-    total_time_s: float
+    time_per_hop_s: float        # seconds between burns, plane crossing to crossing
+    total_time_s: float          # first burn to the final peak
     method: str = "hbar_hop"
 
 
@@ -2102,12 +2106,18 @@ def hbar_hop_sequence(
     time_per_hop_s: float | None = None,
     mu: float = MU_EARTH,
 ) -> HBarHopResult:
-    """Compute an H-bar hop sequence advancing in the orbit-normal direction.
+    """Compute an H-bar hop sequence that grows an out-of-plane oscillation.
 
-    Each hop is a small incremental plane change (normal burn at a node
-    crossing), exploiting the SHM out-of-plane dynamics::
-
-        ΔV_hop = n · d
+    Out-of-plane CW motion is simple harmonic, z(t) = (ż0 / n) sin nt, so an
+    impulse cannot hold an offset: a normal burn of n·d reaches d a quarter
+    orbit later and is back on the plane at the half orbit. Each hop is a
+    normal burn of n·d at a plane crossing, along the out-of-plane velocity
+    there, which raises the amplitude by d. After k hops the satellite swings
+    k·d either side of the plane, reaching that peak a quarter orbit after
+    the last burn. Holding the offset would need continuous thrust, which is
+    not costed. The previous version claimed n_hops · d of accumulated
+    advance after n_hops half orbits, where the satellite is back on the
+    plane (audit F-077).
 
     H-bar hops cost roughly twice as much as V-bar hops for the same advance
     because out-of-plane burns are more expensive than radial burns.  The
@@ -2116,18 +2126,29 @@ def hbar_hop_sequence(
 
     Args:
         r_ref: Reference orbit radius (km).
-        hop_distance_km: Orbit-normal advance per hop (km).
+        hop_distance_km: Out-of-plane amplitude added per hop (km).
         n_hops: Number of hops.
-        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        time_per_hop_s: Time between burns (s); must be a whole number of
+            half orbits, since each burn is at a plane crossing. Defaults to
+            T_orbit / 2.
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: if *time_per_hop_s* is not a whole number of half orbits.
     """
     n = math.sqrt(mu / r_ref ** 3)
     T_orbit = 2.0 * math.pi / n
 
     if time_per_hop_s is None:
         time_per_hop_s = T_orbit / 2.0
+    half_orbits = time_per_hop_s / (T_orbit / 2.0)
+    if round(half_orbits) < 1 or abs(half_orbits - round(half_orbits)) > _HOP_CADENCE_TOL:
+        raise ValueError(
+            f"time_per_hop_s={time_per_hop_s:.0f} s is not a whole number of half orbits "
+            f"({T_orbit / 2.0:.0f} s); each hop burns at a plane crossing"
+        )
 
-    # Single normal burn per hop exploiting SHM quarter-period reach: Δv_n = n·d
+    # A normal burn of n·d at a plane crossing adds d to the amplitude.
     dv_per_hop = n * hop_distance_km
     total_dv = n_hops * dv_per_hop
 
@@ -2138,5 +2159,5 @@ def hbar_hop_sequence(
         delta_v_per_hop=dv_per_hop,
         total_delta_v=total_dv,
         time_per_hop_s=time_per_hop_s,
-        total_time_s=n_hops * time_per_hop_s,
+        total_time_s=(n_hops - 1) * time_per_hop_s + T_orbit / 4.0,
     )
