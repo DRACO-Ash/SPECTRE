@@ -22,6 +22,7 @@ import math
 from dataclasses import dataclass
 
 from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
+from spectre.astro.transfers import hohmann
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. Phasing Orbit
@@ -425,6 +426,14 @@ def combined_altitude_plane_change(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# J2 drift acceleration search: altitude floor, highest raise considered,
+# bisection steps, and the target used when the planes never converge.
+_J2_FLOOR_ALT_KM = 200.0
+_J2_MAX_RAISE_KM = 2000.0
+_J2_BISECT_STEPS = 100
+_J2_FALLBACK_DAYS = 180.0
+
+
 @dataclass
 class J2DriftResult:
     """Result of a J2 RAAN drift analysis."""
@@ -434,9 +443,9 @@ class J2DriftResult:
     differential_rate_deg_day: float  # deg/day — convergence rate
     delta_raan_deg: float             # current RAAN gap
     convergence_time_days: float      # days to natural alignment (0 if diverging)
-    accel_altitude_change_km: float   # altitude change to double convergence rate
+    accel_altitude_change_km: float   # altitude change to halve convergence time (0 if none reaches it)
     accel_convergence_days: float     # convergence time after altitude change
-    accel_delta_v: float              # km/s — ΔV for the altitude change
+    accel_delta_v: float              # km/s — both Hohmann burns of the altitude change
     method: str = "j2_drift"
 
 
@@ -505,26 +514,10 @@ def j2_drift_plan(
         if conv_days < 0:
             conv_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate)
 
-    # Compute altitude change to double convergence rate
-    # Strategy: lower/raise chaser by Δa to increase differential rate
-    # For prograde orbits (inc < 90°), lower altitude → faster (more negative) RAAN rate
-    delta_a = -50.0 if inc_chaser_deg < 90.0 else 50.0  # km, heuristic step
-    a_new = a_chaser + delta_a
-    rate_c_new = j2_raan_rate(a_new, ecc_chaser, inc_chaser_deg, mu)
-    diff_rate_new = rate_c_new - rate_t
-
-    if abs(diff_rate_new) < 1e-10:
-        accel_days = float("inf")
-    else:
-        accel_days = -delta_raan_deg / diff_rate_new
-        if accel_days < 0:
-            accel_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate_new)
-
-    # ΔV to change altitude by delta_a (Hohmann-like)
-    v_old = math.sqrt(mu / a_chaser)
-    a_transfer = (a_chaser + a_new) / 2.0
-    v_transfer = math.sqrt(mu * (2.0 / a_chaser - 1.0 / a_transfer))
-    accel_dv = abs(v_transfer - v_old)
+    delta_a, accel_days = _j2_acceleration(
+        a_chaser, ecc_chaser, inc_chaser_deg, rate_t, delta_raan_deg, conv_days, mu,
+    )
+    accel_dv = hohmann(a_chaser, a_chaser + delta_a, mu).total_delta_v if delta_a else 0.0
 
     return J2DriftResult(
         raan_rate_chaser_deg_day=rate_c,
@@ -536,6 +529,46 @@ def j2_drift_plan(
         accel_convergence_days=accel_days,
         accel_delta_v=accel_dv,
     )
+
+
+def _j2_acceleration(
+    a_chaser: float,
+    ecc_chaser: float,
+    inc_chaser_deg: float,
+    rate_t: float,
+    delta_raan_deg: float,
+    conv_days: float,
+    mu: float,
+) -> tuple[float, float]:
+    """Altitude change (km) that closes the RAAN gap the short way in half the time.
+
+    The nodal rate is monotonic in semi-major axis, so the change is found by
+    bisection between a floor 200 km above the surface and 2,000 km above the
+    chaser. The direction follows from the differential rate the gap needs,
+    not from the inclination alone (audit F-024). Natural convergence that
+    never happens is given a target of _J2_FALLBACK_DAYS. Returns (0, natural
+    time) when no altitude in that range is fast enough.
+    """
+    if delta_raan_deg == 0.0:
+        return 0.0, conv_days
+    target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS
+    needed = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)
+
+    def excess(a: float) -> float:
+        return j2_raan_rate(a, ecc_chaser, inc_chaser_deg, mu) - rate_t - needed
+
+    lo, hi = R_EARTH + _J2_FLOOR_ALT_KM, a_chaser + _J2_MAX_RAISE_KM
+    f_lo = excess(lo)
+    if f_lo * excess(hi) > 0.0:
+        return 0.0, conv_days
+    for _ in range(_J2_BISECT_STEPS):
+        mid = 0.5 * (lo + hi)
+        f_mid = excess(mid)
+        if (f_mid < 0.0) == (f_lo < 0.0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi) - a_chaser, target_days
 
 
 # ═══════════════════════════════════════════════════════════════════════════

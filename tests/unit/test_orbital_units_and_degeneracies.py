@@ -282,16 +282,19 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
         )
         assert solution.miss_distance_km == pytest.approx(128.243, abs=0.01)
 
-        # A plane-alignment assist is a small altitude trim, not a transfer.
-        # Fourteen metres per second is right for LEO.
+        # The inclination half is held by the convergence time. The nodal
+        # rates go as cos(i), so with inclinations read as radians this pair
+        # converges in 181.3 days instead of 46.8.
         #
-        # An earlier note here claimed delta-v could not hold this, because it
-        # moves only from 0.014364 to 0.014232. That was wrong: 0.014232 is
-        # thirteen times outside the 1e-5 tolerance below, so this assertion
-        # kills the inclination mutant on its own. The angle still carries the
-        # RAAN half, where the move is 128 to 6988.
-        assert solution.total_delta_v == pytest.approx(0.014364, abs=1e-5)
-        assert 0.001 < solution.total_delta_v < 0.1
+        # This assertion used to pin a 14.4 m/s altitude trim, the cost of a
+        # fixed 50 km step that did not double the rate it claimed to (audit
+        # F-024). Halving 46.8 days needs a differential of -5.48 deg/day and
+        # the fastest reachable, at the 200 km floor, is -3.16, so no altitude
+        # change helps and the plan has no burns.
+        days = (solution.arrival_epoch - _EPOCH).total_seconds() / 86400.0
+        assert days == pytest.approx(46.825, abs=0.01)
+        assert solution.burns == []
+        assert solution.total_delta_v == 0.0
 
     def test_intent_likelihood_is_scored_from_degrees(self) -> None:
         """Coplanar, because a cross-plane pair hides this one completely.

@@ -769,9 +769,13 @@ def j2_drift_intercept(
 ) -> InterceptSolution:
     """Analyse J2 RAAN drift for orbital plane alignment.
 
-    Returns an InterceptSolution with one burn representing the
-    optional altitude change to accelerate convergence. If the
-    satellites are already converging, this may be a zero-ΔV solution.
+    Returns an InterceptSolution whose two burns are the Hohmann altitude
+    change that halves the natural convergence time. When no altitude in
+    range achieves that, there are no burns and the arrival is the natural
+    convergence.
+
+    Raises:
+        ValueError: when the planes never converge and no altitude helps.
 
     Args:
         red_tle: TLE of the chaser.
@@ -803,10 +807,23 @@ def j2_drift_intercept(
         delta_raan, mu,
     )
 
-    # Build a single burn for the optional altitude adjustment
-    v_hat = sv_red.v / sv_red.v_mag
-    dv_vec = v_hat * result.accel_delta_v
-    burn1 = _make_burn(1, t_epoch, dv_vec, sv_red)
+    if not math.isfinite(result.accel_convergence_days):
+        raise ValueError(
+            "the two planes precess at the same rate, so J2 drift never closes the "
+            f"{delta_raan:.2f} deg RAAN gap, and no altitude change in range speeds it"
+        )
+
+    # The altitude change is a Hohmann transfer: two burns, prograde to raise
+    # and retrograde to lower, along the transfer arc's velocity.
+    burns = []
+    if result.accel_altitude_change_km:
+        r_new = sv_red.r_mag + result.accel_altitude_change_km
+        hop = hohmann(sv_red.r_mag, r_new, mu)
+        sense = 1.0 if result.accel_altitude_change_km > 0 else -1.0
+        dv1_vec = sense * hop.delta_v_1 * sv_red.v / sv_red.v_mag
+        sv_top = _coast(sv_red, dv1_vec, t_epoch + timedelta(seconds=hop.transfer_time_s), mu)
+        dv2_vec = sense * hop.delta_v_2 * sv_top.v / sv_top.v_mag
+        burns = [_make_burn(1, t_epoch, dv1_vec, sv_red), _make_burn(2, sv_top.epoch, dv2_vec, sv_top)]
 
     t_arrival = t_epoch + timedelta(days=result.accel_convergence_days)
 
@@ -820,8 +837,8 @@ def j2_drift_intercept(
 
     return InterceptSolution(
         method="j2_drift",
-        burns=[burn1],
-        total_delta_v=result.accel_delta_v,
+        burns=burns,
+        total_delta_v=sum(b.delta_v_mag for b in burns),
         departure_epoch=t_epoch,
         arrival_epoch=t_arrival,
         miss_distance_km=abs(delta_raan),
