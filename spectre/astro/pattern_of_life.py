@@ -15,11 +15,13 @@ Given a chronological list of TLEs for a single object this module:
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
 from spectre.astro.constants import (
@@ -979,6 +981,37 @@ def _pol_status_and_reason(
     return "NORMAL", "All metrics within normal historical bounds."
 
 
+def _burn_epoch_of(m: Manoeuvre) -> datetime:
+    return m.burn_epoch
+
+
+def _burn_intervals(manoeuvres: list[Manoeuvre], burn_time: Any) -> list[float]:
+    """Days between successive burns, in burn order."""
+    times = sorted(burn_time(m) for m in manoeuvres)
+    return [(b - a).total_seconds() / 86400.0 for a, b in itertools.pairwise(times)]
+
+
+def _next_manoeuvre(
+    manoeuvres: list[Manoeuvre], burn_time: Any = _burn_epoch_of,
+) -> tuple[str | None, float | None]:
+    """Predicted next burn and the half-width (days) of its 95% interval.
+
+    The band is a prediction interval for the next interval between burns,
+    t(0.975, n-1) x s x sqrt(1 + 1/n). It was 2 s, which with three intervals
+    understates a 95% band by more than half (t = 4.30), and was timed on the
+    after-element-set epochs rather than the burns (audit F-094). None below
+    _MIN_INTERVALS_FOR_PREDICTION intervals.
+    """
+    intervals = _burn_intervals(manoeuvres, burn_time)
+    stats_ = _pol_stats(intervals)
+    if stats_ is None or stats_.n < _MIN_INTERVALS_FOR_PREDICTION:
+        return None, None
+    last = max(burn_time(m) for m in manoeuvres)
+    pred = last + timedelta(days=stats_.mean)
+    t_factor = float(student_t.ppf(0.975, stats_.n - 1))
+    return pred.strftime("%Y-%m-%d %H:%M UTC"), round(t_factor * stats_.std * math.sqrt(1.0 + 1.0 / stats_.n), 1)
+
+
 def analyse_pattern_of_life(
     records: list[TLERecord],
     satno: int = 0,
@@ -1069,20 +1102,9 @@ def analyse_pattern_of_life(
     total_dv  = float(sum(dv_vals))
     sorted_m  = sorted(manoeuvres, key=lambda m: m.epoch)
 
-    intervals: list[float] = [
-        (sorted_m[j].epoch - sorted_m[j - 1].epoch).total_seconds() / 86400.0
-        for j in range(1, len(sorted_m))
-    ]
-
     dv_stats       = _pol_stats(dv_vals)
-    interval_stats = _pol_stats(intervals)
-
-    # Prediction
-    next_est = next_unc = None
-    if interval_stats and interval_stats.n >= _MIN_INTERVALS_FOR_PREDICTION and sorted_m:
-        pred = sorted_m[-1].epoch + timedelta(days=interval_stats.mean)
-        next_est = pred.strftime("%Y-%m-%d %H:%M UTC")
-        next_unc = round(interval_stats.std * 2.0, 1)
+    interval_stats = _pol_stats(_burn_intervals(manoeuvres, _burn_epoch_of))
+    next_est, next_unc = _next_manoeuvre(manoeuvres, _burn_epoch_of)
 
     # PoL status
     pol_status, pol_reason = _pol_status_for_history(records[-1].epoch, manoeuvres)

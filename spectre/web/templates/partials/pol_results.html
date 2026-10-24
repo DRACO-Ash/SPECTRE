@@ -314,7 +314,7 @@
                "derived from Table 3, not asserted") }}
   {% endif %}
   {% if pol.next_manoeuvre_est %}
-  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--ops-gold)") }}
   {% endif %}
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
