@@ -22,6 +22,7 @@ import math
 from dataclasses import dataclass
 
 from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
+from spectre.astro.cw_geometry import CWState, _cw_propagate
 from spectre.astro.transfers import hohmann
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1797,6 +1798,26 @@ def fingerprint_manoeuvre(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+_SLOT_SAMPLES = 2000
+_BURN_AXIS = {"radial": 0, "along_track": 1, "out_of_plane": 2}
+
+
+def _slot_displacement_km(strategy: str, delta_v: float, n: float) -> float:
+    """Largest distance (km) a single impulse moves the asset over one orbit.
+
+    Flown through the Clohessy-Wiltshire solution from the slot, with the
+    impulse along the strategy's axis.
+    """
+    velocity = [0.0, 0.0, 0.0]
+    velocity[_BURN_AXIS[strategy]] = delta_v
+    start = CWState(0.0, 0.0, 0.0, *velocity)
+    period = 2.0 * math.pi / n
+    return max(
+        math.sqrt(p.x**2 + p.y**2 + p.z**2)
+        for p in (_cw_propagate(start, n, period * k / _SLOT_SAMPLES) for k in range(_SLOT_SAMPLES + 1))
+    )
+
+
 @dataclass
 class FormationDefenceResult:
     """Result of a formation-aware defensive manoeuvre computation."""
@@ -1812,7 +1833,6 @@ class FormationDefenceResult:
 
 def formation_defence_burn(
     r_asset: float,
-    r_threat: float,
     time_to_tca_s: float,
     desired_miss_km: float,
     formation_spacing_km: float = 50.0,
@@ -1826,33 +1846,21 @@ def formation_defence_burn(
 
     Args:
         r_asset: Asset orbit radius (km).
-        r_threat: Threat orbit radius at conjunction (km).
         time_to_tca_s: Warning time before conjunction (seconds).
         desired_miss_km: Required miss distance (km).
         formation_spacing_km: Formation slot tolerance (km).
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_asset**3)
-    nt = n * time_to_tca_s
-    _sin_nt = math.sin(nt)
 
     # Compute cheapest COLA burn
     cola = collision_avoidance(r_asset, desired_miss_km, time_to_tca_s, mu)
     best = cola.best
 
-    # Assess formation impact: how far does the burn displace the asset
-    # after one orbital period?
-    T = 2.0 * math.pi / n
-    if best.strategy == "along_track":
-        # Along-track burn causes secular drift
-        coeff = abs(4.0 * math.sin(n * T) - 3.0 * n * T) / n
-        formation_displacement = best.delta_v * coeff if coeff > 1e-12 else 0.0
-    elif best.strategy == "radial":
-        # Radial burn causes oscillating displacement
-        formation_displacement = best.delta_v / n  # max radial excursion
-    else:
-        # Out-of-plane: oscillating cross-track
-        formation_displacement = best.delta_v / n
+    # Formation impact: the furthest the burn carries the asset from its slot
+    # over one orbit. A radial burn's along-track excursion reaches 4 dv / n,
+    # four times the dv / n reported before (audit F-078).
+    formation_displacement = _slot_displacement_km(best.strategy, best.delta_v, n)
 
     maintains = formation_displacement < formation_spacing_km
 

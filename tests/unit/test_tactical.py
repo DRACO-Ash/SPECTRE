@@ -539,18 +539,18 @@ class TestFormationDefence:
 
     def test_basic_formation_burn(self) -> None:
         """Should compute a ΔV and assess formation impact."""
-        r = formation_defence_burn(LEO_R, LEO_R + 100, 3600.0, 5.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 5.0)
         assert r.delta_v > 0
         assert r.formation_impact_km >= 0
 
     def test_wide_tolerance_maintains_formation(self) -> None:
         """Large formation spacing → should maintain formation."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 1.0, formation_spacing_km=500.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 1.0, formation_spacing_km=500.0)
         assert r.maintains_formation
 
     def test_tight_tolerance_may_exceed(self) -> None:
         """Very tight formation spacing → may exceed tolerance."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 10.0, formation_spacing_km=0.001)
+        r = formation_defence_burn(LEO_R, 3600.0, 10.0, formation_spacing_km=0.001)
         # With very tight tolerance, the burn likely exceeds it
         assert r.formation_impact_km > 0
 

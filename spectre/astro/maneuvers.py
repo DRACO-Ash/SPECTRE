@@ -1514,17 +1514,18 @@ def formation_intercept(
 
     Blue satellite evades red threat while assessing impact on
     formation geometry.
+
+    The burn is sized by ``formation_defence_burn`` from blue's own orbit
+    alone: *red_tle* is accepted for the common intercept signature but the
+    threat's state is not modelled, unlike ``evasion_intercept``. Its radius
+    was passed in and never read (audit F-078).
     """
-    red_orbit = TLEOrbit(red_tle)
     blue_orbit = TLEOrbit(blue_tle)
 
     t_tca = manoeuvre_start + timedelta(seconds=coast_s)
-    sv_red = red_orbit.propagate(t_tca)
     sv_blue = blue_orbit.propagate(t_tca)
 
-    result = formation_defence_burn(
-        sv_blue.r_mag, sv_red.r_mag, tof_s, desired_miss_km, mu=mu,
-    )
+    result = formation_defence_burn(sv_blue.r_mag, tof_s, desired_miss_km, mu=mu)
 
     t_burn = t_tca - timedelta(seconds=tof_s)
     sv_blue_burn = blue_orbit.propagate(t_burn)
