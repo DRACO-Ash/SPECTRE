@@ -35,6 +35,11 @@ class OrbitalEvent:
     label: str = ""
 
 
+# Longest span an event search covers: three of every event type even for a
+# GEO object needs about three days.
+_MAX_SCAN_S = 7 * 86400.0
+
+
 def find_orbital_events(
     tle: str,
     start: datetime,
@@ -66,7 +71,11 @@ def find_orbital_events(
     counts: dict[EventType, int] = {}
     from spectre.astro.constants import MU_EARTH
 
-    window_s = (stop - start).total_seconds()
+    # The scan stops once every type has max_per_type events, and never
+    # covers more than _MAX_SCAN_S: an equatorial orbit has no node crossings,
+    # so its quota is never met. Unbounded, a long scenario window ran tens of
+    # thousands of propagations on the event loop (audit F-040).
+    window_s = min((stop - start).total_seconds(), _MAX_SCAN_S)
     n_steps = max(2, int(window_s / step_s))
 
     prev_ta: float | None = None
@@ -125,6 +134,8 @@ def find_orbital_events(
 
         prev_ta = ta
         prev_lat = lat
+        if len(counts) == len(EventType) and min(counts.values()) >= max_per_type:
+            break
 
     events.sort(key=lambda ev: ev.epoch)
     return events

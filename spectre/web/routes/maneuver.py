@@ -730,7 +730,8 @@ async def orbital_events(
     """Compute upcoming orbital events for both red and blue satellites.
 
     Uses sgp4 to propagate the satellite TLEs and detect apogee, perigee,
-    ascending node, and descending node crossings.
+    ascending node, and descending node crossings. The search runs in a
+    worker thread, not on the event loop (audit F-040).
     """
     logger.info(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
@@ -754,7 +755,7 @@ async def orbital_events(
     if red_sat.strip():
         tle = _find_tle(state, red_sat.strip())
         if tle:
-            raw = find_orbital_events(tle, sc_start, sc_stop)
+            raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             red_events = [_astro_event_to_domain(e) for e in raw]
         else:
             logger.warning("orbital_events: no TLE found for red %s", log_safe(red_sat))
@@ -762,7 +763,7 @@ async def orbital_events(
     if blue_sat.strip():
         tle = _find_tle(state, blue_sat.strip())
         if tle:
-            raw = find_orbital_events(tle, sc_start, sc_stop)
+            raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             blue_events = [_astro_event_to_domain(e) for e in raw]
         else:
             logger.warning("orbital_events: no TLE found for blue %s", log_safe(blue_sat))
