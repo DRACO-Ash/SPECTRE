@@ -193,26 +193,29 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
 
 ### Levels and progression
 
-| Level | Title | Min Points |
-|-------|-------|-----------|
-| 1 | Cadet | 0 |
-| 2 | Trainee | 200 |
-| 3 | Operator | 500 |
-| 4 | Senior Operator | 1 000 |
-| 5 | Analyst | 2 000 |
-| 6 | Expert | 4 000 |
+Generated from `spectre/training/config/gamification.yaml`; a level needs both its
+points total and its unlock condition.
+
+| Level | Title | Min Points | Unlock condition |
+|-------|-------|-----------|------------------|
+| 1 | Cadet | 0 | Starting level |
+| 2 | Observer | 100 | Complete the `orientation` tutorial |
+| 3 | Planner | 400 | Pass 3 scenarios |
+| 4 | Analyst | 1,200 | 300 points on Decision Quality |
+| 5 | Operator | 3,000 | Pass 3 challenges |
+| 6 | Instructor | 8,000 | 1000 points on Operational Tempo |
 
 ### Skill axes
 
 Scenarios and tutorials each contribute points to one or more of five skill axes:
 
-| Axis | Description |
-|------|-------------|
-| `intercept_planning` | Intercept Engine and transfer methods |
-| `threat_assessment` | Threat Sweep, HRR, detectability |
-| `pattern_analysis` | Pattern of Life, NOTSO, photometry |
-| `decision_making` | Decision Engine, what-if analysis |
-| `situational_awareness` | GCAT, regime identification, data literacy |
+| Axis | Label | Description |
+|------|-------|-------------|
+| `situational_awareness` | Situational Awareness | Speed and accuracy of reading a threat scenario |
+| `manoeuvre_planning` | Manoeuvre Planning | Ability to compute effective orbital responses |
+| `decision_quality` | Decision Quality | Selecting the optimal option, not merely a valid one |
+| `operational_tempo` | Operational Tempo | Working at mission-required speed |
+| `efficiency` | Efficiency | Minimising resource expenditure (ΔV, sensor tasking) |
 
 ### Scenario design rules
 
