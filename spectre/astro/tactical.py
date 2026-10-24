@@ -861,7 +861,13 @@ def classify_manoeuvre(
     # Subtract expected J2 drift to isolate manoeuvre-induced RAAN change
     expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
     raan_residual = max(0.0, draan - expected_j2_raan)
-    dv_raan = 2.0 * v1 * math.sin(math.radians(raan_residual) / 2.0) if raan_residual > 0.01 else 0.0
+    # Two planes at inclination i differing by dOmega in RAAN are theta apart
+    # with cos theta = cos^2 i + sin^2 i cos dOmega. Pricing dOmega itself
+    # overstated the cost by 1/sin i (audit F-073).
+    i1 = math.radians(inc1_deg)
+    cos_theta = math.cos(i1) ** 2 + math.sin(i1) ** 2 * math.cos(math.radians(raan_residual))
+    theta_raan = math.acos(max(-1.0, min(1.0, cos_theta)))
+    dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > 0.01 else 0.0
 
     total_dv = math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
 
