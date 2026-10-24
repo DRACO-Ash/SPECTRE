@@ -64,6 +64,7 @@
         ⚠ {{ fetch_errors | length }} error{{ 's' if fetch_errors | length != 1 else '' }}
       </span>
       {% endif %}
+      {% if can_refresh %}
       <button class="btn-secondary btn-sm"
               hx-post="/gcat/refresh"
               hx-target="#gcat-panel-body"
@@ -73,6 +74,7 @@
               title="Re-download all {{ total_count }} GCAT datasets from planet4589.org (takes 10–30 s)">
         ↻ Refresh All
       </button>
+      {% endif %}
       <span id="gcat-refresh-ind" class="htmx-indicator gcat-refresh-ind">
         <span class="spinner"></span> Downloading&hellip;
       </span>

@@ -66,3 +66,36 @@ class TestARevokedSessionIsAnonymousOnTheRoot:
         assert resp.status_code == 200
         assert b"Blue Assets" not in resp.content
         assert b"root_replay" not in resp.content
+
+
+class TestGcatRefreshIsAdminOnly:
+    """F-139. Refresh clears the cache every operator shares and starts 28 downloads."""
+
+    def test_an_operator_is_refused(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        from spectre.web.routes import gcat
+        from tests.conftest import csrf_headers
+
+        started: list[bool] = []
+
+        async def _never(*_a: object, **_k: object) -> None:
+            started.append(True)
+
+        monkeypatch.setattr(gcat, "_refresh_cache", _never)
+        admin = _admin_cookies(client)
+        _create_operator(client, admin, "gcat_operator", "no-refresh-for-me")
+        client.cookies.clear()
+        session = str(_login(client, "gcat_operator", "no-refresh-for-me").cookies["spectre_session"])
+        client.cookies.clear()
+        resp = client.post("/gcat/refresh", cookies={"spectre_session": session}, headers=csrf_headers(session))
+        assert resp.status_code == 403
+        assert started == []
+
+    def test_the_panel_offers_refresh_to_admins_only(self, client: TestClient) -> None:
+        admin = _admin_cookies(client)
+        client.cookies.clear()
+        assert 'hx-post="/gcat/refresh"' in client.get("/gcat/panel", cookies=admin).text
+        _create_operator(client, admin, "gcat_viewer", "looks-but-no-refresh")
+        client.cookies.clear()
+        session = {"spectre_session": str(_login(client, "gcat_viewer", "looks-but-no-refresh").cookies["spectre_session"])}
+        client.cookies.clear()
+        assert 'hx-post="/gcat/refresh"' not in client.get("/gcat/panel", cookies=session).text

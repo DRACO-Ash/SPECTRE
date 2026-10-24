@@ -39,7 +39,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.web.auth import require_login
+from spectre.web.auth import require_admin, require_login
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -63,6 +63,7 @@ _ALLOWED_URL_SCHEMES = frozenset({"https"})
 _MAX_REDIRECT_HOPS = 5
 
 PAGE_SIZE = 100
+_MAX_QUERY = 100  # characters in a table search
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gcat-dl")
 
 # ── Dataset registry ──────────────────────────────────────────────────────────
@@ -375,16 +376,12 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
 
 # ── Bulk async downloader (used by /refresh only) ─────────────────────────────
 
-async def _load_all() -> None:
-    """Concurrently download all 28 GCAT datasets into _CACHE.
-    Called only by the manual Refresh endpoint — never blocks panel load.
-    """
-    global _FETCHING, _CACHE_FETCH_TIME, _FETCH_ERRORS
-    if _FETCHING:
-        log.info("[GCAT] Refresh already running — skipping duplicate")
-        return
+async def _download_all() -> dict[str, dict[str, Any]]:
+    """Download every GCAT dataset and return the ones that loaded.
 
-    _FETCHING = True
+    Touches nothing shared but the error list: the caller swaps the result in.
+    """
+    global _FETCH_ERRORS
     _FETCH_ERRORS = []
     log.info("[GCAT] ══ Starting full refresh (%d datasets) ══", len(DATASETS))
     t_start = time.perf_counter()
@@ -396,43 +393,92 @@ async def _load_all() -> None:
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    loaded = failed = 0
+    fresh: dict[str, dict[str, Any]] = {}
     for result in results:
         if isinstance(result, BaseException):
             log.error("[GCAT] gather exception: %s", result)
             _FETCH_ERRORS.append(str(result))
-            failed += 1
             continue
         key, df = result
-        if df is not None:
-            _CACHE[key] = {
-                "df": df,
-                "fetched_at": datetime.now(UTC),
-                "rows": len(df),
-                "cols": len(df.columns),
-                "columns": list(df.columns),
-            }
-            loaded += 1
-        else:
+        if df is None:
             _FETCH_ERRORS.append(f"failed: {DATASETS[key]['label']}")
-            failed += 1
+            continue
+        fresh[key] = _entry(df)
 
-    _CACHE_FETCH_TIME = datetime.now(UTC)
-    _FETCHING = False
-    total_rows = sum(v["rows"] for v in _CACHE.values())
-    elapsed = time.perf_counter() - t_start
     log.info(
         "[GCAT] ══ Refresh done: %d loaded / %d failed / %d total rows (%.1fs) ══",
-        loaded, failed, total_rows, elapsed,
+        len(fresh), len(DATASETS) - len(fresh), sum(v["rows"] for v in fresh.values()),
+        time.perf_counter() - t_start,
     )
+    return fresh
+
+
+def _entry(df: pd.DataFrame) -> dict[str, Any]:
+    """One cache entry for a downloaded dataset."""
+    return {
+        "df": df,
+        "fetched_at": datetime.now(UTC),
+        "rows": len(df),
+        "cols": len(df.columns),
+        "columns": list(df.columns),
+    }
+
+
+async def _refresh_cache() -> None:
+    """Re-download every dataset and swap the results into the shared cache.
+
+    The cache was cleared before the running-refresh check, so a second
+    refresh wiped what the first was loading, and the flag was reset without
+    try/finally (F-139). Now a refresh already running is left to finish, the
+    old entries serve until the new ones are in, a dataset that fails to
+    download keeps its previous copy, and the swap has no await inside it.
+    """
+    global _FETCHING, _CACHE_FETCH_TIME
+    if _FETCHING:
+        log.info("[GCAT] Refresh already running — skipping duplicate")
+        return
+    _FETCHING = True
+    try:
+        fresh = await _download_all()
+        merged = {**_CACHE, **fresh}
+        _CACHE.clear()
+        _CACHE.update(merged)
+        _CACHE_FETCH_TIME = datetime.now(UTC)
+    finally:
+        _FETCHING = False
+
+
+#: One lock per dataset, so N concurrent first views download it once.
+_KEY_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+async def _ensure_cached(key: str) -> bool:
+    """Download *key* on first access, once however many views ask at once."""
+    if key in _CACHE:
+        return True
+    lock = _KEY_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        if key in _CACHE:
+            return True
+        loop = asyncio.get_event_loop()
+        _, df_result = await loop.run_in_executor(_EXECUTOR, _fetch_one, key, DATASETS[key])
+        if df_result is None:
+            return False
+        _CACHE[key] = _entry(df_result)
+        log.info("[GCAT] '%s' cached: %d rows", key, len(df_result))
+        return True
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _panel_context() -> dict[str, Any]:
-    """Build common context dict for gcat_panel.html."""
+def _panel_context(user: User) -> dict[str, Any]:
+    """Build common context dict for gcat_panel.html.
+
+    *can_refresh* hides the Refresh control from operators, who would get 403.
+    """
     gcat_total_rows = sum(v["rows"] for v in _CACHE.values())
     return {
+        "can_refresh": user.role == "admin",
         "datasets": DATASETS,
         "categories": CATEGORIES,
         "cache_rows": {k: v["rows"] for k, v in _CACHE.items()},
@@ -470,7 +516,9 @@ def _page_data(
     if q.strip():
         qlo = q.strip().lower()
         mask = (
-            df.apply(lambda col: col.astype(str).str.lower().str.contains(qlo, na=False))
+            # regex=False: the operator's text is text. As a pattern "(" raised
+            # and a catastrophic one could hold a thread indefinitely (F-138).
+            df.apply(lambda col: col.astype(str).str.lower().str.contains(qlo, na=False, regex=False))
             .any(axis=1)
         )
         df = df[mask]
@@ -529,7 +577,7 @@ async def gcat_panel(
         "[GCAT] Panel opened by %s — %d/%d datasets in cache",
         log_safe(current_user.username), len(_CACHE), len(DATASETS),
     )
-    return render(request, "partials/gcat_panel.html", _panel_context())
+    return render(request, "partials/gcat_panel.html", _panel_context(current_user))
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -537,7 +585,7 @@ async def gcat_table(
     request: Request,
     dataset: str = Query("currentcat"),
     page: int = Query(1, ge=1),
-    q: str = Query(""),
+    q: str = Query("", max_length=_MAX_QUERY),
     sort: str = Query(""),
     asc: int = Query(1),
     current_user: User = Depends(require_login),
@@ -562,29 +610,19 @@ async def gcat_table(
 
     if dataset not in _CACHE:
         log.info("[GCAT] On-demand download: '%s' for %s", dataset, log_safe(current_user.username))
-        loop = asyncio.get_event_loop()
-        _, df_result = await loop.run_in_executor(
-            _EXECUTOR, _fetch_one, dataset, DATASETS[dataset]
+    if not await _ensure_cached(dataset):
+        label = DATASETS[dataset]["label"]
+        return HTMLResponse(
+            '<div class="gcat-error-state">'
+            f'<span class="gcat-error-icon">✗</span>'
+            f'Failed to download <strong>{label}</strong>. '
+            'Check your network connection and try again.'
+            '</div>'
         )
-        if df_result is None:
-            label = DATASETS[dataset]["label"]
-            return HTMLResponse(
-                '<div class="gcat-error-state">'
-                f'<span class="gcat-error-icon">✗</span>'
-                f'Failed to download <strong>{label}</strong>. '
-                'Check your network connection and try again.'
-                '</div>'
-            )
-        _CACHE[dataset] = {
-            "df": df_result,
-            "fetched_at": datetime.now(UTC),
-            "rows": len(df_result),
-            "cols": len(df_result.columns),
-            "columns": list(df_result.columns),
-        }
-        log.info("[GCAT] '%s' cached: %d rows", dataset, len(df_result))
 
-    td = _page_data(dataset, page=page, q=q, sort=sort, asc=asc)
+    # Off the event loop: a search scans every column of tens of thousands of rows.
+    loop = asyncio.get_running_loop()
+    td = await loop.run_in_executor(None, lambda: _page_data(dataset, page=page, q=q, sort=sort, asc=asc))
     if td is None:
         return HTMLResponse('<div class="gcat-error-state">Dataset unavailable.</div>')
 
@@ -594,24 +632,22 @@ async def gcat_table(
 @router.post("/refresh", response_class=HTMLResponse)
 async def gcat_refresh(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: User = Depends(require_admin),
 ) -> HTMLResponse:
-    """Clear the in-memory cache and re-download all 28 GCAT datasets.
+    """Re-download all 28 GCAT datasets into the cache every operator shares.
 
-    This is the slow path (~10-30s). Use it intentionally via the Refresh button.
-    Returns a fresh panel HTML on completion.
+    This is the slow path (~10-30s). Admin only: any operator could clear the
+    shared cache and start 28 downloads (F-139). A refresh already running is
+    left to finish, and the panel shows the cache as it stands.
     """
-    global _CACHE_FETCH_TIME
     log.info(
-        "[GCAT] ══ Manual refresh by %s — clearing %d cached datasets ══",
+        "[GCAT] ══ Manual refresh by %s — %d datasets cached ══",
         log_safe(current_user.username), len(_CACHE),
     )
-    _CACHE.clear()
-    _CACHE_FETCH_TIME = None
-    await _load_all()
+    await _refresh_cache()
 
     log.info(
         "[GCAT] Refresh complete for %s — %d datasets, %d total rows",
         log_safe(current_user.username), len(_CACHE), sum(v["rows"] for v in _CACHE.values()),
     )
-    return render(request, "partials/gcat_panel.html", _panel_context())
+    return render(request, "partials/gcat_panel.html", _panel_context(current_user))
