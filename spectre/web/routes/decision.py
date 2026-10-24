@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
+import math
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, NamedTuple
@@ -34,6 +35,45 @@ router = APIRouter(prefix="/plan/decision", tags=["decision"])
 
 # Weights summing to less than this are treated as unset rather than scaled up.
 _MIN_WEIGHT_TOTAL = 0.01
+# Rows per side, as README.md documents, and the longest horizon in hours.
+_MAX_ROWS = 5
+_MAX_HORIZON_H = 720.0
+
+
+class _Invalid(ValueError):
+    """An input outside its meaning, with the sentence the operator is shown."""
+
+
+def _number(raw: str | None, label: str, high: float = 1.0, *, positive: bool = False) -> float:
+    """Parse one form number in [0, *high*], or in (0, *high*] when *positive*.
+
+    Every value this engine takes is a fraction in [0, 1], a time or the
+    horizon. It accepted any float, NaN and negatives included, and a blank
+    field produced a 422 that htmx does not swap, so the panel did nothing
+    (audit F-164).
+    """
+    try:
+        value = float(raw or "")
+    except ValueError:
+        raise _Invalid(f"Enter a number for {label}.") from None
+    low_ok = value > 0.0 if positive else value >= 0.0
+    if not (math.isfinite(value) and low_ok and value <= high):
+        bound = f"above 0 and at most {high:g}" if positive else f"between 0 and {high:g}"
+        raise _Invalid(f"{label[0].upper()}{label[1:]} must be {bound}; got {raw}.")
+    return value
+
+
+def _column(raws: list[str] | None, label: str, high: float = 1.0) -> list[float]:
+    """One numeric column of rows, each checked, named by its row."""
+    return [_number(raw, f"{label} in row {i + 1}", high) for i, raw in enumerate(raws or [])]
+
+
+def _check_rows(adv_ids: list[str] | None, fr_ids: list[str] | None) -> None:
+    """Both sides take 1 to 5 rows, as README.md documents."""
+    if not (1 <= len(adv_ids or []) <= _MAX_ROWS and 1 <= len(fr_ids or []) <= _MAX_ROWS):
+        raise _Invalid(
+            f"Define 1 to {_MAX_ROWS} adversary actions and 1 to {_MAX_ROWS} friendly responses."
+        )
 
 
 def _err(msg: str) -> HTMLResponse:
@@ -146,52 +186,63 @@ async def decision_panel(
 async def decision_evaluate(
     request: Request,
     scenario_name: Annotated[str, Form()] = "Unnamed Scenario",
-    horizon_hours: Annotated[float, Form()] = 72.0,
+    # No default: FastAPI reads a blank field as absent, and a default would
+    # turn a cleared horizon into a silent 72 h.
+    horizon_hours: Annotated[str | None, Form()] = None,
     # Adversary actions (up to 4, passed as parallel form arrays)
     adv_ids:    Annotated[list[str] | None, Form(alias="adv_id")] = None,
     adv_names:  Annotated[list[str] | None, Form(alias="adv_name")] = None,
     adv_types:  Annotated[list[str] | None, Form(alias="adv_type")] = None,
-    adv_probs:  Annotated[list[float] | None, Form(alias="adv_prob")] = None,
-    adv_confs:  Annotated[list[float] | None, Form(alias="adv_conf")] = None,
+    adv_probs:  Annotated[list[str] | None, Form(alias="adv_prob")] = None,
+    adv_confs:  Annotated[list[str] | None, Form(alias="adv_conf")] = None,
     # Friendly responses (up to 4)
     fr_ids:    Annotated[list[str] | None, Form(alias="fr_id")] = None,
     fr_names:  Annotated[list[str] | None, Form(alias="fr_name")] = None,
     fr_types:  Annotated[list[str] | None, Form(alias="fr_type")] = None,
-    fr_costs:  Annotated[list[float] | None, Form(alias="fr_cost")] = None,
-    fr_revs:   Annotated[list[float] | None, Form(alias="fr_rev")] = None,
-    fr_times:  Annotated[list[float] | None, Form(alias="fr_time")] = None,
+    fr_costs:  Annotated[list[str] | None, Form(alias="fr_cost")] = None,
+    fr_revs:   Annotated[list[str] | None, Form(alias="fr_rev")] = None,
+    fr_times:  Annotated[list[str] | None, Form(alias="fr_time")] = None,
     # Scoring weights
-    w_custody:  Annotated[float, Form()] = 0.35,
-    w_ca:       Annotated[float, Form()] = 0.25,
-    w_dv:       Annotated[float, Form()] = 0.20,
-    w_time:     Annotated[float, Form()] = 0.10,
-    w_rev:      Annotated[float, Form()] = 0.10,
+    w_custody:  Annotated[str, Form()] = "0.35",
+    w_ca:       Annotated[str, Form()] = "0.25",
+    w_dv:       Annotated[str, Form()] = "0.20",
+    w_time:     Annotated[str, Form()] = "0.10",
+    w_rev:      Annotated[str, Form()] = "0.10",
     strategy:   Annotated[str, Form()] = "minimax",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Evaluate a decision scenario and return the ranked results partial."""
-    if not adv_ids or not fr_ids:
-        return _err("Define at least one adversary action and one friendly response.")
-
-    adversary_actions = _adversary_rows(adv_ids, adv_names or [], adv_types or [], adv_probs or [], adv_confs or [])
-    friendly_responses = _friendly_rows(
-        fr_ids, fr_names or [], fr_types or [],
-        _ResponseColumns(fr_costs or [], fr_revs or [], fr_times or []),
-    )
+    try:
+        _check_rows(adv_ids, fr_ids)
+        horizon = _number(horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
+        weights = [_number(w, "each scoring weight") for w in (w_custody, w_ca, w_dv, w_time, w_rev)]
+        adversary_actions = _adversary_rows(
+            adv_ids or [], adv_names or [], adv_types or [],
+            _column(adv_probs, "probability"), _column(adv_confs, "confidence"),
+        )
+        friendly_responses = _friendly_rows(
+            fr_ids or [], fr_names or [], fr_types or [],
+            _ResponseColumns(
+                _column(fr_costs, "cost"), _column(fr_revs, "reversibility"),
+                _column(fr_times, "time to execute (hours)", _MAX_HORIZON_H),
+            ),
+        )
+    except _Invalid as exc:
+        return _err(str(exc))
     strat = _strategy(strategy)
-    w_custody, w_ca, w_dv, w_time, w_rev = _normalised_weights(w_custody, w_ca, w_dv, w_time, w_rev)
+    w_custody_n, w_ca_n, w_dv_n, w_time_n, w_rev_n = _normalised_weights(*weights)
 
     scenario = Scenario(
         name=scenario_name,
         epoch_utc=datetime.now(UTC),
         adversary_actions=adversary_actions,
         friendly_responses=friendly_responses,
-        horizon_hours=horizon_hours,
-        w_custody=w_custody,
-        w_closest_approach=w_ca,
-        w_dv_cost=w_dv,
-        w_time_to_exec=w_time,
-        w_reversibility=w_rev,
+        horizon_hours=horizon,
+        w_custody=w_custody_n,
+        w_closest_approach=w_ca_n,
+        w_dv_cost=w_dv_n,
+        w_time_to_exec=w_time_n,
+        w_reversibility=w_rev_n,
     )
 
     state = get_session_state(current_user.username)

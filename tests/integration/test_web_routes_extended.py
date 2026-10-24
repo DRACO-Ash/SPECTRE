@@ -214,7 +214,7 @@ class TestDecisionRoutes:
         resp = client.post(  # type: ignore[attr-defined]
             "/plan/decision/evaluate",
             data={
-                "scenario_name": "Short rows",
+                "scenario_name": "Short rows", "horizon_hours": "72",
                 "adv_id": ["A1", "A2"], "adv_name": ["Approach"], "adv_type": ["manoeuvre", "not-a-type"],
                 "adv_prob": ["0.7"],
                 "fr_id": ["F1", "F2"], "fr_name": ["Evasion"], "fr_type": ["manoeuvre"],
