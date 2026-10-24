@@ -1,4 +1,21 @@
 {
+  "_meta": {
+    "marking": "UNCLASS // PAIR",
+    "marking_authority": "Ruled by the Technical Director, 24 October 2026 (audit F-146)",
+    "provenance": "Each record names its own sources in its source field; this list is their union.",
+    "sources": [
+      "COSMIC Nov 2025",
+      "CSIS 2025",
+      "CSIS Space Threat Assessment 2025",
+      "Iran Space OOB (PAIR/PatchPlus Feb 2026)",
+      "JCO Threat List",
+      "McDowell 2025",
+      "RAND 2025",
+      "SWF 2025",
+      "SWF Global Counterspace Capabilities 2025"
+    ],
+    "threat_level": "Analyst judgement carried with each record, with no stated method; not a computed score."
+  },
   "40892": {
     "name": "TJS-1",
     "country": "CHN",

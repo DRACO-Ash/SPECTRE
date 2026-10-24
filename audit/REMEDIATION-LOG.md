@@ -80,6 +80,7 @@ Each was shown to fail against the original `master` file it guards.
 ### Rulings recorded
 
 ● **NOTSO marking (`U//DS-JCO-NOTIF`):** acceptable to hold, and the ruling expressly covers a public repository. Ruled by the Technical Director, 24 October 2026. No change made.
+● **Intelligence data marking (F-146):** keep `UNCLASS // PAIR`. Ruled by the Technical Director, 24 October 2026. Recorded in the file's `_meta` block.
 ● **UDL-sourced object names (F-038):** the reply restated the question rather than choosing, so the names are treated as **untrusted**, the safer reading. The fix is identical under either ruling; only the priority would differ. Open for correction.
 
 ### Solver and screening fixes
@@ -255,6 +256,6 @@ All new reference pins passed against the existing code; these findings were abo
 | F-183 | F-S10-21 | `051325b` | the analyser clone takes tag v2.5.18 and must be commit e175fc6; the packager runs it only with RUN_DS_VERIFY=1 |
 | F-184 | F-S10-23 | `909fa8b` | the four comments name scripts/preflight-gate.py and TestPackaging.test_manifests_do_not_drift, which hold the subset check |
 | F-175 | F-S10-08 | `0fed505` | actions pinned to commits (checkout v4.4.0, setup-python v5.6.0, upload-artifact v4.6.2, setup-node v4.4.0); the gitleaks tarball is checked against the release's SHA-256 before unpacking; jscpd pinned to 4.3.0 |
-| F-146 | F-S07-20 | `bd4459b` | in part: the docstring names the records' real sources and the card labels threat level an analyst judgement. The file-level handling marking awaits a ruling |
+| F-146 | F-S07-20 | `bd4459b`, see below | the docstring names the records' real sources and the card labels threat level an analyst judgement; the file carries its marking and source list (next row) |
 
 `f20291b` pins the NOTSO sync route with five characterisation tests and splits it (it scored 27 and F-141 brought it into scope).
