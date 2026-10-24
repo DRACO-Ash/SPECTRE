@@ -230,6 +230,38 @@ def _objects_for_group(
     return results
 
 
+#: Bounds on the manual target list (F-134). It lives in the process-global
+#: session state, survives session expiry and rides into every sweep.
+_MAX_MANUAL_TARGETS = 50
+_MAX_MANUAL_NAME = 64
+_MAX_MANUAL_TLE = 300  # a name line and two 69-column lines, with room to spare
+_CONFIDENCES = ("CONFIRMED", "HIGH", "MEDIUM", "LOW", "UNCONFIRMED")
+
+
+def _manual_target_error(existing: list[dict[str, str]], name: str, tle: str, confidence: str) -> str | None:
+    """Why a manual target cannot be added, or None when it can."""
+    problems = (
+        (not name, "Target name is required."),
+        (len(name) > _MAX_MANUAL_NAME, f"Target name must be at most {_MAX_MANUAL_NAME} characters."),
+        (not tle, "TLE is required."),
+        (len(tle) > _MAX_MANUAL_TLE, f"TLE is too long: at most {_MAX_MANUAL_TLE} characters."),
+        (confidence not in _CONFIDENCES, f"Confidence must be one of {', '.join(_CONFIDENCES)}."),
+        (
+            len(existing) >= _MAX_MANUAL_TARGETS and all(e["name"] != name for e in existing),
+            f"A sweep takes at most {_MAX_MANUAL_TARGETS} manual targets; remove one first.",
+        ),
+    )
+    first = next((message for failed, message in problems if failed), None)
+    if first:
+        return first
+    try:
+        TLEOrbit(tle)
+    # BLE001: any parse failure is the operator's to see, with its reason.
+    except Exception as exc:  # noqa: BLE001
+        return f"Invalid TLE: {exc}"
+    return None
+
+
 @router.post("/add-manual-tle", response_model=None)
 async def add_manual_tle(
     request: Request,
@@ -242,24 +274,11 @@ async def add_manual_tle(
     tle = str(form.get("manual_tle") or "").strip()
     confidence = str(form.get("manual_confidence") or "MEDIUM").strip().upper()
 
-    if not name:
+    error = _manual_target_error(state.manual_sweep_tles, name, tle, confidence)
+    if error:
         return render(request, "partials/sweep_manual_tles.html", {
             "manual_tles": state.manual_sweep_tles,
-            "error": "Target name is required.",
-        })
-    if not tle:
-        return render(request, "partials/sweep_manual_tles.html", {
-            "manual_tles": state.manual_sweep_tles,
-            "error": "TLE is required.",
-        })
-
-    # Validate TLE by attempting to parse it.
-    try:
-        TLEOrbit(tle)
-    except Exception as exc:
-        return render(request, "partials/sweep_manual_tles.html", {
-            "manual_tles": state.manual_sweep_tles,
-            "error": f"Invalid TLE: {exc}",
+            "error": error,
         })
 
     # Replace existing entry with same name, otherwise append.

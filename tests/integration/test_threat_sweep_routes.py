@@ -239,3 +239,52 @@ class TestRefineTellsTheTruth:
         assert resp.status_code == 200
         assert replacement.entries == [], "a foreign entry was spliced into the newer sweep"
         assert "newer sweep" in resp.text
+
+
+class TestManualTargetsAreBounded:
+    """Audit F-134: per-user state lives in a process-global dict and outlives the session."""
+
+    def test_an_oversize_name_is_refused(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
+        resp = _add_manual(client, auth_cookie, "N" * 65, _BLUE_GEO)
+        assert "64 characters" in resp.text
+        assert sweep_state.manual_sweep_tles == []
+
+    def test_an_oversize_tle_is_refused(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
+        resp = _add_manual(client, auth_cookie, "BIG", _BLUE_GEO + "\n" + "x" * 400)
+        assert "too long" in resp.text
+        assert sweep_state.manual_sweep_tles == []
+
+    def test_an_unknown_confidence_is_refused(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
+        resp = _post(client, auth_cookie, "add-manual-tle", {
+            "manual_name": "X", "manual_tle": _BLUE_GEO, "manual_confidence": "<b>certain</b>",
+        })
+        assert "Confidence must be one of" in resp.text
+        assert sweep_state.manual_sweep_tles == []
+
+    def test_the_list_is_capped(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
+        from spectre.web.routes.threat import _MAX_MANUAL_TARGETS
+
+        sweep_state.manual_sweep_tles = [
+            {"name": f"T{i}", "tle": _BLUE_GEO, "confidence": "HIGH"} for i in range(_MAX_MANUAL_TARGETS)
+        ]
+        resp = _add_manual(client, auth_cookie, "ONE-MORE", _BLUE_GEO)
+        assert f"at most {_MAX_MANUAL_TARGETS}" in resp.text
+        assert len(sweep_state.manual_sweep_tles) == _MAX_MANUAL_TARGETS
+        # Replacing an existing name is not growth.
+        _add_manual(client, auth_cookie, "T0", _BLUE_GEO)
+        assert len(sweep_state.manual_sweep_tles) == _MAX_MANUAL_TARGETS
+
+
+def test_intercept_history_is_bounded() -> None:
+    """Audit F-134: one entry per apply-intercept call, never cleared until asked."""
+    from types import SimpleNamespace
+
+    from spectre.web.routes.maneuver import _MAX_INTERCEPT_HISTORY, _record_intercept
+
+    state = SimpleNamespace(intercept_history=[], last_intercept_result=None)
+    for i in range(_MAX_INTERCEPT_HISTORY + 5):
+        _record_intercept(state, i)  # type: ignore[arg-type]
+    assert len(state.intercept_history) == _MAX_INTERCEPT_HISTORY
+    assert state.intercept_history[-1] == _MAX_INTERCEPT_HISTORY + 4
+    assert state.intercept_history[0] == 5
+    assert state.last_intercept_result == _MAX_INTERCEPT_HISTORY + 4

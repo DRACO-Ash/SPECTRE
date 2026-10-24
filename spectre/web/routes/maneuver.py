@@ -269,6 +269,19 @@ def _burn_direction(pro: float, nor: float, rad: float, threshold: float) -> str
     return "Combined"
 
 
+#: Most recent intercepts kept for the trade space (F-134). The history grew
+#: by one per apply-intercept call, in process-global state that survives
+#: session expiry, until the operator cleared it.
+_MAX_INTERCEPT_HISTORY = 200
+
+
+def _record_intercept(state: Any, result: InterceptResult) -> None:
+    """Make *result* the latest intercept and keep the history bounded."""
+    state.last_intercept_result = result
+    state.intercept_history.append(result)
+    del state.intercept_history[:-_MAX_INTERCEPT_HISTORY]
+
+
 def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
     """Per-burn magnitude in m/s, dominant axis, and component percentages."""
     burn_intel: list[dict[str, Any]] = []
@@ -883,8 +896,7 @@ async def apply_intercept(
     # Map astro InterceptSolution → domain InterceptResult for the template.
     result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), intercept_method)
 
-    state.last_intercept_result = result
-    state.intercept_history.append(result)
+    _record_intercept(state, result)
     burn_summary = ", ".join(
         f"burn{b.burn_number} ΔV={b.delta_v_m_s:.3f}" for b in result.burns
     )
