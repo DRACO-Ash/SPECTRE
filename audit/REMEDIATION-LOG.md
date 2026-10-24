@@ -259,3 +259,19 @@ All new reference pins passed against the existing code; these findings were abo
 | F-146 | F-S07-20 | `bd4459b`, see below | the docstring names the records' real sources and the card labels threat level an analyst judgement; the file carries its marking and source list (next row) |
 
 `f20291b` pins the NOTSO sync route with five characterisation tests and splits it (it scored 27 and F-141 brought it into scope).
+
+### Documentation
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-146 | F-S07-20 | `cba7715` | completed: `adversary_intel.json` carries `UNCLASS // PAIR` (the Technical Director's ruling) and the union of its records' sources in a `_meta` block the loader skips |
+| F-056 | F-S10-04 | `e45a1fa` | the guard refuses any `SECRET_KEY` containing "change me" in any spelling; both quick starts generate the key and prompt for the admin password |
+| F-064 | F-S00-09 | `e45a1fa` | the quick start installs the locked sets, runs `python -m spectre.web._entrypoint`, maps 8080:8080 and states Python 3.12 |
+| F-055 | F-S10-03 | `19f7378` | README states TEME, not converted to J2000/GCRF, and delta-V in m/s; a test refuses J2000/ICRF as the working frame while no transform exists |
+| F-173 | F-S10-01 | `5eda791` | the three documents describe Curtis Algorithm 5.2 in `lambert.py` with multi-revolution solutions (true since F-010); `transfers.py` is the closed forms |
+| F-161 | F-S09-09 | `1a48611` | README level and axis tables generated from the gamification configuration, with unlock conditions; a test compares them with `get_config()` |
+| F-181 | F-S10-15 | `1faa09a` | intercept result, burn and route tables rebuilt from the dataclasses and the router; a test keeps them equal |
+| F-180 | F-S10-14 | `508f8ab` | the unused `integration` marker removed; no count claims; all seven CI jobs listed; a test fails on an unused marker |
+| F-057 | F-S10-05 | `54a1959` | SECURITY.md rewritten: 22 controls in place, each citing its file and CI job (a test checks they exist); 13 open items; both marking rulings; operator accounts and sign-in logs recorded as personal data |
+
+Observed while generating the F-161 table, not an audit finding: level 5 (Operator) needs three challenges passed, but only one challenge (`analyst_gauntlet`) is available below level 5; the other two unlock at level 5. Level 5 is reachable today only because scenario levels are not enforced (finding at FINDINGS.md:2800). Enforcing them would make level 5 unreachable. Left for a design decision.

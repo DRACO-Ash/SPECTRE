@@ -50,7 +50,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - .env.example lists every setting and says where SQLite lives (F-182).
 - The proxy-CA build hook edits the Dockerfile it claims to; the complexity meter follows sonar-python; the dependency analyser is pinned and opt-in; comments name the real subset check (F-176 to F-178, F-183, F-184).
 - CI actions are pinned to commits, the gitleaks download is checksum-verified, and jscpd is an exact version (F-175).
-- Intelligence records' sources are stated as they are; threat level is labelled an analyst judgement (F-146, in part).
+- Intelligence records' sources are stated as they are, threat level is labelled an analyst judgement, and the file carries its UNCLASS // PAIR marking (F-146).
+
+### Fixed (audit step 3, documentation)
+- Any example "change me" signing key is refused at boot, and the README no longer publishes one; the quick start runs (F-056, F-064).
+- The docs state the TEME frame, the Lambert solver that exists, the real level and axis tables, the real intercept result and routes, and the real test suite and CI jobs (F-055, F-173, F-161, F-181, F-180).
+- SECURITY.md states only controls the repository implements, each evidenced, with the rest as open items (F-057).
 
 ### Added
 - Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
