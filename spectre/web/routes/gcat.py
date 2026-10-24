@@ -271,9 +271,16 @@ CATEGORIES: dict[str, dict[str, str]] = {
 
 # ── In-memory cache ───────────────────────────────────────────────────────────
 _CACHE: dict[str, dict[str, Any]] = {}
-_CACHE_FETCH_TIME: datetime | None = None
-_FETCHING: bool = False
-_FETCH_ERRORS: list[str] = []
+class _RefreshState:
+    """Mutable refresh bookkeeping, held on one object rather than rebound globals."""
+
+    def __init__(self) -> None:
+        self.fetching = False
+        self.fetched_at: datetime | None = None
+        self.errors: list[str] = []
+
+
+_REFRESH = _RefreshState()
 
 
 # ── TSV fetcher (sync — runs in ThreadPoolExecutor) ───────────────────────────
@@ -381,8 +388,8 @@ async def _download_all() -> dict[str, dict[str, Any]]:
 
     Touches nothing shared but the error list: the caller swaps the result in.
     """
-    global _FETCH_ERRORS
-    _FETCH_ERRORS = []
+    errors: list[str] = []
+    _REFRESH.errors = errors
     log.info("[GCAT] ══ Starting full refresh (%d datasets) ══", len(DATASETS))
     t_start = time.perf_counter()
 
@@ -397,11 +404,11 @@ async def _download_all() -> dict[str, dict[str, Any]]:
     for result in results:
         if isinstance(result, BaseException):
             log.error("[GCAT] gather exception: %s", result)
-            _FETCH_ERRORS.append(str(result))
+            errors.append(str(result))
             continue
         key, df = result
         if df is None:
-            _FETCH_ERRORS.append(f"failed: {DATASETS[key]['label']}")
+            errors.append(f"failed: {DATASETS[key]['label']}")
             continue
         fresh[key] = _entry(df)
 
@@ -433,19 +440,18 @@ async def _refresh_cache() -> None:
     old entries serve until the new ones are in, a dataset that fails to
     download keeps its previous copy, and the swap has no await inside it.
     """
-    global _FETCHING, _CACHE_FETCH_TIME
-    if _FETCHING:
+    if _REFRESH.fetching:
         log.info("[GCAT] Refresh already running — skipping duplicate")
         return
-    _FETCHING = True
+    _REFRESH.fetching = True
     try:
         fresh = await _download_all()
         merged = {**_CACHE, **fresh}
         _CACHE.clear()
         _CACHE.update(merged)
-        _CACHE_FETCH_TIME = datetime.now(UTC)
+        _REFRESH.fetched_at = datetime.now(UTC)
     finally:
-        _FETCHING = False
+        _REFRESH.fetching = False
 
 
 #: One lock per dataset, so N concurrent first views download it once.
@@ -490,11 +496,11 @@ def _panel_context(user: User) -> dict[str, Any]:
         "loaded_count": len(_CACHE),
         "total_count": len(DATASETS),
         "last_updated": (
-            _CACHE_FETCH_TIME.strftime("%Y-%m-%d %H:%M UTC")
-            if _CACHE_FETCH_TIME else "—"
+            _REFRESH.fetched_at.strftime("%Y-%m-%d %H:%M UTC")
+            if _REFRESH.fetched_at else "—"
         ),
-        "fetch_errors": _FETCH_ERRORS,
-        "fetching": _FETCHING,
+        "fetch_errors": _REFRESH.errors,
+        "fetching": _REFRESH.fetching,
     }
 
 

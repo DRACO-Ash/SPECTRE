@@ -30,7 +30,7 @@ def cache() -> Any:
     yield gcat._CACHE
     gcat._CACHE.clear()
     gcat._CACHE.update(saved)
-    gcat._FETCHING = False
+    gcat._REFRESH.fetching = False
 
 
 def _frame(rows: int = 3) -> pd.DataFrame:
@@ -70,7 +70,7 @@ class TestRefresh:
         await asyncio.gather(gcat._refresh_cache(), gcat._refresh_cache())
         assert set(cache) == set(gcat.DATASETS)
         assert len(calls) == len(gcat.DATASETS), "the second refresh ran a second download"
-        assert gcat._FETCHING is False
+        assert gcat._REFRESH.fetching is False
 
     async def test_a_failed_refresh_releases_the_flag_and_keeps_the_cache(
         self, cache: Any, monkeypatch: pytest.MonkeyPatch,
@@ -83,7 +83,7 @@ class TestRefresh:
         monkeypatch.setattr(gcat.asyncio, "gather", _boom)
         with pytest.raises(RuntimeError):
             await gcat._refresh_cache()
-        assert gcat._FETCHING is False
+        assert gcat._REFRESH.fetching is False
         assert "k" in cache, "a failed refresh must not leave the panel empty"
 
     async def test_concurrent_first_views_download_once(

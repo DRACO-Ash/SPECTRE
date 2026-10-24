@@ -198,7 +198,13 @@ _SESSION_TASKS: dict[str, set[asyncio.Task[None]]] = {}
 
 #: The catalogue is pulled again once it is this old.
 _CATALOG_TTL_S = 24 * 3600.0
-_catalog_loaded_at: float | None = None
+class _CatalogClock:
+    """When the catalogue last loaded (time.monotonic), or None."""
+
+    loaded_at: float | None = None
+
+
+_CATALOG_CLOCK = _CatalogClock()
 
 
 def _spawn(coro: Coroutine[Any, Any, None], owner: str) -> asyncio.Task[None]:
@@ -233,11 +239,11 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
     logins no longer each start the 60 s download, and a catalogue younger
     than _CATALOG_TTL_S is kept rather than never being refreshed (F-143).
     """
-    global _catalog_loaded_at
     status = get_catalog_status()
     if status == "loading":
         return
-    fresh = _catalog_loaded_at is not None and time.monotonic() - _catalog_loaded_at < _CATALOG_TTL_S
+    loaded_at = _CATALOG_CLOCK.loaded_at
+    fresh = loaded_at is not None and time.monotonic() - loaded_at < _CATALOG_TTL_S
     if status == "ready" and fresh:
         return
     set_catalog_status("loading")
@@ -252,7 +258,7 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         resp.raise_for_status()
         data = resp.json()
         set_onorbit_catalog(data if isinstance(data, list) else [])
-        _catalog_loaded_at = time.monotonic()
+        _CATALOG_CLOCK.loaded_at = time.monotonic()
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
     except Exception as exc:
         set_catalog_status("error")

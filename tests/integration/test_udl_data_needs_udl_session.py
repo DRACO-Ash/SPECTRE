@@ -55,7 +55,7 @@ def test_the_notso_cache_needs_a_udl_session(
             looked.append(satno)
             return []
 
-    monkeypatch.setattr(notso_cache, "get_notso_cache", lambda: _Cache())
+    monkeypatch.setattr(notso_cache, "get_notso_cache", _Cache)
     saved = getattr(no_udl, "last_pol_analysis", None)
     no_udl.last_pol_analysis = SimpleNamespace(satno=41838)
     try:

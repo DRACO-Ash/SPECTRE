@@ -217,3 +217,22 @@ All new reference pins passed against the existing code; these findings were abo
 | F-160 | F-S09-04 | `eff8280` | challenge awards for challenge scenarios only; no free-play pass award added, as its value is a tuning decision |
 
 `eff8280` also brings the functions this batch touched under the cognitive complexity limit: `training_scenario_submit` (41), `_start_scenario` (17) and `find_orbital_events` (33, output byte-identical across 15 cases). Each security gate (F-058 to F-061) was mutation-checked: it fails when its control is reverted.
+
+### Web routes, second batch (step 3 web-route Medium findings now closed)
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-138 | F-S07-07 | `0e0f55a` | GCAT search is literal text (`regex=False`), capped at 100 characters, and runs in the executor |
+| F-139 | F-S07-08 | `0e0f55a` | GCAT refresh is admin only (button hidden for operators), single-flight with a finally, swaps the new cache in with no await inside the swap, keeps a dataset's previous copy if its download fails; on-demand loads take a per-dataset lock. No separate rate limit: admin-only plus single-flight leaves nothing to throttle |
+| F-140 | F-S07-11 | `4c85a40` | an elset with no element lines is an error; one list of field spellings serves selection, extraction and diagnostics |
+| F-142 | F-S07-14 | `3936160` | catalogue search and the NOTSO cache path need the operator's own UDL session. Per-identity caching is left to the identity work in step 4 |
+| F-143 | F-S07-15 | `e5b5ed2` | login tasks held until done; single-flight catalogue pull (two quick logins made two pulls against the old code, one now); refreshed after a day; cancelled on UDL logout |
+| F-144 | F-S07-16 | `74d0f3e` | an archive at the record cap is flagged "History truncated at <epoch>" on the PoL panel. Paging is the fuller fix |
+| F-155 | F-S08-12 | `ea48c24` | session expiry pinned at 28,799 s good and 28,801 s gone, by patching itsdangerous's clock; fails when `max_age` is dropped |
+| F-151 | F-S08-07 | `1d60499`, `cd3d02f` | login CSRF: every rendering of the login page sets a random token as a Strict, HttpOnly cookie scoped to /login and as a hidden field, and a browser POST (Origin or Referer present) must return both. A same-origin Origin comparison was tried first and dropped before push: Chromium sends `Origin: null` from our own form under the app's no-referrer policy, so it would have refused every real sign-in, and a Host-rewriting proxy would have done the same. Checked in Chromium against a running server: sign-in from /login and from /, cross-site auto-post refused with no session |
+| F-149 | F-S08-05 | `9aad51d` | demotion and delete of an admin are conditional statements requiring another admin at the moment of the write, with admin rows locked first where the database has row locks. The race is reproduced deterministically in the test. The PostgreSQL lock path is untested: the suite runs on SQLite |
+| F-164 | F-S09-13 | `6c854af` | Decision Engine inputs range-checked (fractions and weights in [0, 1], times in [0, 720] h, horizon in (0, 720] h, 1 to 5 rows each), blanks and NaN refused, all as inline errors htmx swaps; the horizon has no default, so a cleared field is refused rather than read as 72 h |
+| F-170 | F-S09-27 | `88ba568` | JetBrains Mono and IBM Plex Sans self-hosted (Latin and Latin Extended, OFL texts alongside); Google removed from style-src and font-src. Checked in Chromium: no external requests, no policy violations |
+| F-174 | F-S10-02 | `b0f1b04` | Rendezvous and Proximity are a declared alias table; results under an alias name the solver they ran; README and the engine and architecture docs list the 23 solvers |
+
+`d514f54` splits `search_catalog` and `pol_notso_correlate`, which the F-142 checks took over the complexity limit.

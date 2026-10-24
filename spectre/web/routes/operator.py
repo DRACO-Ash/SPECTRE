@@ -53,7 +53,7 @@ async def dashboard(
     valid session.
     """
     if current_user is None:
-        from spectre.web.routes.login import render_login  # noqa: PLC0415
+        from spectre.web.routes.login import render_login
 
         return render_login(request)
 

@@ -1026,8 +1026,8 @@ def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list
     with another operator's credential, so it does (audit F-142). Returns the
     refusal to show instead when there is nothing usable.
     """
-    from spectre.astro.notso import parse_notso_text_with_rejects  # noqa: PLC0415
-    from spectre.data.notso_cache import get_notso_cache  # noqa: PLC0415
+    from spectre.astro.notso import parse_notso_text_with_rejects
+    from spectre.data.notso_cache import get_notso_cache
 
     if notso_text:
         notsos, rejects = parse_notso_text_with_rejects(notso_text)

@@ -40,7 +40,7 @@ _MAX_ROWS = 5
 _MAX_HORIZON_H = 720.0
 
 
-class _Invalid(ValueError):
+class _InvalidInputError(ValueError):
     """An input outside its meaning, with the sentence the operator is shown."""
 
 
@@ -55,11 +55,11 @@ def _number(raw: str | None, label: str, high: float = 1.0, *, positive: bool = 
     try:
         value = float(raw or "")
     except ValueError:
-        raise _Invalid(f"Enter a number for {label}.") from None
+        raise _InvalidInputError(f"Enter a number for {label}.") from None
     low_ok = value > 0.0 if positive else value >= 0.0
     if not (math.isfinite(value) and low_ok and value <= high):
         bound = f"above 0 and at most {high:g}" if positive else f"between 0 and {high:g}"
-        raise _Invalid(f"{label[0].upper()}{label[1:]} must be {bound}; got {raw}.")
+        raise _InvalidInputError(f"{label[0].upper()}{label[1:]} must be {bound}; got {raw}.")
     return value
 
 
@@ -71,7 +71,7 @@ def _column(raws: list[str] | None, label: str, high: float = 1.0) -> list[float
 def _check_rows(adv_ids: list[str] | None, fr_ids: list[str] | None) -> None:
     """Both sides take 1 to 5 rows, as README.md documents."""
     if not (1 <= len(adv_ids or []) <= _MAX_ROWS and 1 <= len(fr_ids or []) <= _MAX_ROWS):
-        raise _Invalid(
+        raise _InvalidInputError(
             f"Define 1 to {_MAX_ROWS} adversary actions and 1 to {_MAX_ROWS} friendly responses."
         )
 
@@ -227,7 +227,7 @@ async def decision_evaluate(
                 _column(fr_times, "time to execute (hours)", _MAX_HORIZON_H),
             ),
         )
-    except _Invalid as exc:
+    except _InvalidInputError as exc:
         return _err(str(exc))
     strat = _strategy(strategy)
     w_custody_n, w_ca_n, w_dv_n, w_time_n, w_rev_n = _normalised_weights(*weights)

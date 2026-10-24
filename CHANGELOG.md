@@ -36,10 +36,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Sweep: refusal reasons keep their figures and name their target and epoch; refine reports refusals, flies the swept orbits and cannot write into a newer sweep; an unreadable manual number no longer fails the sweep; pasted targets survive the cap; manual targets are bounded (F-058, F-123 to F-128, F-134).
 - Intercept engine: computed miss shown for every method; assessment scores never labelled km; unread controls removed; revolutions, hops and drift days have their own fields; the Data Mode badge states actual provenance (F-129 to F-133).
 - Add TLE sends its fields before clearing them (F-043).
+- GCAT search is literal and off the event loop; refresh is admin only and cannot wipe a load in progress (F-138, F-139).
+- UDL: an elset with no element lines is refused; the catalogue and NOTSO cache need the operator's own UDL session; login tasks are held, single-flight, refreshed and cancelled on UDL logout; a PoL history at the record cap is flagged (F-140, F-142 to F-144).
+- Login carries a pre-session token against login CSRF; the last-admin guard holds under concurrent changes (F-151, F-149).
+- Decision Engine inputs are range-checked with inline errors (F-164).
+- Fonts are served from the console's own origin; the content security policy no longer names Google (F-170).
+- Rendezvous and Proximity are declared aliases of Hohmann and Lambert; the docs list the 23 solvers (F-174).
 
 ### Added
 - Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
 - Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).
+- A regression gate for session expiry (F-155).
 - `spectre/astro/kepler.py`: universal-variable two-body propagator.
 - `solve_lambert_all` and `cheapest_lambert`: multi-revolution Lambert solutions.
 

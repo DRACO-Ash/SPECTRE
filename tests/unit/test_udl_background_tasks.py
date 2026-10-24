@@ -22,10 +22,10 @@ from spectre.web.routes import udl
 
 @pytest.fixture(autouse=True)
 def fresh_catalogue() -> Any:
-    saved = (planning_state._onorbit_catalog, planning_state._catalog_status, udl._catalog_loaded_at)
+    saved = (planning_state._onorbit_catalog, planning_state._catalog_status, udl._CATALOG_CLOCK.loaded_at)
     planning_state.set_catalog_status("not_loaded")
     yield
-    planning_state._onorbit_catalog, planning_state._catalog_status, udl._catalog_loaded_at = saved
+    planning_state._onorbit_catalog, planning_state._catalog_status, udl._CATALOG_CLOCK.loaded_at = saved
 
 
 def _client(gets: list[str]) -> Any:
@@ -60,7 +60,7 @@ async def test_a_stale_catalogue_is_pulled_again() -> None:
         await udl._fetch_onorbit_background("u", "p")
         await udl._fetch_onorbit_background("u", "p")
         assert len(gets) == 1, "a fresh catalogue is not pulled again"
-        udl._catalog_loaded_at = time.monotonic() - udl._CATALOG_TTL_S - 1
+        udl._CATALOG_CLOCK.loaded_at = time.monotonic() - udl._CATALOG_TTL_S - 1
         await udl._fetch_onorbit_background("u", "p")
     assert len(gets) == 2
 
