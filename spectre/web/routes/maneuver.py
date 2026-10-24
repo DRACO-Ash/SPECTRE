@@ -423,21 +423,21 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.HOHMANN:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.BIELLIPTIC:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.PHASING:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": _LABEL_TRANSFER_TYPE, "value": "Phasing orbit"},
             ]
         ),
