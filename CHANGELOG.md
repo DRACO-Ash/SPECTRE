@@ -9,6 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (audit step 3, solvers and screening)
+- Hohmann and bi-elliptic intercepts sign each burn correctly for raising and lowering, and report the propagated miss instead of 0 km (F-011, F-012, F-013).
+- Evasion is planned against the threat's predicted position; the reported miss is the separation achieved (F-014).
+- Combined altitude and plane change burns follow the geometry they are priced on, from a crossing of the target plane (F-015).
+- Molniya and Tundra orbits classify as HEO, so Tundra objects are screened against GEO assets (F-016).
+- Object names reach inline handlers as data attributes, never as JavaScript source (F-038).
+
+### Added
+- `spectre/astro/kepler.py`: universal-variable two-body propagator.
+
 Remediation of the whole-repository audit of 23 October 2026 (`audit/`).
 Step 1 of 4: the eight Blockers. Each fix landed test-first, with the defect
 reproduced by a failing test before the change and the full suite green

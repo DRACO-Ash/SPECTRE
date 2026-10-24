@@ -76,3 +76,27 @@ Each was shown to fail against the original `master` file it guards.
 | F-S09-13 (complexity part) | F-S09-13 | `decision_evaluate` (cognitive complexity 44) is decomposed into row builders, strategy and weight helpers. Proof of no behaviour change: the rendered result for five forms (short rows, a bad type, unnormalised and all-zero weights, every strategy and an unknown one) is byte-identical before and after, computation time masked | the quality gate's complexity leg; new route test `test_decision_evaluate_fills_short_rows_and_labels_the_result` |
 
 **Prior P2 status after this change:** the July 2026 agreed remediation, a "modelled estimate, not a computed solution" banner, is now implemented in all three layers: code, payload and rendered page. The constants themselves remain uncited; F-S05-03, where custody loss is scaled by reversibility, is still open in step 3.
+
+### Rulings recorded
+
+● **NOTSO marking (`U//DS-JCO-NOTIF`):** acceptable to hold, and the ruling expressly covers a public repository. Ruled by the Technical Director, 24 October 2026. No change made.
+● **UDL-sourced object names (F-038):** the reply restated the question rather than choosing, so the names are treated as **untrusted**, the safer reading. The fix is identical under either ruling; only the priority would differ. Open for correction.
+
+### Solver and screening fixes
+
+| Finding | Origin | Commit | Defect, as reproduced before the fix | Gate |
+|---|---|---|---|---|
+| F-011 (High) | F-S01-05 | `5141687` | Hohmann reported a 0 km miss for a pair arriving 20,771 km apart | `tests/unit/test_transfer_intercept_burns.py::TestHohmannIntercept` (5 tests, incl. lead-angle phasing meets the target) |
+| F-013 (High) | F-S01-07 | `5141687` | both Hohmann burns prograde for a lowering transfer | `::test_lowering_burns_are_retrograde`, `::test_the_second_burn_circularises_at_the_target_radius` |
+| F-012 (High) | F-S01-06 | `5141687` | bi-elliptic burn 2 pointed along the departure velocity, burn 3 prograde; the arc did not end on the target circle | `::TestBiellipticIntercept` (4 tests) |
+| F-014 (High) | F-S01-09 | `0b2ef36` | evasion reported 10.0 km against two different threats, whose achieved misses were 10.29 and 14.21 km | `tests/unit/test_evasion_against_threat.py` (5 tests) |
+| F-015 (High) | F-S01-10 | `45add79` | combined plane change: fixed 36.9 deg tilt on burn 1; the arc did not end in the target plane | `tests/unit/test_combined_plane_change.py` (6 tests) |
+| F-016 (High) | F-S01-12 | `ea7e6ba` | Molniya classified GTO and Tundra MEO, so Tundra was dropped from GEO screening | `tests/unit/test_orbit_regime_reference.py` (8 tests) |
+| F-038 (High) | F-S06-03 | `ae46457`, `570f364` | a name `x');alert(1);//` reached onclick source in three Load buttons | `tests/unit/test_handler_attribute_injection.py` (template-wide gate and a render test); Chromium check: the handler receives the exact name and no script runs |
+
+**Notes, fact unless marked:**
+● `spectre/astro/kepler.py` is new: a universal-variable two-body propagator (Curtis Algorithms 3.3 and 3.4), checked against scipy integration to 1 m. The Hohmann, bi-elliptic, combined plane change and evasion fixes all use it.
+● Evasion now flies each `optimal_evasion` candidate and its reverse against the threat. The burn's displacement comes from two two-body coasts from the same state, so propagator model error cancels. The candidate sizing itself is still the Clohessy-Wiltshire heuristic (F-S06-07, step 4).
+● Regenerating `spectre/data/hrr_default.json` with its build script moved two synthetic Molniya-type entries from GTO to HEO. Both labels are trans-belt, so screening of those two is unchanged.
+● F-038 converted nine handler sites in total, so the gate covers the whole template tree without an allowlist. Three carried names; six carried server-generated keys and dates.
+● **Behaviour changes an operator will see (inference):** Hohmann and bi-elliptic plans now show a real, often large, miss when the pair is not phased; combined plane changes depart at the next crossing of the target plane, not immediately; evasion burns may point the other way to the old ones.
