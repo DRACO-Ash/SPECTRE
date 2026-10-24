@@ -1,5 +1,5 @@
 {# NOTSO Correlation Results — rendered into #notso-results #}
-{# Context: correlations, profile, pol, source_label #}
+{# Context: correlations, profile, pol, source_label, notso_parsed, notso_rejects #}
 
 {% if not correlations %}
 <p class="empty-msg" style="font-size:0.7rem; margin-top:0.5rem">No correlations to display — check NORAD ID matches the analysis object.</p>
@@ -9,6 +9,13 @@
 <p style="font-size:0.68rem; color:var(--text-dim); margin-bottom:0.4rem; font-style:italic">
   Source: {{ source_label }}
 </p>
+{% endif %}
+
+{% if notso_rejects %}
+<div style="font-size:0.66rem; color:#f59e0b; margin-bottom:0.4rem">
+  {{ notso_parsed }} of {{ notso_parsed + notso_rejects | length }} messages parsed. Not parsed:
+  {% for reason in notso_rejects %}<br>● {{ reason }}{% endfor %}
+</div>
 {% endif %}
 
 {# ── Behaviour Profile Card ─────────────────────────────────────────────────── #}

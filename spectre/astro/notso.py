@@ -335,22 +335,36 @@ def parse_notso_text(raw_text: str) -> list[NOTSORecord]:
     Returns
     -------
     list[NOTSORecord]
-        Parsed records.  Unparseable messages are skipped with a log warning.
+        Parsed records. See :func:`parse_notso_text_with_rejects` for the
+        messages that did not parse and why.
     """
-    messages = _split_messages(raw_text)
-    records: list[NOTSORecord] = []
+    records, _ = parse_notso_text_with_rejects(raw_text)
+    return records
 
-    for i, msg in enumerate(messages):
-        if not msg.strip():
-            continue
+
+def parse_notso_text_with_rejects(raw_text: str) -> tuple[list[NOTSORecord], list[str]]:
+    """Parse NOTSO messages, also returning a reason for each one rejected.
+
+    A message without a labelled NORAD ID used to drop with no log, and one
+    that raised reached only the server log, so the operator could not tell a
+    pasted message had been lost (audit F-089). Each reject is logged and
+    returned as "message N: reason" for the page to show.
+    """
+    records: list[NOTSORecord] = []
+    rejects: list[str] = []
+    for i, msg in enumerate(_split_messages(raw_text)):
         try:
             record = _parse_single_notso(msg, index=i)
-            if record is not None:
+        except Exception as exc:  # noqa: BLE001 - one bad message must not lose the rest
+            rejects.append(f"message {i + 1}: {exc}")
+        else:
+            if record is None:
+                rejects.append(f"message {i + 1}: no labelled NORAD ID")
+            else:
                 records.append(record)
-        except Exception as exc:
-            logger.warning("NOTSO parse error for message %d: %s", i, exc)
-
-    return records
+    for reason in rejects:
+        logger.warning("NOTSO not parsed, %s", reason)
+    return records, rejects
 
 
 def _notso_dates(

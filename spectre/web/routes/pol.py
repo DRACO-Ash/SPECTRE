@@ -1005,7 +1005,7 @@ async def pol_notso_correlate(
         NOTSORecord,
         correlate_notsos_with_manoeuvres,
         extract_behaviour_profile,
-        parse_notso_text,
+        parse_notso_text_with_rejects,
     )
     from spectre.data.notso_cache import get_notso_cache
 
@@ -1021,11 +1021,12 @@ async def pol_notso_correlate(
     notso_text = str(form.get("notso_text") or "").strip()
 
     notsos: list[NOTSORecord] = []
+    rejects: list[str] = []
     source_label = ""
 
     if notso_text:
         # Path 1: operator-pasted text
-        notsos = parse_notso_text(notso_text)
+        notsos, rejects = parse_notso_text_with_rejects(notso_text)
         source_label = "pasted text"
         if not notsos:
             return HTMLResponse(
@@ -1092,6 +1093,8 @@ async def pol_notso_correlate(
         "profile": profile,
         "pol": pol,
         "source_label": source_label,
+        "notso_parsed": len(notsos),
+        "notso_rejects": rejects,
     })
 
 
