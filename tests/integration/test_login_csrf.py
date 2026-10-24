@@ -77,3 +77,14 @@ def test_a_client_that_is_not_a_browser_form_is_unaffected(client: Any) -> None:
     client.cookies.clear()
     resp = client.post("/login", data=_CREDS, follow_redirects=False)
     assert resp.status_code == 302
+
+
+def test_our_own_form_signs_in_with_a_null_origin(client: Any) -> None:
+    """Chromium sends "Origin: null" from our login form, because the app's
+    Referrer-Policy is no-referrer. A check comparing Origin with Host would
+    have refused every real sign-in; the token does not read either."""
+    token = _page_token(client)
+    resp = client.post(
+        "/login", data={**_CREDS, "login_csrf": token}, headers={"Origin": "null"}, follow_redirects=False,
+    )
+    assert resp.status_code == 302
