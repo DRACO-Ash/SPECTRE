@@ -467,23 +467,14 @@
                 <label title="Pre-burn coast duration in hours">Coast (hr)
                   <input type="number" name="coast_hours" value="1.000" min="0.001" step="any" />
                 </label>
-                <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
+                <label id="ie-tof-row" title="Post-burn time-of-flight in hours, for the methods that take one">Intercept TOF (hr)
                   <input type="number" name="intercept_hours" value="6.000" min="0.001" step="any" />
                 </label>
                 <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
                   <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
                 </label>
-                <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
-                  <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
-                </label>
                 <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
                   <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
-                </label>
-              </div>
-
-              <div id="ie-minimize-row" class="mnv-check-group" style="margin-top:0.3rem">
-                <label title="Minimise total delta-V (Optimal only)">
-                  <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise &#916;V
                 </label>
               </div>
 
