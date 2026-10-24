@@ -8,16 +8,26 @@ Validated against Curtis Example 5.2 and by propagating the departure state
 forward over the time of flight and measuring the miss distance against the
 requested arrival position. See tests/unit/test_lambert_validation.py.
 
-This file previously claimed to implement Izzo (2015) and did not. The claim
-mattered: Izzo's method is robust and handles multiple revolutions, and the
-docstring credited this code with properties it does not have. It solves the
-single-revolution problem only. A multi-revolution transfer, which matters for
-realistic GEO intercept planning, is not supported and is rejected explicitly
-rather than answered wrongly.
+This file previously claimed to implement Izzo (2015) and did not; it is the
+universal-variable method throughout.
+
+Multiple revolutions. :func:`solve_lambert` returns the zero-revolution arc,
+which exists for any time of flight but grows very expensive once the flight
+is longer than about one orbit: a 30 deg hop along GEO in 24 h costs 7.8 km/s
+over its two burns on that arc, against 0.21 km/s going once round. The universal-variable time-of-flight equation also
+holds above z = 4 pi^2, where each band (2 pi N)^2 < z < (2 pi (N + 1))^2 is a
+transfer making N complete revolutions, with a minimum time of flight and two
+branches either side of it. :func:`solve_lambert_all` returns every such
+solution, and :func:`cheapest_lambert` the one costing least. Branches are
+bracketed on a fixed grid of z, so a branch pair whose minimum time of flight
+only just reaches the requested one can fall between grid points and be
+missed; the other solutions are unaffected.
 """
 
 from __future__ import annotations
 
+import contextlib
+import itertools
 import math
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -39,6 +49,7 @@ class LambertSolution:
     delta_v2_mag: float      # km/s — |delta_v2|
     total_delta_v: float     # km/s — sum of magnitudes
     tof: float               # seconds — time of flight
+    revolutions: int = 0     # complete revolutions before arrival
 
 
 def solve_lambert(
@@ -72,6 +83,79 @@ def solve_lambert(
     Raises:
         ValueError: If tof <= 0 or positions are degenerate.
     """
+    problem = _prepare(r1, r2, tof, prograde, v1_initial)
+    z = _solve_z(problem.geom, tof, mu)
+    return _solution(problem, z, mu, (v1_initial, v2_target), 0)
+
+
+def solve_lambert_all(
+    r1: np.ndarray,
+    r2: np.ndarray,
+    tof: float,
+    mu: float = MU_EARTH,
+    prograde: bool | None = None,
+    v1_initial: np.ndarray | None = None,
+    v2_target: np.ndarray | None = None,
+) -> list[LambertSolution]:
+    """Every transfer reaching r2 in *tof*: zero revolutions, then one, two and so on.
+
+    Arguments as :func:`solve_lambert`. Each revolution count above zero
+    contributes up to two solutions, the branches either side of that count's
+    minimum time of flight. The search stops at the first count whose minimum
+    time of flight exceeds *tof*, since more revolutions only take longer.
+
+    Raises:
+        ValueError: if the geometry is degenerate (as :func:`solve_lambert`).
+        LambertConvergenceError: if no transfer of any revolution count exists.
+    """
+    problem = _prepare(r1, r2, tof, prograde, v1_initial)
+    refs = (v1_initial, v2_target)
+    found: list[LambertSolution] = []
+    with contextlib.suppress(LambertConvergenceError):
+        found.append(_solution(problem, _solve_z(problem.geom, tof, mu), mu, refs, 0))
+    for revolutions in range(1, _MAX_REVOLUTIONS + 1):
+        roots = _multi_revolution_z(problem.geom, tof, mu, revolutions)
+        if roots is None:
+            break
+        found.extend(_solution(problem, z, mu, refs, revolutions) for z in roots)
+    if not found:
+        raise LambertConvergenceError(f"no transfer of any revolution count reaches this geometry in {tof:.1f} s")
+    return found
+
+
+def cheapest_lambert(
+    r1: np.ndarray,
+    r2: np.ndarray,
+    tof: float,
+    mu: float = MU_EARTH,
+    prograde: bool | None = None,
+    v1_initial: np.ndarray | None = None,
+    v2_target: np.ndarray | None = None,
+) -> LambertSolution:
+    """The :func:`solve_lambert_all` solution with the least total delta-V."""
+    return min(
+        solve_lambert_all(r1, r2, tof, mu, prograde, v1_initial, v2_target),
+        key=lambda s: s.total_delta_v,
+    )
+
+
+class _Problem(NamedTuple):
+    """One Lambert problem after the geometry checks."""
+
+    r1: np.ndarray
+    r2: np.ndarray
+    geom: _Geometry
+    tof: float
+
+
+def _prepare(
+    r1: np.ndarray,
+    r2: np.ndarray,
+    tof: float,
+    prograde: bool | None,
+    v1_initial: np.ndarray | None,
+) -> _Problem:
+    """Validate the inputs and fix the transfer angle and chord term."""
     r1 = np.asarray(r1, dtype=float)
     r2 = np.asarray(r2, dtype=float)
 
@@ -132,8 +216,21 @@ def solve_lambert(
     if abs(A) < 1e-14:
         raise ValueError("degenerate Lambert geometry (A is zero to machine precision)")
 
-    # Solve via Stumpff functions with Newton–Raphson iteration.
-    z = _solve_z(_Geometry(float(r1_mag), float(r2_mag), A), tof, mu)
+    return _Problem(r1, r2, _Geometry(float(r1_mag), float(r2_mag), A), tof)
+
+
+
+def _solution(
+    problem: _Problem,
+    z: float,
+    mu: float,
+    refs: tuple[np.ndarray | None, np.ndarray | None],
+    revolutions: int,
+) -> LambertSolution:
+    """Build the velocities and impulses for a converged z."""
+    r1, r2, geom, tof = problem
+    r1_mag, r2_mag, A = geom
+    v1_initial, v2_target = refs
 
     # Lagrange coefficients.
     sz = _stumpff_S(z)
@@ -160,6 +257,7 @@ def solve_lambert(
         delta_v2_mag=float(np.linalg.norm(dv2)),
         total_delta_v=float(np.linalg.norm(dv1) + np.linalg.norm(dv2)),
         tof=tof,
+        revolutions=revolutions,
     )
 
 
@@ -232,9 +330,16 @@ _Z_HYPERBOLIC_FLOOR: float = -5.0e5
 # Bracket width at which further bisection buys nothing.
 _Z_BRACKET_EPSILON: float = 1e-12
 
-# The single-revolution solution lies below the parabolic limit z = 4*pi^2.
-# At that limit the time of flight diverges; above it the transfer needs a
-# full extra revolution, which this solver does not model.
+# Multi-revolution search: grid points per revolution band, bisection steps
+# per root, and a ceiling on the revolution count (100 GEO days).
+_MULTI_REV_GRID: int = 256
+_BISECT_STEPS: int = 200
+_MAX_REVOLUTIONS: int = 100
+_EDGE_HALVINGS: int = 60
+
+# The zero-revolution solution lies below z = 4*pi^2, where its time of flight
+# diverges; above it each band of z is one more complete revolution, solved by
+# _multi_revolution_z.
 _Z_PARABOLIC_LIMIT: float = 4.0 * math.pi**2
 
 
@@ -310,8 +415,7 @@ def _solve_z(
     if not math.isfinite(f_hi) or f_hi < 0.0:
         raise LambertConvergenceError(
             f"no single-revolution transfer reaches this geometry in {tof:.1f} s; "
-            "the requested time of flight exceeds the parabolic limit, which needs "
-            "a multi-revolution solution this solver does not provide"
+            "use solve_lambert_all for transfers making complete revolutions"
         )
 
     # Lower bound: walk down through the hyperbolic region until the residual
@@ -346,3 +450,61 @@ def _solve_z(
         f"the iteration did not converge in {max_iter} steps "
         f"(bracket width {z_hi - z_lo:.3e}); refusing to return an unconverged transfer"
     )
+
+
+def _multi_revolution_z(geom: _Geometry, tof: float, mu: float, revolutions: int) -> list[float] | None:
+    """Roots of the time-of-flight equation for *revolutions* complete revolutions.
+
+    Within the band (2 pi N)^2 < z < (2 pi (N + 1))^2 the time of flight falls
+    from infinity to a minimum and rises to infinity again, so there are two
+    roots when the requested time is above that minimum and none below it.
+    Each is bracketed on a fixed grid and then bisected. A near-circular drift
+    whose transfer angle is close to 0 or 360 deg puts a root nearer the band
+    edge than the first grid point, so when an end of the grid is already
+    below the requested time the bracket is extended towards that edge.
+    Returns None when no grid point reaches the requested time, which ends
+    the caller's search.
+    """
+    lo = (2.0 * math.pi * revolutions) ** 2
+    hi = (2.0 * math.pi * (revolutions + 1)) ** 2
+    grid = [lo + (hi - lo) * k / _MULTI_REV_GRID for k in range(1, _MULTI_REV_GRID)]
+    points = [(z, _time_residual(z, geom, tof, mu)) for z in grid]
+    points = [(z, f) for z, f in points if math.isfinite(f)]
+    if not any(f <= 0.0 for _, f in points):
+        return None
+    for edge, end in ((lo, 0), (hi, -1)):
+        z_in, f_in = points[end]
+        if f_in < 0.0:
+            outer = _towards_edge(geom, tof, mu, z_in, edge)
+            if outer is not None:
+                points.insert(0 if end == 0 else len(points), outer)
+    return [
+        _bisect(geom, tof, mu, (z_a, f_a < 0.0), z_b)
+        for (z_a, f_a), (z_b, f_b) in itertools.pairwise(points)
+        if (f_a < 0.0) != (f_b < 0.0)
+    ]
+
+
+def _towards_edge(geom: _Geometry, tof: float, mu: float, z_in: float, edge: float) -> tuple[float, float] | None:
+    """A point between *z_in* and the band *edge* where the residual is positive."""
+    gap = edge - z_in
+    for _ in range(_EDGE_HALVINGS):
+        gap *= 0.5
+        f = _time_residual(edge - gap, geom, tof, mu)
+        if math.isfinite(f) and f > 0.0:
+            return edge - gap, f
+    return None
+
+
+def _bisect(geom: _Geometry, tof: float, mu: float, start: tuple[float, bool], z_b: float) -> float:
+    """Bisect the residual between start[0] (negative if start[1]) and z_b."""
+    z_a, a_negative = start
+    for _ in range(_BISECT_STEPS):
+        z_mid = 0.5 * (z_a + z_b)
+        if (_time_residual(z_mid, geom, tof, mu) < 0.0) == a_negative:
+            z_a = z_mid
+        else:
+            z_b = z_mid
+        if z_b - z_a < _Z_BRACKET_EPSILON * max(1.0, z_a):
+            break
+    return 0.5 * (z_a + z_b)

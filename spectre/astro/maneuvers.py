@@ -16,7 +16,7 @@ import numpy as np
 from spectre.astro.constants import MU_EARTH, R_EARTH
 from spectre.astro.cw_geometry import _initial_hill_state
 from spectre.astro.kepler import propagate_two_body
-from spectre.astro.lambert import LambertSolution, solve_lambert
+from spectre.astro.lambert import LambertSolution, cheapest_lambert, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
     EvasionResult,
@@ -87,7 +87,10 @@ def lambert_intercept(
 
     1. Propagate red to manoeuvre_start + coast → departure position.
     2. Propagate blue to departure + tof → arrival position.
-    3. Solve Lambert's problem for the transfer arc.
+    3. Solve Lambert's problem for the transfer arc, taking the cheapest of
+       the zero-revolution and every multi-revolution solution. A flight
+       longer than about one orbit otherwise priced the zero-revolution arc,
+       several km/s where going round once costs m/s (audit F-010).
     4. Compute impulse burns at departure and (optionally) arrival.
 
     Args:
@@ -120,7 +123,7 @@ def lambert_intercept(
         r_hat = sv_blue.r / np.linalg.norm(sv_blue.r)
         r_target = sv_blue.r - r_hat * target_distance_km
 
-    sol = solve_lambert(
+    sol = cheapest_lambert(
         r1=sv_red.r,
         r2=r_target,
         tof=tof_s,
@@ -1332,7 +1335,7 @@ def intercept_envelope_intercept(
         arrival = t_epoch + timedelta(seconds=tof)
         try:
             sv_target = blue_orbit.propagate(arrival)
-            solution = solve_lambert(
+            solution = cheapest_lambert(
                 sv_red.r, sv_target.r, tof,
                 mu=mu, v1_initial=sv_red.v, v2_target=sv_target.v,
             )
@@ -1562,8 +1565,9 @@ def min_time_intercept_wrapper(
 
     Raises:
         ValueError: no single-revolution transfer within the budget arrives
-            inside one red period. The solver is single-revolution only, so a
-            longer search would not be trustworthy.
+            inside one red period. The search is the earliest arrival, so it
+            is held to one period on the zero-revolution arc; a transfer
+            making complete revolutions always arrives later.
     """
     red_orbit = TLEOrbit(red_tle)
     blue_orbit = TLEOrbit(blue_tle)
