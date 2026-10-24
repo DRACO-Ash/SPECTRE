@@ -259,11 +259,15 @@ def _fit_least_squares_quadratic(
 
     coeffs = _gauss_solve(A, b_vec)
 
-    # Covariance: residual variance × (X^T X)^{-1}  (approximated from diagonal)
+    # Covariance: residual variance x (X^T X)^-1, the full inverse. The
+    # previous res_var / diag(X^T X) is not a covariance: over tens of degrees
+    # of phase the columns 1, x, x^2 are strongly correlated and it understated
+    # the variances by orders of magnitude (audit F-102). The inverse is built
+    # column by column from the same elimination.
     residuals = [mags[i] - _eval_quadratic(tuple(coeffs), phases[i]) for i in range(n)]  # type: ignore[arg-type]
     res_var   = sum(r * r for r in residuals) / max(n - 3, 1)
-    # Simplified diagonal covariance (off-diagonal entries zeroed)
-    cov = [[res_var / max(A[i][i], 1e-12) if i == j else 0.0 for j in range(3)] for i in range(3)]
+    inv_cols  = [_gauss_solve(A, [1.0 if k == j else 0.0 for k in range(3)]) for j in range(3)]
+    cov = [[res_var * inv_cols[j][i] for j in range(3)] for i in range(3)]
 
     return coeffs[0], coeffs[1], coeffs[2], cov
 
