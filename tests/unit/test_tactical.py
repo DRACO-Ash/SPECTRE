@@ -132,7 +132,7 @@ class TestPlaneChange:
         result = plane_change(LEO_R, inclination_change_deg=5.0)
         assert result.optimal_delta_v > 0
         assert result.inclination_change_deg == 5.0
-        assert result.optimal_location in ("node", "apogee")
+        assert result.optimal_location == "node"
 
     def test_zero_inclination_change(self) -> None:
         result = plane_change(LEO_R, inclination_change_deg=0.0)

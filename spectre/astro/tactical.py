@@ -303,11 +303,11 @@ def cw_combined(
 
 @dataclass
 class PlaneChangeResult:
-    """Result of a plane-change manoeuvre."""
+    """Result of a plane-change manoeuvre, priced at each node."""
 
-    delta_v_at_node: float      # km/s — ΔV if performed at equatorial node
-    delta_v_at_apogee: float    # km/s — ΔV if performed at apogee
-    optimal_location: str       # "node" or "apogee"
+    delta_v_at_ascending_node: float   # km/s
+    delta_v_at_descending_node: float  # km/s
+    optimal_location: str       # "node" (circular), "ascending node" or "descending node"
     optimal_delta_v: float      # km/s — cheapest option
     inclination_change_deg: float
     method: str = "plane_change"
@@ -331,40 +331,46 @@ def plane_change(
     inclination_change_deg: float,
     ecc: float = 0.0,
     mu: float = MU_EARTH,
+    argp_deg: float = 0.0,
 ) -> PlaneChangeResult:
-    """Compute ΔV for a pure inclination change.
+    """Compute ΔV for a pure inclination change, flown at a node.
 
-    Evaluates cost at the equatorial node (circular velocity) and at
-    apogee (slower velocity, cheaper plane change).
+    A plane change rotates the velocity about the radius vector, leaving the
+    radial speed alone, so it costs 2 v_t sin(Δi / 2) with v_t = h / r the
+    transverse speed (Curtis eq. 6.20). It can only be flown at a node, which
+    lies at true anomaly -ω (ascending) and 180° - ω (descending); the slower
+    of the two is the cheaper. The previous version priced the circular speed
+    at the semi-major axis and offered "apogee" without checking apogee lies
+    on the line of nodes, and named "apogee" for a circular orbit (audit F-074).
 
     Args:
-        r: Orbit radius or semi-major axis (km).
+        r: Semi-major axis (km); the orbit radius when circular.
         inclination_change_deg: Desired inclination change (degrees).
         ecc: Orbital eccentricity (0 for circular).
         mu: Gravitational parameter.
+        argp_deg: Argument of perigee (degrees), which places the nodes.
     """
-    di = math.radians(inclination_change_deg)
+    sin_half = math.sin(math.radians(inclination_change_deg) / 2.0)
+    p = r * (1.0 - ecc**2)
+    h = math.sqrt(mu * p)
 
-    # At equatorial node (circular or periapsis velocity)
-    v_node = math.sqrt(mu / r)
-    dv_node = 2.0 * v_node * math.sin(di / 2.0)
+    def cost_at(true_anomaly_deg: float) -> float:
+        radius = p / (1.0 + ecc * math.cos(math.radians(true_anomaly_deg)))
+        return 2.0 * (h / radius) * sin_half
 
-    # At apogee (if eccentric)
-    r_apo = r * (1.0 + ecc)
-    a = r if ecc == 0.0 else r  # r is SMA when ecc > 0
-    v_apo = math.sqrt(mu * (2.0 / r_apo - 1.0 / a)) if ecc > 0 else v_node
-    dv_apogee = 2.0 * v_apo * math.sin(di / 2.0)
+    dv_asc = cost_at(-argp_deg)
+    dv_desc = cost_at(180.0 - argp_deg)
 
-    if dv_apogee <= dv_node:
-        optimal = "apogee"
-        optimal_dv = dv_apogee
+    if ecc == 0.0:
+        optimal, optimal_dv = "node", dv_asc
+    elif dv_desc < dv_asc:
+        optimal, optimal_dv = "descending node", dv_desc
     else:
-        optimal = "node"
-        optimal_dv = dv_node
+        optimal, optimal_dv = "ascending node", dv_asc
 
     return PlaneChangeResult(
-        delta_v_at_node=dv_node,
-        delta_v_at_apogee=dv_apogee,
+        delta_v_at_ascending_node=dv_asc,
+        delta_v_at_descending_node=dv_desc,
         optimal_location=optimal,
         optimal_delta_v=optimal_dv,
         inclination_change_deg=inclination_change_deg,
