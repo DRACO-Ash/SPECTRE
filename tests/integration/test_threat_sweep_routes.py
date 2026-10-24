@@ -164,3 +164,78 @@ class TestProvenance:
         flat = " ".join(resp.text.split())
         assert "not from live tracking" in flat
         assert "SYNTHETIC: red RED-GEO" in flat
+
+
+class TestRefineTellsTheTruth:
+    """Audit F-123, F-127 and F-128: the refine route."""
+
+    def _swept(self, client: Any, cookie: str, **extra: str) -> None:
+        _add_manual(client, cookie, "BLUE-GEO", _BLUE_GEO)
+        _post(client, cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", **extra})
+
+    def test_a_failed_refine_says_why_and_logs_no_result(
+        self, client: Any, auth_cookie: str, sweep_state: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.web.routes import threat
+
+        self._swept(client, auth_cookie)
+        before = sweep_state.last_threat_assessment.entries[0]
+
+        def _refuse(**_kwargs: Any) -> Any:
+            raise ValueError("degenerate Lambert geometry: transfer angle 179.99 deg. Pick another epoch")
+
+        monkeypatch.setattr(threat, "lambert_intercept", _refuse)
+        logged = len(sweep_state.log_entries)
+        resp = _post(client, auth_cookie, "refine", {"entry_index": 0, "group_idx": 0})
+        assert "degenerate Lambert geometry: transfer angle 179.99 deg" in resp.text
+        assert sweep_state.last_threat_assessment.entries[0] is before
+        added = list(sweep_state.log_entries)[logged:]
+        assert not any("Lambert dV" in line for line in added)
+        assert any("refused" in line for line in added)
+
+    def test_refine_flies_the_red_orbit_the_sweep_used(
+        self, client: Any, auth_cookie: str, sweep_state: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.web.routes import threat
+
+        self._swept(client, auth_cookie, manual_red_tle=_BLUE_GEO.replace("BLUE", "RED"))
+        swept_red = sweep_state.last_threat_assessment.red_tle
+        assert swept_red is not None
+        seen: dict[str, Any] = {}
+        real = threat.lambert_intercept
+
+        def _spy(**kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return real(**kwargs)
+
+        monkeypatch.setattr(threat, "lambert_intercept", _spy)
+        _post(client, auth_cookie, "refine", {"entry_index": 0, "group_idx": 0})
+        assert seen["red_tle"] == swept_red, "the manual red override must survive into the refine"
+        assert sweep_state.last_threat_assessment.entries[0].regime == "GEO"
+
+    def test_a_negative_index_is_refused(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
+        self._swept(client, auth_cookie)
+        before = list(sweep_state.last_threat_assessment.entries)
+        resp = _post(client, auth_cookie, "refine", {"entry_index": -1, "group_idx": 0})
+        assert resp.status_code == 422
+        assert sweep_state.last_threat_assessment.entries == before
+
+    def test_a_sweep_replaced_mid_refine_is_left_alone(
+        self, client: Any, auth_cookie: str, sweep_state: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.domain.models import ThreatAssessment
+        from spectre.web.routes import threat
+
+        self._swept(client, auth_cookie)
+        replacement = ThreatAssessment(red_name="OTHER", sweep_epoch=sweep_state.last_threat_assessment.sweep_epoch)
+        real = threat.lambert_intercept
+
+        def _another_tab_sweeps(**kwargs: Any) -> Any:
+            sweep_state.last_threat_assessment = replacement
+            return real(**kwargs)
+
+        monkeypatch.setattr(threat, "lambert_intercept", _another_tab_sweeps)
+        resp = _post(client, auth_cookie, "refine", {"entry_index": 0, "group_idx": 0})
+        assert resp.status_code == 200
+        assert replacement.entries == [], "a foreign entry was spliced into the newer sweep"
+        assert "newer sweep" in resp.text

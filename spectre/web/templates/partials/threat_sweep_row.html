@@ -34,6 +34,8 @@
      comparing does, which is what the contract test now does. #}
   <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ entry.posture_label or '—' }}</td>
   <td class="col-actions" style="white-space:nowrap">
+    {# Why a refine produced nothing, on the row it was asked of (F-123). #}
+    {% if refine_error is defined and refine_error %}<span class="error-msg" role="alert" style="white-space:normal; font-size:0.72rem">{{ refine_error }}</span>{% endif %}
     {% if entry.method == "hohmann" %}
     <button class="btn-secondary btn-sm"
             hx-post="/plan/threat/refine"

@@ -1391,6 +1391,7 @@ async def threat_sweep(
         target_count=len(targets),
         elapsed_s=round(elapsed, 2),
         errors=errors,
+        red_tle=red_tle,
     )
 
     # Group entries by target for the collapsed-row UI.
@@ -1776,10 +1777,24 @@ async def threat_screen(
         "provenance_warnings": provenance,
     })
 
+def _target_tle(state: object, target: ThreatTarget) -> str | None:
+    """The element set a swept target was flown with.
+
+    A manual target's set lives in the manual list, keyed by name; looking it
+    up in the HRR cache by number found nothing (found by the F-042 tests).
+    """
+    if target.target_source == "manual":
+        return next(
+            (m["tle"] for m in state.manual_sweep_tles if m["name"] == target.target_name),  # type: ignore[attr-defined]
+            None,
+        )
+    return state.hrr_tle_cache.get(target.target_satno)  # type: ignore[attr-defined, no-any-return]
+
+
 @router.post("/refine", response_model=None)
 async def refine_entry(
     request: Request,
-    entry_index: Annotated[int, Form()],
+    entry_index: Annotated[int, Form(ge=0)],
     group_idx: Annotated[int, Form(ge=0)] = 0,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
@@ -1795,61 +1810,57 @@ async def refine_entry(
     fact can disagree with the table the row is still sitting in.
     """
     state = get_session_state(current_user.username)
+    # Held for the whole request. The session state is shared by every tab
+    # of this account, so a sweep finishing elsewhere during the await below
+    # replaces last_threat_assessment, and writing through the state then
+    # spliced this entry into the newer sweep or raised IndexError (F-128).
+    assessment = state.last_threat_assessment
 
-    if not state.last_threat_assessment or entry_index >= len(state.last_threat_assessment.entries):
-        return render(request, "partials/threat_sweep_row.html", {
-            "entry": None, "index": entry_index, "group_idx": group_idx,
-            "red_name": "", "error": "Invalid entry",
-        })
-
-    entry = state.last_threat_assessment.entries[entry_index]
-    # The interceptor. It is the FIRST argument the row's Load button passes
-    # to loadInEngine, and the fragment has no assessment of its own to read
-    # it from the way threat_sweep.html does.
-    red_name = state.last_threat_assessment.red_name
-
-    # Find TLEs.
-    red_tle = _find_tle(state, state.last_threat_assessment.red_name)
-    if entry.target.target_source == "blue":
-        target_tle = _find_tle(state, entry.target.target_name)
-    elif entry.target.target_source == "manual":
-        # A manual target's element set lives in the manual list, keyed by
-        # name; looking it up in the HRR cache by number found nothing, so
-        # every manual target refused to refine (found by the F-042 tests).
-        target_tle = next(
-            (m["tle"] for m in state.manual_sweep_tles if m["name"] == entry.target.target_name), None,
-        )
-    else:
-        target_tle = state.hrr_tle_cache.get(entry.target.target_satno)
-
-    if not red_tle or not target_tle:
+    def _row(entry: ThreatSweepEntry | None, error: str | None, refine_error: str | None = None) -> HTMLResponse:
         return render(request, "partials/threat_sweep_row.html", {
             "entry": entry, "index": entry_index, "group_idx": group_idx,
-            "red_name": red_name, "error": "TLE not found",
+            "red_name": assessment.red_name if assessment else "",
+            "error": error, "refine_error": refine_error,
         })
 
-    def _refine() -> ThreatSweepEntry:
+    if not assessment or entry_index >= len(assessment.entries):
+        return _row(None, "Invalid entry")
+
+    entry = assessment.entries[entry_index]
+    # The sweep's own red element set, so a manual override flies here too
+    # (F-127). Older assessments carry none and fall back to the lookup.
+    red_tle = assessment.red_tle or _find_tle(state, assessment.red_name)
+    target_tle = _target_tle(state, entry.target)
+    if not red_tle or not target_tle:
+        return _row(entry, "TLE not found")
+
+    def _refine() -> ThreatSweepEntry | str:
         tof_s = max(entry.tof_hours * 3600.0, 3600.0)
         try:
             sol = lambert_intercept(
                 red_tle=red_tle, blue_tle=target_tle,
                 manoeuvre_start=entry.burn_epoch, tof_s=tof_s, coast_s=0.0,
             )
-        except Exception:
-            return entry
+        # BLE001: any solver refusal is reported to the operator, not raised.
+        except Exception as exc:  # noqa: BLE001
+            return _refusal_reason(exc)
         return _sol_to_entry(sol, entry.target, entry.burn_epoch,
-                             entry.burn_location, "lambert")
+                             entry.burn_location, "lambert", entry.regime)
 
     loop = asyncio.get_running_loop()
     refined = await loop.run_in_executor(None, _refine)
 
-    state.last_threat_assessment.entries[entry_index] = refined
+    if isinstance(refined, str):
+        # A refusal used to return the Hohmann entry unchanged and log it as
+        # a Lambert result: no reason on screen, a false record in the log.
+        state.append_log(f"[THREAT] Refine #{entry_index + 1} refused: {refined}")
+        return _row(entry, None, f"Lambert refine refused: {refined}")
+    if state.last_threat_assessment is not assessment:
+        return _row(entry, None, "A newer sweep replaced this one while refining; run the refine again there.")
+
+    assessment.entries[entry_index] = refined
     state.append_log(
         f"[THREAT] Refined #{entry_index + 1}: {refined.target.target_name} "
         f"Lambert dV={refined.delta_v_m_s:.0f} m/s"
     )
-
-    return render(request, "partials/threat_sweep_row.html", {
-        "entry": refined, "index": entry_index, "group_idx": group_idx,
-        "red_name": red_name, "error": None,
-    })
+    return _row(refined, None)

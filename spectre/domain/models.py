@@ -426,6 +426,9 @@ class ThreatAssessment:
     target_count: int = 0
     elapsed_s: float = 0.0
     errors: list[str] = field(default_factory=list)
+    #: The red element set the sweep flew, manual override included, so a
+    #: refine flies the same orbit rather than looking it up again.
+    red_tle: str | None = None
 
 
 @dataclass
