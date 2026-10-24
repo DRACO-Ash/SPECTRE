@@ -168,16 +168,17 @@
               style="flex:1; font-size:0.7rem; font-weight:700; padding:0.45rem 0">
         {% if scored %}Submit &amp; Score{% else %}Finish Exploration{% endif %}
       </button>
-      <form hx-post="/training/scenario/{{ scenario.id }}/reset"
-            hx-target="#scenario-detail"
-            hx-swap="innerHTML"
-            style="display:inline">
-        <input type="hidden" name="result_id" value="{{ result_id }}">
-        <button type="submit" class="btn-secondary" style="font-size:0.68rem"
-                title="Return to briefing — this attempt is cancelled with no side effects">
-          &#8635; Reset
-        </button>
-      </form>
+      {# Not a nested form: a <form> inside the scoring form is dropped by the
+         parser and its </form> closes the scoring form, which made Reset a
+         submit button of the score (audit F-050). htmx sends the enclosing
+         form's fields, result_id among them, with this button's request. #}
+      <button type="button" class="btn-secondary" style="font-size:0.68rem"
+              hx-post="/training/scenario/{{ scenario.id }}/reset"
+              hx-target="#scenario-detail"
+              hx-swap="innerHTML"
+              title="Return to briefing — this attempt is cancelled with no side effects">
+        &#8635; Reset
+      </button>
       <button type="button" class="btn-secondary"
               style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
               onclick="document.getElementById('scenario-detail').innerHTML=''"
