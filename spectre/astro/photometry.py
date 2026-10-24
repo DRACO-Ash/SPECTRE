@@ -205,6 +205,29 @@ def _eval_quadratic(coeffs: tuple[float, float, float], phase: float) -> float:
     return a0 + a1 * phase + a2 * phase * phase
 
 
+def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
+    """Solve mat x = rhs by Gauss elimination with partial pivoting."""
+    n_ = len(rhs)
+    m = [row[:] + [rhs[i]] for i, row in enumerate(mat)]  # augmented
+    for col in range(n_):
+        # Partial pivot
+        max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
+        m[col], m[max_row] = m[max_row], m[col]
+        if abs(m[col][col]) < 1e-15:
+            raise ValueError("Singular normal matrix — degenerate phase coverage")
+        for row in range(col + 1, n_):
+            f = m[row][col] / m[col][col]
+            for j in range(col, n_ + 1):
+                m[row][j] -= f * m[col][j]
+    # Back substitution
+    x = [0.0] * n_
+    for i in range(n_ - 1, -1, -1):
+        x[i] = m[i][n_] / m[i][i]
+        for j in range(i + 1, n_):
+            x[i] -= m[i][j] * x[j] / m[i][i]
+    return x
+
+
 def _fit_least_squares_quadratic(
     phases: list[float],
     mags: list[float],
@@ -234,28 +257,6 @@ def _fit_least_squares_quadratic(
         [sx2, sx3, sx4],
     ]
     b_vec = [sy0, sy1, sy2]
-
-    # Gauss elimination with partial pivoting
-    def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
-        n_ = len(rhs)
-        m = [row[:] + [rhs[i]] for i, row in enumerate(mat)]  # augmented
-        for col in range(n_):
-            # Partial pivot
-            max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
-            m[col], m[max_row] = m[max_row], m[col]
-            if abs(m[col][col]) < 1e-15:
-                raise ValueError("Singular normal matrix — degenerate phase coverage")
-            for row in range(col + 1, n_):
-                f = m[row][col] / m[col][col]
-                for j in range(col, n_ + 1):
-                    m[row][j] -= f * m[col][j]
-        # Back substitution
-        x = [0.0] * n_
-        for i in range(n_ - 1, -1, -1):
-            x[i] = m[i][n_] / m[i][i]
-            for j in range(i + 1, n_):
-                x[i] -= m[i][j] * x[j] / m[i][i]
-        return x
 
     coeffs = _gauss_solve(A, b_vec)
 

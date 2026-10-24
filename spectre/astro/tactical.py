@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
 from spectre.astro.cw_geometry import CWState, _cw_propagate
@@ -856,20 +857,66 @@ def classify_manoeuvre(
     if draan > 180.0:
         draan = 360.0 - draan
 
-    # Estimate ΔV from each element change
+    # RAAN change, after subtracting the expected J2 drift to isolate the
+    # manoeuvre-induced part (only valid for non-J2 manoeuvres).
+    expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
+    raan_residual = max(0.0, draan - expected_j2_raan)
+
+    total_dv = _element_change_dv(a1, a2, inc1_deg, di, raan_residual, mu)
+
+    changes = _ElementChanges(
+        altitude=abs(da) > 5.0,        # > 5 km SMA change
+        plane=di > 0.05,               # > 0.05° inclination change
+        raan=raan_residual > 0.05,     # > 0.05° RAAN residual
+        ecc=abs(de) > 0.001,           # eccentricity change
+    )
+    mtype, confidence = _manoeuvre_type(total_dv, changes, da)
+
+    notes_parts = []
+    if changes.altitude:
+        notes_parts.append(f"Δa={da:+.1f} km")
+    if changes.plane:
+        notes_parts.append(f"Δi={di:.3f}°")
+    if changes.raan:
+        notes_parts.append(f"ΔRAAN={raan_residual:.3f}° (J2-corrected)")
+    if changes.ecc:
+        notes_parts.append(f"Δe={de:+.5f}")
+
+    return ManoeuvreClassification(
+        manoeuvre_type=mtype,
+        estimated_delta_v=total_dv,
+        burn_direction=_burn_direction(changes, da),
+        delta_a_km=da,
+        delta_ecc=de,
+        delta_inc_deg=inc2_deg - inc1_deg,
+        delta_raan_deg=raan2_deg - raan1_deg,
+        confidence=confidence,
+        notes="; ".join(notes_parts) if notes_parts else "No significant element changes detected",
+    )
+
+
+class _ElementChanges(NamedTuple):
+    """Which element changes cleared their detection thresholds."""
+
+    altitude: bool
+    plane: bool
+    raan: bool
+    ecc: bool
+
+
+def _element_change_dv(
+    a1: float, a2: float, inc1_deg: float, di: float, raan_residual: float, mu: float,
+) -> float:
+    """Combined ΔV (km/s) of the altitude, inclination and RAAN changes."""
     v1 = math.sqrt(mu / a1)
     v2 = math.sqrt(mu / a2)
 
     # Altitude change ΔV (vis-viva approximation)
-    dv_altitude = abs(v2 - v1) if abs(da) > 1.0 else 0.0
+    dv_altitude = abs(v2 - v1) if abs(a2 - a1) > 1.0 else 0.0
 
     # Plane change ΔV
     dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > 0.01 else 0.0
 
-    # RAAN change ΔV (approximation — only valid for non-J2 manoeuvres)
-    # Subtract expected J2 drift to isolate manoeuvre-induced RAAN change
-    expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
-    raan_residual = max(0.0, draan - expected_j2_raan)
     # Two planes at inclination i differing by dOmega in RAAN are theta apart
     # with cos theta = cos^2 i + sin^2 i cos dOmega. Pricing dOmega itself
     # overstated the cost by 1/sin i (audit F-073).
@@ -878,70 +925,37 @@ def classify_manoeuvre(
     theta_raan = math.acos(max(-1.0, min(1.0, cos_theta)))
     dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > 0.01 else 0.0
 
-    total_dv = math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
+    return math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
 
-    # Classify
-    has_altitude = abs(da) > 5.0        # > 5 km SMA change
-    has_plane = di > 0.05               # > 0.05° inclination change
-    has_raan = raan_residual > 0.05     # > 0.05° RAAN residual
-    has_ecc = abs(de) > 0.001           # eccentricity change
 
-    # Determine burn direction
-    if has_altitude and not has_plane:
-        direction = "prograde" if da > 0 else "retrograde"
-    elif has_plane and not has_altitude:
-        direction = "normal"
-    elif has_altitude and has_plane:
-        direction = "combined"
-    elif has_ecc:
-        direction = "radial"
-    else:
-        direction = "combined"
+def _burn_direction(changes: _ElementChanges, da: float) -> str:
+    """The burn direction the element changes imply."""
+    if changes.altitude and not changes.plane:
+        return "prograde" if da > 0 else "retrograde"
+    if changes.plane and not changes.altitude:
+        return "normal"
+    if changes.altitude and changes.plane:
+        return "combined"
+    if changes.ecc:
+        return "radial"
+    return "combined"
 
-    # Determine manoeuvre type
+
+def _manoeuvre_type(total_dv: float, changes: _ElementChanges, da: float) -> tuple[str, float]:
+    """Manoeuvre type and confidence from the cost and the element changes."""
     if total_dv < 0.001:
-        mtype = "station_keeping"
-        confidence = 0.3
-    elif has_altitude and not has_plane and not has_raan:
-        mtype = "altitude_change"
-        confidence = 0.85
-    elif has_plane and not has_altitude:
-        mtype = "plane_change"
-        confidence = 0.85
-    elif has_raan and not has_altitude and not has_plane:
-        mtype = "raan_change"
-        confidence = 0.7
-    elif has_altitude and has_plane:
-        mtype = "combined"
-        confidence = 0.75
-    elif has_ecc and abs(da) < 5.0:
-        mtype = "phasing"
-        confidence = 0.6
-    else:
-        mtype = "unknown"
-        confidence = 0.3
-
-    notes_parts = []
-    if has_altitude:
-        notes_parts.append(f"Δa={da:+.1f} km")
-    if has_plane:
-        notes_parts.append(f"Δi={di:.3f}°")
-    if has_raan:
-        notes_parts.append(f"ΔRAAN={raan_residual:.3f}° (J2-corrected)")
-    if has_ecc:
-        notes_parts.append(f"Δe={de:+.5f}")
-
-    return ManoeuvreClassification(
-        manoeuvre_type=mtype,
-        estimated_delta_v=total_dv,
-        burn_direction=direction,
-        delta_a_km=da,
-        delta_ecc=de,
-        delta_inc_deg=inc2_deg - inc1_deg,
-        delta_raan_deg=raan2_deg - raan1_deg,
-        confidence=confidence,
-        notes="; ".join(notes_parts) if notes_parts else "No significant element changes detected",
-    )
+        return "station_keeping", 0.3
+    if changes.altitude and not changes.plane and not changes.raan:
+        return "altitude_change", 0.85
+    if changes.plane and not changes.altitude:
+        return "plane_change", 0.85
+    if changes.raan and not changes.altitude and not changes.plane:
+        return "raan_change", 0.7
+    if changes.altitude and changes.plane:
+        return "combined", 0.75
+    if changes.ecc and abs(da) < 5.0:
+        return "phasing", 0.6
+    return "unknown", 0.3
 
 
 # ═══════════════════════════════════════════════════════════════════════════
