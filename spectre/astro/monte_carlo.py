@@ -215,6 +215,8 @@ class ManoeuvreHypothesis:
     distribution_type: str = "gaussian"   # "gaussian" | "uniform"
     n_samples: int         = 500
     random_seed: int       = 42
+    # Where the RIC split of the ΔV came from, shown on the panel.
+    direction_basis: str   = "assumed in-track"
 
 
 @dataclass
@@ -254,6 +256,9 @@ class MonteCarloResult:
     # Timing
     wall_time_seconds: float
     random_seed: int
+
+    # Where the hypothesis's ΔV direction came from (see ManoeuvreHypothesis).
+    direction_basis: str = ""
 
 
 # ── Core physics ──────────────────────────────────────────────────────────────
@@ -604,6 +609,7 @@ def run_monte_carlo(
             period_range_minutes=(0.0, 0.0),
             wall_time_seconds=time.monotonic() - t_start,
             random_seed=hypothesis.random_seed,
+            direction_basis=hypothesis.direction_basis,
         )
 
     # ── Aggregate results ─────────────────────────────────────────────────────
@@ -651,6 +657,7 @@ def run_monte_carlo(
         period_range_minutes=(float(np.min(per_arr)), float(np.max(per_arr))),
         wall_time_seconds=time.monotonic() - t_start,
         random_seed=hypothesis.random_seed,
+        direction_basis=hypothesis.direction_basis,
     )
 
 
@@ -664,12 +671,19 @@ def hypothesis_from_tle_record(
 ) -> ManoeuvreHypothesis:
     """Build a ManoeuvreHypothesis from a detected PoL manoeuvre.
 
-    Uses the propagated state at the manoeuvre epoch as the pre-manoeuvre state.
+    The pre-manoeuvre state is *tle_record* propagated to the manoeuvre's burn
+    epoch (its measured burn time where there is one). The ΔV is split across
+    radial, in-track and cross-track in the proportions of the detection's
+    element breakdown, in-track signed by the change in semi-major axis; the
+    breakdown does not resolve the sense of the radial and cross-track parts.
+    Without a breakdown the whole ΔV is assumed in-track, and the hypothesis
+    says so. Every hypothesis used to be in-track, so a detected plane change
+    was simulated as an orbit raise (audit F-030).
     """
     from spectre.astro.propagator import TLEOrbit
 
-    orbit = TLEOrbit(manoeuvre.tle_before.tle)
-    sv = orbit.propagate(manoeuvre.epoch)
+    burn_epoch = getattr(manoeuvre, "burn_epoch", manoeuvre.epoch)
+    sv = TLEOrbit(tle_record.tle).propagate(burn_epoch)
     pre_state = np.concatenate([sv.r, sv.v])
 
     # Pick archetype based on detected manoeuvre type
@@ -678,17 +692,38 @@ def hypothesis_from_tle_record(
 
     dv = manoeuvre.delta_v_km_s
     dv_1sig = max(dv * archetype.delta_v_1sigma_fraction, 0.0005)
+    ric, basis = _ric_split(getattr(manoeuvre, "breakdown", None))
 
     return ManoeuvreHypothesis(
-        epoch_utc=manoeuvre.epoch,
+        epoch_utc=burn_epoch,
         delta_v_magnitude_km_s=dv,
-        delta_v_radial=0.0,
-        delta_v_in_track=dv,     # Assume in-track by default
-        delta_v_cross_track=0.0,
+        delta_v_radial=dv * ric[0],
+        delta_v_in_track=dv * ric[1],
+        delta_v_cross_track=dv * ric[2],
         pre_manoeuvre_state_eci_km=pre_state,
         delta_v_magnitude_1sigma_km_s=dv_1sig,
         delta_v_pointing_1sigma_deg=archetype.pointing_1sigma_deg,
         epoch_1sigma_seconds=archetype.timing_1sigma_seconds,
         bstar_post=getattr(manoeuvre.tle_before, "bstar", 1e-4),
         n_samples=n_samples,
+        direction_basis=basis,
+    )
+
+
+def _ric_split(breakdown: Any) -> tuple[np.ndarray, str]:
+    """Unit RIC direction from a detection's element breakdown, and its basis."""
+    channels = {c.channel: c for c in getattr(breakdown, "components", ())}
+    along = channels.get("along_track")
+    sense = -1.0 if along is not None and along.inputs.get("delta_a_km", 0.0) < 0.0 else 1.0
+    ric = np.array([
+        channels["radial"].dv_km_s if "radial" in channels else 0.0,
+        sense * along.dv_km_s if along is not None else 0.0,
+        channels["cross_track"].dv_km_s if "cross_track" in channels else 0.0,
+    ])
+    norm = float(np.linalg.norm(ric))
+    if norm == 0.0:
+        return np.array([0.0, 1.0, 0.0]), "assumed in-track: no element breakdown"
+    return ric / norm, (
+        "split from the detection's element breakdown; "
+        "sense of radial and cross-track parts not resolved"
     )
