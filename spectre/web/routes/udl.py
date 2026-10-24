@@ -992,6 +992,13 @@ async def search_catalog(
     the current catalog status (loading, ready, error) so the operator can
     see progress without searching.
     """
+    # The catalogue was pulled with another operator's UDL credential. It is
+    # searchable only by an operator holding a UDL session of their own
+    # (audit F-142); the bare status line stays visible to everyone.
+    state = get_session_state(current_user.username)
+    if q.strip() and not (state.udl_username and state.udl_password):
+        return HTMLResponse('<p class="error-msg">Log in to UDL to search the on-orbit catalogue.</p>')
+
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 

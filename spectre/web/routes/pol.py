@@ -1041,6 +1041,13 @@ async def pol_notso_correlate(
                 '<p class="error-msg">No NOTSO records could be parsed. '
                 'Check the message format (SATNO, effective window, and type fields are required).</p>'
             )
+    elif not (state.udl_username and state.udl_password):
+        # The cache holds UDL data fetched with another operator's credential
+        # (audit F-142); pasted text needs no UDL session, the cache does.
+        return HTMLResponse(
+            '<p class="error-msg">Log in to UDL to correlate against the NOTSO cache, '
+            'or paste NOTSO messages.</p>'
+        )
     else:
         # Path 2: load from local cache for this satno
         cache = get_notso_cache()
