@@ -14,6 +14,7 @@ platform-injected variable, then a safe local default.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import secrets
 import ssl
@@ -24,6 +25,8 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load .env from project root (two levels up from this file). Absent in the
 # container image, which is intentional: the platform injects the environment.
@@ -196,6 +199,9 @@ _LIBPQ_ONLY_PARAMS = frozenset({
 _SSLMODE_DISABLED = frozenset({"disable"})
 _SSLMODE_NEGOTIATE = frozenset({"allow", "prefer"})
 _SSLMODE_VERIFYING = frozenset({"verify-ca", "verify-full"})
+_SSLMODE_REQUIRE = "require"
+# Client certificate parameters asyncpg cannot take from the URL.
+_CLIENT_CERT_PARAMS = ("sslcert", "sslkey", "sslcrl")
 
 
 def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
@@ -227,7 +233,7 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         context.check_hostname = sslmode == "verify-full"
         context.verify_mode = ssl.CERT_REQUIRED
         connect_args["ssl"] = context
-    elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
+    elif sslmode == _SSLMODE_REQUIRE:
         # "require" means encrypt, and explicitly does NOT mean verify. Passing
         # asyncpg ssl=True would build a verifying context instead, which
         # rejects the private certificate authorities managed databases
@@ -236,6 +242,20 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         connect_args["ssl"] = context
+    elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
+        # Any other value used to land in the branch above, so a typo such as
+        # "verify_full" silently downgraded verification to none (F-153).
+        raise ConfigurationError(
+            f"Unrecognised sslmode {sslmode!r} in DATABASE_URL. Use disable, allow, "
+            "prefer, require, verify-ca or verify-full."
+        )
+
+    ignored = [k for k in _CLIENT_CERT_PARAMS if k in dropped]
+    if ignored:
+        logger.warning(
+            "DATABASE_URL parameters %s are not applied: asyncpg takes client "
+            "certificates through an SSL context, not the URL.", ", ".join(ignored),
+        )
 
     if "connect_timeout" in dropped:
         with contextlib.suppress(ValueError):
