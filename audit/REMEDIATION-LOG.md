@@ -169,3 +169,16 @@ Each was shown to fail against the original `master` file it guards.
 ● F-078: the formation wrapper never used the threat's state. Its docstring now says so; modelling the threat is left for step 4, alongside F-S06-07.
 ● Already in the audit and not touched here: the NOTSO cache reads keys the bundled UDL records do not carry (FINDINGS.md:829). I checked that F-090 caused no regression there: the cache path parses 0 of 500 records both before and after.
 ● **Process:** two commits were initially made with a test failing (`ae46457`, then the F-075 docstring commit before amendment), because the commit command was not gated on the test exit code. Neither was pushed in that state. Every commit since goes through a helper that runs ruff, mypy and the full suite and commits only on a clean exit.
+
+### Test-only astro findings
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-070 | F-S01-21 | `adb7ee0` | Hohmann pinned to Vallado Ex. 6-1 at 1e-5; bi-elliptic to a vis-viva closed form; SGP4 to SGP4-VER 00005 at epoch (1 m); coplanar Lambert to the exact circular velocity; the reference propagator's Stumpff functions are its own. Vallado Ex. 6-2 not pinned: its inputs could not be confirmed (my recollection gave 3.907163 against the published 3.904057, so the inputs, not the code, are in doubt) |
+| F-081 | F-S02-27 | `adb7ee0` | the CW test's false premise replaced by flying both solvers' burns through the CW solution at five times (1e-9 km) |
+| F-099 | F-S03-34 | `adb7ee0` | GMST pinned to Vallado Ex. 3-5 and Meeus Ex. 12.a (1e-4 deg; the code omits the T^2 term, 6e-6 deg here); J2 RAAN rate to -5.00 deg/day; TLE epoch exact |
+| F-106 | F-S04-15 | `c79adee` | claim-correction half: the docstring's 0.1% and 0.4% accuracy claims replaced by the 1% the tests pin, with the fixture's two-burn geometry stated. Single-impulse fixtures (a propagated state plus a ΔV vector, refitted to mean elements) are left for step 4 |
+
+All new reference pins passed against the existing code; these findings were about the tests' power, not the code's correctness.
+
+**Step 3 astro group: complete.** Every High and Medium finding whose blast radius was "astro solvers" or astro "tests only" is closed or, where noted, split with its remainder named for step 4.
