@@ -564,6 +564,10 @@ def correlate_notsos_with_manoeuvres(
     return correlations
 
 
+# Below this detected ΔV (km/s) a predicted-to-detected ratio is meaningless.
+_MIN_DETECTED_DV_KM_S = 1e-9
+
+
 def _midpoint(notso: NOTSORecord) -> datetime:
     return notso.effective_start_utc + (notso.effective_end_utc - notso.effective_start_utc) / 2
 
@@ -597,7 +601,7 @@ def _matched(notso: NOTSORecord, best: Any) -> NOTSOManoeuvreCorrelation:
     offset_h = (notso.effective_start_utc - burn_at).total_seconds() / 3600.0
     lead_h = (burn_at - notso.issue_date_utc).total_seconds() / 3600.0
     mag_ratio = None
-    if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
+    if notso.predicted_delta_v_km_s and best.delta_v_km_s > _MIN_DETECTED_DV_KM_S:
         mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
     return NOTSOManoeuvreCorrelation(
         notso=notso,

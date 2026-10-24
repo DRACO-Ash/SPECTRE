@@ -205,6 +205,10 @@ def _eval_quadratic(coeffs: tuple[float, float, float], phase: float) -> float:
     return a0 + a1 * phase + a2 * phase * phase
 
 
+# A pivot this small means the phase coverage cannot separate the coefficients.
+_SINGULAR_PIVOT = 1e-15
+
+
 def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
     """Solve mat x = rhs by Gauss elimination with partial pivoting."""
     n_ = len(rhs)
@@ -213,7 +217,7 @@ def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
         # Partial pivot
         max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
         m[col], m[max_row] = m[max_row], m[col]
-        if abs(m[col][col]) < 1e-15:
+        if abs(m[col][col]) < _SINGULAR_PIVOT:
             raise ValueError("Singular normal matrix — degenerate phase coverage")
         for row in range(col + 1, n_):
             f = m[row][col] / m[col][col]

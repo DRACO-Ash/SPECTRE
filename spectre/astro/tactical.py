@@ -862,13 +862,13 @@ def classify_manoeuvre(
     expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
     raan_residual = max(0.0, draan - expected_j2_raan)
 
-    total_dv = _element_change_dv(a1, a2, inc1_deg, di, raan_residual, mu)
+    total_dv = _element_change_dv((a1, a2), inc1_deg, (di, raan_residual), mu)
 
     changes = _ElementChanges(
-        altitude=abs(da) > 5.0,        # > 5 km SMA change
-        plane=di > 0.05,               # > 0.05° inclination change
-        raan=raan_residual > 0.05,     # > 0.05° RAAN residual
-        ecc=abs(de) > 0.001,           # eccentricity change
+        altitude=abs(da) > _ALT_CHANGE_KM,
+        plane=di > _INC_CHANGE_DEG,
+        raan=raan_residual > _RAAN_CHANGE_DEG,
+        ecc=abs(de) > _ECC_CHANGE,
     )
     mtype, confidence = _manoeuvre_type(total_dv, changes, da)
 
@@ -895,6 +895,18 @@ def classify_manoeuvre(
     )
 
 
+# Thresholds for classify_manoeuvre. Element changes below these are not
+# counted as deliberate, and below _SK_DV_KM_S the event is station-keeping.
+_ALT_CHANGE_KM = 5.0       # semi-major axis
+_INC_CHANGE_DEG = 0.05     # inclination
+_RAAN_CHANGE_DEG = 0.05    # RAAN residual after J2
+_ECC_CHANGE = 0.001        # eccentricity
+_SK_DV_KM_S = 0.001
+# Changes below these are not priced at all.
+_ALT_COST_KM = 1.0
+_ANGLE_COST_DEG = 0.01
+
+
 class _ElementChanges(NamedTuple):
     """Which element changes cleared their detection thresholds."""
 
@@ -905,17 +917,23 @@ class _ElementChanges(NamedTuple):
 
 
 def _element_change_dv(
-    a1: float, a2: float, inc1_deg: float, di: float, raan_residual: float, mu: float,
+    sma: tuple[float, float], inc1_deg: float, angles: tuple[float, float], mu: float,
 ) -> float:
-    """Combined ΔV (km/s) of the altitude, inclination and RAAN changes."""
+    """Combined ΔV (km/s) of the altitude, inclination and RAAN changes.
+
+    *sma* is (a before, a after) in km; *angles* is (inclination change, RAAN
+    residual) in degrees.
+    """
+    a1, a2 = sma
+    di, raan_residual = angles
     v1 = math.sqrt(mu / a1)
     v2 = math.sqrt(mu / a2)
 
     # Altitude change ΔV (vis-viva approximation)
-    dv_altitude = abs(v2 - v1) if abs(a2 - a1) > 1.0 else 0.0
+    dv_altitude = abs(v2 - v1) if abs(a2 - a1) > _ALT_COST_KM else 0.0
 
     # Plane change ΔV
-    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > 0.01 else 0.0
+    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > _ANGLE_COST_DEG else 0.0
 
     # Two planes at inclination i differing by dOmega in RAAN are theta apart
     # with cos theta = cos^2 i + sin^2 i cos dOmega. Pricing dOmega itself
@@ -923,7 +941,7 @@ def _element_change_dv(
     i1 = math.radians(inc1_deg)
     cos_theta = math.cos(i1) ** 2 + math.sin(i1) ** 2 * math.cos(math.radians(raan_residual))
     theta_raan = math.acos(max(-1.0, min(1.0, cos_theta)))
-    dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > 0.01 else 0.0
+    dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > _ANGLE_COST_DEG else 0.0
 
     return math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
 
@@ -942,20 +960,19 @@ def _burn_direction(changes: _ElementChanges, da: float) -> str:
 
 
 def _manoeuvre_type(total_dv: float, changes: _ElementChanges, da: float) -> tuple[str, float]:
-    """Manoeuvre type and confidence from the cost and the element changes."""
-    if total_dv < 0.001:
-        return "station_keeping", 0.3
-    if changes.altitude and not changes.plane and not changes.raan:
-        return "altitude_change", 0.85
-    if changes.plane and not changes.altitude:
-        return "plane_change", 0.85
-    if changes.raan and not changes.altitude and not changes.plane:
-        return "raan_change", 0.7
-    if changes.altitude and changes.plane:
-        return "combined", 0.75
-    if changes.ecc and abs(da) < 5.0:
-        return "phasing", 0.6
-    return "unknown", 0.3
+    """Manoeuvre type and confidence from the cost and the element changes.
+
+    The first rule that holds decides, in this order.
+    """
+    rules = (
+        (total_dv < _SK_DV_KM_S, "station_keeping", 0.3),
+        (changes.altitude and not changes.plane and not changes.raan, "altitude_change", 0.85),
+        (changes.plane and not changes.altitude, "plane_change", 0.85),
+        (changes.raan and not changes.altitude and not changes.plane, "raan_change", 0.7),
+        (changes.altitude and changes.plane, "combined", 0.75),
+        (changes.ecc and abs(da) < _ALT_CHANGE_KM, "phasing", 0.6),
+    )
+    return next(((name, conf) for holds, name, conf in rules if holds), ("unknown", 0.3))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1632,7 +1649,7 @@ def relative_motion_stability(
     # for an along-track kick from the origin that reaches 4 v / n (audit F-071).
     offset = 4.0 * dx0 + 2.0 * dvy0 / n
     swing = math.hypot(3.0 * dx0 + 2.0 * dvy0 / n, dvx0 / n)
-    A_x = abs(offset) + swing
+    radial_extent = abs(offset) + swing
 
     # Cross-track amplitude: z(t) = dz0*cos(nt) + dvz0*sin(nt)/n
     A_z = math.sqrt(dz0**2 + (dvz0 / n)**2) if n > 0 else abs(dz0)
@@ -1655,12 +1672,12 @@ def relative_motion_stability(
         notes_parts.append("bounded (non-drifting) relative motion")
     else:
         notes_parts.append(f"secular drift {secular_drift_per_orbit:.2f} km/orbit")
-    notes_parts.append(f"radial ±{A_x:.2f} km, cross-track ±{A_z:.2f} km")
+    notes_parts.append(f"radial ±{radial_extent:.2f} km, cross-track ±{A_z:.2f} km")
     notes_parts.append(f"drift indicator (Δvy+2nΔx) = {drift_indicator:.4e} km/s")
 
     return StabilityResult(
         is_bounded=is_bounded,
-        radial_amplitude_km=A_x,
+        radial_amplitude_km=radial_extent,
         along_track_drift_km_per_orbit=secular_drift_per_orbit,
         cross_track_amplitude_km=A_z,
         stability_score=stability,
