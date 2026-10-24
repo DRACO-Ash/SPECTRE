@@ -59,6 +59,10 @@ class NOTSORecord:
     predicted_delta_v_km_s: float | None
     predicted_direction:    str | None
     raw_message:            str
+    #: Date fields not read from their own field: "issue date", "effective
+    #: start", "effective end". Each was inferred from the text, from another
+    #: date, or defaulted, and is shown to the operator as such.
+    inferred_fields:        tuple[str, ...] = ()
 
 
 @dataclass
@@ -193,7 +197,15 @@ _DT_FORMATS = [
 
 
 def _parse_dt(s: str) -> datetime | None:
+    """Parse a NOTSO date to UTC. ISO 8601 first, with fractional seconds and
+    offsets, which the fixed formats below rejected (audit F-087)."""
     s = s.strip()
+    try:
+        iso = datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    else:
+        return iso.replace(tzinfo=UTC) if iso.tzinfo is None else iso.astimezone(UTC)
     # Strip timezone suffixes before trying strptime formats
     for suffix in (" UTC", " utc", "Z"):
         if s.endswith(suffix):
@@ -341,6 +353,45 @@ def parse_notso_text(raw_text: str) -> list[NOTSORecord]:
     return records
 
 
+def _notso_dates(
+    fields: dict[str, str], text: str,
+) -> tuple[datetime, datetime, datetime, tuple[str, ...]]:
+    """Issue date, window start and end, and which of them were inferred.
+
+    A date missing from its own field is taken from the first date in the
+    text, then from another date, or defaulted; each such field is named in
+    the returned tuple instead of being replaced silently (audit F-087).
+    """
+    inferred: list[str] = []
+
+    issue_raw = fields.get("ISSUE DATE") or fields.get("ISSUED") or fields.get("DATE") or ""
+    issue_dt = _parse_dt(issue_raw)
+    if issue_dt is None:
+        inferred.append("issue date")
+        issue_dt = _extract_datetime(text) or datetime.now(UTC)
+
+    start_raw = (
+        fields.get("EFFECTIVE START") or fields.get("START") or
+        fields.get("WINDOW START") or fields.get("BEGIN") or ""
+    )
+    start_dt = _parse_dt(start_raw)
+    if start_dt is None:
+        inferred.append("effective start")
+        start_dt = _extract_datetime(text) or issue_dt
+
+    end_raw = (
+        fields.get("EFFECTIVE END") or fields.get("END") or
+        fields.get("WINDOW END") or fields.get("STOP") or ""
+    )
+    end_dt = _parse_dt(end_raw)
+    if end_dt is None:
+        # Default: window of 24h if not specified
+        inferred.append("effective end")
+        end_dt = start_dt + timedelta(hours=24.0)
+
+    return issue_dt, start_dt, end_dt, tuple(inferred)
+
+
 def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
     """Parse a single NOTSO message block."""
     lines = text.strip().splitlines()
@@ -380,26 +431,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("OPERATOR") or fields.get("FROM") or "UNKNOWN"
     )
 
-    # Dates — issue date
-    issue_raw = fields.get("ISSUE DATE") or fields.get("ISSUED") or fields.get("DATE") or ""
-    issue_dt  = _parse_dt(issue_raw) or _extract_datetime(text) or datetime.now(UTC)
-
-    # Window start
-    start_raw = (
-        fields.get("EFFECTIVE START") or fields.get("START") or
-        fields.get("WINDOW START") or fields.get("BEGIN") or ""
-    )
-    start_dt = _parse_dt(start_raw) or _extract_datetime(text) or issue_dt
-
-    # Window end
-    end_raw = (
-        fields.get("EFFECTIVE END") or fields.get("END") or
-        fields.get("WINDOW END") or fields.get("STOP") or ""
-    )
-    end_dt = _parse_dt(end_raw)
-    if end_dt is None:
-        # Default: window of 24h if not specified
-        end_dt = start_dt + timedelta(hours=24.0)
+    issue_dt, start_dt, end_dt, inferred = _notso_dates(fields, text)
 
     # Type
     type_raw = fields.get("TYPE") or fields.get("ACTIVITY TYPE") or text
@@ -435,6 +467,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         predicted_delta_v_km_s=dv,
         predicted_direction=direction,
         raw_message=text,
+        inferred_fields=inferred,
     )
 
 

@@ -183,6 +183,8 @@
           {% if c.notso %}
             <span style="color:var(--text-primary)">{{ c.notso.effective_start_utc.strftime("%Y-%m-%d %H:%M") }}</span>
             <span style="color:var(--text-dim)"> → {{ c.notso.effective_end_utc.strftime("%H:%M") }}Z</span>
+            {% if c.notso.inferred_fields %}<span style="color:#f59e0b" title="Not stated in its own field; inferred from the text or defaulted">
+              ({{ c.notso.inferred_fields | join(", ") }} inferred)</span>{% endif %}
           {% else %}—{% endif %}
         </td>
         <td style="padding:0.25rem 0.35rem; white-space:nowrap">
