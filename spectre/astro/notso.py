@@ -507,12 +507,13 @@ def correlate_notsos_with_manoeuvres(
        the bracket between the element sets either side. The after-element-set
        epoch alone can lag the burn by the whole gap, which reported notified
        burns as silent (audit F-027).
-    2. Multiple manoeuvre candidates → select the burn window closest to the
-       NOTSO window midpoint. The time offset is measured to the point of the
-       burn window nearest that midpoint.
-    3. Multiple NOTSO candidates → select closest effective_start.
-    4. Unmatched NOTSOs → "notso_only" (filed but no manoeuvre detected).
-    5. Unmatched manoeuvres → "manoeuvre_only" (no corresponding NOTSO).
+    2. Pairs are assigned closest first: of every NOTSO-manoeuvre pair within
+       tolerance, the one whose burn window lies nearest the NOTSO window
+       midpoint is taken, then the next, each NOTSO and manoeuvre used once
+       (ties go to the earlier window). The time offset is measured to the
+       point of the burn window nearest that midpoint.
+    3. Unmatched NOTSOs → "notso_only" (filed but no manoeuvre detected).
+    4. Unmatched manoeuvres → "manoeuvre_only" (no corresponding NOTSO).
     """
     tolerance = timedelta(hours=time_tolerance_hours)
 
@@ -525,55 +526,23 @@ def correlate_notsos_with_manoeuvres(
         key=lambda m: m.epoch,
     )
 
-    matched_notso_ids: set[str] = set()
-    matched_mnv: set[int]       = set()
-    correlations: list[NOTSOManoeuvreCorrelation] = []
-
-    # Match each NOTSO to at most one manoeuvre
-    for notso in obj_notsos:
-        window_start = notso.effective_start_utc - tolerance
-        window_end   = notso.effective_end_utc   + tolerance
-
-        candidates = [
-            m for m in obj_manoeuvres
-            if _burn_window(m)[0] <= window_end and _burn_window(m)[1] >= window_start
-            and id(m) not in matched_mnv
-        ]
-
-        if candidates:
-            # Select candidate closest to window midpoint
-            midpoint = notso.effective_start_utc + (
-                notso.effective_end_utc - notso.effective_start_utc
-            ) / 2
-            best = min(candidates, key=lambda m: abs((_nearest(m, midpoint) - midpoint).total_seconds()))
-
-            burn_at = _nearest(best, midpoint)
-            offset_h = (notso.effective_start_utc - burn_at).total_seconds() / 3600.0
-            lead_h = (burn_at - notso.issue_date_utc).total_seconds() / 3600.0
-            mag_ratio = None
-            if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
-                mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
-
-            correlations.append(NOTSOManoeuvreCorrelation(
-                notso=notso,
-                manoeuvre=best,
-                correlation_type="matched",
-                time_offset_hours=round(offset_h, 2),
-                magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
-                lead_time_hours=round(lead_h, 2),
-            ))
-            matched_notso_ids.add(notso.message_id)
-            matched_mnv.add(id(best))
-        else:
-            correlations.append(NOTSOManoeuvreCorrelation(
-                notso=notso,
-                manoeuvre=None,
-                correlation_type="notso_only",
-                time_offset_hours=None,
-                magnitude_ratio=None,
-                notes="NOTSO filed but no manoeuvre detected in TLE analysis",
-            ))
-            matched_notso_ids.add(notso.message_id)
+    # Pair closest first: every NOTSO-manoeuvre pair within tolerance, ordered
+    # by the burn's distance from the NOTSO window midpoint, each side used
+    # once. Walking the NOTSOs in start order let an early, wide notice claim
+    # a burn a later notice's window fits better (audit F-092).
+    pairing = _closest_first(obj_notsos, obj_manoeuvres, tolerance)
+    matched_mnv = {id(m) for m in pairing.values()}
+    correlations: list[NOTSOManoeuvreCorrelation] = [
+        _matched(notso, pairing[id(notso)]) if id(notso) in pairing else NOTSOManoeuvreCorrelation(
+            notso=notso,
+            manoeuvre=None,
+            correlation_type="notso_only",
+            time_offset_hours=None,
+            magnitude_ratio=None,
+            notes="NOTSO filed but no manoeuvre detected in TLE analysis",
+        )
+        for notso in obj_notsos
+    ]
 
     # Unmatched manoeuvres
     for m in obj_manoeuvres:
@@ -588,6 +557,51 @@ def correlate_notsos_with_manoeuvres(
             ))
 
     return correlations
+
+
+def _midpoint(notso: NOTSORecord) -> datetime:
+    return notso.effective_start_utc + (notso.effective_end_utc - notso.effective_start_utc) / 2
+
+
+def _closest_first(
+    notsos: list[NOTSORecord], manoeuvres: list[Any], tolerance: timedelta,
+) -> dict[int, Any]:
+    """Map id(notso) to its manoeuvre, assigning the closest pairs first."""
+    candidates = []
+    for notso in notsos:
+        window_start = notso.effective_start_utc - tolerance
+        window_end = notso.effective_end_utc + tolerance
+        mid = _midpoint(notso)
+        for order, m in enumerate(manoeuvres):
+            lo, hi = _burn_window(m)
+            if lo <= window_end and hi >= window_start:
+                distance = abs((_nearest(m, mid) - mid).total_seconds())
+                candidates.append((distance, notso.effective_start_utc, order, notso, m))
+    pairing: dict[int, Any] = {}
+    used: set[int] = set()
+    for _, _, _, notso, m in sorted(candidates, key=lambda c: c[:3]):
+        if id(notso) not in pairing and id(m) not in used:
+            pairing[id(notso)] = m
+            used.add(id(m))
+    return pairing
+
+
+def _matched(notso: NOTSORecord, best: Any) -> NOTSOManoeuvreCorrelation:
+    """The correlation row for a NOTSO paired with a manoeuvre."""
+    burn_at = _nearest(best, _midpoint(notso))
+    offset_h = (notso.effective_start_utc - burn_at).total_seconds() / 3600.0
+    lead_h = (burn_at - notso.issue_date_utc).total_seconds() / 3600.0
+    mag_ratio = None
+    if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
+        mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
+    return NOTSOManoeuvreCorrelation(
+        notso=notso,
+        manoeuvre=best,
+        correlation_type="matched",
+        time_offset_hours=round(offset_h, 2),
+        magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
+        lead_time_hours=round(lead_h, 2),
+    )
 
 
 def _burn_window(m: Any) -> tuple[datetime, datetime]:
