@@ -1521,11 +1521,12 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         resolved = []
         for arg in args:
             ref = re.fullmatch(r"this\.dataset\.(\w+)", arg.strip())
-            if ref:
-                attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
-                assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
-                arg = attrs[-1]
-            resolved.append(arg)
+            if not ref:
+                resolved.append(arg)
+                continue
+            attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
+            assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
+            resolved.append(attrs[-1])
         return resolved
 
     @staticmethod

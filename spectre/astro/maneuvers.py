@@ -662,12 +662,8 @@ def plane_change_intercept(
 
     kep_red = state_to_keplerian(sv_red)
 
-    # The angle between the two orbit PLANES, not the inclination difference.
-    # Two 53 deg planes 10 deg apart in RAAN are 8 deg apart, and using
-    # inclination alone priced aligning them at zero (audit F-002).
     h_red_hat = _unit_normal(sv_red)
     h_blue_hat = _unit_normal(sv_blue)
-    plane_angle_deg = math.degrees(math.acos(float(np.clip(np.dot(h_red_hat, h_blue_hat), -1.0, 1.0))))
     r_red = sv_red.r_mag
     r_blue = sv_blue.r_mag
     alt_diff = abs(r_blue - r_red)
@@ -703,7 +699,7 @@ def plane_change_intercept(
     return _combined_plane_transfer(
         red_orbit, blue_orbit, (h_red_hat, h_blue_hat),
         _next_plane_crossing(red_orbit, h_blue_hat, t_departure, period_s),
-        plane_angle_deg, mu,
+        mu=mu,
     )
 
 
@@ -712,7 +708,7 @@ def _combined_plane_transfer(
     blue_orbit: TLEOrbit,
     normals: tuple[np.ndarray, np.ndarray],
     t_departure: datetime,
-    plane_angle_deg: float,
+    *,
     mu: float,
 ) -> InterceptSolution:
     """Fly the combined altitude and plane change from a crossing of the blue plane.
@@ -725,6 +721,10 @@ def _combined_plane_transfer(
     the interceptor has, so the vectors are the ones that were priced.
     """
     h_red_hat, h_blue_hat = normals
+    # The angle between the two orbit PLANES, not the inclination difference.
+    # Two 53 deg planes 10 deg apart in RAAN are 8 deg apart, and using
+    # inclination alone priced aligning them at zero (audit F-002).
+    plane_angle_deg = math.degrees(math.acos(float(np.clip(np.dot(h_red_hat, h_blue_hat), -1.0, 1.0))))
     sv_dep = red_orbit.propagate(t_departure)
     r1 = sv_dep.r_mag
     r2 = blue_orbit.propagate(t_departure).r_mag
@@ -1158,7 +1158,7 @@ def evasion_intercept(
     plan = optimal_evasion(sv_blue.r_mag, desired_miss_km, time_before_tca_s, fuel_budget_km_s, mu)
 
     flown = [
-        _fly_evasion(blue_orbit, t_tca, candidate, sense, separation_at_tca, mu)
+        _fly_evasion(blue_orbit, t_tca, (candidate, sense), separation_at_tca, mu)
         for candidate in plan.strategies or [plan.best]
         for sense in (1.0, -1.0)
     ]
@@ -1178,17 +1178,17 @@ def evasion_intercept(
 def _fly_evasion(
     blue_orbit: TLEOrbit,
     t_tca: datetime,
-    candidate: EvasionResult,
-    sense: float,
+    option: tuple[EvasionResult, float],
     separation_at_tca: np.ndarray,
     mu: float,
 ) -> tuple[Burn, float]:
-    """Apply one evasion candidate and return the burn and the miss it achieves.
+    """Apply one evasion candidate, in the given sense, and return the burn and its miss.
 
     The burn's effect is taken as the difference between two two-body coasts
     from the same state, with and without the burn, so the propagator's own
     model error cancels and only the displacement is added to the prediction.
     """
+    candidate, sense = option
     t_burn = t_tca - timedelta(seconds=candidate.burn_epoch_offset_s)
     sv = blue_orbit.propagate(t_burn)
     v_hat = sv.v / sv.v_mag
