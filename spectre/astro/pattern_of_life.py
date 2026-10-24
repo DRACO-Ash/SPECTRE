@@ -41,7 +41,6 @@ from spectre.astro.dv_estimation import (
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
-_EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
 # ── Element set format ────────────────────────────────────────────────────────
 
@@ -370,6 +369,26 @@ def _gst_deg(epoch: datetime) -> float:
     return (280.46061837 + 360.98564736629 * (jd - 2451545.0)) % 360.0
 
 
+def _geo_drift_deg_day(sat: Satrec, epoch: datetime) -> float | None:
+    """Longitude drift (deg/day, positive east) that SGP4 flies from *epoch*.
+
+    The Earth-fixed longitude change over one sidereal day of propagation,
+    which cancels the daily swing an eccentric orbit adds. Mean motion alone
+    leaves out the secular node and perigee rates (J2 alone is about
+    0.0134 deg/day at GEO) and the deep-space terms SGP4 applies there
+    (audit F-093). None if SGP4 reports an error.
+    """
+    jd = _epoch_to_jd(epoch)
+    lons = []
+    for days in (0.0, SIDEREAL_DAY / 86400.0):
+        err, r, _ = sat.sgp4(jd + days, 0.0)
+        if err:
+            return None
+        lons.append(math.degrees(math.atan2(r[1], r[0])) - _gst_deg(epoch + timedelta(days=days)))
+    change = (lons[1] - lons[0] + 180.0) % 360.0 - 180.0
+    return change / (SIDEREAL_DAY / 86400.0)
+
+
 def _satrec_to_record(tle: str) -> TLERecord:
     # Cut to _TLE_LINE_COLUMNS here rather than only at the template, so the
     # record carries element set data and nothing else. See the constant.
@@ -401,8 +420,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
         gst          = _gst_deg(epoch)
         lon          = (mean_lon_eci - gst) % 360.0
         geo_lon      = lon - 360.0 if lon > _LONGITUDE_WRAP_DEG else lon
-        # Drift rate: positive = east
-        geo_drift = 360.0 * (n_revday - _EARTH_ROT)
+        geo_drift    = _geo_drift_deg_day(sat, epoch)
 
     # Element Set Number — TLE line 1, columns 65-68 (1-indexed), right-justified
     try:
