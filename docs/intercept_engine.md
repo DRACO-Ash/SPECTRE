@@ -86,50 +86,63 @@ and a result requested under either name says which solver it ran
 
 ## Result Format
 
-Every method returns an `InterceptResult` dataclass:
+Every method returns an `InterceptResult` dataclass (`spectre/domain/models.py`).
+Delta-V is in m/s throughout.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `method` | `InterceptMethod` | Enum value identifying the solver |
-| `total_delta_v_km_s` | `float` | Total ΔV magnitude (km/s) |
+| `red_name` | `str` | The interceptor |
+| `blue_name` | `str` | The target |
+| `method` | `InterceptMethod` | Enum value identifying the solver (an alias names the solver it ran in `notes`) |
 | `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
-| `intercept_range_km` | `float` | Miss distance at arrival epoch (km) |
-| `transfer_time_h` | `float` | Coast time from burn to intercept (hours) |
-| `notes` | `str` | Human-readable summary |
+| `total_delta_v_m_s` | `float` | Sum of the burn magnitudes (m/s) |
+| `arrival_epoch` | `datetime` | UTC time the interceptor reaches its final position |
+| `intercept_range_km` | `float` | Miss distance at arrival (km); for the seven assessment methods, a 0 to 100 score instead |
+| `notes` | `str` | Provenance line naming the solver |
+| `option_id` | `str` | Unique result identifier (`INT_…`) |
 
 Each `BurnResult`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `burn_epoch` | `datetime` | UTC time of burn |
-| `delta_v_km_s` | `float` | Burn magnitude (km/s) |
-| `dv_radial` | `float` | Radial (R) component in VNB frame |
-| `dv_along_track` | `float` | Along-track (T) / in-track component |
-| `dv_cross_track` | `float` | Cross-track (N) component |
-| `location_label` | `str` | Human label (e.g. "Apogee", "Ascending Node") |
+| `burn_number` | `int` | Position in the sequence, from 1 |
+| `segment_name` | `str` | Display label, "Burn 1", "Burn 2" and so on |
+| `burn_epoch` | `datetime` | UTC time of the burn |
+| `delta_v_m_s` | `float` | Burn magnitude (m/s) |
+| `dv_prograde` | `float` | Along the velocity vector (m/s) |
+| `dv_normal` | `float` | Along the orbit normal (m/s) |
+| `dv_radial` | `float` | Along the radius vector (m/s) |
 
 ---
 
 ## Route Dispatch (`maneuver.py`)
 
-`POST /plan/maneuver/calculate` — main intercept solver route:
+All under `/plan/maneuver`, behind login.
 
-1. Parse form fields: `red_satno`, `blue_satno`, `method`, `coast_h`, `tof_h`, plus method-specific params
-2. Fetch TLEs from `SessionState` (assets must already be loaded)
-3. Resolve `InterceptMethod` enum → dispatch to the appropriate `spectre.astro` function
-4. Wrap result in `InterceptResult`; append to `state.intercept_history`
-5. Return `partials/intercept_result.html` fragment via HTMX swap
+`POST /plan/maneuver/apply-all-intercepts`: what the Intercept Engine form posts.
+Runs each of the 23 solvers once on the same inputs (red and blue satellite,
+manoeuvre start, coast, time of flight, target distance, ΔV budget, revolutions,
+hops, drift days, data mode), ranks the results, replaces the trade-space history
+with them and returns `partials/all_intercepts_result.html`.
 
-`GET /plan/maneuver/tradespace` — trade-space scatter data:
+`POST /plan/maneuver/apply-intercept`: one method by name, for scripted use. It
+appends its result to the history (the latest 200 are kept) and returns
+`partials/intercept_result.html`.
 
-- Returns all `InterceptResult` objects from `state.intercept_history` as a Chart.js dataset
-- Called automatically after the second intercept result is added (HTMX trigger)
+`GET /plan/maneuver/trade-space-data`: the history as JSON points (ΔV in m/s,
+transfer time in minutes, `miss_km` or, for an assessment method, `score`),
+fetched when the operator renders the trade-space chart.
+
+`POST /plan/maneuver/clear-history`: empties the history.
+
+`GET /plan/maneuver/orbital-events`: apogee, perigee and node times for the
+selected satellites.
 
 ---
 
 ## Trade-Space Plot
 
-After two or more intercept results are computed, a scatter plot appears automatically showing all results in ΔV vs transfer-time space, colour-coded by method. Zoom/pan is enabled via `hammer.min.js` + `chartjs-plugin-zoom.min.js`.
+Once results exist, the operator renders a scatter plot of the history in ΔV against transfer-time space, colour-coded by method, from the trade-space bar. Assessment methods carry a score, not a miss, and their points say so. Zoom/pan is enabled via `hammer.min.js` + `chartjs-plugin-zoom.min.js`.
 
 Use this to identify the optimal trade-off between fuel cost and time of arrival. Methods that appear in the lower-left quadrant (low ΔV, short time) are the most efficient under the current orbital geometry.
 
