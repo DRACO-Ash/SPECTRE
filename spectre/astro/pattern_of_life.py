@@ -220,6 +220,11 @@ class Manoeuvre:
         return self.epoch
 
     @property
+    def long_gap(self) -> bool:
+        """True when the bracketing gap is long enough to hide several burns."""
+        return self.gap_days > _LONG_GAP_WARN_DAYS
+
+    @property
     def burn_window(self) -> tuple[datetime, datetime]:
         """Earliest and latest times the burn can have happened.
 

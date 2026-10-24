@@ -700,7 +700,8 @@
           </td>
           {% endif %}
           <td class="col-dim">{{ m.dominant_element }}</td>
-          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
+          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}{% if m.long_gap %}
+            <span style="color:#f59e0b" title="Gap longer than the long-gap threshold: this may be several burns read as one">⚑</span>{% endif %}</td>
           <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
           <td style="white-space:nowrap">
             <span style="color:{{ CONF_COL.get(m.confidence, 'var(--text-dim)') }}; font-weight:700">
