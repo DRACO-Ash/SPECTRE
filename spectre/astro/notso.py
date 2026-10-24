@@ -281,18 +281,32 @@ def _split_messages(text: str) -> list[str]:
         text,
         flags=re.IGNORECASE,
     )
-    # Also split on "MESSAGE ID:" or "MSGID:" as a reliable separator
+    # A MSGID line also starts a new message when the message so far already
+    # has one, or follows a blank line. Splitting on every MSGID cut a message
+    # whose SATNO came first in two, and the half holding the window was
+    # dropped for want of a SATNO (audit F-088).
     expanded: list[str] = []
     for msg in messages:
-        sub = re.split(r"(?:MESSAGE\s*ID|MSGID)\s*:", msg, flags=re.IGNORECASE)
-        if len(sub) > 1:
-            # Re-prepend the split token
-            expanded.append(sub[0])
-            for s in sub[1:]:
-                expanded.append("MSGID: " + s)
-        else:
-            expanded.append(msg)
+        expanded.extend(_split_on_msgid(msg))
     return [m.strip() for m in expanded if m.strip()]
+
+
+_MSGID_LINE = re.compile(r"^\s*(?:MESSAGE\s*ID|MSGID)\s*:", re.IGNORECASE)
+
+
+def _split_on_msgid(text: str) -> list[str]:
+    """Split *text* before each MSGID line that begins a new message."""
+    fragments: list[list[str]] = [[]]
+    has_msgid = False
+    previous_blank = True
+    for line in text.splitlines():
+        if _MSGID_LINE.match(line):
+            if any(ln.strip() for ln in fragments[-1]) and (has_msgid or previous_blank):
+                fragments.append([])
+            has_msgid = True
+        fragments[-1].append(line)
+        previous_blank = not line.strip()
+    return ["\n".join(f) for f in fragments]
 
 
 def parse_notso_text(raw_text: str) -> list[NOTSORecord]:
