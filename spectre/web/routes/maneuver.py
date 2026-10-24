@@ -47,7 +47,7 @@ from spectre.astro.maneuvers import (
     terrain_intercept,
     vbar_hop_intercept,
 )
-from spectre.astro.propagator import regime_from_tle
+from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
@@ -854,7 +854,7 @@ async def apply_intercept(
     try:
         red_regime = regime_from_tle(red_tle)
         blue_regime = regime_from_tle(blue_tle)
-    except Exception:
+    except TLE_ERRORS:
         red_regime = blue_regime = "LEO"  # assume compatible on parse failure
 
     if not regimes_compatible(red_regime, blue_regime):
@@ -1121,7 +1121,7 @@ async def apply_all_intercepts(
     try:
         red_regime = regime_from_tle(red_tle)
         blue_regime = regime_from_tle(blue_tle)
-    except Exception:
+    except TLE_ERRORS:
         red_regime = blue_regime = "LEO"  # assume compatible on parse failure
 
     if not regimes_compatible(red_regime, blue_regime):

@@ -53,6 +53,14 @@ _NO_ANALYSIS_HTML = (
 
 # ── UDL helper ────────────────────────────────────────────────────────────────
 
+def _first(rec: dict[str, Any], *keys: str) -> str:
+    """The first truthy value among *keys*, as stripped text; empty if none."""
+    for key in keys:
+        if rec.get(key):
+            return str(rec[key]).strip()
+    return ""
+
+
 def _parse_udl_elset_response(
     resp: httpx.Response,
 ) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
@@ -69,7 +77,7 @@ def _parse_udl_elset_response(
 
     try:
         data = resp.json()
-    except Exception:
+    except ValueError:
         # Plain TLE text — no provenance metadata available.
         return raw, {}, {}, ""
 
@@ -85,22 +93,15 @@ def _parse_udl_elset_response(
     rms_metadata: dict[str, float | None] = {}
     sat_name: str = ""
     for rec in records:
-        l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
-        l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
+        l1 = _first(rec, "line1", "TLE_LINE1", "tle1")
+        l2 = _first(rec, "line2", "TLE_LINE2", "tle2")
         if l1.startswith("1 ") and l2.startswith("2 "):
-            lines.append(l1)
-            lines.append(l2)
-            dm  = str(rec.get("dataMode") or rec.get("data_mode") or "").strip()
-            src = str(rec.get("source") or "").strip()
-            metadata[l1] = (dm, src)
+            lines += [l1, l2]
+            metadata[l1] = (_first(rec, "dataMode", "data_mode"), _first(rec, "source"))
             rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")
             rms_metadata[l1] = float(rms_raw) if rms_raw is not None else None
             # Capture satellite name from first valid record that has one
-            if not sat_name:
-                sat_name = str(
-                    rec.get("satName") or rec.get("objectName") or
-                    rec.get("OBJECT_NAME") or rec.get("name") or ""
-                ).strip()
+            sat_name = sat_name or _first(rec, "satName", "objectName", "OBJECT_NAME", "name")
 
     logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
     return "\n".join(lines), metadata, rms_metadata, sat_name
@@ -326,7 +327,7 @@ async def pol_analyse(
                 source=state.udl_tle_source,
             )
             logger.info("PoL: %d chars from UDL (direct) for %d", len(archive_text), satno)
-        except Exception as exc:
+        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL direct failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
@@ -344,7 +345,7 @@ async def pol_analyse(
                 source=state.udl_tle_source,
             )
             logger.info("PoL: %d chars from UDL (session) for %d", len(archive_text), satno)
-        except Exception as exc:
+        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL session failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 

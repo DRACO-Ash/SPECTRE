@@ -177,7 +177,7 @@ def load_scenarios() -> list[TrainingScenario]:
     except FileNotFoundError:
         logger.warning("Training scenario config not found: %s", _CONFIG_PATH)
         return []
-    except Exception as exc:
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
         logger.error("Failed to load training scenarios: %s", exc)
         return []
 

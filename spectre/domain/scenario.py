@@ -6,9 +6,10 @@ Uses spectre.astro for orbital propagation and access computation.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from collections.abc import Iterable, Iterator
+from datetime import datetime, timedelta
 
-from spectre.astro.propagator import TLEOrbit
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
 from spectre.domain.models import (
     BlueAsset,
     InterceptWindow,
@@ -47,8 +48,6 @@ class ScenarioPlanner:
         Propagates each blue-vs-red pair over the scenario window and
         returns :class:`InterceptWindow` entries where range < threshold.
         """
-        import numpy as np
-
         logger.info(
             "Starting planning run",
             extra={
@@ -67,50 +66,12 @@ class ScenarioPlanner:
                 try:
                     b_orb = TLEOrbit(blue.tle)
                     r_orb = TLEOrbit(red.tle)
-                except Exception:
+                except TLE_ERRORS:
                     logger.warning(
                         "Skipping %s vs %s — invalid TLE", blue.name, red.name
                     )
                     continue
-
-                t = start
-                in_window = False
-                win_start = start
-                min_range = float("inf")
-
-                while t <= stop:
-                    try:
-                        sv_b = b_orb.propagate(t)
-                        sv_r = r_orb.propagate(t)
-                        rng = float(np.linalg.norm(sv_b.r - sv_r.r))
-                    except Exception:
-                        t += timedelta(seconds=_STEP_S)
-                        continue
-
-                    if rng < _ACCESS_RANGE_KM:
-                        if not in_window:
-                            in_window = True
-                            win_start = t
-                            min_range = rng
-                        else:
-                            min_range = min(min_range, rng)
-                    elif in_window:
-                        windows.append(InterceptWindow(
-                            start=win_start, end=t,
-                            min_range_km=min_range,
-                            blue_name=blue.name, red_name=red.name,
-                        ))
-                        in_window = False
-                        min_range = float("inf")
-
-                    t += timedelta(seconds=_STEP_S)
-
-                if in_window:
-                    windows.append(InterceptWindow(
-                        start=win_start, end=stop,
-                        min_range_km=min_range,
-                        blue_name=blue.name, red_name=red.name,
-                    ))
+                windows += _pair_windows(blue, red, _ranges(b_orb, r_orb, start, stop), stop)
 
         windows.sort(key=lambda w: w.start)
         logger.info(
@@ -118,3 +79,48 @@ class ScenarioPlanner:
             extra={"run_id": self._config.run_id, "window_count": len(windows)},
         )
         return windows
+
+
+def _ranges(
+    b_orb: TLEOrbit, r_orb: TLEOrbit, start: datetime, stop: datetime,
+) -> Iterator[tuple[datetime, float]]:
+    """Blue-red range in km at each step, skipping steps SGP4 cannot reach."""
+    import numpy as np
+
+    t = start
+    while t <= stop:
+        try:
+            rng = float(np.linalg.norm(b_orb.propagate(t).r - r_orb.propagate(t).r))
+        except TLE_ERRORS:
+            pass
+        else:
+            yield t, rng
+        t += timedelta(seconds=_STEP_S)
+
+
+def _pair_windows(
+    blue: BlueAsset, red: RedTrack,
+    ranges: Iterable[tuple[datetime, float]], stop: datetime,
+) -> list[InterceptWindow]:
+    """Spans where the range stays under the threshold; one still open ends at *stop*."""
+    windows: list[InterceptWindow] = []
+    win_start: datetime | None = None
+    min_range = float("inf")
+    for t, rng in ranges:
+        if rng < _ACCESS_RANGE_KM:
+            if win_start is None:
+                win_start, min_range = t, rng
+            else:
+                min_range = min(min_range, rng)
+        elif win_start is not None:
+            windows.append(InterceptWindow(
+                start=win_start, end=t, min_range_km=min_range,
+                blue_name=blue.name, red_name=red.name,
+            ))
+            win_start = None
+    if win_start is not None:
+        windows.append(InterceptWindow(
+            start=win_start, end=stop, min_range_km=min_range,
+            blue_name=blue.name, red_name=red.name,
+        ))
+    return windows

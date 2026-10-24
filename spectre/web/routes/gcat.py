@@ -347,7 +347,7 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             # mixed encodings. Decoding as UTF-8 with replacement is what the
             # parser below has always been handed.
             raw = resp.content.decode("utf-8", errors="replace")
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - one unreachable dataset must not take the others down
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
         return key, None
 
@@ -367,7 +367,7 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             on_bad_lines="skip",
             low_memory=False,
         )
-    except Exception as exc:
+    except ValueError as exc:   # pandas' ParserError and EmptyDataError are ValueErrors
         log.error("[GCAT] ✗  Parse error %-20s: %s", label, exc)
         return key, None
 
@@ -535,7 +535,7 @@ def _page_data(
     if sort and sort in df.columns:
         try:
             df = df.sort_values(sort, ascending=bool(asc), key=lambda s: s.str.lower())
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             log.warning("[GCAT] sort failed for '%s': %s", log_safe(sort), exc)
     elif sort:
         log.warning("[GCAT] sort column '%s' not found in %s", log_safe(sort), key)

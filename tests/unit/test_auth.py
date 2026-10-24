@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-unit-tests")
 
 
-from spectre.web.auth import (  # noqa: E402
+from spectre.web.auth import (
     decode_session_cookie,
     hash_password,
     make_session_cookie,

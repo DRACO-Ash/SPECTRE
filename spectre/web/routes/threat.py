@@ -32,7 +32,7 @@ from spectre.astro.maneuvers import (
     plane_change_intercept,
     vbar_hop_intercept,
 )
-from spectre.astro.propagator import TLEOrbit, regime_from_tle, state_to_keplerian
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
@@ -140,7 +140,7 @@ async def red_orbit_info(
             "a_km": a_km,
             "pair": pair,
         })
-    except Exception as exc:
+    except TLE_ERRORS as exc:
         # red_sat is a query parameter and the exception text is built from an
         # operator-supplied element set, so both can carry a newline and forge
         # an audit record (pythonsecurity:S5145).
@@ -169,7 +169,7 @@ def _interceptor_regime(state: object, red_sat_name: str) -> str | None:
             sv = orbit.propagate(t)
             kep = state_to_keplerian(sv)
             return classify_orbit_regime(kep.a, kep.ecc)
-        except Exception:
+        except TLE_ERRORS:
             return None
     return None
 

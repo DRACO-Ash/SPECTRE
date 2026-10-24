@@ -75,6 +75,14 @@ class KeplerianElements:
         return self.a * (1.0 - self.ecc)
 
 
+#: What a malformed or unpropagatable element set raises: ValueError from the
+#: parser, RuntimeError from SGP4, and ZeroDivisionError (an ArithmeticError)
+#: from a zero mean motion in ``regime_from_tle``. Handlers around element set
+#: parsing catch this rather than Exception, so a programming error elsewhere
+#: in the block is not reported as a bad element set.
+TLE_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError, ArithmeticError)
+
+
 class TLEOrbit:
     """Satellite orbit defined by a TLE, propagated with SGP4."""
 

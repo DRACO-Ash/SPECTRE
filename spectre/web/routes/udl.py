@@ -125,7 +125,7 @@ async def fetch_tle_history_for_satno(
             )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_history_for_satno(%s) failed: %s", satno, exc)
         return []
 
@@ -167,7 +167,7 @@ async def fetch_tle_for_satno(
             )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_for_satno(%s) failed: %s", satno, exc)
         return None
 
@@ -260,7 +260,7 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         set_onorbit_catalog(data if isinstance(data, list) else [])
         _CATALOG_CLOCK.loaded_at = time.monotonic()
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - a background task; any failure must reach the status flag
         set_catalog_status("error")
         logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
 
@@ -290,7 +290,7 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
         })
         state.udl_available_sources = sources
         logger.info("UDL TLE sources discovered: %s", log_safe(sources))
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the default source list
         logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
 
 
@@ -1087,6 +1087,23 @@ async def search_catalog(
     )
 
 
+#: Output field -> the UDL fields that may carry it, in order of preference.
+_NOTSO_FIELDS: dict[str, tuple[str, str]] = {
+    "message_id":  ("messageId", "id"),
+    "issue_date":  ("issueDate", "date"),
+    "start":       ("effectiveStart", "startTime"),
+    "end":         ("effectiveEnd", "stopTime"),
+    "type":        ("notificationType", "type"),
+    "description": ("description", "remarks"),
+    "raw":         ("rawMessage", "message"),
+}
+
+
+def _normalise_notso(rec: dict[str, Any]) -> dict[str, str]:
+    """One UDL notification in a consistent shape, whichever field names it used."""
+    return {out: str(rec.get(first) or rec.get(second) or "") for out, (first, second) in _NOTSO_FIELDS.items()}
+
+
 @router.get("/notso", response_model=None)
 async def udl_notso(
     satno: int,
@@ -1122,30 +1139,18 @@ async def udl_notso(
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except ValueError:
             return JSONResponse([])
 
-        # Normalise to a consistent shape
         records = data if isinstance(data, list) else [data]
-        normalised = []
-        for rec in records:
-            normalised.append({
-                "message_id":   str(rec.get("messageId") or rec.get("id") or ""),
-                "issue_date":   str(rec.get("issueDate") or rec.get("date") or ""),
-                "start":        str(rec.get("effectiveStart") or rec.get("startTime") or ""),
-                "end":          str(rec.get("effectiveEnd") or rec.get("stopTime") or ""),
-                "type":         str(rec.get("notificationType") or rec.get("type") or ""),
-                "description":  str(rec.get("description") or rec.get("remarks") or ""),
-                "raw":          str(rec.get("rawMessage") or rec.get("message") or ""),
-            })
-        return JSONResponse(normalised)
+        return JSONResponse([_normalise_notso(rec) for rec in records])
 
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (404, 405, 501):
             return JSONResponse([])
         logger.warning("UDL NOTSO fetch error for %d: %s", satno, exc)
         return JSONResponse({"error": str(exc)}, status_code=502)
-    except Exception as exc:
+    except (httpx.HTTPError, AttributeError) as exc:   # AttributeError: a record that is not an object
         logger.warning("UDL NOTSO fetch failed for %d: %s", satno, exc)
         return JSONResponse({"error": str(exc)}, status_code=502)
 

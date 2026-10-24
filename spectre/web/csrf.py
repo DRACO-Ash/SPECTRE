@@ -125,7 +125,7 @@ async def require_csrf(request: Request) -> None:
             try:
                 form = await request.form()
                 token = str(form.get(_CSRF_FIELD, "") or "")
-            except Exception:
+            except Exception:   # noqa: BLE001 - any unreadable body has no token, and the check below then refuses it
                 token = ""
 
     if not verify_csrf_token(session_cookie, token):

@@ -78,7 +78,8 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE", "S110", "RUF100"]
+external = ["S", "PLR", "PLC", "PLW"]
 ignore = [
     "B008",   # FastAPI Depends() in default args — intentional pattern
     "E501",   # line too long — enforced by line-length setting above

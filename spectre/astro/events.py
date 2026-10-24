@@ -14,7 +14,7 @@ from enum import Enum
 
 import numpy as np
 
-from spectre.astro.propagator import TLEOrbit
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
 
 
 class EventType(Enum):
@@ -64,7 +64,7 @@ def find_orbital_events(
     """
     try:
         orbit = TLEOrbit(tle)
-    except (ValueError, Exception):
+    except TLE_ERRORS:
         return []
 
     events: list[OrbitalEvent] = []

@@ -512,7 +512,7 @@ def propagate_single_sample(
             "period_min": period_min,
             "regime": classify_orbit_regime(sma, ecc),
         }
-    except Exception:
+    except (ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
         return None
 
 
