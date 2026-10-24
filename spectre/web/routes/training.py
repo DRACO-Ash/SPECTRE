@@ -23,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.domain.models import BlueAsset, RedTrack
@@ -384,6 +384,20 @@ async def training_scenario_submit(
     cr = result.scalar_one_or_none()
     if cr is None:
         return HTMLResponse('<p class="error-msg">Attempt record not found.</p>', status_code=404)
+
+    # Claim the attempt atomically: only the first submission of an open
+    # attempt is scored. Resubmitting a completed result_id re-awarded every
+    # point and counter each time (audit F-049); the conditional update also
+    # stops two concurrent submissions both scoring.
+    claim = await db.execute(
+        update(ChallengeResult)
+        .where(ChallengeResult.id == cr.id, ChallengeResult.completed_at.is_(None))
+        .values(completed_at=datetime.now(UTC))
+    )
+    if claim.rowcount == 0:  # type: ignore[attr-defined]
+        return HTMLResponse(
+            '<p class="error-msg">This attempt has already been submitted.</p>', status_code=409,
+        )
 
     try:
         completed_ids: list[str] = json.loads(objectives_completed)
