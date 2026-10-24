@@ -1,18 +1,28 @@
-"""Pattern of Life (PoL) analysis from historical TLE sequences.
+"""Pattern of Life (PoL) measurements from historical TLE sequences.
 
-Given a chronological list of TLEs for a single object this module:
-  - Extracts mean orbital elements at each epoch (direct from SGP4 Satrec)
-  - Computes subsatellite geographic longitude for GEO/GSO objects
-  - Estimates ΔV between successive TLEs (propagation-difference method)
-  - Detects and classifies manoeuvres (SK / plane-change / repositioning)
-  - Corrects RAAN and argp changes for J2 secular drift
-  - Tracks longitude drift phases (East / West / Stationary)
-  - Computes statistical Pattern of Life bounds (μ ± 2σ)
-  - Scores the object on an anomaly scale vs GEO-SK baseline
-  - Estimates propellant budget and remaining operational life
-  - Produces an operator-level intelligence assessment
+Given element sets for a single object, this module measures and stops there:
+  ● parses the history into mean elements from SGP4's own Satrec, dropping
+    and counting element sets that will not parse;
+  ● for GEO and GSO objects, the subsatellite longitude and the drift SGP4
+    flies over one sidereal day;
+  ● screens consecutive pairs against a noise floor measured from the
+    object's own fit scatter (``dv_estimation.calibrate_noise``), and
+    confirms detections with the forensic ΔV breakdown
+    (``dv_estimation.build_breakdown``: epoch-swept propagation and mean
+    element differencing, J2-corrected);
+  ● merges the same burn reported by more than one provider;
+  ● tracks longitude drift phases (east, west, stationary);
+  ● computes ΔV and interval statistics, a small-sample prediction interval
+    for the next burn, and a status scoring the latest burn against the
+    earlier ones.
+
+Judgements against cited per-regime budgets (station-keeping classification,
+anomaly scoring, propellant budget, the operator-level assessment) live in
+``spectre.domain.pol_assessment``, built on
+``spectre.domain.manoeuvre_calibration``. This header used to list them here,
+with a propagation-difference ΔV method the module no longer uses (audit
+F-095).
 """
-
 from __future__ import annotations
 
 import itertools
