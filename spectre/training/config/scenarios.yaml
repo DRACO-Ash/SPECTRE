@@ -35,14 +35,14 @@ scenarios:
     difficulty: easy
     description: >
       A geostationary communications satellite (BLUE-01) must perform a routine
-      north-south station-keeping burn to maintain its assigned longitude slot.
+      east-west station-keeping burn to hold its assigned longitude slot.
       No threat present.  Practise loading the scenario, reading orbital elements
       from the Assets panel, and interpreting the ΔV requirement from the briefing.
     briefing: >
-      BLUE-01 has drifted 0.08° from its assigned longitude slot at 45.0° East.
+      BLUE-01 has drifted 0.08° from its assigned longitude slot at 128.5° West.
       Station-keeping budget: 50 m/s residual.
       Mission computer output: required corrective ΔV = 2.0 m/s
-      north-south component — well within budget.  Execute by 2025-06-15 12:00Z.
+      east-west (along-track) component — well within budget.  Execute by 2025-06-15 12:00Z.
       No threat object is present.  This is a single-asset maintenance task.
     scenario_epoch_utc: "2025-06-15T00:00:00Z"
     horizon_hours: 24
@@ -59,8 +59,10 @@ scenarios:
       2. Assets panel → confirm BLUE-01 appears in the Blue Assets list (pre-loaded by the scenario).
          If not, click Quick-Add Blue and paste the TLE lines from the objects list above.
       3. Click BLUE-01 in the Assets panel to expand its orbital elements.
-         Read the RAAN field — for a GEO satellite this equals the sub-satellite longitude in degrees East.
-         Record this value to answer Objective 2.
+         Read the RAAN field and record it for Objective 2. RAAN is an inertial angle,
+         measured from the vernal equinox; it is not the longitude. The sub-satellite
+         longitude also depends on the argument of perigee, the mean anomaly and the
+         Earth's rotation: here RAAN 45.0° puts BLUE-01 over 128.5° West.
       4. Read the briefing: the mission computer ΔV of 2.0 m/s is stated directly.
          Confirm it is within the 50 m/s budget and enter this value for Objective 3.
       5. Tick all objectives and click Submit & Score.
@@ -70,12 +72,12 @@ scenarios:
         skill_axis: situational_awareness
         points: 10
       - id: obj_read_elements
-        description: "Read the assigned longitude from the BLUE-01 orbital elements (RAAN field) — answer in degrees East"
+        description: "Read the right ascension of the ascending node (RAAN) from the BLUE-01 orbital elements — answer in degrees"
         skill_axis: situational_awareness
         points: 20
         answer: "45.0"
         tolerance: 0.5
-        unit: "degrees East"
+        unit: "degrees"
       - id: obj_confirm_dv
         description: "Enter the corrective ΔV stated by the mission computer in the briefing (m/s)"
         skill_axis: manoeuvre_planning
@@ -270,7 +272,7 @@ scenarios:
     time_limit_minutes: 45
     scoring:
       passing_score: 350
-      optimal_score: 500
+      optimal_score: 350
 
   - id: operator_timed_full_cycle
     title: "Full Engagement Cycle — Timed"
@@ -340,7 +342,7 @@ scenarios:
     time_limit_minutes: 20
     scoring:
       passing_score: 400
-      optimal_score: 600
+      optimal_score: 500
 
   # ── Level 2 additions ─────────────────────────────────────────────────────────
 
@@ -756,7 +758,7 @@ scenarios:
     time_limit_minutes: null
     scoring:
       passing_score: 260
-      optimal_score: 360
+      optimal_score: 260
 
   - id: planner_05_leo_phasing_campaign
     title: "LEO Phasing Campaign — Multi-Step Manoeuvre"
@@ -820,8 +822,9 @@ scenarios:
         points: 50
     time_limit_minutes: null
     scoring:
-      passing_score: 300
-      optimal_score: 460
+      # The objectives total 260; this asked for 300 and could not be passed (audit F-052).
+      passing_score: 200
+      optimal_score: 260
 
   # ── Level 5 additions ─────────────────────────────────────────────────────────
 
@@ -917,4 +920,4 @@ scenarios:
     time_limit_minutes: 30
     scoring:
       passing_score: 500
-      optimal_score: 650
+      optimal_score: 550
