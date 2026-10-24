@@ -97,8 +97,16 @@ def find_orbital_events(
     return events
 
 
-# PLR0913, PLR0917: one state vector's parts and the gravitational parameter.
-def _anomaly_and_latitude(  # noqa: PLR0913, PLR0917
+#: Below this eccentricity the orbit has no usable perigee direction.
+_CIRCULAR_ECC = 1e-10
+#: Apogee is true anomaly 180 deg. Perigee is the wrap through 0 deg, read as
+#: a step from above 300 deg to below 60 deg so one sample step cannot miss it.
+_APOGEE_TA = 180.0
+_WRAP_FROM_TA = 300.0
+_WRAP_TO_TA = 60.0
+
+
+def _anomaly_and_latitude(
     r: np.ndarray, v: np.ndarray, r_mag: float, v_mag: float, mu: float,
 ) -> tuple[float, float]:
     """True anomaly and geocentric latitude, in degrees, of one state.
@@ -110,7 +118,7 @@ def _anomaly_and_latitude(  # noqa: PLR0913, PLR0917
     e_vec = ((v_mag ** 2 - mu / r_mag) * r - r_mag * v_r * v) / mu
     ecc = float(np.linalg.norm(e_vec))
     ta = 0.0
-    if ecc > 1e-10:
+    if ecc > _CIRCULAR_ECC:
         cos_ta = max(-1.0, min(1.0, float(np.dot(e_vec, r)) / (ecc * r_mag)))
         ta = math.degrees(math.acos(cos_ta))
         if v_r < 0:
@@ -123,8 +131,8 @@ def _crossings(prev: tuple[float, float], here: tuple[float, float]) -> list[Eve
     """The events between two consecutive (true anomaly, latitude) samples."""
     (prev_ta, prev_lat), (ta, lat) = prev, here
     rules = (
-        (EventType.APOGEE, prev_ta < 180.0 <= ta),  # TA crosses 180 deg
-        (EventType.PERIGEE, prev_ta > 300.0 and ta < 60.0),  # TA wraps through 0
+        (EventType.APOGEE, prev_ta < _APOGEE_TA <= ta),
+        (EventType.PERIGEE, prev_ta > _WRAP_FROM_TA and ta < _WRAP_TO_TA),
         (EventType.ASCENDING_NODE, prev_lat < 0.0 <= lat),
         (EventType.DESCENDING_NODE, prev_lat >= 0.0 and lat < 0.0),
     )

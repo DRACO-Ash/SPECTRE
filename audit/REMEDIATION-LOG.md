@@ -182,3 +182,38 @@ Each was shown to fail against the original `master` file it guards.
 All new reference pins passed against the existing code; these findings were about the tests' power, not the code's correctness.
 
 **Step 3 astro group: complete.** Every High and Medium finding whose blast radius was "astro solvers" or astro "tests only" is closed or, where noted, split with its remainder named for step 4.
+
+### Web routes and operator UI, first batch
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-037 | | `4a4d4ca` | EVASION gets the operator's ΔV budget; the coast time in hours had been read as km/s |
+| F-049 | | `df14686` | a training attempt is claimed with a conditional UPDATE and scored once; resubmission returns 409 |
+| F-045 | | `427210f` | PoL analysis held to the UDL data and auth rate limits |
+| F-051 | | `396f2fc` | training scenario objects are tagged and removed from the operational lists on leaving training |
+| F-040 | | `eac0d7c` | orbital-event search bounded to 7 days with an early exit, and run off the event loop |
+| F-042 | | `a428a84` | 16 route tests for the threat sweep; threat.py coverage 48% to 78%, with a CI per-file floor of 75. Found and fixed: refine looked manual targets up in the HRR cache |
+| F-050 | | `3360824` | the training Reset button posts to /reset; a nested form had made it submit the score (Chromium-checked) |
+| F-043 | | `d7ad98d` | Add TLE clears its fields after the request, not before (Chromium-checked) |
+| F-039 | F-S06-04 | `0e838c6` | sweep and screen results carry a provenance banner and per-row badges for non-live element sets; the Data Mode filter offers SYNTHETIC |
+| F-058 | F-S00-02 | `de00fa9` | regression gate for the sweep's refusal record. Writing it found that `_refusal_reason` cut figures at the decimal point ("transfer angle 179"); fixed |
+| F-059 | F-S00-03 | `09635bf` | Secure and HttpOnly read off a real Set-Cookie without the opt-out |
+| F-060 | F-S00-04 | `09635bf` | each DELETE route refused without a CSRF token |
+| F-061 | F-S00-05 | `09635bf` | a captured cookie replayed on GET / after logout gets the login page |
+| F-123 | F-S06-05 | `9501e78` | a refused refine shows its reason on the row and logs the refusal, not a Lambert result |
+| F-127 | F-S06-13 | `9501e78` | refine flies the red set the sweep used (manual override included) and keeps the regime; dead "blue" branch removed |
+| F-128 | F-S06-14 | `9501e78` | refine holds its assessment across the await, leaves a replaced sweep alone, and takes `ge=0` |
+| F-124 | F-S06-09 | `c73d054` | an unreadable manual number is blank, not "None"; manual targets are not fetched; fetch failures are recorded, not a 500 |
+| F-125 | F-S06-10 | `a440de4` | refusals are per target (and per actor) with the epoch, and a method that solved is never listed as refused |
+| F-126 | F-S06-11 | `d464486` | manual targets lead, regime mismatches are skipped before the cap, and the cap names what it drops |
+| F-135 | F-S06-25 | `26f2a94` | a failed actor refresh is noted in the screen's provenance banner |
+| F-134 | F-S06-24 | `af97226` | manual targets capped (50 entries, 64-character names, 300-character sets, five confidence values); intercept history keeps the latest 200 |
+| F-130 | F-S06-17 | `f0d86ff` | Hohmann, bi-elliptic and phasing show the computed miss |
+| F-131 | F-S06-18 | `d6c320e` | trade space emits `score` for assessment methods and `miss_km` otherwise; tooltip and clipboard follow. The model-level split is step 4 |
+| F-129 | F-S06-16 | `a83f502` | the unread Burns and Minimise ΔV controls removed; a test requires every intercept form input to be declared and read |
+| F-132 | F-S06-20 | `aa3db11` | Revolutions, Hops and Drift (days) fields; the coast reaches those solvers as a coast |
+| F-133 | F-S06-22 | `0f8ef06` | the Data Mode badge reports the element sets' actual mode, or UNVERIFIED |
+| F-158 | F-S09-02 | `eff8280` | objective ids de-duplicated before scoring |
+| F-160 | F-S09-04 | `eff8280` | challenge awards for challenge scenarios only; no free-play pass award added, as its value is a tuning decision |
+
+`eff8280` also brings the functions this batch touched under the cognitive complexity limit: `training_scenario_submit` (41), `_start_scenario` (17) and `find_orbital_events` (33, output byte-identical across 15 cases). Each security gate (F-058 to F-061) was mutation-checked: it fails when its control is reverted.

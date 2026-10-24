@@ -53,12 +53,13 @@ class TestManualTargets:
         assert sweep_state.manual_sweep_tles == [{"name": "BLUE-GEO", "tle": _BLUE_GEO, "confidence": "HIGH"}]
 
     @pytest.mark.parametrize(
-        ("name", "tle", "message"),
+        "case",
         [("", _BLUE_GEO, "Target name is required"), ("X", "", "TLE is required"), ("X", "not a tle", "Invalid TLE")],
     )
     def test_bad_input_is_refused_with_a_reason(
-        self, client: Any, auth_cookie: str, sweep_state: Any, name: str, tle: str, message: str,
+        self, client: Any, auth_cookie: str, sweep_state: Any, case: tuple[str, str, str],
     ) -> None:
+        name, tle, message = case
         resp = _add_manual(client, auth_cookie, name, tle)
         assert message in resp.text
         assert sweep_state.manual_sweep_tles == []

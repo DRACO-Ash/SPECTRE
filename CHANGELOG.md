@@ -28,7 +28,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - NOTSO parsing and correlation: ΔV fields read, inferred dates flagged, messages split correctly, only labelled IDs taken, rejects shown, true lead time, closest-first pairing (F-086 to F-092).
 - Monte Carlo density is Vallado's exponential atmosphere (F-105); photometry Welch test, fit covariance and empty windows corrected (F-101, F-102, F-108).
 
+### Fixed (audit step 3, web routes and operator UI)
+- Evasion from the intercept engine uses the operator's ΔV budget (F-037).
+- A training attempt is scored once; objectives count once each; challenge awards go to challenge scenarios only; Reset no longer submits the score; training objects leave the operational lists when training ends (F-049, F-158, F-160, F-050, F-051).
+- PoL analysis is rate limited; the orbital-event search is bounded and off the event loop (F-045, F-040).
+- Sweep and screen results say when element sets are not live tracking, including a failed actor refresh (F-039, F-135).
+- Sweep: refusal reasons keep their figures and name their target and epoch; refine reports refusals, flies the swept orbits and cannot write into a newer sweep; an unreadable manual number no longer fails the sweep; pasted targets survive the cap; manual targets are bounded (F-058, F-123 to F-128, F-134).
+- Intercept engine: computed miss shown for every method; assessment scores never labelled km; unread controls removed; revolutions, hops and drift days have their own fields; the Data Mode badge states actual provenance (F-129 to F-133).
+- Add TLE sends its fields before clearing them (F-043).
+
 ### Added
+- Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
+- Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).
 - `spectre/astro/kepler.py`: universal-variable two-body propagator.
 - `solve_lambert_all` and `cheapest_lambert`: multi-revolution Lambert solutions.
 
