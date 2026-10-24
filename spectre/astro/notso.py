@@ -249,12 +249,19 @@ def _extract_norad_id(text: str) -> int | None:
     return None
 
 
-def _extract_delta_v(text: str) -> float | None:
-    """Extract predicted ΔV magnitude from NOTSO description."""
+def _extract_delta_v(text: str, *, bare: bool = False) -> float | None:
+    """Extract predicted ΔV magnitude from NOTSO description.
+
+    With *bare*, *text* is a dedicated field's value, whose key the field
+    parser has already stripped, so a plain "1.5 m/s" is accepted (audit
+    F-086).
+    """
     patterns = [
         r"(?:delta.?v|dv|delta.v)[:\s]*([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)",
         r"([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)\s+(?:burn|manoeuvre|maneuver|impulse)",
     ]
+    if bare:
+        patterns.insert(0, r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)")
     for pat in patterns:
         m = re.search(pat, text, re.IGNORECASE)
         if m:
@@ -387,9 +394,10 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
     )
 
     # Optional predicted ΔV
-    dv = _extract_delta_v(
-        fields.get("PREDICTED DV") or fields.get("DELTA-V") or text
-    )
+    dv_field = fields.get("PREDICTED DV") or fields.get("DELTA-V")
+    dv = _extract_delta_v(dv_field, bare=True) if dv_field else None
+    if dv is None:
+        dv = _extract_delta_v(text)
 
     direction = (
         fields.get("DIRECTION") or fields.get("BURN DIRECTION") or None
