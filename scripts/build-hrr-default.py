@@ -203,11 +203,9 @@ def _entry(satno: str, name: str, country: str, regime: str, rank: int, tle: str
     screen filters candidate actors on that label, so a mismatch would mean
     filtering an object on a description of an orbit it does not have.
 
-    Worth knowing: the classifier calls a Molniya orbit GTO, because it keys
-    on eccentricity above 0.5 with a low perigee and does not distinguish a
-    transfer orbit from an operational highly elliptical one. Both are
-    trans-belt for compatibility purposes so nothing is filtered wrongly, but
-    the label reads oddly against a Cosmos in a Molniya. Recorded, not fixed.
+    The classifier reserves GTO for a low perigee with its apogee at GEO, so
+    a Molniya-type orbit reads HEO (audit F-016). Both are trans-belt for
+    compatibility purposes.
     """
     from spectre.astro.propagator import regime_from_tle
 

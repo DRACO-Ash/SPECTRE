@@ -21,6 +21,7 @@ _MEO_MAX_ALT: float = 35386.0   # GEO lower bound − 400 km
 _GEO_BAND_ALT: float = 35786.0  # nominal GEO altitude
 _GEO_TOL_ALT: float = 400.0     # ± tolerance for GEO band
 _GEO_MAX_ALT: float = 36186.0   # GEO upper bound + 400 km
+_HEO_MIN_ECC: float = 0.25      # eccentric enough to leave the GEO or MEO bands
 
 # Mapping of raw UDL orbitRegime strings → canonical family
 _REGIME_MAP: dict[str, str] = {
@@ -76,8 +77,12 @@ def classify_orbit_regime(semi_major_axis_km: float, eccentricity: float = 0.0) 
     if perigee_alt >= _MEO_MAX_ALT and apogee_alt <= _GEO_MAX_ALT:
         return "GEO"
     if perigee_alt < _LEO_MAX_ALT and apogee_alt > _MEO_MAX_ALT:
-        # High apogee + low perigee — GTO or HEO depending on eccentricity
-        return "GTO" if apogee_alt > _MEO_MAX_ALT and eccentricity > 0.5 else "HEO"
+        # Low perigee and high apogee: a transfer orbit only if the apogee is
+        # at GEO; Molniya, with its apogee near 40,000 km, is HEO.
+        return "GTO" if apogee_alt <= _GEO_MAX_ALT else "HEO"
+    if eccentricity > _HEO_MIN_ECC and apogee_alt > _MEO_MAX_ALT:
+        # Eccentric with apogee above GEO: Tundra (e about 0.27) and similar.
+        return "HEO"
     if eccentricity > 0.3 and apogee_alt > _LEO_MAX_ALT:
         return "HEO"
     if perigee_alt >= _LEO_MAX_ALT:

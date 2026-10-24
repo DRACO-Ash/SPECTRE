@@ -310,7 +310,7 @@
     "commonName": "TJS-13",
     "country": "CHN",
     "rank": 2,
-    "orbitRegime": "GTO",
+    "orbitRegime": "HEO",
     "line1": "1 62188U 20001A   26274.50000000  .00000000  00000-0  00000-0 0  9994",
     "line2": "2 62188  63.4000 120.0000 7200000 270.0000   0.0000  2.00550000 10004",
     "tleDataMode": "SYNTHETIC"
@@ -320,7 +320,7 @@
     "commonName": "Cosmos 2589",
     "country": "RUS",
     "rank": 1,
-    "orbitRegime": "GTO",
+    "orbitRegime": "HEO",
     "line1": "1 64467U 20001A   26274.50000000  .00000000  00000-0  00000-0 0  9996",
     "line2": "2 64467  63.4000 200.0000 7200000 270.0000   0.0000  2.00550000 10005",
     "tleDataMode": "SYNTHETIC"
