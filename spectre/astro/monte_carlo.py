@@ -282,7 +282,7 @@ def _j2_drag_ode(
     ----------
     state : (6,) — [x, y, z, vx, vy, vz]
     bstar : B* parameter from TLE (used for regime check only; drag uses bc)
-    bc_m2_kg : ballistic coefficient (m²/kg) = m / (Cd*A)
+    bc_m2_kg : ballistic coefficient m / (Cd*A), in kg/m² despite the name
     """
     x, y, z, vx, vy, vz = state
     r_vec = np.array([x, y, z])
@@ -418,6 +418,25 @@ def generate_samples(hypothesis: ManoeuvreHypothesis) -> np.ndarray:
 
 # ── Single-sample propagation ─────────────────────────────────────────────────
 
+# SGP4 defines B* = rho0 Cd A / (2 m) with rho0 = 0.15696615 kg/m^2 per Earth
+# radius, so Cd A / m = 2 B* / rho0 = 12.741621 B* in m^2/kg (Vallado,
+# Fundamentals of Astrodynamics and Applications, SGP4 drag term).
+_BSTAR_TO_CDA_OVER_M = 12.741621
+# Floor on m / (Cd A), kg/m^2, and the smallest |B*| taken at face value.
+_MIN_BALLISTIC_KG_M2 = 5.0
+_MIN_BSTAR = 1e-8
+
+
+def _ballistic_coefficient_kg_m2(bstar: float) -> float:
+    """m / (Cd A), kg/m^2, from the SGP4 drag term B* (1/Earth radii).
+
+    The previous conversion used an unsourced constant on the Earth radius in
+    metres and gave 31.9 kg/m^2 for B* = 1e-4 where SGP4's relation gives
+    784.8: drag about 24.6 times too strong (audit F-031).
+    """
+    return max(_MIN_BALLISTIC_KG_M2, 1.0 / (_BSTAR_TO_CDA_OVER_M * max(abs(bstar), _MIN_BSTAR)))
+
+
 def propagate_single_sample(
     sample: np.ndarray,
     pre_state: np.ndarray,
@@ -443,7 +462,7 @@ def propagate_single_sample(
 
     # Effective B* and ballistic coefficient
     bstar_eff = bstar_base + bstar_pert
-    bc_m2_kg = max(5.0, 1.0 / (2.0 * max(abs(bstar_eff), 1e-8) * _R_E * 1e3 * 2.461e-5))
+    bc_m2_kg = _ballistic_coefficient_kg_m2(bstar_eff)
 
     # Propagation span (accounting for timing perturbation)
     t_span_s = horizon_hours * 3600.0 + epoch_offset_s
