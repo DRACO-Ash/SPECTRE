@@ -192,9 +192,9 @@ class TestPropellant:
 
     def test_a_spend_beyond_the_lifetime_budget_is_flagged_not_reported(self) -> None:
         """36,686 m/s on a LEO smallsat is not a propellant reading."""
-        from spectre.domain.pol_assessment import _assess_propellant
+        from spectre.domain.pol_assessment import _assess_propellant, _Spend
 
-        p = _assess_propellant("LEO", 36686.0, 36686.0, 385.0, None)
+        p = _assess_propellant("LEO", _Spend(36686.0, 36686.0, 36686.0), 385.0, None)
         assert p.exceeds_lifetime_budget
         assert "lifetime budget" in p.narrative
         assert p.lifetime_budget_m_s == platform_total_budget_m_s("LEO")
@@ -320,9 +320,9 @@ class TestAnomalyScoring:
         assert str(int(station_keeping_m_s_per_year("LEO"))) in anomaly.basis
 
     def test_an_unscoreable_regime_is_not_scored_rather_than_guessed(self) -> None:
-        from spectre.domain.pol_assessment import _assess_propellant
+        from spectre.domain.pol_assessment import _assess_propellant, _Spend
 
-        p = _assess_propellant("OTHER", 100.0, 100.0, 365.0, None)
+        p = _assess_propellant("OTHER", _Spend(100.0, 100.0, 100.0), 365.0, None)
         assert p.routine_annual_m_s is None
         assert p.rate_multiple is None
 

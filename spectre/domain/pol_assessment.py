@@ -42,7 +42,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from spectre.astro.constants import _GEO_BAND_ALT
 from spectre.domain.manoeuvre_calibration import (
@@ -454,10 +454,24 @@ class PropellantAssessment:
         return "Within routine"
 
 
+class _Spend(NamedTuple):
+    """Confirmed ΔV, in m/s, three ways.
+
+    *discretionary_since_reset* leaves out routine station-keeping: Table 2's
+    discretionary reserve is what remains AFTER the routine share of the
+    lifetime budget, so counting maintenance burns against it would empty a
+    well-behaved GEO object's reserve within a few years (audit F-118).
+    """
+
+    total: float
+    since_reset: float
+    discretionary_since_reset: float
+
+
 def _assess_propellant(
-    regime: str, total_dv_m_s: float, since_reset_m_s: float,
-    span_days: float, reserve_reset: datetime | None,
+    regime: str, spend: _Spend, span_days: float, reserve_reset: datetime | None,
 ) -> PropellantAssessment:
+    total_dv_m_s, since_reset_m_s = spend.total, spend.since_reset
     platform = platform_class_for_regime(regime)
     isp = _ASSUMED_ISP_S.get(regime.strip().upper(), 320.0)
     ve_m_s = isp * _G0_M_S2
@@ -476,7 +490,7 @@ def _assess_propellant(
     multiple = (annual / routine) if routine else None
 
     lifetime = platform_total_budget_m_s(regime)
-    remaining = max(0.0, platform.discretionary_max_m_s - since_reset_m_s)
+    remaining = max(0.0, platform.discretionary_max_m_s - spend.discretionary_since_reset)
 
     caveats = [
         f"Platform class assumed from the orbit regime alone: {platform.name}. "
@@ -794,19 +808,21 @@ def assess_pattern_of_life(
     candidate_views = [_view(m, regime, sk_ceiling, sk_basis, False) for m in candidates]
 
     span_days = float(getattr(pol, "span_days", 0.0) or 0.0)
-    total_m_s = sum(v.delta_v_m_s for v in confirmed_views)
+    counted = confirmed_views
     if reserve_reset is not None:
-        since = sum(v.delta_v_m_s for v in confirmed_views
-                    if v.manoeuvre.epoch >= reserve_reset)
+        counted = [v for v in confirmed_views if v.manoeuvre.epoch >= reserve_reset]
         records = getattr(pol, "records", []) or []
         if records:
             span_days = max(
                 (records[-1].epoch - max(reserve_reset, records[0].epoch))
                 .total_seconds() / 86400.0, 1e-6)
-    else:
-        since = total_m_s
+    spend = _Spend(
+        total=sum(v.delta_v_m_s for v in confirmed_views),
+        since_reset=sum(v.delta_v_m_s for v in counted),
+        discretionary_since_reset=sum(v.delta_v_m_s for v in counted if not v.is_routine),
+    )
 
-    propellant = _assess_propellant(regime, total_m_s, since, span_days, reserve_reset)
+    propellant = _assess_propellant(regime, spend, span_days, reserve_reset)
     anomaly = _assess_anomaly(confirmed_views, pol, regime, propellant)
     detection = _assess_detection(getattr(pol, "noise_model", None), regime)
 
