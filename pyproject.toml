@@ -54,9 +54,6 @@ requires-python = ">=3.12"
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
-]
 addopts = "-ra -q"
 asyncio_mode = "auto"
 

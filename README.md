@@ -249,7 +249,7 @@ pytest
 | Module | Contents |
 |--------|---------|
 | `test_astro.py` | Hohmann, Lambert, bi-elliptic, SGP4 propagation |
-| `test_tactical.py` | 74 parametrised tactical solver cases |
+| `test_tactical.py` | Tactical solvers: phasing, CW, plane change, J2 drift, COLA, evasion and the rest |
 | `test_cw_geometry.py` | Clohessy-Wiltshire relative motion |
 | `test_monte_carlo.py` | MC sampling, convergence, regime classification |
 | `test_notso.py` | NOTSO parser, correlation algorithm, behaviour profile |
@@ -261,7 +261,7 @@ pytest
 | `test_domain_models.py` | Data model validation |
 | `test_planning_state.py` | Session state management |
 | `tests/unit/tle_clustering/` | TLE DBSCAN clustering pipeline |
-| `tests/integration/` | FastAPI TestClient routes; opt-in network tests |
+| `tests/integration/` | FastAPI TestClient routes against an in-memory database; UDL is stubbed |
 
 ---
 
@@ -380,7 +380,7 @@ spectre/                           ← repo root
 │   └── integration/            ← FastAPI TestClient + TLE clustering pipeline tests
 ├── docs/                       ← Architecture notes, planning docs, reference PDFs
 ├── .github/
-│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets jobs
+│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets / container / quality jobs
 │   └── dependabot.yml          ← Weekly pip + Actions dependency updates
 ├── .pre-commit-config.yaml     ← gitleaks, ruff, bandit, mypy on every commit
 ├── CODEOWNERS                  ← Security-path review gates

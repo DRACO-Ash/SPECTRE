@@ -199,7 +199,7 @@ Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and 
 
 | Layer | Test type | Notes |
 |-------|-----------|-------|
-| `spectre/astro/` | unit | No external deps; fast; 74+ parametrised tactical cases |
+| `spectre/astro/` | unit | No external deps; fast; solver results checked against closed forms, published examples or independent propagation |
 | `spectre/astro/monte_carlo.py` | unit | Smoke (100 samples), convergence, regime classification, RIC→ECI |
 | `spectre/astro/notso.py` | unit | Parser, all four correlation match cases, behaviour profile |
 | `spectre/astro/photometry.py` | unit | Geometric corrections, sigma-clipping, t-test significance |
@@ -209,8 +209,9 @@ Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and 
 | `web/routes/` | integration (TestClient) | In-memory SQLite; covers login, operator, UDL, maneuver, training |
 | `tle_clustering/` | unit + integration | DBSCAN pipeline: parser → clustering → selection; full pipeline |
 
-Integration tests that require a live network (UDL, GCAT) are guarded by
-`@pytest.mark.integration` and skipped unless `SPECTRE_INTEGRATION_TESTS=1` is set.
+No test depends on a live network: UDL calls are stubbed, and the one GCAT
+route test that attempts a real download passes whether or not it succeeds.
+There is no marker or switch for network tests, because there are none.
 
 ---
 
