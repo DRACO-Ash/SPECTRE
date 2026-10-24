@@ -254,3 +254,58 @@ class TestTheNewCodeScoping:
         # not score because they are not new code. A non-zero exit here is the
         # meter working, not failing.
         assert "ok " in result.stdout, "no function scored under the limit"
+
+
+class TestTheRulesAgreeWithSonarPython:
+    """Audit F-177 and F-178. Each case is checked against sonar-python's
+    CognitiveComplexityVisitor (master, read on 24 October 2026), not against
+    memory of the whitepaper: try and finally add nothing and finally does not
+    nest; every else clause adds 1 without a nesting penalty; the visitor has
+    no rule for match, whose case bodies are nested; lambdas add no nesting;
+    a boolean sequence inside a call argument is counted once, as its own."""
+
+    def test_a_boolean_one_call_deep_is_counted_once(self) -> None:
+        assert _score("def f(a, b, c):\n    if a and g(b or c):\n        pass\n") == 3
+
+    def test_depth_inside_the_call_does_not_matter(self) -> None:
+        assert _score("def f(a, b, c):\n    if a and g(h(b or c)):\n        pass\n") == 3
+
+    def test_finally_adds_nothing_and_does_not_nest(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n        pass\n"
+            "    finally:\n        if x:\n            pass\n"
+        )
+        assert _score(source) == 1
+
+    def test_a_try_else_costs_one_and_nests(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n        pass\n"
+            "    except ValueError:\n        pass\n"
+            "    else:\n        if x:\n            pass\n"
+        )
+        assert _score(source) == 1 + 1 + 2
+
+    def test_a_loop_else_costs_one_and_nests(self) -> None:
+        source = "def f():\n    for i in y:\n        pass\n    else:\n        if x:\n            pass\n"
+        assert _score(source) == 1 + 1 + 2
+
+    def test_match_adds_nothing_but_its_cases_nest(self) -> None:
+        source = (
+            "def f(v):\n"
+            "    match v:\n"
+            "        case 1:\n            if x:\n                pass\n"
+            "        case _:\n            pass\n"
+        )
+        assert _score(source) == 2
+
+    def test_a_lambda_adds_no_nesting(self) -> None:
+        assert _score("def f():\n    g = lambda v: 1 if v else 2\n") == 1
+
+
+def test_the_quality_script_no_longer_claims_an_exact_match() -> None:
+    script = _ROOT / "scripts" / "check-quality.sh"
+    if not script.is_file():
+        pytest.skip("scripts/ is excluded from the submission package")
+    assert "computes exactly" not in script.read_text(encoding="utf-8")

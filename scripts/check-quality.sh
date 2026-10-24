@@ -106,8 +106,10 @@ pass "no new bugs, vulnerabilities or code smells on changed lines"
 # ── Cognitive complexity on changed code ─────────────────────────────────────
 # SonarQube's Code Quality gate caps python:S3776 at 15 and scopes it to NEW
 # code, so a function nobody touched is not reported however bad it is. This
-# leg reproduces both halves: the score, which the tool computes exactly (it is
-# calibrated against sixteen functions whose Sonar scores are known), and the
+# leg reproduces both halves: the score, which matches Sonar on sixteen
+# calibration functions whose Sonar scores are known (finally, try-else,
+# loop-else and match are checked against sonar-python's source, not a
+# measured function), and the
 # scoping, so the check stays predictive instead of failing on 43 pre-existing
 # functions and being ignored within a day.
 #

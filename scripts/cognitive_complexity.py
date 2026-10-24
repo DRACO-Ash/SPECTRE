@@ -37,17 +37,26 @@ solve_lambert by exactly 2 against SonarQube, which is how the bug was found.
 THE RULES, as implemented
 
 Increment of 1, with a further increment equal to the current nesting depth:
-    if, ternary (``x if c else y``), for, while, except handler, match
+    if, ternary (``x if c else y``), for, while, except handler
 
 Increment of 1 with NO nesting penalty (the structure is already announced):
-    elif, else, the else clause of a for/while/try, finally
+    elif, else, the else clause of a for/while/try
+
+No increment: try, finally, with, match (sonar-python has no rule for it).
 
 Increment of 1 per SEQUENCE of like boolean operators:
     ``a and b and c``   -> 1      (one sequence)
     ``a and b or c``    -> 2      (two sequences, the operator changes)
 
 Nesting depth is increased by: if/elif/else bodies, ternary operands, for,
-while, except, match, and nested function and lambda definitions. A nested
+while, except, the else of a loop or try, match case bodies, and nested
+function definitions. Not by try, finally, with, or a lambda.
+
+These rules follow sonar-python's CognitiveComplexityVisitor, read on
+24 October 2026. The sixteen calibration functions exercise if, elif, else,
+loops, except, ternaries, boolean sequences, nested functions and lambdas;
+finally, try-else, loop-else and match are covered by unit cases checked
+against that source, not by a Sonar-measured function (audit F-178). A nested
 definition adds depth but scores nothing itself, which is why extracting a
 helper to module level is the cheapest way to cut a score.
 
@@ -203,14 +212,17 @@ class _Scorer(ast.NodeVisitor):
             self._structural(handler)
         if node.orelse:
             self._flat(node.orelse)
-        if node.finalbody:
-            self._flat(node.finalbody)
+        # finally adds nothing and does not nest: sonar-python lists
+        # FINALLY_CLAUSE among the statement lists that keep their depth.
+        for child in node.finalbody:
+            self.visit(child)
 
     visit_TryStar = visit_Try
 
     # -- match ------------------------------------------------------------
     def visit_Match(self, node: ast.Match) -> None:
-        self.score += 1 + self.nesting
+        # sonar-python has no rule for match, so the statement adds nothing;
+        # its case bodies are statement lists and nest like any other.
         self.visit(node.subject)
         self.nesting += 1
         for case in node.cases:
@@ -222,11 +234,9 @@ class _Scorer(ast.NodeVisitor):
     def visit_BoolOp(self, node: ast.BoolOp) -> None:
         self.score += _boolean_sequences(node)
         for value in node.values:
-            # Count each operand's own structure, but never re-count the
-            # sequences already charged above.
-            for sub in ast.walk(value):
-                if isinstance(sub, ast.BoolOp):
-                    continue
+            # Direct BoolOp operands belong to the sequences charged above. A
+            # BoolOp further down, inside a call or a comparison, is reached
+            # by the ordinary visit and charged there, once.
             self._visit_without_boolops(value)
 
     def _visit_without_boolops(self, node: ast.AST) -> None:
@@ -247,9 +257,8 @@ class _Scorer(ast.NodeVisitor):
     visit_AsyncFunctionDef = _nested_definition
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        self.nesting += 1
+        # sonar-python nests statement lists, and a lambda body is not one.
         self.visit(node.body)
-        self.nesting -= 1
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._nested_definition(node)
@@ -266,10 +275,11 @@ def _boolean_sequences(node: ast.BoolOp) -> int:
     operators: list[type] = []
 
     def walk(current: ast.AST, parent_op: type | None) -> None:
+        # Only a chain of BoolOps directly under this one belongs to it. One
+        # inside a call or a comparison is a sequence of its own, which the
+        # visitor charges when it reaches it; following it here as well was
+        # how ``a and g(b or c)`` came to cost 4 against Sonar's 3 (F-177).
         if not isinstance(current, ast.BoolOp):
-            for child in ast.iter_child_nodes(current):
-                if isinstance(child, ast.BoolOp):
-                    walk(child, None)
             return
         op = type(current.op)
         if op is not parent_op:
