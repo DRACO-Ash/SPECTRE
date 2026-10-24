@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.web.auth import hash_password, require_admin
@@ -86,6 +86,28 @@ async def _all_users(db: AsyncSession) -> list[User]:
 async def _admin_count(db: AsyncSession) -> int:
     result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
     return result.scalar_one()
+
+
+def _another_admin_remains() -> Any:
+    """SQL condition: more than one admin exists at the moment of the write.
+
+    The read-then-write guard let two admins demoting or deleting each other
+    at once each count two and both commit (audit F-149). Evaluated inside
+    the UPDATE or DELETE itself, the count is the one the write sees.
+    """
+    count = select(func.count()).select_from(User).where(User.role == "admin").scalar_subquery()
+    return count > 1
+
+
+async def _lock_admin_rows(db: AsyncSession) -> None:
+    """Take row locks on the admin rows where the database has them.
+
+    On PostgreSQL two transactions could otherwise each see the other's admin
+    in their own snapshot. SQLite has no row locks and runs one writer at a
+    time, so the conditional statement is enough there and this is a no-op.
+    """
+    if db.get_bind().dialect.name != "sqlite":
+        await db.execute(select(User.id).where(User.role == "admin").with_for_update())
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -196,6 +218,20 @@ async def cancel_edit_row(
     return HTMLResponse(html)
 
 
+async def _set_role(db: AsyncSession, user: User, role: str) -> bool:
+    """Change *user*'s role, refusing to demote the last admin. False if refused."""
+    guard = [User.id == user.id]
+    if user.role == "admin" and role != "admin":
+        await _lock_admin_rows(db)
+        guard.append(_another_admin_remains())
+    done = await db.execute(update(User).where(*guard).values(role=role).execution_options(synchronize_session=False))
+    if done.rowcount == 0:  # type: ignore[attr-defined]
+        await db.rollback()
+        return False
+    user.role = role
+    return True
+
+
 @router.post("/users/{user_id}", response_class=HTMLResponse)
 async def update_user(
     request: Request,
@@ -228,7 +264,11 @@ async def update_user(
 
     changed: list[str] = []
     if user.role != role:
-        user.role = role
+        if not await _set_role(db, user, role):
+            return _table_response(
+                request, await _all_users(db), current_user,
+                flash={"type": "error", "message": "Cannot demote the last admin account."},
+            )
         changed.append("role")
 
     if new_password:
@@ -281,7 +321,17 @@ async def delete_user(
             )
 
     username = user.username
-    await db.delete(user)
+    await _lock_admin_rows(db)
+    guard = [User.id == user.id]
+    if user.role == "admin":
+        guard.append(_another_admin_remains())
+    removed = await db.execute(delete(User).where(*guard))
+    if removed.rowcount == 0:  # type: ignore[attr-defined]
+        await db.rollback()
+        return _table_response(
+            request, await _all_users(db), current_user,
+            flash={"type": "error", "message": "Cannot delete the last admin account."},
+        )
     await db.commit()
     logger.info("Admin '%s' deleted user '%s'", log_safe(current_user.username), log_safe(username))
 
