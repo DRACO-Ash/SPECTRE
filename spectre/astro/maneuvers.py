@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
-from spectre.astro.cw_geometry import _initial_hill_state
+from spectre.astro.cw_geometry import CWState, _cw_propagate, _eci_to_hill_matrix, _initial_hill_state
 from spectre.astro.kepler import propagate_two_body
 from spectre.astro.lambert import LambertSolution, cheapest_lambert, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
@@ -32,7 +32,6 @@ from spectre.astro.tactical import (
     geo_drift,
     hbar_hop_sequence,
     j2_drift_plan,
-    nmc_safety_ellipse,
     optimal_evasion,
     orbital_terrain,
     phasing_orbit,
@@ -40,6 +39,11 @@ from spectre.astro.tactical import (
     vbar_hop_sequence,
 )
 from spectre.astro.transfers import TransferResult, bielliptic, hohmann
+
+# NMC insertion: the ellipse through red's position may differ from the one
+# requested by this fraction, and the closest approach is sampled this often.
+_NMC_SIZE_TOLERANCE = 0.10
+_NMC_SAMPLES = 2000
 
 
 @dataclass
@@ -1031,10 +1035,20 @@ def nmc_intercept(
     coast_s: float = 0.0,
     mu: float = MU_EARTH,
 ) -> InterceptSolution:
-    """Compute NMC / passive safety ellipse for proximity operations.
+    """Establish a passively safe relative orbit (NMC) around the target.
 
-    Determines the ΔV to establish a passively safe relative orbit
-    (Natural Motion Circumnavigation) around the target satellite.
+    A bounded Clohessy-Wiltshire ellipse centred on the target passes through
+    any relative position: from (x0, y0) it needs xd = n y0 / 2 and
+    yd = -2 n x0, and has along-track amplitude 2 sqrt(x0^2 + y0^2 / 4). The
+    burn is the change from red's actual relative velocity to that one, and
+    the reported margin is the closest approach flown over one orbit. An
+    insertion point whose ellipse is not the size requested (within 10 per
+    cent) is refused: reaching the requested ellipse needs an approach first,
+    which this method does not plan.
+
+    The previous wrapper built a radial burn from wherever red was, which from
+    a co-located start passes through the target once per orbit, and labelled
+    it with the along-track cost and a positive margin (audit F-017).
 
     Args:
         red_tle: TLE of the inspector/manoeuvring satellite.
@@ -1044,39 +1058,49 @@ def nmc_intercept(
         cross_track_km: Desired cross-track amplitude (km).
         coast_s: Coast before burn (seconds).
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: when the ellipse through red's position is not the one
+            requested, including when red is co-located with the target.
     """
-    red_orbit = TLEOrbit(red_tle)
-    blue_orbit = TLEOrbit(blue_tle)
-
     t_departure = manoeuvre_start + timedelta(seconds=coast_s)
-    sv_red = red_orbit.propagate(t_departure)
-    sv_blue = blue_orbit.propagate(t_departure)
+    state, n, _, _ = _initial_hill_state(red_tle, blue_tle, t_departure)
 
-    r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
-    nmc = nmc_safety_ellipse(r_ref, along_track_km, cross_track_km, mu)
+    along_amp = 2.0 * math.hypot(state.x, state.y / 2.0)
+    if abs(along_amp - along_track_km) > _NMC_SIZE_TOLERANCE * along_track_km:
+        raise ValueError(
+            f"red is {state.x:.2f} km radial and {state.y:.2f} km along-track of the "
+            f"target, on the {along_amp:.2f} km ellipse, not the requested "
+            f"{along_track_km:.2f} km one; approach to an insertion point first"
+        )
 
-    t_arrival = t_departure + timedelta(seconds=nmc.period_s)
+    cross_amp = max(cross_track_km, abs(state.z))
+    target = CWState(
+        x=state.x, y=state.y, z=state.z,
+        xd=n * state.y / 2.0,
+        yd=-2.0 * n * state.x,
+        zd=n * math.sqrt(cross_amp**2 - state.z**2),
+    )
+    dv_hill = np.array([target.xd - state.xd, target.yd - state.yd, target.zd - state.zd])
 
-    # Establish impulse: radial + cross-track components
-    v_hat = sv_red.v / sv_red.v_mag
-    h = np.cross(sv_red.r, sv_red.v)
-    h_mag = float(np.linalg.norm(h))
-    n_hat = h / h_mag if h_mag > 1e-10 else np.array([0, 0, 1], dtype=float)
-    b_hat = np.cross(v_hat, n_hat)
-
-    # Radial impulse for in-plane ellipse + normal for cross-track
-    dv_vec = b_hat * nmc.radial_amplitude_km * float(np.sqrt(mu / r_ref**3))
-    if cross_track_km > 0:
-        dv_vec = dv_vec + n_hat * cross_track_km * float(np.sqrt(mu / r_ref**3))
+    sv_blue = TLEOrbit(blue_tle).propagate(t_departure)
+    dv_vec = _eci_to_hill_matrix(sv_blue.r, sv_blue.v).T @ dv_hill
+    sv_red = TLEOrbit(red_tle).propagate(t_departure)
     burn1 = _make_burn(1, t_departure, dv_vec, sv_red)
+
+    period_s = 2.0 * math.pi / n
+    closest = min(
+        math.sqrt(p.x**2 + p.y**2 + p.z**2)
+        for p in (_cw_propagate(target, n, period_s * k / _NMC_SAMPLES) for k in range(_NMC_SAMPLES))
+    )
 
     return InterceptSolution(
         method="nmc",
         burns=[burn1],
-        total_delta_v=nmc.total_delta_v,
+        total_delta_v=burn1.delta_v_mag,
         departure_epoch=t_departure,
-        arrival_epoch=t_arrival,
-        miss_distance_km=nmc.safety_margin_km,
+        arrival_epoch=t_departure + timedelta(seconds=period_s),
+        miss_distance_km=closest,
     )
 
 
