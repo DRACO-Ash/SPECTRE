@@ -410,16 +410,37 @@ def _notso_dates(
     return issue_dt, start_dt, end_dt, tuple(inferred)
 
 
-def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
-    """Parse a single NOTSO message block."""
-    lines = text.strip().splitlines()
+def _fields(text: str) -> dict[str, str]:
+    """The message's "key: value" lines, keys upper-cased."""
     fields: dict[str, str] = {}
-
-    # Parse key: value lines
-    for line in lines:
+    for line in text.strip().splitlines():
         if ":" in line:
             key, _, val = line.partition(":")
             fields[key.strip().upper()] = val.strip()
+    return fields
+
+
+def _norad_id_of(fields: dict[str, str], text: str) -> int | None:
+    """The catalogue number from its own field, else a labelled one in the text."""
+    norad_raw = (
+        fields.get("SATNO") or fields.get("SAT NO") or
+        fields.get("NORAD ID") or fields.get("NORAD") or
+        fields.get("CATALOG NO") or ""
+    )
+    m = re.search(r"\d+", norad_raw)
+    return int(m.group()) if m else _extract_norad_id(text)
+
+
+def _predicted_dv(fields: dict[str, str], text: str) -> float | None:
+    """Predicted ΔV from its own field, else from the text (audit F-086)."""
+    dv_field = fields.get("PREDICTED DV") or fields.get("DELTA-V")
+    dv = _extract_delta_v(dv_field, bare=True) if dv_field else None
+    return dv if dv is not None else _extract_delta_v(text)
+
+
+def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
+    """Parse a single NOTSO message block."""
+    fields = _fields(text)
 
     # Message ID
     msg_id = (
@@ -427,19 +448,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("MESSAGE_ID") or f"NOTSO-{index+1:04d}"
     )
 
-    # NORAD ID
-    norad_raw = (
-        fields.get("SATNO") or fields.get("SAT NO") or
-        fields.get("NORAD ID") or fields.get("NORAD") or
-        fields.get("CATALOG NO") or ""
-    )
-    norad_id = None
-    if norad_raw:
-        m = re.search(r"\d+", norad_raw)
-        if m:
-            norad_id = int(m.group())
-    if norad_id is None:
-        norad_id = _extract_norad_id(text)
+    norad_id = _norad_id_of(fields, text)
     if norad_id is None:
         return None  # Can't correlate without NORAD ID
 
@@ -461,11 +470,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("COMMENT") or text[:500]
     )
 
-    # Optional predicted ΔV
-    dv_field = fields.get("PREDICTED DV") or fields.get("DELTA-V")
-    dv = _extract_delta_v(dv_field, bare=True) if dv_field else None
-    if dv is None:
-        dv = _extract_delta_v(text)
+    dv = _predicted_dv(fields, text)
 
     direction = (
         fields.get("DIRECTION") or fields.get("BURN DIRECTION") or None
