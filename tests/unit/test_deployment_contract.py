@@ -1509,13 +1509,24 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         holds the declaration as well as a call.
         """
         calls = [
-            cls._split_arguments(markup, m.end())
+            (m.start(), cls._split_arguments(markup, m.end()))
             for m in re.finditer(r'onclick="[^"]*?\bloadInEngine\(', markup)
         ]
         assert len(calls) == 1, (
             f"expected exactly one loadInEngine call site, found {len(calls)}"
         )
-        return calls[0]
+        start, args = calls[0]
+        # Arguments read as this.dataset.x come from the data-x attribute on
+        # the same element, which precedes the handler (audit F-038).
+        resolved = []
+        for arg in args:
+            ref = re.fullmatch(r"this\.dataset\.(\w+)", arg.strip())
+            if ref:
+                attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
+                assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
+                arg = attrs[-1]
+            resolved.append(arg)
+        return resolved
 
     @staticmethod
     def _header_bindings(row: str) -> list[str]:
