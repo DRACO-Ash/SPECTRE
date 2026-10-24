@@ -120,7 +120,7 @@ Each was shown to fail against the original `master` file it guards.
 ● `test_orbital_units_and_degeneracies.py`: pinned the 14.4 m/s cost of the fixed 50 km step (F-024). For its pair no altitude halves the 46.8-day convergence, so the inclination-units guard now pins that time; mutation-checked (the mutant gives 181.3 days).
 ● `test_tle_clustering_pipeline.py`: the multi-cluster test's data formed no cluster, so its guarded assertions never ran (F-028).
 
-**New defect found, not fixed, for a decision (fact):** the Monte Carlo density table (`monte_carlo.py:_atmo_density_kg_m3`) is discontinuous at most band edges. Density jumps by 0.63 at 86 km, 24.9 at 150, 1.13 at 200, 2.22 at 300, 2.74 at 400, 1.40 at 500, 0.77 at 700 and 10.1 at 1,000 km. Inference: the (rho0, H) pairs are misaligned between rows; the scale heights look shifted against the base densities. A satellite near a band edge sees its drag change in steps as it crosses. Fixing it means re-sourcing the table, which I have not done from memory.
+**Density table (corrected below: this is audit F-105, not a new defect, and is now fixed in `e93c664`):** the Monte Carlo density table (`monte_carlo.py:_atmo_density_kg_m3`) is discontinuous at most band edges. Density jumps by 0.63 at 86 km, 24.9 at 150, 1.13 at 200, 2.22 at 300, 2.74 at 400, 1.40 at 500, 0.77 at 700 and 10.1 at 1,000 km. Inference: the (rho0, H) pairs are misaligned between rows; the scale heights look shifted against the base densities. A satellite near a band edge sees its drag change in steps as it crosses. Fixing it means re-sourcing the table, which I have not done from memory.
 
 **Left from these findings for step 4:** comparing RAAN at a common epoch in `tle_clustering` (F-028's second half). `nmc_safety_ellipse` is no longer used by the wrapper and remains as a tested library function.
 
@@ -131,3 +131,41 @@ Each was shown to fail against the original `master` file it guards.
 ● PoL shows INSUFFICIENT until three earlier manoeuvres exist.
 ● Notified burns with late element sets now match.
 ● The Monte Carlo panel shows the ΔV direction basis, with much smaller drag-driven and timing-driven spreads.
+
+### Medium solver findings
+
+| Finding | Origin | Commit | Defect, as reproduced before the fix | Gate |
+|---|---|---|---|---|
+| F-067 | F-S01-11 | `42d42a6` (step 1) | closed by the F-002 rebuild: the plane-change burn is at the next crossing of the target plane and rotates the velocity into it | `tests/unit/test_plane_change_intercept.py::test_the_burn_is_at_the_line_of_nodes_and_lands_in_the_blue_plane` |
+| F-071 | F-S02-05 | `c3ddedb` | an along-track kick from the origin, which reaches 4v/n radially, reported 0 | `tests/unit/test_relative_motion_radial_extent.py` (5 tests, against the CW solution) |
+| F-073 | F-S02-14 | `102d501` | a RAAN-only change priced 1.28x high at 51.6 deg and 5.8x at 10 deg | `tests/unit/test_classify_raan_cost.py` |
+| F-074 | F-S02-16 | `a5bc0d7` | circular speed at a used as the node speed; "apogee" offered for a circular orbit | `tests/unit/test_plane_change_nodes.py` (Curtis eq. 6.20 at each node) |
+| F-075 | F-S02-17 | `0fa8ea9` | docstring claimed the plane change was split across both burns; the code makes it at one. Docstring corrected; the split is deliberately not implemented because the F-015 intercept flies the single-burn geometry | `tests/unit/test_combined_plane_change_split.py` |
+| F-077 | F-S02-20 | `f0cb83a` | H-bar hops claimed n_hops x d of held advance at a time the satellite is back on the plane; now described and timed as a growing oscillation | `tests/unit/test_hbar_hop_oscillation.py` (flown through the CW solution) |
+| F-078 | F-S02-23 | `06034a7` | slot displacement up to 4x short for a radial burn; unread r_threat removed | `tests/unit/test_formation_slot_displacement.py` |
+| F-083 | F-S03-03 | `ace4090` | one corrupt epoch ("XX") ended the whole PoL parse; now dropped and counted on the panel | `tests/unit/test_pol_malformed_pair.py` |
+| F-084 | F-S03-04 | `b21b410` | _LONG_GAP_WARN_DAYS never read; long-gap detections now flagged in the table | `tests/unit/test_pol_long_gap_flag.py` |
+| F-085 | F-S03-05 | `88554c8` | twelve sets ten minutes apart chained into one 110-minute cluster, losing the pre-step orbit | `tests/unit/test_tle_filter_cluster_span.py` |
+| F-086 | F-S03-07 | `4f8ee97` | "PREDICTED DV: 1.5 m/s" lost | `tests/unit/test_notso_delta_v_field.py` |
+| F-087 | F-S03-08 | `02f8c67` | inferred dates replaced silently; fractional seconds and offsets rejected. Now flagged per field and shown | `tests/unit/test_notso_date_provenance.py` |
+| F-088 | F-S03-09 | `17c1dbe` | SATNO above MSGID split one message in two and dropped the half with the window | `tests/unit/test_notso_msgid_split.py` |
+| F-089 | F-S03-10 | `841751c` | a pasted message without a SATNO vanished without trace; "n of m parsed" and reasons now shown | `tests/integration/test_notso_rejects_shown.py` |
+| F-090 | F-S03-11 | `0fb4ea1` | a stray five-digit number taken as the object; the existing fallback test asserted the defect and now asserts the refusal | `tests/unit/test_notso_norad_label.py` |
+| F-091 | F-S03-12 | `34ae31a` | "lead time" was the window offset, negative for a timely notice; now burn minus issue date. The profile fixture's -2 h was the offset; it is now the 14 h lead | `tests/unit/test_notso_lead_time.py` |
+| F-092 | F-S03-13 | `299c884` | an early wide notice claimed a burn a later notice fits exactly | `tests/unit/test_notso_assignment.py` |
+| F-093 | F-S03-14 | `c79d336` | GEO drift from mean motion alone read 0.00004 deg/day for sets SGP4 moves 0.0107 east; now measured from SGP4 over one sidereal day | `tests/unit/test_geo_drift_rate.py` |
+| F-094 | F-S03-15 | `05f3469` | next-burn band 2s from three intervals (t = 4.30); now a 95% prediction interval on burn epochs | `tests/unit/test_pol_next_manoeuvre.py` |
+| F-095 | F-S03-16 | `85a4f3c` | module header advertised a replaced method and moved functions | `tests/unit/test_pol_module_header.py` |
+| F-101 | F-S04-08 | `283066c` | Welch p = 0.14 where scipy gives 9e-6 for 3,000 per group at 0.05 mag | `tests/unit/test_photometry_statistics.py` |
+| F-102 | F-S04-09 | `ba39a73` | "covariance" was res_var / diag(X^T X) | `tests/unit/test_photometry_fit_covariance.py` (against numpy) |
+| F-105 | F-S04-13 | `e93c664` | density table misaligned, discontinuous at most band edges | `tests/unit/test_atmosphere_table.py` (Vallado Table 8-4; continuity at every edge) |
+| F-108 | F-S04-23 | `8b7c127` | an empty window read as "no significant change" | `tests/unit/test_photometry_empty_window.py` |
+
+**Supporting commits:** `fd42da8` and `60d065c` bring touched functions under the complexity limit (`_parse_single_notso` 19, `classify_manoeuvre` 31, `_fit_least_squares_quadratic` 19); `classify_manoeuvre`'s output is byte-identical over 1,440 inputs.
+
+**Notes (fact unless marked):**
+● F-093: no real station-kept GEO element set is in the repository, so the gate checks the field against the same SGP4 measurement taken through the propagator's public API. Inference: the bundled bootstrap GEO sets, generated at exactly sidereal mean motion without J2, really do drift about 0.011 deg/day east under SGP4.
+● F-105: Table 8-4 was transcribed from Vallado. Two checks support it: it agrees with the audit's independent hand values at 550 and 700 km, and every band edge is continuous to within 0.1 per cent, as the published fit is.
+● F-078: the formation wrapper never used the threat's state. Its docstring now says so; modelling the threat is left for step 4, alongside F-S06-07.
+● Already in the audit and not touched here: the NOTSO cache reads keys the bundled UDL records do not carry (FINDINGS.md:829). I checked that F-090 caused no regression there: the cache path parses 0 of 500 records both before and after.
+● **Process:** two commits were initially made with a test failing (`ae46457`, then the F-075 docstring commit before amendment), because the commit command was not gated on the test exit code. Neither was pushed in that state. Every commit since goes through a helper that runs ruff, mypy and the full suite and commits only on a clean exit.

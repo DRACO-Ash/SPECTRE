@@ -22,6 +22,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - NOTSO correlation uses the burn window, not the next element set (F-027).
 - TLE clustering writes the newest cluster's representative (F-028).
 - Monte Carlo: timing dispersion moves the burn (F-029), the ΔV direction comes from the detection (F-030), and drag uses the SGP4 B* relation (F-031).
+- CW stability radial extent, RAAN-change cost, plane-change node pricing, H-bar hop description and formation slot displacement corrected (F-071, F-073 to F-075, F-077, F-078).
+- Pattern of life: malformed element sets dropped and counted (F-083), long-gap detections flagged (F-084), GEO drift measured from SGP4 (F-093), next-burn band a small-sample prediction interval on burn epochs (F-094).
+- TLE cadence clusters bounded by their span (F-085).
+- NOTSO parsing and correlation: ΔV fields read, inferred dates flagged, messages split correctly, only labelled IDs taken, rejects shown, true lead time, closest-first pairing (F-086 to F-092).
+- Monte Carlo density is Vallado's exponential atmosphere (F-105); photometry Welch test, fit covariance and empty windows corrected (F-101, F-102, F-108).
 
 ### Added
 - `spectre/astro/kepler.py`: universal-variable two-body propagator.
