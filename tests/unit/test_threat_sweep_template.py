@@ -68,8 +68,8 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "hrr_count": 0,
         "worst_coa": worst_coa,
         "method_refusals": [
-            ("bielliptic", "exceeds the 500 m/s budget"),
-            ("lambert", "transfer angle within 0.5 degrees of 180"),
+            ("B_SAT_Alpha", "bielliptic", "at now: exceeds the 500 m/s budget"),
+            ("B_SAT_Alpha", "lambert", "at now: transfer angle within 0.5 degrees of 180"),
         ],
         "red_satno": "41838",
         "manual_red_confidence": None,
@@ -118,7 +118,7 @@ class TestEveryNameTheTemplateUsesIsSupplied:
 class TestTheRefusalsPanelIsVisible:
     def test_each_refused_method_and_its_reason_appear(self) -> None:
         html = _render(_context())
-        assert "2 method(s) produced no solution" in html
+        assert "2 method(s) produced no solution for a target" in html
         assert "BIELLIPTIC" in html
         assert "exceeds the 500 m/s budget" in html
         assert "transfer angle within 0.5 degrees of 180" in html

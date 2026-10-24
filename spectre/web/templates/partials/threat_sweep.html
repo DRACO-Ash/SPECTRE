@@ -168,12 +168,12 @@
   {% if method_refusals %}
   <details style="margin:0.4rem 0">
     <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
-      {{ method_refusals | length }} method(s) produced no solution
+      {{ method_refusals | length }} method(s) produced no solution for a target
     </summary>
     <div style="padding:0.4rem 0.6rem">
-      {% for method, reason in method_refusals %}
+      {% for subject, method, reason in method_refusals %}
       <p style="margin:0.15rem 0; font-size:0.74rem">
-        <strong>{{ method | upper }}</strong>
+        {{ subject }} &#183; <strong>{{ method | upper }}</strong>
         <span style="color:var(--text-muted)">{{ reason }}</span>
       </p>
       {% endfor %}

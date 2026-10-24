@@ -33,9 +33,10 @@ def test_the_refusal_reaches_the_rendered_panel(monkeypatch: pytest.MonkeyPatch)
     entries = threat._sweep_all_methods(request, [("now", datetime(2026, 9, 13, tzinfo=UTC))], refusals)
 
     assert entries == []
-    assert refusals == {"lambert": "Transfer angle within 0.5 degrees of 180"}
-    html = sweep._render(sweep._context(method_refusals=sorted(refusals.items())))
-    assert "1 method(s) produced no solution" in html
+    assert refusals == {"lambert": "at now: Transfer angle within 0.5 degrees of 180"}
+    rows = [("SKYNET-5A", method, reason) for method, reason in refusals.items()]
+    html = sweep._render(sweep._context(method_refusals=rows))
+    assert "1 method(s) produced no solution for a target" in " ".join(html.split())
     assert "Transfer angle within 0.5 degrees of 180" in html
 
 

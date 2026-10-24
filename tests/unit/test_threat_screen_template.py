@@ -103,7 +103,7 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "budget_m_s": 500.0,
         "elapsed_s": 1.35,
         "entry_count": 41,
-        "method_refusals": [("bielliptic", "exceeds the 500 m/s budget")],
+        "method_refusals": [("SJ-17", "bielliptic", "at now: exceeds the 500 m/s budget")],
         "profiles_by_actor": {
             "43874": _profiles("43874", "TJS-3"),
             "44797": _profiles("44797", "COSMOS 2535"),
@@ -199,7 +199,7 @@ class TestNothingIsHiddenFromTheOperator:
 
     def test_refused_methods_are_listed(self) -> None:
         html = _render(_context())
-        assert "1 method(s) produced no solution" in html
+        assert "1 method(s) produced no solution for an actor" in html
         assert "exceeds the 500 m/s budget" in html
 
 

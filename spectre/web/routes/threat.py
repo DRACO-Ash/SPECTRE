@@ -683,11 +683,15 @@ def _sweep_all_methods(
                         sol, request.target, epoch, location, name, request.regime,
                     ))
                 else:
-                    notes.setdefault(name, f"exceeds the {budget:g} m/s budget")
+                    notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
             # BLE001: one refusal is recorded and the sweep continues.
             except Exception as exc:  # noqa: BLE001
-                notes.setdefault(name, _refusal_reason(exc))
+                notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
 
+    # A method that solved at any epoch did produce a solution for this
+    # target; listing it as refused contradicted the table beside it (F-125).
+    for solved in {e.method for e in entries}:
+        notes.pop(solved, None)
     return entries
 
 
@@ -988,7 +992,7 @@ def _screen_one_actor(  # noqa: PLR0913, PLR0917
     asset: ThreatTarget,
     now: datetime,
     budget_m_s: float,
-    refusals: dict[str, str],
+    refusals: list[tuple[str, str, str]],
 ) -> tuple[ActorVerdict | None, list[ThreatSweepEntry]]:
     """Assess one candidate actor against the asset.
 
@@ -997,6 +1001,7 @@ def _screen_one_actor(  # noqa: PLR0913, PLR0917
     rather than being computed once.
     """
     actor_regime = actor.regime or _regime_of_tle(actor_tle)
+    notes: dict[str, str] = {}
     epochs = _compute_epochs(actor_tle, now)
     entries = _sweep_all_methods(
         _SweepRequest(
@@ -1007,8 +1012,9 @@ def _screen_one_actor(  # noqa: PLR0913, PLR0917
             regime=actor_regime,
         ),
         epochs,
-        refusals=refusals,
+        refusals=notes,
     )
+    refusals.extend((actor.actor_name, method, reason) for method, reason in sorted(notes.items()))
     for entry in entries:
         entry.actor = actor
     if not entries:
@@ -1208,20 +1214,22 @@ def _run_target_sweep(  # noqa: PLR0913, PLR0917
     red_regime: str,
     epochs: list[tuple[str, datetime]],
     max_dv_m_s: float,
-) -> tuple[list[ThreatSweepEntry], list[str], dict[str, str]]:
+) -> tuple[list[ThreatSweepEntry], list[str], list[tuple[str, str, str]]]:
     """Fan every target out across every method and epoch.
 
     Synchronous on purpose: the handler hands this to an executor thread.
     Lifted out of that handler whole, where being nested inside it added the
     handler's nesting to every branch here on top of its own.
 
-    Returns ``(entries, errors, method_refusals)``. A target that is skipped
+    Returns ``(entries, errors, method_refusals)``, the last as
+    (target, method, reason) for each method that solved nowhere for that
+    target. A target that is skipped
     is recorded with the reason rather than dropped, because a short result
     and a safe one read identically on the screen.
     """
     all_entries: list[ThreatSweepEntry] = []
     sweep_errors: list[str] = []
-    method_refusals: dict[str, str] = {}
+    method_refusals: list[tuple[str, str, str]] = []
     for target in targets:
         if target.target_source == "manual":
             tle = manual_tle_by_name.get(target.target_name)
@@ -1242,14 +1250,16 @@ def _run_target_sweep(  # noqa: PLR0913, PLR0917
                 f"{red_regime} red vs {tgt_regime} target (regime mismatch)"
             )
             continue
+        notes: dict[str, str] = {}
         target_entries = _sweep_all_methods(
             _SweepRequest(
                 red_tle=red_tle, target_tle=tle, target=target,
                 max_dv_m_s=max_dv_m_s, regime=red_regime,
             ),
             epochs,
-            refusals=method_refusals,
+            refusals=notes,
         )
+        method_refusals.extend((target.target_name, m, why) for m, why in sorted(notes.items()))
         if not target_entries:
             sweep_errors.append(
                 f"{target.target_name}: all methods/epochs exceeded {max_dv_m_s:g} m/s or solver failed"
@@ -1438,7 +1448,7 @@ async def threat_sweep(
         "worst_coa": worst_coa,
         # Methods that produced nothing, and why. Previously discarded, which
         # hid the fastest approaches: refusals cluster on the aggressive end.
-        "method_refusals": sorted(method_refusals.items()),
+        "method_refusals": method_refusals,
         "red_satno": red_satno or "",
         "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
         "clustering_summary": clustering_summary,
@@ -1488,7 +1498,7 @@ class _ScreenRun(NamedTuple):
 
     verdicts: list[ActorVerdict]
     entries: list[ThreatSweepEntry]
-    refusals: dict[str, str]
+    refusals: list[tuple[str, str, str]]
     notes: list[str]
 
 
@@ -1508,7 +1518,7 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
     """
     verdicts: list[ActorVerdict] = []
     entries: list[ThreatSweepEntry] = []
-    refusals: dict[str, str] = {}
+    refusals: list[tuple[str, str, str]] = []
     notes: list[str] = []
 
     for actor in actors:
@@ -1780,7 +1790,7 @@ async def threat_screen(
         "budget_m_s": max_dv_m_s,
         "elapsed_s": round(elapsed, 2),
         "entry_count": len(entries),
-        "method_refusals": sorted(method_refusals.items()),
+        "method_refusals": method_refusals,
         "profiles_by_actor": profiles_by_actor,
         "errors": errors,
         "error": None,
