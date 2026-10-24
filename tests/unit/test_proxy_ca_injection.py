@@ -22,12 +22,16 @@ _AWK = re.compile(r"awk '\n(.*?)\n\s*' ", re.S)
 @pytest.mark.parametrize("script", ["scripts/verify-container.sh", "scripts/simulate-pipeline.sh"])
 @pytest.mark.parametrize("dockerfile", ["Dockerfile", "Dockerfile.docker-only"])
 def test_the_hook_adds_the_ca_to_the_build(script: str, dockerfile: str) -> None:
-    if shutil.which("awk") is None:
+    awk = shutil.which("awk")
+    if awk is None:
         pytest.skip("awk not available")
     program = _AWK.search(_repo_only(script).read_text(encoding="utf-8"))
     assert program, f"{script} has no awk program"
     source = _repo_only(dockerfile).read_text(encoding="utf-8")
-    out = subprocess.run(["awk", program.group(1)], input=source, capture_output=True, text=True, check=True).stdout
+    # S603: a resolved binary and a program read from the repository's own script.
+    out = subprocess.run(  # noqa: S603
+        [awk, program.group(1)], input=source, capture_output=True, text=True, check=True,
+    ).stdout
     assert "PIP_CERT" in out
     assert out != source
 

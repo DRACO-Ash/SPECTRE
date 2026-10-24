@@ -236,3 +236,25 @@ All new reference pins passed against the existing code; these findings were abo
 | F-174 | F-S10-02 | `b0f1b04` | Rendezvous and Proximity are a declared alias table; results under an alias name the solver they ran; README and the engine and architecture docs list the 23 solvers |
 
 `d514f54` splits `search_catalog` and `pol_notso_correlate`, which the F-142 checks took over the complexity limit.
+
+### Build, CI, config and data
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-046 | F-S07-03 | `917c043` | the NOTSO cache reads the real UDL record shape: keyed on `id`, indexed by every `msgBody.SatIds` entry, with JCO fields laid out as labelled text the existing grammar parses (event time from "Jday DDD HHMMz", type from `Event_Class`). All 461 bundled records that name a satellite now parse; 0 did. A route test shows the cache path correlating for 40258 |
+| F-047 | F-S07-05 | ruling | closed by the Technical Director's ruling of 24 October 2026 that the `U//DS-JCO-NOTIF` data is acceptable to hold, including in a public repository. No removal. Since F-142 the cache path also needs the operator's own UDL session |
+| F-062 | F-S00-06 | `917c043` | the cache lives in the configured data directory, seeded once from the bundled copy; the suite points the data directory at a scratch directory |
+| F-141 | F-S07-13 | `917c043` | writes go to a temporary file swapped in with `os.replace`, sync pages write from a worker thread, and an unreadable file is moved aside, not reset |
+| F-052 | F-S09-07 | `50ad782` | every optimal score is its objective total; planner_05 passes at 200 of 260 (it asked for 300). The 200 is a tuning choice |
+| F-053 | F-S09-08 | `50ad782` | cadet_01 asks for the RAAN (answer unchanged at 45.0), explains it is not the longitude, states the real slot (128.5 West, from SGP4 and GMST) and calls the burn east-west |
+| F-153 | F-S08-10 | `3649a5c` | only `require` means encrypt without verifying; any other unknown sslmode is a ConfigurationError; dropped client-certificate parameters are logged |
+| F-182 | F-S10-19 | `e5c9998` | .env.example lists all five missing variables and says where SQLite really lives; a test requires every variable the settings read |
+| F-176 | F-S10-10 | `f3f8df3` | the proxy-CA hook matches `COPY requirements-runtime.txt ./` and fails if nothing was inserted |
+| F-177 | F-S10-11 | `215af86` | a boolean one call deep is charged once (`if a and g(b or c)` scores 3) |
+| F-178 | F-S10-12 | `215af86` | the meter follows sonar-python's visitor, read on 24 October 2026: finally adds nothing and does not nest, match adds nothing, lambdas add no nesting. Each rule has a unit case; the calibration still matches all 16 SonarQube scores; the "computes exactly" wording is gone. 5 of 725 scores move, all down |
+| F-183 | F-S10-21 | `051325b` | the analyser clone takes tag v2.5.18 and must be commit e175fc6; the packager runs it only with RUN_DS_VERIFY=1 |
+| F-184 | F-S10-23 | `909fa8b` | the four comments name scripts/preflight-gate.py and TestPackaging.test_manifests_do_not_drift, which hold the subset check |
+| F-175 | F-S10-08 | `0fed505` | actions pinned to commits (checkout v4.4.0, setup-python v5.6.0, upload-artifact v4.6.2, setup-node v4.4.0); the gitleaks tarball is checked against the release's SHA-256 before unpacking; jscpd pinned to 4.3.0 |
+| F-146 | F-S07-20 | `bd4459b` | in part: the docstring names the records' real sources and the card labels threat level an analyst judgement. The file-level handling marking awaits a ruling |
+
+`f20291b` pins the NOTSO sync route with five characterisation tests and splits it (it scored 27 and F-141 brought it into scope).

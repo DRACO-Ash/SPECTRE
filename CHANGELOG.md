@@ -43,6 +43,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fonts are served from the console's own origin; the content security policy no longer names Google (F-170).
 - Rendezvous and Proximity are declared aliases of Hohmann and Lambert; the docs list the 23 solvers (F-174).
 
+### Fixed (audit step 3, build, CI, config and data)
+- The NOTSO cache reads real UDL records, so correlation from the cache works; it lives in the data directory and writes atomically off the event loop (F-046, F-062, F-141).
+- Every training scenario can be passed and its optimal score is reachable; cadet_01 no longer teaches that RAAN is longitude (F-052, F-053).
+- An unknown database sslmode is refused rather than downgraded to no verification (F-153).
+- .env.example lists every setting and says where SQLite lives (F-182).
+- The proxy-CA build hook edits the Dockerfile it claims to; the complexity meter follows sonar-python; the dependency analyser is pinned and opt-in; comments name the real subset check (F-176 to F-178, F-183, F-184).
+- CI actions are pinned to commits, the gitleaks download is checksum-verified, and jscpd is an exact version (F-175).
+- Intelligence records' sources are stated as they are; threat level is labelled an analyst judgement (F-146, in part).
+
 ### Added
 - Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
 - Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).

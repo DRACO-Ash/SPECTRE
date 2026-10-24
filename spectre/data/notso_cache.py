@@ -70,7 +70,7 @@ def default_cache_path() -> Path:
     It sat inside the installed package, which bypassed SPECTRE_DATA_DIR and
     STORAGE_MOUNT_PATH and is ephemeral in the container image.
     """
-    from spectre.config.settings import get_settings  # noqa: PLC0415
+    from spectre.config.settings import get_settings
 
     return Path(get_settings().data_dir) / _CACHE_NAME
 

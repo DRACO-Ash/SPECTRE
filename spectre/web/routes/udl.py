@@ -1160,7 +1160,7 @@ def _notso_query(latest: datetime | None) -> dict[str, str | int]:
     hitting UDL too hard; otherwise the newest record plus 1 microsecond, so
     the boundary record is not fetched again.
     """
-    from datetime import timedelta  # noqa: PLC0415
+    from datetime import timedelta
 
     since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
     return {
