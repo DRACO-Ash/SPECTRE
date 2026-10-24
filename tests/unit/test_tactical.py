@@ -118,13 +118,32 @@ class TestCWCombined:
         assert result.along_track_sep_km == 5.0
         assert result.method == "combined"
 
-    def test_pure_radial_recoverable(self) -> None:
-        """Combined with zero along-track should match pure radial."""
-        pure = cw_radial_separation(LEO_R, 5.0, 1800.0)
-        combined = cw_combined(LEO_R, 5.0, 0.0, 1800.0)
-        # Not exact match because combined solves the full 2×2 system
-        # but radial ΔV should be close
-        assert abs(combined.delta_v_radial - pure.delta_v_radial) < 0.01
+    @pytest.mark.parametrize("time_s", [600.0, 1800.0, 2900.0, 4100.0, 7000.0])
+    def test_the_burns_fly_to_their_targets(self, time_s: float) -> None:
+        """Fly each solver's burn through the CW solution and check the result.
+
+        The premise of the test this replaces, that the combined solve with no
+        along-track target matches the pure radial burn, is false: by hand at
+        1,800 s the pure radial burn is +6.06 m/s and the combined one -2.21
+        m/s radial with +2.68 m/s along-track, and the 10 m/s tolerance let both
+        signs pass (audit F-081).
+        """
+        from spectre.astro.cw_geometry import CWState, _cw_propagate
+
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+
+        def flown(result: object) -> CWState:
+            return _cw_propagate(
+                CWState(0.0, 0.0, 0.0, result.delta_v_radial, result.delta_v_along_track, 0.0),  # type: ignore[attr-defined]
+                n, time_s,
+            )
+
+        pure = flown(cw_radial_separation(LEO_R, 5.0, time_s))
+        assert pure.x == pytest.approx(5.0, abs=1e-9)
+
+        combined = flown(cw_combined(LEO_R, 5.0, 0.0, time_s))
+        assert combined.x == pytest.approx(5.0, abs=1e-9)
+        assert combined.y == pytest.approx(0.0, abs=1e-9)
 
 
 class TestPlaneChange:

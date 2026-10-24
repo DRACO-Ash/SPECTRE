@@ -38,10 +38,28 @@ import pytest
 from spectre.astro.constants import MU_EARTH
 from spectre.astro.lambert import (
     LambertConvergenceError,
-    _stumpff_C,
-    _stumpff_S,
     solve_lambert,
 )
+
+
+# Stumpff functions written out here rather than imported from the solver, so
+# the reference propagator shares no code with what it checks (audit F-070).
+def _stumpff_C(z: float) -> float:
+    if z > 0:
+        return (1.0 - math.cos(math.sqrt(z))) / z
+    if z < 0:
+        return (math.cosh(math.sqrt(-z)) - 1.0) / -z
+    return 0.5
+
+
+def _stumpff_S(z: float) -> float:
+    if z > 0:
+        sz = math.sqrt(z)
+        return (sz - math.sin(sz)) / sz**3
+    if z < 0:
+        sz = math.sqrt(-z)
+        return (math.sinh(sz) - sz) / sz**3
+    return 1.0 / 6.0
 
 
 def _propagate(r0: np.ndarray, v0: np.ndarray, dt: float, mu: float = MU_EARTH) -> np.ndarray:

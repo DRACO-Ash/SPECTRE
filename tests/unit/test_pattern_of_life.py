@@ -136,6 +136,14 @@ class TestEpochToJd:
 
 
 class TestGstDeg:
+    def test_vallado_example_3_5(self) -> None:
+        # 1992-08-20 12:14 UT1: GMST 152.578787810 deg (Vallado, Example 3-5).
+        assert _gst_deg(datetime(1992, 8, 20, 12, 14, tzinfo=UTC)) == pytest.approx(152.578787810, abs=1e-4)
+
+    def test_meeus_example_12a(self) -> None:
+        # 1987-04-10 0h UT: GMST 13h10m46.3668s = 197.693195 deg (Meeus, Example 12.a).
+        assert _gst_deg(datetime(1987, 4, 10, tzinfo=UTC)) == pytest.approx(197.693195, abs=1e-4)
+
     def test_returns_float_in_0_360(self) -> None:
         epoch = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
         gst = _gst_deg(epoch)
@@ -147,7 +155,7 @@ class TestParseTleEpoch:
         # line1 with epoch 26060.5 => 2026, day 60.5 (= March 1, 12:00 approx)
         line1 = "1 25544U 98067A   26060.50000000  .00016717  00000-0  10270-3 0  9993"
         epoch = _parse_tle_epoch(line1)
-        assert epoch.year == 2026
+        assert epoch == datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
         assert epoch.tzinfo is UTC
 
 
@@ -300,8 +308,8 @@ class TestJ2Rates:
     def test_raan_rate_negative_for_prograde(self) -> None:
         rec = _make_record(sma=6778.0, ecc=0.001, inc=51.6)
         rate = _j2_raan_rate(rec)
-        # RAAN regresses for prograde orbits (inc < 90°)
-        assert rate < 0.0
+        # About -5.00 deg/day for a = 6,778 km at 51.6 deg (the ISS figure).
+        assert rate == pytest.approx(-5.00, rel=0.01)
 
     def test_argp_rate_returns_float(self) -> None:
         rec = _make_record()
