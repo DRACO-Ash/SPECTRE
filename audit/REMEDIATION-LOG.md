@@ -275,3 +275,17 @@ All new reference pins passed against the existing code; these findings were abo
 | F-057 | F-S10-05 | `54a1959` | SECURITY.md rewritten: 22 controls in place, each citing its file and CI job (a test checks they exist); 13 open items; both marking rulings; operator accounts and sign-in logs recorded as personal data |
 
 Observed while generating the F-161 table, not an audit finding: level 5 (Operator) needs three challenges passed, but only one challenge (`analyst_gauntlet`) is available below level 5; the other two unlock at level 5. Level 5 is reachable today only because scenario levels are not enforced (finding at FINDINGS.md:2800). Enforcing them would make level 5 unreachable. Left for a design decision.
+
+### Domain
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-111 | F-S05-04 | `ea29066` | the Decision Engine's TLE refinement removed rather than repaired: it swallowed every error, sampled one instant rather than closest approach, and could only lower the score. `compute_outcome_metrics` and `evaluate_scenario` no longer take element sets; the route no longer passes them |
+| F-113 | F-S05-06 | `ea29066` | module and function docstrings describe the model as it is: an uncalibrated lookup over operator-entered fractions, with the custody and gap rules stated as the code applies them, and no claim that SGP4 drives it |
+| F-112 | F-S05-05 | `b8fd0bf` | AdversaryAction, FriendlyResponse and Scenario refuse fractions outside [0, 1], NaN and a non-positive horizon at construction, so the domain holds without the route's checks (43 cases) |
+| F-116 | F-S05-10 | `832c85e` | the GEO protected region ends at GEO plus 200 km (35,986 km), per the IADC guidelines, built from the shared GEO altitude constant rather than the regime band edge |
+| F-118 | F-S05-12 | `572c0ba` | only manoeuvres not classified as routine station-keeping count against the discretionary reserve; five years of fortnightly 1.8 m/s GEO burns keep the full 200 m/s. Spend and rate still count every burn |
+| F-119 | F-S05-13 | `de205bb` | an unrecognised solver maps to a new UNCLASSIFIED kind scored against the 75/300 m/s band, which is at least as wide as every (regime, kind) band. RENDEZVOUS, the old fallback, is not the widest anywhere. The test checks the unknown kind is never scored above any known kind, in every regime |
+| F-065 | F-S00-12 | `1fa1f55` | CI ruff selects BLE, S110 and RUF100, with the quality gate's own codes (S, PLR, PLC, PLW) declared external so their directives are not reported dead; the one dead directive removed. Of 23 unmarked broad handlers, 16 now catch what their block raises (`TLE_ERRORS`, found by fuzzing the parser and SGP4: ValueError, RuntimeError and ZeroDivisionError) and 7 stay broad with a stated reason |
+
+`1fa1f55` also splits `ScenarioPlanner.plan` (27), `_parse_udl_elset_response` (21) and `udl_notso` (17), which narrowing their handlers brought into scope; each gives byte-identical output against a snapshot taken before the change.

@@ -57,6 +57,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The docs state the TEME frame, the Lambert solver that exists, the real level and axis tables, the real intercept result and routes, and the real test suite and CI jobs (F-055, F-173, F-161, F-181, F-180).
 - SECURITY.md states only controls the repository implements, each evidenced, with the rest as open items (F-057).
 
+### Fixed (audit step 3, domain)
+- The Decision Engine no longer runs a TLE refinement that hid its errors and could only lower the score; its docstrings describe it as the uncalibrated lookup model it is (F-111, F-113).
+- Decision Engine inputs are validated in the domain, not only at the route (F-112).
+- The GEO protected region ends at GEO plus 200 km, as the IADC guidelines define it (F-116).
+- Routine station-keeping no longer draws down the discretionary reserve (F-118).
+- An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
+- CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
+
 ### Added
 - Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
 - Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).
