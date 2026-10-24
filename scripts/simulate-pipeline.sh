@@ -92,13 +92,17 @@ printf '\n== Stage 3: containerize (build from the checkout root as context) ==\
 BUILD_FILE="Dockerfile"
 if [ -n "${PROXY_CA_BUNDLE:-}" ] && [ -f "$PROXY_CA_BUNDLE" ]; then
     cp "$PROXY_CA_BUNDLE" "$WORK/.sim-proxy-ca.crt"
+    # Matched requirements.lock, which no Dockerfile copies, so nothing was
+    # inserted while the note below claimed it was (audit F-176).
     awk '
-      /^COPY requirements\.lock \.\/$/ {
+      /^COPY requirements-runtime\.txt \.\/$/ {
         print "COPY .sim-proxy-ca.crt /tmp/ca.crt"
         print "ENV PIP_CERT=/tmp/ca.crt"
       }
       { print }
     ' "$WORK/Dockerfile" > "$WORK/Dockerfile.sim"
+    cmp -s "$WORK/Dockerfile" "$WORK/Dockerfile.sim" \
+        && fail "proxy CA hook matched no line in Dockerfile; the CA would not be trusted"
     BUILD_FILE="Dockerfile.sim"
     printf '  note  proxy CA trusted for the build only\n'
 fi
