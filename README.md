@@ -13,7 +13,7 @@ SPECTRE provides analysts with a web console for:
 - **Intercept Engine** (23 methods) — Lambert, Hohmann, bi-elliptic, rendezvous, proximity; tactical manoeuvres (phasing, CW relative motion, plane change, J2 RAAN drift, COLA, evasion); advanced analysis (GEO drift, NMC, manoeuvre classification, detectability); decision support (intent prediction, intercept envelope, stability, fingerprinting, formation defence, orbital terrain, minimum-time intercept)
 - **Threat Sweep** — batch Hohmann evaluation across HRR target groups at 5 orbital epochs; Lambert refinement of top results; TLE clustering and de-duplication via DBSCAN; per-object uncertainty flagging
 - **Pattern of Life (PoL)** — historical TLE sequence analysis: manoeuvre detection, activity classification, behavioural baseline; TLE cadence filtering and de-duplication; NOTSO message correlation with detected manoeuvres; Monte Carlo simulation of adversary manoeuvre hypotheses; historical photometry change assessment
-- **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Maximin); robust recommendation banner
+- **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Minimin); results labelled as a modelled estimate, not a computed solution, because Phase 1 outcomes are lookup constants rather than propagated orbits
 - **GCAT Browser** — interactive browser for the General Catalog of Artificial Space Objects (J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, paginated; on-demand download with in-session caching
 - **Training Mode** — full gamification system for operator skill development: six proficiency levels, 13 structured scenarios (Cadet through Expert), timed challenges, step-by-step tutorials, live SPECTRE console embed, XP/points progression, session tracking
 
@@ -166,8 +166,8 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
     - Define 1–5 adversary action rows (type, probability, confidence)
     - Define 1–5 friendly response rows (type, cost, reversibility, time-to-execute)
     - Click **Evaluate** — the engine computes an N × M outcome matrix with composite scores, custody indicators, and closest-approach estimates
-    - Choose selector strategy: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), or **Maximin** (maximise best-case)
-    - The robust recommendation banner shows the best response across all adversary action probabilities
+    - Choose selector strategy: **Minimax** (cautious: best worst case), **Expected Value** (probability-weighted), or **Minimin** (optimistic: best best case, not robust)
+    - The recommendation banner shows the selected response and states that it is a **modelled estimate, not a computed solution**: Phase 1 outcomes are lookup constants and weights, not propagated orbits
 
 11. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method.
 
@@ -245,7 +245,7 @@ pytest
 | `test_notso.py` | NOTSO parser, correlation algorithm, behaviour profile |
 | `test_photometry.py` | Geometric corrections, baseline fitting, change detection |
 | `test_tle_filter.py` | TLE cadence clustering and quality flags |
-| `test_decision.py` | Decision Engine models, minimax/EV/maximin selectors |
+| `test_decision.py`, `test_decision_labelling.py` | Decision Engine models, minimax/EV/minimin selectors, modelled-estimate labelling |
 | `test_training_gamification.py` | XP/level progression, scenario unlocks |
 | `test_threat_sweep.py` | Threat Sweep solver dispatch |
 | `test_domain_models.py` | Data model validation |

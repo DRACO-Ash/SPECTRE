@@ -205,6 +205,33 @@ def _eval_quadratic(coeffs: tuple[float, float, float], phase: float) -> float:
     return a0 + a1 * phase + a2 * phase * phase
 
 
+# A pivot this small means the phase coverage cannot separate the coefficients.
+_SINGULAR_PIVOT = 1e-15
+
+
+def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
+    """Solve mat x = rhs by Gauss elimination with partial pivoting."""
+    n_ = len(rhs)
+    m = [row[:] + [rhs[i]] for i, row in enumerate(mat)]  # augmented
+    for col in range(n_):
+        # Partial pivot
+        max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
+        m[col], m[max_row] = m[max_row], m[col]
+        if abs(m[col][col]) < _SINGULAR_PIVOT:
+            raise ValueError("Singular normal matrix — degenerate phase coverage")
+        for row in range(col + 1, n_):
+            f = m[row][col] / m[col][col]
+            for j in range(col, n_ + 1):
+                m[row][j] -= f * m[col][j]
+    # Back substitution
+    x = [0.0] * n_
+    for i in range(n_ - 1, -1, -1):
+        x[i] = m[i][n_] / m[i][i]
+        for j in range(i + 1, n_):
+            x[i] -= m[i][j] * x[j] / m[i][i]
+    return x
+
+
 def _fit_least_squares_quadratic(
     phases: list[float],
     mags: list[float],
@@ -235,35 +262,17 @@ def _fit_least_squares_quadratic(
     ]
     b_vec = [sy0, sy1, sy2]
 
-    # Gauss elimination with partial pivoting
-    def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
-        n_ = len(rhs)
-        m = [row[:] + [rhs[i]] for i, row in enumerate(mat)]  # augmented
-        for col in range(n_):
-            # Partial pivot
-            max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
-            m[col], m[max_row] = m[max_row], m[col]
-            if abs(m[col][col]) < 1e-15:
-                raise ValueError("Singular normal matrix — degenerate phase coverage")
-            for row in range(col + 1, n_):
-                f = m[row][col] / m[col][col]
-                for j in range(col, n_ + 1):
-                    m[row][j] -= f * m[col][j]
-        # Back substitution
-        x = [0.0] * n_
-        for i in range(n_ - 1, -1, -1):
-            x[i] = m[i][n_] / m[i][i]
-            for j in range(i + 1, n_):
-                x[i] -= m[i][j] * x[j] / m[i][i]
-        return x
-
     coeffs = _gauss_solve(A, b_vec)
 
-    # Covariance: residual variance × (X^T X)^{-1}  (approximated from diagonal)
+    # Covariance: residual variance x (X^T X)^-1, the full inverse. The
+    # previous res_var / diag(X^T X) is not a covariance: over tens of degrees
+    # of phase the columns 1, x, x^2 are strongly correlated and it understated
+    # the variances by orders of magnitude (audit F-102). The inverse is built
+    # column by column from the same elimination.
     residuals = [mags[i] - _eval_quadratic(tuple(coeffs), phases[i]) for i in range(n)]  # type: ignore[arg-type]
     res_var   = sum(r * r for r in residuals) / max(n - 3, 1)
-    # Simplified diagonal covariance (off-diagonal entries zeroed)
-    cov = [[res_var / max(A[i][i], 1e-12) if i == j else 0.0 for j in range(3)] for i in range(3)]
+    inv_cols  = [_gauss_solve(A, [1.0 if k == j else 0.0 for k in range(3)]) for j in range(3)]
+    cov = [[res_var * inv_cols[j][i] for j in range(3)] for i in range(3)]
 
     return coeffs[0], coeffs[1], coeffs[2], cov
 
@@ -381,7 +390,10 @@ def _t_test_two_sample(
     # Welch–Satterthwaite degrees of freedom
     num   = (var_a / na + var_b / nb) ** 2
     denom = (var_a / na) ** 2 / (na - 1) + (var_b / nb) ** 2 / (nb - 1)
-    df    = num / denom if denom > 1e-15 else 1.0
+    # Guarded on exact zero: denom is in mag^4 and an absolute 1e-15 cut-off
+    # sent precise or large samples to one degree of freedom, a Cauchy tail
+    # (audit F-101). With no spread to weight, the pooled count is used.
+    df    = num / denom if denom > 0.0 else float(na + nb - 2)
 
     # p-value via regularised incomplete Beta (I_x(a,b), x = df/(df+t^2))
     x   = df / (df + t * t)
@@ -456,6 +468,10 @@ def _regularised_incomplete_beta(x: float, a: float, b: float) -> float:
         return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
 
 
+# Fewest usable observations per window from which a change can be tested.
+_MIN_WINDOW_OBS = 2
+
+
 def detect_change(
     corrected: Sequence[CorrectedObservation],
     baseline: PhotometryBaseline,
@@ -468,13 +484,35 @@ def detect_change(
     -------
     (baseline_mean, baseline_std, recent_mean, recent_std, t_stat, p_value)
     """
+    baseline_residuals, recent_residuals = _window_residuals(
+        corrected, baseline, recent_window_days, baseline_window_days,
+    )
+
+    if not baseline_residuals or not recent_residuals:
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 1.0
+
+    bm = sum(baseline_residuals) / len(baseline_residuals)
+    bs = math.sqrt(sum((r - bm) ** 2 for r in baseline_residuals) / max(len(baseline_residuals) - 1, 1))
+    rm = sum(recent_residuals) / len(recent_residuals)
+    rs = math.sqrt(sum((r - rm) ** 2 for r in recent_residuals) / max(len(recent_residuals) - 1, 1))
+
+    t, p = _t_test_two_sample(baseline_residuals, recent_residuals)
+    return bm, bs, rm, rs, t, p
+
+
+def _window_residuals(
+    corrected: Sequence[CorrectedObservation],
+    baseline: PhotometryBaseline,
+    recent_window_days: float,
+    baseline_window_days: float,
+) -> tuple[list[float], list[float]]:
+    """Residuals from the baseline model in the baseline and recent windows."""
     now_epoch = max((c.epoch_utc for c in corrected), default=datetime.now(UTC))
     recent_cutoff   = now_epoch - timedelta(days=recent_window_days)
     baseline_cutoff = now_epoch - timedelta(days=recent_window_days + baseline_window_days)
 
     baseline_residuals: list[float] = []
     recent_residuals:   list[float] = []
-
     for c in corrected:
         if c.quality_flag in ("reject",):
             continue
@@ -487,17 +525,7 @@ def detect_change(
             baseline_residuals.append(residual)
         elif c.epoch_utc >= recent_cutoff:
             recent_residuals.append(residual)
-
-    if not baseline_residuals or not recent_residuals:
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 1.0
-
-    bm = sum(baseline_residuals) / len(baseline_residuals)
-    bs = math.sqrt(sum((r - bm) ** 2 for r in baseline_residuals) / max(len(baseline_residuals) - 1, 1))
-    rm = sum(recent_residuals) / len(recent_residuals)
-    rs = math.sqrt(sum((r - rm) ** 2 for r in recent_residuals) / max(len(recent_residuals) - 1, 1))
-
-    t, p = _t_test_two_sample(baseline_residuals, recent_residuals)
-    return bm, bs, rm, rs, t, p
+    return baseline_residuals, recent_residuals
 
 
 def _estimate_change_epoch(
@@ -625,6 +653,15 @@ def assess_photometry(
         confounders.append(f"{n_lunar} observations affected by lunar proximity")
     if baseline.residual_std > 0.3:
         confounders.append(f"High baseline scatter (σ={baseline.residual_std:.3f} mag) — variable phase coverage")
+    # An empty or single-point window gives p = 1, which would otherwise read
+    # as "no significant change" (audit F-108).
+    base_res, recent_res = _window_residuals(corrected, baseline, recent_window_days, baseline_window_days)
+    if min(len(base_res), len(recent_res)) < _MIN_WINDOW_OBS:
+        confounders.append(
+            f"No change could be tested: the baseline window holds {len(base_res)} usable "
+            f"observations and the recent window holds {len(recent_res)}; at least "
+            f"{_MIN_WINDOW_OBS} each are needed"
+        )
 
     # Confidence: composite based on p-value and sample sizes
     if sig99:

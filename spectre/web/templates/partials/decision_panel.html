@@ -12,7 +12,7 @@
 
   <p style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.6rem">
     Define adversary actions and friendly responses. The engine evaluates every combination
-    and recommends the robust best response using the selected strategy.
+    and gives a modelled recommendation using the selected strategy. Outcomes are lookup estimates, not propagated orbits.
     {% if pol %}<em>Active PoL object: SATNO {{ pol.satno }}.</em>{% endif %}
   </p>
 
@@ -135,9 +135,9 @@
     <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.5rem">
       Selector Strategy
       <select name="strategy" style="font-size:0.65rem; margin-left:0.4rem">
-        <option value="minimax">Minimax (minimise worst-case risk)</option>
-        <option value="expected_value">Expected Value (minimise weighted cost)</option>
-        <option value="maximin">Maximin (maximise best-case outcome)</option>
+        <option value="minimax">Minimax: cautious, best worst case</option>
+        <option value="expected_value">Expected Value: probability-weighted cost</option>
+        <option value="minimin">Minimin: optimistic, best best case (not robust)</option>
       </select>
     </label>
 

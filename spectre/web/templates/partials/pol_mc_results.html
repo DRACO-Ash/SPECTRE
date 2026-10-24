@@ -20,6 +20,7 @@
     </div>
     <span style="font-size:0.62rem; color:var(--text-dim)">
       Manoeuvre: {{ manoeuvre.epoch.strftime("%Y-%m-%d") }} · {{ manoeuvre_dv_m_s | m_s }} m/s
+      {% if mc.direction_basis %}<br>ΔV direction: {{ mc.direction_basis }}{% endif %}
     </span>
   </div>
 

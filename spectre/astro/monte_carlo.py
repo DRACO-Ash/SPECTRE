@@ -48,32 +48,55 @@ _J2   = J2_EARTH   # dimensionless
 
 # ── Atmospheric density model ─────────────────────────────────────────────────
 
-def _atmo_density_kg_m3(h_km: float) -> float:
-    """Approximate atmospheric density (kg/m³) from altitude (km).
+# Vallado, Fundamentals of Astrodynamics and Applications, Table 8-4
+# (exponential atmosphere): base altitude km, base density kg/m^3, scale
+# height km. Each scale height is fitted so adjacent bands meet. The previous
+# uncited table had its scale heights shifted one band against base densities
+# that matched no published row, so density jumped at most band edges (x24.9
+# at 150 km, x10.1 at 1,000 km) (audit F-105).
+_EXPONENTIAL_ATMOSPHERE: tuple[tuple[float, float, float], ...] = (
+    (0.0,    1.225,     7.249),
+    (25.0,   3.899e-2,  6.349),
+    (30.0,   1.774e-2,  6.682),
+    (40.0,   3.972e-3,  7.554),
+    (50.0,   1.057e-3,  8.382),
+    (60.0,   3.206e-4,  7.714),
+    (70.0,   8.770e-5,  6.549),
+    (80.0,   1.905e-5,  5.799),
+    (90.0,   3.396e-6,  5.382),
+    (100.0,  5.297e-7,  5.877),
+    (110.0,  9.661e-8,  7.263),
+    (120.0,  2.438e-8,  9.473),
+    (130.0,  8.484e-9,  12.636),
+    (140.0,  3.845e-9,  16.149),
+    (150.0,  2.070e-9,  22.523),
+    (180.0,  5.464e-10, 29.740),
+    (200.0,  2.789e-10, 37.105),
+    (250.0,  7.248e-11, 45.546),
+    (300.0,  2.418e-11, 53.628),
+    (350.0,  9.518e-12, 53.298),
+    (400.0,  3.725e-12, 58.515),
+    (450.0,  1.585e-12, 60.828),
+    (500.0,  6.967e-13, 63.822),
+    (600.0,  1.454e-13, 71.835),
+    (700.0,  3.614e-14, 88.667),
+    (800.0,  1.170e-14, 124.64),
+    (900.0,  5.245e-15, 181.05),
+    (1000.0, 3.019e-15, 268.00),
+)
 
-    Simplified piecewise exponential fit valid for 0–2000 km.
-    Sufficient for 48-hour MC propagation — dominant perturbation is ΔV
-    variation, not drag-model accuracy.
+
+def _atmo_density_kg_m3(h_km: float) -> float:
+    """Atmospheric density (kg/m^3) at altitude *h_km*, exponential atmosphere.
+
+    Vallado's Table 8-4, piecewise exponential from the band at or below the
+    altitude. Above 1,000 km the top band is extended.
     """
     h = max(0.0, h_km)
-    # Each tuple: (h_base_km, rho0_kg_m3, scale_height_km)
-    _TABLE = [
-        (0,    1.2250,     7.249),
-        (86,   5.457e-6,   5.770),
-        (150,  2.070e-9,  22.523),
-        (200,  2.530e-10, 29.740),
-        (300,  1.950e-11, 37.105),
-        (400,  3.614e-12, 45.546),
-        (500,  5.630e-13, 53.628),
-        (700,  1.040e-14, 88.667),
-        (1000, 3.560e-15, 115.70),
-    ]
-    # Find the appropriate band
-    for i in range(len(_TABLE) - 1, -1, -1):
-        h_base, rho0, H = _TABLE[i]
+    for h_base, rho0, scale_height in reversed(_EXPONENTIAL_ATMOSPHERE):
         if h >= h_base:
-            return rho0 * math.exp(-(h - h_base) / H)
-    return _TABLE[-1][1]
+            return rho0 * math.exp(-(h - h_base) / scale_height)
+    return _EXPONENTIAL_ATMOSPHERE[0][1]
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -215,6 +238,8 @@ class ManoeuvreHypothesis:
     distribution_type: str = "gaussian"   # "gaussian" | "uniform"
     n_samples: int         = 500
     random_seed: int       = 42
+    # Where the RIC split of the ΔV came from, shown on the panel.
+    direction_basis: str   = "assumed in-track"
 
 
 @dataclass
@@ -255,6 +280,9 @@ class MonteCarloResult:
     wall_time_seconds: float
     random_seed: int
 
+    # Where the hypothesis's ΔV direction came from (see ManoeuvreHypothesis).
+    direction_basis: str = ""
+
 
 # ── Core physics ──────────────────────────────────────────────────────────────
 
@@ -282,7 +310,7 @@ def _j2_drag_ode(
     ----------
     state : (6,) — [x, y, z, vx, vy, vz]
     bstar : B* parameter from TLE (used for regime check only; drag uses bc)
-    bc_m2_kg : ballistic coefficient (m²/kg) = m / (Cd*A)
+    bc_m2_kg : ballistic coefficient m / (Cd*A), in kg/m² despite the name
     """
     x, y, z, vx, vy, vz = state
     r_vec = np.array([x, y, z])
@@ -418,54 +446,59 @@ def generate_samples(hypothesis: ManoeuvreHypothesis) -> np.ndarray:
 
 # ── Single-sample propagation ─────────────────────────────────────────────────
 
+# SGP4 defines B* = rho0 Cd A / (2 m) with rho0 = 0.15696615 kg/m^2 per Earth
+# radius, so Cd A / m = 2 B* / rho0 = 12.741621 B* in m^2/kg (Vallado,
+# Fundamentals of Astrodynamics and Applications, SGP4 drag term).
+_BSTAR_TO_CDA_OVER_M = 12.741621
+# Floor on m / (Cd A), kg/m^2, and the smallest |B*| taken at face value.
+_MIN_BALLISTIC_KG_M2 = 5.0
+_MIN_BSTAR = 1e-8
+
+
+def _ballistic_coefficient_kg_m2(bstar: float) -> float:
+    """m / (Cd A), kg/m^2, from the SGP4 drag term B* (1/Earth radii).
+
+    The previous conversion used an unsourced constant on the Earth radius in
+    metres and gave 31.9 kg/m^2 for B* = 1e-4 where SGP4's relation gives
+    784.8: drag about 24.6 times too strong (audit F-031).
+    """
+    return max(_MIN_BALLISTIC_KG_M2, 1.0 / (_BSTAR_TO_CDA_OVER_M * max(abs(bstar), _MIN_BSTAR)))
+
+
 def propagate_single_sample(
     sample: np.ndarray,
     pre_state: np.ndarray,
-    pre_epoch: datetime,
-    ric_to_eci: np.ndarray,
     bstar_base: float,
     horizon_hours: float,
 ) -> dict[str, Any] | None:
     """Propagate one MC sample and return key orbital elements at horizon.
 
+    Time zero is the nominal burn epoch, at which *pre_state* holds. The
+    sample's timing offset moves the burn: the pre-burn state is propagated
+    (forward or back) to the shifted instant, the ΔV is applied in the RIC
+    frame there, and every sample is then integrated to the same horizon. The
+    offset used to lengthen or shorten the whole span instead, so the cloud
+    mixed states read at different times (audit F-029).
+
     Returns None on numerical failure.
     """
     dv_ric = sample[:3]
-    epoch_offset_s = float(sample[3])
-    bstar_pert = float(sample[4])
-
-    # Rotate ΔV from RIC to ECI
-    dv_eci = ric_to_eci @ dv_ric  # (3,)
-
-    # Apply ΔV to velocity
-    state0 = pre_state.copy()
-    state0[3:] += dv_eci
-
-    # Effective B* and ballistic coefficient
-    bstar_eff = bstar_base + bstar_pert
-    bc_m2_kg = max(5.0, 1.0 / (2.0 * max(abs(bstar_eff), 1e-8) * _R_E * 1e3 * 2.461e-5))
-
-    # Propagation span (accounting for timing perturbation)
-    t_span_s = horizon_hours * 3600.0 + epoch_offset_s
-    if t_span_s <= 0:
-        t_span_s = 60.0
+    t_burn = float(sample[3])
+    bstar_eff = bstar_base + float(sample[4])
+    horizon_s = horizon_hours * 3600.0
+    if t_burn >= horizon_s:
+        return None
 
     try:
-        sol = solve_ivp(
-            _j2_drag_ode,
-            (0.0, t_span_s),
-            state0,
-            method="RK45",
-            rtol=1e-8,
-            atol=1e-10,
-            args=(bstar_eff, bc_m2_kg),
-            dense_output=False,
-        )
-        if not sol.success:
+        burn_state = _integrate(pre_state, t_burn, bstar_base)
+        if burn_state is None:
+            return None
+        burn_state[3:] += _ric_to_eci_rotation(burn_state[:3], burn_state[3:]) @ dv_ric
+        final = _integrate(burn_state, horizon_s - t_burn, bstar_eff)
+        if final is None:
             return None
 
-        r_final = sol.y[:3, -1]
-        v_final = sol.y[3:, -1]
+        r_final, v_final = final[:3], final[3:]
         sma, ecc, inc_deg = _state_to_keplerian(r_final, v_final)
         alt_km = float(np.linalg.norm(r_final)) - _R_E
         period_min = 2.0 * math.pi * math.sqrt(max(sma, 1.0) ** 3 / _MU) / 60.0
@@ -481,6 +514,23 @@ def propagate_single_sample(
         }
     except Exception:
         return None
+
+
+def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | None:
+    """Integrate *state* for *span_s* seconds (negative runs backwards)."""
+    if span_s == 0.0:
+        return state.copy()
+    sol = solve_ivp(
+        _j2_drag_ode,
+        (0.0, span_s),
+        state,
+        method="RK45",
+        rtol=1e-8,
+        atol=1e-10,
+        args=(bstar, _ballistic_coefficient_kg_m2(bstar)),
+        dense_output=False,
+    )
+    return np.array(sol.y[:, -1]) if sol.success else None
 
 
 # ── Convergence check ─────────────────────────────────────────────────────────
@@ -532,11 +582,6 @@ def run_monte_carlo(
     t_start = time.monotonic()
     pre_state = hypothesis.pre_manoeuvre_state_eci_km.copy()
 
-    # RIC → ECI rotation at pre-manoeuvre epoch
-    r_eci = pre_state[:3]
-    v_eci = pre_state[3:]
-    ric_to_eci = _ric_to_eci_rotation(r_eci, v_eci)
-
     # Generate all samples
     samples = generate_samples(hypothesis)  # (N, 5)
 
@@ -549,8 +594,6 @@ def run_monte_carlo(
                 propagate_single_sample,
                 samples[i],
                 pre_state,
-                hypothesis.epoch_utc,
-                ric_to_eci,
                 hypothesis.bstar_post,
                 prediction_horizon_hours,
             ): i
@@ -589,6 +632,7 @@ def run_monte_carlo(
             period_range_minutes=(0.0, 0.0),
             wall_time_seconds=time.monotonic() - t_start,
             random_seed=hypothesis.random_seed,
+            direction_basis=hypothesis.direction_basis,
         )
 
     # ── Aggregate results ─────────────────────────────────────────────────────
@@ -636,6 +680,7 @@ def run_monte_carlo(
         period_range_minutes=(float(np.min(per_arr)), float(np.max(per_arr))),
         wall_time_seconds=time.monotonic() - t_start,
         random_seed=hypothesis.random_seed,
+        direction_basis=hypothesis.direction_basis,
     )
 
 
@@ -649,12 +694,19 @@ def hypothesis_from_tle_record(
 ) -> ManoeuvreHypothesis:
     """Build a ManoeuvreHypothesis from a detected PoL manoeuvre.
 
-    Uses the propagated state at the manoeuvre epoch as the pre-manoeuvre state.
+    The pre-manoeuvre state is *tle_record* propagated to the manoeuvre's burn
+    epoch (its measured burn time where there is one). The ΔV is split across
+    radial, in-track and cross-track in the proportions of the detection's
+    element breakdown, in-track signed by the change in semi-major axis; the
+    breakdown does not resolve the sense of the radial and cross-track parts.
+    Without a breakdown the whole ΔV is assumed in-track, and the hypothesis
+    says so. Every hypothesis used to be in-track, so a detected plane change
+    was simulated as an orbit raise (audit F-030).
     """
     from spectre.astro.propagator import TLEOrbit
 
-    orbit = TLEOrbit(manoeuvre.tle_before.tle)
-    sv = orbit.propagate(manoeuvre.epoch)
+    burn_epoch = getattr(manoeuvre, "burn_epoch", manoeuvre.epoch)
+    sv = TLEOrbit(tle_record.tle).propagate(burn_epoch)
     pre_state = np.concatenate([sv.r, sv.v])
 
     # Pick archetype based on detected manoeuvre type
@@ -663,17 +715,38 @@ def hypothesis_from_tle_record(
 
     dv = manoeuvre.delta_v_km_s
     dv_1sig = max(dv * archetype.delta_v_1sigma_fraction, 0.0005)
+    ric, basis = _ric_split(getattr(manoeuvre, "breakdown", None))
 
     return ManoeuvreHypothesis(
-        epoch_utc=manoeuvre.epoch,
+        epoch_utc=burn_epoch,
         delta_v_magnitude_km_s=dv,
-        delta_v_radial=0.0,
-        delta_v_in_track=dv,     # Assume in-track by default
-        delta_v_cross_track=0.0,
+        delta_v_radial=dv * ric[0],
+        delta_v_in_track=dv * ric[1],
+        delta_v_cross_track=dv * ric[2],
         pre_manoeuvre_state_eci_km=pre_state,
         delta_v_magnitude_1sigma_km_s=dv_1sig,
         delta_v_pointing_1sigma_deg=archetype.pointing_1sigma_deg,
         epoch_1sigma_seconds=archetype.timing_1sigma_seconds,
         bstar_post=getattr(manoeuvre.tle_before, "bstar", 1e-4),
         n_samples=n_samples,
+        direction_basis=basis,
+    )
+
+
+def _ric_split(breakdown: Any) -> tuple[np.ndarray, str]:
+    """Unit RIC direction from a detection's element breakdown, and its basis."""
+    channels = {c.channel: c for c in getattr(breakdown, "components", ())}
+    along = channels.get("along_track")
+    sense = -1.0 if along is not None and along.inputs.get("delta_a_km", 0.0) < 0.0 else 1.0
+    ric = np.array([
+        channels["radial"].dv_km_s if "radial" in channels else 0.0,
+        sense * along.dv_km_s if along is not None else 0.0,
+        channels["cross_track"].dv_km_s if "cross_track" in channels else 0.0,
+    ])
+    norm = float(np.linalg.norm(ric))
+    if norm == 0.0:
+        return np.array([0.0, 1.0, 0.0]), "assumed in-track: no element breakdown"
+    return ric / norm, (
+        "split from the detection's element breakdown; "
+        "sense of radial and cross-track parts not resolved"
     )

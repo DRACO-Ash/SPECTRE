@@ -1,0 +1,26 @@
+$ python scripts/cognitive_complexity.py --max 15
+  OVER   51  spectre/astro/tactical.py:1135  optimal_evasion
+  OVER   44  spectre/web/routes/decision.py:56  decision_evaluate
+  OVER   40  spectre/web/routes/training.py:364  training_scenario_submit
+  OVER   31  spectre/astro/tactical.py:791  classify_manoeuvre
+  OVER   31  spectre/astro/tactical.py:1617  fingerprint_manoeuvre
+  OVER   30  spectre/astro/events.py:38  find_orbital_events
+  OVER   27  spectre/astro/photometry.py:664  parse_photometry_csv
+  OVER   27  spectre/domain/scenario.py:40  plan
+  OVER   27  spectre/web/routes/udl.py:1071  udl_notso_sync
+  OVER   26  spectre/astro/tactical.py:1839  orbital_terrain
+  OVER   23  spectre/astro/notso.py:319  _parse_single_notso
+  OVER   23  spectre/astro/tle_preprocessing.py:106  cluster_and_reduce_tle_cache
+  OVER   22  spectre/astro/tactical.py:1293  assess_intercept_intent
+  OVER   21  spectre/web/routes/pol.py:53  _parse_udl_elset_response
+  OVER   20  spectre/domain/decision.py:155  compute_outcome_metrics
+  OVER   19  spectre/astro/pattern_of_life.py:648  _compute_drift_phases
+  OVER   19  spectre/astro/photometry.py:208  _fit_least_squares_quadratic
+  OVER   19  spectre/astro/photometry.py:271  fit_baseline
+  OVER   17  spectre/web/routes/threat.py:208  _objects_for_group
+  OVER   17  spectre/web/routes/training.py:215  _start_scenario
+  OVER   17  spectre/web/routes/udl.py:970  search_catalog
+  OVER   17  spectre/web/routes/udl.py:1008  udl_notso
+
+  625 function(s) measured, 22 over the limit of 15.
+[exit 1]

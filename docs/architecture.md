@@ -204,7 +204,7 @@ Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and 
 | `spectre/astro/notso.py` | unit | Parser, all four correlation match cases, behaviour profile |
 | `spectre/astro/photometry.py` | unit | Geometric corrections, sigma-clipping, t-test significance |
 | `spectre/astro/tle_filter.py` | unit | Cadence clustering, representative selection, quality flags |
-| `domain/` | unit | Pure-Python models; decision engine minimax/EV/maximin selectors |
+| `domain/` | unit | Pure-Python models; decision engine minimax/EV/minimin selectors (modelled estimates) |
 | `training/` | unit | XP progression, level unlock gates, scenario unlock logic |
 | `web/routes/` | integration (TestClient) | In-memory SQLite; covers login, operator, UDL, maneuver, training |
 | `tle_clustering/` | unit + integration | DBSCAN pipeline: parser → clustering → selection; full pipeline |

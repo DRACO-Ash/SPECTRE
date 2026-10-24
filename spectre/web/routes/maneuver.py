@@ -1248,6 +1248,7 @@ async def _refetch_tles(
 #: ``spectre.web.format_units``, because a bare 3600 beside a revolution count
 #: and a drift time in days reads as neither.
 _SECONDS_PER_HOUR: float = 3600.0
+_SECONDS_PER_DAY: float = 86400.0
 
 
 def _hop_count(coast_s: float, default: int) -> int:
@@ -1274,9 +1275,15 @@ def _hop_distance_km(target_km: float) -> float | None:
 
 
 def _geo_drift_days(coast_s: float) -> float | None:
-    """Drift time for the GEO relocation solver, or None to leave it to the solver."""
+    """Drift time in DAYS for the GEO relocation solver, or None to leave it to the solver.
+
+    The panel's coast field doubles as the drift duration. It was divided by
+    the seconds in an hour, so a 48 h coast reached the solver as a 48-day
+    drift and the reported delta-V came out about 1/24 of the true cost
+    (audit F-007).
+    """
     if coast_s > _SECONDS_PER_HOUR:
-        return coast_s / _SECONDS_PER_HOUR
+        return coast_s / _SECONDS_PER_DAY
     return None
 
 

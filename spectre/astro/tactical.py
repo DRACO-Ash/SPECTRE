@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
+from spectre.astro.cw_geometry import CWState, _cw_propagate
+from spectre.astro.transfers import hohmann
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. Phasing Orbit
@@ -302,11 +305,11 @@ def cw_combined(
 
 @dataclass
 class PlaneChangeResult:
-    """Result of a plane-change manoeuvre."""
+    """Result of a plane-change manoeuvre, priced at each node."""
 
-    delta_v_at_node: float      # km/s — ΔV if performed at equatorial node
-    delta_v_at_apogee: float    # km/s — ΔV if performed at apogee
-    optimal_location: str       # "node" or "apogee"
+    delta_v_at_ascending_node: float   # km/s
+    delta_v_at_descending_node: float  # km/s
+    optimal_location: str       # "node" (circular), "ascending node" or "descending node"
     optimal_delta_v: float      # km/s — cheapest option
     inclination_change_deg: float
     method: str = "plane_change"
@@ -330,40 +333,46 @@ def plane_change(
     inclination_change_deg: float,
     ecc: float = 0.0,
     mu: float = MU_EARTH,
+    argp_deg: float = 0.0,
 ) -> PlaneChangeResult:
-    """Compute ΔV for a pure inclination change.
+    """Compute ΔV for a pure inclination change, flown at a node.
 
-    Evaluates cost at the equatorial node (circular velocity) and at
-    apogee (slower velocity, cheaper plane change).
+    A plane change rotates the velocity about the radius vector, leaving the
+    radial speed alone, so it costs 2 v_t sin(Δi / 2) with v_t = h / r the
+    transverse speed (Curtis eq. 6.20). It can only be flown at a node, which
+    lies at true anomaly -ω (ascending) and 180° - ω (descending); the slower
+    of the two is the cheaper. The previous version priced the circular speed
+    at the semi-major axis and offered "apogee" without checking apogee lies
+    on the line of nodes, and named "apogee" for a circular orbit (audit F-074).
 
     Args:
-        r: Orbit radius or semi-major axis (km).
+        r: Semi-major axis (km); the orbit radius when circular.
         inclination_change_deg: Desired inclination change (degrees).
         ecc: Orbital eccentricity (0 for circular).
         mu: Gravitational parameter.
+        argp_deg: Argument of perigee (degrees), which places the nodes.
     """
-    di = math.radians(inclination_change_deg)
+    sin_half = math.sin(math.radians(inclination_change_deg) / 2.0)
+    p = r * (1.0 - ecc**2)
+    h = math.sqrt(mu * p)
 
-    # At equatorial node (circular or periapsis velocity)
-    v_node = math.sqrt(mu / r)
-    dv_node = 2.0 * v_node * math.sin(di / 2.0)
+    def cost_at(true_anomaly_deg: float) -> float:
+        radius = p / (1.0 + ecc * math.cos(math.radians(true_anomaly_deg)))
+        return 2.0 * (h / radius) * sin_half
 
-    # At apogee (if eccentric)
-    r_apo = r * (1.0 + ecc)
-    a = r if ecc == 0.0 else r  # r is SMA when ecc > 0
-    v_apo = math.sqrt(mu * (2.0 / r_apo - 1.0 / a)) if ecc > 0 else v_node
-    dv_apogee = 2.0 * v_apo * math.sin(di / 2.0)
+    dv_asc = cost_at(-argp_deg)
+    dv_desc = cost_at(180.0 - argp_deg)
 
-    if dv_apogee <= dv_node:
-        optimal = "apogee"
-        optimal_dv = dv_apogee
+    if ecc == 0.0:
+        optimal, optimal_dv = "node", dv_asc
+    elif dv_desc < dv_asc:
+        optimal, optimal_dv = "descending node", dv_desc
     else:
-        optimal = "node"
-        optimal_dv = dv_node
+        optimal, optimal_dv = "ascending node", dv_asc
 
     return PlaneChangeResult(
-        delta_v_at_node=dv_node,
-        delta_v_at_apogee=dv_apogee,
+        delta_v_at_ascending_node=dv_asc,
+        delta_v_at_descending_node=dv_desc,
         optimal_location=optimal,
         optimal_delta_v=optimal_dv,
         inclination_change_deg=inclination_change_deg,
@@ -378,11 +387,13 @@ def combined_altitude_plane_change(
 ) -> CombinedTransferResult:
     """Combined altitude change + plane change in a Hohmann-like transfer.
 
-    The plane change is split across both burns using the cosine rule,
-    which is more efficient than performing them separately.
-
-    Strategy: perform all inclination change at the slower burn point
-    (typically at the higher-altitude burn), combined with the Hohmann impulse.
+    The whole plane change is made at the burn at the higher radius, where
+    the speed is lower, and combined with that burn's Hohmann impulse by the
+    cosine rule; the other burn is a plain Hohmann impulse. This is cheaper
+    than a separate plane change, though not optimal: splitting a small
+    fraction of the plane change onto the lower burn saves a little more
+    (Vallado, combined plane change), and is not implemented. The previous
+    docstring claimed the change was divided between the burns (audit F-075).
 
     Args:
         r1: Initial orbit radius (km).
@@ -425,6 +436,14 @@ def combined_altitude_plane_change(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# J2 drift acceleration search: altitude floor, highest raise considered,
+# bisection steps, and the target used when the planes never converge.
+_J2_FLOOR_ALT_KM = 200.0
+_J2_MAX_RAISE_KM = 2000.0
+_J2_BISECT_STEPS = 100
+_J2_FALLBACK_DAYS = 180.0
+
+
 @dataclass
 class J2DriftResult:
     """Result of a J2 RAAN drift analysis."""
@@ -434,9 +453,9 @@ class J2DriftResult:
     differential_rate_deg_day: float  # deg/day — convergence rate
     delta_raan_deg: float             # current RAAN gap
     convergence_time_days: float      # days to natural alignment (0 if diverging)
-    accel_altitude_change_km: float   # altitude change to double convergence rate
+    accel_altitude_change_km: float   # altitude change to halve convergence time (0 if none reaches it)
     accel_convergence_days: float     # convergence time after altitude change
-    accel_delta_v: float              # km/s — ΔV for the altitude change
+    accel_delta_v: float              # km/s — both Hohmann burns of the altitude change
     method: str = "j2_drift"
 
 
@@ -505,26 +524,10 @@ def j2_drift_plan(
         if conv_days < 0:
             conv_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate)
 
-    # Compute altitude change to double convergence rate
-    # Strategy: lower/raise chaser by Δa to increase differential rate
-    # For prograde orbits (inc < 90°), lower altitude → faster (more negative) RAAN rate
-    delta_a = -50.0 if inc_chaser_deg < 90.0 else 50.0  # km, heuristic step
-    a_new = a_chaser + delta_a
-    rate_c_new = j2_raan_rate(a_new, ecc_chaser, inc_chaser_deg, mu)
-    diff_rate_new = rate_c_new - rate_t
-
-    if abs(diff_rate_new) < 1e-10:
-        accel_days = float("inf")
-    else:
-        accel_days = -delta_raan_deg / diff_rate_new
-        if accel_days < 0:
-            accel_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate_new)
-
-    # ΔV to change altitude by delta_a (Hohmann-like)
-    v_old = math.sqrt(mu / a_chaser)
-    a_transfer = (a_chaser + a_new) / 2.0
-    v_transfer = math.sqrt(mu * (2.0 / a_chaser - 1.0 / a_transfer))
-    accel_dv = abs(v_transfer - v_old)
+    delta_a, accel_days = _j2_acceleration(
+        (a_chaser, ecc_chaser, inc_chaser_deg), rate_t, delta_raan_deg, conv_days, mu,
+    )
+    accel_dv = hohmann(a_chaser, a_chaser + delta_a, mu).total_delta_v if delta_a else 0.0
 
     return J2DriftResult(
         raan_rate_chaser_deg_day=rate_c,
@@ -536,6 +539,47 @@ def j2_drift_plan(
         accel_convergence_days=accel_days,
         accel_delta_v=accel_dv,
     )
+
+
+def _j2_acceleration(
+    chaser: tuple[float, float, float],
+    rate_t: float,
+    delta_raan_deg: float,
+    conv_days: float,
+    mu: float,
+) -> tuple[float, float]:
+    """Altitude change (km) that closes the RAAN gap the short way in half the time.
+
+    *chaser* is its (semi-major axis km, eccentricity, inclination deg).
+
+    The nodal rate is monotonic in semi-major axis, so the change is found by
+    bisection between a floor 200 km above the surface and 2,000 km above the
+    chaser. The direction follows from the differential rate the gap needs,
+    not from the inclination alone (audit F-024). Natural convergence that
+    never happens is given a target of _J2_FALLBACK_DAYS. Returns (0, natural
+    time) when no altitude in that range is fast enough.
+    """
+    a_chaser, ecc_chaser, inc_chaser_deg = chaser
+    if delta_raan_deg == 0.0:
+        return 0.0, conv_days
+    target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS
+    needed = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)
+
+    def excess(a: float) -> float:
+        return j2_raan_rate(a, ecc_chaser, inc_chaser_deg, mu) - rate_t - needed
+
+    lo, hi = R_EARTH + _J2_FLOOR_ALT_KM, a_chaser + _J2_MAX_RAISE_KM
+    f_lo = excess(lo)
+    if f_lo * excess(hi) > 0.0:
+        return 0.0, conv_days
+    for _ in range(_J2_BISECT_STEPS):
+        mid = 0.5 * (lo + hi)
+        f_mid = excess(mid)
+        if (f_mid < 0.0) == (f_lo < 0.0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi) - a_chaser, target_days
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -813,79 +857,35 @@ def classify_manoeuvre(
     if draan > 180.0:
         draan = 360.0 - draan
 
-    # Estimate ΔV from each element change
-    v1 = math.sqrt(mu / a1)
-    v2 = math.sqrt(mu / a2)
-
-    # Altitude change ΔV (vis-viva approximation)
-    dv_altitude = abs(v2 - v1) if abs(da) > 1.0 else 0.0
-
-    # Plane change ΔV
-    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > 0.01 else 0.0
-
-    # RAAN change ΔV (approximation — only valid for non-J2 manoeuvres)
-    # Subtract expected J2 drift to isolate manoeuvre-induced RAAN change
+    # RAAN change, after subtracting the expected J2 drift to isolate the
+    # manoeuvre-induced part (only valid for non-J2 manoeuvres).
     expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
     raan_residual = max(0.0, draan - expected_j2_raan)
-    dv_raan = 2.0 * v1 * math.sin(math.radians(raan_residual) / 2.0) if raan_residual > 0.01 else 0.0
 
-    total_dv = math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
+    total_dv = _element_change_dv((a1, a2), inc1_deg, (di, raan_residual), mu)
 
-    # Classify
-    has_altitude = abs(da) > 5.0        # > 5 km SMA change
-    has_plane = di > 0.05               # > 0.05° inclination change
-    has_raan = raan_residual > 0.05     # > 0.05° RAAN residual
-    has_ecc = abs(de) > 0.001           # eccentricity change
-
-    # Determine burn direction
-    if has_altitude and not has_plane:
-        direction = "prograde" if da > 0 else "retrograde"
-    elif has_plane and not has_altitude:
-        direction = "normal"
-    elif has_altitude and has_plane:
-        direction = "combined"
-    elif has_ecc:
-        direction = "radial"
-    else:
-        direction = "combined"
-
-    # Determine manoeuvre type
-    if total_dv < 0.001:
-        mtype = "station_keeping"
-        confidence = 0.3
-    elif has_altitude and not has_plane and not has_raan:
-        mtype = "altitude_change"
-        confidence = 0.85
-    elif has_plane and not has_altitude:
-        mtype = "plane_change"
-        confidence = 0.85
-    elif has_raan and not has_altitude and not has_plane:
-        mtype = "raan_change"
-        confidence = 0.7
-    elif has_altitude and has_plane:
-        mtype = "combined"
-        confidence = 0.75
-    elif has_ecc and abs(da) < 5.0:
-        mtype = "phasing"
-        confidence = 0.6
-    else:
-        mtype = "unknown"
-        confidence = 0.3
+    changes = _ElementChanges(
+        altitude=abs(da) > _ALT_CHANGE_KM,
+        plane=di > _INC_CHANGE_DEG,
+        raan=raan_residual > _RAAN_CHANGE_DEG,
+        ecc=abs(de) > _ECC_CHANGE,
+    )
+    mtype, confidence = _manoeuvre_type(total_dv, changes, da)
 
     notes_parts = []
-    if has_altitude:
+    if changes.altitude:
         notes_parts.append(f"Δa={da:+.1f} km")
-    if has_plane:
+    if changes.plane:
         notes_parts.append(f"Δi={di:.3f}°")
-    if has_raan:
+    if changes.raan:
         notes_parts.append(f"ΔRAAN={raan_residual:.3f}° (J2-corrected)")
-    if has_ecc:
+    if changes.ecc:
         notes_parts.append(f"Δe={de:+.5f}")
 
     return ManoeuvreClassification(
         manoeuvre_type=mtype,
         estimated_delta_v=total_dv,
-        burn_direction=direction,
+        burn_direction=_burn_direction(changes, da),
         delta_a_km=da,
         delta_ecc=de,
         delta_inc_deg=inc2_deg - inc1_deg,
@@ -893,6 +893,86 @@ def classify_manoeuvre(
         confidence=confidence,
         notes="; ".join(notes_parts) if notes_parts else "No significant element changes detected",
     )
+
+
+# Thresholds for classify_manoeuvre. Element changes below these are not
+# counted as deliberate, and below _SK_DV_KM_S the event is station-keeping.
+_ALT_CHANGE_KM = 5.0       # semi-major axis
+_INC_CHANGE_DEG = 0.05     # inclination
+_RAAN_CHANGE_DEG = 0.05    # RAAN residual after J2
+_ECC_CHANGE = 0.001        # eccentricity
+_SK_DV_KM_S = 0.001
+# Changes below these are not priced at all.
+_ALT_COST_KM = 1.0
+_ANGLE_COST_DEG = 0.01
+
+
+class _ElementChanges(NamedTuple):
+    """Which element changes cleared their detection thresholds."""
+
+    altitude: bool
+    plane: bool
+    raan: bool
+    ecc: bool
+
+
+def _element_change_dv(
+    sma: tuple[float, float], inc1_deg: float, angles: tuple[float, float], mu: float,
+) -> float:
+    """Combined ΔV (km/s) of the altitude, inclination and RAAN changes.
+
+    *sma* is (a before, a after) in km; *angles* is (inclination change, RAAN
+    residual) in degrees.
+    """
+    a1, a2 = sma
+    di, raan_residual = angles
+    v1 = math.sqrt(mu / a1)
+    v2 = math.sqrt(mu / a2)
+
+    # Altitude change ΔV (vis-viva approximation)
+    dv_altitude = abs(v2 - v1) if abs(a2 - a1) > _ALT_COST_KM else 0.0
+
+    # Plane change ΔV
+    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > _ANGLE_COST_DEG else 0.0
+
+    # Two planes at inclination i differing by dOmega in RAAN are theta apart
+    # with cos theta = cos^2 i + sin^2 i cos dOmega. Pricing dOmega itself
+    # overstated the cost by 1/sin i (audit F-073).
+    i1 = math.radians(inc1_deg)
+    cos_theta = math.cos(i1) ** 2 + math.sin(i1) ** 2 * math.cos(math.radians(raan_residual))
+    theta_raan = math.acos(max(-1.0, min(1.0, cos_theta)))
+    dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > _ANGLE_COST_DEG else 0.0
+
+    return math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
+
+
+def _burn_direction(changes: _ElementChanges, da: float) -> str:
+    """The burn direction the element changes imply."""
+    if changes.altitude and not changes.plane:
+        return "prograde" if da > 0 else "retrograde"
+    if changes.plane and not changes.altitude:
+        return "normal"
+    if changes.altitude and changes.plane:
+        return "combined"
+    if changes.ecc:
+        return "radial"
+    return "combined"
+
+
+def _manoeuvre_type(total_dv: float, changes: _ElementChanges, da: float) -> tuple[str, float]:
+    """Manoeuvre type and confidence from the cost and the element changes.
+
+    The first rule that holds decides, in this order.
+    """
+    rules = (
+        (total_dv < _SK_DV_KM_S, "station_keeping", 0.3),
+        (changes.altitude and not changes.plane and not changes.raan, "altitude_change", 0.85),
+        (changes.plane and not changes.altitude, "plane_change", 0.85),
+        (changes.raan and not changes.altitude and not changes.plane, "raan_change", 0.7),
+        (changes.altitude and changes.plane, "combined", 0.75),
+        (changes.ecc and abs(da) < _ALT_CHANGE_KM, "phasing", 0.6),
+    )
+    return next(((name, conf) for holds, name, conf in rules if holds), ("unknown", 0.3))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1523,7 +1603,7 @@ class StabilityResult:
     """Result of CW relative motion stability analysis."""
 
     is_bounded: bool                  # True if motion doesn't drift
-    radial_amplitude_km: float        # max radial oscillation
+    radial_amplitude_km: float        # largest radial distance over an orbit
     along_track_drift_km_per_orbit: float  # secular along-track drift per orbit
     cross_track_amplitude_km: float   # max cross-track oscillation
     stability_score: float            # 0.0–1.0 (1 = perfectly bounded)
@@ -1555,12 +1635,21 @@ def relative_motion_stability(
 
     # CW boundedness condition: dvy0 + 2*n*dx0 = 0 for no secular drift
     drift_indicator = dvy0 + 2.0 * n * dx0
-    secular_drift_per_orbit = 3.0 * math.pi * drift_indicator / n  # km per orbit
+    # Secular along-track term of the CW solution is -3 t (ydot0 + 2 n x0)
+    # (Curtis eq. 7.53), so over one orbit, t = 2 pi / n, it is -6 pi D / n.
+    # This read +3 pi D / n, half the size and the wrong sign (audit F-005).
+    secular_drift_per_orbit = -6.0 * math.pi * drift_indicator / n  # km per orbit
 
-    # Radial amplitude: from CW in-plane solution
-    # x(t) = (4-3cos(nt))*dx0 + sin(nt)*dvx0/n + 2*(1-cos(nt))*dvy0/n
-    # Maximum occurs at specific nt values; estimate from initial conditions
-    A_x = math.sqrt(dx0**2 + (dvx0 / n)**2) if n > 0 else abs(dx0)
+    # Radial extent from the CW in-plane solution (Curtis eq. 7.53):
+    #   x(t) = (4 - 3 cos nt) dx0 + (sin nt) dvx0 / n + 2 (1 - cos nt) dvy0 / n
+    #        = c - b cos nt + (dvx0 / n) sin nt,
+    # with offset c = 4 dx0 + 2 dvy0 / n and b = 3 dx0 + 2 dvy0 / n, so the
+    # largest radial distance is |c| + sqrt(b^2 + (dvx0 / n)^2). The previous
+    # sqrt(dx0^2 + (dvx0 / n)^2) ignored dvy0 and the factor 3, and reported 0
+    # for an along-track kick from the origin that reaches 4 v / n (audit F-071).
+    offset = 4.0 * dx0 + 2.0 * dvy0 / n
+    swing = math.hypot(3.0 * dx0 + 2.0 * dvy0 / n, dvx0 / n)
+    radial_extent = abs(offset) + swing
 
     # Cross-track amplitude: z(t) = dz0*cos(nt) + dvz0*sin(nt)/n
     A_z = math.sqrt(dz0**2 + (dvz0 / n)**2) if n > 0 else abs(dz0)
@@ -1583,12 +1672,12 @@ def relative_motion_stability(
         notes_parts.append("bounded (non-drifting) relative motion")
     else:
         notes_parts.append(f"secular drift {secular_drift_per_orbit:.2f} km/orbit")
-    notes_parts.append(f"radial ±{A_x:.2f} km, cross-track ±{A_z:.2f} km")
+    notes_parts.append(f"radial ±{radial_extent:.2f} km, cross-track ±{A_z:.2f} km")
     notes_parts.append(f"drift indicator (Δvy+2nΔx) = {drift_indicator:.4e} km/s")
 
     return StabilityResult(
         is_bounded=is_bounded,
-        radial_amplitude_km=A_x,
+        radial_amplitude_km=radial_extent,
         along_track_drift_km_per_orbit=secular_drift_per_orbit,
         cross_track_amplitude_km=A_z,
         stability_score=stability,
@@ -1740,6 +1829,26 @@ def fingerprint_manoeuvre(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+_SLOT_SAMPLES = 2000
+_BURN_AXIS = {"radial": 0, "along_track": 1, "out_of_plane": 2}
+
+
+def _slot_displacement_km(strategy: str, delta_v: float, n: float) -> float:
+    """Largest distance (km) a single impulse moves the asset over one orbit.
+
+    Flown through the Clohessy-Wiltshire solution from the slot, with the
+    impulse along the strategy's axis.
+    """
+    velocity = [0.0, 0.0, 0.0]
+    velocity[_BURN_AXIS[strategy]] = delta_v
+    start = CWState(0.0, 0.0, 0.0, *velocity)
+    period = 2.0 * math.pi / n
+    return max(
+        math.sqrt(p.x**2 + p.y**2 + p.z**2)
+        for p in (_cw_propagate(start, n, period * k / _SLOT_SAMPLES) for k in range(_SLOT_SAMPLES + 1))
+    )
+
+
 @dataclass
 class FormationDefenceResult:
     """Result of a formation-aware defensive manoeuvre computation."""
@@ -1755,7 +1864,6 @@ class FormationDefenceResult:
 
 def formation_defence_burn(
     r_asset: float,
-    r_threat: float,
     time_to_tca_s: float,
     desired_miss_km: float,
     formation_spacing_km: float = 50.0,
@@ -1769,33 +1877,21 @@ def formation_defence_burn(
 
     Args:
         r_asset: Asset orbit radius (km).
-        r_threat: Threat orbit radius at conjunction (km).
         time_to_tca_s: Warning time before conjunction (seconds).
         desired_miss_km: Required miss distance (km).
         formation_spacing_km: Formation slot tolerance (km).
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_asset**3)
-    nt = n * time_to_tca_s
-    _sin_nt = math.sin(nt)
 
     # Compute cheapest COLA burn
     cola = collision_avoidance(r_asset, desired_miss_km, time_to_tca_s, mu)
     best = cola.best
 
-    # Assess formation impact: how far does the burn displace the asset
-    # after one orbital period?
-    T = 2.0 * math.pi / n
-    if best.strategy == "along_track":
-        # Along-track burn causes secular drift
-        coeff = abs(4.0 * math.sin(n * T) - 3.0 * n * T) / n
-        formation_displacement = best.delta_v * coeff if coeff > 1e-12 else 0.0
-    elif best.strategy == "radial":
-        # Radial burn causes oscillating displacement
-        formation_displacement = best.delta_v / n  # max radial excursion
-    else:
-        # Out-of-plane: oscillating cross-track
-        formation_displacement = best.delta_v / n
+    # Formation impact: the furthest the burn carries the asset from its slot
+    # over one orbit. A radial burn's along-track excursion reaches 4 dv / n,
+    # four times the dv / n reported before (audit F-078).
+    formation_displacement = _slot_displacement_km(best.strategy, best.delta_v, n)
 
     maintains = formation_displacement < formation_spacing_km
 
@@ -1945,103 +2041,12 @@ def orbital_terrain(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept (analytical approximation)
+#  17. Minimum-Time Intercept
+#
+#  Removed. The analytic search here could not depend on the time of flight
+#  (audit F-004); see maneuvers.min_time_intercept_wrapper, which solves
+#  Lambert's problem against the target's real position instead.
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class MinTimeResult:
-    """Result of minimum-time intercept search."""
-
-    min_tof_s: float         # minimum feasible TOF (seconds)
-    delta_v_km_s: float      # ΔV at minimum TOF
-    is_feasible: bool        # True if any solution exists within budget
-    max_delta_v_budget: float  # km/s — the ΔV budget used
-    hohmann_tof_s: float     # Hohmann TOF for reference
-    hohmann_dv_km_s: float   # Hohmann ΔV for reference
-    method: str = "min_time"
-
-
-def min_time_intercept_analytical(
-    r1: float,
-    r2: float,
-    max_delta_v: float,
-    mu: float = MU_EARTH,
-) -> MinTimeResult:
-    """Find the minimum transfer time within a ΔV budget (analytical estimate).
-
-    Uses the vis-viva equation to estimate ΔV as a function of transfer
-    SMA, then binary-searches for the smallest TOF that keeps ΔV within
-    budget. The TLE wrapper uses full Lambert for higher accuracy.
-
-    Args:
-        r1: Interceptor orbit radius (km).
-        r2: Target orbit radius (km).
-        max_delta_v: ΔV budget (km/s).
-        mu: Gravitational parameter.
-    """
-    v1 = math.sqrt(mu / r1)
-    v2 = math.sqrt(mu / r2)
-
-    # Hohmann reference
-    a_h = (r1 + r2) / 2.0
-    tof_h = math.pi * math.sqrt(a_h**3 / mu)
-    v_h_dep = math.sqrt(mu * (2.0 / r1 - 1.0 / a_h))
-    v_h_arr = math.sqrt(mu * (2.0 / r2 - 1.0 / a_h))
-    dv_h = abs(v_h_dep - v1) + abs(v2 - v_h_arr)
-
-    # If Hohmann exceeds budget, not feasible at all
-    if dv_h > max_delta_v:
-        return MinTimeResult(
-            min_tof_s=0.0, delta_v_km_s=dv_h,
-            is_feasible=False, max_delta_v_budget=max_delta_v,
-            hohmann_tof_s=tof_h, hohmann_dv_km_s=dv_h,
-        )
-
-    # Binary search: lower TOF requires higher ΔV
-    # Find minimum TOF where ΔV ≤ budget
-    lo, hi = tof_h * 0.01, tof_h  # search between 1% and 100% of Hohmann TOF
-
-    for _ in range(50):  # 50 iterations gives ~10⁻¹⁵ precision
-        mid = (lo + hi) / 2.0
-        # Estimate SMA from TOF (half-orbit approximation)
-        a_est = (mu * (mid / math.pi) ** 2) ** (1.0 / 3.0)
-        a_est = max(a_est, max(r1, r2))  # can't be smaller than larger orbit
-
-        try:
-            v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_est)))
-            v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_est)))
-        except (ValueError, ZeroDivisionError):
-            hi = mid
-            continue
-
-        dv_est = abs(v_dep - v1) + abs(v2 - v_arr)
-
-        if dv_est <= max_delta_v:
-            hi = mid  # can go faster
-        else:
-            lo = mid  # need more time
-
-    # Final estimate at the converged TOF
-    best_tof = hi
-    a_final = (mu * (best_tof / math.pi) ** 2) ** (1.0 / 3.0)
-    a_final = max(a_final, max(r1, r2))
-    try:
-        v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_final)))
-        v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_final)))
-    except (ValueError, ZeroDivisionError):
-        v_dep = v1
-        v_arr = v2
-    dv_final = abs(v_dep - v1) + abs(v2 - v_arr)
-
-    return MinTimeResult(
-        min_tof_s=best_tof,
-        delta_v_km_s=dv_final,
-        is_feasible=True,
-        max_delta_v_budget=max_delta_v,
-        hohmann_tof_s=tof_h,
-        hohmann_dv_km_s=dv_h,
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2115,17 +2120,21 @@ def vbar_hop_sequence(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# A hop cadence may differ from a whole number of half orbits by this fraction.
+_HOP_CADENCE_TOL = 1e-6
+
+
 @dataclass
 class HBarHopResult:
     """Result of an H-bar hop sequence in the orbit-normal direction."""
 
-    hop_distance_km: float       # orbit-normal advance per hop (km)
+    hop_distance_km: float       # out-of-plane amplitude added per hop (km)
     n_hops: int
-    total_advance_km: float      # total H-bar advance
+    total_advance_km: float      # peak out-of-plane offset reached, either side of the plane
     delta_v_per_hop: float       # km/s — single normal burn per hop
     total_delta_v: float         # km/s
-    time_per_hop_s: float        # seconds per hop (default T_orbit / 2)
-    total_time_s: float
+    time_per_hop_s: float        # seconds between burns, plane crossing to crossing
+    total_time_s: float          # first burn to the final peak
     method: str = "hbar_hop"
 
 
@@ -2136,12 +2145,18 @@ def hbar_hop_sequence(
     time_per_hop_s: float | None = None,
     mu: float = MU_EARTH,
 ) -> HBarHopResult:
-    """Compute an H-bar hop sequence advancing in the orbit-normal direction.
+    """Compute an H-bar hop sequence that grows an out-of-plane oscillation.
 
-    Each hop is a small incremental plane change (normal burn at a node
-    crossing), exploiting the SHM out-of-plane dynamics::
-
-        ΔV_hop = n · d
+    Out-of-plane CW motion is simple harmonic, z(t) = (ż0 / n) sin nt, so an
+    impulse cannot hold an offset: a normal burn of n·d reaches d a quarter
+    orbit later and is back on the plane at the half orbit. Each hop is a
+    normal burn of n·d at a plane crossing, along the out-of-plane velocity
+    there, which raises the amplitude by d. After k hops the satellite swings
+    k·d either side of the plane, reaching that peak a quarter orbit after
+    the last burn. Holding the offset would need continuous thrust, which is
+    not costed. The previous version claimed n_hops · d of accumulated
+    advance after n_hops half orbits, where the satellite is back on the
+    plane (audit F-077).
 
     H-bar hops cost roughly twice as much as V-bar hops for the same advance
     because out-of-plane burns are more expensive than radial burns.  The
@@ -2150,18 +2165,29 @@ def hbar_hop_sequence(
 
     Args:
         r_ref: Reference orbit radius (km).
-        hop_distance_km: Orbit-normal advance per hop (km).
+        hop_distance_km: Out-of-plane amplitude added per hop (km).
         n_hops: Number of hops.
-        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        time_per_hop_s: Time between burns (s); must be a whole number of
+            half orbits, since each burn is at a plane crossing. Defaults to
+            T_orbit / 2.
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: if *time_per_hop_s* is not a whole number of half orbits.
     """
     n = math.sqrt(mu / r_ref ** 3)
     T_orbit = 2.0 * math.pi / n
 
     if time_per_hop_s is None:
         time_per_hop_s = T_orbit / 2.0
+    half_orbits = time_per_hop_s / (T_orbit / 2.0)
+    if round(half_orbits) < 1 or abs(half_orbits - round(half_orbits)) > _HOP_CADENCE_TOL:
+        raise ValueError(
+            f"time_per_hop_s={time_per_hop_s:.0f} s is not a whole number of half orbits "
+            f"({T_orbit / 2.0:.0f} s); each hop burns at a plane crossing"
+        )
 
-    # Single normal burn per hop exploiting SHM quarter-period reach: Δv_n = n·d
+    # A normal burn of n·d at a plane crossing adds d to the amplitude.
     dv_per_hop = n * hop_distance_km
     total_dv = n_hops * dv_per_hop
 
@@ -2172,5 +2198,5 @@ def hbar_hop_sequence(
         delta_v_per_hop=dv_per_hop,
         total_delta_v=total_dv,
         time_per_hop_s=time_per_hop_s,
-        total_time_s=n_hops * time_per_hop_s,
+        total_time_s=(n_hops - 1) * time_per_hop_s + T_orbit / 4.0,
     )

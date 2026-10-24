@@ -1,0 +1,7 @@
+# One fingerprint per line. Each entry records why it is not a secret.
+#
+# Commit e31b72e: a throwaway SECRET_KEY ("probe-secret-key-...") in the audit's
+# login-limiter probe, used only against a temporary in-process test client.
+# It never signed a real session and was replaced in the working tree two
+# commits later; history cannot be rewritten on a pushed branch.
+e31b72edd3f5521a71a769864f008c782080be74:audit/tools-raw/probe_login_limiter.txt:generic-api-key:9

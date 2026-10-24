@@ -1,0 +1,3 @@
+$ ruff check spectre/ tests/ --no-cache
+All checks passed!
+[exit 0]

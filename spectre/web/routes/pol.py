@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
+from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.data.intel import get_intel
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
@@ -331,7 +331,7 @@ async def pol_analyse(
     try:
         threshold_km_s = dv_threshold_ms / 1000.0
         apply_filter = bool(cadence_filter)
-        records = parse_tle_history(
+        records, malformed = parse_tle_history_counted(
             merged_text, satno=satno,
             metadata=merged_meta, rms_metadata=merged_rms,
         )
@@ -350,6 +350,7 @@ async def pol_analyse(
             dv_threshold=threshold_km_s,
             quality_flags=quality_flags,
         )
+        pol.malformed_element_sets = malformed
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
@@ -465,6 +466,7 @@ def _detection_view(pol: object) -> dict[str, object]:
         "rejected_on_evidence": getattr(pol, "rejected_on_evidence", 0),
         "skipped_long_gap":     getattr(pol, "skipped_long_gap", 0),
         "merged_duplicates":    getattr(pol, "merged_duplicates", 0),
+        "malformed_element_sets": getattr(pol, "malformed_element_sets", 0),
         "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
         "confirmed":            len(getattr(pol, "manoeuvres", [])),
         "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),
@@ -1003,7 +1005,7 @@ async def pol_notso_correlate(
         NOTSORecord,
         correlate_notsos_with_manoeuvres,
         extract_behaviour_profile,
-        parse_notso_text,
+        parse_notso_text_with_rejects,
     )
     from spectre.data.notso_cache import get_notso_cache
 
@@ -1019,11 +1021,12 @@ async def pol_notso_correlate(
     notso_text = str(form.get("notso_text") or "").strip()
 
     notsos: list[NOTSORecord] = []
+    rejects: list[str] = []
     source_label = ""
 
     if notso_text:
         # Path 1: operator-pasted text
-        notsos = parse_notso_text(notso_text)
+        notsos, rejects = parse_notso_text_with_rejects(notso_text)
         source_label = "pasted text"
         if not notsos:
             return HTMLResponse(
@@ -1090,6 +1093,8 @@ async def pol_notso_correlate(
         "profile": profile,
         "pol": pol,
         "source_label": source_label,
+        "notso_parsed": len(notsos),
+        "notso_rejects": rejects,
     })
 
 

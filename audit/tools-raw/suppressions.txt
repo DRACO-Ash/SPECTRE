@@ -1,0 +1,354 @@
+scripts/cognitive_complexity.py:354:    merge_base = subprocess.run(  # noqa: S603
+scripts/cognitive_complexity.py:360:    result = subprocess.run(  # noqa: S603
+scripts/cognitive_complexity.py:390:    status = subprocess.run(  # noqa: S603
+scripts/cognitive_complexity.py:457:    result = subprocess.run(  # noqa: S603
+scripts/smoke-browser.py:124:        self._proc = subprocess.Popen(  # noqa: S603
+scripts/smoke-browser.py:140:                with urllib.request.urlopen(f"{self.base_url}/login", timeout=2):  # noqa: S310
+scripts/smoke-browser.py:164:        page.on("console", self._on_console)  # type: ignore[attr-defined]
+scripts/smoke-browser.py:165:        page.on("pageerror", lambda exc: self.fatal.append(f"uncaught exception: {exc}"))  # type: ignore[attr-defined]
+scripts/smoke-browser.py:168:        if message.type != "error":  # type: ignore[attr-defined]
+scripts/smoke-browser.py:170:        text = str(message.text)  # type: ignore[attr-defined]
+scripts/smoke-browser.py:193:        browser = await pw.chromium.launch(**launch)  # type: ignore[arg-type]
+scripts/smoke-browser.py:369:        import playwright  # noqa: F401
+scripts/sonar_scope.py:26:    return subprocess.run(  # noqa: S603
+scripts/sonar_scope.py:27:        ["git", *args],  # noqa: S607
+scripts/verify-db-resilience.py:12:    import spectre.web.models  # noqa: F401  register the User table
+spectre/astro/dv_estimation.py:462:    except Exception:  # noqa: BLE001
+spectre/astro/dv_estimation.py:782:    except Exception as exc:  # noqa: BLE001
+spectre/astro/dv_estimation.py:798:        except Exception:  # noqa: BLE001
+spectre/astro/dv_estimation.py:868:    except Exception as exc:  # noqa: BLE001
+spectre/astro/notso.py:596:def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
+spectre/astro/pattern_of_life.py:760:    except Exception:  # noqa: BLE001
+spectre/astro/photometry.py:263:    residuals = [mags[i] - _eval_quadratic(tuple(coeffs), phases[i]) for i in range(n)]  # type: ignore[arg-type]
+spectre/astro/tactical.py:1718:    primary = max(probs, key=probs.get)  # type: ignore[arg-type]
+spectre/config/settings.py:395:    except OSError as exc:  # pragma: no cover — defensive
+spectre/domain/pol_assessment.py:289:def _classify(delta_v_m_s: float, channel: str, regime: str,  # noqa: PLR0913, PLR0917
+spectre/web/_entrypoint.py:15:# ruff: noqa: S104
+spectre/web/_entrypoint.py:41:        host="0.0.0.0",  # nosec B104
+spectre/web/database.py:92:    import spectre.training.models  # noqa: F401
+spectre/web/deps.py:25:    from spectre.web.app import templates  # noqa: PLC0415
+spectre/web/deps.py:43:    from spectre.web.csrf import make_csrf_token  # noqa: PLC0415
+spectre/web/planning_state.py:210:    global _default_hrr_tles, _default_hrr_tle_modes  # noqa: PLW0603
+spectre/web/routes/geometry.py:57:    for a in state.blue_assets:  # type: ignore[attr-defined]
+spectre/web/routes/geometry.py:60:    for t in state.red_tracks:  # type: ignore[attr-defined]
+spectre/web/routes/login.py:199:    from spectre.web.auth import decode_session_cookie  # noqa: PLC0415
+spectre/web/routes/login.py:200:    from spectre.web.planning_state import clear_session_state  # noqa: PLC0415
+spectre/web/routes/maneuver.py:873:    except Exception as exc:  # noqa: BLE001
+spectre/web/routes/maneuver.py:1010:        except Exception as exc:  # noqa: BLE001
+spectre/web/routes/maneuver.py:1196:    for a in state.blue_assets:  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1199:    for t in state.red_tracks:  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1216:    if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1227:            state.udl_username,  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1228:            state.udl_password,  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1502:        event_type=_EVENT_TYPE_TO_BURN_LOCATION[ev.event_type],  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1503:        epoch=ev.epoch,  # type: ignore[attr-defined]
+spectre/web/routes/maneuver.py:1504:        label=ev.label,  # type: ignore[attr-defined]
+spectre/web/routes/pol.py:353:        state.last_pol_analysis = pol  # type: ignore[attr-defined]
+spectre/web/routes/pol.py:683:        state.pol_reserve_resets = resets  # type: ignore[attr-defined]
+spectre/web/routes/pol.py:756:async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
+spectre/web/routes/pol.py:800:        hypothesis.prediction_horizon_hours = horizon_h  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:162:    for track in state.red_tracks:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:192:    for obj in state.hrr_objects:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:215:    for obj in state.hrr_objects:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:331:    if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:335:            int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:336:            data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:337:            source=state.udl_tle_source,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:342:        state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:343:        state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:346:            int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:348:            data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:349:            source=state.udl_tle_source,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:352:            state.hrr_tle_multiset[satno_str] = history  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:451:    if satno not in state.hrr_tle_cache:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:453:    mode = state.hrr_tle_data_mode.get(satno, "REAL")  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:474:        raw_objects = list(state.hrr_objects)  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:496:    for a in state.blue_assets:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:499:    for t in state.red_tracks:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:519:def _sol_to_entry(  # noqa: PLR0913, PLR0917
+spectre/web/routes/threat.py:681:            except Exception as exc:  # noqa: BLE001
+spectre/web/routes/threat.py:934:    cached = state.hrr_tle_cache.get(str(satno).strip())  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:943:    except Exception:  # noqa: BLE001
+spectre/web/routes/threat.py:956:    for obj in state.hrr_objects:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:977:def _screen_one_actor(  # noqa: PLR0913, PLR0917
+spectre/web/routes/threat.py:1082:    except Exception as exc:  # noqa: BLE001
+spectre/web/routes/threat.py:1098:    for manual in state.manual_sweep_tles:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1127:    if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1133:    udl_user: str = state.udl_username  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1134:    udl_pass: str = state.udl_password  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1140:                data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1141:                source=state.udl_tle_source,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1145:                state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1146:                state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1167:    if not state.hrr_tle_multiset:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1173:            state.hrr_tle_multiset,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1174:            state.hrr_tle_cache,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1177:        state.hrr_tle_cache.update(reduced)  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1179:    except Exception as _cl_exc:  # noqa: BLE001
+spectre/web/routes/threat.py:1185:def _run_target_sweep(  # noqa: PLR0913, PLR0917
+spectre/web/routes/threat.py:1211:            tle = state.hrr_tle_cache.get(target.target_satno)  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1219:        except Exception:  # noqa: BLE001
+spectre/web/routes/threat.py:1255:        g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1342:    except Exception:  # noqa: BLE001
+spectre/web/routes/threat.py:1418:    if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1424:    user: str = state.udl_username  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1425:    password: str = state.udl_password  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1431:                data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1432:                source=state.udl_tle_source,  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1436:                state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1437:                state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1453:def _screen_all_actors(  # noqa: PLR0913, PLR0917
+spectre/web/routes/threat.py:1526:    if not state.hrr_objects:  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1532:    hrr_objects = state.hrr_objects  # type: ignore[attr-defined]
+spectre/web/routes/threat.py:1578:        except Exception as exc:  # noqa: BLE001
+spectre/web/routes/threat.py:1600:            for o in state.hrr_objects  # type: ignore[attr-defined]
+spectre/web/routes/training.py:253:                ChallengeResult.scored == True,  # noqa: E712
+spectre/web/routes/training.py:350:            ChallengeResult.scored == True,  # noqa: E712
+spectre/web/routes/udl.py:426:        epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+spectre/web/routes/udl.py:603:                auth=(state.udl_username, state.udl_password),  # type: ignore[arg-type]
+spectre/web/routes/udl.py:649:        rec = _select_elset_by_epoch(records, state.scenario_start)  # type: ignore[arg-type]
+spectre/web/routes/udl.py:655:                    f"{state.scenario_start.strftime('%Y-%m-%d %H:%M UTC')}."  # type: ignore[union-attr]
+tests/integration/conftest.py:50:    with TestClient(initialized_app, raise_server_exceptions=True) as c:  # type: ignore[arg-type]
+tests/integration/conftest.py:56:    resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:38:    import spectre.web.models  # noqa: F401
+tests/integration/test_admin_bootstrap.py:50:    async with db.AsyncSessionLocal() as session:  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:62:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:65:        assert [u.username for u in users] == ["operator1"]  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:75:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:87:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:98:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:102:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:114:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:117:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:119:        assert verify_password("first-password", user.hashed_password)  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:131:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:136:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:140:        user = next(u for u in await _users(clean_db) if u.username == "operator1")  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:141:        assert verify_password("recovered-password", user.hashed_password)  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:150:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:155:            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:157:            assert verify_password("first-password", user.hashed_password)  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:167:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:172:        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:174:        user = next(u for u in await _users(clean_db) if u.username == "rescue-admin")  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:175:        assert user.role == "admin"  # type: ignore[attr-defined]
+tests/integration/test_admin_bootstrap.py:176:        assert verify_password("rescue-password", user.hashed_password)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:8:def _admin_session(client: object) -> dict[str, str]:  # type: ignore[type-arg]
+tests/integration/test_admin_routes.py:10:    resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:19:def _operator_session(client: object, username: str, password: str) -> dict[str, str]:  # type: ignore[type-arg]
+tests/integration/test_admin_routes.py:21:    resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:32:        resp = client.get("/admin/users", follow_redirects=False)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:40:        client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:47:        resp = client.get("/admin/users", cookies=op_cookies, follow_redirects=False)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:52:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:61:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:72:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:83:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:94:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:105:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:120:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:130:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:138:        cancel_resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:148:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:159:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:161:                update_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:175:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:179:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:181:                reset_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:190:                login_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:204:        client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:210:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:214:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:216:                del_resp = client.delete(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:228:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:232:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:234:                del_resp = client.delete(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:245:        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:250:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:255:            client.delete(f"/admin/users/{second_admin_id}", cookies=cookies, headers=csrf_headers(cookies))  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:261:        resp2 = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:264:            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:267:                demote_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:309:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:321:        client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:326:        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:331:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:342:        client.post(  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:347:        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_admin_routes.py:351:        resp = client.request(  # type: ignore[attr-defined]
+tests/integration/test_audit_log_integrity.py:53:    resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_audit_log_integrity.py:73:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_audit_log_integrity.py:86:        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
+tests/integration/test_audit_log_integrity.py:94:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_audit_log_integrity.py:106:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_packager_gates.py:63:    listing = subprocess.run(  # noqa: S603
+tests/integration/test_packager_gates.py:79:        subprocess.run(command, cwd=destination, check=True, capture_output=True)  # noqa: S603
+tests/integration/test_packager_gates.py:89:    return subprocess.run(  # noqa: S603
+tests/integration/test_packager_gates.py:162:            subprocess.run(  # noqa: S603
+tests/integration/test_plan_export.py:31:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_plan_export.py:39:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:49:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:55:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:62:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:72:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:83:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:94:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:104:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:176:            resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:196:                resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:218:            resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:259:            for node in ast.walk(self._tree())  # type: ignore[arg-type]
+tests/integration/test_plan_export.py:277:                for node in ast.walk(tree)  # type: ignore[arg-type]
+tests/integration/test_plan_export.py:317:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:329:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:345:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_plan_export.py:384:            resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:16:        resp = client.get("/", cookies={}, follow_redirects=False)  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:22:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:33:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:42:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:51:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:97:        client.post(  # type: ignore[attr-defined]
+tests/integration/test_root_contract.py:103:        resp = client.get("/", cookies={}, follow_redirects=False)  # type: ignore[attr-defined]
+tests/integration/test_threat_screen_route.py:29:    return client.post(  # type: ignore[attr-defined]
+tests/integration/test_threat_screen_route.py:157:            resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:16:        resp = client.get("/login")  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:21:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:27:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:33:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:42:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:61:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes.py:70:        login = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:76:        resp = client.get("/", cookies={"spectre_session": session_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:84:        login = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:92:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:102:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:115:        login = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:123:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:133:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:148:        login = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:156:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:166:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:177:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes.py:190:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:29:    client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:35:    client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:47:        resp = client.get("/training", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:51:        resp = client.get("/training/", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:55:        resp = client.get("/training/dashboard", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:59:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:70:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:79:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:87:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:95:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:103:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:111:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:119:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:127:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:135:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:144:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:154:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:164:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:173:        resp = client.get("/plan/decision/panel", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:177:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:187:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:212:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:221:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:241:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:262:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:283:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:307:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:321:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:336:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:352:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:367:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:377:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:385:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:396:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:404:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:418:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:427:        resp = client.get("/gcat/panel", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:432:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:440:        resp = client.get(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:450:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:459:        resp = client.get("/pol/panel", cookies={"spectre_session": auth_cookie})  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:464:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:475:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:487:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:508:        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:511:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:536:        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:537:        resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:548:        with TestClient(initialized_app, raise_server_exceptions=True) as fresh:  # type: ignore[arg-type]
+tests/integration/test_web_routes_extended.py:560:        start_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:566:            pytest.skip("Scenario not available at current level")
+tests/integration/test_web_routes_extended.py:579:            pytest.skip("Could not extract result_id from response")
+tests/integration/test_web_routes_extended.py:584:        submit_resp = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:598:        resp1 = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:603:        resp2 = client.post(  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:632:        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+tests/integration/test_web_routes_extended.py:634:        resp = client.get(  # type: ignore[attr-defined]
+tests/unit/test_auth.py:10:from spectre.web.auth import (  # noqa: E402
+tests/unit/test_cognitive_complexity_meter.py:41:        pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_cognitive_complexity_meter.py:147:            pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_cognitive_complexity_meter.py:150:            pytest.skip("the calibration replays a commit; git is not available here")
+tests/unit/test_cognitive_complexity_meter.py:151:        result = subprocess.run(  # noqa: S603
+tests/unit/test_cognitive_complexity_meter.py:213:            pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_cognitive_complexity_meter.py:216:            pytest.skip("the scoping check needs git")
+tests/unit/test_cognitive_complexity_meter.py:217:        dirty = subprocess.run(  # noqa: S603
+tests/unit/test_cognitive_complexity_meter.py:239:        result = subprocess.run(  # noqa: S603
+tests/unit/test_csrf.py:95:        assert client.get("/login").status_code == 200  # type: ignore[attr-defined]
+tests/unit/test_csrf.py:98:        resp = client.post("/scenario/time", data={})  # type: ignore[attr-defined]
+tests/unit/test_csrf.py:103:        resp = client.post(  # type: ignore[attr-defined]
+tests/unit/test_csrf.py:113:        resp = client.post(  # type: ignore[attr-defined]
+tests/unit/test_db_pool_contract.py:90:            except Exception as exc:        # noqa: BLE001 - the point is the class
+tests/unit/test_deployment_contract.py:43:        pytest.skip(f"{name} is excluded from the submission package")
+tests/unit/test_deployment_contract.py:95:        pytest.skip("Dockerfile is not present in this tree")
+tests/unit/test_deployment_contract.py:435:        except (OSError, subprocess.SubprocessError):  # pragma: no cover - no git
+tests/unit/test_deployment_contract.py:438:        if result.returncode not in (0, 1):  # pragma: no cover - broken git
+tests/unit/test_deployment_contract.py:564:            pytest.skip(f"{name} is excluded from this package")
+tests/unit/test_deployment_contract.py:663:            pytest.skip("no lock file travels in this tree")
+tests/unit/test_deployment_contract.py:796:    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
+tests/unit/test_deployment_contract.py:813:    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
+tests/unit/test_docs_are_committable.py:51:        pytest.skip("no git executable: the runner's job image ships none")
+tests/unit/test_docs_are_committable.py:53:        pytest.skip("no git repository: running from the submission package")
+tests/unit/test_docs_are_committable.py:55:        pytest.skip("docs/ is excluded from the submission package")
+tests/unit/test_docs_are_committable.py:60:    return subprocess.run(  # noqa: S603
+tests/unit/test_docs_are_committable.py:86:        tracked = subprocess.run(  # noqa: S603
+tests/unit/test_docs_are_committable.py:120:            pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_entrypoint.py:44:        assert captured["host"] == "0.0.0.0"  # noqa: S104
+tests/unit/test_health.py:69:        resp = client.get("/healthz")  # type: ignore[attr-defined]
+tests/unit/test_health.py:74:        resp = client.get("/readyz")  # type: ignore[attr-defined]
+tests/unit/test_health.py:88:        resp = client.get("/readyz")  # type: ignore[attr-defined]
+tests/unit/test_health.py:97:        assert client.get("/healthz").status_code == 200  # type: ignore[attr-defined]
+tests/unit/test_health.py:98:        assert client.get("/readyz").status_code == 200  # type: ignore[attr-defined]
+tests/unit/test_health.py:115:        body = client.get(path).json()  # type: ignore[attr-defined]
+tests/unit/test_health.py:125:        assert __version__ not in client.get(path).text  # type: ignore[attr-defined]
+tests/unit/test_health.py:137:            client.get("/readyz")  # type: ignore[attr-defined]
+tests/unit/test_health.py:156:        resp = client.get(path)  # type: ignore[attr-defined]
+tests/unit/test_health.py:164:        body = client.get(path).text  # type: ignore[attr-defined]
+tests/unit/test_hrr_bootstrap.py:59:        pytest.skip("no git executable: the runner's job image ships none")
+tests/unit/test_hrr_bootstrap.py:61:        pytest.skip("no git repository: running from the submission package")
+tests/unit/test_hrr_bootstrap.py:70:        result = subprocess.run(  # noqa: S603
+tests/unit/test_hrr_bootstrap.py:90:            result = subprocess.run(  # noqa: S603
+tests/unit/test_hrr_bootstrap.py:109:            result = subprocess.run(  # noqa: S603
+tests/unit/test_hrr_bootstrap.py:128:                result = subprocess.run(  # noqa: S603
+tests/unit/test_lambert_validation.py:79:    else:  # pragma: no cover - the reference propagator converges on these cases
+tests/unit/test_operator_sees_metres_per_second.py:302:            pytest.skip("operator guide generator not present in this checkout")
+tests/unit/test_outbound_and_ddl_guards.py:46:        httpx.Client = _record  # type: ignore[misc, assignment]
+tests/unit/test_outbound_and_ddl_guards.py:50:            httpx.Client = original  # type: ignore[misc]
+tests/unit/test_outbound_and_ddl_guards.py:160:        httpx.Client = _ScriptedClient  # type: ignore[misc, assignment]
+tests/unit/test_outbound_and_ddl_guards.py:164:            httpx.Client = original  # type: ignore[misc]
+tests/unit/test_quality_gate_scope.py:79:        pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_quality_gate_scope.py:103:        pytest.skip("scripts/ is excluded from the submission package")
+tests/unit/test_quality_gate_scope.py:134:    if git is None:  # pragma: no cover - the repo fixture skips before this
+tests/unit/test_quality_gate_scope.py:135:        pytest.skip("the scoping checks need git")
+tests/unit/test_quality_gate_scope.py:136:    subprocess.run(  # noqa: S603
+tests/unit/test_quality_gate_scope.py:144:    return subprocess.run(  # noqa: S603
+tests/unit/test_quality_gate_scope.py:166:        pytest.skip("the scoping checks need git")
+tests/unit/test_rate_limit_memory.py:30:    return asyncio.run(coro)  # type: ignore[arg-type]
+tests/unit/test_rate_limit_memory.py:121:            limiter._evict_elapsed = counting  # type: ignore[method-assign]
+tests/unit/test_rate_limit_memory.py:180:            total += sum(sys.getsizeof(stamp) for stamp in queue)  # type: ignore[attr-defined]
+tests/unit/test_tactical.py:402:        assert cheapest_long <= cheapest_short or True  # noqa: SIM222
+tests/unit/test_template_markup_is_well_formed.py:103:        result = subprocess.run(  # noqa: S603
+tests/unit/test_token_channels_match.py:116:    return tuple(int(raw[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]

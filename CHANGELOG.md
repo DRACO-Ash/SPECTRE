@@ -7,6 +7,87 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed (audit step 3, solvers and screening)
+- Hohmann and bi-elliptic intercepts sign each burn correctly for raising and lowering, and report the propagated miss instead of 0 km (F-011, F-012, F-013).
+- Evasion is planned against the threat's predicted position; the reported miss is the separation achieved (F-014).
+- Combined altitude and plane change burns follow the geometry they are priced on, from a crossing of the target plane (F-015).
+- Molniya and Tundra orbits classify as HEO, so Tundra objects are screened against GEO assets (F-016).
+- Object names reach inline handlers as data attributes, never as JavaScript source (F-038).
+- Lambert transfers longer than one orbit are priced on the cheapest revolution count, in intercepts and the envelope sweep (F-010).
+- The NMC burn is flown from the interceptor's actual relative state, and refused when it is not on the requested ellipse (F-017).
+- J2 drift acceleration closes the RAAN gap the short way in half the natural time and costs both burns (F-024).
+- Pattern-of-life status scores the latest manoeuvre against earlier ones only, and reads INSUFFICIENT below three (F-026).
+- NOTSO correlation uses the burn window, not the next element set (F-027).
+- TLE clustering writes the newest cluster's representative (F-028).
+- Monte Carlo: timing dispersion moves the burn (F-029), the ΔV direction comes from the detection (F-030), and drag uses the SGP4 B* relation (F-031).
+- CW stability radial extent, RAAN-change cost, plane-change node pricing, H-bar hop description and formation slot displacement corrected (F-071, F-073 to F-075, F-077, F-078).
+- Pattern of life: malformed element sets dropped and counted (F-083), long-gap detections flagged (F-084), GEO drift measured from SGP4 (F-093), next-burn band a small-sample prediction interval on burn epochs (F-094).
+- TLE cadence clusters bounded by their span (F-085).
+- NOTSO parsing and correlation: ΔV fields read, inferred dates flagged, messages split correctly, only labelled IDs taken, rejects shown, true lead time, closest-first pairing (F-086 to F-092).
+- Monte Carlo density is Vallado's exponential atmosphere (F-105); photometry Welch test, fit covariance and empty windows corrected (F-101, F-102, F-108).
+
+### Added
+- `spectre/astro/kepler.py`: universal-variable two-body propagator.
+- `solve_lambert_all` and `cheapest_lambert`: multi-revolution Lambert solutions.
+
+Remediation of the whole-repository audit of 23 October 2026 (`audit/`).
+Step 1 of 4: the eight Blockers. Each fix landed test-first, with the defect
+reproduced by a failing test before the change and the full suite green
+after it. The finding-to-commit map is `audit/REMEDIATION-LOG.md`.
+
+### Fixed
+
+- **Login brute force** (F-008). An exhausted login budget refused only
+  wrong passwords; the correct one still signed in. Both limiter tiers are
+  now read, without charging, before the password is compared.
+- **GEO drift duration** (F-007). The coast time in hours reached the GEO
+  relocation solver as days, so a 48 h coast became a 48-day drift and the
+  reported delta-V was about 1/24 of the true cost.
+- **CW secular drift** (F-005). Along-track drift per orbit was reported at
+  -0.5 times the Clohessy-Wiltshire value.
+- **CW stability frame** (F-006). The stability analysis received inertial
+  rather than rotating-frame relative velocity, so bounded motion read as
+  drifting.
+- **Manoeuvre detection units** (F-001). Inclination and RAAN, already in
+  degrees, were converted to degrees again, pricing a 0.1 deg trim at
+  754 m/s instead of 13 m/s. The static guard now catches any alias.
+- **Plane-change cost** (F-002). The angle between planes ignored RAAN, so
+  aligning two 53 deg planes 10 deg apart in RAAN cost nothing. The burn is
+  now also placed at the line of nodes.
+- **Lambert arc direction** (F-003). Every retrograde or sun-synchronous
+  orbit took the arc running against its own motion, about 15 km/s per burn
+  in LEO. The arc now follows the departure orbit's sense by default.
+- **Minimum-time intercept** (F-004). The analytic search always returned
+  1 per cent of the Hohmann time at less than Hohmann cost. It is replaced
+  by a Lambert sweep against the target's real position.
+
+### Changed (step 3 of 4: decision engine relabelled)
+
+- **The Decision Engine says it is a modelled estimate.** Its Phase 1 outcomes
+  are lookup constants and weights, not propagated orbits. The result now
+  carries a `modelled` flag and a basis statement, the banner reads "Modelled
+  Recommendation" with "Modelled estimate, not a computed solution.", and each
+  cell marks its closest approach "(model)". This is the July 2026 agreed
+  remediation, built at last.
+- **"Maximin" is renamed "Minimin".** The selector minimised the best-case
+  cost, the optimistic rule; "maximin" names the cautious one. The form value
+  is now `minimin`.
+
+### Changed (step 2 of 4: CI executes its checks)
+
+- **CI installs the locked sets.** The lint, test and quality jobs installed
+  an undefined `.[dev]` extra, so they had no tools and failed with exit 127
+  before checking anything. They now install `requirements.txt` and
+  `requirements-dev.txt` with hashes and confirm the tools are present.
+- **One version per shared package.** The dev lock is constrained by the
+  runtime lock, so the two install together. Dev-only pins moved for tomli,
+  urllib3, filelock and setuptools; the last three clear published advisories.
+- **SCA covers the dev lock**, and CI no longer overrides the pyproject
+  coverage floor.
+- **The orphan `SPECTRE-1` submodule pointer is removed.**
+
 ## [0.5.24] - 2026-10-22
 
 The SonarQube Code Quality gate. 57 findings reported, 55 cleared, 2 left for a

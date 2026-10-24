@@ -23,6 +23,7 @@ right.
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime
 
 import numpy as np
@@ -38,6 +39,16 @@ from spectre.astro.propagator import (
 from spectre.astro.tactical import plane_change
 
 _EPOCH = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
+
+# A call that converts a KeplerianElements attribute, which the dataclass
+# documents as degrees, to degrees again. Any ``<alias>.degrees(`` is matched,
+# not only ``math.degrees(``: a local ``import math as _m`` hid audit F-001.
+# Anchored with \b so .inc does not match .inclo, and sgp4's Satrec (sat.*)
+# is excluded because those fields really are radians.
+_REDEGREE = re.compile(
+    r"\b\w+\.degrees\(\s*(?!sat\.)(?:[A-Za-z_][A-Za-z0-9_]*\.)?"
+    r"(?:inc|raan|argp|ta)\b(?!_)"
+)
 
 
 class TestElementRoundTrip:
@@ -107,22 +118,18 @@ class TestKeplerianElementsAreDegrees:
         them is correct. A guard that fires on correct code gets disabled, and
         then it protects nothing.
         """
-        import re
         from pathlib import Path
 
         # An attribute of KeplerianElements, which the dataclass documents as
         # degrees. Anchored with \b so .inc does not match .inclo, and sgp4's
         # Satrec (sat.*) is excluded because those fields are radians.
-        pattern = re.compile(
-            r"math\.degrees\(\s*(?!sat\.)(?:[A-Za-z_][A-Za-z0-9_]*\.)?"
-            r"(?:inc|raan|argp|ta)\b(?!_)"
-        )
-        astro = Path(__file__).resolve().parents[2] / "spectre" / "astro"
+        pattern = _REDEGREE
+        package = Path(__file__).resolve().parents[2] / "spectre"
         offenders: list[str] = []
-        for path in sorted(astro.glob("*.py")):
+        for path in sorted(package.rglob("*.py")):
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 stripped = line.strip()
-                if stripped.startswith("#") or "math.degrees(" not in line:
+                if stripped.startswith("#") or ".degrees(" not in line:
                     continue
                 if pattern.search(line):
                     offenders.append(f"{path.name}:{number}: {stripped[:88]}")
@@ -132,14 +139,14 @@ class TestKeplerianElementsAreDegrees:
 
     def test_the_scan_can_actually_see_the_defect(self) -> None:
         """Prove the guard goes red, rather than trusting that it would."""
-        import re
 
-        pattern = re.compile(
-            r"math\.degrees\(\s*(?!sat\.)(?:[A-Za-z_][A-Za-z0-9_]*\.)?"
-            r"(?:inc|raan|argp|ta)\b(?!_)"
-        )
+        pattern = _REDEGREE
         # The exact lines that shipped.
         assert pattern.search("    delta_inc = math.degrees(kep_blue.inc - kep_red.inc)")
+        # Including through a module alias, which hid audit F-001 from the
+        # earlier pattern because it required the literal ``math.``.
+        assert pattern.search("        kep_before.a, kep_before.ecc, _m.degrees(kep_before.inc), _m.degrees(kep_before.raan),")
+        assert pattern.search("    x = np.degrees(kep.raan)")
         assert pattern.search("        kep_red.a, kep_red.ecc, math.degrees(kep_red.inc),")
         assert pattern.search("    result = orbital_terrain(altitude, math.degrees(kep_red.inc))")
         # And must NOT fire on the correct sgp4 conversions next door.
@@ -275,16 +282,19 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
         )
         assert solution.miss_distance_km == pytest.approx(128.243, abs=0.01)
 
-        # A plane-alignment assist is a small altitude trim, not a transfer.
-        # Fourteen metres per second is right for LEO.
+        # The inclination half is held by the convergence time. The nodal
+        # rates go as cos(i), so with inclinations read as radians this pair
+        # converges in 181.3 days instead of 46.8.
         #
-        # An earlier note here claimed delta-v could not hold this, because it
-        # moves only from 0.014364 to 0.014232. That was wrong: 0.014232 is
-        # thirteen times outside the 1e-5 tolerance below, so this assertion
-        # kills the inclination mutant on its own. The angle still carries the
-        # RAAN half, where the move is 128 to 6988.
-        assert solution.total_delta_v == pytest.approx(0.014364, abs=1e-5)
-        assert 0.001 < solution.total_delta_v < 0.1
+        # This assertion used to pin a 14.4 m/s altitude trim, the cost of a
+        # fixed 50 km step that did not double the rate it claimed to (audit
+        # F-024). Halving 46.8 days needs a differential of -5.48 deg/day and
+        # the fastest reachable, at the 200 km floor, is -3.16, so no altitude
+        # change helps and the plan has no burns.
+        days = (solution.arrival_epoch - _EPOCH).total_seconds() / 86400.0
+        assert days == pytest.approx(46.825, abs=0.01)
+        assert solution.burns == []
+        assert solution.total_delta_v == 0.0
 
     def test_intent_likelihood_is_scored_from_degrees(self) -> None:
         """Coplanar, because a cross-plane pair hides this one completely.

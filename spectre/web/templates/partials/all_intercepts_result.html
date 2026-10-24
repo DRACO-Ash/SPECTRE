@@ -133,7 +133,9 @@
       <button class="btn-secondary btn-sm"
               type="button"
               onkeydown="event.stopPropagation()"
-              onclick="event.stopPropagation(); aiLoadEngine('{{ item.result.red_name }}','{{ item.result.blue_name }}','{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}','{{ item.result.method.value }}')"
+              data-red="{{ item.result.red_name }}" data-blue="{{ item.result.blue_name }}"
+              data-epoch="{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ item.result.method.value }}"
+              onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
               title="Pre-fill intercept engine with this result">Load</button>
     </td>
   </tr>

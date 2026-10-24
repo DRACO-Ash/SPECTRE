@@ -2,6 +2,12 @@
 # platform Test stage, so it is deliberately kept out of requirements.in: every
 # package in the scanned set has to be defensible, and lint and SAST tooling
 # does not run on the platform.
+# Constrained to the runtime-and-test lock, so a package both sets need is
+# pinned to ONE version. Without this the two locks resolved tomli
+# differently (2.5.0 against 2.4.1) and could not be installed together,
+# which is what CI must do to run lint, type check and tests (audit F-S00-08).
+-c requirements.txt
+
 ruff>=0.9
 mypy>=1.14
 types-PyYAML

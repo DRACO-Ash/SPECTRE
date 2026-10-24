@@ -1,0 +1,25 @@
+$ python3 scripts/preflight-gate.py .
+App Store gate pre-flight: <clone>
+========================================================================
+[WARN ] INFERENCE Base image pinned by tag, not digest: ${BASE_IMAGE}.
+                   fix: A moving tag means two builds of the identical archive can produce different images and different Container Scan results. Pin the digest and schedule a refresh job.
+[GOOD ] FACT      pyproject.toml present with a [project] table.
+[GOOD ] FACT      Scannable file(s) at root: requirements.txt.
+[GOOD ] FACT      No resolver hazards in any dependency file.
+[GOOD ] FACT      requirements.txt is exactly pinned throughout.
+[GOOD ] FACT      Every pinned entry carries a hash.
+[GOOD ] FACT      requirements.txt is compiled for python 3.11, the scanner's interpreter.
+[GOOD ] FACT      requirements-runtime.txt is compiled for python 3.11, the scanner's interpreter.
+[GOOD ] INFERENCE Runtime lock file is a version-identical subset of requirements.txt.
+[GOOD ] FACT      Dockerfile at the package root.
+========================================================================
+0 blocking, 1 advisory.
+Contract satisfied. This predicts nothing about the gate's verdict;
+it removes the failure modes that are visible from here.
+The analyser's silence is explained: gemnasium-python logs pip's output
+at DEBUG only, so a resolution failure shows as a bare exit 1.
+[exit 0]
+
+$ python3 scripts/preflight-gate.py --self-test
+SELF-TEST PASSED: 10 assertions.
+[exit 0]

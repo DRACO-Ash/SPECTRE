@@ -105,6 +105,25 @@ def _client_address(request: Request) -> str:
     return client.host if client else "unknown"
 
 
+def _refuse_rate_limited(request: Request, address: str, username: str) -> HTMLResponse:
+    """Log and render the 429 login page for an exhausted budget."""
+    # Both values are caller-supplied, so both are flattened before they reach
+    # the log (pythonsecurity:S5145).
+    logger.warning(
+        "Login rate limit reached: address=%s username=%s",
+        log_safe(address), log_safe(username),
+    )
+    # A browser is what reaches this endpoint, so the refusal is the login page
+    # carrying an explanation, not a bare JSON body the operator would have to
+    # read in the network tab.
+    return render(
+        request,
+        "login.html",
+        {"error": "Too many failed sign-in attempts. Wait a few minutes and try again."},
+        status_code=429,
+    )
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
@@ -119,6 +138,15 @@ async def post_login(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse | RedirectResponse:
     """Authenticate and set a session cookie, or re-render with an error."""
+    address = _client_address(request)
+    # An exhausted budget is judged BEFORE the password is compared. Judged
+    # after, as it was, a locked account still accepted the right password, so
+    # 429 refused only wrong guesses and a brute force was bounded by bcrypt
+    # throughput rather than by the limiter (audit F-008). Both tiers answer
+    # alike for a real and an absent account, so this read leaks nothing.
+    if await _LOGIN_ADDRESS_LIMITER.is_blocked(address) or await _LOGIN_USERNAME_LIMITER.is_blocked(username):
+        return _refuse_rate_limited(request, address, username)
+
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
@@ -132,28 +160,13 @@ async def post_login(
     matched = await run_in_threadpool(verify_password, password, hashed)
 
     if user is None or not matched:
-        address = _client_address(request)
         # Both tiers are charged before either is judged, so an attempt always
         # costs both budgets. Short-circuiting on the first would let a caller
         # who has exhausted the address tier keep probing a username for free.
         address_ok = await _LOGIN_ADDRESS_LIMITER.is_allowed(address)
         username_ok = await _LOGIN_USERNAME_LIMITER.is_allowed(username)
         if not (address_ok and username_ok):
-            # Both values are caller-supplied, so both are flattened before
-            # they reach the log (pythonsecurity:S5145).
-            logger.warning(
-                "Login rate limit reached: address=%s username=%s",
-                log_safe(address), log_safe(username),
-            )
-            # A browser is what reaches this endpoint, so the refusal is the
-            # login page carrying an explanation, not a bare JSON body the
-            # operator would have to read in the network tab.
-            return render(
-                request,
-                "login.html",
-                {"error": "Too many failed sign-in attempts. Wait a few minutes and try again."},
-                status_code=429,
-            )
+            return _refuse_rate_limited(request, address, username)
         # The only unauthenticated path that writes an operator-supplied value
         # into the audit log, so the only one an attacker can pick freely. A bare
         # %s here lets a newline in the form field forge a second record that

@@ -1,0 +1,3 @@
+$ bandit -r spectre/ -ll -c pyproject.toml -q
+[tester]	WARNING	nosec encountered (B104), but no failed test on file spectre/web/_entrypoint.py:34
+[exit 0]

@@ -1,0 +1,5 @@
+$ sh scripts/check-quality.sh master
+
+No analysed Python files changed against master. Nothing to check.
+
+[exit 0]

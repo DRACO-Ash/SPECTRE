@@ -118,8 +118,9 @@ class TestExtractNoradId:
     def test_norad_id_prefix(self):
         assert _extract_norad_id("NORAD ID: 25544") == 25544
 
-    def test_five_digit_fallback(self):
-        assert _extract_norad_id("Object 43689 in LEO") == 43689
+    def test_an_unlabelled_five_digit_number_is_not_an_id(self):
+        # The bare fallback attributed stray numbers to objects (audit F-090).
+        assert _extract_norad_id("Object 43689 in LEO") is None
 
     def test_no_id_returns_none(self):
         assert _extract_norad_id("no numbers here") is None
@@ -329,6 +330,7 @@ class TestExtractBehaviourProfile:
                 correlation_type="matched",
                 time_offset_hours=-2.0,
                 magnitude_ratio=1.0,
+                lead_time_hours=14.0,
             ))
         for i in range(n_total - n_matched):
             mnv = _FakeManoeuvre(start + timedelta(days=100 + i))
@@ -422,9 +424,13 @@ class TestExtractBehaviourProfile:
         assert p.manoeuvres_without_notso == 4
 
     def test_mean_lead_time_computed(self):
-        """All matched rows have lead time = -2.0h."""
+        """Each notice is issued at 00:00 for a 14:00 burn: lead time 14 h.
+
+        This read -2 h, the window start minus the burn, before lead time was
+        defined as burn minus issue date (audit F-091).
+        """
         p = self._build_profile(4, 4)
-        assert p.mean_lead_time_h == pytest.approx(-2.0)
+        assert p.mean_lead_time_h == pytest.approx(14.0)
 
     def test_window_accuracy_rate(self):
         """Manoeuvre at t+14h falls inside window [t+12h, t+18h] → 100% accuracy."""

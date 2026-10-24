@@ -98,6 +98,25 @@ class TestFailedLoginRateLimit:
         assert b"Operator Authentication" in refused.content
         assert b"Too many failed sign-in attempts" in refused.content
 
+    def test_a_locked_account_refuses_even_the_correct_password(
+        self, client: TestClient
+    ) -> None:
+        """Audit F-008: the limiter was consulted only after a failed comparison.
+
+        An exhausted budget then refused only wrong passwords, so the correct
+        guess still signed in and 429 was just a renamed 401: the brute force
+        was bounded by bcrypt throughput, not by the limiter.
+        """
+        admin = _admin_cookies(client)
+        _create_operator(client, admin, "locked_out_user", "the-right-password")
+        client.cookies.clear()
+        for attempt in range(10):
+            resp = _login(client, "locked_out_user", f"wrong-{attempt}", address=f"198.51.104.{attempt}")
+            assert resp.status_code == 401
+        resp = _login(client, "locked_out_user", "the-right-password", address="198.51.104.200")
+        assert resp.status_code == 429
+        assert "spectre_session" not in resp.cookies
+
     def test_a_different_source_address_keeps_its_own_budget(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -4,7 +4,7 @@
 {% set RISK_COLOR  = {"CRITICAL":"#ef4444","HIGH":"#f59e0b","MEDIUM":"#eab308","LOW":"#3b8beb","MINIMAL":"#22c55e"} %}
 {% set RISK_BG     = {"CRITICAL":"rgba(239,68,68,0.04)","HIGH":"rgba(245,158,11,0.04)","MEDIUM":"rgba(234,179,8,0.04)","LOW":"rgba(59,139,235,0.04)","MINIMAL":"rgba(34,197,94,0.04)"} %}
 {% set RISK_ICON   = {"CRITICAL":"⚠","HIGH":"⚠","MEDIUM":"◈","LOW":"◉","MINIMAL":"✓"} %}
-{% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444"} %}
+{% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444","INSUFFICIENT":"var(--text-dim)"} %}
 {% set ELSET_TABLE_CAP = 400 %}
 {% set CONF_COL    = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
 {# Manoeuvre labels and posture colours come from the domain assessment now.
@@ -314,7 +314,7 @@
                "derived from Table 3, not asserted") }}
   {% endif %}
   {% if pol.next_manoeuvre_est %}
-  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--ops-gold)") }}
   {% endif %}
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
@@ -627,6 +627,7 @@
     ● {{ detection.rejected_below_floor }} pairs fell below the floor
     {% if detection.rejected_on_evidence %}● {{ detection.rejected_on_evidence }} cleared the floor but failed the forensic checks{% endif %}
     {% if detection.merged_duplicates %}● {{ detection.merged_duplicates }} merged as the same burn seen by more than one provider{% endif %}
+    {% if detection.malformed_element_sets %}● {{ detection.malformed_element_sets }} element sets would not parse and were dropped{% endif %}
     {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
     {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
     <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>
@@ -699,7 +700,8 @@
           </td>
           {% endif %}
           <td class="col-dim">{{ m.dominant_element }}</td>
-          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
+          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}{% if m.long_gap %}
+            <span style="color:#f59e0b" title="Gap longer than the long-gap threshold: this may be several burns read as one">⚑</span>{% endif %}</td>
           <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
           <td style="white-space:nowrap">
             <span style="color:{{ CONF_COL.get(m.confidence, 'var(--text-dim)') }}; font-weight:700">

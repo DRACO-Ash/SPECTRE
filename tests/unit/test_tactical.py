@@ -23,7 +23,6 @@ from spectre.astro.tactical import (
     intercept_envelope_analytical,
     j2_drift_plan,
     j2_raan_rate,
-    min_time_intercept_analytical,
     nmc_safety_ellipse,
     optimal_evasion,
     orbital_terrain,
@@ -119,13 +118,32 @@ class TestCWCombined:
         assert result.along_track_sep_km == 5.0
         assert result.method == "combined"
 
-    def test_pure_radial_recoverable(self) -> None:
-        """Combined with zero along-track should match pure radial."""
-        pure = cw_radial_separation(LEO_R, 5.0, 1800.0)
-        combined = cw_combined(LEO_R, 5.0, 0.0, 1800.0)
-        # Not exact match because combined solves the full 2×2 system
-        # but radial ΔV should be close
-        assert abs(combined.delta_v_radial - pure.delta_v_radial) < 0.01
+    @pytest.mark.parametrize("time_s", [600.0, 1800.0, 2900.0, 4100.0, 7000.0])
+    def test_the_burns_fly_to_their_targets(self, time_s: float) -> None:
+        """Fly each solver's burn through the CW solution and check the result.
+
+        The premise of the test this replaces, that the combined solve with no
+        along-track target matches the pure radial burn, is false: by hand at
+        1,800 s the pure radial burn is +6.06 m/s and the combined one -2.21
+        m/s radial with +2.68 m/s along-track, and the 10 m/s tolerance let both
+        signs pass (audit F-081).
+        """
+        from spectre.astro.cw_geometry import CWState, _cw_propagate
+
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+
+        def flown(result: object) -> CWState:
+            return _cw_propagate(
+                CWState(0.0, 0.0, 0.0, result.delta_v_radial, result.delta_v_along_track, 0.0),  # type: ignore[attr-defined]
+                n, time_s,
+            )
+
+        pure = flown(cw_radial_separation(LEO_R, 5.0, time_s))
+        assert pure.x == pytest.approx(5.0, abs=1e-9)
+
+        combined = flown(cw_combined(LEO_R, 5.0, 0.0, time_s))
+        assert combined.x == pytest.approx(5.0, abs=1e-9)
+        assert combined.y == pytest.approx(0.0, abs=1e-9)
 
 
 class TestPlaneChange:
@@ -133,7 +151,7 @@ class TestPlaneChange:
         result = plane_change(LEO_R, inclination_change_deg=5.0)
         assert result.optimal_delta_v > 0
         assert result.inclination_change_deg == 5.0
-        assert result.optimal_location in ("node", "apogee")
+        assert result.optimal_location == "node"
 
     def test_zero_inclination_change(self) -> None:
         result = plane_change(LEO_R, inclination_change_deg=0.0)
@@ -540,18 +558,18 @@ class TestFormationDefence:
 
     def test_basic_formation_burn(self) -> None:
         """Should compute a ΔV and assess formation impact."""
-        r = formation_defence_burn(LEO_R, LEO_R + 100, 3600.0, 5.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 5.0)
         assert r.delta_v > 0
         assert r.formation_impact_km >= 0
 
     def test_wide_tolerance_maintains_formation(self) -> None:
         """Large formation spacing → should maintain formation."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 1.0, formation_spacing_km=500.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 1.0, formation_spacing_km=500.0)
         assert r.maintains_formation
 
     def test_tight_tolerance_may_exceed(self) -> None:
         """Very tight formation spacing → may exceed tolerance."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 10.0, formation_spacing_km=0.001)
+        r = formation_defence_burn(LEO_R, 3600.0, 10.0, formation_spacing_km=0.001)
         # With very tight tolerance, the burn likely exceeds it
         assert r.formation_impact_km > 0
 
@@ -583,30 +601,3 @@ class TestOrbitalTerrain:
         """Low LEO (300 km) → moderate debris."""
         r = orbital_terrain(300.0, 51.6)
         assert r.debris_risk == "medium"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestMinTimeIntercept:
-    """Tests for min_time_intercept_analytical()."""
-
-    def test_feasible_transfer(self) -> None:
-        """LEO-to-LEO with generous budget → feasible."""
-        r = min_time_intercept_analytical(LEO_R, LEO_R + 200.0, max_delta_v=1.0)
-        assert r.is_feasible
-        assert r.min_tof_s > 0
-        assert r.delta_v_km_s <= 1.0
-
-    def test_infeasible_large_gap(self) -> None:
-        """LEO to GEO with tiny budget → infeasible."""
-        r = min_time_intercept_analytical(LEO_R, GEO_R, max_delta_v=0.01)
-        assert not r.is_feasible
-
-    def test_faster_with_more_dv(self) -> None:
-        """More ΔV budget → faster min transfer time."""
-        slow = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=0.5)
-        fast = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=2.0)
-        if slow.is_feasible and fast.is_feasible:
-            assert fast.min_tof_s <= slow.min_tof_s

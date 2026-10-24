@@ -6,9 +6,13 @@ clustering logic lives in ``tle_clustering``; this module only handles the
 session-state in/out contract.
 
 One representative TLE is written per satno regardless of how many clusters
-DBSCAN finds.  When multiple clusters exist (rare: post-manoeuvre objects or
-poor coverage), the first representative is used and a WARNING is logged so the
-operator is aware that orbit uncertainty is elevated.
+DBSCAN finds. When multiple clusters exist (post-manoeuvre objects, poor
+coverage, or a fast-regressing RAAN spreading one orbit across several), the
+representative of the cluster with the most recent member is used, so an
+object that has just manoeuvred is written with its post-burn orbit, and a
+WARNING is logged so the operator is aware that orbit uncertainty is elevated.
+DBSCAN numbers clusters in scan order, so the "first" representative used
+before was the cluster holding the earliest input record (audit F-028).
 
 Input format
 ------------
@@ -116,9 +120,9 @@ def cluster_and_reduce_tle_cache(
     the returned cache:
 
     * Single cluster (typical): the representative of that cluster.
-    * Multiple clusters (rare — post-manoeuvre or poor data): the representative
-      of the first cluster.  A WARNING is logged and ``multi_cluster=True`` is
-      set in the per-object summary.
+    * Multiple clusters (post-manoeuvre or poor data): the representative of
+      the cluster with the most recent member.  A WARNING is logged and
+      ``multi_cluster=True`` is set in the per-object summary.
     * All noise (very rare): the pre-existing cached TLE is retained unchanged
       and ``fallback=True`` is set.
 
@@ -167,105 +171,18 @@ def cluster_and_reduce_tle_cache(
     objects_fallback = 0
 
     for satno, tle_list in tle_multiset.items():
-        if len(tle_list) < 2:
-            # Nothing to cluster — keep existing single TLE unchanged.
+        outcome = _reduce_one(satno, tle_list, existing_cache, cfg, cluster_tle_strings)
+        obj_summaries.append(outcome.summary)
+        if outcome.clustered:
+            objects_clustered += 1
+            total_tles_in += len(tle_list)
+        else:
             objects_skipped += 1
-            obj_summaries.append(ObjectClusteringSummary(
-                satno=satno, tles_in=len(tle_list),
-                clusters_found=0, representatives_out=min(1, len(tle_list)),
-                noise_count=0, reduction_pct=0.0, skipped=True,
-            ))
-            # Do not write to reduced_cache — caller keeps existing value.
-            continue
-
-        total_tles_in += len(tle_list)
-        objects_clustered += 1
-
-        # cluster_tle_strings expects a flat list of individual TLE lines.
-        # tle_list entries may be combined "line1\nline2" strings; flatten them.
-        flat_lines = []
-        for tle in tle_list:
-            flat_lines.extend(tle.splitlines())
-
-        try:
-            results = cluster_tle_strings(flat_lines, cfg)
-        except Exception as exc:
-            logger.warning(
-                "Clustering failed for satno %s: %s — retaining existing cached TLE",
-                satno, exc,
-            )
-            objects_clustered -= 1
-            objects_skipped += 1
-            total_tles_in -= len(tle_list)
-            obj_summaries.append(ObjectClusteringSummary(
-                satno=satno, tles_in=len(tle_list),
-                clusters_found=0, representatives_out=1,
-                noise_count=0, reduction_pct=0.0, skipped=True, fallback=True,
-            ))
-            # Retain existing cache value unchanged.
-            continue
-
-        # Gather all representatives across all ClusteringResult objects.
-        reps: list[str] = []
-        n_noise = 0
-        n_clusters = 0
-        for cr in results.values():
-            n_clusters += cr.cluster_count
-            n_noise += cr.noise_count
-            for rep in cr.representatives:
-                reps.append(f"{rep.line1}\n{rep.line2}")
-
-        total_noise += n_noise
-        is_fallback = False
-
-        if not reps:
-            # All TLEs were noise — retain the pre-existing cached TLE.
-            fallback_tle = existing_cache.get(satno)
-            if fallback_tle:
-                reps = [fallback_tle]
-                is_fallback = True
-                objects_fallback += 1
-                logger.warning(
-                    "Clustering satno %s: all %d TLEs were noise — retaining existing cached TLE",
-                    satno, len(tle_list),
-                )
-            else:
-                # No existing cache and no representatives — skip this satno.
-                logger.warning(
-                    "Clustering satno %s: all TLEs noise and no cached fallback — skipping",
-                    satno,
-                )
-                obj_summaries.append(ObjectClusteringSummary(
-                    satno=satno, tles_in=len(tle_list),
-                    clusters_found=n_clusters, representatives_out=0,
-                    noise_count=n_noise, reduction_pct=0.0, fallback=True,
-                ))
-                continue
-
-        # Always write exactly one TLE per satno.
-        is_multi = len(reps) > 1
-        if is_multi:
-            objects_multi_cluster += 1
-            logger.warning(
-                "Clustering satno %s: %d clusters found — orbit uncertainty elevated; "
-                "using first cluster representative",
-                satno, len(reps),
-            )
-        reduced_cache[satno] = reps[0]
-
-        reduction = 100.0 * (1.0 - 1.0 / len(tle_list))
-        obj_summaries.append(ObjectClusteringSummary(
-            satno=satno, tles_in=len(tle_list),
-            clusters_found=n_clusters, representatives_out=1,
-            noise_count=n_noise, reduction_pct=reduction,
-            multi_cluster=is_multi, fallback=is_fallback,
-        ))
-
-        logger.info(
-            "Clustering satno %s: %d TLEs → %d cluster(s), 1 rep selected, "
-            "%d noise (%.0f%% reduction)",
-            satno, len(tle_list), n_clusters, n_noise, reduction,
-        )
+        total_noise += outcome.noise
+        objects_multi_cluster += outcome.multi
+        objects_fallback += outcome.fallback
+        if outcome.tle is not None:
+            reduced_cache[satno] = outcome.tle
 
     # Aggregate stats — representatives_out is always 1 per clustered object.
     total_reps_out = objects_clustered - objects_fallback + (1 if objects_fallback > 0 else 0)
@@ -298,3 +215,135 @@ def cluster_and_reduce_tle_cache(
     )
 
     return reduced_cache, summary
+
+
+# An object needs at least this many TLEs before clustering means anything.
+_MIN_TLES_TO_CLUSTER = 2
+
+
+@dataclass
+class _Outcome:
+    """What reducing one object's TLE list produced, for the caller to tally."""
+
+    summary: ObjectClusteringSummary
+    tle: str | None = None    # written to the reduced cache when set
+    clustered: bool = False   # counted as clustered (else skipped)
+    noise: int = 0
+    multi: bool = False
+    fallback: bool = False
+
+
+def _reduce_one(
+    satno: str,
+    tle_list: list[str],
+    existing_cache: dict[str, str],
+    cfg: Any,
+    cluster_tle_strings: Any,
+) -> _Outcome:
+    """Cluster one object's TLEs and choose the single TLE to write."""
+    if len(tle_list) < _MIN_TLES_TO_CLUSTER:
+        # Nothing to cluster — keep existing single TLE unchanged.
+        return _Outcome(ObjectClusteringSummary(
+            satno=satno, tles_in=len(tle_list),
+            clusters_found=0, representatives_out=min(1, len(tle_list)),
+            noise_count=0, reduction_pct=0.0, skipped=True,
+        ))
+
+    # cluster_tle_strings expects a flat list of individual TLE lines.
+    # tle_list entries may be combined "line1\nline2" strings; flatten them.
+    flat_lines = [line for tle in tle_list for line in tle.splitlines()]
+
+    try:
+        results = cluster_tle_strings(flat_lines, cfg)
+    except Exception as exc:  # noqa: BLE001 - any clustering failure keeps the cached TLE
+        logger.warning(
+            "Clustering failed for satno %s: %s — retaining existing cached TLE",
+            satno, exc,
+        )
+        # Retain existing cache value unchanged.
+        return _Outcome(ObjectClusteringSummary(
+            satno=satno, tles_in=len(tle_list),
+            clusters_found=0, representatives_out=1,
+            noise_count=0, reduction_pct=0.0, skipped=True, fallback=True,
+        ))
+
+    # Newest cluster first, by its most recent member epoch.
+    clusters = sorted(
+        (c for cr in results.values() for c in cr.clusters),
+        key=lambda c: max(c.member_epochs),
+        reverse=True,
+    )
+    reps = [f"{c.representative.line1}\n{c.representative.line2}" for c in clusters]
+    n_noise = sum(cr.noise_count for cr in results.values())
+    n_clusters = sum(cr.cluster_count for cr in results.values())
+
+    if not reps:
+        return _all_noise(satno, tle_list, existing_cache, n_clusters, n_noise)
+
+    # Always write exactly one TLE per satno.
+    is_multi = len(reps) > 1
+    if is_multi:
+        logger.warning(
+            "Clustering satno %s: %d clusters found — orbit uncertainty elevated; "
+            "using the representative of the most recent cluster",
+            satno, len(reps),
+        )
+
+    reduction = 100.0 * (1.0 - 1.0 / len(tle_list))
+    logger.info(
+        "Clustering satno %s: %d TLEs → %d cluster(s), 1 rep selected, "
+        "%d noise (%.0f%% reduction)",
+        satno, len(tle_list), n_clusters, n_noise, reduction,
+    )
+    return _Outcome(
+        ObjectClusteringSummary(
+            satno=satno, tles_in=len(tle_list),
+            clusters_found=n_clusters, representatives_out=1,
+            noise_count=n_noise, reduction_pct=reduction,
+            multi_cluster=is_multi, fallback=False,
+        ),
+        tle=reps[0], clustered=True, noise=n_noise, multi=is_multi,
+    )
+
+
+def _all_noise(
+    satno: str,
+    tle_list: list[str],
+    existing_cache: dict[str, str],
+    n_clusters: int,
+    n_noise: int,
+) -> _Outcome:
+    """Every TLE was noise: keep the cached TLE if there is one, else drop the object."""
+    fallback_tle = existing_cache.get(satno)
+    if not fallback_tle:
+        logger.warning(
+            "Clustering satno %s: all TLEs noise and no cached fallback — skipping",
+            satno,
+        )
+        return _Outcome(
+            ObjectClusteringSummary(
+                satno=satno, tles_in=len(tle_list),
+                clusters_found=n_clusters, representatives_out=0,
+                noise_count=n_noise, reduction_pct=0.0, fallback=True,
+            ),
+            clustered=True, noise=n_noise,
+        )
+    logger.warning(
+        "Clustering satno %s: all %d TLEs were noise — retaining existing cached TLE",
+        satno, len(tle_list),
+    )
+    reduction = 100.0 * (1.0 - 1.0 / len(tle_list))
+    logger.info(
+        "Clustering satno %s: %d TLEs → %d cluster(s), 1 rep selected, "
+        "%d noise (%.0f%% reduction)",
+        satno, len(tle_list), n_clusters, n_noise, reduction,
+    )
+    return _Outcome(
+        ObjectClusteringSummary(
+            satno=satno, tles_in=len(tle_list),
+            clusters_found=n_clusters, representatives_out=1,
+            noise_count=n_noise, reduction_pct=reduction,
+            multi_cluster=False, fallback=True,
+        ),
+        tle=fallback_tle, clustered=True, noise=n_noise, fallback=True,
+    )

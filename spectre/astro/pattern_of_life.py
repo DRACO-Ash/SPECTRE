@@ -1,25 +1,37 @@
-"""Pattern of Life (PoL) analysis from historical TLE sequences.
+"""Pattern of Life (PoL) measurements from historical TLE sequences.
 
-Given a chronological list of TLEs for a single object this module:
-  - Extracts mean orbital elements at each epoch (direct from SGP4 Satrec)
-  - Computes subsatellite geographic longitude for GEO/GSO objects
-  - Estimates ΔV between successive TLEs (propagation-difference method)
-  - Detects and classifies manoeuvres (SK / plane-change / repositioning)
-  - Corrects RAAN and argp changes for J2 secular drift
-  - Tracks longitude drift phases (East / West / Stationary)
-  - Computes statistical Pattern of Life bounds (μ ± 2σ)
-  - Scores the object on an anomaly scale vs GEO-SK baseline
-  - Estimates propellant budget and remaining operational life
-  - Produces an operator-level intelligence assessment
+Given element sets for a single object, this module measures and stops there:
+  ● parses the history into mean elements from SGP4's own Satrec, dropping
+    and counting element sets that will not parse;
+  ● for GEO and GSO objects, the subsatellite longitude and the drift SGP4
+    flies over one sidereal day;
+  ● screens consecutive pairs against a noise floor measured from the
+    object's own fit scatter (``dv_estimation.calibrate_noise``), and
+    confirms detections with the forensic ΔV breakdown
+    (``dv_estimation.build_breakdown``: epoch-swept propagation and mean
+    element differencing, J2-corrected);
+  ● merges the same burn reported by more than one provider;
+  ● tracks longitude drift phases (east, west, stationary);
+  ● computes ΔV and interval statistics, a small-sample prediction interval
+    for the next burn, and a status scoring the latest burn against the
+    earlier ones.
+
+Judgements against cited per-regime budgets (station-keeping classification,
+anomaly scoring, propellant budget, the operator-level assessment) live in
+``spectre.domain.pol_assessment``, built on
+``spectre.domain.manoeuvre_calibration``. This header used to list them here,
+with a propagation-difference ΔV method the module no longer uses (audit
+F-095).
 """
-
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
 from spectre.astro.constants import (
@@ -41,7 +53,6 @@ from spectre.astro.dv_estimation import (
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
-_EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
 # ── Element set format ────────────────────────────────────────────────────────
 
@@ -118,6 +129,7 @@ _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 _STATUS_RECENT_DAYS     = 10.0  # days: older than this and there is no "latest" manoeuvre
 _STATUS_ANOMALOUS_SIGMA = 3.0   # σ above the historical mean ΔV → "ANOMALOUS"
 _STATUS_CAUTION_SIGMA   = 2.0   # σ above the historical mean ΔV → "CAUTION"
+_STATUS_MIN_PRIOR       = 3     # earlier manoeuvres needed to score the latest
 
 # _SK_DV_LIMIT and _GEO_SK_BASELINE used to live here. Both are gone, and
 # nothing in this module replaces them, because neither was a measurement.
@@ -217,6 +229,23 @@ class Manoeuvre:
         if bd is not None and bd.burn_epoch is not None and not bd.swept.burn_epoch_ambiguous:
             return bd.burn_epoch
         return self.epoch
+
+    @property
+    def long_gap(self) -> bool:
+        """True when the bracketing gap is long enough to hide several burns."""
+        return self.gap_days > _LONG_GAP_WARN_DAYS
+
+    @property
+    def burn_window(self) -> tuple[datetime, datetime]:
+        """Earliest and latest times the burn can have happened.
+
+        The measured burn epoch where the estimator dated it; otherwise the
+        bracket between the element sets either side, since the burn lies
+        somewhere in that gap.
+        """
+        if self.burn_epoch is not self.epoch:
+            return self.burn_epoch, self.burn_epoch
+        return self.tle_before.epoch, self.epoch
 
     @property
     def confidence(self) -> str:
@@ -321,6 +350,7 @@ class PolAnalysis:
     rejected_on_evidence:   int = 0   # survived the floor, failed the forensics
     skipped_long_gap:       int = 0   # gap too large to read as a single burn
     merged_duplicates:      int = 0   # same burn reported by more than one provider
+    malformed_element_sets: int = 0   # pairs that would not parse, dropped
     breakdowns_truncated:   int = 0   # detections past the forensic budget
 
 
@@ -349,6 +379,26 @@ def _gst_deg(epoch: datetime) -> float:
     """Greenwich Apparent Sidereal Time (degrees) at *epoch*."""
     jd = _epoch_to_jd(epoch)
     return (280.46061837 + 360.98564736629 * (jd - 2451545.0)) % 360.0
+
+
+def _geo_drift_deg_day(sat: Satrec, epoch: datetime) -> float | None:
+    """Longitude drift (deg/day, positive east) that SGP4 flies from *epoch*.
+
+    The Earth-fixed longitude change over one sidereal day of propagation,
+    which cancels the daily swing an eccentric orbit adds. Mean motion alone
+    leaves out the secular node and perigee rates (J2 alone is about
+    0.0134 deg/day at GEO) and the deep-space terms SGP4 applies there
+    (audit F-093). None if SGP4 reports an error.
+    """
+    jd = _epoch_to_jd(epoch)
+    lons = []
+    for days in (0.0, SIDEREAL_DAY / 86400.0):
+        err, r, _ = sat.sgp4(jd + days, 0.0)
+        if err:
+            return None
+        lons.append(math.degrees(math.atan2(r[1], r[0])) - _gst_deg(epoch + timedelta(days=days)))
+    change = (lons[1] - lons[0] + 180.0) % 360.0 - 180.0
+    return change / (SIDEREAL_DAY / 86400.0)
 
 
 def _satrec_to_record(tle: str) -> TLERecord:
@@ -382,8 +432,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
         gst          = _gst_deg(epoch)
         lon          = (mean_lon_eci - gst) % 360.0
         geo_lon      = lon - 360.0 if lon > _LONGITUDE_WRAP_DEG else lon
-        # Drift rate: positive = east
-        geo_drift = 360.0 * (n_revday - _EARTH_ROT)
+        geo_drift    = _geo_drift_deg_day(sat, epoch)
 
     # Element Set Number — TLE line 1, columns 65-68 (1-indexed), right-justified
     try:
@@ -726,7 +775,9 @@ def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
     """Parse one pair, or None when it is unusable or a duplicate epoch.
 
     A history block routinely carries the same element set twice from two
-    providers, and a malformed pair must drop out rather than stop the parse.
+    providers. A malformed pair raises ValueError or ZeroDivisionError, which
+    the caller catches and counts so that it drops out rather than stopping
+    the parse.
     """
     rec = _satrec_to_record(f"{l1}\n{l2}")
     key = rec.epoch.strftime("%Y%j%H%M%S")
@@ -779,10 +830,31 @@ def parse_tle_history(
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
     """
+    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata)
+    return records
+
+
+def parse_tle_history_counted(
+    tle_text: str,
+    satno: int | None = None,
+    metadata: dict[str, tuple[str, str]] | None = None,
+    rms_metadata: dict[str, float | None] | None = None,
+) -> tuple[list[TLERecord], int]:
+    """As :func:`parse_tle_history`, also returning how many pairs were malformed.
+
+    A corrupt epoch raised ValueError and a zero mean motion ZeroDivisionError
+    out of the whole parse, so one bad element set lost the analysis (audit
+    F-083). Each now drops out and is counted.
+    """
     records: list[TLERecord] = []
     seen: set[str] = set()
+    malformed = 0
     for l1, l2 in _tle_line_pairs(tle_text):
-        rec = _record_from_pair(l1, l2, seen)
+        try:
+            rec = _record_from_pair(l1, l2, seen)
+        except (ValueError, ZeroDivisionError):
+            malformed += 1
+            continue
         if rec is None:
             continue
         if not _apply_metadata(rec, l1, metadata, rms_metadata):
@@ -790,7 +862,7 @@ def parse_tle_history(
         records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
-    return records
+    return records, malformed
 
 
 def _screen_pairs(
@@ -863,35 +935,91 @@ def _detect_manoeuvres(
     return manoeuvres
 
 
+def _pol_status_for_history(
+    latest_epoch: datetime,
+    manoeuvres: list[Manoeuvre],
+) -> tuple[str, str]:
+    """Status of the latest manoeuvre, scored against the ones before it.
+
+    Leave-one-out. Scoring the latest delta-V against statistics that already
+    include it caps its z-score at (n - 1) / sqrt(n) (Samuelson's inequality),
+    so ANOMALOUS could not happen below 11 manoeuvres and a burn 100 times its
+    only predecessor read NORMAL (audit F-026).
+    """
+    prior = [m.delta_v_km_s for m in manoeuvres[:-1]]
+    return _pol_status_and_reason(latest_epoch, manoeuvres, _pol_stats(prior), len(prior))
+
+
 def _pol_status_and_reason(
     latest_epoch: datetime,
     manoeuvres: list[Manoeuvre],
-    dv_stats: PolStats | None,
+    prior_stats: PolStats | None,
+    n_prior: int = _STATUS_MIN_PRIOR,
 ) -> tuple[str, str]:
     """The backward-compatible PoL status and the sentence explaining it.
 
-    *latest_epoch* is the epoch of the last element set in the history: a
-    manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not "the
-    latest" and leaves the status at NORMAL, because an object that has simply
-    stopped manoeuvring is not an anomaly.
+    *prior_stats* describe the manoeuvres before the latest, of which there
+    are *n_prior*. *latest_epoch* is the epoch of the last element set in the
+    history: a manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not
+    "the latest" and leaves the status at NORMAL, because an object that has
+    simply stopped manoeuvring is not an anomaly. A recent manoeuvre with
+    fewer than ``_STATUS_MIN_PRIOR`` before it is INSUFFICIENT, not NORMAL:
+    there is nothing to measure it against.
     """
-    pol_status = "NORMAL"
-    pol_reason = "All metrics within normal historical bounds."
-    if manoeuvres and dv_stats:
-        last_dv = manoeuvres[-1].delta_v_km_s if (
-            latest_epoch - manoeuvres[-1].epoch
-        ).total_seconds() / 86400.0 < _STATUS_RECENT_DAYS else None
-        if last_dv and dv_stats.std > 0:
-            z = (last_dv - dv_stats.mean) / dv_stats.std
-            if z > _STATUS_ANOMALOUS_SIGMA:
-                pol_status = "ANOMALOUS"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above historical mean."
-            elif z > _STATUS_CAUTION_SIGMA:
-                pol_status = "CAUTION"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above mean — approaching anomalous threshold."
     if not manoeuvres:
-        pol_reason = "No manoeuvres detected — object appears passive."
-    return pol_status, pol_reason
+        return "NORMAL", "No manoeuvres detected — object appears passive."
+    age_days = (latest_epoch - manoeuvres[-1].epoch).total_seconds() / 86400.0
+    if age_days >= _STATUS_RECENT_DAYS:
+        return "NORMAL", "All metrics within normal historical bounds."
+    if prior_stats is None or n_prior < _STATUS_MIN_PRIOR:
+        return "INSUFFICIENT", (
+            f"Only {n_prior} earlier manoeuvre(s); at least {_STATUS_MIN_PRIOR} are needed "
+            "to judge whether the latest is unusual."
+        )
+    last_dv = manoeuvres[-1].delta_v_km_s
+    if prior_stats.std > 0:
+        z = (last_dv - prior_stats.mean) / prior_stats.std
+    else:
+        z = math.inf if last_dv > prior_stats.mean else 0.0
+    if z > _STATUS_ANOMALOUS_SIGMA:
+        return "ANOMALOUS", f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean."
+    if z > _STATUS_CAUTION_SIGMA:
+        return "CAUTION", (
+            f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean — "
+            "approaching anomalous threshold."
+        )
+    return "NORMAL", "All metrics within normal historical bounds."
+
+
+def _burn_epoch_of(m: Manoeuvre) -> datetime:
+    return m.burn_epoch
+
+
+def _burn_intervals(manoeuvres: list[Manoeuvre], burn_time: Any) -> list[float]:
+    """Days between successive burns, in burn order."""
+    times = sorted(burn_time(m) for m in manoeuvres)
+    return [(b - a).total_seconds() / 86400.0 for a, b in itertools.pairwise(times)]
+
+
+def _next_manoeuvre(
+    manoeuvres: list[Manoeuvre], burn_time: Any = _burn_epoch_of,
+) -> tuple[str | None, float | None]:
+    """Predicted next burn and the half-width (days) of its 95% interval.
+
+    The band is a prediction interval for the next interval between burns,
+    t(0.975, n-1) x s x sqrt(1 + 1/n). It was 2 s, which with three intervals
+    understates a 95% band by more than half (t = 4.30), and was timed on the
+    after-element-set epochs rather than the burns (audit F-094). None below
+    _MIN_INTERVALS_FOR_PREDICTION intervals.
+    """
+    intervals = _burn_intervals(manoeuvres, burn_time)
+    stats_ = _pol_stats(intervals)
+    if stats_ is None or stats_.n < _MIN_INTERVALS_FOR_PREDICTION:
+        return None, None
+    last = max(burn_time(m) for m in manoeuvres)
+    pred = last + timedelta(days=stats_.mean)
+    t_factor = float(student_t.ppf(0.975, stats_.n - 1))
+    return pred.strftime("%Y-%m-%d %H:%M UTC"), round(t_factor * stats_.std * math.sqrt(1.0 + 1.0 / stats_.n), 1)
 
 
 def analyse_pattern_of_life(
@@ -984,25 +1112,12 @@ def analyse_pattern_of_life(
     total_dv  = float(sum(dv_vals))
     sorted_m  = sorted(manoeuvres, key=lambda m: m.epoch)
 
-    intervals: list[float] = [
-        (sorted_m[j].epoch - sorted_m[j - 1].epoch).total_seconds() / 86400.0
-        for j in range(1, len(sorted_m))
-    ]
-
     dv_stats       = _pol_stats(dv_vals)
-    interval_stats = _pol_stats(intervals)
-
-    # Prediction
-    next_est = next_unc = None
-    if interval_stats and interval_stats.n >= _MIN_INTERVALS_FOR_PREDICTION and sorted_m:
-        pred = sorted_m[-1].epoch + timedelta(days=interval_stats.mean)
-        next_est = pred.strftime("%Y-%m-%d %H:%M UTC")
-        next_unc = round(interval_stats.std * 2.0, 1)
+    interval_stats = _pol_stats(_burn_intervals(manoeuvres, _burn_epoch_of))
+    next_est, next_unc = _next_manoeuvre(manoeuvres, _burn_epoch_of)
 
     # PoL status
-    pol_status, pol_reason = _pol_status_and_reason(
-        records[-1].epoch, manoeuvres, dv_stats,
-    )
+    pol_status, pol_reason = _pol_status_for_history(records[-1].epoch, manoeuvres)
 
     # ── Chart data ────────────────────────────────────────────────────────────
     cr = _downsample(records, 500)

@@ -101,6 +101,23 @@ class SlidingWindowLimiter:
         for key in elapsed:
             del self._calls[key]
 
+    async def is_blocked(self, key: str) -> bool:
+        """Return ``True`` when *key* has already spent its budget, without charging it.
+
+        The login route has to refuse an exhausted account BEFORE it compares
+        the password. Asking ``is_allowed`` there would charge a successful
+        sign-in, which this limiter must never do, so the read is separate.
+        """
+        key = key[: self._MAX_KEY_CHARS]
+        now = time.monotonic()
+        async with self._lock:
+            q = self._calls.get(key)
+            if not q:
+                return False
+            while q and now - q[0] > self._window:
+                q.popleft()
+            return len(q) >= self._max
+
     async def is_allowed(self, key: str) -> bool:
         # Clamped here rather than at the call sites so every present and
         # future caller inherits the bound.

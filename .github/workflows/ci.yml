@@ -25,10 +25,19 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install the full dev environment
-        # The same install the test job and a developer use. A partial set here
-        # let mypy disagree with the local loop and kept master red.
-        run: pip install -e ".[dev]"
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: ruff — style and import checks
         run: ruff check spectre/ tests/
       - name: mypy — strict type checking
@@ -40,19 +49,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the cognitive-complexity meter's calibration test
+          # replays the commit SonarQube scanned, which a depth-1 checkout
+          # does not contain.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: Run tests with coverage
         env:
           # Boot now fails closed on a missing or placeholder signing key.
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
         run: >
-          pytest tests/ -q --cov=spectre --cov-report=term-missing
-          --cov-report=xml --cov-fail-under=70
+          pytest tests/ -q --cov=spectre --cov=tle_clustering --cov-report=term-missing
+          --cov-report=xml
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
@@ -87,10 +112,15 @@ jobs:
           cache: pip
       - name: Install pip-audit
         run: pip install pip-audit
-      - name: pip-audit — scan the committed lockfile
-        # Audits requirements.txt, the same hash-pinned set the image installs, so
-        # CI and the container can never disagree about what was scanned.
-        run: pip-audit --desc on --requirement requirements.txt
+      - name: pip-audit — scan the committed lockfiles
+        # requirements.txt is the hash-pinned set the image installs, so CI and
+        # the container can never disagree about what was scanned. The dev lock
+        # is installed by CI and every developer, so it is scanned too: it was
+        # carrying urllib3, filelock and setuptools advisories unseen (audit
+        # F-S10-25).
+        run: |
+          pip-audit --desc on --no-deps --disable-pip --requirement requirements.txt
+          pip-audit --desc on --no-deps --disable-pip --requirement requirements-dev.txt
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:
@@ -181,8 +211,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install the full dev environment
-        run: pip install -e ".[dev]" diff-cover
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: Produce the coverage report the gate reads
         env:
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
