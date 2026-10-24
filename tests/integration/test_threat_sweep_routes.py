@@ -143,3 +143,24 @@ class TestRedOrbitInfo:
 class TestFetchTargets:
     def test_no_group_returns_nothing(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
         assert _post(client, auth_cookie, "fetch-targets", {"tgt_group": ""}).text == ""
+
+
+class TestProvenance:
+    """Audit F-039: a sweep from a generated red element set says so."""
+
+    def test_a_synthetic_red_set_is_flagged_in_the_result(
+        self, client: Any, auth_cookie: str, sweep_state: Any,
+    ) -> None:
+        from spectre.data.intel import satno_from_tle
+
+        red_satno = str(satno_from_tle(_RED_GEO))
+        saved = dict(sweep_state.hrr_tle_data_mode)
+        sweep_state.hrr_tle_data_mode[red_satno] = "SYNTHETIC"
+        try:
+            _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+            resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
+        finally:
+            sweep_state.hrr_tle_data_mode = saved
+        flat = " ".join(resp.text.split())
+        assert "not from live tracking" in flat
+        assert "SYNTHETIC: red RED-GEO" in flat

@@ -93,6 +93,10 @@ class TestTheScreenRefusesClearly:
             "UDL connection"
         )
         assert "candidate actor(s)" in resp.text
+        # Audit F-039: the bundled watchlist is SYNTHETIC, and the result
+        # built from it has to say so where it is read.
+        assert "not from live tracking" in " ".join(resp.text.split())
+        assert 'class="provenance-badge"' in resp.text
 
 
 class TestTheScreenRunsAgainstAWatchlist:

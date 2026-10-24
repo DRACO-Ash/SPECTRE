@@ -1255,6 +1255,23 @@ def _attach_data_mode(state: object, grouped: list[dict[str, Any]]) -> None:
         g["data_mode"] = state.hrr_tle_data_mode.get(satno, "REAL") if satno else "REAL"  # type: ignore[attr-defined]
 
 
+_DECLARED_MODES = frozenset({"REAL", "MANUAL"})
+
+
+def _provenance_warnings(subjects: list[tuple[str, str]]) -> list[str]:
+    """Name what in a result rests on element sets that are not live tracking.
+
+    *subjects* are (label, UDL dataMode) pairs. REAL is live tracking and
+    MANUAL is the operator's own entry, already labelled where it was typed,
+    so neither is raised. Every other mode gets one line naming its subjects.
+    """
+    by_mode: dict[str, list[str]] = {}
+    for label, mode in subjects:
+        if mode not in _DECLARED_MODES:
+            by_mode.setdefault(mode, []).append(label)
+    return [f"{mode}: {', '.join(labels)}" for mode, labels in sorted(by_mode.items())]
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1373,6 +1390,11 @@ async def threat_sweep(
     grouped = _group_entries(entries)
     # Attach UDL dataMode provenance to each group for the display-time filter.
     _attach_data_mode(state, grouped)
+    red_mode = "MANUAL" if manual_red_tle else state.hrr_tle_data_mode.get(red_satno or "", "REAL")
+    provenance = _provenance_warnings(
+        [(f"red {red_sat.strip()}", red_mode)]
+        + [(f"target {g['target'].target_name}", g["data_mode"]) for g in grouped],
+    )
 
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
@@ -1400,6 +1422,7 @@ async def threat_sweep(
         "red_satno": red_satno or "",
         "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
         "clustering_summary": clustering_summary,
+        "provenance_warnings": provenance,
         "error": None,
     })
 
@@ -1705,6 +1728,16 @@ async def threat_screen(
     errors.extend(run.notes)
 
     screening = rank_actors(run.verdicts)
+    # Read after _refresh_actor_tles, which replaces synthetic sets when it can.
+    asset_mode = "MANUAL" if manual_asset_tle else state.hrr_tle_data_mode.get(asset_satno, "REAL")
+    actor_modes = {
+        v.actor_satno: state.hrr_tle_data_mode.get(v.actor_satno, "REAL")
+        for v in run.verdicts
+    }
+    provenance = _provenance_warnings(
+        [(f"asset {asset_name}", asset_mode)]
+        + [(f"actor {v.actor_name}", actor_modes[v.actor_satno]) for v in run.verdicts],
+    )
     profiles_by_actor = _profiles_by_actor(run.entries)
     entries = run.entries
     method_refusals = run.refusals
@@ -1732,6 +1765,8 @@ async def threat_screen(
         "errors": errors,
         "error": None,
         "band_colours": _BAND_COLOURS,
+        "actor_modes": actor_modes,
+        "provenance_warnings": provenance,
     })
 
 @router.post("/refine", response_model=None)

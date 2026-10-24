@@ -112,6 +112,8 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "errors": ["SL-12 R/B (27051): no element set"],
         "error": None,
         "band_colours": _BAND_COLOURS,
+        "actor_modes": {},
+        "provenance_warnings": [],
     }
     context.update(overrides)
     return context

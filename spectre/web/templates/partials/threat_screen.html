@@ -14,6 +14,8 @@
     </span>
   </div>
 
+  {% include "partials/_provenance_banner.html" %}
+
   {% if not screening.ranked %}
   {# Never render an empty list without a reason: "nothing listed" and
      "nothing can reach you" must not look the same. #}
@@ -118,7 +120,8 @@
             tabindex="0" onkeydown="spectreActivate(event)"
             title="Open the profiles behind this verdict">
           <td class="col-dim">{{ loop.index }}</td>
-          <td><strong>{{ v.actor_name }}</strong></td>
+          {% set badge_mode = actor_modes.get(v.actor_satno, "REAL") %}
+          <td><strong>{{ v.actor_name }}</strong>{% if badge_mode not in ("REAL", "MANUAL") %}{% include "partials/_provenance_badge.html" %}{% endif %}</td>
           <td class="col-dim">{{ v.actor_satno }}</td>
           <td class="col-dim">{{ v.country or "-" }}</td>
           <td><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></td>

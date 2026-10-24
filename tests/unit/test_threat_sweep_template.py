@@ -74,6 +74,7 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "red_satno": "41838",
         "manual_red_confidence": None,
         "clustering_summary": None,
+        "provenance_warnings": [],
         "error": None,
     }
     context.update(overrides)
