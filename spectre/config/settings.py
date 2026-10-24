@@ -38,8 +38,9 @@ load_dotenv(_env_path)
 # in the Dockerfile, because that would override the platform's injection.
 DEFAULT_PORT = 8080
 
-# Placeholder values shipped in .env.example. Booting with one of these means
-# the operator never set a real secret, so the app must refuse to start.
+# Placeholder values operators have been seen to leave in place (.env.example
+# itself ships SECRET_KEY blank). Booting with one of these means the operator
+# never set a real secret, so the app must refuse to start.
 _PLACEHOLDER_SECRETS = frozenset({
     "change-me-to-a-random-string",
     "change-me",
@@ -174,11 +175,10 @@ def _resolve_database_url() -> str:
     """Return the database URL, resolved at runtime.
 
     An explicit ``DATABASE_URL`` wins (the POSTGRESQL add-on injects one).
-    Otherwise SQLite is placed inside the resolved data directory.
-
-    Without one, SQLite is used on the container's own filesystem, never on the
+    Without one, SQLite is used under ./data or SPECTRE_SQLITE_DIR on the
+    container's own filesystem, never in the data directory or on the
     FILE_STORAGE mount: see :func:`_resolve_sqlite_dir` for why that mount
-    cannot host a database.
+    cannot host a database, and why the file is ephemeral there.
     """
     explicit = os.environ.get("DATABASE_URL", "").strip()
     if explicit:
