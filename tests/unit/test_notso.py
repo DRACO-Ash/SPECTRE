@@ -118,8 +118,9 @@ class TestExtractNoradId:
     def test_norad_id_prefix(self):
         assert _extract_norad_id("NORAD ID: 25544") == 25544
 
-    def test_five_digit_fallback(self):
-        assert _extract_norad_id("Object 43689 in LEO") == 43689
+    def test_an_unlabelled_five_digit_number_is_not_an_id(self):
+        # The bare fallback attributed stray numbers to objects (audit F-090).
+        assert _extract_norad_id("Object 43689 in LEO") is None
 
     def test_no_id_returns_none(self):
         assert _extract_norad_id("no numbers here") is None

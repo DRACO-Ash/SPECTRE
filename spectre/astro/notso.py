@@ -234,11 +234,15 @@ def _infer_notso_type(text: str) -> NOTSOType:
 
 
 def _extract_norad_id(text: str) -> int | None:
-    """Extract NORAD catalogue number from common NOTSO field patterns."""
+    """Extract a labelled NORAD catalogue number from the message text.
+
+    Only a number introduced by a catalogue label counts. The fallbacks that
+    took the first five-digit number anywhere, or any five digits after an
+    OBJECT label, could pick another object, a quantity or a reference: "close
+    approach with 43013" was attributed to 43013 (audit F-090).
+    """
     patterns = [
         r"(?:SATNO|SAT\s*NO|NORAD\s*ID|NORAD|CATALOG\s*NO|CATNO)[:\s#]+(\d{4,6})",
-        r"(?:OBJECT|OBJ)[:\s]+\d+[^\d].*?(\d{5})",
-        r"\b(\d{5})\b",   # Fallback: any 5-digit number
     ]
     for pat in patterns:
         m = re.search(pat, text, re.IGNORECASE)
