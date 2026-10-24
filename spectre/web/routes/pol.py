@@ -6,6 +6,7 @@ rendered partials for the Historical PoL hero tab.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import logging
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.data.intel import get_intel
@@ -243,6 +245,24 @@ async def _fetch_merged_history(
     return archive_text, merged_text, merged_meta, merged_rms, name
 
 
+def _archive_end_if_capped(archive_text: str) -> datetime | None:
+    """The newest archived epoch when the archive pull hit its record cap.
+
+    One request returns at most _UDL_MAX_RESULTS sets with no paging, and the
+    current set is appended after it, so a capped archive leaves a gap that
+    used to pass without a word (audit F-144). None when under the cap.
+    """
+    line1s = [ln.strip() for ln in archive_text.splitlines() if ln.strip().startswith("1 ")]
+    if len(line1s) < _UDL_MAX_RESULTS:
+        return None
+    epochs = []
+    for ln in line1s:
+        # A line 1 too damaged to date is skipped; parsing drops it anyway.
+        with contextlib.suppress(ValueError, IndexError):
+            epochs.append(tle_epoch(ln))
+    return max(epochs, default=None)
+
+
 def _cadence_filtered(
     records: list[Any], apply_filter: bool, satno: int,
 ) -> tuple[list[Any], list[Any]]:
@@ -359,6 +379,7 @@ async def pol_analyse(
             quality_flags=quality_flags,
         )
         pol.malformed_element_sets = malformed
+        pol.history_truncated_at = _archive_end_if_capped(archive_text)
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(

@@ -19,6 +19,15 @@
 {% set rb          = RISK_BG.get(risk_level, "rgba(107,114,128,0.10)") %}
 {% set is_geo      = pol.regime in ("GEO","DEEP") or (pol.records and pol.records[-1].geo_longitude_deg is not none) %}
 
+{% if pol.history_truncated_at %}
+{# Audit F-144: the archive pull hit UDL's record cap; there may be a gap. #}
+<div class="callout callout-amber" role="note" style="margin:0 0 0.5rem; font-size:0.78rem">
+  <strong>&#9888; History truncated at {{ pol.history_truncated_at.strftime('%Y-%m-%d %H:%M UTC') }}.</strong>
+  UDL returned its record cap for the archive, so element sets between that epoch and the
+  current one may be missing, and manoeuvres in that gap would not be detected.
+</div>
+{% endif %}
+
 {# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
    ══════════════════════════════════════════════════════════════════════════════ #}

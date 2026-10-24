@@ -352,6 +352,9 @@ class PolAnalysis:
     merged_duplicates:      int = 0   # same burn reported by more than one provider
     malformed_element_sets: int = 0   # pairs that would not parse, dropped
     breakdowns_truncated:   int = 0   # detections past the forensic budget
+    # Newest archived epoch when the archive pull hit its record cap, so the
+    # history may have a gap between it and the current element set.
+    history_truncated_at:   datetime | None = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
