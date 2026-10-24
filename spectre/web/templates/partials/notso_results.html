@@ -207,9 +207,10 @@
           {% else %}—{% endif %}
         </td>
         <td style="text-align:right; padding:0.25rem 0.35rem; font-family:monospace">
-          {% if c.time_offset_hours is not none %}
-            <span style="color:{% if c.time_offset_hours > 0 %}#22c55e{% else %}#f59e0b{% endif %}">
-              {% if c.time_offset_hours > 0 %}+{% endif %}{{ c.time_offset_hours }}
+          {% if c.lead_time_hours is not none %}
+            <span style="color:{% if c.lead_time_hours > 0 %}#22c55e{% else %}#f59e0b{% endif %}"
+                  title="Burn minus issue date; window start is {{ c.time_offset_hours }} h from the burn">
+              {% if c.lead_time_hours > 0 %}+{% endif %}{{ c.lead_time_hours }}
             </span>
           {% else %}—{% endif %}
         </td>

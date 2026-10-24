@@ -72,9 +72,13 @@ class NOTSOManoeuvreCorrelation:
     notso:             NOTSORecord | None
     manoeuvre:         object | None    # Manoeuvre from pattern_of_life
     correlation_type:  str             # "matched" | "notso_only" | "manoeuvre_only"
-    time_offset_hours: float | None    # NOTSO effective_start − manoeuvre epoch (h)
+    time_offset_hours: float | None    # window offset: NOTSO effective_start − burn (h)
     magnitude_ratio:   float | None    # Predicted ΔV / detected ΔV
     notes:             str = ""
+    #: Burn minus the NOTSO's issue date (h): positive when the notice came
+    #: first. "Lead time" used to be the window offset above, which ignores
+    #: when the notice was issued and is negative for a timely one (audit F-091).
+    lead_time_hours:   float | None = None
 
 
 @dataclass
@@ -131,7 +135,7 @@ class OperatorBehaviourProfile:
     inconsistent_notifier:  bool = False   # 0.30 ≤ rate ≤ 0.90
     low_notification_rate:  bool = False   # rate < 0.30
     behaviour_unassessable: bool = False   # too few reportable manoeuvres
-    predictable_timing:     bool = False   # std_lead_time < 6 h
+    predictable_timing:     bool = False   # std_lead_time < _PREDICTABLE_LEAD_STD_H
 
     def summary(self) -> str:
         rate_pct = f"{self.notification_rate * 100:.0f}%"
@@ -543,9 +547,9 @@ def correlate_notsos_with_manoeuvres(
             ) / 2
             best = min(candidates, key=lambda m: abs((_nearest(m, midpoint) - midpoint).total_seconds()))
 
-            offset_h = (
-                (notso.effective_start_utc - _nearest(best, midpoint)).total_seconds() / 3600.0
-            )
+            burn_at = _nearest(best, midpoint)
+            offset_h = (notso.effective_start_utc - burn_at).total_seconds() / 3600.0
+            lead_h = (burn_at - notso.issue_date_utc).total_seconds() / 3600.0
             mag_ratio = None
             if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
                 mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
@@ -556,6 +560,7 @@ def correlate_notsos_with_manoeuvres(
                 correlation_type="matched",
                 time_offset_hours=round(offset_h, 2),
                 magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
+                lead_time_hours=round(lead_h, 2),
             ))
             matched_notso_ids.add(notso.message_id)
             matched_mnv.add(id(best))
@@ -598,6 +603,10 @@ def _nearest(m: Any, when: datetime) -> datetime:
 
 
 # ── Behaviour profile extraction ──────────────────────────────────────────────
+
+# Lead-time scatter below which an operator's notification timing is called
+# predictable. A tuned figure, not a sourced one.
+_PREDICTABLE_LEAD_STD_H = 6.0
 
 # Smallest sample a spread may be quoted from: a standard deviation over a
 # single observation is not a spread, it is zero information.
@@ -726,8 +735,8 @@ def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
     assessable = (reportable >= min_reportable_for_behaviour
                   and reportable_threshold_km_s is not None)
 
-    # Lead times (NOTSO effective_start − manoeuvre epoch)
-    lead_times = [c.time_offset_hours for c in matched if c.time_offset_hours is not None]
+    # Lead times: burn minus issue date, positive when the notice came first.
+    lead_times = [c.lead_time_hours for c in matched if c.lead_time_hours is not None]
     mean_lt, std_lt = _mean_and_std(lead_times)
 
     # Magnitude accuracy
@@ -765,6 +774,6 @@ def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
         inconsistent_notifier=(assessable
                                and _LOW_NOTIFIER_RATE <= notif_rate <= _CONSISTENT_NOTIFIER_RATE),
         low_notification_rate=assessable and notif_rate < _LOW_NOTIFIER_RATE,
-        predictable_timing=bool(std_lt is not None and std_lt < 6.0),
+        predictable_timing=bool(std_lt is not None and std_lt < _PREDICTABLE_LEAD_STD_H),
     )
     return profile
