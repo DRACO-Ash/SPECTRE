@@ -846,9 +846,9 @@ async def apply_intercept(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
-    if intercept_data_mode.strip():
-        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+        red_tle, blue_tle, intercept_data_mode, state,
+    )
 
     # Regime compatibility check — block cross-belt intercepts.
     try:
@@ -1113,9 +1113,9 @@ async def apply_all_intercepts(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
-    if intercept_data_mode.strip():
-        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+        red_tle, blue_tle, intercept_data_mode, state,
+    )
 
     # Regime compatibility check — block cross-belt intercepts.
     try:
@@ -1242,26 +1242,47 @@ def _find_tle(state: object, sat_name: str) -> str | None:
     return None
 
 
+class _Fetched(NamedTuple):
+    """An element set and the UDL dataMode it is known to have."""
+
+    tle: str
+    mode: str
+
+
+def _held_mode(state: object, tle: str) -> str:
+    """The known mode of a set already held, or UNVERIFIED when none is recorded.
+
+    A mode is known only for the very set the HRR cache holds; an operator's
+    pasted set for the same object has no recorded provenance.
+    """
+    satno = satno_from_tle(tle)
+    key = str(satno) if satno is not None else ""
+    if not key or state.hrr_tle_cache.get(key) != tle:  # type: ignore[attr-defined]
+        return "UNVERIFIED"
+    return str(state.hrr_tle_data_mode.get(key, "UNVERIFIED"))  # type: ignore[attr-defined]
+
+
 async def _refetch_tles(
     red_tle: str,
     blue_tle: str,
     data_mode: str,
     state: object,
-) -> tuple[str, str]:
+) -> tuple[_Fetched, _Fetched]:
     """Re-fetch the red and blue TLEs from UDL using *data_mode*.
 
-    Falls back silently to the supplied originals when UDL credentials are
-    absent, the SATNO cannot be extracted from the TLE, or the fetch fails.
+    Keeps the supplied originals when UDL credentials are absent, the SATNO
+    cannot be extracted from the TLE, or the fetch fails, and then reports
+    the mode the original is known to have rather than the one requested.
     """
     if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return red_tle, blue_tle
+        return _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
-    async def _try_fetch(tle: str) -> str:
+    async def _try_fetch(tle: str) -> _Fetched:
         satno = satno_from_tle(tle)
         if satno is None:
-            return tle
+            return _Fetched(tle, _held_mode(state, tle))
         result = await fetch_tle_for_satno(
             satno,
             state.udl_username,  # type: ignore[attr-defined]
@@ -1269,10 +1290,26 @@ async def _refetch_tles(
             data_mode=data_mode,
             source=getattr(state, "udl_tle_source", ""),
         )
-        return result[0] if result else tle
+        return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue
+
+
+async def _resolve_provenance(
+    red_tle: str, blue_tle: str, requested: str, state: object,
+) -> tuple[str, str, str]:
+    """The element sets to fly and the badge naming their actual provenance.
+
+    The badge used to show the requested mode, defaulting to REAL, even when
+    nothing was fetched and the sets were the operator's own (audit F-133).
+    """
+    if requested.strip():
+        red, blue = await _refetch_tles(red_tle, blue_tle, requested.strip().upper(), state)
+    else:
+        red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
+    label = red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}"
+    return red.tle, blue.tle, label
 
 
 # ── Intercept solver dispatch ────────────────────────────────────────────────

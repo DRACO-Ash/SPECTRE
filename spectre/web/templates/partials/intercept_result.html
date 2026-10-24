@@ -7,7 +7,8 @@
 {# ── Data Mode provenance badge ── #}
 {% if intercept_data_mode %}
 <div style="margin-bottom:0.4rem">
-  <span class="badge-ok" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
+  {# The element sets' provenance, not the mode requested (F-133). #}
+  <span class="{{ 'badge-ok' if intercept_data_mode == 'REAL' else 'badge-warn' }}" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
 </div>
 {% endif %}
 

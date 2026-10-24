@@ -9,7 +9,8 @@
 <div class="threat-sweep-summary" style="margin-bottom:0.5rem">
   <span class="badge-ok">{{ ok_items | length }} / {{ items | length }} methods analysed</span>
   {% if intercept_data_mode %}
-  <span class="badge-ok" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
+  {# The element sets' provenance, not the mode requested (F-133). #}
+  <span class="{{ 'badge-ok' if intercept_data_mode == 'REAL' else 'badge-warn' }}" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
   {% endif %}
   {% if best %}
   <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
