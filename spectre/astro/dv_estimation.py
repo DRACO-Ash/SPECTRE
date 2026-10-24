@@ -37,10 +37,14 @@ Two estimators, neither of which reads phase as ΔV.
 The headline figure is **epoch-swept propagation**. Velocity differencing is
 exact at the instant of the burn and only then, so instead of abandoning it,
 the gap is searched for the epoch at which the two trajectories actually
-coincide and the velocities are differenced there. Measured against known
-synthetic burns it is accurate to better than 0.1% and, unlike the original,
-its error does not grow with the gap. It also dates the manoeuvre, which the
-detection loop previously assumed to be the after-epoch.
+coincide and the velocities are differenced there. Its accuracy is pinned in
+the tests to 1% against synthetic pairs whose after-set is a concentric orbit
+Δa away, which is a two-burn end state rather than the state a single impulse
+leaves at the burn point; it has not yet been tested on that single-impulse
+geometry. An earlier version of this note claimed an accuracy ten times
+tighter, which no test supported (audit F-106). Unlike the original, its error does not grow
+with the gap. It also dates the manoeuvre, which the detection loop
+previously assumed to be the after-epoch.
 
 The second is **mean element differencing**, and it is what decomposes the
 figure per variable. Phase (mean anomaly) is never read, so the estimate
@@ -52,8 +56,8 @@ near-circular orbit:
   Which is the familiar n·Δa/2 when the orbit is circular. First order in Δa/a, and it over-reports as that ratio grows: against the
   exact two-burn Hohmann total it is +1.1% at Δa/a = 0.015 (100 km in LEO),
   +5.5% at 0.073, and +10.9% at 0.145. The epoch-swept estimator tracks the
-  Hohmann total to better than 0.4% across the same range, which is why it is
-  the headline and this is the decomposition.
+  Hohmann total to within the 1% the tests pin across the same range, which
+  is why it is the headline and this is the decomposition.
 ● **Radial** — drives the eccentricity vector. Δe = Δv/v   ⟹  Δv = v·Δe
   The part a tangential burn already explains is removed in quadrature, since
   a tangential burn moves the eccentricity vector along the apsidal line and a
