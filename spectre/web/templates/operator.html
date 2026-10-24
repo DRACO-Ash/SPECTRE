@@ -473,6 +473,15 @@
                 <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
                   <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
                 </label>
+                <label title="Revolutions of the phasing orbit before arrival — Phasing">Revolutions
+                  <input type="number" name="revolutions" value="1" min="1" max="50" step="1" />
+                </label>
+                <label title="Number of hops along the V-bar or H-bar — V-bar and H-bar hop">Hops
+                  <input type="number" name="hops" value="3" min="1" max="20" step="1" />
+                </label>
+                <label title="Drift duration in days; leave blank for the solver's own — GEO drift">Drift (days)
+                  <input type="number" name="drift_days" value="" min="0" step="any" />
+                </label>
                 <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
                   <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
                 </label>

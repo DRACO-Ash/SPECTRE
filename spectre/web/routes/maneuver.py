@@ -804,6 +804,9 @@ async def apply_intercept(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
@@ -879,6 +882,7 @@ async def apply_intercept(
             lambda: _run_intercept(
                 intercept_method, red_tle, blue_tle,
                 manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
+                shaping=_shaping_from_form(revolutions, hops, drift_days),
             ),
         )
     # BLE001: any solver failure is reported to the operator, not raised.
@@ -961,6 +965,19 @@ _THREAT_SORT_ORDER: dict[str, int] = {
 }
 
 
+class _Shaping(NamedTuple):
+    """Counts and durations some solvers take instead of a time of flight.
+
+    Each has its own field on the form. They used to be read off the coast
+    time, so a 6 h coast asked for six revolutions or six hops and those
+    solvers were given no coast at all (audit F-132).
+    """
+
+    revolutions: int = 1
+    hops: int = 3
+    drift_days: float | None = None
+
+
 class _InterceptArgs(NamedTuple):
     """One intercept run's solver inputs, carried together.
 
@@ -976,6 +993,7 @@ class _InterceptArgs(NamedTuple):
     tof_s: float
     target_km: float
     max_dv_m_s: float
+    shaping: _Shaping = _Shaping()
 
 
 def _missing_tle_labels(
@@ -1014,6 +1032,7 @@ def _run_all_methods(
             sol = _run_intercept(
                 method, args.red_tle, args.blue_tle,
                 args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
+                shaping=args.shaping,
             )
             result = _solution_to_result(sol, red_name, blue_name, method)
             out.append((method, result, None))
@@ -1062,6 +1081,9 @@ async def apply_all_intercepts(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
@@ -1122,6 +1144,7 @@ async def apply_all_intercepts(
 
     args = _InterceptArgs(
         red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
+        _shaping_from_form(revolutions, hops, drift_days),
     )
 
     loop = asyncio.get_running_loop()
@@ -1268,16 +1291,13 @@ _SECONDS_PER_HOUR: float = 3600.0
 _SECONDS_PER_DAY: float = 86400.0
 
 
-def _hop_count(coast_s: float, default: int) -> int:
-    """Whole hours of coast, read as a revolution or hop count.
-
-    The phasing and hop solvers count revolutions rather than taking a
-    duration, so the panel's coast time doubles as that count once it runs past
-    an hour. Below that the solver's own default stands.
-    """
-    if coast_s > _SECONDS_PER_HOUR:
-        return max(1, int(coast_s / _SECONDS_PER_HOUR))
-    return default
+def _shaping_from_form(revolutions: int, hops: int, drift_days: str) -> _Shaping:
+    """The form's counts, with a blank or non-positive drift left to the solver."""
+    try:
+        days = float(drift_days) if drift_days.strip() else None
+    except ValueError:
+        days = None
+    return _Shaping(revolutions, hops, days if days is not None and days > 0 else None)
 
 
 def _hop_distance_km(target_km: float) -> float | None:
@@ -1288,19 +1308,6 @@ def _hop_distance_km(target_km: float) -> float | None:
     """
     if target_km > 0:
         return target_km
-    return None
-
-
-def _geo_drift_days(coast_s: float) -> float | None:
-    """Drift time in DAYS for the GEO relocation solver, or None to leave it to the solver.
-
-    The panel's coast field doubles as the drift duration. It was divided by
-    the seconds in an hour, so a 48 h coast reached the solver as a 48-day
-    drift and the reported delta-V came out about 1/24 of the true cost
-    (audit F-007).
-    """
-    if coast_s > _SECONDS_PER_HOUR:
-        return coast_s / _SECONDS_PER_DAY
     return None
 
 
@@ -1342,7 +1349,8 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
     InterceptMethod.PHASING:
         lambda a: phasing_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
-            manoeuvre_start=a.start, n_revolutions=_hop_count(a.coast_s, 1),
+            manoeuvre_start=a.start, n_revolutions=a.shaping.revolutions,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.RBAR_HOP:
         lambda a: cw_radial_intercept(
@@ -1356,17 +1364,17 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: vbar_hop_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            n_hops=_hop_count(a.coast_s, 3),
+            n_hops=a.shaping.hops,
             hop_distance_km=_hop_distance_km(a.target_km),
-            coast_s=0.0,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.HBAR_HOP:
         lambda a: hbar_hop_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            n_hops=_hop_count(a.coast_s, 3),
+            n_hops=a.shaping.hops,
             hop_distance_km=_hop_distance_km(a.target_km),
-            coast_s=0.0,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.CW_DRIFT:
         lambda a: cw_drift_intercept(
@@ -1388,7 +1396,8 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: geo_drift_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            drift_time_days=_geo_drift_days(a.coast_s),
+            drift_time_days=a.shaping.drift_days,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.NMC:
         lambda a: nmc_intercept(
@@ -1446,6 +1455,8 @@ def _run_intercept(
     tof_s: float,
     target_km: float,
     max_dv_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+    *,
+    shaping: _Shaping = _Shaping(),
 ) -> InterceptSolution:
     """Dispatch to the appropriate spectre.astro solver.
 
@@ -1466,7 +1477,7 @@ def _run_intercept(
     if shaped is None:
         raise ValueError(f"Unsupported intercept method: {method}")
     return shaped(
-        _InterceptArgs(red_tle, blue_tle, start, coast_s, tof_s, target_km, max_dv_m_s)
+        _InterceptArgs(red_tle, blue_tle, start, coast_s, tof_s, target_km, max_dv_m_s, shaping)
     )
 
 
