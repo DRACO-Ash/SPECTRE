@@ -1027,6 +1027,29 @@ async def fetch_hrr(
 # ── On-orbit catalog search ────────────────────────────────────────────────
 
 
+_MAX_CATALOGUE_RESULTS = 50
+
+
+def _catalogue_matches(catalog: list[dict[str, Any]], q: str) -> list[dict[str, Any]]:
+    """Up to 50 objects whose name or catalogue number contains *q*."""
+    q_lower = q.strip().lower()
+    results: list[dict[str, Any]] = []
+    for obj in catalog:
+        name = str(obj.get("name") or obj.get("objectName") or "").lower()
+        satno = str(obj.get("satNo") or obj.get("satno") or "")
+        if q_lower not in name and q_lower not in satno:
+            continue
+        results.append({
+            "satno": obj.get("satNo") or obj.get("satno") or "—",
+            "name": obj.get("name") or obj.get("objectName") or "—",
+            "obj_type": obj.get("objectType") or obj.get("type") or "—",
+            "country": obj.get("country") or "—",
+        })
+        if len(results) >= _MAX_CATALOGUE_RESULTS:
+            break
+    return results
+
+
 @router.get("/catalog/search", response_model=None)
 async def search_catalog(
     request: Request,
@@ -1049,21 +1072,7 @@ async def search_catalog(
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 
-    results: list[dict[str, Any]] = []
-    if q.strip():
-        q_lower = q.strip().lower()
-        for obj in catalog:
-            name = str(obj.get("name") or obj.get("objectName") or "").lower()
-            satno = str(obj.get("satNo") or obj.get("satno") or "")
-            if q_lower in name or q_lower in satno:
-                results.append({
-                    "satno": obj.get("satNo") or obj.get("satno") or "—",
-                    "name": obj.get("name") or obj.get("objectName") or "—",
-                    "obj_type": obj.get("objectType") or obj.get("type") or "—",
-                    "country": obj.get("country") or "—",
-                })
-                if len(results) >= 50:
-                    break
+    results = _catalogue_matches(catalog, q) if q.strip() else []
 
     return render(request,
         "partials/catalog_results.html",

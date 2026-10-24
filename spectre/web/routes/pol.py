@@ -1019,6 +1019,46 @@ def _correlation_rows(correlations: list[Any]) -> list[dict[str, object]]:
     ]
 
 
+def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list[str], str] | HTMLResponse:
+    """The NOTSOs to correlate, the rejected messages and where they came from.
+
+    Pasted text needs no UDL session; the local cache holds UDL data fetched
+    with another operator's credential, so it does (audit F-142). Returns the
+    refusal to show instead when there is nothing usable.
+    """
+    from spectre.astro.notso import parse_notso_text_with_rejects  # noqa: PLC0415
+    from spectre.data.notso_cache import get_notso_cache  # noqa: PLC0415
+
+    if notso_text:
+        notsos, rejects = parse_notso_text_with_rejects(notso_text)
+        if not notsos:
+            return HTMLResponse(
+                '<p class="error-msg">No NOTSO records could be parsed. '
+                'Check the message format (SATNO, effective window, and type fields are required).</p>'
+            )
+        return notsos, rejects, "pasted text"
+    if not (state.udl_username and state.udl_password):
+        return HTMLResponse(
+            '<p class="error-msg">Log in to UDL to correlate against the NOTSO cache, '
+            'or paste NOTSO messages.</p>'
+        )
+    raw_records = get_notso_cache().get_for_satno(pol.satno)
+    if not raw_records:
+        return HTMLResponse(
+            '<p class="error-msg">No NOTSOs in local cache for SATNO '
+            f'{pol.satno}. Run a cache sync first, or paste NOTSO messages manually.</p>'
+        )
+    # Each cache record carries a msgText field (the full notification text),
+    # or the text is reconstructed from its fields.
+    notsos = _notsos_from_cache_records(raw_records)
+    if not notsos:
+        return HTMLResponse(
+            f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
+            f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
+        )
+    return notsos, [], f"local cache ({len(raw_records)} records)"
+
+
 @router.post("/notso-correlate", response_class=HTMLResponse)
 async def pol_notso_correlate(
     request: Request,
@@ -1031,12 +1071,9 @@ async def pol_notso_correlate(
       2. Local NOTSO cache for the current satno (automatic if text is empty).
     """
     from spectre.astro.notso import (
-        NOTSORecord,
         correlate_notsos_with_manoeuvres,
         extract_behaviour_profile,
-        parse_notso_text_with_rejects,
     )
-    from spectre.data.notso_cache import get_notso_cache
 
     state = get_session_state(current_user.username)
     pol = getattr(state, "last_pol_analysis", None)
@@ -1049,44 +1086,10 @@ async def pol_notso_correlate(
     form = await request.form()
     notso_text = str(form.get("notso_text") or "").strip()
 
-    notsos: list[NOTSORecord] = []
-    rejects: list[str] = []
-    source_label = ""
-
-    if notso_text:
-        # Path 1: operator-pasted text
-        notsos, rejects = parse_notso_text_with_rejects(notso_text)
-        source_label = "pasted text"
-        if not notsos:
-            return HTMLResponse(
-                '<p class="error-msg">No NOTSO records could be parsed. '
-                'Check the message format (SATNO, effective window, and type fields are required).</p>'
-            )
-    elif not (state.udl_username and state.udl_password):
-        # The cache holds UDL data fetched with another operator's credential
-        # (audit F-142); pasted text needs no UDL session, the cache does.
-        return HTMLResponse(
-            '<p class="error-msg">Log in to UDL to correlate against the NOTSO cache, '
-            'or paste NOTSO messages.</p>'
-        )
-    else:
-        # Path 2: load from local cache for this satno
-        cache = get_notso_cache()
-        raw_records = cache.get_for_satno(pol.satno)
-        if not raw_records:
-            return HTMLResponse(
-                '<p class="error-msg">No NOTSOs in local cache for SATNO '
-                f'{pol.satno}. Run a cache sync first, or paste NOTSO messages manually.</p>'
-            )
-        # Convert raw cache dicts → NOTSORecord using the existing text parser
-        # Each record has a msgText field (full notification text) or we reconstruct it.
-        notsos = _notsos_from_cache_records(raw_records)
-        source_label = f"local cache ({len(raw_records)} records)"
-        if not notsos:
-            return HTMLResponse(
-                f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
-                f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
-            )
+    loaded = _load_notsos(state, pol, notso_text)
+    if isinstance(loaded, HTMLResponse):
+        return loaded
+    notsos, rejects, source_label = loaded
 
     try:
         # A NOTSO follows human analysis and is deliberately withheld for
