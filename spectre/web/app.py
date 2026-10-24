@@ -241,11 +241,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 #     file, then drop the token.
 #   style-src 'unsafe-inline'. Roughly 1500 inline style attributes and two
 #     inline <style> blocks. To close: move them into the stylesheet.
-#   style-src and font-src on the Google Fonts hosts. static/spectre-theme.css
-#     opens with two @import rules against fonts.googleapis.com, which its own
-#     comment marks as a development convenience. Blocking them would silently
-#     change console typography. To close: self-host JetBrains Mono and IBM Plex
-#     Sans under /static and delete the two @import lines.
 #   frame-src and frame-ancestors 'self'. The training Console tab embeds the
 #     console itself: templates/training.html sets an iframe src of '/'.
 #     'none', or X-Frame-Options: DENY, blanks that tab. 'self' still refuses
@@ -270,8 +265,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "font-src 'self'; "
     "img-src 'self' data:; "
     "connect-src 'self'; "
     "frame-src 'self'; "

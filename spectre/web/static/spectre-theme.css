@@ -11,12 +11,12 @@
 
 /* ---------------------------------------------------------------------------
  * 1. FONT IMPORTS
- * Using variable-weight imports for smaller payload.
- * Self-host in production — these CDN links are for development convenience.
+ * Self-hosted under /static/fonts (Latin and Latin Extended subsets, SIL Open
+ * Font Licence). They were imported from Google on every console load, which
+ * told a third party each time the console opened (audit F-170).
  * --------------------------------------------------------------------------- */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('fonts/fonts.css');
 
 
 /* ---------------------------------------------------------------------------
