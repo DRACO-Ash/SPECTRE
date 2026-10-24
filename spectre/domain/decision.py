@@ -1,9 +1,15 @@
 """Decision Engine — Phase 1: deterministic scenario evaluation.
 
-Evaluates a grid of adversary actions × friendly responses using deterministic
-SGP4 propagation and a weighted composite scoring function.  A minimax selector
-identifies the "robust" friendly response that minimises worst-case cost across
-all adversary actions.
+Evaluates a grid of adversary actions × friendly responses with a lookup model
+and a weighted composite scoring function. No orbit is propagated: custody,
+closest approach, time to approach and delta-V are rules of thumb and
+constants per action type, scaled by the operator's inputs, and they are
+uncalibrated against any observed outcome. A selector (minimax by default)
+picks the friendly response with the least worst-case cost.
+
+An earlier "TLE refinement" took one instant's separation, could only lower
+the estimate, hid every error behind a bare except, and never ran because the
+route passed no red element set; it was removed (audit F-111).
 
 Phase 2 (future sprint) will attach a ``ManoeuvreHypothesis`` to
 ``AdversaryAction`` and wire in the Monte Carlo engine for probabilistic scoring.
@@ -17,7 +23,7 @@ Typical use::
         friendly_responses=[...],
         horizon_hours=72.0,
     )
-    result = evaluate_scenario(scenario, blue_tle="...", red_tle="...")
+    result = evaluate_scenario(scenario)
 """
 
 from __future__ import annotations
@@ -29,10 +35,6 @@ from datetime import datetime
 from enum import Enum
 
 logger = logging.getLogger(__name__)
-
-# Earth radius (km) — used for GCA (ground closest approach) estimates
-_R_EARTH_KM = 6371.0
-
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
 
@@ -176,22 +178,22 @@ def compute_outcome_metrics(
     adversary: AdversaryAction,
     friendly: FriendlyResponse,
     scenario: Scenario,
-    blue_tle: str | None = None,
-    red_tle: str | None = None,
 ) -> OutcomeMetrics:
-    """Compute deterministic outcome metrics for one (adversary, friendly) pair.
+    """Outcome metrics for one (adversary, friendly) pair, from the lookup model.
 
-    Phase 1 uses a simplified analytic model since full SGP4 propagation
-    requires TLE strings.  When both ``blue_tle`` and ``red_tle`` are supplied,
-    closest-approach estimation uses the TLE epoch separation as a proxy.
-
-    Scoring model (Phase 1)
-    -----------------------
-    - custody_maintained: True unless adversary is a MANOEUVRE and friendly is NO_ACTION
-    - custody_gap_hours: 0 if maintained, else horizon * (1 - friendly.reversibility)
-    - closest_approach_km: modelled by action type and response combination
-    - delta_v_cost_km_s: 0 for non-manoeuvre responses, else friendly.cost * 0.05
-    - composite_score: weighted sum (higher = worse for friendly)
+    Rules as implemented (Phase 1, uncalibrated)
+    --------------------------------------------
+    - custody: lost when the adversary manoeuvres and the response is
+      NO_ACTION or POSTURE_CHANGE; a MANOEUVRE or SENSOR_RETASK response keeps it
+    - custody_gap_hours: when lost, horizon * adversary confidence *
+      (1 - friendly.reversibility); against a SENSOR_RETASK response to a
+      manoeuvre, half the response's time to execute
+    - closest_approach_km: a constant per adversary action type, raised by
+      response cost for a MANOEUVRE (x(1 + 5 cost)) or POSTURE_CHANGE
+      (x(1 + 2 cost)) response
+    - time_to_closest_hours: 0.4 of the horizon
+    - delta_v_cost_km_s: friendly.cost * 0.05 for a MANOEUVRE response, else 0
+    - composite_score: weighted sum of the normalised terms (higher = worse)
     """
     # ── Custody ──────────────────────────────────────────────────────────────
     adversary_is_manoeuvre = adversary.action_type == ActionType.MANOEUVRE
@@ -227,29 +229,6 @@ def compute_outcome_metrics(
         ca_km = base_ca_km * (1.0 + friendly.cost * 2.0)
     else:
         ca_km = base_ca_km
-
-    # TLE-based refinement (Phase 1.5): if TLEs supplied, use epoch delta as a
-    # proxy for current conjunction geometry
-    if blue_tle and red_tle:
-        try:
-            from spectre.astro.propagator import TLEOrbit
-            blue_orbit = TLEOrbit(blue_tle)
-            red_orbit  = TLEOrbit(red_tle)
-            # Use propagation difference at horizon midpoint as geometry hint
-            t_mid_min  = scenario.horizon_hours * 30.0
-            t_mid_dt   = scenario.epoch_utc + __import__("datetime").timedelta(minutes=t_mid_min)
-            blue_sv = blue_orbit.propagate(t_mid_dt)
-            red_sv  = red_orbit.propagate(t_mid_dt)
-            import math
-            sep = math.sqrt(sum(
-                (blue_sv.r[i] - red_sv.r[i]) ** 2
-                for i in range(3)
-            ))
-            if sep > 0:
-                # Scale analytic CA by ratio of actual/typical separation
-                ca_km = min(ca_km, sep * friendly.reversibility + base_ca_km * (1.0 - friendly.reversibility))
-        except Exception:
-            pass   # Fall back to analytic estimate
 
     time_to_ca = scenario.horizon_hours * 0.4   # Phase 1: simplified
 
@@ -365,8 +344,6 @@ def find_robust_response(
 
 def evaluate_scenario(
     scenario: Scenario,
-    blue_tle: str | None = None,
-    red_tle: str | None = None,
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
 ) -> ScenarioResult:
     """Evaluate all (adversary × friendly) combinations and return a ranked result.
@@ -375,10 +352,6 @@ def evaluate_scenario(
     ----------
     scenario:
         Fully populated Scenario dataclass.
-    blue_tle:
-        Two-line element string for the friendly (blue) object (optional).
-    red_tle:
-        Two-line element string for the adversary (red) object (optional).
     strategy:
         Selector strategy for the robust recommendation.
 
@@ -399,7 +372,7 @@ def evaluate_scenario(
     for adversary in scenario.adversary_actions:
         row: list[OutcomeMetrics] = []
         for friendly in scenario.friendly_responses:
-            metrics = compute_outcome_metrics(adversary, friendly, scenario, blue_tle, red_tle)
+            metrics = compute_outcome_metrics(adversary, friendly, scenario)
             row.append(metrics)
         outcome_matrix.append(row)
 

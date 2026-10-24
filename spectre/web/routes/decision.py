@@ -161,14 +161,6 @@ def _normalised_weights(*weights: float) -> tuple[float, ...]:
     return tuple(w / total for w in weights)
 
 
-def _pol_blue_tle(state: object) -> str | None:
-    """The latest element set from the session's active Pattern of Life, if any."""
-    pol = getattr(state, "last_pol_analysis", None)
-    if pol and pol.records:
-        return pol.records[-1].tle if hasattr(pol.records[-1], "tle") else None
-    return None
-
-
 @router.get("/panel", response_class=HTMLResponse)
 async def decision_panel(
     request: Request,
@@ -246,10 +238,9 @@ async def decision_evaluate(
     )
 
     state = get_session_state(current_user.username)
-    blue_tle = _pol_blue_tle(state)
 
     try:
-        result = evaluate_scenario(scenario, blue_tle=blue_tle, red_tle=None, strategy=strat)
+        result = evaluate_scenario(scenario, strategy=strat)
         state.append_log(
             f"[Decision] Evaluated '{scenario_name}': "
             f"{len(adversary_actions)} adversary actions × {len(friendly_responses)} friendly responses. "
