@@ -74,8 +74,8 @@ and a result requested under either name says which solver it ran
 | Module | Responsibility |
 |--------|---------------|
 | `spectre/astro/maneuvers.py` | the intercept solvers: Hohmann, bi-elliptic, phasing, hops, plane change, drift, COLA, evasion and the rest |
-| `spectre/astro/transfers.py` | Lambert solver (universal variable method) |
-| `spectre/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
+| `spectre/astro/transfers.py` | Hohmann and bi-elliptic transfer costs (vis-viva closed forms) |
+| `spectre/astro/lambert.py` | Lambert solver: universal variables, single and multiple revolutions |
 | `spectre/astro/tactical.py` | All 17 tactical and decision-support categories |
 | `spectre/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
 | `spectre/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
@@ -139,7 +139,18 @@ Use this to identify the optimal trade-off between fuel cost and time of arrival
 
 ### Lambert (universal variable method)
 
-The Lambert solver in `transfers.py` uses the universal variable (Battin) formulation. It iterates on the universal variable `x` using Halley's method until the desired time of flight is matched. The solution is always computed for the prograde direction; retrograde and multi-revolution solutions are available via `lambert.py`.
+The Lambert solver is in `spectre/astro/lambert.py`. It is Curtis, *Orbital
+Mechanics for Engineering Students*, Algorithm 5.2: universal variables with
+Stumpff functions, solved for z by bracketed bisection on the time-of-flight
+residual. The transfer direction follows the departure velocity, so a
+retrograde orbit gets a retrograde arc. `solve_lambert` returns the
+zero-revolution arc; `solve_lambert_all` also returns the multi-revolution
+solutions (each band (2πN)² < z < (2π(N+1))², both branches), and
+`cheapest_lambert` the one costing least, which the intercept engine and the
+envelope sweep use. Branches are bracketed on a fixed grid of z, so a pair
+whose minimum time of flight only just reaches the request can be missed.
+Validated against Curtis Example 5.2 and by propagating each solution
+(tests/unit/test_lambert_validation.py, test_lambert_multi_revolution.py).
 
 ### J2 RAAN drift
 

@@ -45,8 +45,8 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 |--------|----------|
 | `constants.py` | Earth gravitational parameter (μ), radius, J2 coefficient, sidereal rate, unit conversions |
 | `maneuvers.py` | the intercept solvers (`hohmann_intercept()`, `bielliptic_intercept()`, `phasing_intercept()` and the rest), each returning an `InterceptSolution` with per-burn ΔV |
-| `transfers.py` | Lambert solver (universal variable method); two-impulse intercept ΔV |
-| `lambert.py` | Lambert targeting: multi-revolution solutions, batched evaluation |
+| `transfers.py` | Hohmann and bi-elliptic transfer costs from vis-viva closed forms |
+| `lambert.py` | Lambert solver (Curtis Algorithm 5.2, universal variables, bisection on z); multi-revolution solutions and the cheapest of them |
 | `tactical.py` | 17 solver categories: phasing orbit, CW radial separation, CW along-track drift, plane change, J2 RAAN drift, COLA avoidance, optimal evasion, GEO drift (longitude relocation), NMC safety ellipse, manoeuvre classification, intercept detectability, adversary intent prediction, intercept envelope, relative motion stability, manoeuvre fingerprinting, formation defence, minimum-time intercept |
 | `cw_geometry.py` | Clohessy-Wiltshire equations, Hill-frame relative motion, relative state vectors |
 | `propagator.py` | `TLEOrbit`: SGP4 propagation via `sgp4` library; `state_to_keplerian()`, `keplerian_to_state()` |

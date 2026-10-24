@@ -313,8 +313,8 @@ spectre/                           ← repo root
 │   ├── astro/                  ← pure-Python orbital mechanics
 │   │   ├── constants.py        ← μ, R_Earth, J2, sidereal rate, unit conversions
 │   │   ├── maneuvers.py        ← Hohmann, bi-elliptic, rendezvous, proximity
-│   │   ├── transfers.py        ← Lambert solver (universal variable method)
-│   │   ├── lambert.py          ← Lambert targeting (multi-rev, batched)
+│   │   ├── transfers.py        ← Hohmann and bi-elliptic closed forms (vis-viva)
+│   │   ├── lambert.py          ← Lambert solver: Curtis Alg. 5.2, universal variables, multi-revolution
 │   │   ├── tactical.py         ← 17 solver categories (phasing, CW, J2, COLA, evasion…)
 │   │   ├── cw_geometry.py      ← Clohessy-Wiltshire relative motion geometry
 │   │   ├── propagator.py       ← TLEOrbit: SGP4 propagation, state-to-Keplerian
