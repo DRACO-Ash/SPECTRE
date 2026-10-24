@@ -1106,7 +1106,10 @@ def _append_manual_targets(
         name = manual["name"]
         tle = manual["tle"]
         confidence = manual.get("confidence", "")
-        satno = str(satno_from_tle(tle)) if tle else ""
+        # satno_from_tle answers None for a number it cannot read (Alpha-5,
+        # for one); str() made that "None", which then looked fetchable.
+        number = satno_from_tle(tle) if tle else None
+        satno = str(number) if number is not None else ""
         targets.append(ThreatTarget(
             target_name=name,
             target_satno=satno,
@@ -1127,9 +1130,11 @@ async def _fetch_missing_target_tles(
     instance running from the bundled bootstrap watchlist. A failed fetch is
     recorded against the target rather than dropped.
     """
+    # A manual target flies the operator's pasted set, looked up by name, so
+    # a fetch could only overwrite a cache entry nothing reads.
     missing = [
         t for t in targets
-        if t.target_satno and _needs_live_tle(state, t.target_satno)
+        if t.target_source != "manual" and t.target_satno and _needs_live_tle(state, t.target_satno)
     ]
     if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
         return
@@ -1154,7 +1159,13 @@ async def _fetch_missing_target_tles(
             else:
                 errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
-    await asyncio.gather(*[_fetch_one(t) for t in missing])
+    # return_exceptions: one target's failure is recorded, not a 500 for all.
+    outcomes = await asyncio.gather(*[_fetch_one(t) for t in missing], return_exceptions=True)
+    errors.extend(
+        f"TLE fetch failed for {t.target_name} ({t.target_satno}): {_refusal_reason(outcome)}"
+        for t, outcome in zip(missing, outcomes, strict=True)
+        if isinstance(outcome, BaseException)
+    )
 
 
 def _reduce_tle_clusters(state: object) -> Any | None:
@@ -1318,7 +1329,8 @@ async def threat_sweep(
         })
 
     # Build HRR target list, excluding the interceptor itself.
-    red_satno = str(satno_from_tle(red_tle)) if red_tle else None
+    red_number = satno_from_tle(red_tle) if red_tle else None
+    red_satno = str(red_number) if red_number is not None else None
     targets = (
         [] if side == "none"
         else _build_target_list(state, side, rank, exclude_satno=red_satno)
