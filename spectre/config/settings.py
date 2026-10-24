@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import secrets
 import ssl
 from dataclasses import dataclass, field
@@ -48,6 +49,11 @@ _PLACEHOLDER_SECRETS = frozenset({
     "secret",
     "test",
 })
+
+# A key containing any spelling of "change me" is an example value, however
+# long. The README once published a 34-character one that passed the length
+# floor and missed the list above (audit F-056).
+_PLACEHOLDER_MARKER = re.compile(r"change[\s_-]?me", re.IGNORECASE)
 
 # Minimum acceptable length for a session-signing key.
 _MIN_SECRET_LENGTH = 16
@@ -389,7 +395,7 @@ def validate_secret_key(secret_key: str) -> None:
             f"{_MIN_SECRET_LENGTH} characters (for example: "
             "python -c 'import secrets; print(secrets.token_urlsafe(32))')."
         )
-    if candidate.lower() in _PLACEHOLDER_SECRETS:
+    if candidate.lower() in _PLACEHOLDER_SECRETS or _PLACEHOLDER_MARKER.search(candidate):
         raise ConfigurationError(
             "SECRET_KEY is still set to the example placeholder value. "
             "Replace it with a real random secret before deploying."

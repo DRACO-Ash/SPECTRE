@@ -25,7 +25,7 @@ All orbital mechanics computations use the pure-Python `spectre.astro` package â
 
 | Component | Minimum version | Notes |
 |-----------|-----------------|-------|
-| Python | 3.14 | |
+| Python | 3.12 | The version CI, the lock files and the container use |
 | uvicorn | 0.29 | Bundled via `pip install` |
 
 ---
@@ -37,21 +37,23 @@ All orbital mechanics computations use the pure-Python `spectre.astro` package â
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. Install in editable mode with dev extras
-pip install -e ".[dev]"
+# 2. Install the locked dependencies, then the package itself, as CI does
+pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+pip install --no-deps -e .
 
-# 3. Set required environment variables
-$env:SECRET_KEY      = "change-me-to-a-long-random-string"
+# 3. Set required environment variables. Generate the key; never reuse an
+#    example value (the app refuses any key containing "change me").
+$env:SECRET_KEY         = python -c "import secrets; print(secrets.token_urlsafe(32))"
 $env:SPECTRE_ADMIN_USER = "admin"
-$env:SPECTRE_ADMIN_PASS = "change-me"
+$env:SPECTRE_ADMIN_PASS = Read-Host "Choose the admin password"
+# Local plain-HTTP only: without this the session cookie is Secure (HTTPS only)
+$env:SPECTRE_COOKIE_SECURE = "false"
 
-# 4. Start the server
-spectre-serve
-# or equivalently:
-uvicorn spectre.web.app:app --reload
+# 4. Start the server (listens on 8080, or PORT if set)
+python -m spectre.web._entrypoint
 ```
 
-Then open **http://localhost:8000** in your browser.
+Then open **http://localhost:8080** in your browser.
 
 ### First Login
 
@@ -69,16 +71,18 @@ docker build -t spectre:latest .
 
 # Run with a named volume for the database
 docker run -d \
-  -p 8000:8000 \
+  -p 8080:8080 \
   -v spectre_data:/app/data \
-  -e SECRET_KEY="change-me-to-a-long-random-string" \
+  -e SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
   -e SPECTRE_ADMIN_USER="admin" \
-  -e SPECTRE_ADMIN_PASS="change-me" \
+  -e SPECTRE_ADMIN_PASS="$(read -rsp 'Admin password: ' p; echo "$p")" \
+  -e SPECTRE_COOKIE_SECURE=false \
   --name spectre \
   spectre:latest
 ```
 
-Then open **http://localhost:8000** in your browser.
+Then open **http://localhost:8080** in your browser. `SPECTRE_COOKIE_SECURE=false`
+is for plain-HTTP local use only; behind HTTPS, leave it unset.
 
 To use PostgreSQL instead of SQLite, add:
 
