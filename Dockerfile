@@ -35,8 +35,9 @@ WORKDIR /src
 # --only-binary=:all: guarantees no source build, so no compiler is needed.
 # The image installs the runtime set only. requirements-runtime.txt is not a
 # filename the Dependency Scanning analyser recognises, so it is never scanned
-# directly; scripts/check-quality.sh asserts it stays a strict, version-
-# identical subset of requirements.txt, which is scanned. Keeping the two files
+# directly; scripts/preflight-gate.py and the deployment contract test assert
+# it stays a strict, version-identical subset of requirements.txt, which is
+# scanned. Keeping the two files
 # apart is what stops the test toolchain reaching the runtime image and being
 # counted against it at the Container Scan stage.
 COPY requirements-runtime.txt ./

@@ -1,7 +1,9 @@
 # Runtime-only inputs. Compiled to requirements-runtime.txt, which the image
 # installs under --require-hashes. Not a filename the analyser recognises, so
 # it is never scanned directly: it must stay a strict, version-identical
-# subset of requirements.txt, and scripts/check-quality.sh asserts that.
+# subset of requirements.txt. scripts/preflight-gate.py (check_runtime_subset)
+# and tests/unit/test_deployment_contract.py (test_manifests_do_not_drift)
+# assert that.
 structlog>=25.0
 fastapi>=0.111
 uvicorn[standard]>=0.29

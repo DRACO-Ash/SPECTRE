@@ -122,7 +122,8 @@ done
 # requirements-runtime.txt is not a filename the analyser recognises, so the
 # gate never reads it. That is why it must stay a strict, version-identical
 # subset of requirements.txt: otherwise the image would ship a version no stage
-# examined. scripts/check-quality.sh asserts the subset.
+# examined. scripts/preflight-gate.py (check_runtime_subset, run below) and the
+# deployment contract test assert the subset.
 
 # The root is matched, file for file, against PSIRENS, an application that
 # clears this gate. Its root carries exactly seven entries: Dockerfile,

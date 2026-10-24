@@ -28,8 +28,9 @@ agree.
 `requirements-runtime.txt` being invisible to the scanner is deliberate and has
 a consequence: the gate reads the **superset**, so it scans at least what the
 image ships. That only stays safe while the runtime set is a strict,
-version-identical subset. `scripts/check-quality.sh` and
-`TestPipCompileLockContract` both assert it; the platform does not.
+version-identical subset. `scripts/preflight-gate.py` (`check_runtime_subset`)
+and `TestPackaging.test_manifests_do_not_drift` in
+`tests/unit/test_deployment_contract.py` both assert it; the platform does not.
 
 Collapsing the split would drag the whole test toolchain into the runtime image
 and count it against Container Scan.
