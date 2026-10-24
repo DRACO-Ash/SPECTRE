@@ -6,9 +6,13 @@ clustering logic lives in ``tle_clustering``; this module only handles the
 session-state in/out contract.
 
 One representative TLE is written per satno regardless of how many clusters
-DBSCAN finds.  When multiple clusters exist (rare: post-manoeuvre objects or
-poor coverage), the first representative is used and a WARNING is logged so the
-operator is aware that orbit uncertainty is elevated.
+DBSCAN finds. When multiple clusters exist (post-manoeuvre objects, poor
+coverage, or a fast-regressing RAAN spreading one orbit across several), the
+representative of the cluster with the most recent member is used, so an
+object that has just manoeuvred is written with its post-burn orbit, and a
+WARNING is logged so the operator is aware that orbit uncertainty is elevated.
+DBSCAN numbers clusters in scan order, so the "first" representative used
+before was the cluster holding the earliest input record (audit F-028).
 
 Input format
 ------------
@@ -206,14 +210,15 @@ def cluster_and_reduce_tle_cache(
             continue
 
         # Gather all representatives across all ClusteringResult objects.
-        reps: list[str] = []
-        n_noise = 0
-        n_clusters = 0
-        for cr in results.values():
-            n_clusters += cr.cluster_count
-            n_noise += cr.noise_count
-            for rep in cr.representatives:
-                reps.append(f"{rep.line1}\n{rep.line2}")
+        # Newest cluster first, by its most recent member epoch.
+        clusters = sorted(
+            (c for cr in results.values() for c in cr.clusters),
+            key=lambda c: max(c.member_epochs),
+            reverse=True,
+        )
+        reps = [f"{c.representative.line1}\n{c.representative.line2}" for c in clusters]
+        n_noise = sum(cr.noise_count for cr in results.values())
+        n_clusters = sum(cr.cluster_count for cr in results.values())
 
         total_noise += n_noise
         is_fallback = False
@@ -248,7 +253,7 @@ def cluster_and_reduce_tle_cache(
             objects_multi_cluster += 1
             logger.warning(
                 "Clustering satno %s: %d clusters found — orbit uncertainty elevated; "
-                "using first cluster representative",
+                "using the representative of the most recent cluster",
                 satno, len(reps),
             )
         reduced_cache[satno] = reps[0]
