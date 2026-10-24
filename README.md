@@ -10,7 +10,7 @@ Accessed through a browser-based operator interface built on FastAPI + HTMX.
 SPECTRE provides analysts with a web console for:
 
 - **Asset Management** — define Blue (friendly) and Red (adversary) satellite sets with TLE propagators; fetch live TLEs from UDL; one-click import from the HRR watchlist
-- **Intercept Engine** (23 methods) — Lambert, Hohmann, bi-elliptic, rendezvous, proximity; tactical manoeuvres (phasing, CW relative motion, plane change, J2 RAAN drift, COLA, evasion); advanced analysis (GEO drift, NMC, manoeuvre classification, detectability); decision support (intent prediction, intercept envelope, stability, fingerprinting, formation defence, orbital terrain, minimum-time intercept)
+- **Intercept Engine** (23 solvers) — classical transfers (Lambert, Hohmann, bi-elliptic, minimum-time); proximity operations (phasing, R-bar, V-bar and H-bar hops, CW drift, NMC safety ellipse); orbital manoeuvres (plane change, J2 RAAN drift, GEO drift); defensive (COLA, evasion, formation defence); assessment (detectability, intent prediction, stability, fingerprinting, orbital terrain, manoeuvre classification, intercept envelope). Rendezvous and Proximity are declared aliases of Hohmann and Lambert, not separate solvers
 - **Threat Sweep** — batch Hohmann evaluation across HRR target groups at 5 orbital epochs; Lambert refinement of top results; TLE clustering and de-duplication via DBSCAN; per-object uncertainty flagging
 - **Pattern of Life (PoL)** — historical TLE sequence analysis: manoeuvre detection, activity classification, behavioural baseline; TLE cadence filtering and de-duplication; NOTSO message correlation with detected manoeuvres; Monte Carlo simulation of adversary manoeuvre hypotheses; historical photometry change assessment
 - **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Minimin); results labelled as a modelled estimate, not a computed solution, because Phase 1 outcomes are lookup constants rather than propagated orbits
@@ -142,10 +142,13 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
 6. **Compute orbital events** — select a red and/or blue satellite, click **Compute Events**. Apogee, perigee, and node crossings are detected via SGP4 propagation and displayed as clickable badges that auto-populate the manoeuvre start time.
 
 7. **Run intercept calculations** — in the **Intercept Engine** panel, select a red target, a blue asset, and choose a method. Methods are grouped into:
-   - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Rendezvous, Proximity
-   - **Tactical Manoeuvres**: Phasing, CW Radial Separation, CW Along-Track Drift, Plane Change, J2 Drift, COLA, Evasion
-   - **Advanced Analysis**: GEO Drift, NMC (safety ellipse), Manoeuvre Detect, Detectability
-   - **Decision Support**: Intent Predict, Intercept Envelope, Stability, Fingerprint, Formation Defence, Terrain, Min-Time
+   - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Min-Time
+   - **Proximity Operations**: Phasing, R-bar hop (CW radial), V-bar hop, H-bar hop, CW Along-Track Drift, NMC (safety ellipse)
+   - **Orbital Manoeuvres**: Plane Change, J2 Drift, GEO Drift
+   - **Defensive**: COLA, Evasion, Formation Defence
+   - **Assessment**: Detectability, Intent Predict, Stability, Fingerprint, Terrain, Manoeuvre Detect, Intercept Envelope
+
+   That is 23 solvers. Rendezvous and Proximity are aliases (of Hohmann and Lambert respectively): the batch runs each solver once, and a result requested under an alias says which solver it ran.
 
    Set coast and time-of-flight parameters, then click **Calculate Intercept**. The per-burn ΔV breakdown appears with VNB components, arrival epoch, and miss distance.
 

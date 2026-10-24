@@ -99,8 +99,8 @@ class InterceptMethod(Enum):
     ``LAMBERT``      — pre-burn coast → burn → post-burn coast (R=0).
     ``HOHMANN``      — two-burn circular coplanar transfer.
     ``BIELLIPTIC``   — three-burn transfer via intermediate apoapsis.
-    ``RENDEZVOUS``   — coast → burn (match position + velocity).
-    ``PROXIMITY``    — coast → burn (minimise range to target_distance_m).
+    ``RENDEZVOUS``   — alias of HOHMANN; it has no solver of its own.
+    ``PROXIMITY``    — alias of LAMBERT; it has no solver of its own.
     ``PHASING``      — period-adjustment rendezvous after N revolutions.
     ``RBAR_HOP``     — R-bar hop (CW radial separation, single impulse).
     ``VBAR_HOP``     — V-bar hop sequence (multi-hop along velocity vector).

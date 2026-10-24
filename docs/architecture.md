@@ -44,7 +44,7 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 | Module | Contents |
 |--------|----------|
 | `constants.py` | Earth gravitational parameter (μ), radius, J2 coefficient, sidereal rate, unit conversions |
-| `maneuvers.py` | `hohmann_transfer()`, `bielliptic_transfer()`, `rendezvous()`, `proximity_rendezvous()` — all return ΔV vectors in VNB frame |
+| `maneuvers.py` | the intercept solvers (`hohmann_intercept()`, `bielliptic_intercept()`, `phasing_intercept()` and the rest), each returning an `InterceptSolution` with per-burn ΔV |
 | `transfers.py` | Lambert solver (universal variable method); two-impulse intercept ΔV |
 | `lambert.py` | Lambert targeting: multi-revolution solutions, batched evaluation |
 | `tactical.py` | 17 solver categories: phasing orbit, CW radial separation, CW along-track drift, plane change, J2 RAAN drift, COLA avoidance, optimal evasion, GEO drift (longitude relocation), NMC safety ellipse, manoeuvre classification, intercept detectability, adversary intent prediction, intercept envelope, relative motion stability, manoeuvre fingerprinting, formation defence, minimum-time intercept |
@@ -104,7 +104,7 @@ FastAPI application. All operator access via browser — no desktop install requ
   - `login.py` — `GET/POST /login`, `POST /logout`
   - `operator.py` — dashboard, asset CRUD, log, orbital events
   - `udl.py` — UDL login/logout, TLE fetch (latest + epoch modes), HRR watchlist, orbit catalogue search, NOTSO cache sync
-  - `maneuver.py` — full intercept engine: 23 methods across Classical, Tactical, Advanced Analysis, and Decision Support categories; trade-space data endpoint
+  - `maneuver.py` — full intercept engine: 23 solvers across Classical, Proximity, Orbital, Defensive and Assessment categories, plus two declared aliases (Rendezvous, Proximity); trade-space data endpoint
   - `threat.py` — Threat Sweep: batch Hohmann evaluation + Lambert refinement across HRR target groups; sentinel pattern; per-epoch sweep (now/apogee/perigee/nodes); TLE clustering
   - `pol.py` — Pattern of Life: historical TLE analysis, manoeuvre detection, cadence filtering, NOTSO correlation, Monte Carlo simulation, photometry assessment
   - `decision.py` — `GET /plan/decision/panel` (scenario builder form), `POST /plan/decision/evaluate` (runs `evaluate_scenario()`)

@@ -1,6 +1,6 @@
 # Intercept Engine
 
-The SPECTRE intercept engine is implemented entirely in pure Python across `spectre/astro/` and dispatched by `spectre/web/routes/maneuver.py`. It provides 23 solver methods grouped into four categories.
+The SPECTRE intercept engine is implemented entirely in pure Python across `spectre/astro/` and dispatched by `spectre/web/routes/maneuver.py`. It provides 23 solvers in five categories, and two declared aliases.
 
 > **Historical note:** An earlier version of SPECTRE used STK Astrogator COM integration for intercept planning (`spectre/intercept_engine/`, `spectre/stk_adapter/`). That architecture was removed when the codebase migrated to pure-Python astrodynamics. This document describes the current implementation.
 
@@ -8,48 +8,64 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 ## Method Categories
 
+The batch runs each of the 23 solvers once and ranks the results.
+
 ### Classical Transfers
 
 | Method | Key input | Output |
 |--------|-----------|--------|
 | **Lambert** | coast_h, tof_h | Δv₁ (VNB), Δv₂ (VNB), miss distance |
-| **Hohmann** | — | Δv₁, Δv₂, transfer time |
+| **Hohmann** | — | Δv₁, Δv₂, transfer time, propagated miss |
 | **Bi-elliptic** | intermediate SMA | Δv₁, Δv₂, Δv₃, transfer time |
-| **Rendezvous** | coast_h | Δv (VNB), relative velocity at arrival |
-| **Proximity** | coast_h, stand-off km | Δv (VNB), range at arrival |
+| **Min-Time** | ΔV budget | fastest feasible transfer within the budget |
 
-### Tactical Manoeuvres
-
-| Method | Description |
-|--------|-------------|
-| **Phasing** | Phasing orbit to advance/retard along-track position by a target angle |
-| **CW Radial** | Clohessy-Wiltshire radial separation — set a prescribed radial offset |
-| **CW Along-Track** | Clohessy-Wiltshire along-track drift — controlled drift in the Hill frame |
-| **Plane Change** | Combined or pure plane change; node-crossing timing |
-| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target; coast or active |
-| **COLA** | Collision avoidance manoeuvre — minimum ΔV to achieve a target miss distance |
-| **Evasion** | Optimal defensive evasion — maximise miss distance per ΔV unit |
-
-### Advanced Analysis
+### Proximity Operations
 
 | Method | Description |
 |--------|-------------|
-| **GEO Drift** | Longitude relocation via drift orbit; east/west drift rate; station acquisition epoch |
+| **Phasing** | Phasing orbit to advance or retard along-track position; Revolutions field |
+| **R-bar hop** | Clohessy-Wiltshire radial separation to a prescribed radial offset |
+| **V-bar hop** | Hops along the velocity vector; Hops field |
+| **H-bar hop** | Hops across track; Hops field |
+| **CW Drift** | Clohessy-Wiltshire along-track drift, controlled in the Hill frame |
 | **NMC** | Natural Motion Circumnavigation — passive safety ellipse sizing and phasing |
-| **Manoeuvre Detect** | Classify a TLE-pair delta as manoeuvre type (Hohmann, plane change, combined, drag) |
-| **Detectability** | Assess observability of an intercept given ground-based sensor geometry |
 
-### Decision Support
+### Orbital Manoeuvres
 
 | Method | Description |
 |--------|-------------|
+| **Plane Change** | Combined or pure plane change; node-crossing timing |
+| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target |
+| **GEO Drift** | Longitude relocation via drift orbit; Drift (days) field |
+
+### Defensive
+
+| Method | Description |
+|--------|-------------|
+| **COLA** | Collision avoidance — minimum ΔV to achieve a target miss distance |
+| **Evasion** | Defensive evasion against the threat's predicted position, within the ΔV budget |
+| **Formation Defence** | Formation-aware defensive burn |
+
+### Assessment
+
+These return a 0-100 score, not a miss distance.
+
+| Method | Description |
+|--------|-------------|
+| **Detectability** | Observability of an intercept given ground-based sensor geometry |
 | **Intent Predict** | Adversary intent prediction from approach geometry, ΔV budget, and NOTSO history |
-| **Intercept Envelope** | Reachability analysis — ΔV-feasible intercept positions over the planning horizon |
 | **Stability** | Relative motion stability classification (bounded, drifting, diverging) |
 | **Fingerprint** | Behavioural classification of a manoeuvre sequence against known archetypes |
-| **Formation Defence** | Formation-aware COLA — simultaneous protection of multiple Blue assets |
-| **Terrain** | Orbital regime risk mapping — identify crowded altitude/inclination bands |
-| **Min-Time** | Minimum-time intercept — fastest feasible transfer given a ΔV budget |
+| **Terrain** | Orbital regime risk mapping — crowded altitude and inclination bands |
+| **Manoeuvre Detect** | Classify a TLE-pair delta as a manoeuvre type |
+| **Intercept Envelope** | Reachability — ΔV-feasible intercepts over the planning horizon |
+
+### Aliases
+
+**Rendezvous** and **Proximity** are not separate solvers. Rendezvous runs the
+Hohmann solver and Proximity the Lambert transfer; the batch leaves them out,
+and a result requested under either name says which solver it ran
+(`_METHOD_ALIASES` in `spectre/web/routes/maneuver.py`).
 
 ---
 
@@ -57,7 +73,7 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 | Module | Responsibility |
 |--------|---------------|
-| `spectre/astro/maneuvers.py` | Hohmann, bi-elliptic, rendezvous, proximity |
+| `spectre/astro/maneuvers.py` | the intercept solvers: Hohmann, bi-elliptic, phasing, hops, plane change, drift, COLA, evasion and the rest |
 | `spectre/astro/transfers.py` | Lambert solver (universal variable method) |
 | `spectre/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
 | `spectre/astro/tactical.py` | All 17 tactical and decision-support categories |

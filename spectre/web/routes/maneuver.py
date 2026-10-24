@@ -1349,7 +1349,7 @@ def _hop_distance_km(target_km: float) -> float | None:
 
 
 def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
-    """Solve the Lambert arc, which LAMBERT and PROXIMITY both fly."""
+    """Solve the Lambert arc LAMBERT flies (PROXIMITY is its declared alias)."""
     return lambert_intercept(
         red_tle=a.red_tle, blue_tle=a.blue_tle,
         manoeuvre_start=a.start, tof_s=a.tof_s, coast_s=a.coast_s,
@@ -1357,14 +1357,34 @@ def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
     )
 
 
+#: Method names that run another method's solver, declared rather than hidden
+#: (audit F-174). Rendezvous had no solver of its own and ran Hohmann;
+#: Proximity ran the same Lambert transfer as Lambert. The docs described both
+#: as distinct, so a result under either name now says what it ran, and the
+#: batch, which runs each solver once, leaves them out.
+_METHOD_ALIASES: dict[InterceptMethod, InterceptMethod] = {
+    InterceptMethod.RENDEZVOUS: InterceptMethod.HOHMANN,
+    InterceptMethod.PROXIMITY: InterceptMethod.LAMBERT,
+}
+
+
+def _result_note(method: InterceptMethod, solver: str) -> str:
+    """The result's provenance line, naming the solver an alias ran."""
+    target = _METHOD_ALIASES.get(method)
+    if target is None:
+        return f"Computed via spectre.astro {solver} solver"
+    return (
+        f"{method.value.capitalize()} is an alias: this is the {target.value.capitalize()} "
+        f"solution, computed via spectre.astro {solver} solver"
+    )
+
+
 #: Methods whose solver takes the two TLEs, the manoeuvre start and the coast
-#: time, and nothing else. RENDEZVOUS flies the Hohmann transfer, as it did in
-#: the chain this table replaced. These entries hold the solver object itself,
+#: time, and nothing else. These entries hold the solver object itself,
 #: bound at import, so rebinding the name on this module does not reach them;
 #: the shaped table below resolves its solver on every call.
 _COAST_ONLY_SOLVERS: dict[InterceptMethod, Callable[..., InterceptSolution]] = {
     InterceptMethod.HOHMANN: hohmann_intercept,
-    InterceptMethod.RENDEZVOUS: hohmann_intercept,
     InterceptMethod.BIELLIPTIC: bielliptic_intercept,
     InterceptMethod.PLANE_CHANGE: plane_change_intercept,
     InterceptMethod.J2_DRIFT: j2_drift_intercept,
@@ -1380,7 +1400,6 @@ _COAST_ONLY_SOLVERS: dict[InterceptMethod, Callable[..., InterceptSolution]] = {
 #: the old chain, and only the method it is keyed on reaches it.
 _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolution]] = {
     InterceptMethod.LAMBERT: _lambert_transfer,
-    InterceptMethod.PROXIMITY: _lambert_transfer,
     # Phasing counts whole revolutions rather than taking a time of flight, so
     # the panel's intercept hours have no part in it.
     InterceptMethod.PHASING:
@@ -1504,6 +1523,7 @@ def _run_intercept(
     that defect; the first was recorded in 0.5.13 for
     ``intercept_envelope_intercept``.
     """
+    method = _METHOD_ALIASES.get(method, method)
     coast_only = _COAST_ONLY_SOLVERS.get(method)
     if coast_only is not None:
         return coast_only(
@@ -1550,7 +1570,7 @@ def _solution_to_result(
         total_delta_v_m_s=from_km_s(sol.total_delta_v),
         arrival_epoch=sol.arrival_epoch,
         intercept_range_km=sol.miss_distance_km,
-        notes=f"Computed via spectre.astro {sol.method} solver",
+        notes=_result_note(method, sol.method),
     )
 
 
