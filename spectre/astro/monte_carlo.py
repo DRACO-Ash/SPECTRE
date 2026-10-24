@@ -440,51 +440,37 @@ def _ballistic_coefficient_kg_m2(bstar: float) -> float:
 def propagate_single_sample(
     sample: np.ndarray,
     pre_state: np.ndarray,
-    pre_epoch: datetime,
-    ric_to_eci: np.ndarray,
     bstar_base: float,
     horizon_hours: float,
 ) -> dict[str, Any] | None:
     """Propagate one MC sample and return key orbital elements at horizon.
 
+    Time zero is the nominal burn epoch, at which *pre_state* holds. The
+    sample's timing offset moves the burn: the pre-burn state is propagated
+    (forward or back) to the shifted instant, the ΔV is applied in the RIC
+    frame there, and every sample is then integrated to the same horizon. The
+    offset used to lengthen or shorten the whole span instead, so the cloud
+    mixed states read at different times (audit F-029).
+
     Returns None on numerical failure.
     """
     dv_ric = sample[:3]
-    epoch_offset_s = float(sample[3])
-    bstar_pert = float(sample[4])
-
-    # Rotate ΔV from RIC to ECI
-    dv_eci = ric_to_eci @ dv_ric  # (3,)
-
-    # Apply ΔV to velocity
-    state0 = pre_state.copy()
-    state0[3:] += dv_eci
-
-    # Effective B* and ballistic coefficient
-    bstar_eff = bstar_base + bstar_pert
-    bc_m2_kg = _ballistic_coefficient_kg_m2(bstar_eff)
-
-    # Propagation span (accounting for timing perturbation)
-    t_span_s = horizon_hours * 3600.0 + epoch_offset_s
-    if t_span_s <= 0:
-        t_span_s = 60.0
+    t_burn = float(sample[3])
+    bstar_eff = bstar_base + float(sample[4])
+    horizon_s = horizon_hours * 3600.0
+    if t_burn >= horizon_s:
+        return None
 
     try:
-        sol = solve_ivp(
-            _j2_drag_ode,
-            (0.0, t_span_s),
-            state0,
-            method="RK45",
-            rtol=1e-8,
-            atol=1e-10,
-            args=(bstar_eff, bc_m2_kg),
-            dense_output=False,
-        )
-        if not sol.success:
+        burn_state = _integrate(pre_state, t_burn, bstar_base)
+        if burn_state is None:
+            return None
+        burn_state[3:] += _ric_to_eci_rotation(burn_state[:3], burn_state[3:]) @ dv_ric
+        final = _integrate(burn_state, horizon_s - t_burn, bstar_eff)
+        if final is None:
             return None
 
-        r_final = sol.y[:3, -1]
-        v_final = sol.y[3:, -1]
+        r_final, v_final = final[:3], final[3:]
         sma, ecc, inc_deg = _state_to_keplerian(r_final, v_final)
         alt_km = float(np.linalg.norm(r_final)) - _R_E
         period_min = 2.0 * math.pi * math.sqrt(max(sma, 1.0) ** 3 / _MU) / 60.0
@@ -500,6 +486,23 @@ def propagate_single_sample(
         }
     except Exception:
         return None
+
+
+def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | None:
+    """Integrate *state* for *span_s* seconds (negative runs backwards)."""
+    if span_s == 0.0:
+        return state.copy()
+    sol = solve_ivp(
+        _j2_drag_ode,
+        (0.0, span_s),
+        state,
+        method="RK45",
+        rtol=1e-8,
+        atol=1e-10,
+        args=(bstar, _ballistic_coefficient_kg_m2(bstar)),
+        dense_output=False,
+    )
+    return np.array(sol.y[:, -1]) if sol.success else None
 
 
 # ── Convergence check ─────────────────────────────────────────────────────────
@@ -551,11 +554,6 @@ def run_monte_carlo(
     t_start = time.monotonic()
     pre_state = hypothesis.pre_manoeuvre_state_eci_km.copy()
 
-    # RIC → ECI rotation at pre-manoeuvre epoch
-    r_eci = pre_state[:3]
-    v_eci = pre_state[3:]
-    ric_to_eci = _ric_to_eci_rotation(r_eci, v_eci)
-
     # Generate all samples
     samples = generate_samples(hypothesis)  # (N, 5)
 
@@ -568,8 +566,6 @@ def run_monte_carlo(
                 propagate_single_sample,
                 samples[i],
                 pre_state,
-                hypothesis.epoch_utc,
-                ric_to_eci,
                 hypothesis.bstar_post,
                 prediction_horizon_hours,
             ): i
