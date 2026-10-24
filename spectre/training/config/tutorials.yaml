@@ -14,7 +14,7 @@ tutorials:
         body: >
           SPECTRE (Space Planning, Evaluation & Counter-Threat Response Engine) is your operational interface for
           space domain awareness, manoeuvre planning, and threat assessment.
-          In Training Mode all data is synthetic — no operational systems are accessed.
+          In Training Mode all data is synthetic — no operational systems are accessed, and scenario objects leave your planning lists when you leave training.
           You can experiment freely without any real-world consequences.
 
       - heading: "The Main Panels"

@@ -1,6 +1,8 @@
 """ORM models for the SPECTRE training environment.
 
-These tables are completely separate from operational data.
+These tables are separate from operational data. (Training routes do add
+tagged synthetic objects to the operator's session state while a scenario
+runs; see spectre.training.)
 The isolation boundary:
   - training_* tables ←→ operator progress, scores, session logs
   - users table: read-only reference (username FK only)

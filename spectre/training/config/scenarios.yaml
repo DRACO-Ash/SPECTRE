@@ -1,6 +1,7 @@
 # SPECTRE Training Scenario Library
 # All data is SYNTHETIC.  Orbital parameters are realistic but no real object.
-# Each scenario is completely isolated from operational data.
+# Each scenario's objects are synthetic. They are added to the operator's
+# planning lists while it runs and removed when the operator leaves training.
 #
 # TOOL CAPABILITIES WITH SYNTHETIC TLEs (99xxx SATNOs do not exist in UDL):
 #   Assets panel       — Load objects by pasting TLE lines.  Shows all orbital elements.

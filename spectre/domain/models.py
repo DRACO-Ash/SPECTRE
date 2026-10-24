@@ -23,6 +23,9 @@ class BlueAsset:
 
     name: str
     tle: str
+    #: Added by a training scenario and removed when the operator leaves
+    #: training (audit F-051).
+    training: bool = False
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -41,6 +44,9 @@ class RedTrack:
 
     name: str
     tle: str
+    #: Added by a training scenario and removed when the operator leaves
+    #: training (audit F-051).
+    training: bool = False
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:

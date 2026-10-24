@@ -150,7 +150,8 @@ async def training_leave(
     current_user: User = Depends(require_login),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
-    """Close the training session and return to Operations."""
+    """Close the training session, remove its scenario objects, return to Operations."""
+    _remove_training_objects(current_user.username)
     if session_id:
         result = await db.execute(
             select(TrainingSession).where(
@@ -171,6 +172,13 @@ async def training_leave(
             await db.commit()
 
     return RedirectResponse(url="/", status_code=303)
+
+
+def _remove_training_objects(username: str) -> None:
+    """Drop every object a training scenario added to the operator's lists."""
+    state = get_session_state(username)
+    state.blue_assets = [a for a in state.blue_assets if not a.training]
+    state.red_tracks = [t for t in state.red_tracks if not t.training]
 
 
 # ── Scenario detail panel ─────────────────────────────────────────────────────
@@ -225,19 +233,21 @@ async def _start_scenario(
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
     # Pre-load synthetic scenario TLE objects into planning state so SPECTRE panels
-    # can work with them immediately.  Training TLEs are fully synthetic — they
-    # never come from UDL and cannot be confused with operational data.
+    # can work with them immediately. Training TLEs are fully synthetic and never
+    # come from UDL. They are tagged as training objects and removed when the
+    # operator leaves training; untagged, they used to stay in the operational
+    # lists for good (audit F-051).
     try:
         state = get_session_state(username)
         for obj in scenario.objects:
             if obj.side == "blue":
                 if not any(obj.satno == getattr(b, "satno", None) or obj.name == b.name
                            for b in state.blue_assets):
-                    state.blue_assets.append(BlueAsset(name=obj.name, tle=obj.tle))
+                    state.blue_assets.append(BlueAsset(name=obj.name, tle=obj.tle, training=True))
             else:
                 if not any(obj.satno == getattr(r, "satno", None) or obj.name == r.name
                            for r in state.red_tracks):
-                    state.red_tracks.append(RedTrack(name=obj.name, tle=obj.tle))
+                    state.red_tracks.append(RedTrack(name=obj.name, tle=obj.tle, training=True))
     except Exception as _tl_exc:
         logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)
 
