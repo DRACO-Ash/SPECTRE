@@ -1615,6 +1615,11 @@ class TestContinuousIntegrationCanRun:
 
     _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
 
+    def test_the_threat_routes_keep_their_coverage_floor(self) -> None:
+        """Audit F-042: the sweep routes were untested at 48 per cent."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
+
     def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
         workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         installs = [

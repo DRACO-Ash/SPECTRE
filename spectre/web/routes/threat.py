@@ -1770,6 +1770,13 @@ async def refine_entry(
     red_tle = _find_tle(state, state.last_threat_assessment.red_name)
     if entry.target.target_source == "blue":
         target_tle = _find_tle(state, entry.target.target_name)
+    elif entry.target.target_source == "manual":
+        # A manual target's element set lives in the manual list, keyed by
+        # name; looking it up in the HRR cache by number found nothing, so
+        # every manual target refused to refine (found by the F-042 tests).
+        target_tle = next(
+            (m["tle"] for m in state.manual_sweep_tles if m["name"] == entry.target.target_name), None,
+        )
     else:
         target_tle = state.hrr_tle_cache.get(entry.target.target_satno)
 

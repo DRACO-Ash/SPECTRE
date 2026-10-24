@@ -78,6 +78,11 @@ jobs:
         run: >
           pytest tests/ -q --cov=spectre --cov=tle_clustering --cov-report=term-missing
           --cov-report=xml
+      - name: Per-file coverage floors
+        # The threat sweep routes stood at 48 per cent with no test touching
+        # the sweep, refine or manual-target paths (audit F-042). Raise a floor
+        # only with the tests that earn it.
+        run: coverage report --include=spectre/web/routes/threat.py --fail-under=75
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
