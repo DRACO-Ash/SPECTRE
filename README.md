@@ -470,8 +470,14 @@ If the admin account is lost (e.g. all admins deleted via direct SQL), restore a
 
 ## Naming Conventions
 
-All times are UTC. Distances in km, speeds in km/s, angles in degrees.
-Coordinate frame: ICRF/J2000.
+All times are UTC. Distances in km, orbital speeds in km/s, delta-V in m/s
+wherever it is shown or stored (`InterceptResult`, `BurnResult`), angles in
+degrees.
+
+Coordinate frame: TEME (True Equator, Mean Equinox), the frame SGP4 returns.
+States are not converted to J2000 or GCRF; the difference reaches tens of
+kilometres at GEO, so positions here are not interchangeable with an
+inertial-frame product without that rotation.
 
 ---
 
