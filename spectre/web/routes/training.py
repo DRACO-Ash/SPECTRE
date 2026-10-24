@@ -220,6 +220,26 @@ async def training_scenario_detail(
 
 # ── Start a scenario attempt ──────────────────────────────────────────────────
 
+def _preload_training_objects(scenario: Any, username: str) -> None:
+    """Load a scenario's synthetic objects into the operator's planning state.
+
+    SPECTRE panels can then work with them immediately. Training TLEs are
+    fully synthetic and never come from UDL. They are tagged as training
+    objects and removed when the operator leaves training; untagged, they
+    used to stay in the operational lists for good (audit F-051).
+    """
+    try:
+        state = get_session_state(username)
+        for obj in scenario.objects:
+            held: list[Any] = state.blue_assets if obj.side == "blue" else state.red_tracks
+            if any(obj.satno == getattr(h, "satno", None) or obj.name == h.name for h in held):
+                continue
+            model = BlueAsset if obj.side == "blue" else RedTrack
+            held.append(model(name=obj.name, tle=obj.tle, training=True))
+    except Exception as _tl_exc:
+        logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)
+
+
 async def _start_scenario(
     scenario_id: str,
     username: str,
@@ -232,24 +252,7 @@ async def _start_scenario(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    # Pre-load synthetic scenario TLE objects into planning state so SPECTRE panels
-    # can work with them immediately. Training TLEs are fully synthetic and never
-    # come from UDL. They are tagged as training objects and removed when the
-    # operator leaves training; untagged, they used to stay in the operational
-    # lists for good (audit F-051).
-    try:
-        state = get_session_state(username)
-        for obj in scenario.objects:
-            if obj.side == "blue":
-                if not any(obj.satno == getattr(b, "satno", None) or obj.name == b.name
-                           for b in state.blue_assets):
-                    state.blue_assets.append(BlueAsset(name=obj.name, tle=obj.tle, training=True))
-            else:
-                if not any(obj.satno == getattr(r, "satno", None) or obj.name == r.name
-                           for r in state.red_tracks):
-                    state.red_tracks.append(RedTrack(name=obj.name, tle=obj.tle, training=True))
-    except Exception as _tl_exc:
-        logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)
+    _preload_training_objects(scenario, username)
 
     progress = await _get_or_create_progress(username, db)
 
@@ -370,6 +373,102 @@ async def training_scenario_reset(
 
 # ── Submit a scenario attempt ─────────────────────────────────────────────────
 
+def _objective_ids(raw: str) -> list[str]:
+    """The client's completed-objective list, as distinct ids in order.
+
+    A repeated id used to add its points once per repetition, so any
+    self-certified scenario passed on demand (audit F-158).
+    """
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return list(dict.fromkeys(x for x in parsed if isinstance(x, str)))
+
+
+def _answer_ok(obj: Any, given: str) -> bool:
+    """Whether the operator's answer matches an answer-type objective."""
+    op_ans = given.strip().lower()
+    expected = obj.answer.strip().lower()
+    if obj.tolerance is None:
+        return bool(op_ans == expected)  # exact match, case-insensitive
+    try:
+        return abs(float(op_ans) - float(expected)) <= float(obj.tolerance)
+    except (ValueError, TypeError):
+        return False
+
+
+def _score_objectives(
+    scenario: Any, completed_ids: list[str], operator_answers: dict[str, str],
+) -> tuple[int, dict[str, float]]:
+    """Total and per-axis points for the ticked objectives.
+
+    An objective with an expected answer scores only when the answer given
+    matches it; a ticked box with a wrong answer earns nothing.
+    """
+    obj_by_id = {o.id: o for o in scenario.objectives}
+    axis_scores: dict[str, float] = {}
+    total_score = 0
+    for obj_id in completed_ids:
+        obj = obj_by_id.get(obj_id)
+        if obj is None or (obj.answer and not _answer_ok(obj, operator_answers.get(obj.id, ""))):
+            continue
+        total_score += obj.points
+        axis_scores[obj.skill_axis] = axis_scores.get(obj.skill_axis, 0.0) + obj.points
+    return total_score, axis_scores
+
+
+def _award(
+    axis: dict[str, float], *, is_scored: bool, passed: bool, first_try: bool, challenge: bool,
+) -> tuple[int, dict[str, float]]:
+    """Points earned by one submission, and the axis totals after them.
+
+    The two challenge awards go to challenge scenarios only. They were given
+    for every passed scored attempt, so a free-play pass earned 500 points
+    where its authors tuned for 150 (audit F-160).
+    """
+    actions: list[str] = []
+    if is_scored:
+        actions.append("scenario_completed")
+        if passed and challenge:
+            actions.append("challenge_passed")
+            if first_try:
+                actions.append("challenge_passed_first_try")
+    earned = 0
+    for action in actions:
+        pa = award_points(action, axis)
+        earned += pa.total_points
+        for name, delta in pa.axis_deltas.items():
+            axis[name] = axis.get(name, 0.0) + delta
+    return earned, axis
+
+
+def _apply_level_ups(progress: Any) -> tuple[list[Any], list[str]]:
+    """Advance *progress* through every level it now qualifies for."""
+    level_up_events: list[Any] = []
+    newly_unlocked: list[str] = []
+    while True:
+        lu = check_level_up(
+            current_level=progress.current_level,
+            total_points=progress.total_points,
+            axis_points=progress.axis_points,
+            tutorials_completed=progress.tutorials_completed,
+            scenarios_passed=progress.scenarios_passed,
+            challenges_passed=progress.challenges_passed,
+        )
+        if not lu.levelled_up:
+            return level_up_events, newly_unlocked
+        progress.current_level = lu.new_level
+        newly_unlocked.extend(lu.newly_unlocked)
+        cur_unlocked = progress.unlocked
+        cur_unlocked.extend([x for x in lu.newly_unlocked if x not in cur_unlocked])
+        progress.unlocked = cur_unlocked
+        if lu.new_level_def:
+            level_up_events.append(lu.new_level_def)
+
+
 @router.post("/scenario/{scenario_id}/submit", response_class=HTMLResponse)
 async def training_scenario_submit(
     request: Request,
@@ -409,10 +508,7 @@ async def training_scenario_submit(
             '<p class="error-msg">This attempt has already been submitted.</p>', status_code=409,
         )
 
-    try:
-        completed_ids: list[str] = json.loads(objectives_completed)
-    except (ValueError, TypeError):
-        completed_ids = []
+    completed_ids = _objective_ids(objectives_completed)
 
     # Collect operator-supplied answers for answer-type objectives
     form_data = await request.form()
@@ -421,64 +517,17 @@ async def training_scenario_submit(
         for key, value in form_data.items()
         if key.startswith("answer_")
     }
-
-    # Score objectives — validate answer-type objectives against expected answer
-    obj_by_id = {o.id: o for o in scenario.objectives}
-    axis_scores: dict[str, float] = {}
-    total_score = 0
-    for obj_id in completed_ids:
-        obj = obj_by_id.get(obj_id)
-        if obj is None:
-            continue
-        # Validate answer if the objective has one
-        if obj.answer:
-            op_ans = operator_answers.get(obj.id, "").strip().lower()
-            expected = obj.answer.strip().lower()
-            answer_ok = False
-            if obj.tolerance is not None:
-                # Numeric comparison with tolerance
-                try:
-                    op_val = float(op_ans)
-                    ex_val = float(expected)
-                    answer_ok = abs(op_val - ex_val) <= float(obj.tolerance)
-                except (ValueError, TypeError):
-                    answer_ok = False
-            else:
-                # Exact string match (case-insensitive)
-                answer_ok = op_ans == expected
-            if not answer_ok:
-                # Checkbox was ticked but answer is wrong — skip the points
-                continue
-        total_score += obj.points
-        axis_scores[obj.skill_axis] = axis_scores.get(obj.skill_axis, 0.0) + obj.points
+    total_score, axis_scores = _score_objectives(scenario, completed_ids, operator_answers)
 
     passed     = total_score >= scenario.scoring.passing_score
-    first_try  = cr.first_try
     is_scored  = cr.scored
 
     # Award gamification points only for scored attempts
     progress = await _get_or_create_progress(current_user.username, db)
-    current_axis = progress.axis_points.copy()
-    total_points_earned = 0
-
-    if is_scored:
-        # Base completion award
-        pa = award_points("scenario_completed", current_axis)
-        total_points_earned = pa.total_points
-        for axis, delta in pa.axis_deltas.items():
-            current_axis[axis] = current_axis.get(axis, 0.0) + delta
-
-    if is_scored and passed:
-        pa2 = award_points("challenge_passed", current_axis)
-        total_points_earned += pa2.total_points
-        for axis, delta in pa2.axis_deltas.items():
-            current_axis[axis] = current_axis.get(axis, 0.0) + delta
-
-        if first_try:
-            pa3 = award_points("challenge_passed_first_try", current_axis)
-            total_points_earned += pa3.total_points
-            for axis, delta in pa3.axis_deltas.items():
-                current_axis[axis] = current_axis.get(axis, 0.0) + delta
+    total_points_earned, current_axis = _award(
+        progress.axis_points.copy(), is_scored=is_scored, passed=passed,
+        first_try=cr.first_try, challenge=scenario.challenge,
+    )
 
     # Update progress — counters only change on scored attempts
     progress.axis_points = current_axis
@@ -488,27 +537,7 @@ async def training_scenario_submit(
         if scenario.challenge:
             progress.challenges_passed += 1
 
-    # Level-up check (loop in case of multiple advances)
-    level_up_events = []
-    newly_unlocked  = []
-    while True:
-        lu = check_level_up(
-            current_level=progress.current_level,
-            total_points=progress.total_points,
-            axis_points=progress.axis_points,
-            tutorials_completed=progress.tutorials_completed,
-            scenarios_passed=progress.scenarios_passed,
-            challenges_passed=progress.challenges_passed,
-        )
-        if not lu.levelled_up:
-            break
-        progress.current_level = lu.new_level
-        newly_unlocked.extend(lu.newly_unlocked)
-        cur_unlocked = progress.unlocked
-        cur_unlocked.extend([x for x in lu.newly_unlocked if x not in cur_unlocked])
-        progress.unlocked = cur_unlocked
-        if lu.new_level_def:
-            level_up_events.append(lu.new_level_def)
+    level_up_events, newly_unlocked = _apply_level_ups(progress)
 
     # Save ChallengeResult
     cr.completed_at       = datetime.now(UTC)
