@@ -48,32 +48,55 @@ _J2   = J2_EARTH   # dimensionless
 
 # ── Atmospheric density model ─────────────────────────────────────────────────
 
-def _atmo_density_kg_m3(h_km: float) -> float:
-    """Approximate atmospheric density (kg/m³) from altitude (km).
+# Vallado, Fundamentals of Astrodynamics and Applications, Table 8-4
+# (exponential atmosphere): base altitude km, base density kg/m^3, scale
+# height km. Each scale height is fitted so adjacent bands meet. The previous
+# uncited table had its scale heights shifted one band against base densities
+# that matched no published row, so density jumped at most band edges (x24.9
+# at 150 km, x10.1 at 1,000 km) (audit F-105).
+_EXPONENTIAL_ATMOSPHERE: tuple[tuple[float, float, float], ...] = (
+    (0.0,    1.225,     7.249),
+    (25.0,   3.899e-2,  6.349),
+    (30.0,   1.774e-2,  6.682),
+    (40.0,   3.972e-3,  7.554),
+    (50.0,   1.057e-3,  8.382),
+    (60.0,   3.206e-4,  7.714),
+    (70.0,   8.770e-5,  6.549),
+    (80.0,   1.905e-5,  5.799),
+    (90.0,   3.396e-6,  5.382),
+    (100.0,  5.297e-7,  5.877),
+    (110.0,  9.661e-8,  7.263),
+    (120.0,  2.438e-8,  9.473),
+    (130.0,  8.484e-9,  12.636),
+    (140.0,  3.845e-9,  16.149),
+    (150.0,  2.070e-9,  22.523),
+    (180.0,  5.464e-10, 29.740),
+    (200.0,  2.789e-10, 37.105),
+    (250.0,  7.248e-11, 45.546),
+    (300.0,  2.418e-11, 53.628),
+    (350.0,  9.518e-12, 53.298),
+    (400.0,  3.725e-12, 58.515),
+    (450.0,  1.585e-12, 60.828),
+    (500.0,  6.967e-13, 63.822),
+    (600.0,  1.454e-13, 71.835),
+    (700.0,  3.614e-14, 88.667),
+    (800.0,  1.170e-14, 124.64),
+    (900.0,  5.245e-15, 181.05),
+    (1000.0, 3.019e-15, 268.00),
+)
 
-    Simplified piecewise exponential fit valid for 0–2000 km.
-    Sufficient for 48-hour MC propagation — dominant perturbation is ΔV
-    variation, not drag-model accuracy.
+
+def _atmo_density_kg_m3(h_km: float) -> float:
+    """Atmospheric density (kg/m^3) at altitude *h_km*, exponential atmosphere.
+
+    Vallado's Table 8-4, piecewise exponential from the band at or below the
+    altitude. Above 1,000 km the top band is extended.
     """
     h = max(0.0, h_km)
-    # Each tuple: (h_base_km, rho0_kg_m3, scale_height_km)
-    _TABLE = [
-        (0,    1.2250,     7.249),
-        (86,   5.457e-6,   5.770),
-        (150,  2.070e-9,  22.523),
-        (200,  2.530e-10, 29.740),
-        (300,  1.950e-11, 37.105),
-        (400,  3.614e-12, 45.546),
-        (500,  5.630e-13, 53.628),
-        (700,  1.040e-14, 88.667),
-        (1000, 3.560e-15, 115.70),
-    ]
-    # Find the appropriate band
-    for i in range(len(_TABLE) - 1, -1, -1):
-        h_base, rho0, H = _TABLE[i]
+    for h_base, rho0, scale_height in reversed(_EXPONENTIAL_ATMOSPHERE):
         if h >= h_base:
-            return rho0 * math.exp(-(h - h_base) / H)
-    return _TABLE[-1][1]
+            return rho0 * math.exp(-(h - h_base) / scale_height)
+    return _EXPONENTIAL_ATMOSPHERE[0][1]
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
