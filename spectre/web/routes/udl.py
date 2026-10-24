@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
 from math import inf
 from typing import Annotated, Any
@@ -188,14 +190,56 @@ async def fetch_tle_for_satno(
     return (f"{line1}\n{line2}", data_mode_tag)
 
 
+#: Background tasks started at UDL login. The loop holds only weak references
+#: to tasks, so a discarded handle could be collected before the task finished
+#: (audit F-143); these sets hold them until they are done.
+_BACKGROUND: set[asyncio.Task[None]] = set()
+_SESSION_TASKS: dict[str, set[asyncio.Task[None]]] = {}
+
+#: The catalogue is pulled again once it is this old.
+_CATALOG_TTL_S = 24 * 3600.0
+_catalog_loaded_at: float | None = None
+
+
+def _spawn(coro: Coroutine[Any, Any, None], owner: str) -> asyncio.Task[None]:
+    """Start *coro* as a task held until it finishes, filed under *owner*."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND.add(task)
+    _SESSION_TASKS.setdefault(owner, set()).add(task)
+
+    def _forget(t: asyncio.Task[None]) -> None:
+        _BACKGROUND.discard(t)
+        owned = _SESSION_TASKS.get(owner)
+        if owned is not None:
+            owned.discard(t)
+            if not owned:
+                _SESSION_TASKS.pop(owner, None)
+
+    task.add_done_callback(_forget)
+    return task
+
+
+def _cancel_session_tasks(owner: str) -> None:
+    """Cancel the background tasks still using *owner*'s UDL password."""
+    for task in list(_SESSION_TASKS.get(owner, ())):
+        task.cancel()
+
+
 async def _fetch_onorbit_background(username: str, password: str) -> None:
     """Fetch the UDL on-orbit catalog in the background and cache it app-wide.
 
     Called as an asyncio background task immediately after successful UDL login.
-    Only runs when the catalog has not already been loaded (status != 'ready').
+    Single-flight: a pull already loading is left to finish, so concurrent
+    logins no longer each start the 60 s download, and a catalogue younger
+    than _CATALOG_TTL_S is kept rather than never being refreshed (F-143).
     """
-    if get_catalog_status() == "ready":
-        return  # Already loaded — no need to fetch again
+    global _catalog_loaded_at
+    status = get_catalog_status()
+    if status == "loading":
+        return
+    fresh = _catalog_loaded_at is not None and time.monotonic() - _catalog_loaded_at < _CATALOG_TTL_S
+    if status == "ready" and fresh:
+        return
     set_catalog_status("loading")
     logger.info("Background: fetching on-orbit catalog from UDL")
     try:
@@ -208,6 +252,7 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         resp.raise_for_status()
         data = resp.json()
         set_onorbit_catalog(data if isinstance(data, list) else [])
+        _catalog_loaded_at = time.monotonic()
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
     except Exception as exc:
         set_catalog_status("error")
@@ -313,8 +358,8 @@ async def udl_login(
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
     # Kick off background tasks (no-op for catalog if already loaded).
-    asyncio.create_task(_fetch_onorbit_background(username, password))
-    asyncio.create_task(_discover_tle_sources(username, password, state))
+    _spawn(_fetch_onorbit_background(username, password), current_user.username)
+    _spawn(_discover_tle_sources(username, password, state), current_user.username)
 
     return render(request,
         "partials/udl_status.html",
@@ -383,6 +428,8 @@ async def udl_logout(
     state = get_session_state(current_user.username)
     state.udl_username = None
     state.udl_password = None
+    # The login's background tasks hold the password; stop them too (F-143).
+    _cancel_session_tasks(current_user.username)
     state.append_log("[UDL] Disconnected")
     logger.info("UDL session closed for operator: %s", log_safe(current_user.username))
 
