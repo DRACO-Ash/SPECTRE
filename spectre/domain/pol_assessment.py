@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from spectre.astro.constants import _GEO_BAND_ALT
 from spectre.domain.manoeuvre_calibration import (
     ON_STATION_ANOMALY_EXPLANATIONS,
     ON_STATION_ANOMALY_M_S,
@@ -173,10 +174,14 @@ _CHANNEL_TO_KIND: dict[tuple[bool, str], ManoeuvreKind] = {
     (False, "mixed"):       ManoeuvreKind.PROXIMITY,
 }
 
-#: Upper edge of the GEO protected region, km of altitude. A raise that ends
-#: above it is disposal, not relocation, and the two look identical in the
-#: elements alone.
-_GEO_PROTECTED_MAX_ALT_KM: float = 36186.0
+#: Upper edge of the GEO protected region, km of altitude: GEO altitude plus
+#: 200 km, as the IADC Space Debris Mitigation Guidelines define the region
+#: (GEO altitude plus or minus 200 km, latitude within 15 degrees). A raise that
+#: ends above it is disposal, not relocation, and the two look identical in the
+#: elements alone. It was 36,186 km, the regime band edge (GEO plus 400 km),
+#: so a standard 300 km graveyard raise read as relocation (audit F-116).
+_GEO_PROTECTED_HALF_WIDTH_KM: float = 200.0
+_GEO_PROTECTED_MAX_ALT_KM: float = _GEO_BAND_ALT + _GEO_PROTECTED_HALF_WIDTH_KM
 
 #: Operator label for a manoeuvre inside the routine per-event budget.
 #: Three places decide on this one string: the classifier that assigns it,

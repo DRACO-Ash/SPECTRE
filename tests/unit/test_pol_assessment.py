@@ -87,7 +87,9 @@ class TestTheAssessmentsOwnEventsAreNotCalledRoutine:
 
         Only the altitude it ends at separates them, so that is what decides.
         """
-        above, _, _ = _classify(9.0, "along_track", "GEO", _geo_ceiling(), 36486.0, 300.0)
+        # A 300 km raise from GEO ends at 36,086 km. This fixture once said
+        # 36,486 km, 700 km up, which is how a wrong edge passed (F-116).
+        above, _, _ = _classify(9.0, "along_track", "GEO", _geo_ceiling(), 35786.0 + 300.0, 300.0)
         within, _, _ = _classify(9.0, "along_track", "GEO", _geo_ceiling(), 35790.0, 78.0)
         assert above == "graveyard disposal"
         assert within == "relocation"
