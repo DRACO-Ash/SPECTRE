@@ -25,6 +25,7 @@ from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.rate_limit import udl_auth_rate_limit, udl_data_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
@@ -284,12 +285,19 @@ async def pol_analyse(
     dv_threshold_ms: Annotated[float, Form()] = 2.0,
     cadence_filter: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
-    """Fetch historical TLEs from UDL and run PoL analysis."""
+    """Fetch historical TLEs from UDL and run PoL analysis.
+
+    Held to the UDL data limit, and to the five-per-minute credential limit
+    of /udl/login when the form carries credentials: without either it was
+    an unthrottled credential oracle (audit F-045).
+    """
     state = get_session_state(current_user.username)
 
     # ── UDL direct credentials ────────────────────────────────────────────────
     if pol_source == "udl_direct":
+        await udl_auth_rate_limit(current_user)
         if not udl_user.strip() or not udl_pass.strip():
             return _panel_error(request, state, "Enter UDL username and password.")
         try:
