@@ -1287,13 +1287,6 @@ def _geo_drift_days(coast_s: float) -> float | None:
     return None
 
 
-def _evasion_fuel_km_s(coast_s: float) -> float:
-    """Fuel budget for the evasion solver, falling back to half a km/s."""
-    if coast_s > 0:
-        return coast_s / _SECONDS_PER_HOUR
-    return 0.5
-
-
 def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
     """Solve the Lambert arc, which LAMBERT and PROXIMITY both fly."""
     return lambert_intercept(
@@ -1399,7 +1392,9 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
             manoeuvre_start=a.start,
             desired_miss_km=max(a.target_km, 10.0),
             time_before_tca_s=a.tof_s,
-            fuel_budget_km_s=_evasion_fuel_km_s(a.coast_s),
+            # The operator's ΔV budget. This was the coast time in hours read
+            # as km/s, so a 6 h coast meant a 6 km/s budget (audit F-037).
+            fuel_budget_km_s=to_km_s(a.max_dv_m_s),
             coast_s=0.0,
         ),
     InterceptMethod.INTERCEPT_ENVELOPE:
