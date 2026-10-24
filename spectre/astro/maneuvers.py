@@ -697,36 +697,60 @@ def plane_change_intercept(
             arrival_epoch=t_burn,
             miss_distance_km=0.0,
         )
-    else:
-        # Different altitudes — combined transfer
-        cpc = combined_altitude_plane_change(
-            r_red, r_blue, plane_angle_deg, mu
-        )
+    # Different altitudes: a Hohmann-like transfer with the plane change on
+    # the slower burn, as combined_altitude_plane_change prices it.
+    period_s = 2.0 * math.pi * math.sqrt(kep_red.a**3 / mu)
+    return _combined_plane_transfer(
+        red_orbit, blue_orbit, (h_red_hat, h_blue_hat),
+        _next_plane_crossing(red_orbit, h_blue_hat, t_departure, period_s),
+        plane_angle_deg, mu,
+    )
 
-        v_hat = sv_red.v / sv_red.v_mag
-        h = np.cross(sv_red.r, sv_red.v)
-        h_mag = float(np.linalg.norm(h))
-        n_hat = h / h_mag if h_mag > 1e-10 else np.array([0, 0, 1], dtype=float)
 
-        # Burn 1: combined prograde + normal
-        dv1_vec = v_hat * cpc.delta_v_1 * 0.8 + n_hat * cpc.delta_v_1 * 0.6
-        dv1_vec = dv1_vec / float(np.linalg.norm(dv1_vec)) * cpc.delta_v_1
-        burn1 = _make_burn(1, t_departure, dv1_vec, sv_red)
+def _combined_plane_transfer(
+    red_orbit: TLEOrbit,
+    blue_orbit: TLEOrbit,
+    normals: tuple[np.ndarray, np.ndarray],
+    t_departure: datetime,
+    plane_angle_deg: float,
+    mu: float,
+) -> InterceptSolution:
+    """Fly the combined altitude and plane change from a crossing of the blue plane.
 
-        t_arrival = t_departure + timedelta(seconds=cpc.transfer_time_s)
-        sv_blue_arr = blue_orbit.propagate(t_arrival)
-        v_hat_arr = sv_blue_arr.v / sv_blue_arr.v_mag
-        dv2_vec = v_hat_arr * cpc.delta_v_2
-        burn2 = _make_burn(2, t_arrival, dv2_vec, sv_blue_arr)
+    Departing on the line of nodes puts the arrival, half a transfer ellipse
+    later, on it too, so either burn can rotate into the blue plane. Raising,
+    burn 1 stays in the red plane and burn 2 turns into the blue one;
+    lowering, burn 1 turns and burn 2 only circularises. Each burn is the
+    difference between the velocity the geometry calls for and the velocity
+    the interceptor has, so the vectors are the ones that were priced.
+    """
+    h_red_hat, h_blue_hat = normals
+    sv_dep = red_orbit.propagate(t_departure)
+    r1 = sv_dep.r_mag
+    r2 = blue_orbit.propagate(t_departure).r_mag
+    cpc = combined_altitude_plane_change(r1, r2, plane_angle_deg, mu)
+    a_t = (r1 + r2) / 2.0
 
-        return InterceptSolution(
-            method="plane_change",
-            burns=[burn1, burn2],
-            total_delta_v=cpc.total_delta_v,
-            departure_epoch=t_departure,
-            arrival_epoch=t_arrival,
-            miss_distance_km=0.0,
-        )
+    r_hat = sv_dep.r / r1
+    first_plane = h_red_hat if r2 > r1 else h_blue_hat
+    v_transfer = math.sqrt(mu * (2.0 / r1 - 1.0 / a_t)) * np.cross(first_plane, r_hat)
+    dv1_vec = v_transfer - sv_dep.v
+    burn1 = _make_burn(1, t_departure, dv1_vec, sv_dep)
+
+    t_arrival = t_departure + timedelta(seconds=cpc.transfer_time_s)
+    sv_arr = _coast(sv_dep, dv1_vec, t_arrival, mu)
+    r_hat_arr = sv_arr.r / sv_arr.r_mag
+    dv2_vec = math.sqrt(mu / r2) * np.cross(h_blue_hat, r_hat_arr) - sv_arr.v
+    burn2 = _make_burn(2, t_arrival, dv2_vec, sv_arr)
+
+    return InterceptSolution(
+        method="plane_change",
+        burns=[burn1, burn2],
+        total_delta_v=burn1.delta_v_mag + burn2.delta_v_mag,
+        departure_epoch=t_departure,
+        arrival_epoch=t_arrival,
+        miss_distance_km=_separation(sv_arr, blue_orbit),
+    )
 
 
 def j2_drift_intercept(
