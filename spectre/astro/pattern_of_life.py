@@ -220,6 +220,18 @@ class Manoeuvre:
         return self.epoch
 
     @property
+    def burn_window(self) -> tuple[datetime, datetime]:
+        """Earliest and latest times the burn can have happened.
+
+        The measured burn epoch where the estimator dated it; otherwise the
+        bracket between the element sets either side, since the burn lies
+        somewhere in that gap.
+        """
+        if self.burn_epoch is not self.epoch:
+            return self.burn_epoch, self.burn_epoch
+        return self.tle_before.epoch, self.epoch
+
+    @property
     def confidence(self) -> str:
         return self.breakdown.confidence if self.breakdown else "UNASSESSED"
 

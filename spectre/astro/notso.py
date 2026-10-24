@@ -424,9 +424,15 @@ def correlate_notsos_with_manoeuvres(
 
     Matching logic
     --------------
-    1. A NOTSO matches a manoeuvre if the manoeuvre epoch falls within
-       [effective_start − tolerance, effective_end + tolerance].
-    2. Multiple manoeuvre candidates → select closest to window midpoint.
+    1. A NOTSO matches a manoeuvre if the manoeuvre's burn window overlaps
+       [effective_start − tolerance, effective_end + tolerance]. The burn
+       window is the measured burn epoch, or when the burn could not be dated
+       the bracket between the element sets either side. The after-element-set
+       epoch alone can lag the burn by the whole gap, which reported notified
+       burns as silent (audit F-027).
+    2. Multiple manoeuvre candidates → select the burn window closest to the
+       NOTSO window midpoint. The time offset is measured to the point of the
+       burn window nearest that midpoint.
     3. Multiple NOTSO candidates → select closest effective_start.
     4. Unmatched NOTSOs → "notso_only" (filed but no manoeuvre detected).
     5. Unmatched manoeuvres → "manoeuvre_only" (no corresponding NOTSO).
@@ -442,8 +448,8 @@ def correlate_notsos_with_manoeuvres(
         key=lambda m: m.epoch,
     )
 
-    matched_notso_ids: set[str]      = set()
-    matched_mnv_epochs: set[datetime] = set()
+    matched_notso_ids: set[str] = set()
+    matched_mnv: set[int]       = set()
     correlations: list[NOTSOManoeuvreCorrelation] = []
 
     # Match each NOTSO to at most one manoeuvre
@@ -453,8 +459,8 @@ def correlate_notsos_with_manoeuvres(
 
         candidates = [
             m for m in obj_manoeuvres
-            if window_start <= m.epoch <= window_end
-            and m.epoch not in matched_mnv_epochs
+            if _burn_window(m)[0] <= window_end and _burn_window(m)[1] >= window_start
+            and id(m) not in matched_mnv
         ]
 
         if candidates:
@@ -462,10 +468,10 @@ def correlate_notsos_with_manoeuvres(
             midpoint = notso.effective_start_utc + (
                 notso.effective_end_utc - notso.effective_start_utc
             ) / 2
-            best = min(candidates, key=lambda m: abs((m.epoch - midpoint).total_seconds()))
+            best = min(candidates, key=lambda m: abs((_nearest(m, midpoint) - midpoint).total_seconds()))
 
             offset_h = (
-                (notso.effective_start_utc - best.epoch).total_seconds() / 3600.0
+                (notso.effective_start_utc - _nearest(best, midpoint)).total_seconds() / 3600.0
             )
             mag_ratio = None
             if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
@@ -479,7 +485,7 @@ def correlate_notsos_with_manoeuvres(
                 magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
             ))
             matched_notso_ids.add(notso.message_id)
-            matched_mnv_epochs.add(best.epoch)
+            matched_mnv.add(id(best))
         else:
             correlations.append(NOTSOManoeuvreCorrelation(
                 notso=notso,
@@ -493,7 +499,7 @@ def correlate_notsos_with_manoeuvres(
 
     # Unmatched manoeuvres
     for m in obj_manoeuvres:
-        if m.epoch not in matched_mnv_epochs:
+        if id(m) not in matched_mnv:
             correlations.append(NOTSOManoeuvreCorrelation(
                 notso=None,
                 manoeuvre=m,
@@ -504,6 +510,18 @@ def correlate_notsos_with_manoeuvres(
             ))
 
     return correlations
+
+
+def _burn_window(m: Any) -> tuple[datetime, datetime]:
+    """The manoeuvre's burn window, or its epoch for an object that has none."""
+    window = getattr(m, "burn_window", None)
+    return window if window is not None else (m.epoch, m.epoch)
+
+
+def _nearest(m: Any, when: datetime) -> datetime:
+    """The point of the manoeuvre's burn window nearest *when*."""
+    lo, hi = _burn_window(m)
+    return min(max(when, lo), hi)
 
 
 # ── Behaviour profile extraction ──────────────────────────────────────────────
