@@ -358,7 +358,9 @@
             {% endif %}
             <button class="btn-secondary btn-sm"
                     type="button"
-                    onclick="event.stopPropagation(); loadInEngine('{{ assessment.red_name }}', '{{ child.entry.target.target_name }}', '{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ child.entry.method }}')"
+                    data-red="{{ assessment.red_name }}" data-blue="{{ child.entry.target.target_name }}"
+                    data-epoch="{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ child.entry.method }}"
+                    onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
                     title="Pre-fill the intercept engine with this solution">Load</button>
           </td>
         </tr>

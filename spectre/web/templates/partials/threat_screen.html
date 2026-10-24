@@ -114,7 +114,7 @@
         {% set vc = band_colours.get(v.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
         {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
         {% set row_id = 'scr-' ~ loop.index0 %}
-        <tr class="threat-parent" onclick="scrToggle('{{ row_id }}')" style="cursor:pointer"
+        <tr class="threat-parent" data-row="{{ row_id }}" onclick="scrToggle(this.dataset.row)" style="cursor:pointer"
             tabindex="0" onkeydown="spectreActivate(event)"
             title="Open the profiles behind this verdict">
           <td class="col-dim">{{ loop.index }}</td>

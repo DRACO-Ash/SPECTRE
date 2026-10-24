@@ -77,7 +77,7 @@
              class="gcat-search">
       {% if q %}
       <button class="gcat-search-clr"
-              onclick="gcatClearSearch('{{ dataset_key }}')"
+              data-dataset="{{ dataset_key }}" onclick="gcatClearSearch(this.dataset.dataset)"
               title="Clear search filter">&#10005;</button>
       {% endif %}
     </div>
@@ -125,7 +125,7 @@
           {% if q %}
             No records match &ldquo;<em>{{ q }}</em>&rdquo;&ensp;&mdash;&ensp;
             <button class="gcat-link-btn"
-                    onclick="gcatClearSearch('{{ dataset_key }}')"
+                    data-dataset="{{ dataset_key }}" onclick="gcatClearSearch(this.dataset.dataset)"
                     title="Clear filter and show all records">clear filter</button>
           {% else %}
             No data available.
