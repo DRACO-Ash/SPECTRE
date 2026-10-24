@@ -15,9 +15,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Combined altitude and plane change burns follow the geometry they are priced on, from a crossing of the target plane (F-015).
 - Molniya and Tundra orbits classify as HEO, so Tundra objects are screened against GEO assets (F-016).
 - Object names reach inline handlers as data attributes, never as JavaScript source (F-038).
+- Lambert transfers longer than one orbit are priced on the cheapest revolution count, in intercepts and the envelope sweep (F-010).
+- The NMC burn is flown from the interceptor's actual relative state, and refused when it is not on the requested ellipse (F-017).
+- J2 drift acceleration closes the RAAN gap the short way in half the natural time and costs both burns (F-024).
+- Pattern-of-life status scores the latest manoeuvre against earlier ones only, and reads INSUFFICIENT below three (F-026).
+- NOTSO correlation uses the burn window, not the next element set (F-027).
+- TLE clustering writes the newest cluster's representative (F-028).
+- Monte Carlo: timing dispersion moves the burn (F-029), the ΔV direction comes from the detection (F-030), and drag uses the SGP4 B* relation (F-031).
 
 ### Added
 - `spectre/astro/kepler.py`: universal-variable two-body propagator.
+- `solve_lambert_all` and `cheapest_lambert`: multi-revolution Lambert solutions.
 
 Remediation of the whole-repository audit of 23 October 2026 (`audit/`).
 Step 1 of 4: the eight Blockers. Each fix landed test-first, with the defect

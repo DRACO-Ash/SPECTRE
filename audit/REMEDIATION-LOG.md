@@ -100,3 +100,34 @@ Each was shown to fail against the original `master` file it guards.
 ● Regenerating `spectre/data/hrr_default.json` with its build script moved two synthetic Molniya-type entries from GTO to HEO. Both labels are trans-belt, so screening of those two is unchanged.
 ● F-038 converted nine handler sites in total, so the gate covers the whole template tree without an allowlist. Three carried names; six carried server-generated keys and dates.
 ● **Behaviour changes an operator will see (inference):** Hohmann and bi-elliptic plans now show a real, often large, miss when the pair is not phased; combined plane changes depart at the next crossing of the target plane, not immediately; evasion burns may point the other way to the old ones.
+
+### Solver fixes, second batch (all step 3 High solver findings now closed)
+
+| Finding | Origin | Commit | Defect, as reproduced before the fix | Gate |
+|---|---|---|---|---|
+| F-010 (High) | F-S01-04 | `accb129` | a 30 deg GEO hop in 24 h priced at 7,820 m/s on the zero-revolution arc; once round costs 214 m/s. The envelope sweep found 11 of 24 one-degree arrivals feasible | `tests/unit/test_lambert_multi_revolution.py` (8 tests, incl. a root beside the band edge, mutation-checked); `tests/unit/test_intercept_envelope.py` re-derived: 23 of 24 feasible, cheapest 3.4 m/s at 46 h |
+| F-017 (High) | F-S02-06 | `64016fd` | a radial burn from wherever red was, labelled with the along-track cost and a positive margin | `tests/unit/test_nmc_intercept_burn.py` (4 tests: the burn is flown through the CW solution and the margin is the closest approach) |
+| F-024 (High) | F-S02-15 | `b190aff` | a fixed 50 km step by inclination alone; the cost was one Hohmann burn | `tests/unit/test_j2_drift_acceleration.py` (6 tests, both signs, two inclinations) |
+| F-026 (High) | F-S03-01 | `7074ea0` | a burn 100 times its predecessors read NORMAL at n = 2 and 5, CAUTION at 10 | `tests/unit/test_pol_status_leave_one_out.py` (15 tests) |
+| F-027 (High) | F-S03-02 | `4e43187` | a notified burn bracketed by element sets a day before and three days after was split into notso_only and manoeuvre_only | `tests/unit/test_notso_burn_epoch.py` (3 tests) |
+| F-028 (High) | F-S03-06 | `658a097` | the earliest cluster's representative was written, so a just-manoeuvred object was cached with its pre-burn orbit; the existing multi-cluster test never formed a cluster | `tests/integration/test_tle_clustering_pipeline.py::test_the_newest_cluster_supplies_the_representative`, and the vacuous test made unconditional |
+| F-029 (High) | F-S04-01 | `590312c` | with no ΔV dispersion, a 30 s timing sigma gave a 643 km three-sigma cloud; now 0.33 km | `tests/unit/test_monte_carlo_burn_timing.py` (2 tests) |
+| F-030 (High) | F-S04-02 | `6ad566b` | a detected plane change simulated as an orbit raise | `tests/unit/test_monte_carlo_direction.py` (4 tests) |
+| F-031 (High) | F-S04-03 | `226c90b` | drag 25.0 times too strong (B* to ballistic coefficient) | `tests/unit/test_monte_carlo_drag.py` (2 tests; 48 h decay at 450 km agrees with the analytic estimate to 0.5 per cent) |
+
+**Tests changed because their expectations encoded a defect, each re-derived and stated in the test:**
+● `test_intercept_envelope.py`: the feasible counts and cheapest arc were the zero-revolution figures (F-010).
+● `test_orbital_units_and_degeneracies.py`: pinned the 14.4 m/s cost of the fixed 50 km step (F-024). For its pair no altitude halves the 46.8-day convergence, so the inclination-units guard now pins that time; mutation-checked (the mutant gives 181.3 days).
+● `test_tle_clustering_pipeline.py`: the multi-cluster test's data formed no cluster, so its guarded assertions never ran (F-028).
+
+**New defect found, not fixed, for a decision (fact):** the Monte Carlo density table (`monte_carlo.py:_atmo_density_kg_m3`) is discontinuous at most band edges. Density jumps by 0.63 at 86 km, 24.9 at 150, 1.13 at 200, 2.22 at 300, 2.74 at 400, 1.40 at 500, 0.77 at 700 and 10.1 at 1,000 km. Inference: the (rho0, H) pairs are misaligned between rows; the scale heights look shifted against the base densities. A satellite near a band edge sees its drag change in steps as it crosses. Fixing it means re-sourcing the table, which I have not done from memory.
+
+**Left from these findings for step 4:** comparing RAAN at a common epoch in `tle_clustering` (F-028's second half). `nmc_safety_ellipse` is no longer used by the wrapper and remains as a tested library function.
+
+**Behaviour changes an operator will see (inference):**
+● Long-flight Lambert intercepts are priced on the cheapest revolution count, often orders of magnitude cheaper.
+● NMC refuses unless red already sits on the requested ellipse.
+● J2 drift may offer no burn where none helps.
+● PoL shows INSUFFICIENT until three earlier manoeuvres exist.
+● Notified burns with late element sets now match.
+● The Monte Carlo panel shows the ΔV direction basis, with much smaller drag-driven and timing-driven spreads.
