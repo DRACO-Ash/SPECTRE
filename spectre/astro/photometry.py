@@ -463,6 +463,10 @@ def _regularised_incomplete_beta(x: float, a: float, b: float) -> float:
         return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
 
 
+# Fewest usable observations per window from which a change can be tested.
+_MIN_WINDOW_OBS = 2
+
+
 def detect_change(
     corrected: Sequence[CorrectedObservation],
     baseline: PhotometryBaseline,
@@ -475,13 +479,35 @@ def detect_change(
     -------
     (baseline_mean, baseline_std, recent_mean, recent_std, t_stat, p_value)
     """
+    baseline_residuals, recent_residuals = _window_residuals(
+        corrected, baseline, recent_window_days, baseline_window_days,
+    )
+
+    if not baseline_residuals or not recent_residuals:
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 1.0
+
+    bm = sum(baseline_residuals) / len(baseline_residuals)
+    bs = math.sqrt(sum((r - bm) ** 2 for r in baseline_residuals) / max(len(baseline_residuals) - 1, 1))
+    rm = sum(recent_residuals) / len(recent_residuals)
+    rs = math.sqrt(sum((r - rm) ** 2 for r in recent_residuals) / max(len(recent_residuals) - 1, 1))
+
+    t, p = _t_test_two_sample(baseline_residuals, recent_residuals)
+    return bm, bs, rm, rs, t, p
+
+
+def _window_residuals(
+    corrected: Sequence[CorrectedObservation],
+    baseline: PhotometryBaseline,
+    recent_window_days: float,
+    baseline_window_days: float,
+) -> tuple[list[float], list[float]]:
+    """Residuals from the baseline model in the baseline and recent windows."""
     now_epoch = max((c.epoch_utc for c in corrected), default=datetime.now(UTC))
     recent_cutoff   = now_epoch - timedelta(days=recent_window_days)
     baseline_cutoff = now_epoch - timedelta(days=recent_window_days + baseline_window_days)
 
     baseline_residuals: list[float] = []
     recent_residuals:   list[float] = []
-
     for c in corrected:
         if c.quality_flag in ("reject",):
             continue
@@ -494,17 +520,7 @@ def detect_change(
             baseline_residuals.append(residual)
         elif c.epoch_utc >= recent_cutoff:
             recent_residuals.append(residual)
-
-    if not baseline_residuals or not recent_residuals:
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 1.0
-
-    bm = sum(baseline_residuals) / len(baseline_residuals)
-    bs = math.sqrt(sum((r - bm) ** 2 for r in baseline_residuals) / max(len(baseline_residuals) - 1, 1))
-    rm = sum(recent_residuals) / len(recent_residuals)
-    rs = math.sqrt(sum((r - rm) ** 2 for r in recent_residuals) / max(len(recent_residuals) - 1, 1))
-
-    t, p = _t_test_two_sample(baseline_residuals, recent_residuals)
-    return bm, bs, rm, rs, t, p
+    return baseline_residuals, recent_residuals
 
 
 def _estimate_change_epoch(
@@ -632,6 +648,15 @@ def assess_photometry(
         confounders.append(f"{n_lunar} observations affected by lunar proximity")
     if baseline.residual_std > 0.3:
         confounders.append(f"High baseline scatter (σ={baseline.residual_std:.3f} mag) — variable phase coverage")
+    # An empty or single-point window gives p = 1, which would otherwise read
+    # as "no significant change" (audit F-108).
+    base_res, recent_res = _window_residuals(corrected, baseline, recent_window_days, baseline_window_days)
+    if min(len(base_res), len(recent_res)) < _MIN_WINDOW_OBS:
+        confounders.append(
+            f"No change could be tested: the baseline window holds {len(base_res)} usable "
+            f"observations and the recent window holds {len(recent_res)}; at least "
+            f"{_MIN_WINDOW_OBS} each are needed"
+        )
 
     # Confidence: composite based on p-value and sample sizes
     if sig99:
