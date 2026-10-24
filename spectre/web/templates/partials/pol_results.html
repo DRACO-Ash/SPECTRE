@@ -627,6 +627,7 @@
     ● {{ detection.rejected_below_floor }} pairs fell below the floor
     {% if detection.rejected_on_evidence %}● {{ detection.rejected_on_evidence }} cleared the floor but failed the forensic checks{% endif %}
     {% if detection.merged_duplicates %}● {{ detection.merged_duplicates }} merged as the same burn seen by more than one provider{% endif %}
+    {% if detection.malformed_element_sets %}● {{ detection.malformed_element_sets }} element sets would not parse and were dropped{% endif %}
     {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
     {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
     <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>

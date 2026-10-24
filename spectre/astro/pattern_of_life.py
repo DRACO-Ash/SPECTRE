@@ -334,6 +334,7 @@ class PolAnalysis:
     rejected_on_evidence:   int = 0   # survived the floor, failed the forensics
     skipped_long_gap:       int = 0   # gap too large to read as a single burn
     merged_duplicates:      int = 0   # same burn reported by more than one provider
+    malformed_element_sets: int = 0   # pairs that would not parse, dropped
     breakdowns_truncated:   int = 0   # detections past the forensic budget
 
 
@@ -739,7 +740,9 @@ def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
     """Parse one pair, or None when it is unusable or a duplicate epoch.
 
     A history block routinely carries the same element set twice from two
-    providers, and a malformed pair must drop out rather than stop the parse.
+    providers. A malformed pair raises ValueError or ZeroDivisionError, which
+    the caller catches and counts so that it drops out rather than stopping
+    the parse.
     """
     rec = _satrec_to_record(f"{l1}\n{l2}")
     key = rec.epoch.strftime("%Y%j%H%M%S")
@@ -792,10 +795,31 @@ def parse_tle_history(
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
     """
+    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata)
+    return records
+
+
+def parse_tle_history_counted(
+    tle_text: str,
+    satno: int | None = None,
+    metadata: dict[str, tuple[str, str]] | None = None,
+    rms_metadata: dict[str, float | None] | None = None,
+) -> tuple[list[TLERecord], int]:
+    """As :func:`parse_tle_history`, also returning how many pairs were malformed.
+
+    A corrupt epoch raised ValueError and a zero mean motion ZeroDivisionError
+    out of the whole parse, so one bad element set lost the analysis (audit
+    F-083). Each now drops out and is counted.
+    """
     records: list[TLERecord] = []
     seen: set[str] = set()
+    malformed = 0
     for l1, l2 in _tle_line_pairs(tle_text):
-        rec = _record_from_pair(l1, l2, seen)
+        try:
+            rec = _record_from_pair(l1, l2, seen)
+        except (ValueError, ZeroDivisionError):
+            malformed += 1
+            continue
         if rec is None:
             continue
         if not _apply_metadata(rec, l1, metadata, rms_metadata):
@@ -803,7 +827,7 @@ def parse_tle_history(
         records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
-    return records
+    return records, malformed
 
 
 def _screen_pairs(
