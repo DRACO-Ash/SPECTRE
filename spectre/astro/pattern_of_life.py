@@ -118,6 +118,7 @@ _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 _STATUS_RECENT_DAYS     = 10.0  # days: older than this and there is no "latest" manoeuvre
 _STATUS_ANOMALOUS_SIGMA = 3.0   # σ above the historical mean ΔV → "ANOMALOUS"
 _STATUS_CAUTION_SIGMA   = 2.0   # σ above the historical mean ΔV → "CAUTION"
+_STATUS_MIN_PRIOR       = 3     # earlier manoeuvres needed to score the latest
 
 # _SK_DV_LIMIT and _GEO_SK_BASELINE used to live here. Both are gone, and
 # nothing in this module replaces them, because neither was a measurement.
@@ -863,35 +864,60 @@ def _detect_manoeuvres(
     return manoeuvres
 
 
+def _pol_status_for_history(
+    latest_epoch: datetime,
+    manoeuvres: list[Manoeuvre],
+) -> tuple[str, str]:
+    """Status of the latest manoeuvre, scored against the ones before it.
+
+    Leave-one-out. Scoring the latest delta-V against statistics that already
+    include it caps its z-score at (n - 1) / sqrt(n) (Samuelson's inequality),
+    so ANOMALOUS could not happen below 11 manoeuvres and a burn 100 times its
+    only predecessor read NORMAL (audit F-026).
+    """
+    prior = [m.delta_v_km_s for m in manoeuvres[:-1]]
+    return _pol_status_and_reason(latest_epoch, manoeuvres, _pol_stats(prior), len(prior))
+
+
 def _pol_status_and_reason(
     latest_epoch: datetime,
     manoeuvres: list[Manoeuvre],
-    dv_stats: PolStats | None,
+    prior_stats: PolStats | None,
+    n_prior: int = _STATUS_MIN_PRIOR,
 ) -> tuple[str, str]:
     """The backward-compatible PoL status and the sentence explaining it.
 
-    *latest_epoch* is the epoch of the last element set in the history: a
-    manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not "the
-    latest" and leaves the status at NORMAL, because an object that has simply
-    stopped manoeuvring is not an anomaly.
+    *prior_stats* describe the manoeuvres before the latest, of which there
+    are *n_prior*. *latest_epoch* is the epoch of the last element set in the
+    history: a manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not
+    "the latest" and leaves the status at NORMAL, because an object that has
+    simply stopped manoeuvring is not an anomaly. A recent manoeuvre with
+    fewer than ``_STATUS_MIN_PRIOR`` before it is INSUFFICIENT, not NORMAL:
+    there is nothing to measure it against.
     """
-    pol_status = "NORMAL"
-    pol_reason = "All metrics within normal historical bounds."
-    if manoeuvres and dv_stats:
-        last_dv = manoeuvres[-1].delta_v_km_s if (
-            latest_epoch - manoeuvres[-1].epoch
-        ).total_seconds() / 86400.0 < _STATUS_RECENT_DAYS else None
-        if last_dv and dv_stats.std > 0:
-            z = (last_dv - dv_stats.mean) / dv_stats.std
-            if z > _STATUS_ANOMALOUS_SIGMA:
-                pol_status = "ANOMALOUS"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above historical mean."
-            elif z > _STATUS_CAUTION_SIGMA:
-                pol_status = "CAUTION"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above mean — approaching anomalous threshold."
     if not manoeuvres:
-        pol_reason = "No manoeuvres detected — object appears passive."
-    return pol_status, pol_reason
+        return "NORMAL", "No manoeuvres detected — object appears passive."
+    age_days = (latest_epoch - manoeuvres[-1].epoch).total_seconds() / 86400.0
+    if age_days >= _STATUS_RECENT_DAYS:
+        return "NORMAL", "All metrics within normal historical bounds."
+    if prior_stats is None or n_prior < _STATUS_MIN_PRIOR:
+        return "INSUFFICIENT", (
+            f"Only {n_prior} earlier manoeuvre(s); at least {_STATUS_MIN_PRIOR} are needed "
+            "to judge whether the latest is unusual."
+        )
+    last_dv = manoeuvres[-1].delta_v_km_s
+    if prior_stats.std > 0:
+        z = (last_dv - prior_stats.mean) / prior_stats.std
+    else:
+        z = math.inf if last_dv > prior_stats.mean else 0.0
+    if z > _STATUS_ANOMALOUS_SIGMA:
+        return "ANOMALOUS", f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean."
+    if z > _STATUS_CAUTION_SIGMA:
+        return "CAUTION", (
+            f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean — "
+            "approaching anomalous threshold."
+        )
+    return "NORMAL", "All metrics within normal historical bounds."
 
 
 def analyse_pattern_of_life(
@@ -1000,9 +1026,7 @@ def analyse_pattern_of_life(
         next_unc = round(interval_stats.std * 2.0, 1)
 
     # PoL status
-    pol_status, pol_reason = _pol_status_and_reason(
-        records[-1].epoch, manoeuvres, dv_stats,
-    )
+    pol_status, pol_reason = _pol_status_for_history(records[-1].epoch, manoeuvres)
 
     # ── Chart data ────────────────────────────────────────────────────────────
     cr = _downsample(records, 500)
