@@ -147,6 +147,9 @@ class ManoeuvreKind(Enum):
     PHASING = "phasing or relocation"
     PROXIMITY = "proximity operation"
     RENDEZVOUS = "rendezvous"
+    #: A solver this table does not know. It has no band of its own in any
+    #: regime, so it is scored against ``_UNCLASSIFIED_BAND``.
+    UNCLASSIFIED = "unclassified manoeuvre"
 
 
 #: Threat-sweep method name -> operational kind.
@@ -168,10 +171,12 @@ _METHOD_TO_KIND: dict[str, ManoeuvreKind] = {
 def kind_for_method(method: str) -> ManoeuvreKind:
     """Map a solver name to the kind of manoeuvre it represents.
 
-    An unrecognised method falls back to RENDEZVOUS, the most permissive band,
-    so a new solver is never accidentally scored as more alarming than it is.
+    An unrecognised method maps to UNCLASSIFIED, which is scored against the
+    widest band in the table, so a new solver is never scored as more
+    alarming than any known kind of manoeuvre would be at the same cost.
+    RENDEZVOUS, the previous fallback, is not the widest band in any regime.
     """
-    return _METHOD_TO_KIND.get(method.strip().lower(), ManoeuvreKind.RENDEZVOUS)
+    return _METHOD_TO_KIND.get(method.strip().lower(), ManoeuvreKind.UNCLASSIFIED)
 
 
 @dataclass(frozen=True)
@@ -309,7 +314,8 @@ _BANDS: dict[tuple[str, ManoeuvreKind], _Band] = {
 
 # GTO is dynamically a trans-belt orbit like HEO, so it shares HEO's bands.
 for _kind in ManoeuvreKind:
-    _BANDS[("GTO", _kind)] = _BANDS[("HEO", _kind)]
+    if ("HEO", _kind) in _BANDS:
+        _BANDS[("GTO", _kind)] = _BANDS[("HEO", _kind)]
 
 #: Fallback when the regime is unrecognised or DEEP. Deliberately the widest
 #: band in the table, so an unclassified object is never scored as more
@@ -318,6 +324,14 @@ _DEFAULT_BAND = _Band(
     75.0, 300.0,
     "Regime not recognised; the widest published band (HEO reshaping, Table 6) "
     "is used so an unclassified object is not over-scored.",
+)
+
+#: The same figures for a solver the table does not know, in any regime.
+#: They are at least as wide as every (regime, kind) band above.
+_UNCLASSIFIED_BAND = _Band(
+    _DEFAULT_BAND.benign_max_m_s, _DEFAULT_BAND.annoyance_max_m_s,
+    "Method not recognised, so its kind of manoeuvre is unknown; the widest "
+    "published band (HEO reshaping, Table 6) is used so it is not over-scored.",
 )
 
 
@@ -516,7 +530,8 @@ def classify_posture(
     single global threshold cannot be right in both.
     """
     regime_key = regime.strip().upper()
-    band = _BANDS.get((regime_key, kind), _DEFAULT_BAND)
+    band = (_UNCLASSIFIED_BAND if kind is ManoeuvreKind.UNCLASSIFIED
+            else _BANDS.get((regime_key, kind), _DEFAULT_BAND))
 
     if delta_v_m_s >= _BEYOND_ANY_FLOWN_PLATFORM_M_S:
         posture = Posture.BEYOND_PLATFORM

@@ -164,8 +164,8 @@ _CHANNEL_TO_KIND: dict[tuple[bool, str], ManoeuvreKind] = {
     # A manoeuvre that moves altitude and plane together, above the
     # station-keeping ceiling, is the signature of inspection or shadowing
     # work. Note this is the OPPOSITE fallback to kind_for_method, which sends
-    # an unrecognised SOLVER to the permissive rendezvous band so a new solver
-    # cannot be scored as more alarming than it is. Here the object has already
+    # an unrecognised SOLVER to the widest band so a new solver cannot be
+    # scored as more alarming than it is. Here the object has already
     # manoeuvred and we are reading its behaviour, so the permissive choice is
     # the unsafe one: Cosmos 2576's inspector campaign, 25 to 30 m/s in LEO
     # across altitude and inclination together, reads BENIGN against the
