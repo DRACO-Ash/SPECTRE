@@ -493,3 +493,41 @@ class TestTleEpochMetadata:
         line1 = _make_udl_record(25544, "26025.00000000")["line1"]
         _, age = _tle_epoch_metadata(line1, datetime(2026, 1, 23, tzinfo=UTC))
         assert age == pytest.approx(2.0, abs=1e-6)
+
+
+class TestARecordWithoutElementLinesIsAnError:
+    """Audit F-140. With no parsable line 1 the latest mode fell back to the
+    first record, extraction did not check for empty lines, and the route
+    rendered no error with a TLE of "\\n" and a "TLE loaded" line.
+    Diagnostics read ``tle1``, which extraction ignored."""
+
+    async def _fetch(self, mock_state: object, record: dict) -> dict:
+        with (
+            patch("spectre.web.routes.udl.get_session_state", return_value=mock_state),
+            patch("spectre.web.routes.udl.render") as render_mock,
+            patch("httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = [record]
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+            from spectre.web.routes.udl import fetch_tle
+            await fetch_tle(request=_make_request(), satno=39034, mode="latest", current_user=_make_user())
+            return render_mock.call_args[0][2]
+
+    @pytest.mark.asyncio
+    async def test_no_lines_is_reported(self, mock_state) -> None:
+        context = await self._fetch(mock_state, {"objectName": "EMPTY"})
+        assert context["error"] is not None
+        assert "39034" in context["error"]
+
+    @pytest.mark.asyncio
+    async def test_the_tle1_spelling_diagnostics_read_is_extracted_too(self, mock_state) -> None:
+        good = _make_udl_record(39034)
+        context = await self._fetch(mock_state, {"objectName": "ALT", "tle1": good["line1"], "tle2": good["line2"]})
+        assert context["error"] is None
+        assert context["tle"] == f"{good['line1']}\n{good['line2']}"

@@ -474,9 +474,7 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
 
     # Log every candidate's TLE line1 epoch for diagnostics.
     for i, candidate in enumerate(records):
-        l1_raw = str(
-            candidate.get("line1") or candidate.get("TLE_LINE1") or candidate.get("tle1") or ""
-        ).strip()
+        l1_raw = _elset_line(candidate, 1)
         ep = _parse_tle_epoch(l1_raw)
         logger.info(
             "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
@@ -485,6 +483,20 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
             ep.isoformat() if ep else "None",
             log_safe(candidate.get("objectName") or candidate.get(_UDL_NAME_KEY_UPPER) or "?"),
         )
+
+
+#: Every spelling of the two element lines a UDL record has been seen to use.
+#: Diagnostics read "tle1" while extraction ignored it (audit F-140), so one
+#: list now serves selection, extraction and diagnostics alike.
+_LINE_KEYS = {
+    1: ("line1", "TLE_LINE1", "tle1", "TLE1"),
+    2: ("line2", "TLE_LINE2", "tle2", "TLE2"),
+}
+
+
+def _elset_line(rec: Any, n: int) -> str:
+    """Line *n* (1 or 2) of a UDL record, under whichever spelling it carries."""
+    return next((str(rec[k]).strip() for k in _LINE_KEYS[n] if rec.get(k)), "")
 
 
 def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any | None:
@@ -497,8 +509,7 @@ def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any 
     best_rec = None
     best_delta = inf
     for candidate in records:
-        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-        ep = _parse_tle_epoch(l1)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         if ep is None or ep > scenario_start:
             continue
         delta = (scenario_start - ep).total_seconds()
@@ -515,12 +526,9 @@ def _select_latest_elset(records: list[Any]) -> Any:
     so the newest is chosen here rather than taken on trust.
     """
     best_rec = records[0]
-    best_epoch = _parse_tle_epoch(
-        str(best_rec.get("line1") or best_rec.get("TLE_LINE1") or "").strip()
-    )
+    best_epoch = _parse_tle_epoch(_elset_line(best_rec, 1))
     for candidate in records[1:]:
-        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-        ep = _parse_tle_epoch(l1)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         if ep is not None and (best_epoch is None or ep > best_epoch):
             best_epoch = ep
             best_rec = candidate
@@ -538,8 +546,8 @@ def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, 
     both are read before falling back to the catalogue number.
     """
     name = name_override.strip() or str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER) or satno).strip()
-    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
-    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
+    line1 = _elset_line(rec, 1)
+    line2 = _elset_line(rec, 2)
     return name, f"{line1}\n{line2}", line1
 
 
@@ -661,6 +669,12 @@ async def fetch_tle(
 
     # ── Extract fields ───────────────────────────────────────────────────────
     name, tle, line1 = _extract_tle_fields(rec, name_override, satno)
+    if not line1 or not _elset_line(rec, 2):
+        # Rendered as success with a TLE of "\n" before (audit F-140).
+        return render(request,
+            "partials/tle_fields.html",
+            {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
+        )
 
     # TLE epoch metadata for the partial
     tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
