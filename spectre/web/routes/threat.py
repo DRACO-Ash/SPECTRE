@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -587,6 +588,9 @@ _BAND_COLOURS: dict[str, tuple[str, str]] = {
 }
 
 
+_SENTENCE_END = re.compile(r"\.(?:\s|$)")
+
+
 def _refusal_reason(exc: BaseException) -> str:
     """Turn a solver refusal into a sentence worth showing.
 
@@ -597,7 +601,10 @@ def _refusal_reason(exc: BaseException) -> str:
     text = str(exc).strip()
     if not text:
         return f"refused ({type(exc).__name__})"
-    first_sentence = text.split(".")[0].split(";")[0].strip()
+    # A full stop ends a sentence only before whitespace or the end. Splitting
+    # on every "." cut solver figures short: "transfer angle 179.9876 deg"
+    # was shown as "transfer angle 179" (audit F-058).
+    first_sentence = _SENTENCE_END.split(text, maxsplit=1)[0].split(";")[0].strip()
     return first_sentence[:160] if first_sentence else text[:160]
 
 
