@@ -175,3 +175,38 @@ class TestPlanningStateDiesWithTheAccount:
         assert key is not None
         assert not has_session_state(key)
         _delete(client, admin, "f148-dave")
+
+
+class TestARevokedTokenCannotActAfterLogout:
+    """Audit F-152: a revoked token could keep logging the operator out."""
+
+    def test_replaying_logout_with_a_revoked_token_leaves_the_new_session_alone(self, client: object) -> None:
+        admin = _admin(client)
+        _create(client, admin, "f152-erin", role="admin")
+        old = login_as(client, "f152-erin", "pass-123")
+        old_headers = csrf_headers(old)
+        client.post("/logout", cookies={"spectre_session": old}, headers=old_headers)  # type: ignore[attr-defined]
+
+        new = login_as(client, "f152-erin", "pass-123")
+        client.post("/logout", cookies={"spectre_session": old}, headers=old_headers)  # type: ignore[attr-defined]
+        status = _status(client, new)
+        _delete(client, admin, "f152-erin")
+        assert status == 200, "the revoked token ended the live session"
+
+    def test_a_revoked_token_is_given_no_csrf_token(self, client: object) -> None:
+        admin = _admin(client)
+        _create(client, admin, "f152-frank")
+        old = login_as(client, "f152-frank", "pass-123")
+        client.post("/logout", cookies={"spectre_session": old}, headers=csrf_headers(old))  # type: ignore[attr-defined]
+        page = client.get("/login", cookies={"spectre_session": old}).text  # type: ignore[attr-defined]
+        _delete(client, admin, "f152-frank")
+        meta = re.search(r'<meta name="csrf-token" content="([^"]*)"', page)
+        assert meta is None or meta.group(1) == "", "a revoked session was handed a CSRF token"
+
+    def test_a_live_session_still_gets_its_csrf_token(self, client: object) -> None:
+        """The pages HTMX posts from must keep carrying the token."""
+        cookie = login_as(client, *_ADMIN)
+        for path in ("/", "/admin/users"):
+            page = client.get(path, cookies={"spectre_session": cookie}).text  # type: ignore[attr-defined]
+            meta = re.search(r'<meta name="csrf-token" content="([^"]+)"', page)
+            assert meta, f"{path} lost its CSRF token"

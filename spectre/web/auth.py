@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 import bcrypt
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,6 +114,23 @@ def session_key_for(token: str) -> SessionKey | None:
     return None if claims is None else claims.key
 
 
+async def current_user_for(token: str, db: AsyncSession) -> User | None:
+    """The account *token* is a live session of, or ``None``.
+
+    For the routes that read the cookie themselves rather than through
+    :func:`require_login`, so they apply the same binding and revocation.
+    """
+    claims = _decode_session(token)
+    if claims is None:
+        return None
+    result = await db.execute(select(User).where(User.username == claims.username))
+    user: User | None = result.scalar_one_or_none()
+    if user is None or not _bound_to(user, claims):
+        return None
+    user.session_key = claims.key
+    return user
+
+
 def decode_session_cookie(token: str) -> str | None:
     """Decode and validate *token*.
 
@@ -156,6 +173,7 @@ def _bound_to(user: User, claims: SessionClaims) -> bool:
 
 
 async def require_login(
+    request: Request,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -199,6 +217,7 @@ async def require_login(
         )
 
     user.session_key = claims.key
+    request.state.session_current = True
     return user
 
 
@@ -224,6 +243,7 @@ async def optional_login(
     # one. FastAPI resolves dependencies by name and the only call site is
     # Depends(optional_login), so no caller passes these positionally.
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> User | None:
     """Return the authenticated user, or ``None`` when there is no valid session.
@@ -248,4 +268,5 @@ async def optional_login(
     if user is None or not _bound_to(user, claims):
         return None
     user.session_key = claims.key
+    request.state.session_current = True
     return user

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from spectre.config.settings import get_settings
-from spectre.web.auth import _COOKIE_NAME, hash_password, make_session_cookie, verify_password
+from spectre.web.auth import _COOKIE_NAME, current_user_for, hash_password, make_session_cookie, verify_password
 from spectre.web.csrf import LOGIN_COOKIE, new_login_token
 from spectre.web.database import get_db
 from spectre.web.deps import render
@@ -212,17 +212,13 @@ async def post_login(
     return response
 
 
-async def _revoke_sessions(db: AsyncSession, username: str) -> None:
-    """Advance *username*'s session generation, ending every live session.
+async def _revoke_sessions(db: AsyncSession, user: User) -> None:
+    """Advance *user*'s session generation, ending every live session.
 
     Every session, not only the cookie that asked: the operator signing out of
     a shared terminal has no way to know which other copies of their token are
     still in circulation, and that is the case this control exists for.
     """
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
-    if user is None:
-        return
     user.session_generation = (user.session_generation or 0) + 1
     await db.commit()
     # Every sign-in it ended loses its planning state, UDL password included.
@@ -235,19 +231,21 @@ async def post_logout(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RedirectResponse:
     """Revoke the session, clear the cookie, wipe planning state, then redirect."""
-    from spectre.web.auth import decode_session_cookie  # noqa: PLC0415
-
     cookie = request.cookies.get(_COOKIE_NAME)
     if cookie:
-        username = decode_session_cookie(cookie)
-        if username:
+        # Only a live session may end the account's sessions. Decoded without
+        # that check, as it was, a token already revoked by an earlier logout
+        # could keep ending the operator's new sessions for the rest of its
+        # 8 hours (audit F-152).
+        user = await current_user_for(cookie, db)
+        if user is not None:
             # Deleting the cookie only asks the browser to forget it. The token
             # itself stayed signed and valid for its full 8 hours, so a copy
             # captured before this point still answered 200 from /admin/users.
             # On a shared operations-room terminal logout is the operator's
             # only way to end a session, so it has to end it on the server.
-            await _revoke_sessions(db, username)
-            logger.info("Session state cleared on logout for: %s", log_safe(username))
+            await _revoke_sessions(db, user)
+            logger.info("Session state cleared on logout for: %s", log_safe(user.username))
 
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=_COOKIE_NAME)
