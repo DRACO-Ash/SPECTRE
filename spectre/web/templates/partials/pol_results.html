@@ -1,3 +1,4 @@
+{% import "partials/_modelled.html" as modelled %}
 {# Pattern of Life — enhanced analysis results with full intelligence output #}
 {# Context: pol (PolAnalysis), source (str) #}
 
@@ -45,7 +46,7 @@
       <div style="font-size:1.5rem; font-weight:900; color:{{ rc }}; line-height:1; margin-top:0.2rem">
         {{ anomaly.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
       </div>
-      <div style="font-size:0.58rem; color:var(--text-dim)">anomaly score</div>
+      <div style="font-size:0.58rem; color:var(--text-dim)">heuristic anomaly index (uncalibrated)</div>
       {% endif %}
     </div>
 
@@ -156,7 +157,7 @@
   {# Anomaly Score Component Bars #}
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
-      Anomaly Score — Component Breakdown
+      Heuristic Anomaly Index — Component Breakdown {{ modelled.badge(anomaly.basis if anomaly else "") }}
     </div>
     {% if anomaly %}
     {% set anoms = anomaly %}
@@ -180,14 +181,15 @@
     {{ score_bar("Longitude Coverage", anoms.lon_coverage, "Total GEO belt traversed — >60° = full score") }}
     {{ score_bar("Drift Rate", anoms.drift_rate, "Max drift rate vs ±0.05°/day SK tolerance") }}
     {{ score_bar("SK Irregularity", anoms.sk_regularity, "Coefficient of variation of manoeuvre intervals") }}
-    {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV vs 200 m/s/yr reference ceiling") }}
+    {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV against this regime's own routine budget; see the basis below") }}
     <div style="margin-top:0.5rem; padding-top:0.4rem; border-top:1px solid var(--border);
                 display:flex; align-items:center; justify-content:space-between">
-      <div style="font-size:0.62rem; color:var(--text-dim)">Overall (weighted composite)</div>
+      <div style="font-size:0.62rem; color:var(--text-dim)">Overall heuristic index (tuned weights)</div>
       <div style="font-size:1.25rem; font-weight:900; color:{{ rc }}">
         {{ anoms.overall | round(1) }}<span style="font-size:0.6rem; color:var(--text-dim)">/100</span>
       </div>
     </div>
+    <div style="margin-top:0.35rem; font-size:0.6rem; color:var(--text-dim); line-height:1.4">{{ anoms.basis }}</div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Insufficient manoeuvres for anomaly scoring (need ≥ 2).</p>
     {% endif %}

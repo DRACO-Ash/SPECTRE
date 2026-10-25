@@ -88,8 +88,9 @@
                   letter-spacing:0.05em; margin-bottom:0.2rem">Detection</div>
       <div style="font-size:0.65rem; line-height:1.7">
         <div>
-          <span style="color:var(--text-dim)">Confidence:</span>
-          <strong style="color:{{ sig_color }}">{{ (result.confidence * 100) | round(1) }}%</strong>
+          <span style="color:var(--text-dim)">Welch t-test:</span>
+          <strong style="color:{{ sig_color }}">p = {{ "%.4f" | format(result.p_value) }}</strong>
+          <span style="color:var(--text-dim)">({{ result.n_baseline }} baseline, {{ result.n_recent }} recent obs)</span>
         </div>
         {% if result.estimated_change_epoch %}
         <div>

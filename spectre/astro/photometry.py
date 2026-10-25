@@ -108,7 +108,11 @@ class PhotometryChangeAssessment:
     magnitude_change:         float      # Δmag (positive = fainter)
     change_direction:         str        # "brightening" | "fading" | "none"
     estimated_change_epoch:   datetime | None
-    confidence:               float      # [0, 1] — composite
+    # Window sizes behind the p-value. A "confidence" of 0.99, 0.95 or 1 - p
+    # stood here and was shown as a percentage; it was not the probability
+    # that a change occurred, and it ignored these (audit F-033).
+    n_baseline:               int
+    n_recent:                 int
     confounding_factors:      list[str]
     correlated_manoeuvre_epochs: list[datetime]
 
@@ -118,15 +122,16 @@ class PhotometryChangeAssessment:
                 f"No significant brightness change detected "
                 f"(|Δmag|={abs(self.magnitude_change):.3f}, p={self.p_value:.3f})."
             )
-        sig = "99%" if self.significant_at_99 else "95%"
+        sig = "p < 0.01" if self.significant_at_99 else "p < 0.05"
         mn  = self.correlated_manoeuvre_epochs
         mn_str = (
             f" Correlated with {len(mn)} manoeuvre(s)."
             if mn else " No correlated manoeuvres detected."
         )
         return (
-            f"Significant {self.change_direction} detected at {sig} confidence "
-            f"(Δmag={self.magnitude_change:+.3f}, p={self.p_value:.4f}).{mn_str}"
+            f"Significant {self.change_direction} ({sig}, Welch t-test on "
+            f"{self.n_baseline} baseline and {self.n_recent} recent observations; "
+            f"Δmag={self.magnitude_change:+.3f}, p={self.p_value:.4f}).{mn_str}"
         )
 
 
@@ -620,7 +625,7 @@ def assess_photometry(
             mean_residual=0.0, t_statistic=0.0, p_value=1.0,
             significant_at_95=False, significant_at_99=False,
             magnitude_change=0.0, change_direction="none",
-            estimated_change_epoch=None, confidence=0.0,
+            estimated_change_epoch=None, n_baseline=0, n_recent=0,
             confounding_factors=[str(exc)],
             correlated_manoeuvre_epochs=[],
         )
@@ -663,14 +668,6 @@ def assess_photometry(
             f"{_MIN_WINDOW_OBS} each are needed"
         )
 
-    # Confidence: composite based on p-value and sample sizes
-    if sig99:
-        confidence = 0.99
-    elif sig95:
-        confidence = 0.95
-    else:
-        confidence = max(0.0, 1.0 - p)
-
     # Change epoch estimation
     change_ep = _estimate_change_epoch(corrected, baseline) if sig95 else None
 
@@ -690,7 +687,8 @@ def assess_photometry(
         magnitude_change=round(delta_mag, 4),
         change_direction=direction,
         estimated_change_epoch=change_ep,
-        confidence=round(confidence, 4),
+        n_baseline=len(base_res),
+        n_recent=len(recent_res),
         confounding_factors=confounders,
         correlated_manoeuvre_epochs=corr_mnvs,
     )

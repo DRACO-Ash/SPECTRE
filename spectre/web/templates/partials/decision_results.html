@@ -1,5 +1,6 @@
 {# Decision Engine Results — rendered into #decision-results #}
 {# Context: result (ScenarioResult) #}
+{% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}
@@ -10,8 +11,8 @@
   <div style="display:flex; justify-content:space-between; align-items:center">
     <div>
       <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.06em">
-        Modelled Recommendation
-      </span>
+        Heuristic ranking
+      </span>{{ modelled.badge(result.basis) }}
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
         {{ result.robust_strategy.value | replace('_',' ') | title }} strategy ·
         {{ result.computation_time_s }}s
@@ -94,8 +95,9 @@
               {{ "%.3f" | format(om.composite_score) }}
             </div>
             <div style="font-size:0.57rem; color:var(--text-dim)">
-              {{ "%.0f" | format(om.closest_approach_km) }}km{% if om.modelled %} (model){% endif %} ·
+              <span title="{{ om.basis }}">{{ "%.0f" | format(om.closest_approach_km) }} km{% if om.modelled %} (model){% endif %} ·
               {% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
+              custody{% if om.modelled %} (model){% endif %}</span>
             </div>
           </td>
         {% endfor %}

@@ -35,6 +35,13 @@ and they were wrong in a specific and costly way:
 Two sets of numbers for the same physics is worse than one set that is wrong,
 because only one of them ever gets updated. There is now one set, and it is the
 cited one.
+
+One exception, stated rather than hidden (audit F-036): the anomaly index's
+component weights and three of its normalisers (60 degrees of longitude,
+1.5 degrees per day of drift, an interval coefficient of variation of 2) are
+tuned, not sourced, and the risk ladder over it is a convention. The index is a
+heuristic and the panel labels it so; its budget and ΔV terms rest on the cited
+figures.
 """
 
 from __future__ import annotations
@@ -602,6 +609,18 @@ def _risk_level(overall: float) -> str:
     return _RISK_FLOOR_LEVEL
 
 
+# Normalisers at which a component reaches full score. Tuned, not sourced
+# (audit F-036): the module docstring and the basis line both say so.
+_ANOMALY_FULL_LON_DEG = 60.0
+_ANOMALY_FULL_DRIFT_DEG_DAY = 1.5
+_ANOMALY_FULL_CV = 2.0
+_ANOMALY_TUNED_NOTE = (
+    " The component weights and the longitude, drift and interval normalisers "
+    "(60 degrees, 1.5 degrees per day, a coefficient of variation of 2) are tuned, "
+    "not sourced, so the overall figure is a heuristic index, not a measurement."
+)
+
+
 def _assess_anomaly(
     views: list[ManoeuvreView], pol: Any, regime: str,
     propellant: PropellantAssessment,
@@ -620,19 +639,19 @@ def _assess_anomaly(
     lons = [v.manoeuvre.tle_after.geo_longitude_deg for v in views
             if v.manoeuvre.tle_after.geo_longitude_deg is not None]
     lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
-    lon_score = _clamp01(lon_range / 60.0) * 100
+    lon_score = _clamp01(lon_range / _ANOMALY_FULL_LON_DEG) * 100
 
     phases = getattr(pol, "drift_phases", []) or []
     if phases:
         max_drift = max(abs(p.rate_deg_day) for p in phases)
         # Table 3: GEO east-west keeping holds a slot to about 0.05 deg/day.
-        drift_score = _clamp01((max_drift - 0.05) / 1.5) * 100
+        drift_score = _clamp01((max_drift - 0.05) / _ANOMALY_FULL_DRIFT_DEG_DAY) * 100
     else:
         drift_score = 0.0
 
     intervals = getattr(pol, "interval_stats", None)
     if intervals and intervals.std > 0:
-        reg_score = _clamp01((intervals.std / max(intervals.mean, 0.01)) / 2.0) * 100
+        reg_score = _clamp01((intervals.std / max(intervals.mean, 0.01)) / _ANOMALY_FULL_CV) * 100
     else:
         reg_score = 0.0
 
@@ -650,6 +669,7 @@ def _assess_anomaly(
         basis = (f"No published station-keeping budget for {regime}, so the "
                  "budget term is not scored rather than guessed.")
 
+    basis += _ANOMALY_TUNED_NOTE
     w = _W_GEO if regime.strip().upper() in ("GEO", "DEEP") else _W_OTHER
     overall = (dv_score * w["dv"] + lon_score * w["lon"] + drift_score * w["drift"]
                + reg_score * w["regularity"] + budget_score * w["budget"])

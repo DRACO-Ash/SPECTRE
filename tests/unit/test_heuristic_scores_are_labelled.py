@@ -166,3 +166,63 @@ class TestTheAstroResultsNameThemselvesHonestly:
         assert r.primary_classification == "unknown"
         assert r.match_score == pytest.approx(max(r.scores.values()))
         assert r.match_score != pytest.approx(0.1), "the old constant, not the score"
+
+
+class TestTheAnomalyScoreIsAHeuristicIndex:
+    """Audit F-036: the anomaly score read as a measurement under a risk banner."""
+
+    _TEMPLATE = Path("spectre/web/templates/partials/pol_results.html")
+
+    def test_the_panel_names_it_heuristic_and_shows_its_basis(self) -> None:
+        text = self._TEMPLATE.read_text(encoding="utf-8")
+        assert "heuristic anomaly index (uncalibrated)" in text
+        assert "anomaly.basis" in text or "anoms.basis" in text
+        assert "modelled.badge(" in text
+
+    def test_the_tooltip_no_longer_cites_a_flat_ceiling(self) -> None:
+        assert "200 m/s/yr" not in self._TEMPLATE.read_text(encoding="utf-8")
+
+    def test_the_basis_says_the_weights_are_tuned(self) -> None:
+        from spectre.domain.pol_assessment import assess_pattern_of_life
+        from tests.unit.test_routine_burns_keep_the_reserve import _pol, _station_keeping
+
+        anomaly = assess_pattern_of_life(_pol(_station_keeping())).anomaly
+        assert anomaly is not None
+        assert "tuned" in anomaly.basis and "heuristic" in anomaly.basis
+
+    def test_the_module_no_longer_claims_every_threshold_is_cited(self) -> None:
+        import spectre.domain.pol_assessment as pa
+
+        assert "anomaly index" in (pa.__doc__ or ""), "the docstring must carve out the tuned anomaly weights"
+
+
+class TestPhotometryReportsItsStatistics:
+    """Audit F-033: a p-value was shown as a "Confidence" percentage."""
+
+    def test_the_assessment_carries_sample_sizes_not_a_confidence(self) -> None:
+        import dataclasses
+
+        from spectre.astro.photometry import PhotometryChangeAssessment
+
+        names = {f.name for f in dataclasses.fields(PhotometryChangeAssessment)}
+        assert "confidence" not in names
+        assert {"n_baseline", "n_recent", "p_value"} <= names
+
+    def test_the_panel_shows_the_p_value_and_sizes(self) -> None:
+        text = Path("spectre/web/templates/partials/photometry_results.html").read_text(encoding="utf-8")
+        assert "result.confidence" not in text
+        assert "Confidence:" not in text
+        assert "result.p_value" in text and "result.n_baseline" in text and "result.n_recent" in text
+
+    def test_the_summary_does_not_call_significance_confidence(self) -> None:
+        from spectre.astro.photometry import PhotometryChangeAssessment
+
+        a = PhotometryChangeAssessment(
+            baseline_mean=12.0, baseline_std=0.02, recent_mean=12.3, recent_std=0.02,
+            mean_residual=0.3, t_statistic=9.0, p_value=0.0001, significant_at_95=True,
+            significant_at_99=True, magnitude_change=0.3, change_direction="fading",
+            estimated_change_epoch=None, n_baseline=20, n_recent=8,
+            confounding_factors=[], correlated_manoeuvre_epochs=[],
+        )
+        assert "confidence" not in a.summary().lower()
+        assert "p < 0.01" in a.summary()

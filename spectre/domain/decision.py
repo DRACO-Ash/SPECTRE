@@ -124,6 +124,7 @@ class OutcomeMetrics:
     # Every figure above is a Phase 1 lookup or weighting, not a propagated
     # result. Carried on the data so no consumer can present it as computed.
     modelled:             bool = True
+    basis:                str = MODELLED_BASIS
 
     def __str__(self) -> str:
         cust = "✓" if self.custody_maintained else "✗"

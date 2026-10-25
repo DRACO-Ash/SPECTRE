@@ -102,3 +102,28 @@ class TestTheOperatorIsTold:
         panel = (_TEMPLATE_DIR / "partials" / "decision_panel.html").read_text(encoding="utf-8")
         assert 'value="maximin"' not in panel
         assert "Minimin" in panel
+
+
+class TestEveryModelledCellSaysSo:
+    """Audit F-034: closest approach and custody read as physical quantities."""
+
+    def test_each_metric_carries_its_basis(self) -> None:
+        from spectre.domain.decision import MODELLED_BASIS
+
+        scenario, _ = _two_by_two()
+        result = evaluate_scenario(scenario)
+        assert all(cell.basis == MODELLED_BASIS for row in result.outcome_matrix for cell in row)
+
+    def test_the_banner_calls_it_a_heuristic_ranking_and_uses_the_shared_badge(self) -> None:
+        scenario, _ = _two_by_two()
+        html = " ".join(_render("partials/decision_results.html", {"result": evaluate_scenario(scenario)}).split())
+        assert "Heuristic ranking" in html
+        assert 'class="modelled-badge"' in html
+
+    def test_every_custody_mark_is_labelled_modelled(self) -> None:
+        scenario, _ = _two_by_two()
+        result = evaluate_scenario(scenario)
+        html = " ".join(_render("partials/decision_results.html", {"result": result}).split())
+        cells = sum(len(row) for row in result.outcome_matrix)
+        assert html.count("custody (model)") == cells
+        assert html.count("km (model)") == cells
