@@ -337,3 +337,15 @@ With F-104, step 3's single-location findings are closed apart from those carrie
 | F-033 | F-S04-05 | `ad8b937` | the composite "confidence" is removed; the panel shows the Welch p-value and both window sizes, and the summary says "p < 0.01", not "99% confidence" |
 | F-079 | F-S02-25 | `8414b03`, `8dda153` | the five tactical functions over complexity 15 are split, their thresholds named in tables; byte-identical over 28,816 and 420 snapshot cases |
 | F-076 | F-S02-19 | `8dda153` | the discarded combined-burn allocation and unused cosine are removed and the docstring no longer claims combined burns; a zero fuel budget no longer divides by zero |
+
+### Remaining High findings
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-023 | F-S02-13 | `ab70bc9` | the RAAN residual is signed and wrapped, so a node moved against precession is detected (+5 against -5 now reads 10, not 0). Fixing it exposed a second defect the magnitude arithmetic hid: manoeuvre detection compared both sets at one instant and still removed a day of J2 drift. It now removes none; a coasting object two days on is no longer charged for a node change |
+| F-025 | F-S02-22 | `52f3b5e` | phasing refuses radii more than 10 km apart, naming the Hohmann or Lambert leg needed, and within that reports the radial gap it leaves as the miss instead of 0 |
+| F-032 | F-S04-04 | `a652541` | one shared partial says where the detection floor came from; an unmeasured floor reads "the absolute floor (not measured)" with the reason. The too-few-samples path also marked its absolute floor as measured; it no longer does |
+| F-035 | F-S05-03 | `d7531e4` | the custody gap is horizon x adversary confidence, not scaled by our reversibility; losing custody now costs. On the fixture the robust rules pick the sensor retask and minimin picks doing nothing |
+| F-054 | F-S09-11 | `978a157` | each TLE's node is carried to the newest epoch at SGP4's own secular rate before clustering; three fits of one orbit six hours apart now form one cluster, and a 2 degree node change still separates |
+
+Fixtures in three places held a node fixed for hours or a day, which is itself a node change against J2; they now drift at the J2 or SGP4 rate.

@@ -65,6 +65,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
 - CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
 
+### Fixed (audit step 4, High)
+- A node change against J2 precession is detected, and manoeuvre detection no longer removes the drift twice (F-023).
+- Phasing refuses an altitude gap it cannot close and reports the gap it leaves (F-025).
+- An unmeasured detection floor is no longer called measured (F-032).
+- Losing custody costs in the Decision Engine whatever our own reversibility, so doing nothing is no longer the robust pick against a manoeuvre (F-035).
+- TLE clustering compares nodes at one epoch, so fits of one orbit hours apart cluster (F-054).
+
 ### Changed (audit step 4, heuristic scores)
 - Assessment results carry a score, its kind and its provenance; the miss distance is only ever a distance (F-072).
 - Heuristic figures say so: scores, not probabilities, likelihoods or confidences, with a shared "modelled estimate, not a computed solution" badge on intercept assessments, the Decision Engine and the PoL anomaly index (F-041, F-018 to F-022, F-034, F-036).
