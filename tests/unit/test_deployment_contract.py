@@ -67,9 +67,9 @@ _DOCKER_ONLY = _is_docker_only_package()
 
 # Assertions about files only the python template ships. They still run in the
 # repository and in the python-template package; only the docker-only archive
-# skips them. The inverse is asserted against the built archive itself, in
-# tests/integration/test_packager_gates.py (TestTheDockerOnlyArchive), because
-# the docker-only archive carries no tests to assert it from inside (F-179).
+# skips them. The inverse is asserted against the built archive itself, by the
+# docker-only archive class in the packager gate tests, because that archive
+# carries no tests to assert it from inside (F-179).
 _python_template_only = pytest.mark.skipif(
     _DOCKER_ONLY,
     reason="docker-only package: no recognised Python manifest ships, by design",

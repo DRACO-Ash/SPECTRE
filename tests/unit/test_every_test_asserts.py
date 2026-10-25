@@ -21,13 +21,12 @@ _CONTEXT_CHECKS = {"raises", "warns"}
 
 
 def _test_functions() -> list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
-    found = []
-    for path in sorted(_TESTS.rglob("test_*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
-                found.append((f"{path.relative_to(_TESTS)}:{node.lineno} {node.name}", node))
-    return found
+    return [
+        (f"{path.relative_to(_TESTS)}:{node.lineno} {node.name}", node)
+        for path in sorted(_TESTS.rglob("test_*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+    ]
 
 
 def _call_name(call: ast.Call) -> str:
