@@ -67,8 +67,9 @@ _DOCKER_ONLY = _is_docker_only_package()
 
 # Assertions about files only the python template ships. They still run in the
 # repository and in the python-template package; only the docker-only archive
-# skips them, and TestDockerOnlyContract below asserts the inverse there so the
-# skip is not a hole.
+# skips them. The inverse is asserted against the built archive itself, in
+# tests/integration/test_packager_gates.py (TestTheDockerOnlyArchive), because
+# the docker-only archive carries no tests to assert it from inside (F-179).
 _python_template_only = pytest.mark.skipif(
     _DOCKER_ONLY,
     reason="docker-only package: no recognised Python manifest ships, by design",
@@ -764,59 +765,6 @@ class TestBuildBackendContract:
         body = self._pyproject()
         include = body.split("[tool.setuptools.packages.find]", 1)[1].split("\n\n", 1)[0]
         assert '"tests' not in include, "tests/ must not be declared as a package"
-
-
-class TestDockerOnlyContract:
-    """The inverse contract, asserted only inside the docker-only archive.
-
-    Every assertion the python template makes about manifests skips here, so
-    without these the docker-only package would travel with a hole where its
-    contract should be. The property that matters is the absence that selects
-    the template, plus the presence of everything the image actually needs.
-    """
-
-    _RECOGNISED = frozenset(
-        {
-            "requirements.txt",
-            "requirements.in",
-            "requirements.pip",
-            "requires.txt",
-            "setup.py",
-            "setup.cfg",
-            "pyproject.toml",
-            "Pipfile",
-            "Pipfile.lock",
-            "poetry.lock",
-            "uv.lock",
-            "pdm.lock",
-            "pipdeptree.json",
-        }
-    )
-
-    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
-    def test_no_recognised_manifest_at_any_depth(self) -> None:
-        """A single one anywhere flips the template and restores the broken stage.
-
-        Checked at every depth, not just the root: the analyser walks the tree
-        and selects the first directory carrying a name it recognises.
-        """
-        strays = sorted(
-            str(path.relative_to(_REPO_ROOT))
-            for path in _REPO_ROOT.rglob("*")
-            if path.is_file() and path.name in self._RECOGNISED
-        )
-        assert not strays, (
-            f"these would select the python template: {strays}. The docker-only "
-            "archive must carry none of them."
-        )
-
-    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
-    def test_the_image_still_has_a_hashed_lock_to_install(self) -> None:
-        """Dropping the manifests must not drop the pinning with them."""
-        runtime = _repo_only("requirements-runtime.txt")
-        assert runtime.is_file(), "the image has nothing to install from"
-        body = runtime.read_text(encoding="utf-8")
-        assert "--hash=sha256:" in body, "the runtime lock must stay hash-pinned"
 
 
 class TestClusteringPackageTravels:
@@ -1619,6 +1567,16 @@ class TestContinuousIntegrationCanRun:
         """Audit F-042: the sweep routes were untested at 48 per cent."""
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
+
+    def test_no_test_runs_only_where_the_suite_is_absent(self) -> None:
+        """Audit F-179: a test skipped unless in the docker-only archive never
+        runs, because that archive does not carry the suite."""
+        offenders = [
+            str(path.relative_to(_REPO_ROOT))
+            for path in (_REPO_ROOT / "tests").rglob("test_*.py")
+            if re.search(r"skipif\(\s*not\s+_DOCKER_ONLY", path.read_text(encoding="utf-8"))
+        ]
+        assert not offenders, f"these hold tests that can never run: {offenders}"
 
     def test_the_decision_engine_keeps_its_coverage_floor(self) -> None:
         """Audit F-122: the selectors were tested only for returning a response."""
