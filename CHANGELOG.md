@@ -65,6 +65,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
 - CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
 
+### Fixed (audit step 3, tests)
+- The threat sweep shows the group's best ΔV and the worst-case headline in whole m/s, not to three decimals (F-137).
+- Tests that checked nothing, only a type, or a condition true of every value now pin values; a meta-test keeps them out (F-066, F-147).
+- The threat sweep, TLE year pivot, NOTSO cache and Decision Engine tests pin reference values; the Decision Engine is held at full coverage (F-137, F-147, F-122).
+- The docker-only archive's contract is checked against the built archive, not from inside it where the suite never travels (F-179).
+
 ### Added
 - Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
 - Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).

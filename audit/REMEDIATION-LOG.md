@@ -289,3 +289,15 @@ Observed while generating the F-161 table, not an audit finding: level 5 (Operat
 | F-065 | F-S00-12 | `1fa1f55` | CI ruff selects BLE, S110 and RUF100, with the quality gate's own codes (S, PLR, PLC, PLW) declared external so their directives are not reported dead; the one dead directive removed. Of 23 unmarked broad handlers, 16 now catch what their block raises (`TLE_ERRORS`, found by fuzzing the parser and SGP4: ValueError, RuntimeError and ZeroDivisionError) and 7 stay broad with a stated reason |
 
 `1fa1f55` also splits `ScenarioPlanner.plan` (27), `_parse_udl_elset_response` (21) and `udl_notso` (17), which narrowing their handlers brought into scope; each gives byte-identical output against a snapshot taken before the change.
+
+### Test-only findings
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-147 | F-S07-26 | `a4c23a8` | the TLE year pivot is one parametrised test over 00, 26, 56, 57 and 99; the NOTSO cache's `added >= 0` is replaced by what the cache does: a record with no id is kept every time |
+| F-137 | F-S06-28 | `2d8ab36` | the `list.sort` test is deleted; the group test's docstring says warning time; the sweep's Hohmann is pinned to the vis-viva 110.69 m/s within 1 m/s; the screen route tests restore the shared cache. Tightening the whole-metres test found two real defects: the group row and the worst-case headline printed ΔV with three decimals. Both now use the `m_s` filter |
+| F-122 | F-S05-18 | `41ae3d8` | the fixture's six composite scores and each selector's pick are pinned, the zero-probability branch and all four closest-approach rules run, and CI holds `decision.py` at 100 per cent line coverage. Five hand mutations of `find_robust_response`: four fail the suite, the fifth is equivalent |
+| F-066 | F-S00-14 | `8d92e47` | 9 assertion-free tests, 20 type-only tests and 7 assertions true of every value now pin values; `tests/unit/test_every_test_asserts.py` fails on any of the three patterns (also the F-147 gate) |
+| F-179 | F-S10-13 | `7b28d97` | the docker-only contract is asserted against the built archive in the packager gate module; the class that could never run is removed, and a contract test fails on a test gated to the docker-only archive. The suite's skips fall from 14 to 12 |
+
+Observed while pinning F-137, not an audit finding: for coplanar circular orbits at 400 and 600 km the sweep prices a V-bar hop at 1.66 m/s, which cannot move an object 200 km in altitude. Left for the solver owner.
