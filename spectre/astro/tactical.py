@@ -55,6 +55,15 @@ class PhasingResult:
     time_to_intercept_s: float  # total wait time
 
 
+#: Largest chaser-target radius difference phasing will plan across, km. The
+#: burns and the return are at the chaser's radius and the closure uses the
+#: target's period, so the plan ends with a radial miss equal to the gap; it is
+#: a rendezvous only while that stays this small. About an eccentricity of
+#: 0.0015 in LEO. Beyond it the altitude has to be matched first, by a Hohmann
+#: or Lambert leg (audit F-025).
+_PHASING_RADIUS_TOLERANCE_KM = 10.0
+
+
 def phasing_orbit(
     r_chaser: float,
     r_target: float,
@@ -74,6 +83,13 @@ def phasing_orbit(
         n_revolutions: Number of phasing revolutions.
         mu: Gravitational parameter.
     """
+    gap_km = abs(r_chaser - r_target)
+    if gap_km > _PHASING_RADIUS_TOLERANCE_KM:
+        raise ValueError(
+            f"phasing needs the chaser and target at the same radius: they are {gap_km:.1f} km "
+            f"apart, beyond the {_PHASING_RADIUS_TOLERANCE_KM:.0f} km a phasing plan can close. "
+            "Match the altitude first with a Hohmann or Lambert transfer."
+        )
     phase_rad = math.radians(phase_angle_deg)
     period_target = 2.0 * math.pi * math.sqrt(r_target**3 / mu)
 

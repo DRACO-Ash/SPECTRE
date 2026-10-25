@@ -54,3 +54,20 @@ class TestDetectionDoesNotSubtractTheDriftTwice:
         start = _parse_tle_epoch(after.splitlines()[0])
         solution = manoeuvre_detect_intercept(before, after, start)
         assert solution.total_delta_v * 1000.0 < 1.0, "a coasting object was charged for a node change"
+
+
+class TestPhasingRefusesUnequalRadii:
+    """Audit F-025: phasing closes the angle at the chaser's radius, so it is a
+    rendezvous only when the radii match; it reported 0 km for an altitude gap."""
+
+    def test_unequal_radii_beyond_the_tolerance_raise(self) -> None:
+        from spectre.astro.tactical import _PHASING_RADIUS_TOLERANCE_KM, phasing_orbit
+
+        with pytest.raises(ValueError, match="radi"):
+            phasing_orbit(6778.0, 6778.0 + _PHASING_RADIUS_TOLERANCE_KM + 1.0, 20.0, 2)
+
+    def test_matching_radii_still_solve(self) -> None:
+        from spectre.astro.tactical import _PHASING_RADIUS_TOLERANCE_KM, phasing_orbit
+
+        result = phasing_orbit(6778.0, 6778.0 + _PHASING_RADIUS_TOLERANCE_KM / 2, 20.0, 2)
+        assert result.total_delta_v > 0.0

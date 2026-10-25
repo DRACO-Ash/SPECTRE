@@ -348,7 +348,8 @@ def phasing_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=0.0,
+        # The closure is at the chaser's radius, so the radial gap remains.
+        miss_distance_km=abs(r_red - r_blue),
     )
 
 
