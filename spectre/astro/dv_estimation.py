@@ -898,6 +898,7 @@ def calibrate_noise(dv_samples: list[float]) -> NoiseModel:
             median_km_s=0.0, mad_km_s=0.0,
             floor_km_s=_NOISE_ABSOLUTE_FLOOR_KM_S,
             samples=n, method="insufficient samples — absolute floor",
+            floor_is_measured=False,
         )
 
     ordered = sorted(dv_samples)

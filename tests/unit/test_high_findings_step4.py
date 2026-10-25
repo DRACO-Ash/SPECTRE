@@ -71,3 +71,36 @@ class TestPhasingRefusesUnequalRadii:
 
         result = phasing_orbit(6778.0, 6778.0 + _PHASING_RADIUS_TOLERANCE_KM / 2, 20.0, 2)
         assert result.total_delta_v > 0.0
+
+
+class TestAnUnmeasuredFloorIsNotCalledMeasured:
+    """Audit F-032: the drill-down said "measured from N pairs" when the fixed
+    0.1 m/s absolute floor stood in."""
+
+    @staticmethod
+    def _render(**floor: object) -> str:
+        from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+        from spectre.web.app import templates as app_templates
+
+        env = Environment(loader=FileSystemLoader("spectre/web/templates"), autoescape=True, undefined=StrictUndefined)
+        env.filters.update(app_templates.env.filters)
+        source = '{% import "partials/_noise_floor.html" as nf %}{{ nf.floor(f) }}'
+        return " ".join(env.from_string(source).render(f=floor).split())
+
+    def test_the_absolute_floor_is_not_called_measured(self) -> None:
+        html = self._render(floor_m_s=0.1, measured=False, samples=2, median_m_s=0.0, mad_m_s=0.0,
+                            method="insufficient samples — absolute floor")
+        assert "measured" not in html.replace("not measured", "")
+        assert "absolute floor (not measured)" in html
+        assert "insufficient samples" in html
+
+    def test_a_measured_floor_says_where_it_came_from(self) -> None:
+        html = self._render(floor_m_s=0.8, measured=True, samples=40, median_m_s=0.3, mad_m_s=0.1,
+                            method="median + 5·MAD")
+        assert "measured from 40 consecutive element set pairs" in html
+
+    def test_too_few_samples_marks_the_floor_unmeasured(self) -> None:
+        from spectre.astro.dv_estimation import calibrate_noise
+
+        assert calibrate_noise([0.0001, 0.0002]).floor_is_measured is False

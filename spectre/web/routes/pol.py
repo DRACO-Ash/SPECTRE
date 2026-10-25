@@ -505,6 +505,7 @@ def _detection_view(pol: object) -> dict[str, object]:
         "noise_mad_m_s":        to_m_s(noise.mad_km_s) if noise else None,
         "noise_samples":        noise.samples if noise else 0,
         "noise_method":         noise.method if noise else "",
+        "noise_floor_measured": noise.floor_is_measured if noise else False,
     }
 
 
@@ -626,6 +627,8 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "noise_median_m_s":     None,
         "noise_mad_m_s":        None,
         "noise_samples":        0,
+        "noise_method":         "",
+        "noise_floor_measured": False,
     }
 
     bd = getattr(m, "breakdown", None)
@@ -678,6 +681,8 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "noise_median_m_s": to_m_s(bd.noise.median_km_s) if bd.noise else None,
         "noise_mad_m_s":    to_m_s(bd.noise.mad_km_s) if bd.noise else None,
         "noise_samples":    bd.noise.samples if bd.noise else 0,
+        "noise_method":     bd.noise.method if bd.noise else "",
+        "noise_floor_measured": bd.noise.floor_is_measured if bd.noise else False,
     })
     return view
 

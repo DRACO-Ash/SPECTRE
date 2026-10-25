@@ -279,9 +279,9 @@
   {# ── The threshold this object's own element sets forced ─────────────── #}
   {% if noise_floor_m_s is not none %}
   <div style="font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.4rem">
-    Detection floor for this object <strong style="color:var(--text-primary)">{{ noise_floor_m_s | m_s }} m/s</strong>,
-    measured from {{ noise_samples }} consecutive element set pairs
-    (median {{ noise_median_m_s | m_s }}, median absolute deviation {{ noise_mad_m_s | m_s }} m/s).
+    {% import "partials/_noise_floor.html" as nf %}
+    {{ nf.floor({"floor_m_s": noise_floor_m_s, "measured": noise_floor_measured, "samples": noise_samples,
+                 "median_m_s": noise_median_m_s, "mad_m_s": noise_mad_m_s, "method": noise_method}) }}
     Nothing below that floor can be told apart from the disagreement between successive fits.
   </div>
   {% endif %}

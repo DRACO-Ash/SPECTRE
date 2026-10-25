@@ -629,10 +629,10 @@
               letter-spacing:0.05em; margin-bottom:0.3rem">Detection Provenance</div>
   <div style="font-size:0.63rem; color:var(--text-primary); line-height:1.5">
     {{ detection.pairs_examined }} consecutive element set pairs examined.
-    Detection floor <strong>{{ detection.noise_floor_m_s | m_s }} m/s</strong>, measured from this
-    object's own fit scatter (median {{ detection.noise_median_m_s | m_s }},
-    median absolute deviation {{ detection.noise_mad_m_s | m_s }} m/s over
-    {{ detection.noise_samples }} pairs), not assumed.
+    {% import "partials/_noise_floor.html" as nf %}
+    {{ nf.floor({"floor_m_s": detection.noise_floor_m_s, "measured": detection.noise_floor_measured,
+                 "samples": detection.noise_samples, "median_m_s": detection.noise_median_m_s,
+                 "mad_m_s": detection.noise_mad_m_s, "method": detection.noise_method}) }}
   </div>
   <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem; line-height:1.5">
     ● {{ detection.rejected_below_floor }} pairs fell below the floor
