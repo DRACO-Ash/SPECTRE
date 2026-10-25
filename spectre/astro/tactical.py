@@ -1230,6 +1230,73 @@ class EvasionPlan:
     time_to_tca_s: float
 
 
+_EVASION_TIME_FRACTIONS = (0.25, 0.5, 0.75, 1.0)
+_DEGENERATE = 1e-12
+
+
+def _evasion_axes(n: float, t_burn: float, desired_miss_km: float) -> list[tuple[str, float, int]]:
+    """(strategy, ΔV for the desired miss, axis 0/1/2 = along/normal/radial).
+
+    Clohessy-Wiltshire displacement per unit impulse: along-track
+    |4 sin nt - 3 nt| / n, normal and radial |sin nt| / n, so the normal and
+    radial costs are equal by construction. The along-track cost is the same
+    for a prograde or a retrograde burn, and is labelled prograde. A
+    combined-axis allocation was computed here and then discarded, and the
+    docstring claimed it was evaluated; it was removed (audit F-076).
+    """
+    nt = n * t_burn
+    sin_nt = math.sin(nt)
+    coeff_y = abs(4.0 * sin_nt - 3.0 * nt) / n
+    along = desired_miss_km / coeff_y if coeff_y > _DEGENERATE else float("inf")
+    across = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > _DEGENERATE else float("inf")
+    return [("prograde", along, 0), ("normal", across, 1), ("radial", across, 2)]
+
+
+def _evasion_result(
+    burn: tuple[str, float, int], t_burn: float, desired_miss_km: float, fuel_budget_km_s: float,
+) -> EvasionResult:
+    """The burn on one axis, cut to the fuel budget when it exceeds it.
+
+    *burn* is one ``(strategy, ΔV, axis)`` entry from :func:`_evasion_axes`.
+    """
+    name, dv, axis = burn
+    if dv > fuel_budget_km_s:
+        dv_actual = fuel_budget_km_s
+        achieved_miss = desired_miss_km * (dv_actual / dv)
+    else:
+        dv_actual = dv
+        achieved_miss = desired_miss_km
+    components = [0.0, 0.0, 0.0]
+    components[axis] = dv if dv_actual == dv else dv * (dv_actual / dv)
+    fuel_fraction = dv_actual / fuel_budget_km_s if fuel_budget_km_s > 0 else 1.0
+    return EvasionResult(
+        strategy=name,
+        delta_v=dv_actual,
+        resulting_miss_km=achieved_miss,
+        fuel_used_fraction=fuel_fraction,
+        burn_epoch_offset_s=t_burn,
+        prograde_dv=components[0],
+        normal_dv=components[1],
+        radial_dv=components[2],
+        # The fraction, not a second division: a zero budget divided by zero
+        # here while the field above was guarded.
+        notes=f"Burn {t_burn / 60:.0f} min before TCA, "
+              f"miss={achieved_miss:.1f} km, "
+              f"fuel={fuel_fraction * 100:.0f}%",
+    )
+
+
+def _better_evasion(result: EvasionResult, best: EvasionResult | None, desired_miss_km: float) -> bool:
+    """Cheapest burn that achieves the miss, else the largest miss achieved."""
+    if best is None:
+        return True
+    cheaper_and_enough = result.resulting_miss_km >= desired_miss_km and result.delta_v < best.delta_v
+    best_short_and_beaten = (
+        best.resulting_miss_km < desired_miss_km and result.resulting_miss_km > best.resulting_miss_km
+    )
+    return cheaper_and_enough or best_short_and_beaten
+
+
 def optimal_evasion(
     r_ref: float,
     desired_miss_km: float,
@@ -1239,16 +1306,14 @@ def optimal_evasion(
 ) -> EvasionPlan:
     """Compute the optimal defensive evasion manoeuvre.
 
-    Evaluates multiple burn strategies (prograde, retrograde, normal,
-    radial, and combined) at the optimal burn time to maximise miss
-    distance while respecting fuel constraints.
+    Evaluates single-axis burns (along-track, normal and radial) at four
+    burn times to maximise miss distance while respecting the fuel budget.
 
     Unlike COLA (which simply achieves a required miss distance),
     the evasion planner:
     - Respects a fuel budget constraint
     - Optimises burn timing (not just direction)
-    - Evaluates combined multi-axis burns
-    - Reports remaining fuel after the manoeuvre
+    - Reports the fuel used by the manoeuvre
 
     Args:
         r_ref: Reference orbit radius (km).
@@ -1259,92 +1324,17 @@ def optimal_evasion(
     """
     n = math.sqrt(mu / r_ref**3)
     strategies: list[EvasionResult] = []
-
-    # Evaluate burns at multiple timing offsets to find optimal
-    # Test at 25%, 50%, 75%, and 100% of available time
     best_overall: EvasionResult | None = None
 
-    for time_frac in [0.25, 0.5, 0.75, 1.0]:
+    # Burn at 25, 50, 75 and 100 per cent of the time available.
+    for time_frac in _EVASION_TIME_FRACTIONS:
         t_burn = time_to_tca_s * time_frac
-        nt = n * t_burn
-        sin_nt = math.sin(nt)
-        _cos_nt = math.cos(nt)
-
-        # Prograde/retrograde: along-track displacement
-        coeff_y = abs(4.0 * sin_nt - 3.0 * nt) / n
-        if coeff_y > 1e-12:
-            dv_prograde = desired_miss_km / coeff_y
-        else:
-            dv_prograde = float("inf")
-
-        # Normal: cross-track displacement
-        if abs(sin_nt) > 1e-12:
-            dv_normal = desired_miss_km * n / abs(sin_nt)
-        else:
-            dv_normal = float("inf")
-
-        # Radial: radial displacement
-        if abs(sin_nt) > 1e-12:
-            dv_radial = desired_miss_km * n / abs(sin_nt)
-        else:
-            dv_radial = float("inf")
-
-        # Combined: split ΔV optimally across axes
-        # Allocate budget proportionally to effectiveness
-        weights = []
-        if coeff_y > 1e-12:
-            weights.append(("combined", coeff_y))
-        eff_r = abs(sin_nt) / n if abs(sin_nt) > 1e-12 else 0.0
-        if eff_r > 1e-12:
-            weights.append(("combined_r", eff_r))
-
-        if weights:
-            total_eff = sum(w[1] for w in weights)
-            # Combined ΔV needed for desired_miss along best axis
-            _dv_combined = desired_miss_km / total_eff * len(weights)
-        else:
-            _dv_combined = float("inf")
-
-        # Evaluate each strategy at this timing
-        candidates = [
-            ("prograde" if dv_prograde >= 0 else "retrograde",
-             dv_prograde, dv_prograde, 0.0, 0.0),
-            ("normal", dv_normal, 0.0, dv_normal, 0.0),
-            ("radial", dv_radial, 0.0, 0.0, dv_radial),
-        ]
-
-        for name, dv, pro, nor, rad in candidates:
-            if dv > fuel_budget_km_s or dv == float("inf"):
-                # Exceeds budget — use full budget and compute achieved miss
-                if dv == float("inf"):
-                    continue
-                dv_actual = fuel_budget_km_s
-                achieved_miss = desired_miss_km * (dv_actual / dv)
-            else:
-                dv_actual = dv
-                achieved_miss = desired_miss_km
-
-            result = EvasionResult(
-                strategy=name,
-                delta_v=dv_actual,
-                resulting_miss_km=achieved_miss,
-                fuel_used_fraction=dv_actual / fuel_budget_km_s if fuel_budget_km_s > 0 else 1.0,
-                burn_epoch_offset_s=t_burn,
-                prograde_dv=pro if dv_actual == dv else pro * (dv_actual / dv),
-                normal_dv=nor if dv_actual == dv else nor * (dv_actual / dv),
-                radial_dv=rad if dv_actual == dv else rad * (dv_actual / dv),
-                notes=f"Burn {t_burn / 60:.0f} min before TCA, "
-                      f"miss={achieved_miss:.1f} km, "
-                      f"fuel={dv_actual / fuel_budget_km_s * 100:.0f}%",
-            )
+        for burn in _evasion_axes(n, t_burn, desired_miss_km):
+            if burn[1] == float("inf"):
+                continue
+            result = _evasion_result(burn, t_burn, desired_miss_km, fuel_budget_km_s)
             strategies.append(result)
-
-            if best_overall is None or (
-                achieved_miss >= desired_miss_km and dv_actual < best_overall.delta_v
-            ) or (
-                best_overall.resulting_miss_km < desired_miss_km
-                and achieved_miss > best_overall.resulting_miss_km
-            ):
+            if _better_evasion(result, best_overall, desired_miss_km):
                 best_overall = result
 
     if best_overall is None:

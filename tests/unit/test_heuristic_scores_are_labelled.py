@@ -226,3 +226,19 @@ class TestPhotometryReportsItsStatistics:
         )
         assert "confidence" not in a.summary().lower()
         assert "p < 0.01" in a.summary()
+
+
+class TestTheEvasionPlannerSaysWhatItDoes:
+    """Audit F-076 and F-079: dead combined-burn code, and a crash at zero fuel."""
+
+    def test_a_zero_fuel_budget_plans_without_dividing_by_zero(self) -> None:
+        from spectre.astro.tactical import optimal_evasion
+
+        plan = optimal_evasion(6878.0, 1.0, 2700.0, fuel_budget_km_s=0.0)
+        assert plan.best.delta_v == 0.0
+        assert "fuel=100%" in plan.best.notes
+
+    def test_the_docstring_claims_no_combined_burn(self) -> None:
+        from spectre.astro.tactical import optimal_evasion
+
+        assert "combined" not in (optimal_evasion.__doc__ or "").lower()
