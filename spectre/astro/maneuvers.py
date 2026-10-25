@@ -1022,18 +1022,19 @@ def manoeuvre_detect_intercept(
     kep_before = state_to_keplerian(sv_before)
     kep_after = state_to_keplerian(sv_after)
 
-    # Time between TLE epochs
-    dt_s = abs((blue_orbit._sat.jdsatepoch - red_orbit._sat.jdsatepoch) * 86400.0)
-    if dt_s < 1.0:
-        dt_s = 86400.0  # default 1 day if epochs are same
-
     # KeplerianElements angles are already degrees. They were passed through
     # degrees() again here, under a local alias the static guard could not
     # see, so TLE noise read as a plane change 57x too costly (audit F-001).
+    #
+    # Both element sets are taken at t_epoch, so SGP4 has already carried each
+    # node through its J2 precession and no drift separates them: the elapsed
+    # time is zero. This passed the gap between the TLE epochs (a day when
+    # they matched), which subtracted the drift a second time; the magnitude
+    # arithmetic that F-023 removed happened to hide it.
     result = classify_manoeuvre(
         kep_before.a, kep_before.ecc, kep_before.inc, kep_before.raan,
         kep_after.a, kep_after.ecc, kep_after.inc, kep_after.raan,
-        dt_s, mu,
+        0.0, mu,
     )
 
     # Build a zero-burn solution with classification info

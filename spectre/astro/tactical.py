@@ -33,6 +33,7 @@ from spectre.astro.constants import (
     SIDEREAL_DAY,
 )
 from spectre.astro.cw_geometry import CWState, _cw_propagate
+from spectre.astro.dv_estimation import _wrap180
 from spectre.astro.transfers import hohmann
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -858,20 +859,22 @@ def classify_manoeuvre(
     Args:
         a1, ecc1, inc1_deg, raan1_deg: Before-manoeuvre elements.
         a2, ecc2, inc2_deg, raan2_deg: After-manoeuvre elements.
-        dt_s: Time between observations (seconds).
+        dt_s: Time between the epochs the two element sets are taken at
+            (seconds), used only to remove J2 nodal drift; zero when both were
+            propagated to one instant.
         mu: Gravitational parameter.
     """
     da = a2 - a1
     de = ecc2 - ecc1
     di = abs(inc2_deg - inc1_deg)
-    draan = abs(raan2_deg - raan1_deg)
-    if draan > 180.0:
-        draan = 360.0 - draan
 
     # RAAN change, after subtracting the expected J2 drift to isolate the
-    # manoeuvre-induced part (only valid for non-J2 manoeuvres).
-    expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
-    raan_residual = max(0.0, draan - expected_j2_raan)
+    # manoeuvre-induced part (only valid for non-J2 manoeuvres). Signed, then
+    # wrapped: reducing both to magnitudes first cancelled a node moved
+    # AGAINST precession, so +5 deg against a predicted -5 read as nothing
+    # rather than 10 (audit F-023).
+    expected_j2_raan = j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0
+    raan_residual = abs(_wrap180((raan2_deg - raan1_deg) - expected_j2_raan))
 
     total_dv = _element_change_dv((a1, a2), inc1_deg, (di, raan_residual), mu)
 

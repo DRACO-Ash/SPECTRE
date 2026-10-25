@@ -36,6 +36,17 @@ LEO_R = R_EARTH + 500.0   # ~500 km altitude
 GEO_R = 42164.0           # GEO radius
 
 
+def _drifted(raan_deg: float, a: float = LEO_R, ecc: float = 0.001, inc: float = 51.6, dt_s: float = 86400.0) -> float:
+    """The node a day later with no manoeuvre: J2 moves it about -5 deg/day here.
+
+    Holding the node fixed for a day, as these fixtures did, is itself a node
+    change against precession; the classifier hid that until audit F-023.
+    """
+    from spectre.astro.tactical import j2_raan_rate
+
+    return raan_deg + j2_raan_rate(a, ecc, inc) * dt_s / 86400.0
+
+
 class TestPhasingOrbit:
     """Moved off LEO deliberately.
 
@@ -298,7 +309,7 @@ class TestManoeuvreClassification:
     def test_altitude_change(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R + 50, 0.001, 51.6, 100.0,
+            LEO_R + 50, 0.001, 51.6, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "altitude_change"
@@ -309,7 +320,7 @@ class TestManoeuvreClassification:
     def test_plane_change_detected(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R, 0.001, 53.0, 100.0,
+            LEO_R, 0.001, 53.0, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "plane_change"
@@ -318,7 +329,7 @@ class TestManoeuvreClassification:
     def test_no_manoeuvre(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R, 0.001, 51.6, 100.0,
+            LEO_R, 0.001, 51.6, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "station_keeping"
@@ -327,7 +338,7 @@ class TestManoeuvreClassification:
     def test_combined_manoeuvre(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R + 100, 0.001, 53.0, 100.0,
+            LEO_R + 100, 0.001, 53.0, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "combined"
