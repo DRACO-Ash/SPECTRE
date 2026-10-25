@@ -151,7 +151,7 @@ async def training_leave(
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Close the training session, remove its scenario objects, return to Operations."""
-    _remove_training_objects(current_user.username)
+    _remove_training_objects(current_user)
     if session_id:
         result = await db.execute(
             select(TrainingSession).where(
@@ -174,9 +174,9 @@ async def training_leave(
     return RedirectResponse(url="/", status_code=303)
 
 
-def _remove_training_objects(username: str) -> None:
+def _remove_training_objects(owner: User) -> None:
     """Drop every object a training scenario added to the operator's lists."""
-    state = get_session_state(username)
+    state = get_session_state(owner)
     state.blue_assets = [a for a in state.blue_assets if not a.training]
     state.red_tracks = [t for t in state.red_tracks if not t.training]
 
@@ -220,7 +220,7 @@ async def training_scenario_detail(
 
 # ── Start a scenario attempt ──────────────────────────────────────────────────
 
-def _preload_training_objects(scenario: Any, username: str) -> None:
+def _preload_training_objects(scenario: Any, owner: User) -> None:
     """Load a scenario's synthetic objects into the operator's planning state.
 
     SPECTRE panels can then work with them immediately. Training TLEs are
@@ -229,7 +229,7 @@ def _preload_training_objects(scenario: Any, username: str) -> None:
     used to stay in the operational lists for good (audit F-051).
     """
     try:
-        state = get_session_state(username)
+        state = get_session_state(owner)
         for obj in scenario.objects:
             held: list[Any] = state.blue_assets if obj.side == "blue" else state.red_tracks
             if any(obj.satno == getattr(h, "satno", None) or obj.name == h.name for h in held):
@@ -243,7 +243,7 @@ def _preload_training_objects(scenario: Any, username: str) -> None:
 
 async def _start_scenario(
     scenario_id: str,
-    username: str,
+    owner: User,
     db: AsyncSession,
     scored: bool,
     request: Request,
@@ -253,8 +253,9 @@ async def _start_scenario(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    _preload_training_objects(scenario, username)
+    _preload_training_objects(scenario, owner)
 
+    username = owner.username
     progress = await _get_or_create_progress(username, db)
 
     if scored:
@@ -299,7 +300,7 @@ async def training_scenario_start(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Start a scored attempt."""
-    return await _start_scenario(scenario_id, current_user.username, db, scored=True, request=request)
+    return await _start_scenario(scenario_id, current_user, db, scored=True, request=request)
 
 
 @router.post("/scenario/{scenario_id}/explore", response_class=HTMLResponse)
@@ -315,7 +316,7 @@ async def training_scenario_explore(
     and see what they do, but no points are awarded and the attempt counter
     is not incremented.  The row is deleted when the operator resets or submits.
     """
-    return await _start_scenario(scenario_id, current_user.username, db, scored=False, request=request)
+    return await _start_scenario(scenario_id, current_user, db, scored=False, request=request)
 
 
 # ── Reset active scenario ─────────────────────────────────────────────────────

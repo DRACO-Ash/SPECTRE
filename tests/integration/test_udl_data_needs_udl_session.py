@@ -14,18 +14,18 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _CATALOGUE = [{"satNo": 41838, "name": "SJ-17", "objectType": "PAYLOAD", "country": "PRC"}]
 
 
 @pytest.fixture
-def no_udl(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from spectre.web.planning_state import get_session_state
+def no_udl(monkeypatch: pytest.MonkeyPatch, auth_cookie: str) -> Any:
     from spectre.web.routes import udl
 
     monkeypatch.setattr(udl, "get_onorbit_catalog", lambda: _CATALOGUE)
     monkeypatch.setattr(udl, "get_catalog_status", lambda: "ready")
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     saved = (state.udl_username, state.udl_password)
     state.udl_username = state.udl_password = None
     yield state

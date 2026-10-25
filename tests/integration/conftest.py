@@ -61,6 +61,20 @@ def login_as(client: object, username: str, password: str) -> str:
     return str(resp.cookies["spectre_session"])
 
 
+def session_state(cookie: str) -> object:
+    """The planning state the routes use for the sign-in behind *cookie*.
+
+    State is filed per sign-in, not per username, so a test that seeds state
+    for a request has to reach it through the cookie that request carries.
+    """
+    from spectre.web.auth import session_key_for
+    from spectre.web.planning_state import get_session_state
+
+    key = session_key_for(cookie)
+    assert key is not None, "the cookie names no account"
+    return get_session_state(key)
+
+
 @pytest.fixture(scope="module")
 def auth_cookie(client: object) -> str:
     """An authenticated admin session cookie."""

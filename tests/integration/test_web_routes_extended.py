@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 # ── Sample LEO TLE (ISS-like) ─────────────────────────────────────────────────
 
@@ -522,14 +523,13 @@ class TestPolRoutes:
     ) -> None:
         """Seed a real analysis, then drill into a real manoeuvre end to end."""
         from spectre.astro.pattern_of_life import analyse_pattern_of_life
-        from spectre.web.planning_state import get_session_state
         from tests.unit.test_dv_estimation import TestTwoTierReporting
 
         pol = analyse_pattern_of_life(
             TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
         )
         assert pol.manoeuvres, "fixture must produce at least one confirmed manoeuvre"
-        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+        session_state(auth_cookie).last_pol_analysis = pol  # type: ignore[attr-defined]
 
         epoch = pol.manoeuvres[0].epoch.strftime("%Y-%m-%dT%H:%M:%S")
         resp = client.post(  # type: ignore[attr-defined]
@@ -551,13 +551,12 @@ class TestPolRoutes:
         self, client: object, auth_cookie: str
     ) -> None:
         from spectre.astro.pattern_of_life import analyse_pattern_of_life
-        from spectre.web.planning_state import get_session_state
         from tests.unit.test_dv_estimation import TestTwoTierReporting
 
         pol = analyse_pattern_of_life(
             TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
         )
-        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+        session_state(auth_cookie).last_pol_analysis = pol  # type: ignore[attr-defined]
         resp = client.post(  # type: ignore[attr-defined]
             "/pol/manoeuvre-detail",
             data={"satno": "62902", "manoeuvre_epoch": "1999-01-01T00:00:00"},
@@ -647,13 +646,12 @@ class TestPolPanelRendersAfterAnalysis:
         self, client: object, auth_cookie: str
     ) -> None:
         from spectre.astro.pattern_of_life import analyse_pattern_of_life
-        from spectre.web.planning_state import get_session_state
         from tests.unit.test_dv_estimation import TestTwoTierReporting
 
         pol = analyse_pattern_of_life(
             TestTwoTierReporting._catalogue(), satno=62902, name="SIM",
         )
-        get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+        session_state(auth_cookie).last_pol_analysis = pol  # type: ignore[attr-defined]
 
         resp = client.get(  # type: ignore[attr-defined]
             "/pol/panel", cookies={"spectre_session": auth_cookie},

@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 from tests.integration.test_all_intercepts_ranking import _BLUE_GEO, _RED_GEO
 from tests.unit.test_astro import ISS_TLE
 
@@ -22,12 +23,11 @@ _USER = "testadmin"
 
 
 @pytest.fixture
-def sweep_state() -> Iterator[Any]:
+def sweep_state(auth_cookie: str) -> Iterator[Any]:
     """One red GEO track and an empty manual target list, restored afterwards."""
     from spectre.domain.models import RedTrack
-    from spectre.web.planning_state import get_session_state
 
-    state = get_session_state(_USER)
+    state = session_state(auth_cookie)
     saved = (list(state.red_tracks), list(state.manual_sweep_tles), state.last_threat_assessment)
     state.red_tracks = [RedTrack(name="RED-GEO", tle=_RED_GEO)]
     state.manual_sweep_tles = []

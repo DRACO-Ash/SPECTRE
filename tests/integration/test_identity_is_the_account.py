@@ -97,3 +97,81 @@ class TestAnExistingDatabaseGainsTheNonce:
             row = (await conn.execute(text("SELECT session_generation, session_nonce FROM users"))).one()
         await engine.dispose()
         assert tuple(row) == (0, ""), "a migrated account starts at generation 0 with the empty nonce"
+
+
+def _state(cookie: str) -> object:
+    """The planning state the routes would use for this cookie."""
+    from spectre.web.auth import session_key_for
+    from spectre.web.planning_state import get_session_state
+
+    key = session_key_for(cookie)
+    assert key is not None
+    return get_session_state(key)
+
+
+class TestPlanningStateBelongsToOneSignIn:
+    """Audit F-044: UDL credentials were shared by every session of a username."""
+
+    def test_a_second_sign_in_does_not_see_the_firsts_udl_credentials(self, client: object) -> None:
+        first = login_as(client, *_ADMIN)
+        second = login_as(client, *_ADMIN)
+        state = _state(first)
+        state.udl_username, state.udl_password = "udl-user", "udl-secret"  # type: ignore[attr-defined]
+
+        assert _state(second).udl_password is None  # type: ignore[attr-defined]
+        resp = client.get("/udl/notso", params={"satno": 25544}, cookies={"spectre_session": second})  # type: ignore[attr-defined]
+        assert resp.status_code == 401, "the second sign-in drove UDL with the first's password"
+
+    def test_logout_ends_every_sign_ins_state(self, client: object) -> None:
+        first = login_as(client, *_ADMIN)
+        second = login_as(client, *_ADMIN)
+        _state(first).udl_password = "udl-secret"  # type: ignore[attr-defined]
+        client.post("/logout", cookies={"spectre_session": second}, headers=csrf_headers(second))  # type: ignore[attr-defined]
+        from spectre.web.auth import session_key_for
+        from spectre.web.planning_state import has_session_state
+
+        key = session_key_for(first)
+        assert key is not None
+        assert not has_session_state(key), "a revoked sign-in kept its UDL password in memory"
+
+
+class TestPlanningStateDiesWithTheAccount:
+    """Audit F-148: a deleted account's state passed to its namesake."""
+
+    def test_deleting_an_account_clears_its_state(self, client: object) -> None:
+        from spectre.web.auth import session_key_for
+        from spectre.web.planning_state import has_session_state
+
+        admin = _admin(client)
+        _create(client, admin, "f148-carol")
+        cookie = login_as(client, "f148-carol", "pass-123")
+        _state(cookie).udl_password = "udl-secret"  # type: ignore[attr-defined]
+        key = session_key_for(cookie)
+        assert key is not None
+
+        _delete(client, admin, "f148-carol")
+        assert not has_session_state(key)
+
+        _create(client, admin, "f148-carol")
+        fresh = login_as(client, "f148-carol", "pass-123")
+        assert _state(fresh).udl_password is None  # type: ignore[attr-defined]
+        _delete(client, admin, "f148-carol")
+
+    def test_a_password_change_clears_its_state(self, client: object) -> None:
+        from spectre.web.auth import session_key_for
+        from spectre.web.planning_state import has_session_state
+
+        admin = _admin(client)
+        _create(client, admin, "f148-dave")
+        cookie = login_as(client, "f148-dave", "pass-123")
+        _state(cookie).udl_password = "udl-secret"  # type: ignore[attr-defined]
+        user_id = _user_id(client, admin, "f148-dave")
+        resp = client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{user_id}", data={"role": "operator", "new_password": "new-pass-456"},
+            cookies=admin, headers=csrf_headers(admin),
+        )
+        assert resp.status_code == 200
+        key = session_key_for(cookie)
+        assert key is not None
+        assert not has_session_state(key)
+        _delete(client, admin, "f148-dave")

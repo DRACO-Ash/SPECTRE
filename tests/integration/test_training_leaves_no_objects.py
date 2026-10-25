@@ -9,14 +9,14 @@ and three docstrings said training never touches session state.
 from __future__ import annotations
 
 from spectre.training.scenarios import get_scenario
-from spectre.web.planning_state import get_session_state
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _SCENARIO = "cadet_01_geo_stationkeeping"
 
 
-def _names() -> set[str]:
-    state = get_session_state("testadmin")
+def _names(cookie: str) -> set[str]:
+    state = session_state(cookie)
     return {a.name for a in state.blue_assets} | {t.name for t in state.red_tracks}
 
 
@@ -26,14 +26,14 @@ def test_scenario_objects_are_removed_on_leave(client: object, auth_cookie: str)
     headers, cookies = csrf_headers(auth_cookie), {"spectre_session": auth_cookie}
 
     client.post(f"/training/scenario/{_SCENARIO}/start", cookies=cookies, headers=headers)  # type: ignore[attr-defined]
-    assert scenario_names & _names(), "the exercise objects are present while training"
+    assert scenario_names & _names(auth_cookie), "the exercise objects are present while training"
 
     client.post("/training/leave", cookies=cookies, headers=headers, follow_redirects=False)  # type: ignore[attr-defined]
-    assert not (scenario_names & _names()), "scenario objects stayed in the operational lists"
+    assert not (scenario_names & _names(auth_cookie)), "scenario objects stayed in the operational lists"
 
 
 def test_operator_objects_with_the_same_session_survive_leave(client: object, auth_cookie: str) -> None:
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     before = {a.name for a in state.blue_assets if not getattr(a, "training", False)}
     headers, cookies = csrf_headers(auth_cookie), {"spectre_session": auth_cookie}
     client.post(f"/training/scenario/{_SCENARIO}/start", cookies=cookies, headers=headers)  # type: ignore[attr-defined]

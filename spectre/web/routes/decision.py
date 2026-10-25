@@ -167,7 +167,7 @@ async def decision_panel(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the decision engine scenario builder panel."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol   = getattr(state, "last_pol_analysis", None)
     return render(request, "partials/decision_panel.html", {
         "pol": pol,
@@ -237,7 +237,7 @@ async def decision_evaluate(
         w_reversibility=w_rev_n,
     )
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     try:
         result = evaluate_scenario(scenario, strategy=strat)

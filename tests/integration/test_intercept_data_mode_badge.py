@@ -13,15 +13,15 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 from tests.integration.test_web_routes_extended import _add_assets
 
 
 @pytest.mark.parametrize("path", ["apply-intercept", "apply-all-intercepts"])
 def test_without_a_fetch_the_badge_does_not_read_real(client: Any, auth_cookie: str, path: str) -> None:
-    from spectre.web.planning_state import get_session_state
 
     _add_assets(client, auth_cookie)
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     assert not state.udl_username, "precondition: no UDL session, so nothing can be fetched"
     resp = client.post(
         f"/plan/maneuver/{path}",

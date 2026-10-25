@@ -16,6 +16,7 @@ from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
+from spectre.web.planning_state import clear_account_state
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +334,9 @@ async def delete_user(
             flash={"type": "error", "message": "Cannot delete the last admin account."},
         )
     await db.commit()
+    # The account's planning state goes with it, UDL password included, so a
+    # later account of the same name starts clean (audit F-148).
+    clear_account_state(user_id)
     logger.info("Admin '%s' deleted user '%s'", log_safe(current_user.username), log_safe(username))
 
     users = await _all_users(db)

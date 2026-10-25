@@ -15,6 +15,7 @@ import pytest
 from spectre.web import rate_limit
 from spectre.web.routes import pol
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 from tests.unit.tle_clustering.conftest import make_tle_pair
 
 _EPOCHS = ("26010.00000000", "26011.00000000", "26012.00000000")
@@ -23,8 +24,7 @@ _CURRENT = "\n".join(make_tle_pair(25544, 51.6, 100.0, 0.0006, "26290.00000000")
 
 
 @pytest.fixture
-def udl_stub(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from spectre.web.planning_state import get_session_state
+def udl_stub(monkeypatch: pytest.MonkeyPatch, auth_cookie: str) -> Any:
 
     monkeypatch.setattr(rate_limit, "_udl_auth_limiter", rate_limit.SlidingWindowLimiter(50, 60))
     monkeypatch.setattr(rate_limit, "_udl_data_limiter", rate_limit.SlidingWindowLimiter(50, 60))
@@ -33,7 +33,7 @@ def udl_stub(monkeypatch: pytest.MonkeyPatch) -> Any:
         return _ARCHIVE, _ARCHIVE + "\n" + _CURRENT, {}, {}, "ISS"
 
     monkeypatch.setattr(pol, "_fetch_merged_history", merged)
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     saved = getattr(state, "last_pol_analysis", None)
     yield
     state.last_pol_analysis = saved

@@ -165,7 +165,7 @@ async def export_intercepts(
     anywhere.
     """
     _assert_run_id_is_well_formed(run_id, current_user.username)
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     results = _results_for_export(state, run_id)
 
     buf = io.StringIO()

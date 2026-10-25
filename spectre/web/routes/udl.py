@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
-from spectre.web.models import User
+from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import (
     SessionState,
     get_catalog_status,
@@ -194,7 +194,7 @@ async def fetch_tle_for_satno(
 #: to tasks, so a discarded handle could be collected before the task finished
 #: (audit F-143); these sets hold them until they are done.
 _BACKGROUND: set[asyncio.Task[None]] = set()
-_SESSION_TASKS: dict[str, set[asyncio.Task[None]]] = {}
+_SESSION_TASKS: dict[SessionKey | None, set[asyncio.Task[None]]] = {}
 
 #: The catalogue is pulled again once it is this old.
 _CATALOG_TTL_S = 24 * 3600.0
@@ -207,7 +207,7 @@ class _CatalogClock:
 _CATALOG_CLOCK = _CatalogClock()
 
 
-def _spawn(coro: Coroutine[Any, Any, None], owner: str) -> asyncio.Task[None]:
+def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
     """Start *coro* as a task held until it finishes, filed under *owner*."""
     task = asyncio.create_task(coro)
     _BACKGROUND.add(task)
@@ -225,7 +225,7 @@ def _spawn(coro: Coroutine[Any, Any, None], owner: str) -> asyncio.Task[None]:
     return task
 
 
-def _cancel_session_tasks(owner: str) -> None:
+def _cancel_session_tasks(owner: SessionKey | None) -> None:
     """Cancel the background tasks still using *owner*'s UDL password."""
     for task in list(_SESSION_TASKS.get(owner, ())):
         task.cancel()
@@ -310,7 +310,7 @@ async def udl_login(
     Performs a lightweight probe request to UDL to confirm the credentials
     are accepted before storing them.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     try:
         async with httpx.AsyncClient() as client:
@@ -364,8 +364,8 @@ async def udl_login(
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
     # Kick off background tasks (no-op for catalog if already loaded).
-    _spawn(_fetch_onorbit_background(username, password), current_user.username)
-    _spawn(_discover_tle_sources(username, password, state), current_user.username)
+    _spawn(_fetch_onorbit_background(username, password), current_user.session_key)
+    _spawn(_discover_tle_sources(username, password, state), current_user.session_key)
 
     return render(request,
         "partials/udl_status.html",
@@ -388,7 +388,7 @@ async def set_data_mode(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the UDL data classification mode for this session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     mode = data_mode.strip().upper()
     if mode not in _VALID_DATA_MODES:
         mode = "REAL"
@@ -408,7 +408,7 @@ async def set_tle_source(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the preferred TLE source provider for this session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     source = tle_source.strip()
     state.udl_tle_source = source
     if source:
@@ -431,11 +431,11 @@ async def udl_logout(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear UDL credentials from the operator session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.udl_username = None
     state.udl_password = None
     # The login's background tasks hold the password; stop them too (F-143).
-    _cancel_session_tasks(current_user.username)
+    _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
     logger.info("UDL session closed for operator: %s", log_safe(current_user.username))
 
@@ -638,7 +638,7 @@ async def fetch_tle(
       scenario time to be set first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     _empty = {"name": "", "tle": "", "tle_epoch_str": None,
                "tle_age_days": None, "mode": mode, "error": None}
@@ -771,7 +771,7 @@ async def fetch_statevector(
     at the most recent available epoch. Useful for initialising high-fidelity
     intercept geometry without propagating a TLE.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if not state.udl_username or not state.udl_password:
         return render(request,
@@ -990,7 +990,7 @@ async def fetch_hrr(
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     _empty_err = {"hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
 
@@ -1071,7 +1071,7 @@ async def search_catalog(
     # The catalogue was pulled with another operator's UDL credential. It is
     # searchable only by an operator holding a UDL session of their own
     # (audit F-142); the bare status line stays visible to everyone.
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     if q.strip() and not (state.udl_username and state.udl_password):
         return HTMLResponse('<p class="error-msg">Log in to UDL to search the on-orbit catalogue.</p>')
 
@@ -1120,7 +1120,7 @@ async def udl_notso(
     """
     from fastapi.responses import JSONResponse
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     if not state.udl_username or not state.udl_password:
         return JSONResponse({"error": "No active UDL session"}, status_code=401)
 
@@ -1265,7 +1265,7 @@ async def udl_notso_sync(
 
     from spectre.data.notso_cache import get_notso_cache
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     if not state.udl_username or not state.udl_password:
         return _HTMLResponse(
             '<p class="error-msg" style="font-size:0.72rem">No active UDL session — connect first.</p>'

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from spectre.config.settings import get_settings
 from spectre.web.database import get_db
 from spectre.web.log_safety import log_safe
-from spectre.web.models import User
+from spectre.web.models import SessionKey, User
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,16 @@ class SessionClaims:
     user_id: int | None
     generation: int
     nonce: str = ""
+    session_id: str = ""
+
+    @property
+    def key(self) -> SessionKey | None:
+        """The sign-in this token belongs to, or ``None`` for a token naming no account."""
+        return None if self.user_id is None else SessionKey(self.user_id, self.session_id)
 
 
 def make_session_cookie(
-    username: str, generation: int = 0, user_id: int | None = None, nonce: str = "",
+    username: str, generation: int = 0, user_id: int | None = None, nonce: str = "", session_id: str = "",
 ) -> str:
     """Create a signed, time-limited session token for *username*.
 
@@ -75,8 +81,9 @@ def make_session_cookie(
     with the new one's role (audit F-048). A token with no id is refused by
     :func:`require_login`. *nonce* is the account's random ``session_nonce``,
     which a recreated namesake does not share even when SQLite reuses the id.
+    *session_id* is random per sign-in and files the planning state.
     """
-    payload: dict[str, object] = {"sub": username, "gen": int(generation), "non": nonce}
+    payload: dict[str, object] = {"sub": username, "gen": int(generation), "non": nonce, "sid": session_id}
     if user_id is not None:
         payload["uid"] = int(user_id)
     return str(_serializer().dumps(payload))
@@ -95,9 +102,16 @@ def _decode_session(token: str) -> SessionClaims | None:
             user_id=None if uid is None else int(uid),
             generation=int(data.get("gen", 0)),
             nonce=str(data.get("non", "")),
+            session_id=str(data.get("sid", "")),
         )
     except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError, AttributeError):
         return None
+
+
+def session_key_for(token: str) -> SessionKey | None:
+    """The sign-in *token* belongs to, without checking it is still current."""
+    claims = _decode_session(token)
+    return None if claims is None else claims.key
 
 
 def decode_session_cookie(token: str) -> str | None:
@@ -184,6 +198,7 @@ async def require_login(
             headers={"Location": "/login"},
         )
 
+    user.session_key = claims.key
     return user
 
 
@@ -232,4 +247,5 @@ async def optional_login(
     # after they have signed out of it.
     if user is None or not _bound_to(user, claims):
         return None
+    user.session_key = claims.key
     return user

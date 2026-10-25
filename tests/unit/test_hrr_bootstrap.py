@@ -244,14 +244,16 @@ class TestTheLoaderFindsIt:
 
     def test_a_new_session_inherits_both(self) -> None:
         from spectre.web import app as app_module
+        from spectre.web.models import SessionKey
         from spectre.web.planning_state import clear_session_state, get_session_state
 
+        probe = SessionKey(0, "bootstrap-probe")
         app_module._load_hrr_from_disk()
-        clear_session_state("bootstrap-probe")
-        state = get_session_state("bootstrap-probe")
+        clear_session_state(probe)
+        state = get_session_state(probe)
         try:
             assert state.hrr_objects, "the watchlist did not reach the session"
             assert state.hrr_tle_cache, "the element sets did not reach the session"
             assert len(state.hrr_tle_cache) == len(state.hrr_objects)
         finally:
-            clear_session_state("bootstrap-probe")
+            clear_session_state(probe)

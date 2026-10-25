@@ -57,7 +57,7 @@ async def dashboard(
 
         return render_login(request)
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     return render(request, "operator.html", {
         "user": current_user,
         "blue_assets": state.blue_assets,
@@ -83,7 +83,7 @@ async def add_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a blue asset and return the updated blue list partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     name = name.strip()
     tle = tle.strip()
@@ -113,7 +113,7 @@ async def quick_add_blue_asset(
     Called from the HRR watchlist "→ Blue" button for one-click ingestion.
     Returns the updated blue list partial with OOB select updates.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     clean_name = name.strip() or str(satno)
 
     # Skip if already in the session.
@@ -176,7 +176,7 @@ async def quick_add_red_track(
     Returns the updated red list partial with OOB select updates and an OOB
     badge replacing the button that was clicked.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     clean_name = name.strip() or str(satno)
 
     prospective_stk = f"{RED_PREFIX}{clean_name}"
@@ -230,7 +230,7 @@ async def remove_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
@@ -245,7 +245,7 @@ async def add_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a red track and return the updated red list partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     name = name.strip()
     tle = tle.strip()
@@ -269,7 +269,7 @@ async def remove_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a red track by name and return the updated partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
@@ -287,7 +287,7 @@ async def set_scenario_time(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the scenario time window for event detection and planning."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     try:
         start_dt = datetime.fromisoformat(scenario_start.strip()).replace(tzinfo=UTC)
@@ -334,7 +334,7 @@ async def log_entries(
     console has always polled this route. Removed rather than sanitised,
     because a live defect in code nobody runs is still a line in the scan.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})
 
 
@@ -344,6 +344,6 @@ async def clear_log(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear the session run log and return the empty partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.log_entries.clear()
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})

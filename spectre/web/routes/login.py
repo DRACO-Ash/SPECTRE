@@ -19,6 +19,7 @@ from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
+from spectre.web.planning_state import clear_account_state
 from spectre.web.rate_limit import SlidingWindowLimiter
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ async def post_login(
     logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
     token = make_session_cookie(
         username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
+        session_id=secrets.token_urlsafe(16),
     )
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
@@ -223,6 +225,8 @@ async def _revoke_sessions(db: AsyncSession, username: str) -> None:
         return
     user.session_generation = (user.session_generation or 0) + 1
     await db.commit()
+    # Every sign-in it ended loses its planning state, UDL password included.
+    clear_account_state(user.id)
 
 
 @router.post("/logout", response_model=None)
@@ -232,7 +236,6 @@ async def post_logout(
 ) -> RedirectResponse:
     """Revoke the session, clear the cookie, wipe planning state, then redirect."""
     from spectre.web.auth import decode_session_cookie  # noqa: PLC0415
-    from spectre.web.planning_state import clear_session_state  # noqa: PLC0415
 
     cookie = request.cookies.get(_COOKIE_NAME)
     if cookie:
@@ -244,7 +247,6 @@ async def post_logout(
             # On a shared operations-room terminal logout is the operator's
             # only way to end a session, so it has to end it on the server.
             await _revoke_sessions(db, username)
-            clear_session_state(username)
             logger.info("Session state cleared on logout for: %s", log_safe(username))
 
     response = RedirectResponse(url="/login", status_code=302)

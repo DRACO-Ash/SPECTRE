@@ -17,6 +17,7 @@ import pytest
 from spectre.data import notso_cache
 from spectre.web import rate_limit
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 
 def _rec(i: int) -> dict[str, Any]:
@@ -37,14 +38,13 @@ def _resp(status: int = 200, payload: Any = None, *, bad_json: bool = False) -> 
 
 
 @pytest.fixture
-def stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
-    from spectre.web.planning_state import get_session_state
+def stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, auth_cookie: str) -> Any:
     from spectre.web.routes import udl
 
     monkeypatch.setattr(rate_limit, "_udl_sync_limiter", rate_limit.SlidingWindowLimiter(100, 60))
     cache = notso_cache.NotsoCache(path=tmp_path / "c.json")
     monkeypatch.setattr(notso_cache, "get_notso_cache", lambda: cache)
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     saved = (state.udl_username, state.udl_password)
     state.udl_username, state.udl_password = "u", "p"
     responses: list[MagicMock] = []

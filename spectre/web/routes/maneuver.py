@@ -750,7 +750,7 @@ async def orbital_events(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
         log_safe(red_sat), log_safe(blue_sat), log_safe(current_user.username),
     )
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if not red_sat.strip() and not blue_sat.strip():
         return render(request, "partials/orbital_events.html", {
@@ -818,7 +818,7 @@ async def apply_intercept(
 
     Returns the intercept result partial with per-burn breakdown.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if method not in _INTERCEPT_METHOD_MAP:
         return render(request, "partials/intercept_result.html", {
@@ -1094,7 +1094,7 @@ async def apply_all_intercepts(
     computes intelligence assessments for each successful result, and returns
     a sortable table where every row can expand to show the full analysis.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     manoeuvre_start_dt = datetime.now(tz=UTC)
     if manoeuvre_start.strip():
@@ -1188,7 +1188,7 @@ async def trade_space_data(
     current_user: User = Depends(require_login),
 ) -> JSONResponse:
     """Return JSON array of trade-space points from intercept history."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     points = []
     for r in state.intercept_history:
         transfer_s = (
@@ -1217,7 +1217,7 @@ async def clear_history(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear intercept history and last result."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.intercept_history.clear()
     state.last_intercept_result = None
     state.append_log("[INTERCEPT] Trade-space history cleared")

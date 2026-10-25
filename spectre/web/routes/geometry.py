@@ -147,7 +147,7 @@ async def intercept_geometry(
         return _err(f"Could not parse burn epoch: {burn_epoch_str!r}")
 
     # ── Fetch TLEs from session state ─────────────────────────────────────────
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     red_tle  = _find_tle(state, red_sat.strip())
     blue_tle = _find_tle(state, blue_sat.strip())
 

@@ -9,6 +9,7 @@ no sign of the other.
 from __future__ import annotations
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _GOOD = (
     "MSGID: N1\nSATNO: 62902\nEFFECTIVE START: 2025-03-14T12:00:00Z\n"
@@ -19,11 +20,10 @@ _NO_SATNO = "MSGID: N2\nEFFECTIVE START: 2025-03-15T12:00:00Z\nTYPE: MANOEUVRE"
 
 def test_a_message_without_a_satno_is_reported_as_dropped(client: object, auth_cookie: str) -> None:
     from spectre.astro.pattern_of_life import analyse_pattern_of_life
-    from spectre.web.planning_state import get_session_state
     from tests.unit.test_dv_estimation import TestTwoTierReporting
 
     pol = analyse_pattern_of_life(TestTwoTierReporting._catalogue(), satno=62902, name="SIM")
-    get_session_state("testadmin").last_pol_analysis = pol  # type: ignore[attr-defined]
+    session_state(auth_cookie).last_pol_analysis = pol  # type: ignore[attr-defined]
 
     resp = client.post(  # type: ignore[attr-defined]
         "/pol/notso-correlate",

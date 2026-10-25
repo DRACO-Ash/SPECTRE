@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _ROUTE = "/plan/maneuver/apply-all-intercepts"
 _TEST_USER = "testadmin"
@@ -48,12 +49,11 @@ _BLUE_GEO = (
 
 
 @pytest.fixture()
-def seeded_state() -> Any:
+def seeded_state(auth_cookie: str) -> Any:
     """A session holding one red track and one blue asset, both real GEO TLEs."""
     from spectre.domain.models import BlueAsset, RedTrack
-    from spectre.web.planning_state import get_session_state
 
-    state = get_session_state(_TEST_USER)
+    state = session_state(auth_cookie)
     saved_red, saved_blue = list(state.red_tracks), list(state.blue_assets)
     saved_history = list(state.intercept_history)
     state.red_tracks = [RedTrack(name="RED-GEO", tle=_RED_GEO)]

@@ -4,12 +4,25 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from sqlalchemy import DateTime, Integer, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
 from spectre.web.database import Base
+
+
+class SessionKey(NamedTuple):
+    """One sign-in: the account and the random id its token was issued with.
+
+    Planning state, and the UDL credentials on it, are filed under this rather
+    than the username, so a second sign-in of the same account starts clean
+    and nothing outlives the account (audit F-044, F-148).
+    """
+
+    user_id: int
+    session_id: str
 
 
 class User(Base):
@@ -36,6 +49,8 @@ class User(Base):
     """
 
     __tablename__ = "users"
+    # session_key below is per request, not a column.
+    __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -73,6 +88,9 @@ class User(Base):
         nullable=False,
     )
 
+    # Set by require_login from the token that authenticated this request.
+    session_key: SessionKey | None = None
+
 
 # A password change has to end the sessions that were opened with the old
 # password. It did not: a cookie captured beforehand stayed valid for its full
@@ -95,3 +113,9 @@ def _revoke_sessions_on_password_change(
         # opened with one, so there is nothing to revoke.
         return
     target.session_generation = (target.session_generation or 0) + 1
+    # Every sign-in it ended loses its planning state too, UDL password
+    # included (audit F-148). Deferred: planning_state imports this module.
+    if target.id is not None:
+        from spectre.web.planning_state import clear_account_state
+
+        clear_account_state(target.id)

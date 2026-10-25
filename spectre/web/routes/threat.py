@@ -75,7 +75,7 @@ async def red_orbit_info(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Compute orbital parameters for a red satellite and return a compact info card."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if not red_sat:
         return HTMLResponse("")
@@ -268,7 +268,7 @@ async def add_manual_tle(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a manually provided TLE to the session's manual sweep target list."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     form = await request.form()
     name = str(form.get("manual_name") or "").strip()
     tle = str(form.get("manual_tle") or "").strip()
@@ -298,7 +298,7 @@ async def remove_manual_tle(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a manual TLE entry from the session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     form = await request.form()
     name = str(form.get("manual_name") or "").strip()
     state.manual_sweep_tles = [e for e in state.manual_sweep_tles if e["name"] != name]
@@ -315,7 +315,7 @@ async def target_config(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     regime = _interceptor_regime(state, red_sat) if red_sat else None
     blue_hrr, red_hrr = _hrr_group_counts(state, regime=regime)
     return render(request, "partials/sweep_target_config.html", {
@@ -379,7 +379,7 @@ async def fetch_targets(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Pre-fetch TLEs for a selected HRR target group (side:rank)."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     form = await request.form()
     tgt_group = str(form.get("tgt_group") or "").strip()
 
@@ -1368,7 +1368,7 @@ async def threat_sweep(
 ) -> HTMLResponse:
     """Run a threat sweep for a red satellite against the selected target group."""
     t0 = time.monotonic()
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     now = datetime.now(tz=UTC)
     errors: list[str] = []
 
@@ -1730,7 +1730,7 @@ async def screen_config(
     current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the blue asset selector for the screening panel."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     assets = [
         {
             "satno": str(o.get("satno") or "").strip(),
@@ -1776,7 +1776,7 @@ async def threat_screen(
     told which object to brief.
     """
     t0 = time.monotonic()
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     now = datetime.now(tz=UTC)
     errors: list[str] = []
 
@@ -1897,7 +1897,7 @@ async def refine_entry(
     which is exactly what a refine changes, so a grouping derived after the
     fact can disagree with the table the row is still sitting in.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     # Held for the whole request. The session state is shared by every tab
     # of this account, so a sweep finishing elsewhere during the await below
     # replaces last_threat_assessment, and writing through the state then

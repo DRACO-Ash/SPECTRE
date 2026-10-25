@@ -183,7 +183,7 @@ async def pol_panel(
     silent default, would have rendered the panel with every figure blank and
     nothing to say why.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     context: dict[str, object] = {
         "has_udl": bool(state.udl_username),
@@ -314,7 +314,7 @@ async def pol_analyse(
     of /udl/login when the form carries credentials: without either it was
     an unthrottled credential oracle (audit F-045).
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     # ── UDL direct credentials ────────────────────────────────────────────────
     if pol_source == "udl_direct":
@@ -704,7 +704,7 @@ async def pol_reserve_reset(
     assessment marks unconfirmed, and inventing a number here would put a
     fabricated reserve into a capability verdict.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     if pol is None or pol.satno != satno:
         return HTMLResponse(_NO_ANALYSIS_HTML)
@@ -752,7 +752,7 @@ async def pol_manoeuvre_detail(
     decomposition with the numbers that produced it, all three estimators, and
     why the result was or was not believed.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
@@ -803,7 +803,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
         run_monte_carlo,
     )
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
@@ -856,7 +856,7 @@ async def pol_chart_data(
     current_user: User = Depends(require_login),
 ) -> JSONResponse:
     """Return Chart.js-ready JSON for the most recent PoL analysis."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     if pol is None or pol.satno != satno:
         return JSONResponse({"error": "No PoL analysis available"}, status_code=404)
@@ -930,7 +930,7 @@ async def pol_notso_panel(
 ) -> HTMLResponse:
     """Return the NOTSO correlation input panel."""
     from spectre.data.notso_cache import get_notso_cache
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     cache = get_notso_cache()
     cache_count_for_sat = len(cache.get_for_satno(pol.satno)) if pol else 0
@@ -1050,7 +1050,7 @@ async def pol_notso_correlate(
         extract_behaviour_profile,
     )
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None:
@@ -1120,7 +1120,7 @@ async def pol_photometry_panel(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the photometry analysis input panel."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     return render(request, "partials/photometry_panel.html", {
         "pol": pol,
@@ -1139,7 +1139,7 @@ async def pol_photometry_analyse(
     """Parse photometry CSV and run change-detection analysis."""
     from spectre.astro.photometry import assess_photometry, parse_photometry_csv
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if not csv_text.strip():

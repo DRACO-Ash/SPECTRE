@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _PAYLOAD = "<script>alert('xss')</script>"
 _ESCAPED = "&lt;script&gt;"
@@ -87,7 +88,7 @@ def _assert_not_reflected(resp: Any, *, marker: str) -> None:
 
 
 @pytest.fixture()
-def udl_connected(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+def udl_connected(monkeypatch: pytest.MonkeyPatch, auth_cookie: str) -> Iterator[Any]:
     """A session holding UDL credentials, with the network call stubbed.
 
     Quick-add returns the 'Not connected to UDL' partial before it ever touches
@@ -95,9 +96,8 @@ def udl_connected(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     unreachable and the badge tests assert nothing. Only the outbound fetch is
     stubbed; the route, the template and the escaper are the real ones.
     """
-    from spectre.web.planning_state import get_session_state
 
-    state = get_session_state(_TEST_USER)
+    state = session_state(auth_cookie)
     saved_user, saved_pass = state.udl_username, state.udl_password
     saved_blue, saved_red = list(state.blue_assets), list(state.red_tracks)
     state.udl_username, state.udl_password = "udl-user", "udl-pass"
@@ -218,9 +218,8 @@ class TestPatternOfLifeElementSets:
             """Stand in for the UDL round trip: archive, merge, metadata, name."""
             return (merged, merged, {}, {}, "PROBE-SAT")
 
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state(_TEST_USER)
+        state = session_state(auth_cookie)
         saved_analysis = getattr(state, "last_pol_analysis", None)
         monkeypatch.setattr("spectre.web.routes.pol._fetch_merged_history", _stub_history)
         try:

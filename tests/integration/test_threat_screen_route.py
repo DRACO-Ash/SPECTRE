@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 pytestmark = pytest.mark.anyio
 
@@ -63,9 +64,8 @@ class TestTheScreenRefusesClearly:
         is reached only by clearing it, which is what this does, because the
         branch still has to say something when an operator wipes the list.
         """
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         saved_objects = list(state.hrr_objects)
         state.hrr_objects = []
         try:
@@ -103,9 +103,8 @@ class TestTheScreenRunsAgainstAWatchlist:
     def test_it_ranks_a_red_object_that_can_reach_the_asset(
         self, client: object, auth_cookie: str
     ) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "41838", "name": "SJ-17", "country": "CHN",
@@ -131,9 +130,8 @@ class TestTheScreenRunsAgainstAWatchlist:
     def test_a_blue_only_watchlist_reports_no_candidates(
         self, client: object, auth_cookie: str
     ) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "30793", "name": "SKYNET-5A", "country": "GBR",
@@ -155,9 +153,8 @@ class TestTheScreenRunsAgainstAWatchlist:
 
 class TestTheAssetSelector:
     def test_it_lists_only_blue_objects(self, client: object, auth_cookie: str) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         state.hrr_objects = [
             {"satno": "41838", "name": "SJ-17", "country": "CHN",
              "rank": 1, "orbit_regime": "GEO"},
@@ -185,14 +182,13 @@ class TestAFailedRefreshIsShown:
     """Audit F-135: an actor screened after a failed refresh says so on the result."""
 
     def test_the_note_reaches_the_provenance_banner(self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch) -> None:
-        from spectre.web.planning_state import get_session_state
         from spectre.web.routes import udl
 
         async def _down(*_a: object, **_k: object) -> None:
             return None
 
         monkeypatch.setattr(udl, "fetch_tle_for_satno", _down)
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         saved = (state.udl_username, state.udl_password, state.hrr_objects)
         state.udl_username, state.udl_password = "u", "p"
         state.hrr_objects = [{"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"}]

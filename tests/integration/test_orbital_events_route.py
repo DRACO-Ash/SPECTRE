@@ -11,11 +11,12 @@ from typing import Any
 
 import pytest
 
+from tests.integration.conftest import session_state
+
 
 def test_the_route_searches_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch, client: object, auth_cookie: str,
 ) -> None:
-    from spectre.web.planning_state import get_session_state
     from spectre.web.routes import maneuver
 
     seen: list[bool] = []
@@ -32,7 +33,7 @@ def test_the_route_searches_off_the_event_loop(
     from spectre.domain.models import BlueAsset
     from tests.unit.test_astro import ISS_TLE
 
-    state = get_session_state("testadmin")
+    state = session_state(auth_cookie)
     monkeypatch.setattr(state, "blue_assets", [*state.blue_assets, BlueAsset(name="EVT-PROBE", tle=ISS_TLE)])
     client.get(  # type: ignore[attr-defined]
         "/plan/maneuver/orbital-events", params={"blue_sat": "EVT-PROBE"},
