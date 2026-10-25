@@ -320,3 +320,20 @@ With F-104, step 3's single-location findings are closed apart from those carrie
 | F-148 | F-S08-03 | `c8a73b1` | planning state is cleared for every sign-in of an account on logout, password change and delete; a recreated namesake starts clean |
 | F-044 | F-S07-01 | `c8a73b1` | planning state, and the UDL credentials on it, is filed per sign-in (account id and a random session id from the token) and dropped after the cookie's 8 hours; a second sign-in of the same account sees no UDL connection |
 | F-152 | F-S08-08 | `dae9748` | logout revokes only for a live session, and render mints a CSRF token only for a session require_login or optional_login accepted. Checked in Chromium on a pre-upgrade database |
+
+### Heuristic scores no longer presented as computed physics
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-072 | F-S02-12 | `813ae61` | InterceptSolution and InterceptResult gain `score`, `score_kind` and `provenance`; miss_distance_km and intercept_range_km hold a distance or nothing. Seven assessment scores and the J2 and GEO drift angles moved out of the miss field. An AST test fails if a solver writes a score, count or angle into it |
+| F-041 | F-S06-07 | `813ae61` | assessment figures read "score", "/100 · heuristic", never probability, likelihood or confidence; the observability line claims no SSN detection probability; a heuristic result's note says it is uncalibrated, not "computed via a solver"; a shared `partials/_modelled.html` badge marks every heuristic result |
+| F-018 | F-S02-07 | `813ae61`, `8414b03` | shown as "Intent indicator score (heuristic, uncalibrated)"; the field is `indicator_score`; its weights and thresholds are named constants marked uncited |
+| F-019 | F-S02-08 | `813ae61`, `8414b03` | labelled heuristic; `detection_score`; the unsourced SSN attribution is gone; the regime is banded as the package bands it, so 35,780 and 35,790 km score alike |
+| F-020 | F-S02-09 | `813ae61`, `8414b03` | `scores` and `match_score`, shown as a heuristic match score; a weak fingerprint reports its real top score instead of the constant 0.1; profiles are tables |
+| F-021 | F-S02-10 | `813ae61`, `8414b03` | shown as a detection score fixed per classification branch; the field is `branch_score` |
+| F-022 | F-S02-11 | `8414b03` | the docstring says the bands are indicative, uncited and unchecked against AE8/AP8, and names the slot-region inversion; the panel labels the score heuristic |
+| F-034 | F-S05-02 | `ad8b937` | OutcomeMetrics carries its basis; the banner reads "Heuristic ranking" with the badge; every cell marks closest approach and custody "(model)" |
+| F-036 | F-S05-09 | `ad8b937` | "heuristic anomaly index (uncalibrated)" with the badge and its basis, which states the tuned weights and normalisers; the 200 m/s/yr tooltip is gone; the module docstring carves out the anomaly weights |
+| F-033 | F-S04-05 | `ad8b937` | the composite "confidence" is removed; the panel shows the Welch p-value and both window sizes, and the summary says "p < 0.01", not "99% confidence" |
+| F-079 | F-S02-25 | `8414b03`, `8dda153` | the five tactical functions over complexity 15 are split, their thresholds named in tables; byte-identical over 28,816 and 420 snapshot cases |
+| F-076 | F-S02-19 | `8dda153` | the discarded combined-burn allocation and unused cosine are removed and the docstring no longer claims combined burns; a zero fuel budget no longer divides by zero |

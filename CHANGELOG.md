@@ -65,6 +65,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
 - CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
 
+### Changed (audit step 4, heuristic scores)
+- Assessment results carry a score, its kind and its provenance; the miss distance is only ever a distance (F-072).
+- Heuristic figures say so: scores, not probabilities, likelihoods or confidences, with a shared "modelled estimate, not a computed solution" badge on intercept assessments, the Decision Engine and the PoL anomaly index (F-041, F-018 to F-022, F-034, F-036).
+- Photometry reports the p-value and sample sizes instead of a "confidence" percentage (F-033).
+- The tactical heuristics' thresholds are named tables; the evasion planner no longer claims combined burns and survives a zero fuel budget (F-079, F-076).
+
 ### Security (audit step 4, identity)
 - Session tokens are bound to the account, so a deleted and recreated account of the same name no longer accepts the old account's tokens (F-048). Operators sign in once after upgrading.
 - Planning state, and the UDL credentials on it, belongs to one sign-in: another sign-in of the same account does not see it, and logout, a password change, account deletion and cookie expiry all clear it (F-044, F-148).
