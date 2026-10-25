@@ -238,11 +238,10 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
     worse than no test. The geometries above were each found by reinstating
     the defect and looking for an input where the answer moved.
 
-    ``miss_distance_km`` does not carry a miss distance in any of these. It
-    carries a wrapped RAAN difference in degrees for the drift analysis, and a
-    percentage for the other three (likelihood, confidence, operational risk).
-    The field is overloaded; that is pre-existing and worth knowing while
-    reading these numbers.
+    None of these is a miss distance, so each is read from ``score``: a
+    wrapped RAAN difference in degrees for the drift analysis, and a 0-100
+    heuristic score for the other three (intent, fingerprint, operational
+    risk). They used to be written into ``miss_distance_km`` (audit F-072).
     """
 
     # Synthesised rather than real element sets, so the geometry says what it
@@ -276,11 +275,11 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
             blue_tle=self._tle(43013, 71.6000, 282.0000, 15.10000000),
             manoeuvre_start=_EPOCH,
         )
-        assert abs(solution.miss_distance_km) <= 180.0, (
+        assert abs(solution.score) <= 180.0, (
             "the RAAN difference is outside half a turn, so its inputs were "
             "radians being read as degrees"
         )
-        assert solution.miss_distance_km == pytest.approx(128.243, abs=0.01)
+        assert solution.score == pytest.approx(128.243, abs=0.01)
 
         # The inclination half is held by the convergence time. The nodal
         # rates go as cos(i), so with inclinations read as radians this pair
@@ -311,8 +310,8 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
             manoeuvre_start=_EPOCH,
         )
         # A percentage, not a distance: likelihood * 100.
-        assert solution.miss_distance_km == pytest.approx(10.0, abs=0.01)
-        assert 0.0 <= solution.miss_distance_km <= 100.0
+        assert solution.score == pytest.approx(10.0, abs=0.01)
+        assert 0.0 <= solution.score <= 100.0
         # Assessment only. This method proposes no burn.
         assert solution.total_delta_v == 0.0
 
@@ -340,8 +339,8 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
             red_tle=before, blue_tle=after, manoeuvre_start=_EPOCH,
         )
         # confidence * 100, and the band drops to 50.0 with the defect back.
-        assert solution.miss_distance_km == pytest.approx(70.0, abs=0.01)
-        assert 0.0 <= solution.miss_distance_km <= 100.0
+        assert solution.score == pytest.approx(70.0, abs=0.01)
+        assert 0.0 <= solution.score <= 100.0
         # Delta-v is NOT asserted. Measured at 0.0000000666 km/s with the
         # defect both present and absent, so pinning it would add a number
         # without adding a guard. The score is the quantity that moves.
@@ -361,6 +360,6 @@ class TestTheDegreesCorrectionsAreHeldByNumbers:
             manoeuvre_start=_EPOCH,
         )
         # operational_risk_score * 100, and 31.0 with the defect back.
-        assert solution.miss_distance_km == pytest.approx(41.0, abs=0.01)
-        assert 0.0 <= solution.miss_distance_km <= 100.0
+        assert solution.score == pytest.approx(41.0, abs=0.01)
+        assert 0.0 <= solution.score <= 100.0
         assert solution.total_delta_v == 0.0

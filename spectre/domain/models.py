@@ -343,7 +343,12 @@ class InterceptResult:
         burns: Per-burn breakdown (epoch, ΔV components for each manoeuvre).
         total_delta_v_m_s: Sum of all burn magnitudes, in m/s.
         arrival_epoch: UTC time when the red satellite reaches its final position.
-        intercept_range_km: Miss distance at arrival in km.
+        intercept_range_km: Miss distance at arrival in km, and nothing else.
+        score: An assessment method's 0-100 score (a count for the envelope),
+            never a distance (audit F-072).
+        score_kind: What the score measures, for the label.
+        provenance: "physics" for a solved trajectory, "heuristic" for a score
+            of uncalibrated weights.
     """
 
     red_name: str
@@ -354,6 +359,9 @@ class InterceptResult:
     arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     intercept_range_km: float = 0.0
     notes: str = ""
+    score: float | None = None
+    score_kind: str = ""
+    provenance: str = "physics"
     option_id: str = field(default_factory=lambda: f"INT_{uuid.uuid4().hex[:10].upper()}")
 
 

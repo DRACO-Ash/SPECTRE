@@ -195,17 +195,17 @@
                     padding:0.4rem 0.6rem; border-left:3px solid var(--text-dim)">
           <div style="font-size:0.53rem; font-weight:700; color:var(--text-dim);
                       text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.12rem">
-            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}Score{% else %}Miss Dist{% endif %}
+            {% if item.result.score is not none %}{{ item.result.score_kind or "Score" }}{% else %}Miss Dist{% endif %}
           </div>
           <div style="font-size:1rem; font-weight:700; color:var(--text-bright)">
-            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}
-              {{ item.result.intercept_range_km | round(0) | int }}
+            {% if item.result.score is not none %}
+              {{ item.result.score | round(0) | int }}
             {% else %}
               {{ "%.1f" | format(item.result.intercept_range_km) }}
             {% endif %}
           </div>
           <div style="font-size:0.55rem; color:var(--text-dim)">
-            {% if item.intel.manoeuvre_type == 'ASSESSMENT' %}/100{% else %}km{% endif %}
+            {% if item.result.score is none %}km{% elif item.result.provenance == "heuristic" %}/100 · heuristic{% endif %}
           </div>
         </div>
         <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;

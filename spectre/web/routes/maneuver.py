@@ -225,7 +225,8 @@ def _observability(dv: float) -> tuple[str, str, str]:
     """
     if dv > _MOST_AGGRESSIVE_OBSERVED_M_S:
         return ("HIGH", "#ef4444",
-                "Large ΔV signature — high probability of SSN detection and attribution")
+                "Large ΔV signature — routine surveillance would very likely see it "
+                "(heuristic band from ΔV alone; no sensor model)")
     if dv > _ANNUAL_STATION_KEEPING_M_S:
         return ("MEDIUM", "#f59e0b",
                 "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance")
@@ -444,20 +445,20 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.DETECTABILITY:
         lambda result, dv, miss: (
             [
-                {"label": "Observability Score", "value": f"{miss:.0f}/100"},
-                {"label": "Detection Probability", "value": _score_band(miss / 100.0)},
+                {"label": "Observability score (heuristic)", "value": f"{miss:.0f}/100"},
+                {"label": "Observability band", "value": _score_band(miss / 100.0)},
             ]
         ),
     InterceptMethod.INTENT_PREDICT:
         lambda result, dv, miss: (
             [
-                {"label": "Intercept Likelihood", "value": f"{miss:.0f}%"},
-                {"label": "Assessment", "value": _banded(
+                {"label": "Intent indicator score (heuristic, uncalibrated)", "value": f"{miss:.0f}/100"},
+                {"label": "Indicators", "value": _banded(
                     miss / 100.0,
                     (
-                        "High confidence intercept intent",
-                        "Possible intercept intent",
-                        "Low probability of intercept intent",
+                        "Strong intercept indicators",
+                        "Some intercept indicators",
+                        "Few intercept indicators",
                     ),
                     bounds=(_INTENT_CONFIDENT, _INTENT_POSSIBLE),
                 )},
@@ -466,7 +467,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.STABILITY:
         lambda result, dv, miss: (
             [
-                {"label": "Stability Score", "value": f"{miss:.0f}/100"},
+                {"label": "Stability score (heuristic)", "value": f"{miss:.0f}/100"},
                 {"label": "Assessment", "value": _banded(
                     miss / 100.0,
                     (
@@ -480,21 +481,22 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.FINGERPRINT:
         lambda result, dv, miss: (
             [
-                {"label": "Fingerprint Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Fingerprint match score (heuristic, uncalibrated)", "value": f"{miss:.0f}/100"},
                 {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
             ]
         ),
     InterceptMethod.TERRAIN:
         lambda result, dv, miss: (
             [
-                {"label": "Operational Risk", "value": f"{miss:.0f}/100"},
-                {"label": "Risk Level", "value": _score_band(miss / 100.0)},
+                {"label": "Operational risk score (heuristic, indicative bands)", "value": f"{miss:.0f}/100"},
+                {"label": "Risk band", "value": _score_band(miss / 100.0)},
             ]
         ),
     InterceptMethod.MANOEUVRE_DETECT:
         lambda result, dv, miss: (
             [
-                {"label": "Detection Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Detection score (heuristic, fixed per classification branch)",
+                 "value": f"{miss:.0f}/100"},
                 {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
             ]
         ),
@@ -608,12 +610,12 @@ _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.BIELLIPTIC: _hohmann_summary,
     InterceptMethod.INTENT_PREDICT:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Intent assessment indicates {int(miss)}% probability of intercept "
-            f"intent against {result.blue_name}."
+            f"Intent indicator score {int(miss)}/100 against {result.blue_name}: a weighted "
+            f"score of uncalibrated indicators, not a calibrated estimate."
         ),
     InterceptMethod.DETECTABILITY:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Detectability assessment scores {int(miss)}/100 observability for "
+            f"Detectability assessment scores {int(miss)}/100 observability (heuristic) for "
             f"{result.red_name} manoeuvre against {result.blue_name}."
         ),
     InterceptMethod.COLA:
@@ -656,7 +658,9 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
     """
     method = result.method
     dv = result.total_delta_v_m_s
-    miss = result.intercept_range_km
+    # An assessment method's figure is its score; the builders below read it
+    # as "miss" for the physics methods' sake.
+    miss = result.score if result.score is not None else result.intercept_range_km
 
     # ── Threat classification ────────────────────────────────────────────────
     if method in _ASSESSMENT_METHODS:
@@ -1201,10 +1205,11 @@ async def trade_space_data(
             "transfer_time_min": round(transfer_s / 60.0, 2),
             "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
         }
-        # An assessment method carries a 0-100 score in intercept_range_km;
-        # emitted as miss_km, a score of 73 was plotted as a 73 km miss (F-131).
-        if r.method in _ASSESSMENT_METHODS:
-            point["score"] = round(r.intercept_range_km)
+        # An assessment method carries a score, not a distance; emitted as
+        # miss_km, a score of 73 was plotted as a 73 km miss (F-131, F-072).
+        if r.score is not None:
+            point["score"] = round(r.score)
+            point["provenance"] = r.provenance
         else:
             point["miss_km"] = round(r.intercept_range_km, 2)
         points.append(point)
@@ -1368,8 +1373,18 @@ _METHOD_ALIASES: dict[InterceptMethod, InterceptMethod] = {
 }
 
 
-def _result_note(method: InterceptMethod, solver: str) -> str:
-    """The result's provenance line, naming the solver an alias ran."""
+def _result_note(method: InterceptMethod, solver: str, provenance: str = "physics") -> str:
+    """The result's provenance line, naming the solver an alias ran.
+
+    A heuristic assessment is not "computed via a solver": its figure is a
+    weighted score of uncalibrated constants, and the note says so (audit
+    F-072).
+    """
+    if provenance == "heuristic":
+        return (
+            f"Heuristic assessment by spectre.astro {solver}: a score of uncalibrated "
+            "weights and thresholds, not a computed solution"
+        )
     target = _METHOD_ALIASES.get(method)
     if target is None:
         return f"Computed via spectre.astro {solver} solver"
@@ -1570,7 +1585,10 @@ def _solution_to_result(
         total_delta_v_m_s=from_km_s(sol.total_delta_v),
         arrival_epoch=sol.arrival_epoch,
         intercept_range_km=sol.miss_distance_km,
-        notes=_result_note(method, sol.method),
+        notes=_result_note(method, sol.method, sol.provenance),
+        score=sol.score,
+        score_kind=sol.score_kind,
+        provenance=sol.provenance,
     )
 
 

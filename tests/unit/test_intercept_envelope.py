@@ -161,10 +161,10 @@ class TestAFeasibleCoOrbitalIntercept:
             f"reports {cost_m_s:.1f} m/s"
         )
 
-    def test_miss_distance_km_carries_the_feasible_count(self) -> None:
+    def test_the_score_carries_the_feasible_count(self) -> None:
         """The field is overloaded, so its value has to be checked, not trusted.
 
-        ``miss_distance_km`` holds a COUNT for this method, which the docstring
+        ``score`` holds a COUNT for this method, which the docstring
         states and no other method does. 23 of the 24 arrivals come in under
         500 m/s. The one that does not is 34 h: the one-revolution transfer's
         minimum time of flight for that geometry is 34.03 h, so only the
@@ -178,8 +178,8 @@ class TestAFeasibleCoOrbitalIntercept:
         )
 
         assert len(reference.feasible) == 23
-        assert solution.miss_distance_km == pytest.approx(float(len(reference.feasible))), (
-            "miss_distance_km carries the number of feasible arrival times for this "
+        assert solution.score == pytest.approx(float(len(reference.feasible))), (
+            "score carries the number of feasible arrival times for this "
             "method; a value that ignores the sweep is a count of nothing"
         )
 
@@ -291,7 +291,7 @@ class TestDegenerateStepsAreDropped:
             _RED_GEO, _BLUE_GEO_OPPOSED_AT_TWELVE_HOURS, _EPOCH, max_delta_v_km_s=0.5,
         )
 
-        assert solution.miss_distance_km == pytest.approx(22.0), (
+        assert solution.score == pytest.approx(22.0), (
             "a step the solver refused is not a feasible arrival time"
         )
         assert solution.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
@@ -325,7 +325,7 @@ class TestTheBudgetReachesTheSolver:
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.5,
         )
         assert generous.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
-        assert generous.miss_distance_km == pytest.approx(23.0)
+        assert generous.score == pytest.approx(23.0)
 
 
 class TestAnUnreachableInterceptIsNeverFree:
@@ -435,7 +435,7 @@ class TestTheTwoMutantsThatSurvivedTheFirstPass:
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
             tof_s=21600.0, max_delta_v_km_s=0.5,
         )
-        assert solution.miss_distance_km == pytest.approx(21.0), (
+        assert solution.score == pytest.approx(21.0), (
             "the six-hour sweep lost a step, so the grid no longer starts at "
             "one slice in"
         )
@@ -457,7 +457,7 @@ class TestTheTwoMutantsThatSurvivedTheFirstPass:
         at_the_boundary = intercept_envelope_intercept(
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=exactly,
         )
-        assert at_the_boundary.miss_distance_km == pytest.approx(1.0), (
+        assert at_the_boundary.score == pytest.approx(1.0), (
             "an arc costing exactly the budget was refused, so the budget is "
             "exclusive and the cheapest solution is unreachable by its own price"
         )

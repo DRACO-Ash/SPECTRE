@@ -72,9 +72,15 @@ class InterceptSolution:
     total_delta_v: float = 0.0        # km/s
     departure_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
-    miss_distance_km: float = 0.0     # km — actual miss at arrival
+    miss_distance_km: float = 0.0     # km — actual miss at arrival, and nothing else
     lambert_solution: LambertSolution | None = None
     transfer_result: TransferResult | None = None
+    # Assessment methods report a score, not a distance. They used to write it
+    # into miss_distance_km, so seven scores travelled to the web layer typed
+    # and named as kilometres (audit F-072).
+    score: float | None = None        # 0-100, or a count for the envelope
+    score_kind: str = ""              # what the score measures
+    provenance: str = "physics"       # "physics": solved; "heuristic": uncalibrated weights
 
 
 def lambert_intercept(
@@ -841,7 +847,8 @@ def j2_drift_intercept(
         total_delta_v=sum(b.delta_v_mag for b in burns),
         departure_epoch=t_epoch,
         arrival_epoch=t_arrival,
-        miss_distance_km=abs(delta_raan),
+        score=abs(delta_raan),
+        score_kind="RAAN gap (deg)",
     )
 
 
@@ -980,7 +987,8 @@ def geo_drift_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=abs(gap),
+        score=abs(gap),
+        score_kind="longitude gap (deg)",
     )
 
 
@@ -1039,7 +1047,9 @@ def manoeuvre_detect_intercept(
         total_delta_v=result.estimated_delta_v,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        miss_distance_km=result.confidence * 100.0,  # encode confidence as "miss" for display
+        score=result.confidence * 100.0,
+        score_kind="detection score (fixed per classification branch)",
+        provenance="heuristic",
     )
 
 
@@ -1133,7 +1143,8 @@ def detectability_intercept(
 
     Runs a standard Lambert intercept and then evaluates how detectable
     the manoeuvre would be by ground-based space surveillance. The
-    miss_distance_km field encodes the observability score (0–100).
+    observability score (0-100, heuristic) is in ``score``; the miss distance
+    stays the Lambert solution's.
 
     Args:
         red_tle: TLE of the interceptor.
@@ -1154,9 +1165,10 @@ def detectability_intercept(
 
     det = detectability_metric(sol.total_delta_v, altitude, "lambert")
 
-    # Encode detectability info into the solution
     sol.method = "detectability"
-    sol.miss_distance_km = det.observability_score * 100.0  # 0–100 scale
+    sol.score = det.observability_score * 100.0
+    sol.score_kind = "observability score"
+    sol.provenance = "heuristic"
 
     return sol
 
@@ -1296,7 +1308,9 @@ def intent_predict_intercept(
         total_delta_v=0.0,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        miss_distance_km=result.likelihood * 100.0,
+        score=result.likelihood * 100.0,
+        score_kind="intent indicator score",
+        provenance="heuristic",
     )
 
 
@@ -1407,7 +1421,8 @@ def intercept_envelope_intercept(
         total_delta_v=min_feasible_dv,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch + timedelta(hours=min_feasible_tof_h),
-        miss_distance_km=float(feasible),
+        score=float(feasible),
+        score_kind="feasible solutions",
     )
 
 
@@ -1443,7 +1458,9 @@ def stability_intercept(
         total_delta_v=0.0,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        miss_distance_km=result.stability_score * 100.0,
+        score=result.stability_score * 100.0,
+        score_kind="stability score",
+        provenance="heuristic",
     )
 
 
@@ -1497,7 +1514,9 @@ def fingerprint_intercept(
         total_delta_v=dv_est,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        miss_distance_km=result.confidence * 100.0,
+        score=result.confidence * 100.0,
+        score_kind="fingerprint match score",
+        provenance="heuristic",
     )
 
 
@@ -1582,7 +1601,9 @@ def terrain_intercept(
         total_delta_v=0.0,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        miss_distance_km=result.operational_risk_score * 100.0,
+        score=result.operational_risk_score * 100.0,
+        score_kind="operational risk score",
+        provenance="heuristic",
     )
 
 

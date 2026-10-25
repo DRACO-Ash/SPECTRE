@@ -97,9 +97,12 @@ Delta-V is in m/s throughout.
 | `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
 | `total_delta_v_m_s` | `float` | Sum of the burn magnitudes (m/s) |
 | `arrival_epoch` | `datetime` | UTC time the interceptor reaches its final position |
-| `intercept_range_km` | `float` | Miss distance at arrival (km); for the seven assessment methods, a 0 to 100 score instead |
-| `notes` | `str` | Provenance line naming the solver |
+| `intercept_range_km` | `float` | Miss distance at arrival (km), and nothing else |
+| `notes` | `str` | Provenance line: the solver, or for a heuristic assessment that it is an uncalibrated score |
 | `option_id` | `str` | Unique result identifier (`INT_…`) |
+| `score` | `float \| None` | An assessment's 0 to 100 score, the envelope's feasible count, or a drift method's angular gap; `None` for a trajectory |
+| `score_kind` | `str` | What `score` measures, with its unit where it has one |
+| `provenance` | `str` | `physics` for a solved quantity, `heuristic` for a score of uncalibrated weights, shown with a "modelled estimate" badge |
 
 Each `BurnResult`:
 

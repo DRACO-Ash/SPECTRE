@@ -75,7 +75,7 @@ class TestStabilityInterceptFrame:
 
         solution = maneuvers.stability_intercept("RED", "BLUE", epoch)
 
-        assert solution.miss_distance_km == pytest.approx(100.0), (
+        assert solution.score == pytest.approx(100.0), (
             "a truly bounded relative orbit must score 100; a lower score means the "
             "inertial velocity reached the CW boundedness test without the omega x r term"
         )
