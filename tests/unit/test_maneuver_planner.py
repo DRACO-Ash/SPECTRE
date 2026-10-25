@@ -34,7 +34,7 @@ def config() -> ManeuverSearchConfig:
 class TestManeuverPlannerValidation:
 
     def test_valid_config_passes(self, config: ManeuverSearchConfig) -> None:
-        validate_search_config(config)  # should not raise
+        assert validate_search_config(config) is None   # returns rather than raising
 
     def test_empty_red_sat_raises(self, config: ManeuverSearchConfig) -> None:
         config.red_sat = ""

@@ -77,8 +77,7 @@ class TestParseDt:
         assert dt.year == 2025
 
     def test_date_time_utc(self):
-        dt = _parse_dt("2025-03-14 12:00 UTC")
-        assert dt is not None  # format may not match exactly but shouldn't crash
+        assert _parse_dt("2025-03-14 12:00 UTC") == datetime(2025, 3, 14, 12, 0, tzinfo=UTC)
 
     def test_invalid_returns_none(self):
         assert _parse_dt("not a date") is None
@@ -263,7 +262,8 @@ class TestCorrelateNotsos:
         notso = self._notso(43689, "2025-03-14T12:00:00", "2025-03-14T18:00:00")
         mnv   = _FakeManoeuvre(_dt("2025-03-14T14:00:00"))
         corrs = correlate_notsos_with_manoeuvres([notso], [mnv], norad_id=43689)
-        assert corrs[0].time_offset_hours is not None
+        # The window opens at 12:00 and the burn is at 14:00.
+        assert corrs[0].time_offset_hours == pytest.approx(-2.0)
 
     def test_matched_has_magnitude_ratio(self):
         """Matched correlation with known ΔVs includes magnitude_ratio."""

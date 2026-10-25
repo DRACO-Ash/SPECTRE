@@ -168,7 +168,11 @@ class TestCWPropagate:
         n = 0.0011
         s = self._state(x=1.0)
         out = _cw_propagate(s, n, 100.0)
-        assert isinstance(out, CWState)
+        # From rest at x0: x = (4 - 3 cos nt) x0, y = 6 (sin nt - nt) x0.
+        nt = n * 100.0
+        assert out.x == pytest.approx(4.0 - 3.0 * math.cos(nt), abs=1e-12)
+        assert out.y == pytest.approx(6.0 * (math.sin(nt) - nt), abs=1e-12)
+        assert out.z == 0.0
 
     def test_all_fields_finite(self):
         n = 0.0011
@@ -330,8 +334,12 @@ class TestInitialHillState:
         assert n > 0.0
 
     def test_range_positive(self):
+        from spectre.astro.propagator import TLEOrbit
+
         _, _, rng, _ = _initial_hill_state(_TLE_RED, _TLE_BLUE, _EPOCH)
-        assert rng >= 0.0
+        # The Hill frame is a rotation, so the range is the inertial separation.
+        inertial = TLEOrbit(_TLE_RED).propagate(_EPOCH).r - TLEOrbit(_TLE_BLUE).propagate(_EPOCH).r
+        assert rng == pytest.approx(float(math.sqrt(inertial @ inertial)), rel=1e-6)
 
     def test_ecc_bounded(self):
         _, _, _, ecc = _initial_hill_state(_TLE_RED, _TLE_BLUE, _EPOCH)
@@ -369,9 +377,10 @@ class TestComputeRelativeGeometry:
         return compute_relative_geometry(**defaults)
 
     def test_returns_relative_geometry(self):
-        from spectre.astro.cw_geometry import RelativeGeometry
         result = self._call()
-        assert isinstance(result, RelativeGeometry)
+        assert (result.method, result.red_name, result.blue_name) == ("hohmann", "RedSat", "BlueSat")
+        assert result.tof_hours == pytest.approx(1.0)
+        assert result.dv_total_ms == pytest.approx(100.0)
 
     def test_method_preserved(self):
         result = self._call(method="lambert")
@@ -494,9 +503,9 @@ class TestComputeRelativeGeometry:
 
     def test_vr_transfer_tuples_are_floats(self):
         result = self._call()
-        for y, x in result.vr_transfer:
-            assert isinstance(y, float)
-            assert isinstance(x, float)
+        assert result.vr_transfer == [
+            (round(p.y_km, 4), round(p.x_km, 4)) for p in result.transfer_points
+        ], "the V-bar/R-bar view is (along-track, radial) of each transfer point"
 
     def test_range_series_time_ascending(self):
         result = self._call()
@@ -505,12 +514,18 @@ class TestComputeRelativeGeometry:
 
     def test_range_series_all_positive(self):
         result = self._call()
-        for _, rng in result.range_series:
-            assert rng >= 0.0
+        points = result.coast_points + result.transfer_points
+        assert result.range_series == [(round(p.t_s, 1), round(p.range_km, 4)) for p in points]
+        assert all(
+            rng == pytest.approx(math.sqrt(p.x_km**2 + p.y_km**2 + p.z_km**2), abs=1e-4)
+            for (_, rng), p in zip(result.range_series, points, strict=True)
+        )
 
     def test_burn_state_is_cw_state(self):
         result = self._call()
-        assert isinstance(result.burn_state, CWState)
+        state0, _, _, _ = _initial_hill_state(_TLE_RED, _TLE_BLUE, _EPOCH)
+        # No coast, so the burn adds the 0.1 km/s prograde to the initial state.
+        assert result.burn_state == state0._replace(yd=state0.yd + 0.1)
 
 
 # ── Data isolation ─────────────────────────────────────────────────────────────

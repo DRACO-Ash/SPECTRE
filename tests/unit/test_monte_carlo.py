@@ -142,9 +142,9 @@ class TestCheckConvergence:
         rng = np.random.default_rng(0)
         # Small window relative to high-variance data → unlikely to converge
         vals = rng.normal(6778.0, 50.0, 400).tolist()
-        # With only 400 samples and window=200, result may vary — just test no crash
-        result = check_convergence(vals, window_size=200)
-        assert isinstance(result, bool)
+        # Seeded, so the outcome is fixed: 50 km of scatter does not settle in
+        # two windows of 200.
+        assert check_convergence(vals, window_size=200) is False
 
 
 # ── Full MC run (small N for speed) ──────────────────────────────────────────

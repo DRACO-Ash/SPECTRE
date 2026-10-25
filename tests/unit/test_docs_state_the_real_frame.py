@@ -24,11 +24,14 @@ def _has_gcrf_transform() -> bool:
 def test_no_doc_claims_a_frame_the_code_never_reaches() -> None:
     if _has_gcrf_transform():
         return
-    for name in _DOCS:
-        for line in _repo_only(name).read_text(encoding="utf-8").splitlines():
-            # A line saying states are NOT converted is the correction, not the claim.
-            if re.search(r"\b(J2000|ICRF)\b", line) and not re.search(r"\bnot\b", line):
-                raise AssertionError(f"{name} names a frame no code converts to: {line.strip()}")
+    # A line saying states are NOT converted is the correction, not the claim.
+    offenders = [
+        f"{name}: {line.strip()}"
+        for name in _DOCS
+        for line in _repo_only(name).read_text(encoding="utf-8").splitlines()
+        if re.search(r"\b(J2000|ICRF)\b", line) and not re.search(r"\bnot\b", line)
+    ]
+    assert not offenders, f"these name a frame no code converts to: {offenders}"
 
 
 def test_the_readme_states_teme_and_delta_v_units() -> None:

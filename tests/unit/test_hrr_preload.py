@@ -25,6 +25,15 @@ def hrr_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.fixture()
+def store_writes(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Record what the loader writes to the default HRR store, without writing it."""
+    writes: list[object] = []
+    monkeypatch.setattr(app_module, "set_default_hrr_objects", writes.append)
+    monkeypatch.setattr(app_module, "set_default_hrr_tles", lambda *a, **k: None)
+    return writes
+
+
 _NOTIFICATION = [
     {
         "createdAt": "2026-03-04T12:00:00.000Z",
@@ -54,9 +63,12 @@ class TestHrrPreload:
             app_module._load_hrr_from_disk()
         assert "not found" in caplog.text
 
-    def test_empty_notification_list_is_a_no_op(self, hrr_dir: Path) -> None:
+    def test_empty_notification_list_is_a_no_op(
+        self, hrr_dir: Path, store_writes: list[object]
+    ) -> None:
         (hrr_dir / "HRR_List.json").write_text("[]", encoding="utf-8")
-        app_module._load_hrr_from_disk()  # must not raise
+        app_module._load_hrr_from_disk()
+        assert store_writes == [], "an empty list must leave the default HRR store alone"
 
     def test_malformed_json_is_logged_and_swallowed(
         self, hrr_dir: Path, caplog: pytest.LogCaptureFixture
@@ -76,7 +88,21 @@ class TestHrrPreload:
             app_module._load_hrr_from_disk()
         assert "expected a list of notifications" in caplog.text
 
-    def test_non_dict_entries_are_discarded(self, hrr_dir: Path) -> None:
+    def test_non_dict_entries_are_discarded(
+        self, hrr_dir: Path, store_writes: list[object]
+    ) -> None:
         """A list containing junk entries must not reach the parser."""
         (hrr_dir / "HRR_List.json").write_text('["junk", 42, null]', encoding="utf-8")
-        app_module._load_hrr_from_disk()  # must not raise
+        app_module._load_hrr_from_disk()
+        assert store_writes == [], "junk entries must not replace the default HRR store"
+
+    def test_a_good_entry_survives_junk_beside_it(
+        self, hrr_dir: Path, store_writes: list[object]
+    ) -> None:
+        """Discarding junk keeps the real notification next to it."""
+        (hrr_dir / "HRR_List.json").write_text(
+            json.dumps(["junk", *_NOTIFICATION, 42]), encoding="utf-8",
+        )
+        app_module._load_hrr_from_disk()
+        assert len(store_writes) == 1
+        assert {o["satno"] for o in store_writes[0]} == {"25544", "40000"}  # type: ignore[attr-defined]

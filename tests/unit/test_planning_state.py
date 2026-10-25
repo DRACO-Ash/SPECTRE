@@ -35,7 +35,9 @@ class TestSessionStateIsolation:
         assert len(s2.blue_assets) == 0
 
     def test_clear_nonexistent_is_noop(self) -> None:
-        clear_session_state("nobody")  # should not raise
+        get_session_state("alice").blue_assets.append(BlueAsset(name="Alpha", tle="l1\nl2"))
+        clear_session_state("nobody")
+        assert len(get_session_state("alice").blue_assets) == 1, "another user's state was touched"
 
 
 class TestSessionStateLog:

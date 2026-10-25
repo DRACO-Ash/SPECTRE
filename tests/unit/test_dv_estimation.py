@@ -481,7 +481,6 @@ class TestTwoTierReporting:
         assert pol.pairs_examined > 0
         assert pol.noise_model is not None
         assert pol.noise_model.samples == pol.pairs_examined
-        assert pol.rejected_below_floor >= 0
         assert (pol.rejected_below_floor
                 + len(pol.manoeuvres) + len(pol.candidate_manoeuvres)
                 + pol.rejected_on_evidence + pol.merged_duplicates) <= pol.pairs_examined

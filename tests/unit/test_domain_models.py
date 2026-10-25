@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import (
@@ -94,4 +94,4 @@ class TestRunConfig:
     def test_timestamp_utc_aware(self) -> None:
         """Auto-generated timestamp should be UTC-aware."""
         config = RunConfig(operator="analyst", source="MANUAL")
-        assert config.timestamp.tzinfo is not None
+        assert config.timestamp.utcoffset() == timedelta(0)

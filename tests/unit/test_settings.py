@@ -32,6 +32,6 @@ class TestSettings:
             assert s.log_level == "DEBUG"
 
     def test_get_settings_returns_settings_instance(self) -> None:
-        """get_settings() should return a Settings instance."""
+        """get_settings() reads the environment it is called in."""
         s = get_settings()
-        assert isinstance(s, Settings)
+        assert s.secret_key == os.environ["SECRET_KEY"]

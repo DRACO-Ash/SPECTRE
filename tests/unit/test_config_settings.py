@@ -94,7 +94,7 @@ class TestDatabaseUrlResolution:
 
 class TestSecretKeyValidation:
     def test_accepts_a_real_secret(self) -> None:
-        validate_secret_key("k" * 32)
+        assert validate_secret_key("k" * 32) is None   # returns rather than raising
 
     @pytest.mark.parametrize(
         "bad",
@@ -269,7 +269,7 @@ class TestSqliteSupportProbe:
     def test_accepts_a_normal_filesystem(self, tmp_path: Path) -> None:
         from spectre.config.settings import validate_sqlite_support
 
-        validate_sqlite_support(tmp_path)
+        assert validate_sqlite_support(tmp_path) is None   # returns rather than raising
 
     def test_leaves_no_probe_files_behind(self, tmp_path: Path) -> None:
         from spectre.config.settings import validate_sqlite_support

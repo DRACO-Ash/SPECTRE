@@ -198,7 +198,11 @@ class TestFitBaseline:
     def test_baseline_fit_returns_baseline(self):
         corr = self._corrected_stable()
         b = fit_baseline(corr)
-        assert isinstance(b, PhotometryBaseline)
+        # The fixture is mag = 12 + 0.01 x phase with 0.02 mag of noise.
+        assert b.a0 == pytest.approx(12.0, abs=0.05)
+        assert b.a1 == pytest.approx(0.01, abs=0.002)
+        assert b.a2 == pytest.approx(0.0, abs=1e-4)
+        assert (b.n_used, b.n_outliers) == (30, 0)
 
     def test_a1_positive_for_increasing_phase(self):
         """Phase coefficient a1 should be positive (brighter at small phase)."""

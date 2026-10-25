@@ -15,8 +15,6 @@ from __future__ import annotations
 import pytest
 
 from spectre.training.gamification import (
-    GamificationConfig,
-    PointAward,
     award_points,
     check_level_up,
     get_config,
@@ -25,7 +23,6 @@ from spectre.training.gamification import (
     recommended_next_step,
 )
 from spectre.training.scenarios import (
-    TrainingScenario,
     get_scenario,
     load_scenarios,
     scenarios_for_level,
@@ -36,7 +33,9 @@ from spectre.training.scenarios import (
 class TestGetConfig:
     def test_returns_gamification_config(self):
         cfg = get_config()
-        assert isinstance(cfg, GamificationConfig)
+        levels = [lv.level for lv in cfg.levels]
+        assert levels == list(range(1, len(levels) + 1)), "levels run 1, 2, 3 ... with no gap"
+        assert cfg.levels[0].total_points_required == 0
 
     def test_skill_axes_loaded(self):
         cfg = get_config()
@@ -91,7 +90,8 @@ class TestGetConfig:
 class TestAwardPoints:
     def test_returns_point_award(self):
         pa = award_points("tutorial_step_complete", {})
-        assert isinstance(pa, PointAward)
+        assert (pa.base_points, pa.total_points) == (5, 5)
+        assert sum(pa.axis_deltas.values()) == pytest.approx(5.0)
 
     def test_base_points_match_config(self):
         cfg = get_config()
@@ -215,8 +215,10 @@ class TestCheckLevelUp:
             axis_points={}, tutorials_completed=["orientation"],
             scenarios_passed=0, challenges_passed=0,
         )
-        if result.levelled_up:
-            assert isinstance(result.newly_unlocked, list)
+        assert result.levelled_up
+        assert result.new_level == 2
+        assert result.newly_unlocked == result.new_level_def.unlocks
+        assert "tutorial:threat_assessment" in result.newly_unlocked
 
 
 # ── Progress helpers ───────────────────────────────────────────────────────────
@@ -275,8 +277,13 @@ class TestRecommendedNextStep:
 
 class TestScenarioLoader:
     def test_load_scenarios_returns_list(self):
+        import yaml
+
+        from spectre.training.scenarios import _CONFIG_PATH
+
         scenarios = load_scenarios()
-        assert isinstance(scenarios, list)
+        declared = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))["scenarios"]
+        assert [s.id for s in scenarios] == [d["id"] for d in declared]
 
     def test_minimum_three_scenarios(self):
         assert len(load_scenarios()) >= 3
@@ -304,7 +311,7 @@ class TestScenarioLoader:
     def test_get_scenario_by_id(self):
         s = get_scenario("cadet_01_geo_stationkeeping")
         assert s is not None
-        assert isinstance(s, TrainingScenario)
+        assert s.id == "cadet_01_geo_stationkeeping"
 
     def test_get_scenario_unknown_returns_none(self):
         assert get_scenario("does_not_exist_xyz") is None

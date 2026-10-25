@@ -144,11 +144,15 @@ class TestTheListIsUsable:
 
     def test_every_object_carries_a_usable_element_set(self, notification: dict) -> None:
         """An object list without orbits populates a dropdown that then fails."""
+        from spectre.astro.constants import R_EARTH
         from spectre.astro.propagator import TLEOrbit
+        from spectre.web.routes.udl import _parse_tle_epoch
 
         for entry in notification["msgBody"]:
-            tle = f"{entry['line1']}\n{entry['line2']}"
-            TLEOrbit(tle)  # raises if the element set is unusable
+            epoch = _parse_tle_epoch(entry["line1"])
+            assert epoch is not None, f"{entry['satNo']}: no readable epoch"
+            state = TLEOrbit(f"{entry['line1']}\n{entry['line2']}").propagate(epoch)
+            assert state.r_mag > R_EARTH, f"{entry['satNo']}: propagates inside the Earth"
 
     def test_the_declared_regime_matches_the_element_set(self, notification: dict) -> None:
         """The screen filters candidates on the label, so it must be true."""

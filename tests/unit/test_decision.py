@@ -12,7 +12,6 @@ from spectre.domain.decision import (
     FriendlyResponse,
     OutcomeMetrics,
     Scenario,
-    ScenarioResult,
     SelectorStrategy,
     compute_outcome_metrics,
     evaluate_scenario,
@@ -102,7 +101,12 @@ class TestComputeOutcomeMetrics:
         r = _fr()
         s = _scenario([a], [r])
         om = compute_outcome_metrics(a, r, s)
-        assert isinstance(om, OutcomeMetrics)
+        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km; 0.25 x 0.99 + 0.20 x 0.15
+        # + 0.10 x 6/72 + 0.10 x 0.2 = 0.305833.
+        assert om == OutcomeMetrics(
+            custody_maintained=True, custody_gap_hours=0.0, closest_approach_km=500.0,
+            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.305833,
+        )
 
     def test_composite_score_in_unit_interval(self):
         a = _adv()
@@ -259,7 +263,8 @@ class TestEvaluateScenario:
     def test_smoke_test_minimal(self):
         s      = _scenario()
         result = evaluate_scenario(s)
-        assert isinstance(result, ScenarioResult)
+        assert result.robust_best_response.id == "R1"
+        assert result.outcome_matrix[0][0].composite_score == 0.305833
 
     def test_outcome_matrix_shape(self):
         adv_list = [_adv(id=f"A{i}") for i in range(3)]
@@ -283,10 +288,12 @@ class TestEvaluateScenario:
         result  = evaluate_scenario(s)
         assert result.robust_best_response in s.friendly_responses
 
-    def test_wall_time_positive(self):
+    def test_wall_time_is_measured(self):
+        """A one-by-one lookup takes well under a second; a figure outside that
+        means the timer is not measuring this call."""
         s = _scenario()
         result = evaluate_scenario(s)
-        assert result.computation_time_s >= 0.0
+        assert 0.0 <= result.computation_time_s < 1.0
 
     def test_summary_table_contains_robust_header(self):
         s = Scenario(

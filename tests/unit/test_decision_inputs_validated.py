@@ -69,4 +69,5 @@ def test_weights(field: str, value: float) -> None:
 
 
 def test_valid_inputs_still_construct() -> None:
-    _sc(horizon_hours=0.5, w_custody=0.0, w_dv_cost=1.0)
+    s = _sc(horizon_hours=0.5, w_custody=0.0, w_dv_cost=1.0)
+    assert (s.horizon_hours, s.w_custody, s.w_dv_cost) == (0.5, 0.0, 1.0)

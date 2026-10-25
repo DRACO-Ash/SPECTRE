@@ -477,8 +477,8 @@ class TestInterceptEnvelope:
         r = intercept_envelope_analytical(LEO_R, LEO_R + 200.0, max_delta_v=5.0, tof_max_hours=6.0)
         assert r.hohmann_dv_km_s > 0
         assert r.hohmann_tof_hours > 0
-        # With generous budget, at least some points should be feasible
-        assert r.feasible_count >= 0  # envelope may still reject fast transfers
+        # A 5 km/s budget for a 200 km raise leaves feasible points.
+        assert r.feasible_count > 0
 
     def test_tight_budget_fewer_feasible(self) -> None:
         """Smaller ΔV budget → fewer feasible solutions."""
@@ -560,7 +560,15 @@ class TestFormationDefence:
         """Should compute a ΔV and assess formation impact."""
         r = formation_defence_burn(LEO_R, 3600.0, 5.0)
         assert r.delta_v > 0
-        assert r.formation_impact_km >= 0
+        # An along-track impulse from the slot: x = 2(dv/n)(1 - cos nt),
+        # y = (dv/n)(4 sin nt - 3 nt). Its furthest point in one orbit, where
+        # cos nt = 3/4 late in the orbit, is about 19.3 dv/n.
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+        furthest = max(
+            math.hypot(2.0 * (1.0 - math.cos(nt)), 4.0 * math.sin(nt) - 3.0 * nt)
+            for nt in (2.0 * math.pi * k / 10_000 for k in range(10_001))
+        ) * r.delta_v / n
+        assert r.formation_impact_km == pytest.approx(furthest, rel=1e-3)
 
     def test_wide_tolerance_maintains_formation(self) -> None:
         """Large formation spacing → should maintain formation."""

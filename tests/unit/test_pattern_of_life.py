@@ -314,7 +314,15 @@ class TestJ2Rates:
     def test_argp_rate_returns_float(self) -> None:
         rec = _make_record()
         rate = _j2_argp_rate(rec)
-        assert isinstance(rate, float)
+        # dω/dt = 0.75 n J2 (Re/p)^2 (5 cos^2 i - 1), about 3.75 deg/day here.
+        import math
+        n_rad_day = math.sqrt(398600.4418 / rec.sma_km ** 3) * 86400.0
+        p_km = rec.sma_km * (1.0 - rec.ecc ** 2)
+        textbook = math.degrees(
+            0.75 * n_rad_day * 1.08263e-3 * (6378.137 / p_km) ** 2
+            * (5.0 * math.cos(math.radians(rec.inc_deg)) ** 2 - 1.0)
+        )
+        assert rate == pytest.approx(textbook, rel=5e-3)
 
 
 # ── _compute_drift_phases ─────────────────────────────────────────────────────
@@ -379,7 +387,7 @@ class TestAnalysePatternOfLife:
         records = parse_tle_history(tle_text)
         result = analyse_pattern_of_life(records)
         assert result.noise_model is not None
-        assert result.pairs_examined >= 0
+        assert result.pairs_examined == len(records) - 1, "two element sets make one pair"
 
     def test_the_astro_layer_no_longer_interprets(self) -> None:
         """Every calibrated judgement now has exactly one home.
