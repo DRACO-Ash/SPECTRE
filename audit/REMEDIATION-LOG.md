@@ -301,3 +301,11 @@ Observed while generating the F-161 table, not an audit finding: level 5 (Operat
 | F-179 | F-S10-13 | `7b28d97` | the docker-only contract is asserted against the built archive in the packager gate module; the class that could never run is removed, and a contract test fails on a test gated to the docker-only archive. The suite's skips fall from 14 to 12 |
 
 Observed while pinning F-137, not an audit finding: for coplanar circular orbits at 400 and 600 km the sweep prices a V-bar hop at 1.66 m/s, which cannot move an object 200 km in altitude. Left for the solver owner.
+
+### Operator UI
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-104 | F-S04-12 | `0057e1c` | the Monte Carlo period row shows P5, median and P95 (it showed the minimum and maximum under percentile headers) and the altitude row gains its median; the panel states the archetype's assumed sigmas and the ΔV direction basis as "Modelled, not measured" |
+
+With F-104, step 3's single-location findings are closed apart from those carried into step 4 (identity keyed on username, heuristic scores shown as computed physics).

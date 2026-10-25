@@ -65,6 +65,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
 - CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
 
+### Fixed (audit step 3, operator UI)
+- The Monte Carlo panel shows period percentiles under its percentile headers, an altitude median, and states that its dispersions are an archetype's assumptions, not measurements (F-104).
+
 ### Fixed (audit step 3, tests)
 - The threat sweep shows the group's best ΔV and the worst-case headline in whole m/s, not to three decimals (F-137).
 - Tests that checked nothing, only a type, or a condition true of every value now pin values; a meta-test keeps them out (F-066, F-147).
