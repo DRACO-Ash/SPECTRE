@@ -1620,6 +1620,11 @@ class TestContinuousIntegrationCanRun:
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
 
+    def test_the_decision_engine_keeps_its_coverage_floor(self) -> None:
+        """Audit F-122: the selectors were tested only for returning a response."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/domain/decision.py --fail-under=100" in ci
+
     def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
         workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         installs = [

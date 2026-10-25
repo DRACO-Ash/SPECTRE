@@ -82,7 +82,11 @@ jobs:
         # The threat sweep routes stood at 48 per cent with no test touching
         # the sweep, refine or manual-target paths (audit F-042). Raise a floor
         # only with the tests that earn it.
-        run: coverage report --include=spectre/web/routes/threat.py --fail-under=75
+        # The Decision Engine's selectors were tested only for returning some
+        # response (audit F-122); its own tests now run every line.
+        run: |
+          coverage report --include=spectre/web/routes/threat.py --fail-under=75
+          coverage report --include=spectre/domain/decision.py --fail-under=100
       - name: Upload coverage report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

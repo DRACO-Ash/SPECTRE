@@ -148,6 +148,18 @@ class TestComputeOutcomeMetrics:
         om = compute_outcome_metrics(a, r, s)
         assert om.delta_v_cost_km_s == 0.0
 
+    @pytest.mark.parametrize(("atype", "base_km"), [
+        (ActionType.NO_ACTION, 5000.0),
+        (ActionType.MANOEUVRE, 200.0),
+        (ActionType.SENSOR_RETASK, 10000.0),
+        (ActionType.POSTURE_CHANGE, 3000.0),
+    ])
+    def test_each_adversary_type_has_its_closest_approach(self, atype, base_km):
+        """Against a sensor retask the response leaves the base figure alone."""
+        a = _adv(atype=atype)
+        r = _fr(atype=ActionType.SENSOR_RETASK)
+        assert compute_outcome_metrics(a, r, _scenario([a], [r])).closest_approach_km == base_km
+
     def test_str_representation(self):
         a = _adv()
         r = _fr()
@@ -202,6 +214,36 @@ class TestFindRobustResponse:
         r1 = find_robust_response(s, om, SelectorStrategy.MINIMAX)
         r2 = find_robust_response(s, om, SelectorStrategy.MINIMAX)
         assert r1.id == r2.id
+
+    def test_composite_scores_match_the_hand_calculation(self):
+        """A1 (manoeuvre, confidence 0.8) against R1 (manoeuvre, cost 0.4,
+        reversibility 0.7, 6 h), 72 h horizon, default weights:
+        custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
+        0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;
+        time 6/72, 0.10 x 0.0833 = 0.008333; reversibility 0.10 x 0.3 = 0.03.
+        Total 0.325333. The other five follow the same rules."""
+        _, om = self._two_adversary_scenario()
+        assert [[m.composite_score for m in row] for row in om] == [
+            [0.325333, 0.267333, 0.257333],
+            [0.253333, 0.243333, 0.233333],
+        ]
+
+    @pytest.mark.parametrize("strategy", list(SelectorStrategy))
+    def test_each_selector_picks_the_dominant_response(self, strategy):
+        """R3 scores lowest against both adversary actions, so every rule must
+        pick it. test_decision_labelling.py separates the rules from each other."""
+        s, om = self._two_adversary_scenario()
+        assert find_robust_response(s, om, strategy).id == "R3"
+
+    def test_expected_value_with_no_probability_mass_takes_the_first_response(self):
+        """With every probability zero, every response's expected score is 0
+        and the first listed is returned, not a division by zero."""
+        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.0)
+        a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.0)
+        rs = [_fr(id="R1", cost=0.4, rev=0.7), _fr(id="R2", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)]
+        s = _scenario([a1, a2], rs)
+        om = [[compute_outcome_metrics(a, r, s) for r in rs] for a in (a1, a2)]
+        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE).id == "R1"
 
     def test_no_friendly_raises(self):
         s  = _scenario(fr_list=[])
@@ -283,12 +325,3 @@ class TestEvaluateScenario:
         )
         result = evaluate_scenario(s, strategy=SelectorStrategy.EXPECTED_VALUE)
         assert result.robust_strategy == SelectorStrategy.EXPECTED_VALUE
-
-    def test_mc_integration_stub_does_not_crash(self):
-        """Ensure Phase 2 ManoeuvreHypothesis field absence doesn't crash."""
-        a = AdversaryAction(
-            id="A1", name="Intercept approach",
-            action_type=ActionType.MANOEUVRE,
-            probability=0.6, confidence=0.8,
-        )
-        assert not hasattr(a, "hypothesis")   # Phase 1: no hypothesis attribute
