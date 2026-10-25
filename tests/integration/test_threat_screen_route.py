@@ -106,6 +106,7 @@ class TestTheScreenRunsAgainstAWatchlist:
         from spectre.web.planning_state import get_session_state
 
         state = get_session_state("testadmin")
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "41838", "name": "SJ-17", "country": "CHN",
              "rank": 1, "orbit_regime": "GEO"},
@@ -121,8 +122,11 @@ class TestTheScreenRunsAgainstAWatchlist:
             assert "SJ-17" in resp.text, "the one candidate actor must be listed"
             assert "km/s" not in resp.text
         finally:
-            state.hrr_objects = []
+            # Restore rather than clear: the cache is shared, and clearing it
+            # wiped the bootstrap element sets for every later test.
+            state.hrr_objects = saved_objects
             state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
 
     def test_a_blue_only_watchlist_reports_no_candidates(
         self, client: object, auth_cookie: str
@@ -130,6 +134,7 @@ class TestTheScreenRunsAgainstAWatchlist:
         from spectre.web.planning_state import get_session_state
 
         state = get_session_state("testadmin")
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "30793", "name": "SKYNET-5A", "country": "GBR",
              "rank": 1, "orbit_regime": "GEO"},
@@ -141,8 +146,11 @@ class TestTheScreenRunsAgainstAWatchlist:
             assert "No red HRR objects" in resp.text
             assert "0 red object(s) were considered" in resp.text
         finally:
-            state.hrr_objects = []
+            # Restore rather than clear: the cache is shared, and clearing it
+            # wiped the bootstrap element sets for every later test.
+            state.hrr_objects = saved_objects
             state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
 
 
 class TestTheAssetSelector:

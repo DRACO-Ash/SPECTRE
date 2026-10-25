@@ -197,4 +197,5 @@ class TestWarningTimeLeads:
         html = _render(_context())
         assert "401" in html
         assert "0.4012" not in html, "that is km/s with four decimals of noise"
+        assert "401." not in html, "a figure this size is shown in whole m/s, with no decimals"
         assert "km/s" not in html, "no operator-facing figure is in km/s"
