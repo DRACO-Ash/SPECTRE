@@ -104,3 +104,42 @@ class TestAnUnmeasuredFloorIsNotCalledMeasured:
         from spectre.astro.dv_estimation import calibrate_noise
 
         assert calibrate_noise([0.0001, 0.0002]).floor_is_measured is False
+
+
+class TestLosingCustodyCostsSomething:
+    """Audit F-035: custody loss was scaled by our own reversibility, so a fully
+    reversible NO_ACTION lost custody for free and won the minimax ranking."""
+
+    def test_a_custody_losing_cell_scores_worse_than_a_custody_keeping_one(self) -> None:
+        from datetime import UTC, datetime
+
+        from spectre.domain.decision import (
+            ActionType,
+            AdversaryAction,
+            FriendlyResponse,
+            Scenario,
+            compute_outcome_metrics,
+        )
+
+        adversary = AdversaryAction(id="A1", name="manoeuvre", action_type=ActionType.MANOEUVRE,
+                                    probability=0.6, confidence=0.8)
+        # Equal in every input that has its own term; only the action type differs.
+        keeps = FriendlyResponse(id="K", name="retask", action_type=ActionType.SENSOR_RETASK,
+                                 cost=0.0, reversibility=1.0, time_to_execute_hours=0.0)
+        loses = FriendlyResponse(id="L", name="nothing", action_type=ActionType.NO_ACTION,
+                                 cost=0.0, reversibility=1.0, time_to_execute_hours=0.0)
+        s = Scenario(name="s", epoch_utc=datetime(2025, 6, 1, tzinfo=UTC),
+                     adversary_actions=[adversary], friendly_responses=[keeps, loses])
+        kept, lost = compute_outcome_metrics(adversary, keeps, s), compute_outcome_metrics(adversary, loses, s)
+        assert kept.custody_maintained and not lost.custody_maintained
+        assert lost.composite_score > kept.composite_score, "losing custody was free"
+        assert lost.custody_gap_hours == pytest.approx(72.0 * 0.8)
+
+    def test_minimax_no_longer_recommends_doing_nothing_against_a_manoeuvre(self) -> None:
+        from spectre.domain.decision import SelectorStrategy, find_robust_response
+        from tests.unit.test_decision import TestFindRobustResponse
+
+        s, om = TestFindRobustResponse()._two_adversary_scenario()
+        assert find_robust_response(s, om, SelectorStrategy.MINIMAX).id == "R2", (
+            "the sensor retask keeps custody at low cost; doing nothing loses it"
+        )

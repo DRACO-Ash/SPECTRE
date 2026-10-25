@@ -225,19 +225,27 @@ class TestFindRobustResponse:
         custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
         0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;
         time 6/72, 0.10 x 0.0833 = 0.008333; reversibility 0.10 x 0.3 = 0.03.
-        Total 0.325333. The other five follow the same rules."""
+        Total 0.325333. A1/R3 (doing nothing against the manoeuvre) loses
+        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.249 + 0.008333 =
+        0.537333. Before audit F-035 that gap was scaled by R3's reversibility
+        of 1.0 to nothing, and R3 scored 0.257333. The other four follow the
+        same rules."""
         _, om = self._two_adversary_scenario()
         assert [[m.composite_score for m in row] for row in om] == [
-            [0.325333, 0.267333, 0.257333],
+            [0.325333, 0.267333, 0.537333],
             [0.253333, 0.243333, 0.233333],
         ]
 
-    @pytest.mark.parametrize("strategy", list(SelectorStrategy))
-    def test_each_selector_picks_the_dominant_response(self, strategy):
-        """R3 scores lowest against both adversary actions, so every rule must
-        pick it. test_decision_labelling.py separates the rules from each other."""
+    @pytest.mark.parametrize(("strategy", "pick"), [
+        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.325, 0.267, 0.537
+        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.289, 0.255, 0.385
+        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.253, 0.243, 0.233
+    ])
+    def test_each_selector_picks_its_response(self, strategy, pick):
+        """The sensor retask keeps custody cheaply, so the robust rules pick it;
+        the optimistic one picks doing nothing, on the no-action branch."""
         s, om = self._two_adversary_scenario()
-        assert find_robust_response(s, om, strategy).id == "R3"
+        assert find_robust_response(s, om, strategy).id == pick
 
     def test_expected_value_with_no_probability_mass_takes_the_first_response(self):
         """With every probability zero, every response's expected score is 0

@@ -213,9 +213,12 @@ def compute_outcome_metrics(
     --------------------------------------------
     - custody: lost when the adversary manoeuvres and the response is
       NO_ACTION or POSTURE_CHANGE; a MANOEUVRE or SENSOR_RETASK response keeps it
-    - custody_gap_hours: when lost, horizon * adversary confidence *
-      (1 - friendly.reversibility); against a SENSOR_RETASK response to a
-      manoeuvre, half the response's time to execute
+    - custody_gap_hours: when lost, horizon * adversary confidence, a property
+      of the adversary's action alone; against a SENSOR_RETASK response to a
+      manoeuvre, half the response's time to execute. Detection capability is
+      not modelled. Friendly reversibility counts only in its own term: it
+      used to scale this gap too, so a fully reversible NO_ACTION lost custody
+      at no cost and won the minimax ranking (audit F-035)
     - closest_approach_km: a constant per adversary action type, raised by
       response cost for a MANOEUVRE (x(1 + 5 cost)) or POSTURE_CHANGE
       (x(1 + 2 cost)) response
@@ -232,8 +235,9 @@ def compute_outcome_metrics(
 
     if adversary_is_manoeuvre and not friendly_is_active:
         custody_maintained = False
-        # Gap proportional to adversary confidence and horizon
-        custody_gap_hours = scenario.horizon_hours * adversary.confidence * (1.0 - friendly.reversibility)
+        # Gap proportional to adversary confidence and horizon, and nothing of
+        # ours: how reversible our response is does not shorten their gap.
+        custody_gap_hours = scenario.horizon_hours * adversary.confidence
     elif adversary_is_manoeuvre and friendly.action_type == ActionType.SENSOR_RETASK:
         # Sensor retask reduces gap but doesn't eliminate manoeuvre risk
         custody_maintained = True

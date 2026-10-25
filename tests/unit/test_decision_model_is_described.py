@@ -34,7 +34,8 @@ def test_custody_is_lost_unless_the_response_manoeuvres_or_retasks(friendly: Act
 
 
 def test_the_gap_is_scaled_by_adversary_confidence() -> None:
-    assert _pair(ActionType.NO_ACTION).custody_gap_hours == pytest.approx(72.0 * 0.8 * 0.75)
+    # Not scaled by our reversibility any more (audit F-035).
+    assert _pair(ActionType.NO_ACTION).custody_gap_hours == pytest.approx(72.0 * 0.8)
 
 
 def test_no_tle_path_remains() -> None:
