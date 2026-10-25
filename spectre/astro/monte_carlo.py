@@ -240,6 +240,36 @@ class ManoeuvreHypothesis:
     random_seed: int       = 42
     # Where the RIC split of the ΔV came from, shown on the panel.
     direction_basis: str   = "assumed in-track"
+    # The archetype whose sigmas these are, shown on the panel (audit F-104).
+    archetype: str         = ""
+
+
+@dataclass(frozen=True)
+class MonteCarloAssumptions:
+    """What the run assumed rather than measured, for the panel to state.
+
+    The dispersions come from an archetype table, not from the object's own
+    history, and the ΔV direction may be assumed. Carried with the result so
+    the panel cannot show the cloud without saying so (audit F-104).
+    """
+
+    archetype: str
+    dv_1sigma_m_s: float
+    pointing_1sigma_deg: float
+    timing_1sigma_s: float
+    bstar_1sigma: float
+    direction_basis: str
+
+    @classmethod
+    def of(cls, hypothesis: ManoeuvreHypothesis) -> MonteCarloAssumptions:
+        return cls(
+            archetype=hypothesis.archetype or "unnamed",
+            dv_1sigma_m_s=hypothesis.delta_v_magnitude_1sigma_km_s * 1000.0,
+            pointing_1sigma_deg=hypothesis.delta_v_pointing_1sigma_deg,
+            timing_1sigma_s=hypothesis.epoch_1sigma_seconds,
+            bstar_1sigma=hypothesis.bstar_1sigma,
+            direction_basis=hypothesis.direction_basis,
+        )
 
 
 @dataclass
@@ -282,6 +312,14 @@ class MonteCarloResult:
 
     # Where the hypothesis's ΔV direction came from (see ManoeuvreHypothesis).
     direction_basis: str = ""
+
+    # Percentiles for the rows the panel heads "5th %ile / Median / 95th %ile".
+    # The period row used to show the minimum and maximum there (audit F-104).
+    alt_km_p50: float = 0.0
+    period_min_p5: float = 0.0
+    period_min_p50: float = 0.0
+    period_min_p95: float = 0.0
+    assumptions: MonteCarloAssumptions | None = None
 
 
 # ── Core physics ──────────────────────────────────────────────────────────────
@@ -633,6 +671,8 @@ def run_monte_carlo(
             wall_time_seconds=time.monotonic() - t_start,
             random_seed=hypothesis.random_seed,
             direction_basis=hypothesis.direction_basis,
+            alt_km_p50=sma0 - _R_E,
+            assumptions=MonteCarloAssumptions.of(hypothesis),
         )
 
     # ── Aggregate results ─────────────────────────────────────────────────────
@@ -681,6 +721,11 @@ def run_monte_carlo(
         wall_time_seconds=time.monotonic() - t_start,
         random_seed=hypothesis.random_seed,
         direction_basis=hypothesis.direction_basis,
+        alt_km_p50=float(np.percentile(alt_arr, 50)),
+        period_min_p5=float(np.percentile(per_arr, 5)),
+        period_min_p50=float(np.percentile(per_arr, 50)),
+        period_min_p95=float(np.percentile(per_arr, 95)),
+        assumptions=MonteCarloAssumptions.of(hypothesis),
     )
 
 
@@ -730,6 +775,7 @@ def hypothesis_from_tle_record(
         bstar_post=getattr(manoeuvre.tle_before, "bstar", 1e-4),
         n_samples=n_samples,
         direction_basis=basis,
+        archetype=archetype.name,
     )
 
 

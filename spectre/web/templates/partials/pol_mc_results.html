@@ -20,7 +20,7 @@
     </div>
     <span style="font-size:0.62rem; color:var(--text-dim)">
       Manoeuvre: {{ manoeuvre.epoch.strftime("%Y-%m-%d") }} · {{ manoeuvre_dv_m_s | m_s }} m/s
-      {% if mc.direction_basis %}<br>ΔV direction: {{ mc.direction_basis }}{% endif %}
+      {% if mc.direction_basis and not mc.assumptions %}<br>ΔV direction: {{ mc.direction_basis }}{% endif %}
     </span>
   </div>
 
@@ -68,14 +68,14 @@
           <tr>
             <td style="color:var(--text-dim); padding:0.1rem 0">Alt (km)</td>
             <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.alt_km_p5 | round(1) }}</td>
-            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">—</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">{{ mc.alt_km_p50 | round(1) }}</td>
             <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.alt_km_p95 | round(1) }}</td>
           </tr>
           <tr>
             <td style="color:var(--text-dim); padding:0.1rem 0">Period (min)</td>
-            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_range_minutes[0] | round(1) }}</td>
-            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">—</td>
-            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_range_minutes[1] | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_min_p5 | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem; font-weight:700; color:var(--text-primary)">{{ mc.period_min_p50 | round(1) }}</td>
+            <td style="text-align:right; padding:0.1rem 0.3rem">{{ mc.period_min_p95 | round(1) }}</td>
           </tr>
           <tr>
             <td style="color:var(--text-dim); padding:0.1rem 0">Eccentricity [<em>e</em>]</td>
@@ -101,6 +101,15 @@
   </div>
 
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.3rem">
+    {% set a = mc.assumptions %}
+    {% if a %}
+    <div style="color:var(--ops-gold)">
+      Modelled, not measured: dispersions are the {{ a.archetype }} archetype's assumed sigmas
+      (ΔV 1σ {{ "%.1f" | format(a.dv_1sigma_m_s) }} m/s, pointing 1σ {{ "%.1f" | format(a.pointing_1sigma_deg) }}°,
+      timing 1σ {{ a.timing_1sigma_s | round | int }} s, B* 1σ {{ "%.0e" | format(a.bstar_1sigma) }}),
+      not this object's history. ΔV direction: {{ a.direction_basis }}.
+    </div>
+    {% endif %}
     J2 + exponential drag · RIC perturbation model · seed {{ mc.random_seed }}
   </div>
 
