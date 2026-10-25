@@ -19,10 +19,19 @@ live in ``spectre.astro.maneuvers``.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
+from spectre.astro.constants import (
+    _LEO_MAX_ALT,
+    _MEO_MAX_ALT,
+    GEO_RADIUS,
+    J2_EARTH,
+    MU_EARTH,
+    R_EARTH,
+    SIDEREAL_DAY,
+)
 from spectre.astro.cw_geometry import CWState, _cw_propagate
 from spectre.astro.transfers import hohmann
 
@@ -827,7 +836,9 @@ class ManoeuvreClassification:
     delta_ecc: float           # change in eccentricity
     delta_inc_deg: float       # change in inclination
     delta_raan_deg: float      # change in RAAN
-    confidence: float          # 0.0–1.0
+    # One of six fixed values chosen by which classification branch fired, on
+    # uncited thresholds: a heuristic score, not a confidence (audit F-021).
+    branch_score: float        # 0.0–1.0
     notes: str = ""
     method: str = "manoeuvre_detect"
 
@@ -890,7 +901,7 @@ def classify_manoeuvre(
         delta_ecc=de,
         delta_inc_deg=inc2_deg - inc1_deg,
         delta_raan_deg=raan2_deg - raan1_deg,
-        confidence=confidence,
+        branch_score=confidence,
         notes="; ".join(notes_parts) if notes_parts else "No significant element changes detected",
     )
 
@@ -1091,7 +1102,7 @@ class DetectabilityResult:
     delta_v_km_s: float              # ΔV being assessed
     altitude_km: float               # orbital altitude
     delta_v_category: str            # "micro", "small", "medium", "large"
-    tracking_detection_prob: float   # 0.0–1.0
+    detection_score: float           # 0.0–1.0, heuristic, not a probability (audit F-019)
     time_to_detection_hours: float   # estimated hours until detection
     observability_score: float       # 0.0–1.0 overall
     notes: str = ""
@@ -1103,14 +1114,21 @@ def detectability_metric(
     altitude_km: float,
     manoeuvre_type: str = "unknown",
 ) -> DetectabilityResult:
-    """Estimate detectability of a manoeuvre by space surveillance.
+    """Score how detectable a manoeuvre is likely to be. A heuristic.
 
-    Uses empirical rules based on Space Surveillance Network (SSN)
-    tracking capabilities and orbital mechanics:
-    - Micro-manoeuvres (<1 m/s) are very difficult to detect
-    - LEO manoeuvres are detected faster than GEO (denser tracking)
-    - Plane changes are more detectable than along-track burns
-    - Larger ΔV → faster detection → higher probability
+    Every constant here is hand-set and uncalibrated: the rate k per regime
+    (0.5, 0.2, 0.1 per m/s), the detection times (6, 24, 48 h), the type
+    modifiers (1.3, 0.7) and the composite weights (0.4, 0.3, 0.3). No sensor
+    model or surveillance data stands behind them; an earlier docstring
+    attributed them to the Space Surveillance Network, without a source
+    (audit F-019). The shape encodes four qualitative beliefs:
+    - micro-manoeuvres (<1 m/s) are hard to detect
+    - LEO manoeuvres are seen sooner than GEO ones
+    - plane changes are more visible than along-track burns
+    - a larger ΔV is seen sooner
+
+    The regime is banded as the rest of the package bands it, so an object
+    a kilometre below GEO is scored as GEO rather than MEO.
 
     Args:
         delta_v_km_s: Total ΔV of the manoeuvre (km/s).
@@ -1129,12 +1147,12 @@ def detectability_metric(
     else:
         category = "large"
 
-    # Detection probability (sigmoid-like function of ΔV)
-    # P = 1 - exp(-k * ΔV) where k depends on altitude regime
-    if altitude_km < 2000:  # LEO — dense tracking
+    # Detection score, 1 - exp(-k * ΔV), with k by regime. The GEO band starts
+    # 400 km below GEO (constants._MEO_MAX_ALT), not at exactly 35,786 km.
+    if altitude_km < _LEO_MAX_ALT:  # LEO — dense tracking
         k = 0.5  # per m/s
         base_detection_time = 6.0  # hours
-    elif altitude_km < 35786:  # MEO
+    elif altitude_km < _MEO_MAX_ALT:  # MEO
         k = 0.2
         base_detection_time = 24.0
     else:  # GEO — dedicated tracking but sparse coverage
@@ -1165,7 +1183,7 @@ def detectability_metric(
     notes_parts = [
         f"ΔV={dv_m_s:.1f} m/s ({category})",
         f"altitude={altitude_km:.0f} km",
-        f"detection P={detection_prob:.0%}",
+        f"detection score={detection_prob:.2f} (heuristic)",
         f"~{time_hours:.1f} hr to detection",
     ]
 
@@ -1173,7 +1191,7 @@ def detectability_metric(
         delta_v_km_s=delta_v_km_s,
         altitude_km=altitude_km,
         delta_v_category=category,
-        tracking_detection_prob=detection_prob,
+        detection_score=detection_prob,
         time_to_detection_hours=time_hours,
         observability_score=observability,
         notes="; ".join(notes_parts),
@@ -1363,7 +1381,9 @@ class IntentAssessment:
 
     intent_type: str          # co_orbital_intercept, inspection, station_keeping,
                               # repositioning, debris_avoidance, unknown
-    likelihood: float         # 0.0–1.0
+    # An additive score of uncited weights (0.3, 0.25, 0.15, 0.1) over uncited
+    # thresholds. It was named and shown as a likelihood (audit F-018).
+    indicator_score: float    # 0.0–1.0, heuristic
     risk_level: str           # low, medium, high, critical
     predicted_tca_hours: float  # estimated hours to closest approach (0 = already close)
     evidence: str             # human-readable evidence summary
@@ -1397,62 +1417,20 @@ def assess_intercept_intent(
         is_coplanar: Whether objects share approximately the same orbital plane.
         mu: Gravitational parameter.
     """
-    evidence_parts: list[str] = []
-    score = 0.0
-
-    # 1. Closing geometry (most significant indicator)
-    is_closing = range_rate_km_s < -0.001
-    if is_closing:
-        closing_score = min(1.0, abs(range_rate_km_s) / 1.0)  # normalise to 1 km/s
-        score += 0.3 * closing_score
-        evidence_parts.append(f"closing at {abs(range_rate_km_s):.3f} km/s")
-
-    # 2. Range proximity (closer = more concerning)
-    if relative_range_km < 100:
-        score += 0.25
-        evidence_parts.append(f"range {relative_range_km:.0f} km (proximate)")
-    elif relative_range_km < 1000:
-        score += 0.15 * (1.0 - relative_range_km / 1000.0)
-        evidence_parts.append(f"range {relative_range_km:.0f} km (approaching)")
-
-    # 3. Coplanar matching (needed for intercept)
-    if is_coplanar:
-        score += 0.15
-        evidence_parts.append("coplanar geometry")
-
-    # 4. Altitude matching (Δa → matching target orbit)
-    if abs(delta_a_km) > 5.0 and abs(delta_a_km) < 200.0:
-        score += 0.1
-        evidence_parts.append(f"Δa={delta_a_km:+.1f} km (orbit matching)")
-
-    # 5. Plane matching manoeuvres
-    if abs(delta_inc_deg) > 0.05:
-        score += 0.1
-        evidence_parts.append(f"Δi={delta_inc_deg:.3f}° (plane alignment)")
-
-    if abs(delta_raan_deg) > 0.05:
-        score += 0.1
-        evidence_parts.append(f"ΔRAAN={delta_raan_deg:.3f}° (node alignment)")
-
-    # Classify intent
+    score, geo_evidence = _geometry_indicators(relative_range_km, range_rate_km_s)
+    orbit_weights, orbit_evidence = _orbit_matching_indicators(
+        delta_a_km, delta_inc_deg, delta_raan_deg, is_coplanar,
+    )
+    # Added one at a time, in the order the indicators were always summed, so
+    # no score moves in its last bit and lands on the other side of a band.
+    for weight in orbit_weights:
+        score += weight
+    evidence_parts = geo_evidence + orbit_evidence
     score = min(1.0, score)
-    if score > 0.7:
-        if relative_range_km < 50 and abs(range_rate_km_s) < 0.01:
-            intent = "inspection"
-        else:
-            intent = "co_orbital_intercept"
-        risk = "critical" if score > 0.85 else "high"
-    elif score > 0.4:
-        intent = "repositioning"
-        risk = "medium"
-    elif score > 0.15:
-        intent = "station_keeping"
-        risk = "low"
-    else:
-        intent = "unknown"
-        risk = "low"
+    intent, risk = _classify_intent(score, relative_range_km, range_rate_km_s)
 
     # Predict TCA from range and range rate
+    is_closing = range_rate_km_s < _CLOSING_RATE_KM_S
     if is_closing and abs(range_rate_km_s) > 1e-6:
         tca_hours = relative_range_km / abs(range_rate_km_s) / 3600.0
     else:
@@ -1460,11 +1438,69 @@ def assess_intercept_intent(
 
     return IntentAssessment(
         intent_type=intent,
-        likelihood=score,
+        indicator_score=score,
         risk_level=risk,
         predicted_tca_hours=min(tca_hours, 9999.0),
         evidence="; ".join(evidence_parts) if evidence_parts else "No significant indicators",
     )
+
+
+# Intent indicator thresholds. Hand-set and uncited, like the weights beside
+# them (audit F-018, F-079): named so they can be read and, one day, sourced.
+#: Range rate below which the pair counts as closing, km/s (negative = closing).
+_CLOSING_RATE_KM_S = -0.001
+_PROXIMATE_KM = 100.0
+_APPROACHING_KM = 1000.0
+_ORBIT_MATCH_DA_KM = (5.0, 200.0)       # open interval on |Δa|
+_PLANE_MATCH_DEG = 0.05                 # |Δi| and |ΔRAAN| above this
+_INSPECTION_RANGE_KM = 50.0
+_INSPECTION_RATE_KM_S = 0.01
+#: Score bands for the intent label: high (split by inspection geometry and
+#: critical), repositioning, station-keeping.
+_INTENT_HIGH, _INTENT_CRITICAL, _INTENT_REPOSITION, _INTENT_SK = 0.7, 0.85, 0.4, 0.15
+
+
+def _geometry_indicators(relative_range_km: float, range_rate_km_s: float) -> tuple[float, list[str]]:
+    """Closing rate and proximity, the two most significant indicators."""
+    score, evidence = 0.0, []
+    if range_rate_km_s < _CLOSING_RATE_KM_S:
+        score += 0.3 * min(1.0, abs(range_rate_km_s) / 1.0)  # normalise to 1 km/s
+        evidence.append(f"closing at {abs(range_rate_km_s):.3f} km/s")
+    if relative_range_km < _PROXIMATE_KM:
+        score += 0.25
+        evidence.append(f"range {relative_range_km:.0f} km (proximate)")
+    elif relative_range_km < _APPROACHING_KM:
+        score += 0.15 * (1.0 - relative_range_km / _APPROACHING_KM)
+        evidence.append(f"range {relative_range_km:.0f} km (approaching)")
+    return score, evidence
+
+
+def _orbit_matching_indicators(
+    delta_a_km: float, delta_inc_deg: float, delta_raan_deg: float, is_coplanar: bool,
+) -> tuple[list[float], list[str]]:
+    """Coplanarity, altitude matching and plane matching, 0.1 to 0.15 each."""
+    indicators = (
+        (is_coplanar, 0.15, "coplanar geometry"),
+        (_ORBIT_MATCH_DA_KM[0] < abs(delta_a_km) < _ORBIT_MATCH_DA_KM[1], 0.1,
+         f"Δa={delta_a_km:+.1f} km (orbit matching)"),
+        (abs(delta_inc_deg) > _PLANE_MATCH_DEG, 0.1, f"Δi={delta_inc_deg:.3f}° (plane alignment)"),
+        (abs(delta_raan_deg) > _PLANE_MATCH_DEG, 0.1, f"ΔRAAN={delta_raan_deg:.3f}° (node alignment)"),
+    )
+    present = [(weight, note) for hit, weight, note in indicators if hit]
+    return [w for w, _ in present], [n for _, n in present]
+
+
+def _classify_intent(score: float, relative_range_km: float, range_rate_km_s: float) -> tuple[str, str]:
+    """The intent label and risk level for an indicator score."""
+    if score > _INTENT_HIGH:
+        close_and_slow = relative_range_km < _INSPECTION_RANGE_KM and abs(range_rate_km_s) < _INSPECTION_RATE_KM_S
+        risk = "critical" if score > _INTENT_CRITICAL else "high"
+        return ("inspection" if close_and_slow else "co_orbital_intercept"), risk
+    if score > _INTENT_REPOSITION:
+        return "repositioning", "medium"
+    if score > _INTENT_SK:
+        return "station_keeping", "low"
+    return "unknown", "low"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1697,10 +1733,130 @@ class FingerprintResult:
     primary_classification: str        # "geo_sk", "inspector", "asat_test",
                                        # "debris_avoidance", "orbit_raising",
                                        # "constellation_maintenance", "unknown"
-    probabilities: dict[str, float]    # classification → probability
-    confidence: float                  # 0.0–1.0
+    # Independent additive scores of uncited profile constants, one per
+    # classification. They are not normalised and can sum above 1, so they
+    # are scores, not probabilities (audit F-020).
+    scores: dict[str, float]           # classification → heuristic score
+    match_score: float                 # the primary's score, 0.0–1.0
     signature_summary: str             # human-readable signature
     method: str = "fingerprint"
+
+
+class _Signature(NamedTuple):
+    """An observed manoeuvre, as the fingerprint profiles read it."""
+
+    dv_ms: float
+    direction: str
+    altitude_km: float
+    inclination_deg: float
+    eccentricity: float
+    repeat_days: float
+
+
+# Fingerprint thresholds, all hand-set and uncited (audit F-020, F-079).
+_FP_GEO_BAND_KM = (35000.0, 37000.0)
+_FP_GEO_SK_DV_MS = 5.0
+_FP_GEO_SK_CYCLE_DAYS = (10.0, 20.0)
+_FP_INSPECTOR_DV_MS = 50.0
+_FP_NEAR_CIRCULAR_ECC = 0.01
+_FP_LEO_KM = 2000.0
+_FP_PRECISION_DV_MS = (0.5, 20.0)
+_FP_ASAT_DV_MS = 100.0
+_FP_ASAT_ALT_KM = 1500.0
+_FP_ECCENTRIC = 0.1
+_FP_AVOIDANCE_DV_MS = 10.0
+_FP_AVOIDANCE_ALT_KM = 1000.0
+_FP_RAISE_DV_MS = (10.0, 500.0)
+_FP_RAISE_ECC = 0.05
+_FP_MAINTENANCE_DV_MS = 20.0
+_FP_MAINTENANCE_CYCLE_DAYS = (20.0, 180.0)
+_FP_MAINTENANCE_INC_DEG = (50.0, 100.0)
+
+
+def _inside(value: float, band: tuple[float, float]) -> bool:
+    """Strictly inside an open interval."""
+    return band[0] < value < band[1]
+
+
+def _in_geo_band(altitude_km: float) -> bool:
+    return _inside(altitude_km, _FP_GEO_BAND_KM)
+
+
+def _profile_score(indicators: tuple[tuple[bool, float], ...]) -> float:
+    """Add the weights of the indicators present, in table order."""
+    score = 0.0
+    for present, weight in indicators:
+        if present:
+            score += weight
+    return score
+
+
+def _geo_sk(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    # The other three count only inside the GEO band.
+    in_band = _in_geo_band(s.altitude_km)
+    return (
+        (in_band, 0.4),
+        (in_band and s.dv_ms < _FP_GEO_SK_DV_MS, 0.3),
+        (in_band and s.direction in ("prograde", "retrograde", "normal"), 0.1),
+        (in_band and _inside(s.repeat_days, _FP_GEO_SK_CYCLE_DAYS), 0.2),  # about a 14-day cycle
+    )
+
+
+def _inspector(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_INSPECTOR_DV_MS, 0.2),
+        (s.direction in ("radial", "combined"), 0.2),
+        (s.eccentricity < _FP_NEAR_CIRCULAR_ECC, 0.1),
+        (s.altitude_km < _FP_LEO_KM or _in_geo_band(s.altitude_km), 0.2),
+        (_inside(s.dv_ms, _FP_PRECISION_DV_MS), 0.2),  # precision manoeuvre range
+    )
+
+
+def _asat_test(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms > _FP_ASAT_DV_MS, 0.3),
+        (s.direction == "retrograde", 0.3),
+        (s.altitude_km < _FP_ASAT_ALT_KM, 0.2),
+        (s.eccentricity > _FP_ECCENTRIC, 0.1),
+    )
+
+
+def _debris_avoidance(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_AVOIDANCE_DV_MS, 0.3),
+        (s.direction in ("prograde", "retrograde"), 0.2),
+        (s.altitude_km < _FP_AVOIDANCE_ALT_KM, 0.2),
+    )
+
+
+def _orbit_raising(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.direction == "prograde", 0.3),
+        (_inside(s.dv_ms, _FP_RAISE_DV_MS), 0.2),
+        (s.eccentricity < _FP_RAISE_ECC, 0.1),
+    )
+
+
+def _constellation_maintenance(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_MAINTENANCE_DV_MS, 0.2),
+        (s.direction in ("prograde", "retrograde"), 0.2),
+        (_inside(s.repeat_days, _FP_MAINTENANCE_CYCLE_DAYS), 0.3),
+        (_inside(s.inclination_deg, _FP_MAINTENANCE_INC_DEG), 0.1),
+    )
+
+
+#: Each behaviour profile and the weighted indicators it scores. Every weight
+#: and threshold is hand-set and uncited, so the result is a heuristic score
+#: (audit F-020). Order matters only for ties, where the first profile wins.
+_PROFILES: tuple[tuple[str, Callable[[_Signature], tuple[tuple[bool, float], ...]]], ...] = (
+    ("geo_sk", _geo_sk),
+    ("inspector", _inspector),
+    ("asat_test", _asat_test),
+    ("debris_avoidance", _debris_avoidance),
+    ("orbit_raising", _orbit_raising),
+    ("constellation_maintenance", _constellation_maintenance),
+)
 
 
 def fingerprint_manoeuvre(
@@ -1730,87 +1886,20 @@ def fingerprint_manoeuvre(
         eccentricity: Orbital eccentricity.
         repeat_interval_days: Days since last similar manoeuvre (0 = unknown).
     """
-    dv_ms = delta_v_km_s * 1000.0  # m/s
-    probs: dict[str, float] = {}
-
-    # GEO station-keeping
-    geo_score = 0.0
-    if 35000 < altitude_km < 37000:
-        geo_score += 0.4
-        if dv_ms < 5.0:
-            geo_score += 0.3
-        if burn_direction in ("prograde", "retrograde", "normal"):
-            geo_score += 0.1
-        if repeat_interval_days > 0 and 10 < repeat_interval_days < 20:
-            geo_score += 0.2  # ~14-day SK cycle
-    probs["geo_sk"] = min(1.0, geo_score)
-
-    # Inspector satellite
-    insp_score = 0.0
-    if dv_ms < 50.0:
-        insp_score += 0.2
-    if burn_direction in ("radial", "combined"):
-        insp_score += 0.2
-    if eccentricity < 0.01:
-        insp_score += 0.1
-    if altitude_km < 2000 or 35000 < altitude_km < 37000:
-        insp_score += 0.2
-    if dv_ms > 0.5 and dv_ms < 20.0:
-        insp_score += 0.2  # precision manoeuvre range
-    probs["inspector"] = min(1.0, insp_score)
-
-    # ASAT test
-    asat_score = 0.0
-    if dv_ms > 100.0:
-        asat_score += 0.3
-    if burn_direction == "retrograde":
-        asat_score += 0.3
-    if altitude_km < 1500:
-        asat_score += 0.2
-    if eccentricity > 0.1:
-        asat_score += 0.1
-    probs["asat_test"] = min(1.0, asat_score)
-
-    # Debris avoidance
-    dav_score = 0.0
-    if dv_ms < 10.0:
-        dav_score += 0.3
-    if burn_direction in ("prograde", "retrograde"):
-        dav_score += 0.2
-    if altitude_km < 1000:
-        dav_score += 0.2
-    probs["debris_avoidance"] = min(1.0, dav_score)
-
-    # Orbit raising
-    raise_score = 0.0
-    if burn_direction == "prograde":
-        raise_score += 0.3
-    if 10.0 < dv_ms < 500.0:
-        raise_score += 0.2
-    if eccentricity < 0.05:
-        raise_score += 0.1
-    probs["orbit_raising"] = min(1.0, raise_score)
-
-    # Constellation maintenance
-    const_score = 0.0
-    if dv_ms < 20.0:
-        const_score += 0.2
-    if burn_direction in ("prograde", "retrograde"):
-        const_score += 0.2
-    if repeat_interval_days > 0 and 20 < repeat_interval_days < 180:
-        const_score += 0.3
-    if 50 < inclination_deg < 100:
-        const_score += 0.1
-    probs["constellation_maintenance"] = min(1.0, const_score)
+    sig_in = _Signature(
+        delta_v_km_s * 1000.0, burn_direction, altitude_km, inclination_deg, eccentricity, repeat_interval_days,
+    )
+    dv_ms = sig_in.dv_ms
+    probs = {name: min(1.0, _profile_score(indicators(sig_in))) for name, indicators in _PROFILES}
 
     # Select primary
     primary = max(probs, key=probs.get)  # type: ignore[arg-type]
     confidence = probs[primary]
 
-    # If no strong signal, mark unknown
+    # If no strong signal, mark unknown, but report the top score as it is:
+    # it used to be replaced by the constant 0.1.
     if confidence < 0.3:
         primary = "unknown"
-        confidence = 0.1
 
     sig = (f"ΔV={dv_ms:.1f} m/s {burn_direction}, "
            f"alt={altitude_km:.0f} km, inc={inclination_deg:.1f}°, "
@@ -1818,8 +1907,8 @@ def fingerprint_manoeuvre(
 
     return FingerprintResult(
         primary_classification=primary,
-        probabilities=probs,
-        confidence=confidence,
+        scores=probs,
+        match_score=confidence,
         signature_summary=sig,
     )
 
@@ -1932,6 +2021,79 @@ class TerrainAssessment:
     method: str = "terrain"
 
 
+# Terrain bands, km unless stated, all hand-set and uncited (audit F-022,
+# F-079). Inclusive at both ends unless a comparison below says otherwise.
+_GEO_BELT_KM = (35500.0, 36200.0)
+_DEBRIS_EXTREME_KM = (700.0, 1000.0)
+_DEBRIS_HIGH_LOW_KM = 400.0
+_DEBRIS_HIGH_TOP_KM = 1200.0
+_DEBRIS_MEDIUM_LOW_KM = 200.0
+_DEBRIS_MEDIUM_TOP_KM = 1500.0
+_SSO_INC_DEG = (96.0, 100.0)
+_SSO_ALT_KM = (500.0, 900.0)
+_ISS_CORRIDOR_KM = (400.0, 600.0)
+_ISS_CORRIDOR_INC_DEG = (40.0, 60.0)
+_TERRAIN_LEO_KM = 2000.0
+_INNER_BELT_FLOOR_KM = 1000.0
+
+
+def _within(value: float, band: tuple[float, float]) -> bool:
+    """Inside a closed interval."""
+    return band[0] <= value <= band[1]
+
+
+def _in_geo_belt(altitude_km: float) -> bool:
+    return _within(altitude_km, _GEO_BELT_KM)
+
+
+def _terrain_debris(altitude_km: float, inclination_deg: float) -> tuple[str, float]:
+    """Debris band and score, hand-set and uncited (audit F-022)."""
+    extreme_low, extreme_top = _DEBRIS_EXTREME_KM
+    if _within(altitude_km, _DEBRIS_EXTREME_KM):
+        debris, score = "extreme", 1.0
+    elif _DEBRIS_HIGH_LOW_KM <= altitude_km <= extreme_low or extreme_top < altitude_km <= _DEBRIS_HIGH_TOP_KM:
+        debris, score = "high", 0.7
+    elif (_DEBRIS_MEDIUM_LOW_KM <= altitude_km < _DEBRIS_HIGH_LOW_KM
+          or _DEBRIS_HIGH_TOP_KM < altitude_km <= _DEBRIS_MEDIUM_TOP_KM):
+        debris, score = "medium", 0.4
+    elif _in_geo_belt(altitude_km):
+        debris, score = "medium", 0.3  # GEO debris
+    else:
+        debris, score = "low", 0.1
+    # Sun-synchronous inclination band (97–99°) is heavily congested
+    if _within(inclination_deg, _SSO_INC_DEG) and _within(altitude_km, _SSO_ALT_KM):
+        debris, score = "extreme", max(score, 0.9)
+    return debris, score
+
+
+def _terrain_congestion(altitude_km: float, inclination_deg: float) -> str:
+    if _within(altitude_km, _ISS_CORRIDOR_KM) and _within(inclination_deg, _ISS_CORRIDOR_INC_DEG):
+        return "saturated"  # ISS corridor, Starlink
+    if _within(altitude_km, _SSO_ALT_KM) or _in_geo_belt(altitude_km):
+        return "dense"
+    return "moderate" if altitude_km < _TERRAIN_LEO_KM else "sparse"
+
+
+_CONGESTION_SCORES = {"sparse": 0.1, "moderate": 0.3, "dense": 0.6, "saturated": 0.9}
+
+#: (upper altitude km, band, score), checked in order above 1,000 km. Hand-set:
+#: see orbital_terrain's docstring for how these differ from a belt model.
+_RADIATION_BANDS = (
+    (5000.0, "high", 0.8),       # inner belt
+    (12000.0, "extreme", 1.0),   # slot/outer belt
+    (20000.0, "high", 0.7),      # outer belt
+    (35000.0, "moderate", 0.3),
+)
+
+
+def _terrain_radiation(altitude_km: float) -> tuple[str, float]:
+    if altitude_km >= _INNER_BELT_FLOOR_KM:
+        for upper, band, score in _RADIATION_BANDS:
+            if altitude_km <= upper:
+                return band, score
+    return "minimal", 0.05
+
+
 def orbital_terrain(
     altitude_km: float,
     inclination_deg: float,
@@ -1939,8 +2101,12 @@ def orbital_terrain(
     """Map the risk characteristics of an orbital regime.
 
     Assesses debris density, congestion, radiation, and operational
-    risk based on altitude and inclination. Data derived from publicly
-    available space surveillance statistics and radiation belt models.
+    risk based on altitude and inclination. Indicative only: the bands are
+    hand-set, cite no statistic, and have not been checked against a belt
+    model such as AE8/AP8 or AE9/AP9 (audit F-022). In particular the
+    5,000 to 12,000 km band, which spans the slot between the belts, is
+    marked most severe, while the outer-belt peak near GPS altitude is split
+    between "high" and "moderate". Treat the output as a heuristic.
 
     Risk regions:
     - LEO 200–600 km: moderate debris, high congestion (ISS, constellations)
@@ -1954,59 +2120,10 @@ def orbital_terrain(
         altitude_km: Orbital altitude above Earth surface (km).
         inclination_deg: Orbital inclination (degrees).
     """
-    # Debris risk (based on known debris density bands)
-    if 700 <= altitude_km <= 1000:
-        debris = "extreme"
-        debris_score = 1.0
-    elif 400 <= altitude_km <= 700 or 1000 < altitude_km <= 1200:
-        debris = "high"
-        debris_score = 0.7
-    elif 200 <= altitude_km < 400 or 1200 < altitude_km <= 1500:
-        debris = "medium"
-        debris_score = 0.4
-    elif 35500 <= altitude_km <= 36200:
-        debris = "medium"  # GEO debris
-        debris_score = 0.3
-    else:
-        debris = "low"
-        debris_score = 0.1
-
-    # Sun-synchronous inclination band (97–99°) is heavily congested
-    if 96 <= inclination_deg <= 100 and 500 <= altitude_km <= 900:
-        debris = "extreme"
-        debris_score = max(debris_score, 0.9)
-
-    # Congestion level (based on catalogued objects)
-    if 400 <= altitude_km <= 600 and 40 <= inclination_deg <= 60:
-        congestion = "saturated"  # ISS corridor, Starlink
-    elif 500 <= altitude_km <= 900:
-        congestion = "dense"
-    elif 35500 <= altitude_km <= 36200:
-        congestion = "dense"  # GEO belt
-    elif altitude_km < 2000:
-        congestion = "moderate"
-    else:
-        congestion = "sparse"
-
-    congestion_scores = {"sparse": 0.1, "moderate": 0.3, "dense": 0.6, "saturated": 0.9}
-    cong_score = congestion_scores[congestion]
-
-    # Radiation risk (Van Allen belts)
-    if 1000 <= altitude_km <= 5000:
-        radiation = "high"  # inner belt
-        rad_score = 0.8
-    elif 5000 < altitude_km <= 12000:
-        radiation = "extreme"  # slot/outer belt
-        rad_score = 1.0
-    elif 12000 < altitude_km <= 20000:
-        radiation = "high"  # outer belt
-        rad_score = 0.7
-    elif 20000 < altitude_km <= 35000:
-        radiation = "moderate"
-        rad_score = 0.3
-    else:
-        radiation = "minimal"
-        rad_score = 0.05
+    debris, debris_score = _terrain_debris(altitude_km, inclination_deg)
+    congestion = _terrain_congestion(altitude_km, inclination_deg)
+    cong_score = _CONGESTION_SCORES[congestion]
+    radiation, rad_score = _terrain_radiation(altitude_km)
 
     # Transfer corridor detection
     is_gto = altitude_km > 200 and altitude_km < 36000
@@ -2017,16 +2134,12 @@ def orbital_terrain(
     risk_score = 0.4 * debris_score + 0.3 * cong_score + 0.2 * rad_score + 0.1 * (1.0 if transfer_corridor else 0.0)
     risk_score = min(1.0, risk_score)
 
-    factors: list[str] = []
-    factors.append(f"debris: {debris}")
-    factors.append(f"congestion: {congestion}")
-    factors.append(f"radiation: {radiation}")
-    if transfer_corridor:
-        factors.append("GTO transfer corridor")
-    if 96 <= inclination_deg <= 100:
-        factors.append("sun-synchronous band")
-    if 35500 <= altitude_km <= 36200:
-        factors.append("GEO belt")
+    factors = [f"debris: {debris}", f"congestion: {congestion}", f"radiation: {radiation}"]
+    factors += [note for present, note in (
+        (transfer_corridor, "GTO transfer corridor"),
+        (_within(inclination_deg, _SSO_INC_DEG), "sun-synchronous band"),
+        (_in_geo_belt(altitude_km), "GEO belt"),
+    ) if present]
 
     return TerrainAssessment(
         altitude_km=altitude_km,

@@ -129,3 +129,40 @@ def test_the_panel_shows_a_trajectory_without_the_badge() -> None:
     html = _render_panel(result)
     assert "modelled estimate" not in html
     assert "Miss Distance" in html
+
+
+class TestTheAstroResultsNameThemselvesHonestly:
+    """Audit F-018, F-019, F-020: the astro types called scores probabilities."""
+
+    def test_no_heuristic_result_field_is_called_a_probability_or_likelihood(self) -> None:
+        import dataclasses
+
+        from spectre.astro import tactical
+
+        types = [tactical.DetectabilityResult, tactical.IntentAssessment, tactical.FingerprintResult]
+        names = [f.name for t in types for f in dataclasses.fields(t)]
+        assert not [n for n in names if re.search(r"prob|likelihood|confidence", n)], names
+
+    def test_detectability_has_no_edge_at_exactly_geo_altitude(self) -> None:
+        """35,785 km was scored with MEO constants and 35,786 km with GEO ones."""
+        from spectre.astro.tactical import detectability_metric
+
+        below, above = detectability_metric(0.005, 35780.0), detectability_metric(0.005, 35790.0)
+        assert below.detection_score == pytest.approx(above.detection_score)
+        assert below.time_to_detection_hours == pytest.approx(above.time_to_detection_hours)
+
+    def test_the_detectability_docstring_claims_no_ssn_basis(self) -> None:
+        from spectre.astro.tactical import detectability_metric
+
+        doc = detectability_metric.__doc__ or ""
+        assert "heuristic" in doc.lower()
+        assert "based on Space Surveillance Network" not in doc
+
+    def test_a_weak_fingerprint_reports_its_real_top_score(self) -> None:
+        """Below 0.3 the match score was silently replaced by the constant 0.1."""
+        from spectre.astro.tactical import fingerprint_manoeuvre
+
+        r = fingerprint_manoeuvre(0.05, "radial", 8000.0, 10.0, 0.3)
+        assert r.primary_classification == "unknown"
+        assert r.match_score == pytest.approx(max(r.scores.values()))
+        assert r.match_score != pytest.approx(0.1), "the old constant, not the score"

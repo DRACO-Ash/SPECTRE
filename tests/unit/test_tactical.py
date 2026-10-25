@@ -304,7 +304,7 @@ class TestManoeuvreClassification:
         assert result.manoeuvre_type == "altitude_change"
         assert result.estimated_delta_v > 0
         assert result.burn_direction == "prograde"
-        assert result.confidence > 0.5
+        assert result.branch_score > 0.5
 
     def test_plane_change_detected(self) -> None:
         result = classify_manoeuvre(
@@ -370,12 +370,12 @@ class TestDetectabilityMetric:
     def test_micro_manoeuvre(self) -> None:
         result = detectability_metric(0.0005, 500.0)
         assert result.delta_v_category == "micro"
-        assert result.tracking_detection_prob < 0.5
+        assert result.detection_score < 0.5
 
     def test_large_manoeuvre(self) -> None:
         result = detectability_metric(0.5, 500.0)
         assert result.delta_v_category == "large"
-        assert result.tracking_detection_prob > 0.9
+        assert result.detection_score > 0.9
 
     def test_leo_detected_faster(self) -> None:
         leo = detectability_metric(0.01, 500.0)
@@ -385,7 +385,7 @@ class TestDetectabilityMetric:
     def test_larger_dv_higher_prob(self) -> None:
         small = detectability_metric(0.001, 500.0)
         big = detectability_metric(0.1, 500.0)
-        assert big.tracking_detection_prob > small.tracking_detection_prob
+        assert big.detection_score > small.detection_score
 
     def test_observability_bounded(self) -> None:
         result = detectability_metric(1.0, 500.0)
@@ -440,7 +440,7 @@ class TestIntentPredictor:
             relative_range_km=30.0, range_rate_km_s=-0.8,
             is_coplanar=True,
         )
-        assert r.likelihood > 0.5
+        assert r.indicator_score > 0.5
         assert r.risk_level in ("medium", "high", "critical")
         assert r.predicted_tca_hours < 1.0
 
@@ -452,7 +452,7 @@ class TestIntentPredictor:
             is_coplanar=False,
         )
         assert r.risk_level == "low"
-        assert r.likelihood < 0.3
+        assert r.indicator_score < 0.3
 
     def test_inspector_profile(self) -> None:
         """Close, slow approach, coplanar → inspection or repositioning."""
@@ -462,7 +462,7 @@ class TestIntentPredictor:
             is_coplanar=True,
         )
         assert r.intent_type in ("inspection", "co_orbital_intercept", "repositioning")
-        assert r.likelihood > 0.3
+        assert r.indicator_score > 0.3
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -542,10 +542,10 @@ class TestFingerprinting:
         r = fingerprint_manoeuvre(0.5, "retrograde", 500.0, 65.0, 0.15)
         assert r.primary_classification == "asat_test"
 
-    def test_probabilities_sum_reasonable(self) -> None:
-        """All probabilities should be between 0 and 1."""
+    def test_each_score_is_between_0_and_1(self) -> None:
+        """Each classification's heuristic score lies in [0, 1]."""
         r = fingerprint_manoeuvre(0.05, "combined", 800.0, 98.0, 0.001)
-        for p in r.probabilities.values():
+        for p in r.scores.values():
             assert 0.0 <= p <= 1.0
 
 

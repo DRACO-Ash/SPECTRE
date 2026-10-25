@@ -1047,7 +1047,7 @@ def manoeuvre_detect_intercept(
         total_delta_v=result.estimated_delta_v,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        score=result.confidence * 100.0,
+        score=result.branch_score * 100.0,
         score_kind="detection score (fixed per classification branch)",
         provenance="heuristic",
     )
@@ -1301,14 +1301,14 @@ def intent_predict_intercept(
         relative_range, range_rate, is_coplanar, mu,
     )
 
-    # Encode as zero-burn solution; miss_distance encodes likelihood
+    # A zero-burn solution; the indicator score travels in score
     return InterceptSolution(
         method="intent_predict",
         burns=[],
         total_delta_v=0.0,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        score=result.likelihood * 100.0,
+        score=result.indicator_score * 100.0,
         score_kind="intent indicator score",
         provenance="heuristic",
     )
@@ -1514,7 +1514,7 @@ def fingerprint_intercept(
         total_delta_v=dv_est,
         departure_epoch=t_epoch,
         arrival_epoch=t_epoch,
-        score=result.confidence * 100.0,
+        score=result.match_score * 100.0,
         score_kind="fingerprint match score",
         provenance="heuristic",
     )
