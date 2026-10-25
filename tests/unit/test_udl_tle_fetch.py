@@ -40,19 +40,16 @@ class TestParseTleEpoch:
         assert dt is not None
         assert dt.tzinfo is UTC
 
-    def test_two_digit_year_post_2000(self) -> None:
-        # Year "99" → 1999 (< 57 threshold)
-        line = "1 25544U 98067A   99001.00000000  .00000000  00000-0  00000-0 0  9999 0"
+    # The TLE convention: two-digit years 57 to 99 are 1957 to 1999, and 00 to
+    # 56 are 2000 to 2056. The cases pin both sides of the pivot and each end.
+    @pytest.mark.parametrize(("yy", "year"), [
+        ("00", 2000), ("26", 2026), ("56", 2056), ("57", 1957), ("99", 1999),
+    ])
+    def test_two_digit_year_pivots_at_57(self, yy: str, year: int) -> None:
+        line = f"1 25544U 98067A   {yy}001.00000000  .00000000  00000-0  00000-0 0  9999 0"
         dt = _parse_tle_epoch(line)
         assert dt is not None
-        assert dt.year == 1999
-
-    def test_two_digit_year_pre_2000(self) -> None:
-        # Year "57" → 1957
-        line = "1 00001U 57001A   57274.33491898  .00000000  00000-0  00000-0 0  9999 0"
-        dt = _parse_tle_epoch(line)
-        assert dt is not None
-        assert dt.year == 1957
+        assert dt.year == year
 
     def test_returns_none_for_garbage(self) -> None:
         assert _parse_tle_epoch("not a tle line") is None

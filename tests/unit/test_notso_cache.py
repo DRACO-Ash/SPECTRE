@@ -135,14 +135,14 @@ class TestNotsoCache:
         cache = NotsoCache(path=path)
         assert cache.total_records() == 0
 
-    def test_missing_msgid_uses_empty_string_key(self, tmp_cache: NotsoCache) -> None:
-        # Records with no msgId — both have the same (empty) key so only first is kept
-        records = [
-            {"satNo": 5, "createdAt": "2026-01-01T00:00:00Z"},
-        ]
-        added = tmp_cache.append(records)
-        # The record with empty msgId should still be handled without error
-        assert added >= 0  # may or may not be deduplicated
+    def test_a_record_with_no_id_is_kept_not_deduplicated(self, tmp_cache: NotsoCache) -> None:
+        """With no id there is nothing to deduplicate on, so every such record
+        is kept rather than all but the first being dropped as duplicates."""
+        record = {"satNo": 5, "createdAt": "2026-01-01T00:00:00Z"}
+        before = tmp_cache.total_records()
+        assert tmp_cache.append([record, dict(record)]) == 2
+        assert tmp_cache.append([dict(record)]) == 1
+        assert tmp_cache.total_records() == before + 3
 
     def test_messageId_alias(self, tmp_cache: NotsoCache) -> None:
         """Records using 'messageId' instead of 'msgId' should be deduplicated."""
