@@ -143,3 +143,32 @@ class TestLosingCustodyCostsSomething:
         assert find_robust_response(s, om, SelectorStrategy.MINIMAX).id == "R2", (
             "the sensor retask keeps custody at low cost; doing nothing loses it"
         )
+
+
+class TestClusteringComparesElementsAtOneEpoch:
+    """Audit F-054: RAAN was compared at each TLE's own epoch. An ISS-like node
+    regresses about 5 deg/day, so sets 15 minutes apart were never neighbours."""
+
+    def test_two_sets_six_hours_apart_from_one_orbit_form_one_cluster(self) -> None:
+        from tests.unit.test_dv_estimation import _base, _coast
+        from tle_clustering import cluster_tle_strings
+
+        first = _base()
+        later = _coast(first, 0.25)   # the same orbit, six hours on
+        third = _coast(first, 0.125)
+        result = cluster_tle_strings([*first.splitlines(), *later.splitlines(), *third.splitlines()])
+        (only,) = result.values() if isinstance(result, dict) else (result,)
+        assert len(only.clusters) == 1, f"one orbit split into {len(only.clusters)} clusters"
+        assert not only.noise
+
+    def test_a_real_node_change_still_separates(self) -> None:
+        from tests.unit.test_dv_estimation import _base, _coast
+        from tle_clustering import cluster_tle_strings
+
+        first = _base()
+        lines = first.splitlines()
+        moved_l2 = lines[1][:17] + f"{(float(lines[1][17:25]) + 2.0) % 360:8.4f}" + lines[1][25:]
+        moved = "\n".join([lines[0], moved_l2])
+        result = cluster_tle_strings([*first.splitlines(), *_coast(first, 0.1).splitlines(), *moved.splitlines()])
+        (only,) = result.values() if isinstance(result, dict) else (result,)
+        assert only.noise, "a 2 degree node change must not join the cluster"

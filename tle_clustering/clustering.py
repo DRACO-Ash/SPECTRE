@@ -21,9 +21,11 @@ Usage::
 from __future__ import annotations
 
 import logging
+import math
 
 import numpy as np
 from numpy.typing import NDArray
+from sgp4.api import Satrec
 from sklearn.cluster import DBSCAN
 
 from tle_clustering.config import ClusteringConfig
@@ -36,6 +38,29 @@ from tle_clustering.models import (
 from tle_clustering.selection import select_representative
 
 logger = logging.getLogger(__name__)
+
+
+def _raan_at_common_epoch(records: list[TLERecord]) -> list[float]:
+    """Each record's RAAN carried to the latest epoch among them, in degrees.
+
+    Elements were compared at each TLE's own epoch. An ISS-like node regresses
+    about 5 degrees a day, so two fits of one orbit taken more than about a
+    quarter of an hour apart differed by more than the 0.05 degree tolerance
+    and never clustered (audit F-054). Each node is moved by the secular rate
+    SGP4 itself derives for that element set (``Satrec.nodedot``), so the
+    correction is the one the propagator applies. The results are kept within
+    half a turn of the newest record's node, so a group straddling 0/360 is
+    not split by the wrap.
+    """
+    reference = max(r.epoch for r in records)
+    newest = max(records, key=lambda r: r.epoch)
+    moved = []
+    for r in records:
+        rate_deg_per_min = math.degrees(Satrec.twoline2rv(r.line1, r.line2).nodedot)
+        minutes = (reference - r.epoch).total_seconds() / 60.0
+        raan = r.raan_deg + rate_deg_per_min * minutes
+        moved.append(newest.raan_deg + ((raan - newest.raan_deg + 180.0) % 360.0 - 180.0))
+    return moved
 
 
 def _build_feature_matrix(
@@ -59,8 +84,9 @@ def _build_feature_matrix(
     NDArray[np.float64]
         Array of shape ``(n, 3)`` where ``n == len(records)``.
     """
+    raan_at_reference = _raan_at_common_epoch(records)
     raw = np.array(
-        [[r.inclination_deg, r.raan_deg, r.eccentricity] for r in records],
+        [[r.inclination_deg, raan, r.eccentricity] for r, raan in zip(records, raan_at_reference, strict=True)],
         dtype=np.float64,
     )
     tolerances = np.array(

@@ -267,14 +267,22 @@ class TestClusterAndReduceTleCache:
         from spectre.astro.tle_preprocessing import cluster_and_reduce_tle_cache
 
         norad = 55556
-        pre_burn = [
-            _tle_string(norad, 28.5, 45.0, 0.0003, "26091.10000000"),
-            _tle_string(norad, 28.5, 45.01, 0.0003, "26091.20000000"),
-        ]
-        post_burn = [
-            _tle_string(norad, 28.7, 45.0, 0.0003, "26091.60000000"),
-            _tle_string(norad, 28.7, 45.01, 0.0003, "26091.70000000"),
-        ]
+
+        def drifted(inc: float, day: float) -> str:
+            # The node regresses under J2 between fits, as a real catalogue's
+            # does; holding it fixed for hours was itself a node change, which
+            # the clustering ignored until it compared nodes at one epoch
+            # (audit F-054).
+            import math
+
+            from sgp4.api import Satrec
+
+            rate = math.degrees(Satrec.twoline2rv(*_tle_string(norad, inc, 45.0, 0.0003).splitlines()).nodedot)
+            raan = 45.0 + rate * (day - 91.1) * 1440.0
+            return _tle_string(norad, inc, raan % 360.0, 0.0003, f"26{day:012.8f}")
+
+        pre_burn = [drifted(28.5, 91.1), drifted(28.5, 91.2)]
+        post_burn = [drifted(28.7, 91.6), drifted(28.7, 91.7)]
         reduced, summary = cluster_and_reduce_tle_cache(
             {str(norad): pre_burn + post_burn}, {}, _CONFIG,
         )

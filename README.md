@@ -403,6 +403,9 @@ raw TLE history (N TLEs per sat)
   parse_tle_strings()       ← extract inc, RAAN, ecc via sgp4
          │
          ▼
+  RAAN to a common epoch    ← each node moved to the newest epoch at SGP4's own rate
+         │
+         ▼
   normalise per tolerance   ← divide by [inc_tol, raan_tol, ecc_tol]
          │
          ▼
@@ -418,7 +421,7 @@ raw TLE history (N TLEs per sat)
 | Element | Default | Rationale |
 |---------|---------|-----------|
 | Inclination | 0.01° | J2 + fitting noise < 0.01° |
-| RAAN | 0.05° | Provider epoch offsets of minutes → ~0.05° J2 drift |
+| RAAN | 0.05° | Fit scatter, after each node is carried to the newest epoch in the group by SGP4's secular rate; without that, an ISS-like node's ~5°/day regression put fits more than ~15 minutes apart outside the tolerance |
 | Eccentricity | 1×10⁻⁴ | Typical inter-provider LEO variation |
 
 **Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite, the sweep results show a red ▲ warning — the orbit is not well-determined (possible recent unannounced manoeuvre or poor tracking coverage).
