@@ -70,7 +70,7 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Pre-commit hooks | gitleaks, ruff, bandit, mypy, large files, no direct commit to `master` | `.pre-commit-config.yaml` |
 | Fail-closed signing key | Refuses to boot with a missing, short or example `SECRET_KEY` | `spectre/config/settings.py` |
 | Password storage | bcrypt; sign-in verification runs off the event loop, against a dummy hash for unknown users | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
-| Sessions | Signed cookie, 8 hour expiry, revoked server-side on logout and password change | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
+| Sessions | Signed cookie bound to the account (id and a per-account random nonce), 8 hour expiry, revoked server-side on logout and password change; only a live session can log out or receive a CSRF token | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
 | Cookie attributes | Secure (unless explicitly disabled for local HTTP), HttpOnly, SameSite=Lax | `spectre/web/routes/login.py` |
 | CSRF | Token on every state-changing request; a pre-session token on sign-in | `spectre/web/csrf.py` |
 | Sign-in throttling | Limits per client address and per username | `spectre/web/routes/login.py`, `spectre/web/rate_limit.py` |
@@ -102,7 +102,9 @@ marked `UNCLASS // PAIR` in the file, by the owner's ruling of 24 October 2026.
 password hash, role) and log lines recording usernames and client addresses on
 sign-in attempts. That brings it within UK GDPR; see the open items.
 
-● UDL credentials are held in memory for the session only and never written
+● UDL credentials are held in memory for one sign-in only, never shared with
+another sign-in of the same account, cleared on logout, password change and
+account deletion, dropped when the session cookie expires, and never written
 to disk.
 
 ## Open items

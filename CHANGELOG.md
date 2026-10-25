@@ -65,6 +65,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
 - CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
 
+### Security (audit step 4, identity)
+- Session tokens are bound to the account, so a deleted and recreated account of the same name no longer accepts the old account's tokens (F-048). Operators sign in once after upgrading.
+- Planning state, and the UDL credentials on it, belongs to one sign-in: another sign-in of the same account does not see it, and logout, a password change, account deletion and cookie expiry all clear it (F-044, F-148).
+- A revoked token can no longer log the operator out or obtain a CSRF token (F-152).
+
 ### Fixed (audit step 3, operator UI)
 - The Monte Carlo panel shows period percentiles under its percentile headers, an altitude median, and states that its dispersions are an archetype's assumptions, not measurements (F-104).
 

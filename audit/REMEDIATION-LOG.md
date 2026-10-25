@@ -309,3 +309,14 @@ Observed while pinning F-137, not an audit finding: for coplanar circular orbits
 | F-104 | F-S04-12 | `0057e1c` | the Monte Carlo period row shows P5, median and P95 (it showed the minimum and maximum under percentile headers) and the altitude row gains its median; the panel states the archetype's assumed sigmas and the ΔV direction basis as "Modelled, not measured" |
 
 With F-104, step 3's single-location findings are closed apart from those carried into step 4 (identity keyed on username, heuristic scores shown as computed physics).
+
+## Step 4: structural
+
+### Identity keyed on the account, not the username
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-048 | F-S08-02 | `8fb54f9` | tokens carry the account id and a random per-account nonce, and are accepted only when both match. A clock-seeded generation was tried first and dropped: the test caught it failing when a delete and re-create fell in the same second and SQLite reused the id. Pre-upgrade tokens carry no id and are refused, so each operator signs in once after the upgrade |
+| F-148 | F-S08-03 | `c8a73b1` | planning state is cleared for every sign-in of an account on logout, password change and delete; a recreated namesake starts clean |
+| F-044 | F-S07-01 | `c8a73b1` | planning state, and the UDL credentials on it, is filed per sign-in (account id and a random session id from the token) and dropped after the cookie's 8 hours; a second sign-in of the same account sees no UDL connection |
+| F-152 | F-S08-08 | `dae9748` | logout revokes only for a live session, and render mints a CSRF token only for a session require_login or optional_login accepted. Checked in Chromium on a pre-upgrade database |
