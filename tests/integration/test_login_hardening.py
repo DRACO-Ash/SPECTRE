@@ -261,14 +261,24 @@ class TestGenerationComparison:
         migrated.session_generation = 0
         assert _session_revoked(migrated, 0) is False
 
-    def test_a_token_from_before_the_claim_existed_reads_as_generation_zero(self) -> None:
-        """An operator signed in across the upgrade must not be thrown out."""
-        from spectre.web.auth import _decode_session, _serializer
+    def test_a_token_from_before_the_account_id_claim_is_not_bound(self) -> None:
+        """A pre-upgrade token names no account, so it cannot be bound to one.
+
+        It decodes, at generation 0, but carries no account id, and
+        ``require_login`` refuses a token that does not name the account it
+        was issued to (audit F-048). The cost is one sign-in per operator at
+        the upgrade; the alternative was accepting tokens of deleted namesakes.
+        """
+        from spectre.web.auth import SessionClaims, _bound_to, _decode_session, _serializer
+        from spectre.web.models import User
 
         legacy = str(_serializer().dumps({"sub": "signed_in_before_upgrade"}))
         claims = _decode_session(legacy)
-        assert claims is not None
-        assert claims == ("signed_in_before_upgrade", 0)
+        assert claims == SessionClaims("signed_in_before_upgrade", None, 0)
+        account = User(id=7, username="signed_in_before_upgrade", hashed_password="x", role="operator")
+        account.session_generation = 0
+        account.session_nonce = ""
+        assert _bound_to(account, claims) is False
 
     def test_an_older_generation_is_revoked_and_the_current_one_is_not(self) -> None:
         from spectre.web.auth import _session_revoked

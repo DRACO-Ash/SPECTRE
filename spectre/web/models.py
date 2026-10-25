@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Integer, String, event
@@ -20,6 +21,8 @@ class User(Base):
         hashed_password: bcrypt hash of the password; never store plaintext.
         role: ``"operator"`` or ``"admin"``.
         created_at: UTC timestamp of account creation.
+        session_nonce: random per-account value stamped into every session
+            token, so a recreated namesake cannot accept the old account's.
         session_generation: counter stamped into every session token this
             account mints. Logout and a password change increment it, which
             refuses every token carrying an older value. A counter rather than
@@ -54,6 +57,19 @@ class User(Base):
         Integer,
         default=0,
         server_default="0",
+        nullable=False,
+    )
+    # A random value set when the account is created and carried in every
+    # session token it mints. A deleted and recreated "alice" gets a new one,
+    # so the old account's unexpired tokens no longer match even where SQLite
+    # hands the new row the old row's id (audit F-048). A row from before the
+    # column existed arrives with the empty string, and its tokens carry the
+    # same empty string, so it keeps working; any account created after the
+    # upgrade is random.
+    session_nonce: Mapped[str] = mapped_column(
+        String(32),
+        default=lambda: secrets.token_hex(16),
+        server_default="",
         nullable=False,
     )
 

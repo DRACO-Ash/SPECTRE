@@ -195,7 +195,9 @@ async def post_login(
         return render_login(request, "Invalid username or password.", status_code=401)
 
     logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
-    token = make_session_cookie(username, user.session_generation or 0)
+    token = make_session_cookie(
+        username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
+    )
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
         key=_COOKIE_NAME,

@@ -172,6 +172,8 @@ async def _apply_migrations(conn: Any) -> None:
     migrations: list[tuple[str, str, str]] = [
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
         ("users", "session_generation", "INTEGER NOT NULL DEFAULT 0"),
+        # Existing rows take the empty nonce, and their tokens carry it too.
+        ("users", "session_nonce", "VARCHAR(32) NOT NULL DEFAULT ''"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

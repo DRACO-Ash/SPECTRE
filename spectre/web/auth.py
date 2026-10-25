@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Annotated
 
 import bcrypt
@@ -48,29 +49,54 @@ def verify_password(plaintext: str, hashed: str) -> bool:
 # ── Cookie helpers ────────────────────────────────────────────────────────────
 
 
-def make_session_cookie(username: str, generation: int = 0) -> str:
+@dataclass(frozen=True)
+class SessionClaims:
+    """What a session token says about whose session it is."""
+
+    username: str
+    user_id: int | None
+    generation: int
+    nonce: str = ""
+
+
+def make_session_cookie(
+    username: str, generation: int = 0, user_id: int | None = None, nonce: str = "",
+) -> str:
     """Create a signed, time-limited session token for *username*.
 
     *generation* is the account's session generation at the moment of signing
     in. It travels in the payload so that a later logout or password change,
     which increments the stored counter, refuses this token by value rather
     than by clock.
+
+    *user_id* binds the token to the account rather than the name. Without it
+    a token outlived the account it was issued to: delete "alice", create a
+    new "alice", and every unexpired token of the old one opened the new one,
+    with the new one's role (audit F-048). A token with no id is refused by
+    :func:`require_login`. *nonce* is the account's random ``session_nonce``,
+    which a recreated namesake does not share even when SQLite reuses the id.
     """
-    return str(_serializer().dumps({"sub": username, "gen": int(generation)}))
+    payload: dict[str, object] = {"sub": username, "gen": int(generation), "non": nonce}
+    if user_id is not None:
+        payload["uid"] = int(user_id)
+    return str(_serializer().dumps(payload))
 
 
-def _decode_session(token: str) -> tuple[str, int] | None:
-    """Return the username and the session generation carried by *token*.
+def _decode_session(token: str) -> SessionClaims | None:
+    """Return the claims carried by *token*.
 
-    ``None`` means expired, tampered with, or not one of ours. A token minted
-    before the generation claim existed carries no "gen" key and is read as
-    generation 0, which is where every account starts, so an operator signed
-    in across the upgrade is not thrown out by it.
+    ``None`` means expired, tampered with, or not one of ours.
     """
     try:
         data = _serializer().loads(token, max_age=_SESSION_MAX_AGE)
-        return str(data["sub"]), int(data.get("gen", 0))
-    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError):
+        uid = data.get("uid")
+        return SessionClaims(
+            username=str(data["sub"]),
+            user_id=None if uid is None else int(uid),
+            generation=int(data.get("gen", 0)),
+            nonce=str(data.get("non", "")),
+        )
+    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError, AttributeError):
         return None
 
 
@@ -80,7 +106,7 @@ def decode_session_cookie(token: str) -> str | None:
     Returns the username on success, or ``None`` if the token is expired/invalid.
     """
     claims = _decode_session(token)
-    return None if claims is None else claims[0]
+    return None if claims is None else claims.username
 
 
 def _session_revoked(user: User, generation: int) -> bool:
@@ -100,6 +126,16 @@ def _session_revoked(user: User, generation: int) -> bool:
     which is how it was found. A counter has no resolution to run out of.
     """
     return generation < (user.session_generation or 0)
+
+
+def _bound_to(user: User, claims: SessionClaims) -> bool:
+    """Return ``True`` when the token was issued to this account, not a namesake."""
+    return (
+        claims.user_id is not None
+        and claims.user_id == user.id
+        and claims.nonce == (user.session_nonce or "")
+        and not _session_revoked(user, claims.generation)
+    )
 
 
 # ── FastAPI dependency ────────────────────────────────────────────────────────
@@ -127,7 +163,7 @@ async def require_login(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
         )
-    username, generation = claims
+    username = claims.username
 
     result = await db.execute(select(User).where(User.username == username))
     user: User | None = result.scalar_one_or_none()
@@ -138,8 +174,11 @@ async def require_login(
             headers={"Location": "/login"},
         )
 
-    if _session_revoked(user, generation):
-        logger.info("Refused a session ended by logout or password change: %s", log_safe(username))
+    if not _bound_to(user, claims):
+        logger.info(
+            "Refused a session ended by logout or password change, or issued to a deleted namesake: %s",
+            log_safe(username),
+        )
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
@@ -185,13 +224,12 @@ async def optional_login(
     claims = _decode_session(spectre_session)
     if claims is None:
         return None
-    username, generation = claims
 
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(select(User).where(User.username == claims.username))
     user: User | None = result.scalar_one_or_none()
     # A session ended by logout or a password change must read as anonymous
     # here too, or the console greets the operator by name on the public page
     # after they have signed out of it.
-    if user is None or _session_revoked(user, generation):
+    if user is None or not _bound_to(user, claims):
         return None
     return user
