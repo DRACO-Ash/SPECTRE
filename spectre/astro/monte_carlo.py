@@ -320,6 +320,9 @@ class MonteCarloResult:
     period_min_p50: float = 0.0
     period_min_p95: float = 0.0
     assumptions: MonteCarloAssumptions | None = None
+    # Widest 95 % bootstrap half-width of SMA P5, P50 and P95; ``converged``
+    # means it is within CONVERGENCE_TOLERANCE_KM (audit F-103).
+    percentile_half_width_km: float = math.inf
 
 
 # ── Core physics ──────────────────────────────────────────────────────────────
@@ -573,23 +576,39 @@ def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | N
 
 # ── Convergence check ─────────────────────────────────────────────────────────
 
-def check_convergence(
-    sma_values: list[float],
-    window_size: int = 200,
-    tolerance_fraction: float = 0.01,
-) -> bool:
-    """Check if the running mean/std of SMA have stabilised."""
-    if len(sma_values) < 2 * window_size:
-        return False
-    arr = np.array(sma_values)
-    overall_mean = float(np.mean(arr))
-    overall_std  = float(np.std(arr))
-    recent_mean  = float(np.mean(arr[-window_size:]))
-    recent_std   = float(np.std(arr[-window_size:]))
+# The panel shows SMA-derived P5, P50 and P95. A run has converged when each
+# is known to within this, as a 95 % bootstrap half-width (audit F-103).
+CONVERGENCE_TOLERANCE_KM = 1.0
+_MIN_CONVERGENCE_SAMPLES = 50
+_BOOTSTRAP_RESAMPLES = 200
+_SHOWN_PERCENTILES = (5.0, 50.0, 95.0)
 
-    mean_ok = abs(recent_mean - overall_mean) < tolerance_fraction * max(abs(overall_mean), 1e-6)
-    std_ok  = (overall_std < 1e-9) or abs(recent_std - overall_std) < tolerance_fraction * overall_std
-    return mean_ok and std_ok
+
+def percentile_half_width_km(sma_values: list[float], seed: int = 0) -> float:
+    """The widest 95 % bootstrap half-width of SMA P5, P50 and P95, in km.
+
+    Infinite below 50 samples, where the bootstrap itself is not trusted.
+    """
+    arr = np.asarray(sma_values, dtype=float)
+    if arr.size < _MIN_CONVERGENCE_SAMPLES:
+        return math.inf
+    rng = np.random.default_rng(seed)
+    resamples = arr[rng.integers(0, arr.size, size=(_BOOTSTRAP_RESAMPLES, arr.size))]
+    shown = np.percentile(resamples, _SHOWN_PERCENTILES, axis=1)
+    lo, hi = np.percentile(shown, [2.5, 97.5], axis=1)
+    return float(np.max((hi - lo) / 2.0))
+
+
+def check_convergence(
+    sma_values: list[float], tolerance_km: float = CONVERGENCE_TOLERANCE_KM, seed: int = 0,
+) -> bool:
+    """Whether the SMA percentiles shown are known to within *tolerance_km*.
+
+    It compared the last 200 results with the whole, to 1 % of the SMA for
+    the mean (always passing) and of the std (almost never), in thread
+    completion order (audit F-103).
+    """
+    return percentile_half_width_km(sma_values, seed) <= tolerance_km
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -623,8 +642,9 @@ def run_monte_carlo(
     # Generate all samples
     samples = generate_samples(hypothesis)  # (N, 5)
 
-    results: list[dict[str, Any]] = []
-    n_diverged = 0
+    # Filled by sample index, not completion order, so a seed always gives
+    # the same aggregate whatever the thread count (audit F-103).
+    by_index: list[dict[str, Any] | None] = [None] * len(samples)
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
@@ -638,11 +658,8 @@ def run_monte_carlo(
             for i in range(len(samples))
         }
         for future in as_completed(futures):
-            out = future.result()
-            if out is None:
-                n_diverged += 1
-            else:
-                results.append(out)
+            by_index[futures[future]] = future.result()
+    results = [r for r in by_index if r is not None]
 
     n_converged = len(results)
     logger.info(
@@ -695,14 +712,15 @@ def run_monte_carlo(
         regime_counts[reg] = regime_counts.get(reg, 0) + 1
     regime_probs = {k: v / n_converged for k, v in regime_counts.items()}
 
-    converged = check_convergence(sma_arr.tolist())
+    half_width = percentile_half_width_km(sma_arr.tolist(), seed=hypothesis.random_seed or 0)
 
     return MonteCarloResult(
         hypothesis_satno=satno,
         prediction_horizon_hours=prediction_horizon_hours,
         n_samples_run=hypothesis.n_samples,
         n_samples_converged=n_converged,
-        converged=converged,
+        converged=half_width <= CONVERGENCE_TOLERANCE_KM,
+        percentile_half_width_km=half_width,
         sma_km_mean=float(np.mean(sma_arr)),
         sma_km_std=float(np.std(sma_arr)),
         sma_km_p5=float(np.percentile(sma_arr, 5)),
