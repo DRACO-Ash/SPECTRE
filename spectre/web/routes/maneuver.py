@@ -1,14 +1,15 @@
 """Maneuver planning routes — intercept option generation.
 
 Provides endpoints for intercept calculations and orbital event detection.
-All computations use the pure-Python ``spectre.astro`` package (Lambert, Hohmann,
-bi-elliptic).  Orbital event detection uses SGP4 via ``spectre.astro.events``.
+All computations use the pure-Python ``spectre.astro`` package: every method
+in ``_INTERCEPT_METHOD_MAP``, from the closed-form transfers and Lambert to the
+CW, tactical and assessment methods. Orbital event detection uses SGP4 via
+``spectre.astro.events``. This named three methods (audit F-238).
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import math
 from collections.abc import Callable
@@ -651,8 +652,13 @@ def _summary_text(
     return builder(result, dv, miss, tof_label, arrival)
 
 
-def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
+def _compute_intercept_intel(
+    result: InterceptResult, regime: str = "", budget_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+) -> dict[str, Any]:
     """Pre-compute all intelligence analysis data for the intercept result template.
+
+    *budget_m_s* is the operator's submitted budget; the share of it a result
+    uses was taken against the default whatever the operator set (audit F-236).
 
     Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
     """
@@ -702,7 +708,7 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
     # ── ΔV budget percentage ─────────────────────────────────────────────────
     # Against the default realistic budget rather than a hardcoded 3.0, which
     # in m/s would read 100 per cent for any burn above 3 m/s.
-    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
+    dv_budget_pct = min(100.0, dv / budget_m_s * 100.0) if budget_m_s > 0 else 100.0
 
     burn_intel = _burn_breakdown(result)
 
@@ -725,7 +731,7 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
         # carry its own hardcoded "3.0 m/s", which survived the 0.5.15 move to
         # the realistic 500 m/s budget and left the panel reporting a figure
         # against a number 167 times smaller than the one it was computed with.
-        "dv_budget_m_s": DEFAULT_SWEEP_BUDGET_M_S,
+        "dv_budget_m_s": budget_m_s,
         "burn_intel": burn_intel,
         "obs_level": obs_level,
         "obs_color": obs_color,
@@ -817,8 +823,8 @@ async def apply_intercept(
 ) -> HTMLResponse:
     """Calculate an intercept trajectory using spectre.astro solvers.
 
-    Runs Lambert, Hohmann, or bi-elliptic transfer calculations using
-    the pure-Python astro package.
+    Runs the one method named in *method*, any of ``_INTERCEPT_METHOD_MAP``,
+    using the pure-Python astro package.
 
     Returns the intercept result partial with per-burn breakdown.
     """
@@ -829,11 +835,11 @@ async def apply_intercept(
             "result": None, "error": f"Unknown intercept method: {method!r}",
         })
 
-    # Parse manoeuvre start time.
-    manoeuvre_start_dt = datetime.now(tz=UTC)
-    if manoeuvre_start.strip():
-        with contextlib.suppress(ValueError):
-            manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
+    manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
+    if manoeuvre_start_dt is None:
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "error": _BAD_START.format(manoeuvre_start.strip()),
+        })
 
     # Look up TLEs.
     red_tle = _find_tle(state, red_sat.strip())
@@ -855,11 +861,12 @@ async def apply_intercept(
     )
 
     # Regime compatibility check — block cross-belt intercepts.
-    try:
-        red_regime = regime_from_tle(red_tle)
-        blue_regime = regime_from_tle(blue_tle)
-    except TLE_ERRORS:
-        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+    regimes = _pair_regimes(red_tle, blue_tle)
+    if isinstance(regimes, str):
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "intercept_data_mode": effective_dm, "error": regimes,
+        })
+    red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
         return render(request, "partials/intercept_result.html", {
@@ -919,7 +926,7 @@ async def apply_intercept(
         log_safe(red_sat), log_safe(blue_sat), result.total_delta_v_m_s, len(result.burns),
     )
 
-    intel = _compute_intercept_intel(result, red_regime)
+    intel = _compute_intercept_intel(result, red_regime, max_dv_m_s)
     pair = get_intel(satno_from_tle(red_tle))
 
     return render(request, "partials/intercept_result.html", {
@@ -1000,6 +1007,39 @@ class _InterceptArgs(NamedTuple):
     shaping: _Shaping = _Shaping()
 
 
+_BAD_START = "Manoeuvre start {!r} is not an ISO 8601 date and time, for example 2026-03-14T12:00:00Z."
+
+
+def _manoeuvre_start(text: str) -> datetime | None:
+    """The operator's manoeuvre start in UTC, now when blank, None when unreadable.
+
+    An unreadable value was silently replaced by now, and an explicit offset
+    was overwritten rather than converted (audit F-237).
+    """
+    if not text.strip():
+        return datetime.now(tz=UTC)
+    try:
+        parsed = datetime.fromisoformat(text.strip())
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _pair_regimes(red_tle: str, blue_tle: str) -> tuple[str, str] | str:
+    """Both objects' regimes, or the reason one could not be classified.
+
+    A TLE SGP4 could not propagate was assumed to be LEO and the intercept
+    went ahead on that silent guess (audit F-234).
+    """
+    regimes = []
+    for side, tle in (("red", red_tle), ("blue", blue_tle)):
+        try:
+            regimes.append(regime_from_tle(tle))
+        except TLE_ERRORS as exc:
+            return f"The {side} TLE could not be propagated to classify its orbit: {exc}"
+    return regimes[0], regimes[1]
+
+
 def _missing_tle_labels(
     red_tle: str | None,
     red_sat: str,
@@ -1049,6 +1089,7 @@ def _run_all_methods(
 def _items_from_solutions(
     raw: list[tuple[InterceptMethod, InterceptResult | None, str | None]],
     red_regime: str,
+    budget_m_s: float,
 ) -> list[dict[str, Any]]:
     """Turn each method's outcome into one row of the comparison table.
 
@@ -1058,7 +1099,7 @@ def _items_from_solutions(
     items: list[dict[str, Any]] = []
     for method, result, error in raw:
         if result is not None:
-            intel = _compute_intercept_intel(result, red_regime)
+            intel = _compute_intercept_intel(result, red_regime, budget_m_s)
             items.append({"method": method, "result": result, "intel": intel, "error": None})
         else:
             items.append({"method": method, "result": None, "intel": None, "error": error})
@@ -1094,16 +1135,19 @@ async def apply_all_intercepts(
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
 
-    Executes all 23 methods concurrently using sensible shared parameters,
+    Runs every method in turn, in one executor job, using shared parameters,
     computes intelligence assessments for each successful result, and returns
     a sortable table where every row can expand to show the full analysis.
     """
     state = get_session_state(current_user)
 
-    manoeuvre_start_dt = datetime.now(tz=UTC)
-    if manoeuvre_start.strip():
-        with contextlib.suppress(ValueError):
-            manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
+    manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
+    if manoeuvre_start_dt is None:
+        return render(request, "partials/all_intercepts_result.html", {
+            "items": [], "error": _BAD_START.format(manoeuvre_start.strip()),
+            "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
+            "intercept_history": state.intercept_history,
+        })
 
     red_tle = _find_tle(state, red_sat.strip())
     blue_tle = _find_tle(state, blue_sat.strip())
@@ -1122,11 +1166,14 @@ async def apply_all_intercepts(
     )
 
     # Regime compatibility check — block cross-belt intercepts.
-    try:
-        red_regime = regime_from_tle(red_tle)
-        blue_regime = regime_from_tle(blue_tle)
-    except TLE_ERRORS:
-        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+    regimes = _pair_regimes(red_tle, blue_tle)
+    if isinstance(regimes, str):
+        return render(request, "partials/all_intercepts_result.html", {
+            "items": [], "error": regimes,
+            "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
+            "intercept_history": state.intercept_history,
+        })
+    red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
         return render(request, "partials/all_intercepts_result.html", {
@@ -1156,7 +1203,7 @@ async def apply_all_intercepts(
         None, lambda: _run_all_methods(args, red_sat.strip(), blue_sat.strip())
     )
 
-    items = _items_from_solutions(raw, red_regime)
+    items = _items_from_solutions(raw, red_regime, max_dv_m_s)
     items.sort(key=_sort_key)
 
     # Replace history with current batch so trade-space shows the full comparison

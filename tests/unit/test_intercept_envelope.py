@@ -239,7 +239,7 @@ class TestNothingFeasibleRaises:
             )
 
         message = str(refusal.value)
-        assert "0.500 km/s" in message, f"the budget is missing from: {message}"
+        assert "500 m/s" in message, f"the budget is missing from: {message}"
         assert "24 arrival times" in message, f"the sweep width is missing from: {message}"
         assert "48.0 h" in message
 
@@ -316,7 +316,7 @@ class TestTheBudgetReachesTheSolver:
         _, cheapest_dv_km_s = reference.cheapest
         assert 0.001 < cheapest_dv_km_s < 0.5, "the two budgets must straddle the cheapest arc"
 
-        with pytest.raises(ValueError, match=r"0\.001 km/s budget"):
+        with pytest.raises(ValueError, match=r"within the 1 m/s budget"):
             intercept_envelope_intercept(
                 _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.001,
             )
@@ -396,7 +396,7 @@ class TestTheOperatorsBudgetArrivesInKilometresPerSecond:
         _, cheapest_dv_km_s = reference.cheapest
         assert to_km_s(2.0) < cheapest_dv_km_s < to_km_s(5.0)
 
-        with pytest.raises(ValueError, match=r"0\.002 km/s budget"):
+        with pytest.raises(ValueError, match=r"within the 2 m/s budget"):
             intercept_envelope_intercept(
                 _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
                 max_delta_v_km_s=to_km_s(2.0),

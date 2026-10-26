@@ -1412,7 +1412,9 @@ def intercept_envelope_intercept(
         # Raising is what makes the ranked table honest: a zero here was read
         # as free and sorted ahead of every real assessment.
         raise ValueError(
-            f"No intercept within the {max_delta_v_km_s:.3f} km/s budget: none of "
+            # In m/s, the unit the operator set it in; km/s read 0.001 for a
+            # 1 m/s budget (audit F-239).
+            f"No intercept within the {max_delta_v_km_s * 1000.0:g} m/s budget: none of "
             f"{n_steps} arrival times swept across {tof_max_s / 3600.0:.1f} h "
             "is reachable"
         )

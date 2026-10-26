@@ -67,6 +67,11 @@ router = APIRouter(prefix="/plan/threat")
 
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
+#: Sweeps that may run at once across every operator. Each holds a default
+#: executor thread for its whole length, so unbounded sweeps starved every
+#: other feature that uses the executor (audit F-235).
+_SWEEP_SLOTS = asyncio.Semaphore(2)
+
 
 @router.get("/red-orbit-info", response_model=None)
 async def red_orbit_info(
@@ -1295,9 +1300,14 @@ def _run_target_sweep(  # noqa: PLR0913, PLR0917
         # Skip targets in incompatible orbit regimes.
         try:
             tgt_regime = regime_from_tle(tle)
-        # BLE001: one bad element set, not the whole sweep.
-        except Exception:  # noqa: BLE001
-            tgt_regime = red_regime  # assume compatible if TLE can't be parsed
+        except TLE_ERRORS:
+            # Swept on the assumption it is compatible, and said so; the
+            # assumption was silent (audit F-234).
+            sweep_errors.append(
+                f"{target.target_name}: its TLE could not be propagated to classify its orbit; "
+                "swept assuming the same regime as red"
+            )
+            tgt_regime = red_regime
         if not regimes_compatible(red_regime, tgt_regime):
             sweep_errors.append(
                 f"{target.target_name}: skipped — "
@@ -1410,19 +1420,25 @@ async def threat_sweep(
         })
 
     # Classify red satellite's regime once — used to skip incompatible targets.
+    # A red TLE SGP4 cannot propagate cannot be swept; it was assumed to be
+    # LEO and the sweep went ahead on that silent guess (audit F-234).
     try:
         red_regime = regime_from_tle(red_tle)
-    # BLE001: a malformed element set must not kill the sweep.
-    except Exception:  # noqa: BLE001
-        red_regime = "LEO"  # assume LEO on parse failure; sweep proceeds
+    except TLE_ERRORS as exc:
+        return render(request, "partials/threat_sweep.html", {
+            "assessment": None,
+            "error": f"The red TLE could not be propagated to classify its orbit: {exc}",
+        })
 
     targets = _cap_targets(state, targets, _manual_tle_by_name, red_regime, errors)
 
     # Any targets without a cached TLE get a last-chance fetch now.
     await _fetch_missing_target_tles(state, targets, errors)
 
-    # Cluster multi-provider TLEs and reduce to best representative per object.
-    clustering_summary = _reduce_tle_clusters(state)
+    loop = asyncio.get_running_loop()
+    # Cluster multi-provider TLEs and reduce to best representative per object,
+    # off the event loop like the sweep itself (audit F-235).
+    clustering_summary = await loop.run_in_executor(None, _reduce_tle_clusters, state)
 
     # What is known about the RED object's ability to act.
     #
@@ -1433,19 +1449,20 @@ async def threat_sweep(
     red_capability = _red_capability(red_satno)
 
     # Compute epochs for red satellite.
-    epochs = _compute_epochs(red_tle, now)
+    epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, now)
 
     # Count total targets (HRR + manual).
     hrr_count = len(targets)
 
-    # Run sweep in executor.
-    loop = asyncio.get_running_loop()
-    entries, sweep_errors, method_refusals = await loop.run_in_executor(
-        None,
-        lambda: _run_target_sweep(
-            state, targets, _manual_tle_by_name, red_tle, red_regime, epochs, max_dv_m_s,
-        ),
-    )
+    # Run sweep in executor, a bounded number at once across all operators:
+    # each holds an executor thread for its whole length (audit F-235).
+    async with _SWEEP_SLOTS:
+        entries, sweep_errors, method_refusals = await loop.run_in_executor(
+            None,
+            lambda: _run_target_sweep(
+                state, targets, _manual_tle_by_name, red_tle, red_regime, epochs, max_dv_m_s,
+            ),
+        )
     errors.extend(sweep_errors)
 
     # Rank on warning time among the feasible intercepts. Delta-V keeps its
