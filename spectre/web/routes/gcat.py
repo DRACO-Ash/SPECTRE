@@ -512,7 +512,7 @@ async def _ensure_cached(key: str) -> bool:
         if df_result is None:
             return False
         _CACHE[key] = _entry(df_result)
-        log.info("[GCAT] '%s' cached: %d rows", key, len(df_result))
+        log.info("[GCAT] '%s' cached: %d rows", log_safe(key), len(df_result))
         return True
 
 
