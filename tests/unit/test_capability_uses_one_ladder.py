@@ -31,5 +31,5 @@ def test_the_anomaly_score_reads_the_same_band_in_both_panels(score: float) -> N
 
 
 def test_55_is_high_in_both() -> None:
-    assert dict((level, t) for t, level in _RISK_LADDER)["HIGH"] == 55.0
+    assert {level: t for t, level in _RISK_LADDER}["HIGH"] == 55.0
     assert CapabilityEvidence(anomaly_score=57.0).band() == Band.HIGH
