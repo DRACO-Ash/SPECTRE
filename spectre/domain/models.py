@@ -448,6 +448,7 @@ class RunConfig:
         source: Data source tag for the inputs (e.g. ``SPADOC``, ``MANUAL``).
         timestamp: UTC-aware datetime when the run was created.
         run_id: Unique run identifier; auto-generated as ``RUN_<uuid>`` if not supplied.
+        horizon_hours: How far past ``timestamp`` the planner searches for access.
     """
 
     operator: str
@@ -456,3 +457,4 @@ class RunConfig:
         default_factory=lambda: datetime.now(tz=UTC)
     )
     run_id: str = field(default_factory=lambda: f"RUN_{uuid.uuid4().hex[:12].upper()}")
+    horizon_hours: float = 24.0
