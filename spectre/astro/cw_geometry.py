@@ -511,8 +511,11 @@ def compute_relative_geometry(
     if coast_s > 0.0:
         coast_points = _build_trajectory(state0, n, coast_s)
         state_at_burn = _cw_propagate(state0, n, coast_s)
-        logger.debug("cw_geometry: coast %.0fs, state at burn: x=%.2f y=%.2f z=%.2f km",
-                     coast_s, state_at_burn.x, state_at_burn.y, state_at_burn.z)
+        logger.debug(
+            "cw_geometry: coast %ss, state at burn: x=%s y=%s z=%s km",
+            _log_value(format(coast_s, ".0f")), _log_value(format(state_at_burn.x, ".2f")),
+            _log_value(format(state_at_burn.y, ".2f")), _log_value(format(state_at_burn.z, ".2f")),
+        )
 
     # ── Apply ΔV ──────────────────────────────────────────────────────────────
     burn_state = _apply_dv(state_at_burn, dv_radial_km_s, dv_prograde_km_s, dv_normal_km_s)

@@ -252,9 +252,10 @@ async def decision_evaluate(
             f"{len(adversary_actions)} adversary actions × {len(friendly_responses)} friendly responses. "
             f"Modelled recommendation: {result.robust_best_response.name} ({strat.value})"
         )
-    except Exception as exc:
+    # The traceback goes to the log; the page says only that it failed.
+    except Exception:
         logger.exception("Decision evaluation failed")
-        return _err(f"Evaluation error: {exc}")
+        return _err("Evaluation error: the scenario could not be evaluated; the server log has the detail.")
 
     return render(request, "partials/decision_results.html", {
         "result": result,
