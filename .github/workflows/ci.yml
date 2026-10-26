@@ -138,6 +138,23 @@ jobs:
         # The four libraries served from spectre/web/static are listed in
         # vendored.json and were never scanned by anything (audit F-187).
         run: python scripts/audit-vendored-js.py
+      - name: SBOM — CycloneDX for what the image installs
+        # SEC-04. requirements-runtime.txt is the lock the image installs, so
+        # this SBOM describes the shipped container's Python packages. The
+        # check refuses an SBOM that leaves out any pinned package, because a
+        # partial SBOM is read as a complete one.
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' spectre/__init__.py)
+          mkdir -p sbom
+          pip-audit --no-deps --disable-pip --requirement requirements-runtime.txt \
+            --format cyclonedx-json --output "sbom/spectre-${version}-runtime.cdx.json"
+          python scripts/check-sbom.py "sbom/spectre-${version}-runtime.cdx.json" requirements-runtime.txt
+      - name: Keep the SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom/
+          if-no-files-found: error
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:

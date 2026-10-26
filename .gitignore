@@ -119,6 +119,8 @@ ehthumbs.db
 # Anchored to the root: unanchored, these ignored any spectre/lib/ or
 # tle_clustering/env/ a contributor added, silently (audit F-291).
 /env/
+# CI writes the CycloneDX SBOM here (SEC-04); it is a build artifact.
+/sbom/
 htmlcov/
 /lib/
 /lib64/

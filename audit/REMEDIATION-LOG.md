@@ -594,3 +594,14 @@ Reproduced first, on the commit before the change: an operator promoted to Level
 ● One limit, stated plainly: a namesake recreated before this upgrade already sees the deleted account's history, and the migration cannot tell the two apart, so those rows stay with the namesake.
 
 Gates: `tests/integration/test_training_keyed_on_account.py` (a recreated namesake starts at Level 1 with no attempts and the deleted account's rows are gone; a legacy database is backfilled, orphans removed, indexes moved, and a second run changes nothing).
+
+### SBOM in CI (SEC-04)
+
+Not an audit finding; the open item in the root `SECURITY.md`, closed at the owner's request of 26 October 2026.
+
+● The SCA job writes a CycloneDX SBOM of `requirements-runtime.txt`, the lock the image installs, and keeps it as the `sbom-cyclonedx` build artifact. The upload fails the job if no file was written.
+● `scripts/check-sbom.py` refuses an SBOM that leaves out any pinned package, matching names in their PEP 503 form. A partial SBOM is read as a complete one, so it is a failure rather than a warning. On the current lock it lists all 41 pins.
+● Scope, stated in `docs/SECURITY.md`: the image's Python packages only. OS packages in the base image and the vendored JavaScript are not in it; the JavaScript is recorded in `spectre/web/static/vendored.json` and scanned separately.
+
+Gates: `tests/unit/test_sbom_in_ci.py` (the checker passes a complete SBOM, names a missing pin and refuses a non-CycloneDX document; the SCA job writes, checks and uploads the SBOM; SEC-04 is closed in both policies).
+

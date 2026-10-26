@@ -118,7 +118,7 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Disclosure email | The template's placeholder address was removed; add a monitored address if one is wanted |
 | Branch protection on `master` | A repository setting, not visible from the code; recommended settings were given on 23 October 2026 |
 | Signed commits | Not required by any setting the code can show |
-| SBOM | Not produced in CI |
+| SBOM | Produced in CI: a CycloneDX SBOM of `requirements-runtime.txt`, the image's Python packages, checked against the lock and kept as the `sbom-cyclonedx` artifact. It does not cover OS packages in the base image or the vendored JavaScript (listed in `spectre/web/static/vendored.json`) |
 | CodeQL | Not configured |
 | Release signing and provenance | Not in place; there is no release pipeline |
 | Container image vulnerability scan in CI | Not in CI; the hosting platform scans the image, which this repository cannot verify |
