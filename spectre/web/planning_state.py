@@ -1,14 +1,12 @@
 """Per-session in-memory planning state for SPECTRE web console.
 
 In a single-node deployment this module holds run results and asset lists
-in a plain dict keyed by session username.  Replace with a Redis-backed
+in a plain dict keyed by sign-in (account id and session id).  Replace with a Redis-backed
 store for multi-node cloud deployments.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import time
 from collections import deque
@@ -41,15 +39,12 @@ class SessionState:
         blue_assets: List of friendly assets added in this session.
         red_tracks: List of threat tracks added in this session.
         results: Last set of :class:`InterceptWindow` results from ``/plan``.
-        log_queue: Async queue of log-line strings for SSE streaming.
-        log_entries: Fixed-size deque of recent log entries (polling fallback).
-            Oldest entries are evicted automatically when the deque is full.
+        log_entries: The newest 200 log entries; older ones are evicted.
     """
 
     blue_assets: list[BlueAsset] = field(default_factory=list)
     red_tracks: list[RedTrack] = field(default_factory=list)
     results: list[InterceptWindow] = field(default_factory=list)
-    log_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     log_entries: deque[str] = field(
         default_factory=lambda: deque(maxlen=_MAX_LOG_ENTRIES)
     )
@@ -100,14 +95,12 @@ class SessionState:
         )
 
     def append_log(self, message: str) -> None:
-        """Append *message* to the session log.
+        """Append *message* to the session log, evicting the oldest past 200.
 
-        The underlying :class:`collections.deque` automatically evicts the
-        oldest entry when the log is full — no manual size check required.
+        The log used to be copied to an unbounded queue that nothing read, so
+        every line a session wrote was retained (audit F-154).
         """
         self.log_entries.append(message)
-        with contextlib.suppress(asyncio.QueueFull):
-            self.log_queue.put_nowait(message)
 
 
 # Module-level store: one sign-in → SessionState, with when it was created.
