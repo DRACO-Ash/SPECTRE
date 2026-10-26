@@ -348,9 +348,6 @@ class Settings:
     log_level: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_LOG_LEVEL", "INFO")
     )
-    log_dir: str = field(
-        default_factory=lambda: os.environ.get("SPECTRE_LOG_DIR", "logs")
-    )
     secret_key: str = field(default_factory=_resolve_secret_key)
     database_url: str = field(default_factory=_resolve_database_url)
     data_dir: str = field(default_factory=_resolve_data_dir)

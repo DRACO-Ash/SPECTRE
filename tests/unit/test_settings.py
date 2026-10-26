@@ -12,12 +12,11 @@ class TestSettings:
 
     def test_defaults(self) -> None:
         """Settings should have sensible defaults when no env vars are set."""
-        env_keys = ["SPECTRE_LOG_LEVEL", "SPECTRE_LOG_DIR"]
+        env_keys = ["SPECTRE_LOG_LEVEL"]
         original = {k: os.environ.pop(k, None) for k in env_keys}
         try:
             s = Settings()
             assert s.log_level == "INFO"
-            assert s.log_dir == "logs"
         finally:
             for k, v in original.items():
                 if v is not None:

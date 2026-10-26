@@ -103,7 +103,6 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 | `SPECTRE_ADMIN_USER` | No | `admin` | Bootstrap admin username (first run only). |
 | `SPECTRE_ADMIN_PASS` | No | — | Bootstrap admin password (first run only). Omit to skip bootstrap. |
 | `SPECTRE_LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `SPECTRE_LOG_DIR` | No | `logs` | Directory for structlog output files. |
 
 ---
 
@@ -366,7 +365,6 @@ spectre/                           ← repo root
 │   ├── data/
 │   │   ├── intel.py            ← Intelligence data helpers
 │   │   └── notso_cache.py      ← NOTSO record persistence and retrieval
-│   ├── app_logging/            ← structlog setup, run_id correlation
 │   └── config/                 ← Constants and runtime settings
 ├── tle_clustering/             ← Standalone TLE de-duplication package (DBSCAN)
 │   ├── __init__.py             ← cluster_tle_strings() — primary entry point
