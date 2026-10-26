@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from spectre.web.auth import hash_password, require_admin
+from spectre.web.auth import PASSWORD_TOO_LONG, hash_password, password_too_long, require_admin
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
 from spectre.web.log_safety import log_safe
@@ -155,6 +155,8 @@ async def create_user(
         )
     elif not password:
         error = "Password is required."
+    elif password_too_long(password):
+        error = PASSWORD_TOO_LONG
     else:
         existing = await db.execute(select(User).where(User.username == username))
         if existing.scalar_one_or_none():
@@ -252,6 +254,13 @@ async def update_user(
         return _table_response(
             request, await _all_users(db), current_user,
             flash={"type": "error", "message": "Invalid role."},
+        )
+
+    # Judged before anything changes, so a refused password leaves the role as it was.
+    if new_password and password_too_long(new_password):
+        return _table_response(
+            request, await _all_users(db), current_user,
+            flash={"type": "error", "message": PASSWORD_TOO_LONG},
         )
 
     # Guard: cannot demote the last admin

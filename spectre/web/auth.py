@@ -35,14 +35,34 @@ def _serializer() -> URLSafeTimedSerializer:
 # ── Password helpers ──────────────────────────────────────────────────────────
 
 
+# bcrypt reads at most 72 bytes of a password. The pinned release raises
+# ValueError past that rather than truncating, so every caller must check
+# first (audit F-150). The limit is in UTF-8 bytes, not characters.
+MAX_PASSWORD_BYTES = 72
+PASSWORD_TOO_LONG = f"Password must be {MAX_PASSWORD_BYTES} bytes or fewer (fewer characters if it is not plain ASCII)."
+
+
+def password_too_long(plaintext: str) -> bool:
+    """Return ``True`` if bcrypt cannot hash *plaintext*."""
+    return len(plaintext.encode()) > MAX_PASSWORD_BYTES
+
+
 def hash_password(plaintext: str) -> str:
-    """Return the bcrypt hash of *plaintext*."""
+    """Return the bcrypt hash of *plaintext*, which must be 72 bytes or fewer."""
+    if password_too_long(plaintext):
+        raise ValueError(PASSWORD_TOO_LONG)
     hashed: bytes = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt())
     return hashed.decode()
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
-    """Return ``True`` if *plaintext* matches *hashed*."""
+    """Return ``True`` if *plaintext* matches *hashed*.
+
+    A password bcrypt cannot hash can never have been stored, so it never
+    matches; the caller charges it as any other failed attempt.
+    """
+    if password_too_long(plaintext):
+        return False
     return bool(bcrypt.checkpw(plaintext.encode(), hashed.encode()))
 
 

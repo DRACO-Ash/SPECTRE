@@ -195,12 +195,17 @@ async def _bootstrap_admin() -> None:
     # Deferred: keeps the import cost on the boot path only.
     from sqlalchemy import select
 
-    from spectre.web.auth import hash_password
+    from spectre.web.auth import PASSWORD_TOO_LONG, hash_password, password_too_long
     from spectre.web.models import User
 
     settings = get_settings()
     username = settings.spectre_admin_user.strip()
     password = settings.spectre_admin_pass
+
+    if password and password_too_long(password):
+        # Raised from hash_password, this stopped the boot (audit F-150).
+        logger.error("SPECTRE_ADMIN_PASS was not applied: %s Set a shorter one and redeploy.", PASSWORD_TOO_LONG)
+        return
 
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(select(User))).scalars().all()
