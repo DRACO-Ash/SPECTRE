@@ -72,8 +72,6 @@ Pure Python. No I/O. Contains:
 - **decision.py** — Decision Engine Phase 1: `ActionType`, `AdversaryAction`, `FriendlyResponse`,
   `OutcomeMetrics`, `Scenario`, `ScenarioResult`, `compute_outcome_metrics()`,
   `rank_responses()`, `find_robust_response()`, `evaluate_scenario()`
-- **maneuver_planner.py** — `ManeuverPlanner`: validates search config, sorts options by ΔV
-- **exceptions.py** — domain exception types
 
 ### `spectre/training/`
 

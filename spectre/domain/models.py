@@ -18,7 +18,8 @@ class BlueAsset:
     Attributes:
         name: Human-readable short name (e.g. ``Alpha``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (equals ``name``).
+        stk_name: Auto-derived object name: ``name`` with the side's prefix
+            from spectre.config.constants (audit F-231).
     """
 
     name: str
@@ -39,7 +40,8 @@ class RedTrack:
     Attributes:
         name: Human-readable track identifier (e.g. ``Track01``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (equals ``name``).
+        stk_name: Auto-derived object name: ``name`` with the side's prefix
+            from spectre.config.constants (audit F-231).
     """
 
     name: str
@@ -208,7 +210,9 @@ class ManeuverOption:
         delta_v_m_s: Total delta-V magnitude in m/s.
         dv_prograde: VNC prograde (along-track) component in m/s.
         dv_normal: VNC normal (orbit-normal) component in m/s.
-        dv_radial: VNC radial (cross-track) component in m/s.
+        dv_radial: VNC co-normal component in m/s: in the orbit plane, normal
+            to the velocity (near-radial for a circular orbit). It was called
+            cross-track, which is the orbit-normal axis (audit F-231).
         intercept_epoch: UTC datetime when the intercept occurs.
         transfer_duration_s: Coast time from burn to intercept in seconds.
         intercept_range_km: Miss distance at intercept in km.
@@ -356,7 +360,9 @@ class InterceptResult:
     method: InterceptMethod
     burns: list[BurnResult] = field(default_factory=list)
     total_delta_v_m_s: float = 0.0
-    arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    # Required: a default of "now" put a plausible, wrong arrival time on any
+    # result built without one (audit F-231).
+    arrival_epoch: datetime = field(kw_only=True)
     intercept_range_km: float = 0.0
     notes: str = ""
     score: float | None = None

@@ -399,6 +399,8 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         ("assessed threat level", capability.intel_threat_level),
         ("operational status", capability.operational_status),
         ("propellant budget", capability.propellant_used_pct),
+        # _signals reads it, so the verdict must list it (audit F-228).
+        ("discretionary reserve", capability.discretionary_remaining_m_s),
         ("behavioural anomaly score", capability.anomaly_score),
         ("observed manoeuvre history", capability.manoeuvres_observed),
     ):

@@ -44,11 +44,14 @@ Three postures, as the operator asked for them:
                 economy. Usually a meaningful fraction of the platform's whole
                 remaining life, spent at once.
 
-Every boundary below is traceable to a named table or observed case in
+Every band below is drawn from named tables or observed cases in
 "Satellite Manoeuvre Delta-v: Feasibility Above 0.5 km/s and Budgets by Regime"
 (Bluestaq Limited Space Watch, v1.0, 13 October 2026), cited inline as
 Table 3 (station-keeping), Table 4 (aggressive manoeuvres) or Table 2
-(platform ceilings).
+(platform ceilings). Most band edges are not themselves cited figures but a
+judgement placed between them; a band says so (``_Band.judgement``) and the
+assessment carries the caveat. This read "every boundary is traceable"
+(audit F-227).
 
 What these bands do NOT cover
 -----------------------------
@@ -72,6 +75,8 @@ conversion point is how a value ends up 1,000,000x wrong.
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -186,6 +191,14 @@ class _Band:
     benign_max_m_s: float
     annoyance_max_m_s: float
     basis: str
+
+    @property
+    def judgement(self) -> bool:
+        """Whether either edge is not a figure its basis states: a judgement between cited figures."""
+        return not all(
+            re.search(rf"(?<![\d.]){re.escape(f'{v:g}')}(?!\d)", self.basis)
+            for v in (self.benign_max_m_s, self.annoyance_max_m_s)
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -536,6 +549,9 @@ def classify_posture(
     year of routine station-keeping in GEO and fifty years of it in MEO, so a
     single global threshold cannot be right in both.
     """
+    if not math.isfinite(delta_v_m_s) or delta_v_m_s < 0.0:
+        # NaN fell through every comparison to AGGRESSIVE (audit F-233).
+        raise ValueError(f"delta-v must be a finite, non-negative m/s figure, got {delta_v_m_s!r}")
     regime_key = regime.strip().upper()
     band = (_UNCLASSIFIED_BAND if kind is ManoeuvreKind.UNCLASSIFIED
             else _BANDS.get((regime_key, kind), _DEFAULT_BAND))
@@ -592,7 +608,10 @@ def classify_posture(
         kind=kind,
         benign_max_m_s=band.benign_max_m_s,
         annoyance_max_m_s=band.annoyance_max_m_s,
-        basis=band.basis,
+        basis=band.basis + (
+            " The band edges are a judgement placed between these figures, not figures from the source."
+            if band.judgement else ""
+        ),
         station_keeping_years=years,
         rationale=rationale,
     )

@@ -182,7 +182,7 @@ class TestRankResponses:
         s = _scenario([a], [r_cola, r_noop])
         om_cola = compute_outcome_metrics(a, r_cola, s)
         om_noop = compute_outcome_metrics(a, r_noop, s)
-        ranked  = rank_responses(0, [r_cola, r_noop], [om_cola, om_noop])
+        ranked  = rank_responses([r_cola, r_noop], [om_cola, om_noop])
         assert ranked[0][1] <= ranked[1][1]   # sorted ascending by score
 
     def test_returns_all_responses(self):
@@ -190,7 +190,7 @@ class TestRankResponses:
         rs = [_fr(id=f"R{i}", name=f"R{i}") for i in range(4)]
         s  = _scenario([a], rs)
         row = [compute_outcome_metrics(a, r, s) for r in rs]
-        ranked = rank_responses(0, rs, row)
+        ranked = rank_responses(rs, row)
         assert len(ranked) == 4
 
 
@@ -302,16 +302,6 @@ class TestEvaluateScenario:
         s = _scenario()
         result = evaluate_scenario(s)
         assert 0.0 <= result.computation_time_s < 1.0
-
-    def test_summary_table_contains_robust_header(self):
-        s = Scenario(
-            name="Test GEO Scenario",
-            epoch_utc=_epoch(),
-            adversary_actions=[_adv()],
-            friendly_responses=[_fr()],
-        )
-        result = evaluate_scenario(s)
-        assert "Robust response" in result.summary_table()
 
     def test_empty_adversary_raises(self):
         s = Scenario(

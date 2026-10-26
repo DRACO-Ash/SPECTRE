@@ -221,9 +221,12 @@ class ManoeuvreView:
     sk_ceiling_basis: str
     confirmed:        bool
 
+    #: True when this single manoeuvre is above what an object already on
+    #: station in this regime spends: the assessment's on-station anomaly line.
+    exceeds_on_station_anomaly: bool
     #: True when this single manoeuvre exceeds what any platform in this regime
     #: could hold in total. The assessment's second watchlist recommendation.
-    exceeds_on_station_anomaly: bool
+    #: The comment sat on the field above (audit F-229).
     exceeds_platform_ceiling:   bool
     escalation:                 str
 
@@ -752,11 +755,12 @@ def _assess_detection(noise: Any, _regime: str) -> DetectionLimits | None:
             "avoidance manoeuvres in twelve months, none of which any element-set "
             "method could resolve."
         )
-    if invisible and not missed_routine:
+    # It was guarded by "invisible and not missed_routine", which cannot
+    # both hold since the smallest reference event is routine (audit F-230).
+    if visible:
         narrative += (
-            " Counterspace-scale behaviour is above it: the smallest event on "
-            "open record that this would catch is "
-            f"{visible[0][1]:.0f} m/s ({visible[0][0]})." if visible else ""
+            " The smallest event on open record that this would catch is "
+            f"{visible[0][1]:.0f} m/s ({visible[0][0]})."
         )
     return DetectionLimits(
         floor_m_s=round(floor, 3),

@@ -144,7 +144,8 @@ class TestTheTwoFindingsStaySeparatelyVisible:
 
     def test_missing_evidence_is_declared_not_hidden(self) -> None:
         html = _render(_context())
-        assert "3 input(s) unavailable" in html
+        # Four: the discretionary reserve is listed too since audit F-228.
+        assert "4 input(s) unavailable" in html
         assert "propellant budget" in html
 
 

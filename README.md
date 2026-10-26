@@ -332,8 +332,6 @@ spectre/                           ← repo root
 │   │   ├── scenario.py         ← ScenarioPlanner orchestrator
 │   │   ├── decision.py         ← Decision Engine: ActionType, AdversaryAction,
 │   │   │                          FriendlyResponse, OutcomeMetrics, evaluate_scenario()
-│   │   ├── maneuver_planner.py ← ManeuverPlanner: validates config, sorts options
-│   │   └── exceptions.py       ← Domain exception types
 │   ├── training/               ← Gamification and training mode
 │   │   ├── gamification.py     ← XP engine, level unlock rules, progress tracking
 │   │   ├── scenarios.py        ← Scenario loader and unlock logic

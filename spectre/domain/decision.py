@@ -183,26 +183,6 @@ class ScenarioResult:
     # The code, calibration and scenario behind this result (audit F-121).
     provenance:             Provenance | None = None
 
-    def summary_table(self) -> str:
-        """ASCII summary table for CLI / operator guide output."""
-        adv  = self.scenario.adversary_actions
-        fr   = self.scenario.friendly_responses
-        lines = []
-        header = f"{'':25s}" + "".join(f"{r.name[:12]:>13s}" for r in fr)
-        lines.append(header)
-        lines.append("-" * len(header))
-        for i, a in enumerate(adv):
-            row = f"{a.name[:24]:<25s}"
-            for j in range(len(fr)):
-                row += f"{self.outcome_matrix[i][j].composite_score:>13.3f}"
-            lines.append(row)
-        lines.append("")
-        lines.append(
-            f"Robust response ({self.robust_strategy.value}): "
-            f"{self.robust_best_response.name}"
-        )
-        return "\n".join(lines)
-
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
 
@@ -309,7 +289,6 @@ def compute_outcome_metrics(
 # ── Response ranking ──────────────────────────────────────────────────────────
 
 def rank_responses(
-    adversary_idx: int,
     friendly_responses: list[FriendlyResponse],
     outcome_row: list[OutcomeMetrics],
 ) -> list[tuple[FriendlyResponse, float]]:
@@ -414,7 +393,7 @@ def evaluate_scenario(
 
     # Rank per adversary action
     ranked_per_adversary = [
-        rank_responses(i, scenario.friendly_responses, outcome_matrix[i])
+        rank_responses(scenario.friendly_responses, outcome_matrix[i])
         for i in range(len(scenario.adversary_actions))
     ]
 
