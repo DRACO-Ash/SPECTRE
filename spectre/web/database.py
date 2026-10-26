@@ -190,7 +190,30 @@ async def _apply_migrations(conn: Any) -> None:
     await _key_training_on_account(conn)
 
 
-_TRAINING_TABLE_NAMES = ("training_progress", "training_sessions", "training_challenge_results")
+# Whole statements, one set per table, so no SQL is assembled from strings at
+# all: backfill the account id from the username, remove what no account
+# holds, and index the new key (progress takes its unique index separately).
+_TRAINING_KEY_SQL: dict[str, tuple[str, str, str | None]] = {
+    "training_progress": (
+        "UPDATE training_progress SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_progress.username) WHERE user_id IS NULL",
+        "DELETE FROM training_progress WHERE user_id IS NULL",
+        None,
+    ),
+    "training_sessions": (
+        "UPDATE training_sessions SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_sessions.username) WHERE user_id IS NULL",
+        "DELETE FROM training_sessions WHERE user_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_training_sessions_user_id ON training_sessions (user_id)",
+    ),
+    "training_challenge_results": (
+        "UPDATE training_challenge_results SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_challenge_results.username) WHERE user_id IS NULL",
+        "DELETE FROM training_challenge_results WHERE user_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_training_challenge_results_user_id "
+        "ON training_challenge_results (user_id)",
+    ),
+}
 
 
 def _index_uniqueness(sync_conn: Any, table: str) -> dict[str, bool]:
@@ -213,18 +236,14 @@ async def _key_training_on_account(conn: Any) -> None:
     from sqlalchemy import text
 
     removed = 0
-    for table in _TRAINING_TABLE_NAMES:
-        _assert_safe_ddl(table, "user_id", "INTEGER")
+    for table, (backfill, drop_orphans, index) in _TRAINING_KEY_SQL.items():
         if "user_id" not in await conn.run_sync(_existing_columns, table):
             continue
-        await conn.execute(text(
-            f"UPDATE {table} SET user_id = "  # noqa: S608 - table from the literal tuple above, checked
-            "(SELECT users.id FROM users WHERE users.username = "
-            f"{table}.username) WHERE user_id IS NULL"
-        ))
-        orphans = await conn.execute(text(f"DELETE FROM {table} WHERE user_id IS NULL"))  # noqa: S608
+        await conn.execute(text(backfill))
+        orphans = await conn.execute(text(drop_orphans))
         removed += orphans.rowcount or 0
-        await conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_user_id ON {table} (user_id)"))
+        if index is not None:
+            await conn.execute(text(index))
     if removed:
         logger.warning(
             "Removed %d training record(s) whose account no longer exists while keying "
