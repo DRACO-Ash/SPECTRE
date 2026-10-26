@@ -50,6 +50,7 @@ import numpy as np
 
 from spectre.astro.constants import MU_EARTH
 from spectre.astro.propagator import TLEOrbit, state_to_keplerian
+from spectre.web.log_safety import log_safe
 
 __all__ = [
     "CWState",
@@ -429,9 +430,10 @@ def compute_relative_geometry(
         If inputs are invalid or computation cannot proceed.
     """
     # ── Input sanitisation and validation ────────────────────────────────────
-    red_name_safe  = _sanitise_name(red_name)
-    blue_name_safe = _sanitise_name(blue_name)
-    method_safe    = _sanitise_name(method)
+    red_name_safe  = log_safe(_sanitise_name(red_name))
+    blue_name_safe = log_safe(_sanitise_name(blue_name))
+    method_safe    = log_safe(_sanitise_name(method))
+    caller_safe    = log_safe(_sanitise_name(caller))
 
     for val, label in [
         (dv_radial_km_s,   "dv_radial_km_s"),
@@ -462,7 +464,7 @@ def compute_relative_geometry(
     logger.info(
         "cw_geometry: caller=%r red=%r blue=%r method=%r "
         "dv_r=%.4f dv_p=%.4f dv_n=%.4f tof=%.1fs coast=%.1fs epoch=%s",
-        caller, red_name_safe, blue_name_safe, method_safe,
+        caller_safe, red_name_safe, blue_name_safe, method_safe,
         dv_radial_km_s, dv_prograde_km_s, dv_normal_km_s,
         tof_s, coast_s, burn_epoch.isoformat(),
     )
