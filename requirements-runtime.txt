@@ -12,9 +12,9 @@ annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
     # via pydantic
-anyio==4.14.2 \
-    --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494 \
-    --hash=sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f
+anyio==4.15.1 \
+    --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101 \
+    --hash=sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94
     # via
     #   httpx
     #   starlette
@@ -1058,7 +1058,7 @@ six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
     # via python-dateutil
-sqlalchemy==2.0.52 \
+sqlalchemy[asyncio]==2.0.52 \
     --hash=sha256:11560064cc4696e772298b6221ede59e646386d9f2a85d549365473b972f7850 \
     --hash=sha256:1b2d9e507a458832adcfbd8af6e2036ddf069b7710b799448542ebccae2dceee \
     --hash=sha256:1b92a1e23ed40022081217b40d2d1feba4f77064e69ef4f39f68bcbbd148452a \
@@ -1142,7 +1142,7 @@ typing-inspection==0.4.4 \
     # via
     #   fastapi
     #   pydantic
-uvicorn==0.52.4 \
+uvicorn[standard]==0.52.4 \
     --hash=sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86 \
     --hash=sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1
     # via -r requirements-runtime.in

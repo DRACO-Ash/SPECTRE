@@ -9,7 +9,7 @@ bandit[toml]>=1.7
 pip-audit>=2.7
 pip-tools>=7.4
 diff-cover>=9.0
-anyio[trio]>=4.0
+anyio[trio]>=4.15.1
 
 # playwright: drives a real browser for scripts/smoke-browser.py. Dev-only and
 # never installed by the image or the platform Test stage. Recorded reason: two
