@@ -295,25 +295,20 @@ class TestGenerationComparison:
 
 
 class TestRevocationDoesNotRefuseTheNextSession:
-    """The epoch must never refuse a token minted AFTER it was stamped.
+    """Revocation must never refuse a session minted AFTER it.
 
-    Every write to ``session_epoch`` goes through ``session_epoch_now``, which
-    truncates to whole seconds. That is not tidiness. itsdangerous stamps a
-    token's issue time in whole seconds, so an epoch carrying microseconds is a
-    hair later than a token minted in the same second, and that token reads as
-    revoked.
+    Revocation is a counter, ``User.session_generation``, stamped into every
+    token and bumped by logout and by the password-change listener; a token
+    whose generation is below the account's is refused (auth._session_revoked).
 
-    The account-creation case was spotted and guarded when the feature was
-    written. The two sites that actually MOVE the epoch, logout and the
-    password-change listener, both kept ``datetime.now(tz=UTC)`` and so kept
-    the defect: signing out and straight back in inside the same second
-    returned the operator to the login page, and only waiting for the clock to
-    tick cleared it.
-
-    It also made this suite fail about half the time, which is how it surfaced:
-    every test in test_threat_screen_route.py got the login page instead of the
-    panel, because the shared session cookie had been minted in the wrong
-    microsecond.
+    It replaced a timestamp epoch that could not be made correct (audit
+    F-263 corrected this docstring, which still described that design).
+    itsdangerous stamps a token's issue time in whole seconds, so a sign-in in
+    the same second as the logout before it produced a token byte-identical to
+    the revoked one: signing out and straight back in returned the operator to
+    the login page. It also made this suite fail about half the time, which is
+    how it surfaced: every test in test_threat_screen_route.py got the login
+    page instead of the panel. These tests pin both write sites.
     """
 
     def test_signing_straight_back_in_after_logout_works(self, client: TestClient) -> None:

@@ -20,6 +20,11 @@
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   No HRR objects in regime <strong>{{ interceptor_regime }}</strong> — select a different red satellite or fetch a fresh HRR watchlist.
 </p>
+{% elif interceptor_regime is none %}
+{# The interceptor TLE gave no regime, so nothing was filtered (audit F-245). #}
+<p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
+  Regime unknown for {{ interceptor_name }}: the target list is not filtered by orbit.
+</p>
 {% else %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
   Regime: <strong style="color:var(--ops-blue)">{{ interceptor_regime }}</strong> — targets filtered to match interceptor orbit.

@@ -21,6 +21,7 @@ from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
+from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
 from spectre.domain.pol_assessment import assess_pattern_of_life
@@ -34,7 +35,7 @@ from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
 
-_UDL_BASE = "https://unifieddatalibrary.com/udl"
+_UDL_BASE = UDL_BASE_URL
 
 # Maximum TLEs to fetch from UDL historical endpoint.
 _UDL_MAX_RESULTS = 5000
@@ -123,7 +124,7 @@ async def _fetch_udl_history(
 ) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
     """Fetch historical TLEs from UDL elset endpoint (2015 → now, max 5 000).
 
-    Returns ``(tle_text, metadata, rms_metadata)``.
+    Returns ``(tle_text, metadata, rms_metadata, sat_name)``.
     Records may arrive in any order — the parser will sort chronologically.
     """
     params: dict[str, Any] = {
@@ -330,11 +331,13 @@ async def pol_analyse(
     # ── UDL direct credentials ────────────────────────────────────────────────
     if pol_source == "udl_direct":
         await udl_auth_rate_limit(current_user)
-        if not udl_user.strip() or not udl_pass.strip():
+        if not udl_user.strip() or not udl_pass:
             return _panel_error(request, state, "Enter UDL username and password.")
         try:
+            # The password goes as typed: a leading or trailing space is part
+            # of it, and stripping sent a different credential (audit F-251).
             archive_text, merged_text, merged_meta, merged_rms, name = await _fetch_merged_history(
-                satno, udl_user.strip(), udl_pass.strip(), "REAL",
+                satno, udl_user.strip(), udl_pass, "REAL",
                 source=state.udl_tle_source,
             )
             logger.info("PoL: %d chars from UDL (direct) for %d", len(archive_text), satno)

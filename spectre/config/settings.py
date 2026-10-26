@@ -29,6 +29,10 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+# The one UDL endpoint root. udl.py and pol.py each kept a copy, and udl.py a
+# second one inside a function that shadowed its own (audit F-252).
+UDL_BASE_URL = "https://unifieddatalibrary.com/udl"
+
 # Load .env from project root (two levels up from this file). Absent in the
 # container image, which is intentional: the platform injects the environment.
 _env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -365,6 +369,12 @@ class Settings:
     # explicitly, because leaving it on resets the password every restart.
     admin_reset: bool = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET", "").strip().lower()
+        in _TRUTHY
+    )
+    # Break-glass resets an admin's password. Turning an existing operator
+    # into an admin is a further step and needs its own switch (audit F-261).
+    admin_reset_promote: bool = field(
+        default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET_PROMOTE", "").strip().lower()
         in _TRUTHY
     )
 

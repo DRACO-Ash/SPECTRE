@@ -55,4 +55,8 @@ def log_safe(value: object, limit: int = _DEFAULT_LIMIT) -> str:
     collapsed = " ".join(cleaned.split())
     if len(collapsed) <= limit:
         return collapsed
-    return collapsed[: max(0, limit - len(_ELLIPSIS))] + _ELLIPSIS
+    # A limit no wider than the marker has no room for text and marker both;
+    # appending it anyway returned more than *limit* characters (audit F-262).
+    if limit <= len(_ELLIPSIS):
+        return collapsed[: max(0, limit)]
+    return collapsed[: limit - len(_ELLIPSIS)] + _ELLIPSIS

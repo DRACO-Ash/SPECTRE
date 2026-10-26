@@ -1,4 +1,4 @@
-"""In-process sliding-window rate limiters for SPECTRE UDL proxy routes.
+"""In-process sliding-window rate limiters for SPECTRE.
 
 Three tiers match the cost profile of UDL operations:
   - udl_auth  : credential probes      — 5 / 60 s   per operator
@@ -7,6 +7,11 @@ Three tiers match the cost profile of UDL operations:
 
 and one for the PoL forms that run a computation in the shared executor:
   - pol_compute : Monte Carlo, photometry — 10 / 60 s per operator
+
+The login route builds two more from :class:`SlidingWindowLimiter`, in
+spectre/web/routes/login.py, counting failed sign-ins only:
+  - by source address : 10 / 300 s
+  - by username       : 10 / 300 s
 """
 
 from __future__ import annotations

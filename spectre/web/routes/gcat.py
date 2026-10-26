@@ -62,6 +62,17 @@ _ALLOWED_URL_SCHEMES = frozenset({"https"})
 # rather than following it until the timeout.
 _MAX_REDIRECT_HOPS = 5
 
+# The scheme check alone let a redirect name any https host, including one
+# that resolves inside the cluster (audit F-247). Every dataset lives on
+# planet4589.org, so the host is pinned there at the first request and at
+# every hop; with the host pinned, no operator- or redirect-supplied name can
+# point the fetch at a private, loopback or link-local address.
+_ALLOWED_HOSTS = frozenset({"planet4589.org", "www.planet4589.org"})
+
+# The largest GCAT table is tens of megabytes. Without a cap a hostile or
+# broken server could stream until the pod ran out of memory (audit F-254).
+_MAX_TSV_BYTES = 64 * 1024 * 1024
+
 PAGE_SIZE = 100
 _MAX_QUERY = 100  # characters in a table search
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gcat-dl")
@@ -285,31 +296,42 @@ _REFRESH = _RefreshState()
 
 # ── TSV fetcher (sync — runs in ThreadPoolExecutor) ───────────────────────────
 
+def _url_refusal(url: str) -> str | None:
+    """Why *url* may not be fetched, or ``None`` when its scheme and host are allowed."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in _ALLOWED_URL_SCHEMES:
+        return f"unsupported URL scheme '{parts.scheme}'"
+    if (parts.hostname or "") not in _ALLOWED_HOSTS:
+        return f"host '{parts.hostname or ''}' is not on the GCAT allowlist"
+    return None
+
+
 def _get_rechecking_every_hop(
     client: httpx.Client, url: str, label: str,
 ) -> httpx.Response | None:
-    """GET *url*, re-applying the scheme allowlist at every redirect hop.
+    """GET *url*, re-applying the scheme and host allowlists at every redirect hop.
 
     ``follow_redirects=True`` carries no policy of its own, so the check made
     once against the table's URL said nothing about where the transport
     actually went: a 30x from planet4589.org could walk the fetch onto plain
-    http, or onto an address inside the cluster, with the allowlist never
-    consulted again (CWE-918). Returns ``None`` when a hop is refused or the
-    chain runs past :data:`_MAX_REDIRECT_HOPS`.
+    http, or onto another host, with the allowlist never consulted again
+    (CWE-918). Returns ``None`` when a hop is refused or the chain runs past
+    :data:`_MAX_REDIRECT_HOPS`.
     """
     for _ in range(_MAX_REDIRECT_HOPS + 1):
-        resp = client.get(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        # Streamed, so the body is read under the size cap in _read_capped
+        # rather than in full before anything can look at its length.
+        request = client.build_request("GET", url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        resp = client.send(request, stream=True)
         if not resp.is_redirect:
             return resp
+        resp.close()
         # Relative Location headers are legal, so the hop is resolved against
         # the URL that served the redirect before its scheme is read.
         url = urllib.parse.urljoin(url, resp.headers.get("location", ""))
-        scheme = urllib.parse.urlsplit(url).scheme
-        if scheme not in _ALLOWED_URL_SCHEMES:
-            log.error(
-                "[GCAT] ✗  Refusing %-20s: redirected to unsupported scheme '%s'",
-                label, scheme,
-            )
+        refusal = _url_refusal(url)
+        if refusal is not None:
+            log.error("[GCAT] ✗  Refusing %-20s: redirected to %s", label, refusal)
             return None
     log.error(
         "[GCAT] ✗  Refusing %-20s: more than %d redirects", label, _MAX_REDIRECT_HOPS,
@@ -317,13 +339,26 @@ def _get_rechecking_every_hop(
     return None
 
 
+def _read_capped(resp: httpx.Response, label: str) -> bytes | None:
+    """The response body, or ``None`` once it passes :data:`_MAX_TSV_BYTES`."""
+    body = bytearray()
+    for chunk in resp.iter_bytes():
+        body.extend(chunk)
+        if len(body) > _MAX_TSV_BYTES:
+            log.error(
+                "[GCAT] ✗  Refusing %-20s: body passed the %d byte cap", label, _MAX_TSV_BYTES,
+            )
+            return None
+    return bytes(body)
+
+
 def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None]:
     """Download and parse one GCAT TSV.  Returns (key, df) or (key, None)."""
     url = meta["url"]
     label = meta["label"]
-    scheme = urllib.parse.urlsplit(url).scheme
-    if scheme not in _ALLOWED_URL_SCHEMES:
-        log.error("[GCAT] ✗  Refusing %-20s: unsupported URL scheme '%s'", label, scheme)
+    refusal = _url_refusal(url)
+    if refusal is not None:
+        log.error("[GCAT] ✗  Refusing %-20s: %s", label, refusal)
         return key, None
 
     log.info("[GCAT] ↓  %-24s  %s", label, url)
@@ -342,11 +377,17 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             resp = _get_rechecking_every_hop(client, url, label)
             if resp is None:
                 return key, None
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+                body = _read_capped(resp, label)
+            finally:
+                resp.close()
+            if body is None:
+                return key, None
             # Not resp.text: that runs charset detection, and GCAT serves
             # mixed encodings. Decoding as UTF-8 with replacement is what the
             # parser below has always been handed.
-            raw = resp.content.decode("utf-8", errors="replace")
+            raw = body.decode("utf-8", errors="replace")
     except Exception as exc:   # noqa: BLE001 - one unreachable dataset must not take the others down
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
         return key, None
@@ -516,7 +557,9 @@ def _page_data(
     if not cached:
         return None
 
-    df: pd.DataFrame = cached["df"].copy()
+    # No copy: every step below returns a new frame, and copying the whole
+    # cached table on each page request cost more than the page (F-254).
+    df: pd.DataFrame = cached["df"]
     total_rows = len(df)
 
     if q.strip():
@@ -527,7 +570,7 @@ def _page_data(
             df.apply(lambda col: col.astype(str).str.lower().str.contains(qlo, na=False, regex=False))
             .any(axis=1)
         )
-        df = df[mask]
+        df = df.loc[mask]
         log.debug("[GCAT] search '%s' on %s: %d → %d rows", log_safe(q), key, total_rows, len(df))
 
     filtered_rows = len(df)

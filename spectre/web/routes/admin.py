@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -11,7 +10,13 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from spectre.web.auth import PASSWORD_TOO_LONG, hash_password, password_too_long, require_admin
+from spectre.web.auth import (
+    PASSWORD_TOO_LONG,
+    USERNAME_PATTERN,
+    hash_password,
+    password_too_long,
+    require_admin,
+)
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
 from spectre.web.log_safety import log_safe
@@ -44,7 +49,7 @@ _VALID_ROLES = {"operator", "admin"}
 # directory is commonly an e-mail address. A pattern that rejected any of
 # those would stop the application starting rather than merely refuse a form,
 # so letters, digits, dot, underscore, at-sign and hyphen are all accepted.
-_USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
+_USERNAME_PATTERN = USERNAME_PATTERN
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -64,7 +69,7 @@ def _table_response(
     point the HTML parser foster-parents the trailing flash <div> out of the
     table. htmx then handed a non-element to its out-of-band code, which threw
     "e.querySelectorAll is not a function" and abandoned the whole swap. The
-    server had already committed the change, so a created, renamed or deleted
+    server had already committed the change, so a created or deleted
     user was invisible until the page was reloaded by hand.
 
     Rooting the response at <div>/<table> keeps the flash a legal sibling and

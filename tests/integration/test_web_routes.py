@@ -10,6 +10,11 @@ import pytest
 
 from tests.conftest import csrf_headers
 
+# The add routes parse the TLE since audit F-267; "line1\nline2" is now refused.
+_VALID_TLE = (
+    "1 25544U 98067A   26065.50000000  .00016717  00000-0  10270-3 0  9994\n"
+    "2 25544  51.6420 195.0000 0001207 86.9689 273.1630 15.54320000365490"
+)
 
 class TestLoginFlow:
     def test_get_login_page(self, client: object) -> None:
@@ -91,7 +96,7 @@ class TestAssetManagement:
     def test_add_blue_asset_returns_partial(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/assets/blue",
-            data={"name": "Alpha", "tle": "line1\nline2"},
+            data={"name": "Alpha", "tle": _VALID_TLE},
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
@@ -101,7 +106,7 @@ class TestAssetManagement:
     def test_add_red_track_returns_partial(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/assets/red",
-            data={"name": "Track01", "tle": "line1\nline2"},
+            data={"name": "Track01", "tle": _VALID_TLE},
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
@@ -195,3 +200,38 @@ class TestLogoutFlow:
             )
             # No session cookie means no valid token can exist, so CSRF rejects it.
             assert resp.status_code == 403
+
+
+class TestAssetAddAndRemoveF267:
+    """Audit F-267: an empty name or a non-TLE was accepted, and a name with "/" could not be removed."""
+
+    def _post(self, client: object, auth: str, colour: str, name: str, tle: str) -> object:
+        return client.post(  # type: ignore[attr-defined]
+            f"/assets/{colour}",
+            data={"name": name, "tle": tle},
+            cookies={"spectre_session": auth},
+            headers=csrf_headers(auth),
+        )
+
+    @pytest.mark.parametrize("colour", ["blue", "red"])
+    def test_an_empty_name_is_refused(self, client: object, auth_cookie: str, colour: str) -> None:
+        resp = self._post(client, auth_cookie, colour, "   ", _VALID_TLE)
+        assert b"A name is required." in resp.content  # type: ignore[attr-defined]
+
+    @pytest.mark.parametrize("colour", ["blue", "red"])
+    def test_text_that_is_not_a_tle_is_refused(self, client: object, auth_cookie: str, colour: str) -> None:
+        resp = self._post(client, auth_cookie, colour, "NotATle", "line1\nline2")
+        assert b"line 1 and line 2" in resp.content  # type: ignore[attr-defined]
+        assert b"NotATle" not in resp.content  # type: ignore[attr-defined]
+
+    def test_a_name_with_a_slash_can_be_removed(self, client: object, auth_cookie: str) -> None:
+        from urllib.parse import quote
+
+        self._post(client, auth_cookie, "blue", "Sat/One", _VALID_TLE)
+        resp = client.delete(  # type: ignore[attr-defined]
+            f"/assets/blue/{quote('Sat/One', safe='/')}",
+            cookies={"spectre_session": auth_cookie},
+            headers=csrf_headers(auth_cookie),
+        )
+        assert resp.status_code == 200
+        assert b"Sat/One" not in resp.content

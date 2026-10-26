@@ -198,6 +198,52 @@ def _admin_password_refused(password: str) -> bool:
     return True
 
 
+def _admin_username_refused(username: str) -> bool:
+    """Log and return ``True`` when SPECTRE_ADMIN_USER fails the username rule.
+
+    The admin form enforced the pattern and bootstrap did not, so the one
+    account made from the environment could hold a name no form would accept
+    (audit F-261). An empty name is left to the "no credentials" branch.
+    """
+    from spectre.web.auth import USERNAME_PATTERN
+
+    if not username or USERNAME_PATTERN.fullmatch(username):
+        return False
+    logger.error(
+        "SPECTRE_ADMIN_USER was not applied: a username is 1 to 64 characters of "
+        "letters, digits and . _ @ -. Set a valid one and redeploy.",
+    )
+    return True
+
+
+async def _break_glass(
+    session: AsyncSession, existing: list[Any], username: str, password: str, promote: bool,
+) -> None:
+    """Reset *username*'s password, creating the admin account if it has gone."""
+    from spectre.web.auth import hash_password
+    from spectre.web.models import User
+
+    target = next((u for u in existing if u.username == username), None)
+    if target is not None and target.role != "admin" and not promote:
+        logger.error(
+            "ADMIN RESET REFUSED for %r: the account exists and is not an admin. "
+            "Set SPECTRE_ADMIN_RESET_PROMOTE=true as well to promote it, or name an admin.",
+            username,
+        )
+        return
+    if target is None:
+        target = User(username=username, hashed_password="", role="admin")
+        session.add(target)
+    target.hashed_password = hash_password(password)
+    target.role = "admin"
+    await session.commit()
+    logger.warning(
+        "ADMIN RESET APPLIED for %r because SPECTRE_ADMIN_RESET is set. "
+        "Unset it and redeploy: leaving it on resets the password every boot.",
+        username,
+    )
+
+
 async def _bootstrap_admin() -> None:
     """Create the first admin account, and say plainly what happened.
 
@@ -215,7 +261,7 @@ async def _bootstrap_admin() -> None:
     username = settings.spectre_admin_user.strip()
     password = settings.spectre_admin_pass
 
-    if _admin_password_refused(password):
+    if _admin_password_refused(password) or _admin_username_refused(username):
         return
 
     async with AsyncSessionLocal() as session:
@@ -226,17 +272,8 @@ async def _bootstrap_admin() -> None:
                 # Break-glass recovery. Without it, a forgotten password means
                 # dropping the database, because bootstrap only runs on an
                 # empty table.
-                target = next((u for u in existing if u.username == username), None)
-                if target is None:
-                    target = User(username=username, hashed_password="", role="admin")
-                    session.add(target)
-                target.hashed_password = hash_password(password)
-                target.role = "admin"
-                await session.commit()
-                logger.warning(
-                    "ADMIN RESET APPLIED for %r because SPECTRE_ADMIN_RESET is set. "
-                    "Unset it and redeploy: leaving it on resets the password every boot.",
-                    username,
+                await _break_glass(
+                    session, list(existing), username, password, settings.admin_reset_promote,
                 )
                 return
             logger.info(

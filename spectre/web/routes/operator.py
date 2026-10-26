@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
@@ -75,6 +76,34 @@ async def dashboard(
 # ── Asset management partials ─────────────────────────────────────────────────
 
 
+def _as_utc(moment: datetime) -> datetime:
+    """*moment* in UTC: converted when it carries an offset, assumed UTC when naive.
+
+    ``.replace(tzinfo=UTC)`` relabelled an offset time instead of converting
+    it, so "12:00+01:00" became 12:00 UTC, an hour late (audit F-266).
+    """
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+
+
+def _add_refusal(name: str, tle: str) -> str | None:
+    """Why a hand-entered asset cannot be added, or ``None`` when it can.
+
+    The add routes used to accept an empty name and any text as a TLE, and
+    the bad TLE then failed far from here, in whichever solver met it first
+    (audit F-267).
+    """
+    if not name:
+        return "A name is required."
+    lines = [ln.strip() for ln in tle.splitlines() if ln.strip()]
+    if len(lines) < 2 or not lines[-2].startswith("1 ") or not lines[-1].startswith("2 "):  # noqa: PLR2004
+        return "The TLE needs its line 1 and line 2."
+    try:
+        TLEOrbit(tle)
+    except TLE_ERRORS:
+        return "The TLE could not be parsed."
+    return None
+
+
 @router.post("/assets/blue", response_class=HTMLResponse)
 async def add_blue_asset(
     request: Request,
@@ -87,6 +116,10 @@ async def add_blue_asset(
 
     name = name.strip()
     tle = tle.strip()
+    refusal = _add_refusal(name, tle)
+    if refusal is not None:
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
+        return _list_response(request, "partials/blue_list.html", ctx)
     asset = BlueAsset(name=name, tle=tle)
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
@@ -223,7 +256,9 @@ async def quick_add_red_track(
     return HTMLResponse(list_html2 + oob_badge)
 
 
-@router.delete("/assets/blue/{name}", response_class=HTMLResponse)
+# {name:path}: a name may hold "/", which the template percent-encodes and the
+# router decodes before matching (audit F-267).
+@router.delete("/assets/blue/{name:path}", response_class=HTMLResponse)
 async def remove_blue_asset(
     request: Request,
     name: str,
@@ -249,6 +284,10 @@ async def add_red_track(
 
     name = name.strip()
     tle = tle.strip()
+    refusal = _add_refusal(name, tle)
+    if refusal is not None:
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
+        return _list_response(request, "partials/red_list.html", ctx)
     track = RedTrack(name=name, tle=tle)
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
@@ -262,7 +301,7 @@ async def add_red_track(
     return _list_response(request, "partials/red_list.html", ctx)
 
 
-@router.delete("/assets/red/{name}", response_class=HTMLResponse)
+@router.delete("/assets/red/{name:path}", response_class=HTMLResponse)
 async def remove_red_track(
     request: Request,
     name: str,
@@ -290,8 +329,8 @@ async def set_scenario_time(
     state = get_session_state(current_user)
 
     try:
-        start_dt = datetime.fromisoformat(scenario_start.strip()).replace(tzinfo=UTC)
-        stop_dt = datetime.fromisoformat(scenario_stop.strip()).replace(tzinfo=UTC)
+        start_dt = _as_utc(datetime.fromisoformat(scenario_start.strip()))
+        stop_dt = _as_utc(datetime.fromisoformat(scenario_stop.strip()))
     except ValueError:
         # datetime.fromisoformat quotes the offending input verbatim in its
         # message, and this response is built by hand rather than by Jinja, so

@@ -94,6 +94,19 @@ class SessionState:
             f"hrr_cache={len(self.hrr_tle_cache)})"
         )
 
+    def tle_of(self, name: str) -> str | None:
+        """The TLE of the blue asset or red track called *name*, if any.
+
+        Three routes kept their own copy of this lookup (audit F-241).
+        """
+        for asset in self.blue_assets:
+            if asset.stk_name == name:
+                return asset.tle
+        for track in self.red_tracks:
+            if track.stk_name == name:
+                return track.tle
+        return None
+
     def append_log(self, message: str) -> None:
         """Append *message* to the session log, evicting the oldest past 200.
 

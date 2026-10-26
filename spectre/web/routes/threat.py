@@ -39,6 +39,7 @@ from spectre.domain.manoeuvre_calibration import (
     classify_posture,
     from_km_s,
     kind_for_method,
+    to_km_s,
 )
 from spectre.domain.models import (
     ThreatActor,
@@ -55,6 +56,7 @@ from spectre.domain.threat_assessment import (
     warning_time_rank,
 )
 from spectre.web.auth import require_login
+from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis, intent_label_for
 from spectre.web.deps import render
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
@@ -511,17 +513,6 @@ def _build_target_list(
     return targets
 
 
-def _find_tle(state: object, sat_name: str) -> str | None:
-    """Look up a satellite TLE from session state by object name."""
-    for a in state.blue_assets:  # type: ignore[attr-defined]
-        if a.stk_name == sat_name:
-            return str(a.tle)
-    for t in state.red_tracks:  # type: ignore[attr-defined]
-        if t.stk_name == sat_name:
-            return str(t.tle)
-    return None
-
-
 def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
     """Compute the sweep epochs for the red satellite."""
     epochs: list[tuple[str, datetime]] = [("now", now)]
@@ -589,9 +580,6 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
 #: undefined and the component percentages below would divide by noise.
 _ZERO_VECTOR_M_S: float = 1e-12
 
-#: A component carrying at least this share of the burn magnitude names the
-#: axis on its own; below it the burn is reported as "Combined".
-_DOMINANT_AXIS_FRACTION: float = 0.7
 
 #: (text colour, panel wash) per band, as design tokens rather than hex.
 #: Raw hex here did not move when the operator picked Steel (Light), so every
@@ -687,7 +675,7 @@ def _sweep_all_methods(
         for name, solver, extra in _SWEEP_METHODS:
             kwargs = dict(extra)
             if name == "min_time":
-                kwargs["max_delta_v"] = budget / 1000.0  # m/s -> km/s for astro
+                kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
             try:
                 sol = solver(
                     red_tle=request.red_tle,
@@ -735,22 +723,6 @@ def _red_capability(red_satno: str | None) -> CapabilityEvidence:
     )
 
 
-def _dominant_axis(pro: float, nor: float, rad: float, threshold: float) -> str:
-    """Name the axis carrying the burn, or "Combined" when none dominates.
-
-    The ladder is tested prograde, then normal, then radial, and the first
-    component at or above *threshold* wins. That order is the reported one and
-    matters when two components are both above it.
-    """
-    if abs(pro) >= threshold:
-        return "Prograde" if pro >= 0 else "Retrograde"
-    if abs(nor) >= threshold:
-        return "Normal" if nor >= 0 else "Anti-normal"
-    if abs(rad) >= threshold:
-        return "Radial" if rad >= 0 else "Anti-radial"
-    return "Combined"
-
-
 def _burn_direction_breakdown(
     pro: float, nor: float, rad: float,
 ) -> tuple[float, float, float, str]:
@@ -771,7 +743,7 @@ def _burn_direction_breakdown(
             round(abs(pro) / total_vec * 100.0, 1),
             round(abs(nor) / total_vec * 100.0, 1),
             round(abs(rad) / total_vec * 100.0, 1),
-            _dominant_axis(pro, nor, rad, _DOMINANT_AXIS_FRACTION * total_vec),
+            dominant_axis(pro, nor, rad, DOMINANT_AXIS_FRACTION * total_vec),
         )
     return (0.0, 0.0, 0.0, "Unknown")
 
@@ -820,17 +792,8 @@ def _compute_worst_coa(
         ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)"),
     )
 
-    _sweep_intents: dict[str, str] = {
-        "hohmann":      "Orbital Transfer — Energy Change",
-        "lambert":      "Close-Proximity Operation",
-        "bielliptic":   "Orbital Transfer — Energy Change",
-        "phasing":      "Phasing Rendezvous",
-        "plane_change": "Plane Change — Orbit Alignment",
-        "min_time":     "Minimum-Time Intercept",
-        "vbar_hop":     "V-Bar Hop — Along-Track Approach",
-        "hbar_hop":     "H-Bar Hop — Orbit-Normal Approach",
-    }
-    intent_label = _sweep_intents.get(worst.method, "Intercept Manoeuvre")
+    # One table of intent labels, shared with the intercept panel (audit F-241).
+    intent_label = intent_label_for(worst.method, "Intercept Manoeuvre")
 
     # Burn direction breakdown
     pro_pct, nor_pct, rad_pct, direction = _burn_direction_breakdown(
@@ -1260,7 +1223,9 @@ def _reduce_tle_clusters(state: object) -> Any | None:
         state.hrr_tle_cache.update(reduced)  # type: ignore[attr-defined]
     # BLE001: clustering is an optimisation, never a gate.
     except Exception as _cl_exc:  # noqa: BLE001
-        logger.warning("TLE clustering step failed: %s — proceeding without reduction", _cl_exc)
+        logger.warning(
+            "TLE clustering step failed: %s, proceeding without reduction", log_safe(_cl_exc),
+        )
     return clustering_summary
 
 
@@ -1395,7 +1360,7 @@ async def threat_sweep(
     side, rank, group_label = parsed.side, parsed.rank, parsed.group_label
 
     # Find red TLE — manual override takes precedence over the registered track.
-    red_tle: str | None = manual_red_tle or _find_tle(state, red_sat.strip())
+    red_tle: str | None = manual_red_tle or state.tle_of(red_sat.strip())
     if not red_tle:
         return render(request, "partials/threat_sweep.html", {
             "assessment": None,
@@ -1929,7 +1894,7 @@ async def refine_entry(
     entry = assessment.entries[entry_index]
     # The sweep's own red element set, so a manual override flies here too
     # (F-127). Older assessments carry none and fall back to the lookup.
-    red_tle = assessment.red_tle or _find_tle(state, assessment.red_name)
+    red_tle = assessment.red_tle or state.tle_of(assessment.red_name)
     target_tle = _target_tle(state, entry.target)
     if not red_tle or not target_tle:
         return _row(entry, "TLE not found")

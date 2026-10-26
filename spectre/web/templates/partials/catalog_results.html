@@ -28,7 +28,7 @@
       <td class="text-dim">{{ obj.country }}</td>
       <td class="hrr-actions">
         <button hx-get="/udl/tle"
-                hx-vals='{"satno": {{ obj.satno }}}'
+                hx-vals='{{ {"satno": obj.satno} | tojson }}'
                 hx-target="#blue-tle-fields"
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"
@@ -36,7 +36,7 @@
                 title="Fetch TLE for {{ obj.name }} ({{ obj.satno }}) and pre-fill the Blue Asset form"
                 class="btn-secondary btn-sm">&rarr; Blue</button>
         <button hx-get="/udl/tle"
-                hx-vals='{"satno": {{ obj.satno }}}'
+                hx-vals='{{ {"satno": obj.satno} | tojson }}'
                 hx-target="#red-tle-fields"
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"

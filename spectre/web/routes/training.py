@@ -118,7 +118,7 @@ def _recent_scored(username: str, limit: int) -> Any:
     """
     return (
         select(ChallengeResult)
-        .where(ChallengeResult.username == username, ChallengeResult.scored == True)  # noqa: E712
+        .where(ChallengeResult.username == username, ChallengeResult.scored.is_(True))
         .order_by(ChallengeResult.started_at.desc())
         .limit(limit)
     )
@@ -130,7 +130,7 @@ async def _scored_attempts(db: AsyncSession, username: str, scenario_id: str) ->
         select(ChallengeResult).where(
             ChallengeResult.username == username,
             ChallengeResult.scenario_id == scenario_id,
-            ChallengeResult.scored == True,  # noqa: E712
+            ChallengeResult.scored.is_(True),
         )
     )).scalars().all()
     return len(rows)
@@ -206,12 +206,15 @@ async def training_leave(
         )
         ts = result.scalar_one_or_none()
         if ts and ts.ended_at is None:
-            ts.ended_at = datetime.now(UTC)
+            # A local, aware now: ts.ended_at is typed as the column, and
+            # SQLite hands it back naive after a refresh (audit F-264).
+            now = datetime.now(UTC)
+            ts.ended_at = now
             # Accrue time — normalise started_at to UTC-aware in case SQLite returns naive
             started = ts.started_at
             if started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)
-            elapsed = (ts.ended_at - started).total_seconds() / 60.0
+            elapsed = (now - started).total_seconds() / 60.0
             prog = await _get_or_create_progress(current_user.username, db)
             prog.time_in_training_minutes += elapsed
             await db.commit()

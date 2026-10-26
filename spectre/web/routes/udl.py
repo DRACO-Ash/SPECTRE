@@ -8,6 +8,7 @@ and are never written to disk or the database.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 from collections.abc import Coroutine
@@ -19,6 +20,7 @@ import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
@@ -49,12 +51,17 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
         day_frac = float(epoch_str[2:])
         year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
         day_int = int(day_frac)
+        # Day 0 or 367 is a corrupt field, not a date a timedelta should
+        # quietly roll into the neighbouring year (audit F-255).
+        if not 1 <= day_int <= _DAYS_IN_LEAP_YEAR:
+            return None
         frac = day_frac - day_int
         return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_int - 1 + frac)
     except (ValueError, IndexError):
         return None
 
-_UDL_BASE = "https://unifieddatalibrary.com/udl"
+_UDL_BASE = UDL_BASE_URL
+_DAYS_IN_LEAP_YEAR = 366
 # TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
 # than this cannot hold one and is logged whole rather than sliced to nothing.
 _TLE_EPOCH_FIELD_END = 32
@@ -337,15 +344,8 @@ async def udl_login(
                 "partials/udl_status.html",
                 {"udl_user": None, "error": error},
             )
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
-        error = f"UDL probe returned HTTP {exc.response.status_code}: {body}"
-        logger.warning("UDL login probe HTTP error for operator %s: %s", log_safe(current_user.username), exc)
-        return render(request,
-            "partials/udl_status.html",
-            {"udl_user": None, "error": error},
-        )
+    # No raise_for_status: every non-success status returned above, so the
+    # HTTPStatusError branch it fed could never run (audit F-250).
     except httpx.TimeoutException:
         return render(request,
             "partials/udl_status.html",
@@ -758,6 +758,29 @@ async def fetch_tle(
 # ── State vector fetch proxy ───────────────────────────────────────────────
 
 
+
+# The query used to ask for any vector after 2020 with maxResults=1, which
+# returns whichever record UDL sorts first, not the newest (audit F-248). The
+# window is bounded and the newest record is picked here instead.
+_SV_WINDOW_DAYS = 7
+_SV_MAX_RESULTS = 100
+
+
+def _sv_window_start() -> str:
+    """The UDL epoch filter bound, :data:`_SV_WINDOW_DAYS` before now."""
+    start = datetime.now(UTC) - timedelta(days=_SV_WINDOW_DAYS)
+    return start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _newest_state_vector(data: object) -> dict[str, Any] | None:
+    """The record with the latest epoch, from a list or a single-object payload."""
+    records = [data] if isinstance(data, dict) else data if isinstance(data, list) else []
+    dated = [r for r in records if isinstance(r, dict) and isinstance(r.get("epoch"), str)]
+    if not dated:
+        return None
+    # ISO 8601 UTC strings of one shape sort in time order.
+    return max(dated, key=lambda r: str(r["epoch"]))
+
 @router.get("/statevector", response_model=None)
 async def fetch_statevector(
     request: Request,
@@ -768,7 +791,7 @@ async def fetch_statevector(
     """Fetch the latest Cartesian state vector for *satno* from UDL.
 
     Returns position (km) and velocity (km s⁻¹) in the J2000 reference frame
-    at the most recent available epoch. Useful for initialising high-fidelity
+    at the newest epoch in the last week (_SV_WINDOW_DAYS). Useful for initialising high-fidelity
     intercept geometry without propagating a TLE.
     """
     state = get_session_state(current_user)
@@ -788,8 +811,8 @@ async def fetch_statevector(
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/statevector",
-                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z",
-                        "dataMode": dm, "maxResults": 1},
+                params={"satNo": satno, "epoch": f">{_sv_window_start()}",
+                        "dataMode": dm, "maxResults": _SV_MAX_RESULTS},
                 auth=(state.udl_username, state.udl_password),
                 timeout=10.0,
             )
@@ -814,17 +837,22 @@ async def fetch_statevector(
             {"sv": None, "error": f"UDL unreachable: {exc}"},
         )
 
-    if not data:
+    rec = _newest_state_vector(data)
+    if rec is None:
         return render(request,
             "partials/statevector_fields.html",
             {
-    
                 "sv": None,
-                "error": f"No state vector found for SATNO {satno}.",
+                "error": f"No state vector found for SATNO {satno} in the last {_SV_WINDOW_DAYS} days.",
             },
         )
-
-    rec = data[0]
+    # A vector with no stated frame cannot be placed: guessing J2000 for a
+    # TEME or ECEF record puts the satellite kilometres away (audit F-248).
+    if not rec.get("referenceFrame"):
+        return render(request,
+            "partials/statevector_fields.html",
+            {"sv": None, "error": f"UDL state vector for SATNO {satno} has no referenceFrame; refused."},
+        )
     sv = {
         "name": str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER, satno)).strip(),
         "epoch": rec.get("epoch", "—"),
@@ -834,7 +862,7 @@ async def fetch_statevector(
         "x_dot": rec.get("xvel"),
         "y_dot": rec.get("yvel"),
         "z_dot": rec.get("zvel"),
-        "ref_frame": rec.get("referenceFrame", "J2000"),
+        "ref_frame": rec["referenceFrame"],
     }
 
     state.append_log(
@@ -866,9 +894,12 @@ def _parse_created_at(rec: dict[str, Any]) -> datetime:
     """
     raw = str(rec.get("createdAt") or "").strip().replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return datetime.min.replace(tzinfo=UTC)
+    # A createdAt with no offset is UTC by UDL convention. Left naive, max()
+    # over a mixed list raised TypeError comparing it with aware values (F-255).
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 
@@ -1124,7 +1155,6 @@ async def udl_notso(
     if not state.udl_username or not state.udl_password:
         return JSONResponse({"error": "No active UDL session"}, status_code=401)
 
-    _UDL_BASE = "https://unifieddatalibrary.com/udl"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
@@ -1231,10 +1261,11 @@ async def _pull_notso_pages(
 def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
     """The status callout: red when nothing was added and something failed."""
     if errors and total_added == 0:
-        error_html = "".join(f'<p style="margin:0.1rem 0">{e}</p>' for e in errors)
+        # Escaped: the messages carry exception text and UDL response bodies (F-249).
+        error_html = "".join(f'<p style="margin:0.1rem 0">{html.escape(e)}</p>' for e in errors)
         return f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
     warn_html = "".join(
-        f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {e}</p>'
+        f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {html.escape(e)}</p>'
         for e in errors
     )
     return (

@@ -12,8 +12,11 @@ spectre-theme/
 ├── README.md                  ← You are here
 │
 ├── css/
-│   ├── spectre-theme.css      ← Full design system (tokens, components, dark/light mode)
 │   └── spectre-icons.css      ← Icon utility classes and sizing
+│
+│   The design system itself is ../spectre-theme.css (static/spectre-theme.css),
+│   the one file base.html loads. A stale copy that used to sit in css/ was
+│   removed (audit F-268).
 │
 ├── icons/                     ← Individual SVG icons (24×24 viewBox, currentColor)
 │   ├── icon-track.svg
@@ -61,7 +64,7 @@ spectre-theme/
 ### 1. Link the stylesheets
 
 ```html
-<link rel="stylesheet" href="css/spectre-theme.css">
+<link rel="stylesheet" href="/static/spectre-theme.css">
 <link rel="stylesheet" href="css/spectre-icons.css">
 ```
 

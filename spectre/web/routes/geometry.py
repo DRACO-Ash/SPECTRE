@@ -52,17 +52,6 @@ _TOF_MAX_HOURS = 168.0   # one week
 _COAST_MAX_H   = 24.0
 
 
-def _find_tle(state: object, name: str) -> str | None:
-    """Locate a TLE in session state by stk_name."""
-    for a in state.blue_assets:  # type: ignore[attr-defined]
-        if a.stk_name == name:
-            return str(a.tle)
-    for t in state.red_tracks:  # type: ignore[attr-defined]
-        if t.stk_name == name:
-            return str(t.tle)
-    return None
-
-
 def _parse_epoch(epoch_str: str) -> datetime | None:
     """Parse a datetime-local string to an aware UTC datetime.
 
@@ -148,8 +137,8 @@ async def intercept_geometry(
 
     # ── Fetch TLEs from session state ─────────────────────────────────────────
     state = get_session_state(current_user)
-    red_tle  = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    red_tle  = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle:
         return _err(f"No TLE found for red satellite {red_sat!r}")

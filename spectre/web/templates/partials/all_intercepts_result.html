@@ -135,8 +135,10 @@
               type="button"
               onkeydown="event.stopPropagation()"
               data-red="{{ item.result.red_name }}" data-blue="{{ item.result.blue_name }}"
-              data-epoch="{{ item.result.arrival_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ item.result.method.value }}"
-              onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
+              {# The engine field is the manoeuvre start, so the first burn
+                 epoch goes in, not the arrival (audit F-242). #}
+              data-epoch="{{ (item.result.burns[0].burn_epoch if item.result.burns else item.result.arrival_epoch).strftime('%Y-%m-%dT%H:%M') }}"
+              onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch)"
               title="Pre-fill intercept engine with this result">Load</button>
     </td>
   </tr>
@@ -380,7 +382,7 @@ function aiToggle(idx) {
 }
 
 /* ── Pre-fill the intercept engine ── */
-function aiLoadEngine(redSat, blueSat, epoch, method) {
+function aiLoadEngine(redSat, blueSat, epoch) {
   if (typeof switchToEngine === 'function') switchToEngine();
   var redSel  = document.getElementById('ie-red-sat');
   var blueSel = document.getElementById('ie-blue-sat');

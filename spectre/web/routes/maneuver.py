@@ -67,6 +67,7 @@ from spectre.domain.models import (
     OrbitalEvent,
 )
 from spectre.web.auth import require_login
+from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, INTENT_LABELS, dominant_axis
 from spectre.web.deps import render
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
@@ -109,33 +110,6 @@ _ASSESSMENT_METHODS = {
     InterceptMethod.MANOEUVRE_DETECT,
 }
 
-_INTENT_LABELS: dict[InterceptMethod, str] = {
-    InterceptMethod.LAMBERT: "Close-Proximity Operation",
-    InterceptMethod.PROXIMITY: "Close-Proximity Operation",
-    InterceptMethod.RENDEZVOUS: "Close-Proximity Operation",
-    InterceptMethod.HOHMANN: "Orbital Transfer — Energy Change",
-    InterceptMethod.BIELLIPTIC: "Orbital Transfer — Energy Change",
-    InterceptMethod.PHASING: "Phasing Rendezvous",
-    InterceptMethod.RBAR_HOP: "R-Bar Hop (Radial Proximity Approach)",
-    InterceptMethod.VBAR_HOP: "V-Bar Hop Sequence (Along-Track Approach)",
-    InterceptMethod.HBAR_HOP: "H-Bar Hop Sequence (Orbit-Normal Approach)",
-    InterceptMethod.CW_DRIFT: "Proximity Manoeuvre (CW)",
-    InterceptMethod.NMC: "Proximity Manoeuvre (CW)",
-    InterceptMethod.PLANE_CHANGE: "Plane Change — Orbit Alignment",
-    InterceptMethod.J2_DRIFT: "J2-Assisted RAAN Drift",
-    InterceptMethod.COLA: "Collision Avoidance",
-    InterceptMethod.GEO_DRIFT: "GEO Longitude Relocation",
-    InterceptMethod.MANOEUVRE_DETECT: "Observed Manoeuvre — Classification",
-    InterceptMethod.DETECTABILITY: "Detectability Assessment",
-    InterceptMethod.EVASION: "Evasion Manoeuvre",
-    InterceptMethod.INTENT_PREDICT: "Adversary Intent Assessment",
-    InterceptMethod.INTERCEPT_ENVELOPE: "Intercept Reachability Envelope",
-    InterceptMethod.STABILITY: "Relative Motion Stability Analysis",
-    InterceptMethod.FINGERPRINT: "Behavioural Fingerprint Analysis",
-    InterceptMethod.FORMATION: "Formation-Aware Defensive Burn",
-    InterceptMethod.TERRAIN: "Orbital Terrain Risk Assessment",
-    InterceptMethod.MIN_TIME: "Minimum-Time Intercept",
-}
 
 
 #: Delta-v landmarks in m/s, from the manoeuvre assessment. Named rather than
@@ -252,25 +226,6 @@ _BURN_DIRECTION_DETAIL: dict[str, str] = {
 }
 
 
-def _burn_direction(pro: float, nor: float, rad: float, threshold: float) -> str:
-    """Name the dominant axis of a burn, or "Combined" if no axis dominates.
-
-    *threshold* is the share of the burn's vector magnitude an axis has to
-    carry before it is named; the caller sets it.
-
-    Lifted out of _burn_breakdown whole rather than split in half: the chain
-    sat inside the per-burn loop, and the nesting penalty it carried there
-    was most of that function's cognitive complexity score.
-    """
-    if abs(pro) >= threshold:
-        return "Prograde" if pro >= 0 else "Retrograde"
-    if abs(nor) >= threshold:
-        return "Normal" if nor >= 0 else "Anti-normal"
-    if abs(rad) >= threshold:
-        return "Radial" if rad >= 0 else "Anti-radial"
-    return "Combined"
-
-
 #: Most recent intercepts kept for the trade space (F-134). The history grew
 #: by one per apply-intercept call, in process-global state that survives
 #: session expiry, until the operator cleared it.
@@ -303,8 +258,7 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
         rad_pct = min(100.0, abs(rad) / dv_total * 100.0)
 
         # Direction
-        threshold = 0.7 * dv_total
-        direction = _burn_direction(pro, nor, rad, threshold)
+        direction = dominant_axis(pro, nor, rad, DOMINANT_AXIS_FRACTION * dv_total)
         direction_detail = _BURN_DIRECTION_DETAIL.get(direction, "Multi-axis manoeuvre — combined orbit change")
 
         burn_intel.append({
@@ -693,7 +647,7 @@ def _compute_intercept_intel(
         ]
 
     # ── Operational intent ───────────────────────────────────────────────────
-    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
+    intent_label = INTENT_LABELS.get(method, "Intercept Calculation")
 
     dv_class = _dv_classification(dv)
 
@@ -776,7 +730,7 @@ async def orbital_events(
     blue_events: list[Any] = []
 
     if red_sat.strip():
-        tle = _find_tle(state, red_sat.strip())
+        tle = state.tle_of(red_sat.strip())
         if tle:
             raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             red_events = [_astro_event_to_domain(e) for e in raw]
@@ -784,7 +738,7 @@ async def orbital_events(
             logger.warning("orbital_events: no TLE found for red %s", log_safe(red_sat))
 
     if blue_sat.strip():
-        tle = _find_tle(state, blue_sat.strip())
+        tle = state.tle_of(blue_sat.strip())
         if tle:
             raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             blue_events = [_astro_event_to_domain(e) for e in raw]
@@ -842,8 +796,8 @@ async def apply_intercept(
         })
 
     # Look up TLEs.
-    red_tle = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    red_tle = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle or not blue_tle:
         missing = []
@@ -899,9 +853,10 @@ async def apply_intercept(
     # BLE001: any solver failure is reported to the operator, not raised.
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "apply_intercept failed for operator %s: %s", log_safe(current_user.username), exc
+            "apply_intercept failed for operator %s: %s",
+            log_safe(current_user.username), log_safe(exc),
         )
-        state.append_log(f"[INTERCEPT] {method} failed: {exc}")
+        state.append_log(f"[INTERCEPT] {method} failed: {log_safe(exc)}")
         return render(request, "partials/intercept_result.html", {
             "result": None, "error": f"Intercept calculation failed: {exc}",
         })
@@ -1149,8 +1104,8 @@ async def apply_all_intercepts(
             "intercept_history": state.intercept_history,
         })
 
-    red_tle = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    red_tle = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle or not blue_tle:
         missing = _missing_tle_labels(red_tle, red_sat, blue_tle, blue_sat)
@@ -1282,17 +1237,6 @@ async def clear_history(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _find_tle(state: object, sat_name: str) -> str | None:
-    """Look up a satellite TLE from session state by object name."""
-    for a in state.blue_assets:  # type: ignore[attr-defined]
-        if a.stk_name == sat_name:
-            return str(a.tle)
-    for t in state.red_tracks:  # type: ignore[attr-defined]
-        if t.stk_name == sat_name:
-            return str(t.tle)
-    return None
-
 
 class _Fetched(NamedTuple):
     """An element set and the UDL dataMode it is known to have."""

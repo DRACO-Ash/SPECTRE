@@ -174,3 +174,55 @@ class TestBreakGlassReset:
         user = next(u for u in await _users(clean_db) if u.username == "rescue-admin")  # type: ignore[attr-defined]
         assert user.role == "admin"  # type: ignore[attr-defined]
         assert verify_password("rescue-password", user.hashed_password)  # type: ignore[attr-defined]
+
+
+class TestBootstrapGuards:
+    """Audit F-261: the username rule, and promotion only on its own switch."""
+
+    async def test_an_invalid_username_is_refused_at_boot(
+        self, clean_db: object, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setenv("SPECTRE_ADMIN_USER", "bad name <script>")
+        monkeypatch.setenv("SPECTRE_ADMIN_PASS", "a-real-password")
+        with caplog.at_level(logging.ERROR):
+            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+        assert await _users(clean_db) == []
+        assert "SPECTRE_ADMIN_USER was not applied" in caplog.text
+
+    async def _with_operator(self, clean_db: object, monkeypatch: pytest.MonkeyPatch) -> None:
+        from spectre.web.auth import hash_password
+        from spectre.web.models import User
+
+        monkeypatch.setenv("SPECTRE_ADMIN_USER", "first-admin")
+        monkeypatch.setenv("SPECTRE_ADMIN_PASS", "admin-password")
+        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+        async with clean_db.AsyncSessionLocal() as session:  # type: ignore[attr-defined]
+            session.add(User(username="plain-op", hashed_password=hash_password("op-password"), role="operator"))
+            await session.commit()
+        monkeypatch.setenv("SPECTRE_ADMIN_USER", "plain-op")
+        monkeypatch.setenv("SPECTRE_ADMIN_PASS", "taken-over")
+        monkeypatch.setenv("SPECTRE_ADMIN_RESET", "true")
+
+    async def test_break_glass_will_not_promote_an_operator_by_itself(
+        self, clean_db: object, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from spectre.web.auth import verify_password
+
+        await self._with_operator(clean_db, monkeypatch)
+        with caplog.at_level(logging.ERROR):
+            await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+        op = next(u for u in await _users(clean_db) if u.username == "plain-op")  # type: ignore[attr-defined]
+        assert op.role == "operator"  # type: ignore[attr-defined]
+        assert verify_password("op-password", op.hashed_password)  # type: ignore[attr-defined]
+        assert "SPECTRE_ADMIN_RESET_PROMOTE" in caplog.text
+
+    async def test_the_promote_switch_allows_it(
+        self, clean_db: object, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        await self._with_operator(clean_db, monkeypatch)
+        monkeypatch.setenv("SPECTRE_ADMIN_RESET_PROMOTE", "true")
+        await clean_db._bootstrap_admin()  # type: ignore[attr-defined]
+        op = next(u for u in await _users(clean_db) if u.username == "plain-op")  # type: ignore[attr-defined]
+        assert op.role == "admin"  # type: ignore[attr-defined]

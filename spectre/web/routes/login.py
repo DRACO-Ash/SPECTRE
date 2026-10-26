@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from spectre.config.settings import get_settings
-from spectre.web.auth import _COOKIE_NAME, current_user_for, hash_password, make_session_cookie, verify_password
+from spectre.web.auth import (
+    _COOKIE_NAME,
+    _SESSION_MAX_AGE,
+    current_user_for,
+    hash_password,
+    make_session_cookie,
+    verify_password,
+)
 from spectre.web.csrf import LOGIN_COOKIE, new_login_token
 from spectre.web.database import get_db
 from spectre.web.deps import render
@@ -26,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Session lifetime in seconds (8 hours), matching auth._SESSION_MAX_AGE.
-_SESSION_COOKIE_MAX_AGE = 28_800
+# The cookie lives exactly as long as the token inside it is honoured, so the
+# value is imported rather than copied beside a comment (audit F-259).
+_SESSION_COOKIE_MAX_AGE = _SESSION_MAX_AGE
 # A login page left open longer than this asks for a reload before sign-in.
 _LOGIN_TOKEN_MAX_AGE = 3600
 

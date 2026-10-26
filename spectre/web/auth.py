@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -39,6 +40,10 @@ def _serializer() -> URLSafeTimedSerializer:
 # ValueError past that rather than truncating, so every caller must check
 # first (audit F-150). The limit is in UTF-8 bytes, not characters.
 MAX_PASSWORD_BYTES = 72
+
+# One username rule for the admin form and for the bootstrap account made
+# from SPECTRE_ADMIN_USER (audit F-261).
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 PASSWORD_TOO_LONG = f"Password must be {MAX_PASSWORD_BYTES} bytes or fewer (fewer characters if it is not plain ASCII)."
 
 

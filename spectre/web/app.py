@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,6 +28,7 @@ from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.format_units import format_m_s, format_tof_label
 from spectre.web.health import router as health_router
+from spectre.web.log_safety import log_safe
 from spectre.web.planning_state import set_default_hrr_objects, set_default_hrr_tles
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
@@ -56,6 +58,7 @@ templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m
 
 
 logger = logging.getLogger(__name__)
+_access_log = logging.getLogger("spectre.access")
 
 _HRR_FILENAME = "HRR_List.json"
 
@@ -317,6 +320,31 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+# Probes poll every few seconds; logging them would drown the request lines.
+_UNLOGGED_PATHS = frozenset({"/healthz", "/livez", "/ping", "/readyz"})
+
+
+@app.middleware("http")
+async def _log_request(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """One access line per request: method, path, status and duration.
+
+    The path only: the query string can carry operator input, which is why
+    uvicorn's own access log is off (audit F-258).
+    """
+    started = time.perf_counter()
+    response = await call_next(request)
+    if request.url.path not in _UNLOGGED_PATHS:
+        _access_log.info(
+            "%s %s %d %.0f ms",
+            request.method, log_safe(request.url.path), response.status_code,
+            (time.perf_counter() - started) * 1000.0,
+        )
+    return response
 
 
 @app.middleware("http")

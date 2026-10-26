@@ -67,7 +67,9 @@
           </label>
           <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
             UDL Password
-            <input type="password" name="udl_pass" autocomplete="current-password" placeholder="UDL password" />
+            {# off: a one-shot UDL credential, not this site's login, so the browser
+               must not offer to save it against SPECTRE (audit F-251). #}
+            <input type="password" name="udl_pass" autocomplete="off" placeholder="UDL password" />
           </label>
         </div>
       </div>

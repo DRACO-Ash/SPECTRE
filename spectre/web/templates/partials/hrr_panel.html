@@ -52,7 +52,7 @@ function hrrSort(th) {
           {% if sat.satno %}
           <button id="hrr-bb-{{ sat.satno }}"
                   hx-post="/assets/blue/quick-add"
-                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-bb-{{ sat.satno }}"}'
+                  hx-vals='{{ {"satno": sat.satno, "name": sat.name, "btn_id": "hrr-bb-" ~ sat.satno} | tojson }}'
                   hx-target="#blue-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
@@ -60,7 +60,7 @@ function hrrSort(th) {
                   class="btn-primary btn-xs">&rarr; Blue</button>
           <button id="hrr-br-{{ sat.satno }}"
                   hx-post="/assets/red/quick-add"
-                  hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-br-{{ sat.satno }}"}'
+                  hx-vals='{{ {"satno": sat.satno, "name": sat.name, "btn_id": "hrr-br-" ~ sat.satno} | tojson }}'
                   hx-target="#red-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
@@ -103,7 +103,7 @@ function hrrSort(th) {
             {% if sat.satno %}
             <button id="hrr-rr-{{ sat.satno }}"
                     hx-post="/assets/red/quick-add"
-                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-rr-{{ sat.satno }}"}'
+                    hx-vals='{{ {"satno": sat.satno, "name": sat.name, "btn_id": "hrr-rr-" ~ sat.satno} | tojson }}'
                     hx-target="#red-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
@@ -111,7 +111,7 @@ function hrrSort(th) {
                     class="btn-danger btn-xs">&rarr; Red</button>
             <button id="hrr-rb-{{ sat.satno }}"
                     hx-post="/assets/blue/quick-add"
-                    hx-vals='{"satno": {{ sat.satno }}, "name": {{ sat.name | tojson }}, "btn_id": "hrr-rb-{{ sat.satno }}"}'
+                    hx-vals='{{ {"satno": sat.satno, "name": sat.name, "btn_id": "hrr-rb-" ~ sat.satno} | tojson }}'
                     hx-target="#blue-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
