@@ -280,6 +280,17 @@ def _reduce_one(
     if not reps:
         return _all_noise(satno, tle_list, existing_cache, n_clusters, n_noise)
 
+    # DBSCAN links neighbours, so a cluster can be a chain whose ends differ
+    # by several tolerances: a slow drift, or a small manoeuvre bridged by
+    # intermediate fits, hidden inside one representative (audit F-163).
+    for c in clusters:
+        if c.exceeds_tolerance:
+            logger.warning(
+                "Clustering satno %s: a cluster of %d spans %.1f tolerances end to end — "
+                "a chain of fits; possible slow drift or a bridged manoeuvre",
+                satno, c.size, c.span_tolerances,
+            )
+
     # Always write exactly one TLE per satno.
     is_multi = len(reps) > 1
     if is_multi:

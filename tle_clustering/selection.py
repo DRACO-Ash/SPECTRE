@@ -28,6 +28,27 @@ from tle_clustering.models import TLERecord
 logger = logging.getLogger(__name__)
 
 
+# Below this inclination, in degrees, the ascending node is not a meaningful
+# direction: fits of one near-equatorial GEO orbit scatter across any RAAN,
+# so a pair both under it is not compared on RAAN (audit F-171).
+NODE_UNDEFINED_INC_DEG = 0.1
+
+
+def raan_separation_deg(a: float, b: float) -> float:
+    """Angular separation of two nodes the short way round, in degrees.
+
+    RAAN was treated as linear, so 359.99 and 0.01 were 359.98 apart, not
+    0.02 (audit F-162).
+    """
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def node_compared(inc_a_deg: float, inc_b_deg: float) -> bool:
+    """Whether two orbits' nodes mean anything to compare."""
+    return not (inc_a_deg < NODE_UNDEFINED_INC_DEG and inc_b_deg < NODE_UNDEFINED_INC_DEG)
+
+
 def _chebyshev_distance_normalised(
     record: TLERecord,
     centroid_inc_deg: float,
@@ -59,7 +80,10 @@ def _chebyshev_distance_normalised(
         Chebyshev distance in normalised space (dimensionless).
     """
     d_inc  = abs(record.inclination_deg - centroid_inc_deg)  / config.inclination_tolerance_deg
-    d_raan = abs(record.raan_deg        - centroid_raan_deg) / config.raan_tolerance_deg
+    d_raan = (
+        raan_separation_deg(record.raan_deg, centroid_raan_deg) / config.raan_tolerance_deg
+        if node_compared(record.inclination_deg, centroid_inc_deg) else 0.0
+    )
     d_ecc  = abs(record.eccentricity    - centroid_ecc)      / config.eccentricity_tolerance
     return max(d_inc, d_raan, d_ecc)
 

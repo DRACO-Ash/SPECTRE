@@ -407,7 +407,7 @@ raw TLE history (N TLEs per sat)
   normalise per tolerance   ← divide by [inc_tol, raan_tol, ecc_tol]
          │
          ▼
-  DBSCAN (Chebyshev / L-∞)  ← eps=1.0 → all three elements within tolerance
+  DBSCAN (Chebyshev / L-∞)  ← eps=1.0 → each NEIGHBOURING pair within tolerance on all three
          │
          ├─ cluster members ─▶ select_representative()
          │                        (min Chebyshev dist to centroid, recency tie-break)
@@ -421,6 +421,10 @@ raw TLE history (N TLEs per sat)
 | Inclination | 0.01° | J2 + fitting noise < 0.01° |
 | RAAN | 0.05° | Fit scatter, after each node is carried to the newest epoch in the group by SGP4's secular rate; without that, an ISS-like node's ~5°/day regression put fits more than ~15 minutes apart outside the tolerance |
 | Eccentricity | 1×10⁻⁴ | Typical inter-provider LEO variation |
+
+**What "within tolerance" means.** DBSCAN links neighbours: a pair is linked when every element is within its tolerance (equality included), and a cluster is every set reachable through such links. A chain of fits each within tolerance of the next is therefore one cluster whose ends can be several tolerances apart. Each cluster records that end-to-end span (`span_tolerances`); one over a single tolerance is logged as a warning, since a slow drift or a small manoeuvre bridged by intermediate fits looks exactly like that.
+
+**Awkward geometry.** RAAN is compared the short way round the circle, so fits at 359.99° and 0.01° are 0.02° apart and their centroid sits on the seam. Below 0.1° of inclination the node is not a meaningful direction (fits of one near-equatorial GEO object scatter across any RAAN), so two such fits are compared on inclination and eccentricity only.
 
 **Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite, the sweep results show a red ▲ warning — the orbit is not well-determined (possible recent unannounced manoeuvre or poor tracking coverage).
 
