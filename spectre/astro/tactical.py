@@ -2176,6 +2176,10 @@ def orbital_terrain(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# A hop cadence may differ from a whole number of half orbits by this fraction.
+_HOP_CADENCE_TOL = 1e-6
+
+
 @dataclass
 class VBarHopResult:
     """Result of a V-bar hop sequence along the velocity vector."""
@@ -2209,18 +2213,34 @@ def vbar_hop_sequence(
     stealthy because each individual radial impulse is small and mimics
     natural perturbation-driven drift.
 
+    The radial hop lands back on V-bar only after an odd number of half
+    orbits: after a whole orbit it is back where it started, and at any
+    other time it is off V-bar. Any other cadence was priced as if it were
+    half an orbit; it is now refused.
+
     Args:
         r_ref: Reference orbit radius (km).
         hop_distance_km: Along-track advance per hop (km).
         n_hops: Number of hops in the sequence.
-        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        time_per_hop_s: Hop duration (s); an odd number of half orbits,
+            defaulting to T_orbit / 2.
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: if *time_per_hop_s* is not an odd number of half orbits.
     """
     n = math.sqrt(mu / r_ref ** 3)
     T_orbit = 2.0 * math.pi / n
 
     if time_per_hop_s is None:
         time_per_hop_s = T_orbit / 2.0
+    half_orbits = time_per_hop_s / (T_orbit / 2.0)
+    whole = round(half_orbits)
+    if whole % 2 == 0 or abs(half_orbits - whole) > _HOP_CADENCE_TOL:
+        raise ValueError(
+            f"time_per_hop_s={time_per_hop_s:.0f} s is not an odd number of half orbits "
+            f"({T_orbit / 2.0:.0f} s); a radial hop lands on V-bar only then"
+        )
 
     # Two radial burns per hop: each |Δv_r| = n·d/4, total per hop = n·d/2
     dv_per_hop = n * hop_distance_km / 2.0
@@ -2240,10 +2260,6 @@ def vbar_hop_sequence(
 # ═══════════════════════════════════════════════════════════════════════════
 #  19. H-Bar Hop Sequence
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-# A hop cadence may differ from a whole number of half orbits by this fraction.
-_HOP_CADENCE_TOL = 1e-6
 
 
 @dataclass
