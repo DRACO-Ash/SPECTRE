@@ -53,10 +53,10 @@ router = APIRouter(prefix="/training", tags=["training"])
 # ── Helper: get-or-create TrainingProgress ───────────────────────────────────
 
 async def _get_or_create_progress(
-    username: str, db: AsyncSession
+    owner: User, db: AsyncSession
 ) -> TrainingProgress:
     result = await db.execute(
-        select(TrainingProgress).where(TrainingProgress.username == username)
+        select(TrainingProgress).where(TrainingProgress.user_id == owner.id)
     )
     progress: TrainingProgress | None = result.scalar_one_or_none()
     if progress is None:
@@ -66,7 +66,8 @@ async def _get_or_create_progress(
         if lv1:
             init_unlocks = lv1.unlocks[:]
         progress = TrainingProgress(
-            username=username,
+            user_id=owner.id,
+            username=owner.username,
             current_level=1,
             unlocked_json=json.dumps(init_unlocks),
         )
@@ -78,7 +79,7 @@ async def _get_or_create_progress(
             # the select and this commit. Use its row rather than a 500 (F-276).
             await db.rollback()
             return (await db.execute(
-                select(TrainingProgress).where(TrainingProgress.username == username)
+                select(TrainingProgress).where(TrainingProgress.user_id == owner.id)
             )).scalar_one()
         await db.refresh(progress)
     return progress
@@ -86,7 +87,7 @@ async def _get_or_create_progress(
 
 # ── Helper: open training session ─────────────────────────────────────────────
 
-async def _open_session(username: str, db: AsyncSession) -> TrainingSession:
+async def _open_session(owner: User, db: AsyncSession) -> TrainingSession:
     """The operator's open session, or a new one when none is open.
 
     Every visit to the hub inserted a row, so a refresh left an unclosed
@@ -94,13 +95,13 @@ async def _open_session(username: str, db: AsyncSession) -> TrainingSession:
     """
     current = (await db.execute(
         select(TrainingSession)
-        .where(TrainingSession.username == username, TrainingSession.ended_at.is_(None))
+        .where(TrainingSession.user_id == owner.id, TrainingSession.ended_at.is_(None))
         .order_by(TrainingSession.started_at.desc())
         .limit(1)
     )).scalar_one_or_none()
     if current is not None:
         return current
-    session = TrainingSession(username=username)
+    session = TrainingSession(user_id=owner.id, username=owner.username)
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -132,7 +133,7 @@ def _tutorial_locked(progress: TrainingProgress, tutorial_id: str) -> HTMLRespon
     )
 
 
-def _recent_scored(username: str, limit: int) -> Any:
+def _recent_scored(user_id: int, limit: int) -> Any:
     """The operator's latest scored attempts.
 
     Exploration runs are not history: they used to show as PASS or FAIL
@@ -140,17 +141,17 @@ def _recent_scored(username: str, limit: int) -> Any:
     """
     return (
         select(ChallengeResult)
-        .where(ChallengeResult.username == username, ChallengeResult.scored.is_(True))
+        .where(ChallengeResult.user_id == user_id, ChallengeResult.scored.is_(True))
         .order_by(ChallengeResult.started_at.desc())
         .limit(limit)
     )
 
 
-async def _scored_attempts(db: AsyncSession, username: str, scenario_id: str) -> int:
-    """How many scored attempts *username* has made at *scenario_id*."""
+async def _scored_attempts(db: AsyncSession, user_id: int, scenario_id: str) -> int:
+    """How many scored attempts account *user_id* has made at *scenario_id*."""
     rows = (await db.execute(
         select(ChallengeResult).where(
-            ChallengeResult.username == username,
+            ChallengeResult.user_id == user_id,
             ChallengeResult.scenario_id == scenario_id,
             ChallengeResult.scored.is_(True),
         )
@@ -168,18 +169,18 @@ async def training_home(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Main training hub — opens (or resumes) a training session."""
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     cfg      = get_config()
 
     # Open a new session row (we close it on departure via /training/leave)
-    session = await _open_session(current_user.username, db)
+    session = await _open_session(current_user, db)
 
     available = scenarios_for_level(progress.current_level)
     challenges = [s for s in available if s.challenge]
     free_play  = [s for s in available if not s.challenge]
     unlocked_tutorials = tutorials_for_level(progress.unlocked)
 
-    recent_results = (await db.execute(_recent_scored(current_user.username, 10))).scalars().all()
+    recent_results = (await db.execute(_recent_scored(current_user.id, 10))).scalars().all()
 
     level_def    = cfg.level_def(progress.current_level)
     next_lv_def  = cfg.level_def(progress.current_level + 1)
@@ -223,7 +224,7 @@ async def training_leave(
         result = await db.execute(
             select(TrainingSession).where(
                 TrainingSession.id == session_id,
-                TrainingSession.username == current_user.username,
+                TrainingSession.user_id == current_user.id,
             )
         )
         ts = result.scalar_one_or_none()
@@ -237,7 +238,7 @@ async def training_leave(
             if started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)
             elapsed = (now - started).total_seconds() / 60.0
-            prog = await _get_or_create_progress(current_user.username, db)
+            prog = await _get_or_create_progress(current_user, db)
             prog.time_in_training_minutes += elapsed
             await db.commit()
 
@@ -265,7 +266,7 @@ async def training_scenario_detail(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     locked = _scenario_locked(progress, scenario)
     if locked is not None:
         return locked
@@ -274,7 +275,7 @@ async def training_scenario_detail(
     return render(request, "partials/training_scenario_detail.html", {
         "scenario": scenario,
         "progress": progress,
-        "attempt_number": await _scored_attempts(db, current_user.username, scenario_id) + 1,
+        "attempt_number": await _scored_attempts(db, current_user.id, scenario_id) + 1,
     })
 
 
@@ -313,8 +314,7 @@ async def _start_scenario(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    username = owner.username
-    progress = await _get_or_create_progress(username, db)
+    progress = await _get_or_create_progress(owner, db)
     locked = _scenario_locked(progress, scenario)
     if locked is not None:
         return locked
@@ -322,12 +322,13 @@ async def _start_scenario(
     _preload_training_objects(scenario, owner)
 
     # Explore runs are not numbered; a scored attempt counts only scored ones.
-    attempt_num = await _scored_attempts(db, username, scenario_id) + 1 if scored else 0
+    attempt_num = await _scored_attempts(db, owner.id, scenario_id) + 1 if scored else 0
     if scored:
         progress.scenarios_started += 1
 
     cr = ChallengeResult(
-        username=username,
+        user_id=owner.id,
+        username=owner.username,
         scenario_id=scenario_id,
         attempt_num=attempt_num,
         first_try=(attempt_num == 1 and scored),
@@ -392,7 +393,7 @@ async def training_scenario_reset(
     cr_result = await db.execute(
         select(ChallengeResult).where(
             ChallengeResult.id == result_id,
-            ChallengeResult.username == current_user.username,
+            ChallengeResult.user_id == current_user.id,
         )
     )
     cr = cr_result.scalar_one_or_none()
@@ -401,7 +402,7 @@ async def training_scenario_reset(
         await db.delete(cr)
         # Roll back scenarios_started counter if this was a scored attempt
         if cr.scored:
-            progress = await _get_or_create_progress(current_user.username, db)
+            progress = await _get_or_create_progress(current_user, db)
             progress.scenarios_started = max(0, progress.scenarios_started - 1)
         await db.commit()
 
@@ -410,11 +411,11 @@ async def training_scenario_reset(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     return render(request, "partials/training_scenario_detail.html", {
         "scenario": scenario,
         "progress": progress,
-        "attempt_number": await _scored_attempts(db, current_user.username, scenario_id) + 1,
+        "attempt_number": await _scored_attempts(db, current_user.id, scenario_id) + 1,
     })
 
 
@@ -551,14 +552,14 @@ async def _open_attempt(
     cr = (await db.execute(
         select(ChallengeResult).where(
             ChallengeResult.id == result_id,
-            ChallengeResult.username == owner.username,
+            ChallengeResult.user_id == owner.id,
             ChallengeResult.scenario_id == scenario.id,
         )
     )).scalar_one_or_none()
     if cr is None:
         return HTMLResponse('<p class="error-msg">Attempt record not found.</p>', status_code=404)
 
-    locked = _scenario_locked(await _get_or_create_progress(owner.username, db), scenario)
+    locked = _scenario_locked(await _get_or_create_progress(owner, db), scenario)
     if locked is not None:
         return locked
 
@@ -624,7 +625,7 @@ async def training_scenario_submit(
     is_scored  = cr.scored
 
     # Award gamification points only for scored attempts
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     axis_before = dict(progress.axis_points)
     total_points_earned, current_axis = _award(
         progress.axis_points.copy(), is_scored=is_scored, passed=passed,
@@ -685,7 +686,7 @@ async def training_dashboard(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Return the progress dashboard partial."""
-    progress  = await _get_or_create_progress(current_user.username, db)
+    progress  = await _get_or_create_progress(current_user, db)
     cfg       = get_config()
     level_def = cfg.level_def(progress.current_level)
     next_lv   = cfg.level_def(progress.current_level + 1)
@@ -695,7 +696,7 @@ async def training_dashboard(
         progress.axis_points, progress.tutorials_completed, progress.current_level
     )
 
-    recent_results = (await db.execute(_recent_scored(current_user.username, 5))).scalars().all()
+    recent_results = (await db.execute(_recent_scored(current_user.id, 5))).scalars().all()
 
     available = scenarios_for_level(progress.current_level)
     first_scenario = next((s for s in available if not s.challenge), None)
@@ -727,7 +728,7 @@ async def training_tutorial_view(
     if tutorial is None:
         return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
 
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     already_done = tutorial_id in progress.tutorials_completed
 
     return render(request, "partials/training_tutorial.html", {
@@ -748,7 +749,7 @@ async def training_tutorial_complete(
     if tutorial is None:
         return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
 
-    progress = await _get_or_create_progress(current_user.username, db)
+    progress = await _get_or_create_progress(current_user, db)
     locked = _tutorial_locked(progress, tutorial_id)
     if locked is not None:
         return locked

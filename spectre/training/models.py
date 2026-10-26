@@ -5,7 +5,14 @@ tagged synthetic objects to the operator's session state while a scenario
 runs; see spectre.training.)
 The isolation boundary:
   - training_* tables ←→ operator progress, scores, session logs
-  - users table: read-only reference (username FK only)
+  - users table: read-only reference by account id (``user_id``)
+
+Every training row is keyed on the account id, not the username. Keyed on
+the username, a deleted account's progress, attempts and sessions passed to
+anyone later created with the same name. The username is still stored, as a
+label for whoever reads the table, and is never used to look a row up.
+The rows are deleted with the account (routes/admin.py), because SQLite
+reuses a freed id and would otherwise hand them to the next account.
   - No access to: session state, operational TLEs, UDL credentials
 """
 
@@ -24,14 +31,16 @@ from spectre.web.database import Base
 class TrainingProgress(Base):
     """Per-operator cumulative training state.
 
-    One row per username.  Updated whenever the operator earns points,
+    One row per account.  Updated whenever the operator earns points,
     completes a tutorial, or passes a challenge.
     """
 
     __tablename__ = "training_progress"
 
     id:       Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id:  Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    # A label, not a key: unique on the account, not the name.
+    username: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
     # Totals
     total_points:      Mapped[int]   = mapped_column(Integer, default=0, nullable=False)
@@ -101,6 +110,7 @@ class TrainingSession(Base):
     __tablename__ = "training_sessions"
 
     id:         Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id:    Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     username:   Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -118,6 +128,7 @@ class ChallengeResult(Base):
     __tablename__ = "training_challenge_results"
 
     id:          Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id:     Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     username:    Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     scenario_id: Mapped[str] = mapped_column(String(128), nullable=False)
     attempt_num: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
@@ -176,3 +187,9 @@ class ChallengeResult(Base):
     @debrief.setter
     def debrief(self, value: dict[str, Any]) -> None:
         self.debrief_json = json.dumps(value)
+
+
+# Every table keyed on an account, deleted with it (routes/admin.py).
+TRAINING_TABLES: tuple[type[TrainingProgress] | type[TrainingSession] | type[ChallengeResult], ...] = (
+    TrainingProgress, TrainingSession, ChallengeResult,
+)

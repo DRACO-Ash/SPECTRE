@@ -114,6 +114,13 @@ class TestF275ObjectiveColoursAndEmptyCopy:
         assert "Orientation tutorial" not in out and "level" in out
 
 
+def _account(user_id: int, username: str) -> object:
+    """A stand-in for an account: training reads only its id and its name."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=user_id, username=username)
+
+
 class TestF276OneOpenTrainingSession:
     @pytest.fixture()
     async def db(self) -> object:
@@ -139,8 +146,9 @@ class TestF276OneOpenTrainingSession:
         from spectre.training.models import TrainingSession
         from spectre.web.routes.training import _open_session
 
-        first = await _open_session("op", db)  # type: ignore[arg-type]
-        second = await _open_session("op", db)  # type: ignore[arg-type]
+        op = _account(7, "op")
+        first = await _open_session(op, db)  # type: ignore[arg-type]
+        second = await _open_session(op, db)  # type: ignore[arg-type]
         assert first.id == second.id
         count = (await db.execute(select(func.count()).select_from(TrainingSession))).scalar_one()  # type: ignore[attr-defined]
         assert count == 1
@@ -151,7 +159,7 @@ class TestF276OneOpenTrainingSession:
         from spectre.training.models import TrainingProgress
         from spectre.web.routes import training
 
-        winner = TrainingProgress(username="op", current_level=1, unlocked_json="[]")
+        winner = TrainingProgress(user_id=7, username="op", current_level=1, unlocked_json="[]")
         db.add(winner)  # type: ignore[attr-defined]
         await db.commit()  # type: ignore[attr-defined]
 
@@ -169,7 +177,7 @@ class TestF276OneOpenTrainingSession:
             return result
 
         monkeypatch.setattr(db, "execute", first_select_misses)
-        progress = await training._get_or_create_progress("op", db)  # type: ignore[arg-type]
+        progress = await training._get_or_create_progress(_account(7, "op"), db)  # type: ignore[arg-type]
         assert progress.id == winner.id
 
 

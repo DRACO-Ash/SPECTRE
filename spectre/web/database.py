@@ -174,6 +174,11 @@ async def _apply_migrations(conn: Any) -> None:
         ("users", "session_generation", "INTEGER NOT NULL DEFAULT 0"),
         # Existing rows take the empty nonce, and their tokens carry it too.
         ("users", "session_nonce", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        # Training rows keyed on the account. Nullable here only because a
+        # legacy row has no value until _key_training_on_account fills it.
+        ("training_progress", "user_id", "INTEGER"),
+        ("training_sessions", "user_id", "INTEGER"),
+        ("training_challenge_results", "user_id", "INTEGER"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)
@@ -182,6 +187,62 @@ async def _apply_migrations(conn: Any) -> None:
             continue  # table absent, so create_all will build it complete
         if column not in existing:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+    await _key_training_on_account(conn)
+
+
+_TRAINING_TABLE_NAMES = ("training_progress", "training_sessions", "training_challenge_results")
+
+
+def _index_uniqueness(sync_conn: Any, table: str) -> dict[str, bool]:
+    """Each index on *table*, by name, mapped to whether it is unique."""
+    from sqlalchemy import inspect
+
+    return {str(ix["name"]): bool(ix["unique"]) for ix in inspect(sync_conn).get_indexes(table)}
+
+
+async def _key_training_on_account(conn: Any) -> None:
+    """Move legacy training rows from the username key to the account id.
+
+    Training rows were keyed on the username, so a deleted account's history
+    passed to a namesake created later. Legacy rows take the id of the
+    account that holds their username now; rows whose username no account
+    holds belong to a deleted account and are removed. Progress was unique on
+    the username: that index becomes a plain one, and uniqueness moves to the
+    account id. Safe to re-run: every step is a no-op once applied.
+    """
+    from sqlalchemy import text
+
+    removed = 0
+    for table in _TRAINING_TABLE_NAMES:
+        _assert_safe_ddl(table, "user_id", "INTEGER")
+        if "user_id" not in await conn.run_sync(_existing_columns, table):
+            continue
+        await conn.execute(text(
+            f"UPDATE {table} SET user_id = "  # noqa: S608 - table from the literal tuple above, checked
+            "(SELECT users.id FROM users WHERE users.username = "
+            f"{table}.username) WHERE user_id IS NULL"
+        ))
+        orphans = await conn.execute(text(f"DELETE FROM {table} WHERE user_id IS NULL"))  # noqa: S608
+        removed += orphans.rowcount or 0
+        await conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_user_id ON {table} (user_id)"))
+    if removed:
+        logger.warning(
+            "Removed %d training record(s) whose account no longer exists while keying "
+            "training on the account id.", removed,
+        )
+    if not await conn.run_sync(_existing_columns, "training_progress"):
+        return
+    indexes = await conn.run_sync(_index_uniqueness, "training_progress")
+    if indexes.get("ix_training_progress_username"):
+        await conn.execute(text("DROP INDEX ix_training_progress_username"))
+        await conn.execute(text(
+            "CREATE INDEX ix_training_progress_username ON training_progress (username)"
+        ))
+    if not indexes.get("ix_training_progress_user_id"):
+        await conn.execute(text("DROP INDEX IF EXISTS ix_training_progress_user_id"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX ix_training_progress_user_id ON training_progress (user_id)"
+        ))
 
 
 

@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from spectre.training.models import TRAINING_TABLES
 from spectre.web.auth import (
     PASSWORD_TOO_LONG,
     USERNAME_PATTERN,
@@ -347,6 +348,11 @@ async def delete_user(
             request, await _all_users(db), current_user,
             flash={"type": "error", "message": "Cannot delete the last admin account."},
         )
+    # Its training records go in the same transaction. They are keyed on the
+    # account id, and SQLite reuses a freed id, so left behind they would
+    # pass to the next account created.
+    for table in TRAINING_TABLES:
+        await db.execute(delete(table).where(table.user_id == user.id))
     await db.commit()
     # The account's planning state goes with it, UDL password included, so a
     # later account of the same name starts clean (audit F-148).

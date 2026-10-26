@@ -414,7 +414,7 @@ With F-096 and F-136, no function in `spectre/` or `tle_clustering/` is over cog
 
 Flying the V-bar hop (F-082) found that a custom hop time was priced as if it were half an orbit. A radial hop lands on V-bar only after an odd number of half orbits, so any other cadence is now refused, as the H-bar hop already did. The one caller uses the default.
 
-Observed, not an audit finding: training progress, attempts and sessions are keyed by username, not account id. A deleted account's training history passes to a recreated namesake, the pattern F-048 and F-148 fixed for sessions and planning state. Left for a decision, since moving the key needs a migration of three tables.
+Observed, not an audit finding: training progress, attempts and sessions are keyed by username, not account id. A deleted account's training history passes to a recreated namesake, the pattern F-048 and F-148 fixed for sessions and planning state. Left for a decision, since moving the key needs a migration of three tables. **Closed 26 October 2026 by the owner's decision; see "Training keyed on the account" below.**
 
 `docs/SECURITY.md` lists the two new controls (password length, compute bounds). Observed, not an audit finding: the root `SECURITY.md` is stale. Its open items say there is no CSRF protection, no UDL rate limiting and no user-management UI; all three exist, and `docs/SECURITY.md` (rewritten for F-057) is the current policy. Left for the owner to replace with a pointer.
 
@@ -581,3 +581,16 @@ F-188 (origin F-S00-15): the `test_should_` naming convention is dropped, by the
 ● F-272: the route-test TLEs had a 68-column line 2 (the perigee field had lost a space) as well as wrong checksums. Both were repaired once manual entry began checking.
 ● F-274: the first of two `_rule_block` definitions was not dead. Module-level constants called it during import; every call made later silently reached the second. It is now `_sole_rule_block`.
 ● Observation, not a finding: the house rule that tests must skip when a non-application file is absent detects literal paths only. A helper taking the path as a variable passes it unseen. The new batch 3 helper skips correctly; the detector itself is unchanged.
+
+### Training keyed on the account
+
+Not an audit finding; the observation recorded under the Medium findings, closed by the owner's decision of 26 October 2026.
+
+Reproduced first, on the commit before the change: an operator promoted to Level 4, deleted, and recreated under the same name signed in at Level 4 with the old attempt history.
+
+● All three training tables carry `user_id` and every lookup uses it. The username stays as a label and is never a key; progress is unique on the account, not the name.
+● Deleting an account deletes its training rows in the same transaction. Keying on the id alone would not be enough: SQLite reuses a freed id, and the rows would pass to the next account created.
+● Existing databases are migrated at boot. Each legacy row takes the id of the account that holds its username now; rows whose username no account holds belong to a deleted account and are removed, with a count in the log. The unique index on `training_progress.username` becomes a plain index and uniqueness moves to `user_id`. Every step is a no-op on a second boot.
+● One limit, stated plainly: a namesake recreated before this upgrade already sees the deleted account's history, and the migration cannot tell the two apart, so those rows stay with the namesake.
+
+Gates: `tests/integration/test_training_keyed_on_account.py` (a recreated namesake starts at Level 1 with no attempts and the deleted account's rows are gone; a legacy database is backfilled, orphans removed, indexes moved, and a second run changes nothing).
