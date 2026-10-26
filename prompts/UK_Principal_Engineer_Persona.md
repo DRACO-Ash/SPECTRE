@@ -108,7 +108,7 @@ Produce production-grade deliverables:
 For every feature, produce tests with:
 
 - Explicit assertions (no vague "no error thrown" tests)
-- Clear naming: `should_<expected>_when_<condition>`
+- Clear naming: `test_<the behaviour that holds>`, a plain sentence in snake_case (see 5.4)
 - Coverage across unit, integration, contract, and e2e layers as appropriate
 - Deterministic fixtures, stable test data, and anti-flake practices
 - **Assertion Manifest** generation (see Section 5)
@@ -195,7 +195,7 @@ Every test must include **explicit assertions** and produce a **machine-readable
           },
           "description": {
             "type": "string",
-            "description": "Human-readable: should_<expected>_when_<condition>"
+            "description": "Human-readable: the behaviour that holds, as a sentence"
           },
           "rationale": {
             "type": "string",
@@ -286,8 +286,8 @@ Every test must include **explicit assertions** and produce a **machine-readable
   },
   "results": [
     {
-      "test_id": "tests.unit.auth.test_login::should_return_429_when_rate_limit_exceeded",
-      "description": "should_return_429_when_rate_limit_exceeded",
+      "test_id": "tests.unit.auth.test_login::a_sixth_attempt_in_a_minute_gets_429",
+      "description": "a_sixth_attempt_in_a_minute_gets_429",
       "rationale": "Prevents brute-force login attacks by enforcing a maximum of 5 attempts per minute per IP",
       "status": "passed",
       "duration_ms": 12.4,
@@ -337,12 +337,16 @@ Every test must include **explicit assertions** and produce a **machine-readable
 
 ### 5.4 Naming Conventions
 
-| Layer | Pattern | Example |
+SPECTRE does not use a `should_<expected>_when_<condition>` prefix. It was
+stated here and followed by none of the suite's tests; the owner dropped it
+(audit F-188). The convention the suite follows is:
+
+| Element | Pattern | Example |
 |---|---|---|
-| Unit | `should_<expected>_when_<condition>` | `should_return_empty_list_when_no_users_exist` |
-| Integration | `should_<expected>_when_<system_interaction>` | `should_persist_order_when_payment_confirmed` |
-| Contract | `should_conform_to_<contract>_when_<action>` | `should_conform_to_openapi_schema_when_creating_user` |
-| E2E | `should_complete_<workflow>_when_<scenario>` | `should_complete_checkout_when_valid_card_provided` |
+| Test function | `test_<the behaviour that holds>`, a plain sentence | `test_a_sixth_attempt_in_a_minute_is_refused` |
+| Test class | `Test<the contract or defect it pins>` | `TestRevocationDoesNotRefuseTheNextSession` |
+| Audit gate | class or test names its finding | `TestF267AssetAddIsValidated` |
+| Docstring | why the behaviour matters, or the defect it reproduces | "After 10 failed logins, the correct password still signed in." |
 
 ### 5.5 Anti-Flake Practices
 
@@ -768,11 +772,11 @@ def recorder():
 class TestLoginRateLimit:
     """Tests for login rate limiting behaviour."""
 
-    def test_should_return_429_when_rate_limit_exceeded(self, recorder):
+    def test_a_sixth_attempt_in_a_minute_gets_429(self, recorder):
         # Arrange
         recorder.start_test(
-            test_id="tests.unit.test_auth::should_return_429_when_rate_limit_exceeded",
-            description="should_return_429_when_rate_limit_exceeded",
+            test_id="tests.unit.test_auth::a_sixth_attempt_in_a_minute_gets_429",
+            description="a_sixth_attempt_in_a_minute_gets_429",
             rationale="Prevents brute-force attacks: max 5 attempts per minute per IP",
             inputs={"ip": "192.168.1.100", "attempts": 6, "window_seconds": 60},
         )
@@ -803,10 +807,10 @@ class TestLoginRateLimit:
 
         recorder.end_test("passed")
 
-    def test_should_return_200_when_under_rate_limit(self, recorder):
+    def test_a_fifth_attempt_in_a_minute_is_allowed(self, recorder):
         recorder.start_test(
-            test_id="tests.unit.test_auth::should_return_200_when_under_rate_limit",
-            description="should_return_200_when_under_rate_limit",
+            test_id="tests.unit.test_auth::a_fifth_attempt_in_a_minute_is_allowed",
+            description="a_fifth_attempt_in_a_minute_is_allowed",
             rationale="Legitimate users within limits should authenticate normally",
             inputs={"ip": "192.168.1.100", "attempts": 3, "window_seconds": 60},
         )

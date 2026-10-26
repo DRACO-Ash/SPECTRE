@@ -82,6 +82,7 @@ Each was shown to fail against the original `master` file it guards.
 ● **NOTSO marking (`U//DS-JCO-NOTIF`):** acceptable to hold, and the ruling expressly covers a public repository. Ruled by the Technical Director, 24 October 2026. No change made.
 ● **Intelligence data marking (F-146):** keep `UNCLASS // PAIR`. Ruled by the Technical Director, 24 October 2026. Recorded in the file's `_meta` block.
 ● **UDL-sourced object names (F-038):** the reply restated the question rather than choosing, so the names are treated as **untrusted**, the safer reading. The fix is identical under either ruling; only the priority would differ. Open for correction.
+● **Test naming (F-188):** drop the `test_should_` convention. Ruled by the Technical Director, 26 October 2026. Recorded under the Low findings.
 
 ### Solver and screening fixes
 
@@ -419,7 +420,7 @@ Observed, not an audit finding: training progress, attempts and sessions are key
 
 ### Low findings
 
-All 112 Low findings are closed or already were, except F-188, which is left for a decision. Each change has a gate test that fails on the commit before it: `tests/unit/test_low_findings_astro.py`, `test_low_findings_batch1.py`, `test_low_findings_batch2.py` (54 of 54 new gates failed on the old code) and `test_low_findings_batch3.py` (70 of 72), plus additions to the route, health and bootstrap suites.
+All 112 Low findings are closed or already were; F-188 was closed by the owner's ruling. Each change has a gate test that fails on the commit before it: `tests/unit/test_low_findings_astro.py`, `test_low_findings_batch1.py`, `test_low_findings_batch2.py` (54 of 54 new gates failed on the old code) and `test_low_findings_batch3.py` (70 of 72), plus additions to the route, health and bootstrap suites.
 
 #### Astrodynamics, PoL and constants
 
@@ -569,9 +570,9 @@ All 112 Low findings are closed or already were, except F-188, which is left for
 
 Partly fixed at triage and completed above: F-189, F-194, F-203, F-217, F-222, F-232, F-254 and F-280.
 
-#### Left for a decision
+#### Ruled by the owner
 
-F-188 (origin F-S00-15): the test-naming convention `test_should_` is stated in the engineering persona (now `prompts/UK_Principal_Engineer_Persona.md`) and used by none of the suite's tests. Either the convention is dropped or the suite is renamed and a naming lint added. That is a standards call for the owner, not a defect fix.
+F-188 (origin F-S00-15): the `test_should_` naming convention is dropped, by the owner's ruling of 26 October 2026. It was stated in the engineering persona (now `prompts/UK_Principal_Engineer_Persona.md`) and followed by none of the suite's 1,946 tests. The persona now states the convention the suite does follow (a test named for the behaviour that holds, a class for the contract or defect it pins), its examples follow it, and `TestF188NoShouldPrefixConvention` holds both.
 
 #### Notes
 

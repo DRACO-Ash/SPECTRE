@@ -383,3 +383,20 @@ class TestF285BuildCommentsDescribeTheCurrentFlow:
 
     def test_bump_version_does_not_credit_hatch(self) -> None:
         assert "hatch reads it" not in _text("scripts/bump-version.sh")
+
+
+class TestF188NoShouldPrefixConvention:
+    """The owner dropped the `should_` naming convention: stated, never followed."""
+
+    def test_the_persona_states_the_convention_the_suite_uses(self) -> None:
+        text = _text("prompts/UK_Principal_Engineer_Persona.md")
+        assert "Clear naming: `should_" not in text
+        assert "`test_<the behaviour that holds>`" in text
+        assert "def test_should_" not in text
+
+    def test_no_test_uses_the_dropped_prefix(self) -> None:
+        offenders = [
+            str(p.relative_to(_ROOT)) for p in (_ROOT / "tests").rglob("test_*.py")
+            if re.search(r"^\s*(async )?def test_should_", p.read_text("utf-8"), re.M)
+        ]
+        assert offenders == []
