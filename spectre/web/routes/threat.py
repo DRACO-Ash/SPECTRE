@@ -174,6 +174,25 @@ def _interceptor_regime(state: object, red_sat_name: str) -> str | None:
     return None
 
 
+def _hrr_rank(obj: dict[str, Any]) -> int:
+    """An HRR object's rank; unranked objects count as rank 0 rather than being dropped."""
+    rank = obj.get("rank")
+    return 0 if rank is None else rank
+
+
+def _hrr_side(obj: dict[str, Any]) -> str:
+    """'red' for an object of a red country, else 'blue'."""
+    country = str(obj.get("country") or "").strip().upper()
+    return "red" if country in _RED_COUNTRIES else "blue"
+
+
+def _hrr_in_regime(obj: dict[str, Any], regime: str | None) -> bool:
+    """Whether *obj* is in *regime*; every object is when no regime is given."""
+    from spectre.astro.constants import normalise_regime
+
+    return regime is None or normalise_regime(str(obj.get("orbit_regime") or "")) == regime
+
+
 def _hrr_group_counts(
     state: object,
     regime: str | None = None,
@@ -183,51 +202,27 @@ def _hrr_group_counts(
     If *regime* is provided, only objects whose normalised ``orbit_regime``
     matches are counted — allowing the dropdown to be filtered to objects that
     are actually reachable by the selected interceptor.
+
+    The side, rank and regime rules are the helpers above, shared with
+    :func:`_objects_for_group`, which kept its own copy (audit F-136).
     """
     from collections import Counter
 
-    from spectre.astro.constants import normalise_regime
-
-    blue_ctr: Counter[int] = Counter()
-    red_ctr: Counter[int] = Counter()
+    counts: dict[str, Counter[int]] = {"blue": Counter(), "red": Counter()}
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        rank = obj.get("rank")
-        if rank is None:
-            rank = 0   # treat unranked objects as rank 0 rather than dropping them
-        if regime is not None:
-            obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
-            if obj_regime != regime:
-                continue
-        country = str(obj.get("country") or "").strip().upper()
-        if country in _RED_COUNTRIES:
-            red_ctr[rank] += 1
-        else:
-            blue_ctr[rank] += 1
-    return sorted(blue_ctr.items()), sorted(red_ctr.items())
+        if _hrr_in_regime(obj, regime):
+            counts[_hrr_side(obj)][_hrr_rank(obj)] += 1
+    return sorted(counts["blue"].items()), sorted(counts["red"].items())
 
 
 def _objects_for_group(
     state: object, side: str, rank: int, regime: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return HRR objects matching *side* ('blue'|'red'), *rank*, and optionally *regime*."""
-    from spectre.astro.constants import normalise_regime
-
-    results: list[dict[str, Any]] = []
-    for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        obj_rank = obj.get("rank")
-        if obj_rank is None:
-            obj_rank = 0
-        if obj_rank != rank:
-            continue
-        if regime is not None:
-            obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
-            if obj_regime != regime:
-                continue
-        country = str(obj.get("country") or "").strip().upper()
-        is_red = country in _RED_COUNTRIES
-        if (side == "red" and is_red) or (side == "blue" and not is_red):
-            results.append(obj)
-    return results
+    return [
+        obj for obj in state.hrr_objects  # type: ignore[attr-defined]
+        if _hrr_rank(obj) == rank and _hrr_side(obj) == side and _hrr_in_regime(obj, regime)
+    ]
 
 
 #: Bounds on the manual target list (F-134). It lives in the process-global

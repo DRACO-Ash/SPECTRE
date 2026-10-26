@@ -697,54 +697,58 @@ def _downsample(records: list[Any], max_pts: int = 500) -> list[Any]:
 
 # ── Drift phase analysis ──────────────────────────────────────────────────────
 
+def _drift_direction(rate: float) -> str:
+    """EAST, WEST or STATIONARY for a longitude drift rate in degrees a day."""
+    if rate > _DRIFT_STATIONARY:
+        return "EAST"
+    if rate < -_DRIFT_STATIONARY:
+        return "WEST"
+    return "STATIONARY"
+
+
+def _drift_phase(start: TLERecord, end: TLERecord, rates: list[float], direction: str) -> DriftPhase | None:
+    """One drift phase from *start* to *end*, or ``None`` if under half a day."""
+    dur = (end.epoch - start.epoch).total_seconds() / 86400.0
+    if dur < 0.5:  # noqa: PLR2004
+        return None
+    mean_rate = sum(rates) / len(rates)
+    return DriftPhase(
+        start_epoch=start.epoch, end_epoch=end.epoch,
+        direction=direction, rate_deg_day=round(mean_rate, 3),
+        start_lon=round(start.geo_longitude_deg or 0.0, 2), end_lon=round(end.geo_longitude_deg or 0.0, 2),
+        distance_deg=round(mean_rate * dur, 2), duration_days=round(dur, 1),
+        peak_rate=round(max(abs(r) for r in rates), 3),
+    )
+
+
+def _direction_runs(geo_recs: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, list[float], str]]:
+    """(start, end, rates, direction) for each run of one drift direction.
+
+    A run ends at the first record of the next, so consecutive phases share
+    their boundary record; the last ends at the last record.
+    """
+    runs: list[tuple[TLERecord, TLERecord, list[float], str]] = []
+    start = geo_recs[0]
+    rates = [start.geo_drift_rate_deg_day or 0.0]
+    direction = _drift_direction(rates[0])
+    for rec in geo_recs[1:]:
+        rate = rec.geo_drift_rate_deg_day or 0.0
+        if _drift_direction(rate) == direction:
+            rates.append(rate)
+            continue
+        runs.append((start, rec, rates, direction))
+        start, rates, direction = rec, [rate], _drift_direction(rate)
+    runs.append((start, geo_recs[-1], rates, direction))
+    return runs
+
+
 def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
     """Detect contiguous periods of East / West / Stationary longitude drift."""
     geo_recs = [r for r in records if r.geo_longitude_deg is not None and r.geo_drift_rate_deg_day is not None]
-    if len(geo_recs) < 3:
+    if len(geo_recs) < 3:  # noqa: PLR2004
         return []
-
-    def _dir(rate: float) -> str:
-        if rate > _DRIFT_STATIONARY:
-            return "EAST"
-        if rate < -_DRIFT_STATIONARY:
-            return "WEST"
-        return "STATIONARY"
-
-    phases: list[DriftPhase] = []
-    phase_start = geo_recs[0]
-    cur_dir     = _dir(geo_recs[0].geo_drift_rate_deg_day or 0.0)
-    rates_in_phase: list[float] = [geo_recs[0].geo_drift_rate_deg_day or 0.0]
-
-    def _flush(start: TLERecord, end: TLERecord, rates: list[float], direction: str) -> None:
-        dur = (end.epoch - start.epoch).total_seconds() / 86400.0
-        if dur < 0.5:
-            return
-        mean_rate  = sum(rates) / len(rates)
-        peak_rate  = max(abs(r) for r in rates)
-        dist       = mean_rate * dur
-        # Use signed raw longitude difference for distance (handles 180° wrap)
-        start_lon  = start.geo_longitude_deg or 0.0
-        end_lon    = end.geo_longitude_deg   or 0.0
-        phases.append(DriftPhase(
-            start_epoch=start.epoch, end_epoch=end.epoch,
-            direction=direction, rate_deg_day=round(mean_rate, 3),
-            start_lon=round(start_lon, 2), end_lon=round(end_lon, 2),
-            distance_deg=round(dist, 2), duration_days=round(dur, 1),
-            peak_rate=round(peak_rate, 3),
-        ))
-
-    for rec in geo_recs[1:]:
-        d = _dir(rec.geo_drift_rate_deg_day or 0.0)
-        if d != cur_dir:
-            _flush(phase_start, rec, rates_in_phase, cur_dir)
-            phase_start    = rec
-            cur_dir        = d
-            rates_in_phase = [rec.geo_drift_rate_deg_day or 0.0]
-        else:
-            rates_in_phase.append(rec.geo_drift_rate_deg_day or 0.0)
-
-    _flush(phase_start, geo_recs[-1], rates_in_phase, cur_dir)
-    return phases
+    phases = (_drift_phase(*run) for run in _direction_runs(geo_recs))
+    return [p for p in phases if p is not None]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
