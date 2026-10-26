@@ -4,7 +4,7 @@ DATA ISOLATION CONTRACT
 -----------------------
 These routes NEVER:
   - Access UDL credentials or operational TLEs
-  - Touch the operational log queue
+  - Touch the operational session log
 
 They ONLY:
   - Read training_* database tables via get_db()
@@ -85,6 +85,57 @@ async def _open_session(username: str, db: AsyncSession) -> TrainingSession:
     return session
 
 
+# ── Helper: level gates ──────────────────────────────────────────────────────
+#
+# Only the detail view used to check the level. Start, explore, submit and
+# tutorial completion did not, so a Level 1 operator could start and submit a
+# Level 5 challenge or bank every tutorial on first login (audit F-159).
+
+def _scenario_locked(progress: TrainingProgress, scenario: Any) -> HTMLResponse | None:
+    """A 403 if *progress* has not reached *scenario*'s level, else ``None``."""
+    if progress.current_level >= scenario.level_required:
+        return None
+    return HTMLResponse(
+        f'<p class="error-msg">Reach Level {scenario.level_required} to unlock this scenario.</p>',
+        status_code=403,
+    )
+
+
+def _tutorial_locked(progress: TrainingProgress, tutorial_id: str) -> HTMLResponse | None:
+    """A 403 if the tutorial is not in the operator's unlocked list, else ``None``."""
+    if f"tutorial:{tutorial_id}" in progress.unlocked:
+        return None
+    return HTMLResponse(
+        '<p class="error-msg">This tutorial unlocks at a later level.</p>', status_code=403,
+    )
+
+
+def _recent_scored(username: str, limit: int) -> Any:
+    """The operator's latest scored attempts.
+
+    Exploration runs are not history: they used to show as PASS or FAIL
+    beside scored attempts (audit F-167).
+    """
+    return (
+        select(ChallengeResult)
+        .where(ChallengeResult.username == username, ChallengeResult.scored == True)  # noqa: E712
+        .order_by(ChallengeResult.started_at.desc())
+        .limit(limit)
+    )
+
+
+async def _scored_attempts(db: AsyncSession, username: str, scenario_id: str) -> int:
+    """How many scored attempts *username* has made at *scenario_id*."""
+    rows = (await db.execute(
+        select(ChallengeResult).where(
+            ChallengeResult.username == username,
+            ChallengeResult.scenario_id == scenario_id,
+            ChallengeResult.scored == True,  # noqa: E712
+        )
+    )).scalars().all()
+    return len(rows)
+
+
 # ── Main training page ────────────────────────────────────────────────────────
 
 @router.get("", response_class=HTMLResponse)
@@ -106,13 +157,7 @@ async def training_home(
     free_play  = [s for s in available if not s.challenge]
     unlocked_tutorials = tutorials_for_level(progress.unlocked)
 
-    # Recent results (last 10)
-    recent_results = (await db.execute(
-        select(ChallengeResult)
-        .where(ChallengeResult.username == current_user.username)
-        .order_by(ChallengeResult.started_at.desc())
-        .limit(10)
-    )).scalars().all()
+    recent_results = (await db.execute(_recent_scored(current_user.username, 10))).scalars().all()
 
     level_def    = cfg.level_def(progress.current_level)
     next_lv_def  = cfg.level_def(progress.current_level + 1)
@@ -196,25 +241,15 @@ async def training_scenario_detail(
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
     progress = await _get_or_create_progress(current_user.username, db)
-    if progress.current_level < scenario.level_required:
-        return HTMLResponse(
-            f'<p class="error-msg">Reach Level {scenario.level_required} to unlock this scenario.</p>',
-            status_code=403,
-        )
+    locked = _scenario_locked(progress, scenario)
+    if locked is not None:
+        return locked
 
-    # Count previous attempts
-    attempt_count = (await db.execute(
-        select(ChallengeResult)
-        .where(
-            ChallengeResult.username == current_user.username,
-            ChallengeResult.scenario_id == scenario_id,
-        )
-    )).scalars().all()
-
+    # Scored attempts only, so the number shown is the one the start records.
     return render(request, "partials/training_scenario_detail.html", {
         "scenario": scenario,
         "progress": progress,
-        "attempt_number": len(attempt_count) + 1,
+        "attempt_number": await _scored_attempts(db, current_user.username, scenario_id) + 1,
     })
 
 
@@ -253,25 +288,18 @@ async def _start_scenario(
     if scenario is None:
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
-    _preload_training_objects(scenario, owner)
-
     username = owner.username
     progress = await _get_or_create_progress(username, db)
+    locked = _scenario_locked(progress, scenario)
+    if locked is not None:
+        return locked
 
+    _preload_training_objects(scenario, owner)
+
+    # Explore runs are not numbered; a scored attempt counts only scored ones.
+    attempt_num = await _scored_attempts(db, username, scenario_id) + 1 if scored else 0
     if scored:
-        # Count only scored previous attempts for attempt_num / first_try
-        prev = (await db.execute(
-            select(ChallengeResult)
-            .where(
-                ChallengeResult.username == username,
-                ChallengeResult.scenario_id == scenario_id,
-                ChallengeResult.scored == True,  # noqa: E712
-            )
-        )).scalars().all()
-        attempt_num = len(prev) + 1
         progress.scenarios_started += 1
-    else:
-        attempt_num = 0   # explore runs are not numbered
 
     cr = ChallengeResult(
         username=username,
@@ -314,7 +342,8 @@ async def training_scenario_explore(
 
     A ChallengeResult row is created so the operator can tick off objectives
     and see what they do, but no points are awarded and the attempt counter
-    is not incremented.  The row is deleted when the operator resets or submits.
+    is not incremented.  Reset deletes the row; submit completes it, marked
+    unscored, and it is left out of the activity history and attempt counts.
     """
     return await _start_scenario(scenario_id, current_user, db, scored=False, request=request)
 
@@ -357,19 +386,10 @@ async def training_scenario_reset(
         return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
 
     progress = await _get_or_create_progress(current_user.username, db)
-    scored_prev = (await db.execute(
-        select(ChallengeResult)
-        .where(
-            ChallengeResult.username == current_user.username,
-            ChallengeResult.scenario_id == scenario_id,
-            ChallengeResult.scored == True,  # noqa: E712
-        )
-    )).scalars().all()
-
     return render(request, "partials/training_scenario_detail.html", {
         "scenario": scenario,
         "progress": progress,
-        "attempt_number": len(scored_prev) + 1,
+        "attempt_number": await _scored_attempts(db, current_user.username, scenario_id) + 1,
     })
 
 
@@ -402,24 +422,47 @@ def _answer_ok(obj: Any, given: str) -> bool:
         return False
 
 
+def _elapsed_minutes(cr: ChallengeResult) -> float:
+    """Minutes since the attempt started, by the server's clock.
+
+    The client's own figure was stored as given, negative or not, and a
+    "submit within the time limit" objective was self-certified (audit F-168).
+    """
+    started = cr.started_at
+    if started.tzinfo is None:  # SQLite returns naive datetimes
+        started = started.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - started).total_seconds() / 60.0)
+
+
+def _over_time(scenario: Any, elapsed_min: float) -> bool:
+    """Whether a timed scenario was submitted after its limit."""
+    limit = scenario.time_limit_minutes
+    return limit is not None and elapsed_min > limit
+
+
 def _score_objectives(
-    scenario: Any, completed_ids: list[str], operator_answers: dict[str, str],
-) -> tuple[int, dict[str, float]]:
-    """Total and per-axis points for the ticked objectives.
+    scenario: Any, completed_ids: list[str], operator_answers: dict[str, str], *, late: bool = False,
+) -> tuple[int, dict[str, float], list[str]]:
+    """Total and per-axis points for the ticked objectives, and those that scored.
 
     An objective with an expected answer scores only when the answer given
-    matches it; a ticked box with a wrong answer earns nothing.
+    matches it; a ticked box with a wrong answer earns nothing. A
+    time-limited objective scores nothing on a late submission.
     """
     obj_by_id = {o.id: o for o in scenario.objectives}
     axis_scores: dict[str, float] = {}
     total_score = 0
+    scored: list[str] = []
     for obj_id in completed_ids:
         obj = obj_by_id.get(obj_id)
-        if obj is None or (obj.answer and not _answer_ok(obj, operator_answers.get(obj.id, ""))):
+        if obj is None or (late and obj.time_limited):
             continue
+        if obj.answer and not _answer_ok(obj, operator_answers.get(obj.id, "")):
+            continue
+        scored.append(obj_id)
         total_score += obj.points
         axis_scores[obj.skill_axis] = axis_scores.get(obj.skill_axis, 0.0) + obj.points
-    return total_score, axis_scores
+    return total_score, axis_scores, scored
 
 
 def _award(
@@ -471,30 +514,28 @@ def _apply_level_ups(progress: Any) -> tuple[list[Any], list[str]]:
             level_up_events.append(lu.new_level_def)
 
 
-@router.post("/scenario/{scenario_id}/submit", response_class=HTMLResponse)
-async def training_scenario_submit(
-    request: Request,
-    scenario_id: str,
-    result_id: Annotated[int, Form()],
-    objectives_completed: Annotated[str, Form()] = "[]",  # JSON list of obj IDs
-    time_taken_minutes: Annotated[float, Form()] = 0.0,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
-    """Score a completed scenario attempt and update operator progress."""
-    scenario = get_scenario(scenario_id)
-    if scenario is None:
-        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+async def _open_attempt(
+    db: AsyncSession, owner: User, scenario: Any, result_id: int,
+) -> ChallengeResult | HTMLResponse:
+    """The operator's attempt at *scenario*, claimed for scoring, or the refusal.
 
-    result = await db.execute(
+    The attempt must be the operator's, be for this scenario (a row from one
+    scenario was scored against another's objectives, audit F-159), be at a
+    level the operator holds, and not yet be submitted.
+    """
+    cr = (await db.execute(
         select(ChallengeResult).where(
             ChallengeResult.id == result_id,
-            ChallengeResult.username == current_user.username,
+            ChallengeResult.username == owner.username,
+            ChallengeResult.scenario_id == scenario.id,
         )
-    )
-    cr = result.scalar_one_or_none()
+    )).scalar_one_or_none()
     if cr is None:
         return HTMLResponse('<p class="error-msg">Attempt record not found.</p>', status_code=404)
+
+    locked = _scenario_locked(await _get_or_create_progress(owner.username, db), scenario)
+    if locked is not None:
+        return locked
 
     # Claim the attempt atomically: only the first submission of an open
     # attempt is scored. Resubmitting a completed result_id re-awarded every
@@ -509,8 +550,39 @@ async def training_scenario_submit(
         return HTMLResponse(
             '<p class="error-msg">This attempt has already been submitted.</p>', status_code=409,
         )
+    return cr
 
-    completed_ids = _objective_ids(objectives_completed)
+
+def _axis_change(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+    """How far each axis total moved, for the axes that moved.
+
+    The debrief listed objective points per axis as "Skill Points Earned",
+    but the totals move by the award actions' weights (audit F-172).
+    """
+    moved = {k: after.get(k, 0.0) - before.get(k, 0.0) for k in after.keys() | before.keys()}
+    return {k: v for k, v in moved.items() if round(v) != 0}
+
+
+@router.post("/scenario/{scenario_id}/submit", response_class=HTMLResponse)
+async def training_scenario_submit(
+    request: Request,
+    scenario_id: str,
+    result_id: Annotated[int, Form()],
+    objectives_completed: Annotated[str, Form()] = "[]",  # JSON list of obj IDs
+    current_user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Score a completed scenario attempt and update operator progress."""
+    scenario = get_scenario(scenario_id)
+    if scenario is None:
+        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+
+    cr = await _open_attempt(db, current_user, scenario, result_id)
+    if isinstance(cr, HTMLResponse):
+        return cr
+
+    elapsed_min = _elapsed_minutes(cr)
+    late = _over_time(scenario, elapsed_min)
 
     # Collect operator-supplied answers for answer-type objectives
     form_data = await request.form()
@@ -519,13 +591,16 @@ async def training_scenario_submit(
         for key, value in form_data.items()
         if key.startswith("answer_")
     }
-    total_score, axis_scores = _score_objectives(scenario, completed_ids, operator_answers)
+    total_score, axis_scores, scored_ids = _score_objectives(
+        scenario, _objective_ids(objectives_completed), operator_answers, late=late,
+    )
 
     passed     = total_score >= scenario.scoring.passing_score
     is_scored  = cr.scored
 
     # Award gamification points only for scored attempts
     progress = await _get_or_create_progress(current_user.username, db)
+    axis_before = dict(progress.axis_points)
     total_points_earned, current_axis = _award(
         progress.axis_points.copy(), is_scored=is_scored, passed=passed,
         first_try=cr.first_try, challenge=scenario.challenge,
@@ -543,11 +618,11 @@ async def training_scenario_submit(
 
     # Save ChallengeResult
     cr.completed_at       = datetime.now(UTC)
-    cr.time_taken_minutes = time_taken_minutes
+    cr.time_taken_minutes = elapsed_min
     cr.total_score        = total_score
     cr.passed             = passed
     cr.axis_scores        = axis_scores
-    cr.objectives_completed = completed_ids
+    cr.objectives_completed = scored_ids
     cr.debrief = {
         "optimal_score": scenario.scoring.optimal_score,
         "passing_score": scenario.scoring.passing_score,
@@ -567,6 +642,9 @@ async def training_scenario_submit(
         "is_scored": is_scored,
         "points_earned": total_points_earned,
         "axis_scores": axis_scores,
+        "axis_change": _axis_change(axis_before, current_axis),
+        "late": late,
+        "elapsed_min": elapsed_min,
         "level_up_events": level_up_events,
         "newly_unlocked": newly_unlocked,
         "cfg": cfg,
@@ -592,12 +670,7 @@ async def training_dashboard(
         progress.axis_points, progress.tutorials_completed, progress.current_level
     )
 
-    recent_results = (await db.execute(
-        select(ChallengeResult)
-        .where(ChallengeResult.username == current_user.username)
-        .order_by(ChallengeResult.started_at.desc())
-        .limit(5)
-    )).scalars().all()
+    recent_results = (await db.execute(_recent_scored(current_user.username, 5))).scalars().all()
 
     available = scenarios_for_level(progress.current_level)
     first_scenario = next((s for s in available if not s.challenge), None)
@@ -651,6 +724,9 @@ async def training_tutorial_complete(
         return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
 
     progress = await _get_or_create_progress(current_user.username, db)
+    locked = _tutorial_locked(progress, tutorial_id)
+    if locked is not None:
+        return locked
 
     points_earned = 0
     already_done  = tutorial_id in progress.tutorials_completed
@@ -668,27 +744,7 @@ async def training_tutorial_complete(
         done.append(tutorial_id)
         progress.tutorials_completed = done
 
-    # Level-up check
-    level_up_events: list[Any] = []
-    newly_unlocked:  list[Any] = []
-    while True:
-        lu = check_level_up(
-            current_level=progress.current_level,
-            total_points=progress.total_points,
-            axis_points=progress.axis_points,
-            tutorials_completed=progress.tutorials_completed,
-            scenarios_passed=progress.scenarios_passed,
-            challenges_passed=progress.challenges_passed,
-        )
-        if not lu.levelled_up:
-            break
-        progress.current_level = lu.new_level
-        newly_unlocked.extend(lu.newly_unlocked)
-        cur_unlocked = progress.unlocked
-        cur_unlocked.extend([x for x in lu.newly_unlocked if x not in cur_unlocked])
-        progress.unlocked = cur_unlocked
-        if lu.new_level_def:
-            level_up_events.append(lu.new_level_def)
+    level_up_events, newly_unlocked = _apply_level_ups(progress)
 
     await db.commit()
 

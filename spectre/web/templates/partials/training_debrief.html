@@ -1,6 +1,6 @@
 {# Post-scenario debrief screen #}
 {# Context: scenario, cr (ChallengeResult), total_score, passed, is_scored, points_earned,
-            axis_scores, level_up_events, newly_unlocked, cfg #}
+            axis_scores, axis_change, late, elapsed_min, level_up_events, newly_unlocked, cfg #}
 
 <div style="background:var(--panel-bg); border:2px solid {% if not is_scored %}rgba(107,114,128,0.4){% elif passed %}rgba(34,197,94,0.5){% else %}rgba(239,68,68,0.4){% endif %};
             border-radius:6px; padding:0.75rem 0.9rem">
@@ -73,18 +73,45 @@
   </div>
   {% endif %}
 
-  {# Axis score breakdown #}
+  {# Late submission: the server measured the time, not the browser #}
+  {% if late %}
+  <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.3);
+              border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.63rem">
+    Submitted after {{ elapsed_min | round(1) }} minutes, past the {{ scenario.time_limit_minutes }}-minute
+    time limit: time-limited objectives were not scored.
+  </div>
+  {% endif %}
+
+  {# Objective points per axis: what the ticked objectives were worth. These
+     make up the score above; they are not added to the operator's axes. #}
   {% if axis_scores %}
   <div style="margin-bottom:0.5rem">
     <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
-                letter-spacing:0.05em; margin-bottom:0.25rem">Skill Points Earned</div>
+                letter-spacing:0.05em; margin-bottom:0.25rem">Objective points by axis</div>
     {% for axis_id, pts in axis_scores.items() %}
     {% set axis_def = cfg.axes_by_id.get(axis_id) %}
     <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.15rem">
       <span style="width:130px; font-size:0.62rem; color:{% if axis_def %}{{ axis_def.colour }}{% else %}var(--text-dim){% endif %}; font-weight:600">
         {{ axis_def.label if axis_def else axis_id | replace('_',' ') | title }}
       </span>
-      <span style="font-size:0.62rem; font-family:monospace; color:var(--text-primary)">+{{ pts | int }}</span>
+      <span style="font-size:0.62rem; font-family:monospace; color:var(--text-primary)">{{ pts | int }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Skill points earned: how far each of the operator's axis totals moved #}
+  {% if axis_change %}
+  <div style="margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.25rem">Skill Points Earned</div>
+    {% for axis_id, pts in axis_change.items() | sort %}
+    {% set axis_def = cfg.axes_by_id.get(axis_id) %}
+    <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.15rem">
+      <span style="width:130px; font-size:0.62rem; color:{% if axis_def %}{{ axis_def.colour }}{% else %}var(--text-dim){% endif %}; font-weight:600">
+        {{ axis_def.label if axis_def else axis_id | replace('_',' ') | title }}
+      </span>
+      <span style="font-size:0.62rem; font-family:monospace; color:var(--text-primary)">+{{ pts | round | int }}</span>
     </div>
     {% endfor %}
   </div>

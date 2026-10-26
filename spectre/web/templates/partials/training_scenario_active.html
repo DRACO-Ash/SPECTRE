@@ -67,7 +67,6 @@
         hx-swap="innerHTML"
         id="scenario-submit-form">
     <input type="hidden" name="result_id" value="{{ result_id }}">
-    <input type="hidden" name="time_taken_minutes" id="time-taken-input" value="0">
     <input type="hidden" name="objectives_completed" id="objectives-json" value="[]">
 
     <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
@@ -195,7 +194,6 @@
 (function() {
   {% if scenario.time_limit_minutes %}
   var remaining = {{ scenario.time_limit_minutes * 60 }};
-  var startTime = Date.now();
   var timerInterval = setInterval(function() {
     remaining--;
     if (remaining < 0) {
@@ -208,9 +206,9 @@
     document.getElementById('timer-display').textContent = m + ':' + (s < 10 ? '0' : '') + s;
     if (remaining < 120) document.getElementById('timer-display').style.color = '#ef4444';
   }, 1000);
+  // The countdown is a display only: the server measures the elapsed time
+  // from when the attempt started and judges the time limit itself.
   document.getElementById('scenario-submit-form').addEventListener('submit', function() {
-    var elapsed = (Date.now() - startTime) / 60000;
-    document.getElementById('time-taken-input').value = elapsed.toFixed(2);
     clearInterval(timerInterval);
   });
   {% endif %}

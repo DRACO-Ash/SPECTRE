@@ -6,8 +6,6 @@ using the same in-memory SQLite DB and TestClient pattern as test_web_routes.py.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
 
@@ -82,7 +80,9 @@ class TestTrainingRoutes:
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
-        assert resp.status_code in (200, 403)
+        # A Level 1 scenario: every operator may open it.
+        assert resp.status_code == 200
+        assert b"Attempt #" in resp.content
 
     def test_training_scenario_start(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
@@ -90,7 +90,8 @@ class TestTrainingRoutes:
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
-        assert resp.status_code in (200, 404)
+        assert resp.status_code == 200
+        assert b'name="result_id"' in resp.content
 
     def test_training_scenario_explore(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
@@ -98,7 +99,8 @@ class TestTrainingRoutes:
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
-        assert resp.status_code in (200, 404)
+        assert resp.status_code == 200
+        assert b'name="result_id"' in resp.content
 
     def test_training_tutorial_not_found(self, client: object, auth_cookie: str) -> None:
         resp = client.get(  # type: ignore[attr-defined]
@@ -135,7 +137,7 @@ class TestTrainingRoutes:
     def test_training_scenario_submit_not_found(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/scenario/nonexistent_xyz/submit",
-            data={"result_id": "999", "objectives_completed": "[]", "time_taken_minutes": "0"},
+            data={"result_id": "999", "objectives_completed": "[]"},
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
@@ -144,7 +146,7 @@ class TestTrainingRoutes:
     def test_training_scenario_submit_invalid_result(self, client: object, auth_cookie: str) -> None:
         resp = client.post(  # type: ignore[attr-defined]
             "/training/scenario/cadet_01_geo_stationkeeping/submit",
-            data={"result_id": "99999", "objectives_completed": "[]", "time_taken_minutes": "5"},
+            data={"result_id": "99999", "objectives_completed": "[]"},
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
@@ -467,8 +469,7 @@ class TestGcatRoutes:
             cookies={"spectre_session": auth_cookie},
             headers=csrf_headers(auth_cookie),
         )
-        # Unknown dataset returns 404
-        assert resp.status_code in (200, 404)
+        assert resp.status_code == 404
 
     def test_gcat_unauthenticated_redirects(self, initialized_app: object) -> None:
         from fastapi.testclient import TestClient
@@ -576,62 +577,42 @@ class TestPolRoutes:
 # ── Training full workflow ────────────────────────────────────────────────────
 
 class TestTrainingFullWorkflow:
-    """Test a complete scored attempt cycle: start → submit."""
+    """A scored attempt and a tutorial change the operator's progress, once.
 
-    def test_start_and_submit_scenario(self, client: object, auth_cookie: str) -> None:
-        # Start a scenario
-        start_resp = client.post(  # type: ignore[attr-defined]
-            "/training/scenario/cadet_01_geo_stationkeeping/start",
-            cookies={"spectre_session": auth_cookie},
-            headers=csrf_headers(auth_cookie),
-        )
-        if start_resp.status_code == 404:
-            pytest.skip("Scenario not available at current level")
+    These asserted status codes only and skipped when the attempt id could
+    not be read, so no scoring defect could fail them (audit F-166).
+    """
 
-        assert start_resp.status_code == 200
+    def test_start_and_submit_scenario(self, client: object) -> None:
+        from tests.integration.test_training_integrity import _operator, _progress, _start, _submit
 
-        # Extract result_id from the response (look for hidden input or data attribute)
-        import re
-        match = re.search(rb'result_id["\s]+value=["\s]+(\d+)', start_resp.content)
-        if not match:
-            match = re.search(rb'name="result_id"[^>]*value="(\d+)"', start_resp.content)
-        if not match:
-            match = re.search(rb'"result_id":\s*(\d+)', start_resp.content)
+        cookie = _operator(client, "f166_workflow")  # type: ignore[arg-type]
+        result_id = _start(client, cookie, "cadet_01_geo_stationkeeping")  # type: ignore[arg-type]
+        assert _progress(client, "f166_workflow").scenarios_started == 1  # type: ignore[arg-type]
 
-        if not match:
-            pytest.skip("Could not extract result_id from response")
+        resp = _submit(client, cookie, "cadet_01_geo_stationkeeping", result_id, ["obj_load"])  # type: ignore[arg-type]
+        assert resp.status_code == 200
+        page = " ".join(resp.content.decode().split())
+        assert "NOT PASSED" in page
+        assert "+150 training points earned" in page
+        progress = _progress(client, "f166_workflow")  # type: ignore[arg-type]
+        assert progress.total_points == 150
+        assert progress.scenarios_passed == 0
 
-        result_id = int(match.group(1))
+    def test_complete_tutorial_twice_idempotent(self, client: object) -> None:
+        from spectre.training.tutorials import get_tutorial
+        from tests.integration.test_training_integrity import _operator, _post, _progress
 
-        # Submit the scenario
-        submit_resp = client.post(  # type: ignore[attr-defined]
-            "/training/scenario/cadet_01_geo_stationkeeping/submit",
-            data={
-                "result_id": str(result_id),
-                "objectives_completed": "[]",
-                "time_taken_minutes": "10.0",
-            },
-            cookies={"spectre_session": auth_cookie},
-            headers=csrf_headers(auth_cookie),
-        )
-        assert submit_resp.status_code == 200
-
-    def test_complete_tutorial_twice_idempotent(self, client: object, auth_cookie: str) -> None:
-        # Completing a tutorial twice should not award points the second time
-        resp1 = client.post(  # type: ignore[attr-defined]
-            "/training/tutorial/scenario_loading/complete",
-            cookies={"spectre_session": auth_cookie},
-            headers=csrf_headers(auth_cookie),
-        )
-        resp2 = client.post(  # type: ignore[attr-defined]
-            "/training/tutorial/scenario_loading/complete",
-            cookies={"spectre_session": auth_cookie},
-            headers=csrf_headers(auth_cookie),
-        )
-        assert resp1.status_code == 200
-        assert resp2.status_code == 200
-        # Both should succeed without error
-        assert b"error" not in resp2.content.lower()
+        cookie = _operator(client, "f166_tutorial")  # type: ignore[arg-type]
+        tutorial = get_tutorial("scenario_loading")
+        assert tutorial is not None
+        first = _post(client, cookie, "/training/tutorial/scenario_loading/complete")  # type: ignore[arg-type]
+        assert _progress(client, "f166_tutorial").total_points == tutorial.points  # type: ignore[arg-type]
+        second = _post(client, cookie, "/training/tutorial/scenario_loading/complete")  # type: ignore[arg-type]
+        assert (first.status_code, second.status_code) == (200, 200)
+        progress = _progress(client, "f166_tutorial")  # type: ignore[arg-type]
+        assert progress.total_points == tutorial.points
+        assert progress.tutorials_done == 1
 
 
 class TestPolPanelRendersAfterAnalysis:

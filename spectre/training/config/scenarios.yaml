@@ -212,6 +212,7 @@ scenarios:
       - id: obj_time_pressure
         description: "Submit decision within the 10-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 30
     manoeuvre_options:
       - id: opt_hohmann_intrack
@@ -334,6 +335,7 @@ scenarios:
       - id: obj_act
         description: "Submit all decisions within the 20-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 100
       - id: obj_efficiency
         description: "Selected manoeuvre ΔV is within 20% of the minimum feasible option from the Intercept Engine"
@@ -912,6 +914,7 @@ scenarios:
       - id: obj_time_limit
         description: "Submit all decisions within the 30-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 80
       - id: obj_coordinated_defence
         description: "Verify both defensive responses are orbitally compatible — no fratricide or interference"
