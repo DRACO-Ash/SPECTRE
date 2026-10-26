@@ -170,8 +170,13 @@ class RelativeGeometry:
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _sanitise_name(name: str) -> str:
-    """Strip non-printable characters; truncate to 64 chars for log safety."""
-    return "".join(ch for ch in name if ch.isprintable())[:64]
+    """Make user-controlled labels safe for plain-text logging.
+
+    Removes line-break characters to prevent log forging, strips other
+    non-printable characters, and truncates to 64 chars.
+    """
+    text = str(name).replace("\r", "").replace("\n", "")
+    return "".join(ch for ch in text if ch.isprintable())[:64]
 
 
 def _validate_finite(value: float, name: str) -> float:
