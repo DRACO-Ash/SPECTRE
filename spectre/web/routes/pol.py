@@ -370,7 +370,7 @@ async def pol_analyse(
     try:
         threshold_km_s = dv_threshold_ms / 1000.0
         apply_filter = bool(cadence_filter)
-        records, malformed = parse_tle_history_counted(
+        records, dropped = parse_tle_history_counted(
             merged_text, satno=satno,
             metadata=merged_meta, rms_metadata=merged_rms,
         )
@@ -389,7 +389,10 @@ async def pol_analyse(
             dv_threshold=threshold_km_s,
             quality_flags=quality_flags,
         )
-        pol.malformed_element_sets = malformed
+        pol.malformed_element_sets = dropped.malformed
+        pol.duplicate_epoch_sets = dropped.duplicate_epoch
+        pol.bad_provenance_sets = dropped.bad_provenance
+        pol.other_object_sets = dropped.other_object
         pol.history_truncated_at = _archive_end_if_capped(archive_text)
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
         filter_note = _filter_note(apply_filter, quality_flags)
@@ -507,6 +510,9 @@ def _detection_view(pol: object) -> dict[str, object]:
         "skipped_long_gap":     getattr(pol, "skipped_long_gap", 0),
         "merged_duplicates":    getattr(pol, "merged_duplicates", 0),
         "malformed_element_sets": getattr(pol, "malformed_element_sets", 0),
+        "duplicate_epoch_sets": getattr(pol, "duplicate_epoch_sets", 0),
+        "bad_provenance_sets":  getattr(pol, "bad_provenance_sets", 0),
+        "other_object_sets":    getattr(pol, "other_object_sets", 0),
         "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
         "confirmed":            len(getattr(pol, "manoeuvres", [])),
         "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),

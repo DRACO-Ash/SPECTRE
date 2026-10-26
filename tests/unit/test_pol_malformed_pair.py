@@ -26,10 +26,42 @@ _CORRUPT_EPOCH = (
 
 
 def test_a_corrupt_epoch_drops_one_pair_and_is_counted() -> None:
-    records, malformed = parse_tle_history_counted("\n".join([_GOOD_A, _CORRUPT_EPOCH, _GOOD_B]))
+    records, counts = parse_tle_history_counted("\n".join([_GOOD_A, _CORRUPT_EPOCH, _GOOD_B]))
     assert len(records) == 2
-    assert malformed == 1
+    assert counts.malformed == 1
 
 
 def test_the_plain_parser_still_returns_the_good_records() -> None:
     assert len(parse_tle_history("\n".join([_GOOD_A, _CORRUPT_EPOCH, _GOOD_B]))) == 2
+
+
+class TestEveryDropIsCounted:
+    """Duplicates, unusable provenance and other objects' sets dropped uncounted (audits F-205, F-206)."""
+
+    def test_a_duplicate_epoch_is_counted(self) -> None:
+        records, counts = parse_tle_history_counted("\n".join([_GOOD_A, _GOOD_A, _GOOD_B]))
+        assert (len(records), counts.duplicate_epoch) == (2, 1)
+
+    def test_unusable_provenance_is_counted(self) -> None:
+        line1 = _GOOD_A.splitlines()[0]
+        records, counts = parse_tle_history_counted(
+            "\n".join([_GOOD_A, _GOOD_B]), metadata={line1: ("REAL",)},  # type: ignore[dict-item]
+        )
+        assert (len(records), counts.bad_provenance) == (1, 1)
+
+    def test_another_objects_element_set_is_skipped_and_counted(self) -> None:
+        other = _GOOD_B.replace("25544", "43013")
+        records, counts = parse_tle_history_counted("\n".join([_GOOD_A, other]), satno=25544)
+        assert (len(records), counts.other_object) == (1, 1)
+
+    def test_without_a_satno_nothing_is_filtered(self) -> None:
+        other = _GOOD_B.replace("25544", "43013")
+        records, counts = parse_tle_history_counted("\n".join([_GOOD_A, other]))
+        assert (len(records), counts.other_object) == (2, 0)
+
+    def test_an_alpha_5_catalogue_number_is_read(self) -> None:
+        from spectre.astro.pattern_of_life import _catalogue_number
+
+        assert _catalogue_number("1 A0001U") == 100001
+        assert _catalogue_number("1 Z9999U") == 339999
+        assert _catalogue_number("1 25544U") == 25544

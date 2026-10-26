@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from spectre.astro.constants import SIDEREAL_DAY
-from spectre.astro.pattern_of_life import _gst_deg, _satrec_to_record
+from spectre.astro.pattern_of_life import _gmst_deg, _satrec_to_record
 from spectre.astro.propagator import TLEOrbit
 
 _BOOTSTRAP = Path(__file__).resolve().parents[2] / "spectre" / "data" / "hrr_default.json"
@@ -39,7 +39,7 @@ def _flown_drift(tle: str) -> float:
 
     def lon(t: timedelta) -> float:
         sv = orbit.propagate(epoch + t)
-        return math.degrees(math.atan2(sv.r[1], sv.r[0])) - _gst_deg(epoch + t)
+        return math.degrees(math.atan2(sv.r[1], sv.r[0])) - _gmst_deg(epoch + t)
 
     change = (lon(timedelta(seconds=SIDEREAL_DAY)) - lon(timedelta(0)) + 180.0) % 360.0 - 180.0
     return change / (SIDEREAL_DAY / 86400.0)

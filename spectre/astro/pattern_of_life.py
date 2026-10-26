@@ -29,13 +29,12 @@ import itertools
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
 from spectre.astro.constants import (
-    J2_EARTH,
     MU_EARTH,
     R_EARTH,
     SIDEREAL_DAY,
@@ -304,7 +303,7 @@ class PolAnalysis:
     chart_periods:  list[float]
 
     # GEO longitude time series
-    chart_longitudes:   list[float]
+    chart_longitudes:   list[float | None]
     chart_drift_rates:  list[float]
 
     # Manoeuvre chart data
@@ -351,10 +350,16 @@ class PolAnalysis:
     skipped_long_gap:       int = 0   # gap too large to read as a single burn
     merged_duplicates:      int = 0   # same burn reported by more than one provider
     malformed_element_sets: int = 0   # pairs that would not parse, dropped
+    duplicate_epoch_sets:   int = 0   # the same epoch again, dropped
+    bad_provenance_sets:    int = 0   # provenance in an unusable shape, dropped
+    other_object_sets:      int = 0   # another object's element set, dropped
     breakdowns_truncated:   int = 0   # detections past the forensic budget
     # Newest archived epoch when the archive pull hit its record cap, so the
     # history may have a gap between it and the current element set.
     history_truncated_at:   datetime | None = None
+    # The drift rate below which the panel says station-keeping. The template
+    # used 0.005 against this module's 0.05 (audit F-210).
+    drift_stationary_deg_day: float = _DRIFT_STATIONARY
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -378,8 +383,10 @@ def _epoch_to_jd(epoch: datetime) -> float:
     return 2451545.0 + dt_days
 
 
-def _gst_deg(epoch: datetime) -> float:
-    """Greenwich Apparent Sidereal Time (degrees) at *epoch*."""
+def _gmst_deg(epoch: datetime) -> float:
+    """Greenwich Mean Sidereal Time (degrees) at *epoch*: Meeus, Astronomical
+    Algorithms, eq. 12.4. It was labelled apparent sidereal time, which also
+    carries the nutation in right ascension (audit F-207)."""
     jd = _epoch_to_jd(epoch)
     return (280.46061837 + 360.98564736629 * (jd - 2451545.0)) % 360.0
 
@@ -399,7 +406,7 @@ def _geo_drift_deg_day(sat: Satrec, epoch: datetime) -> float | None:
         err, r, _ = sat.sgp4(jd + days, 0.0)
         if err:
             return None
-        lons.append(math.degrees(math.atan2(r[1], r[0])) - _gst_deg(epoch + timedelta(days=days)))
+        lons.append(math.degrees(math.atan2(r[1], r[0])) - _gmst_deg(epoch + timedelta(days=days)))
     change = (lons[1] - lons[0] + 180.0) % 360.0 - 180.0
     return change / (SIDEREAL_DAY / 86400.0)
 
@@ -413,6 +420,9 @@ def _satrec_to_record(tle: str) -> TLERecord:
     l1, l2 = lines[-2], lines[-1]
     sat = Satrec.twoline2rv(l1, l2)
 
+    # Kozai mean motion, and the semi-major axis from it with WGS-84 mu: a
+    # Kozai mean element, not SGP4's internal Brouwer semi-major axis, and
+    # the altitude from it is a mean altitude (audit F-208).
     n_rad_min = sat.no_kozai          # rad/min
     n_rad_s   = n_rad_min / 60.0
     sma       = (MU_EARTH / (n_rad_s ** 2)) ** (1.0 / 3.0)
@@ -432,7 +442,7 @@ def _satrec_to_record(tle: str) -> TLERecord:
     geo_drift = None
     if regime in ("GEO", "DEEP") or (abs(inc_deg) < 15.0 and alt_km > 30000.0):
         mean_lon_eci = (raan_deg + argp_deg + ma_deg) % 360.0
-        gst          = _gst_deg(epoch)
+        gst          = _gmst_deg(epoch)
         lon          = (mean_lon_eci - gst) % 360.0
         geo_lon      = lon - 360.0 if lon > _LONGITUDE_WRAP_DEG else lon
         geo_drift    = _geo_drift_deg_day(sat, epoch)
@@ -453,24 +463,6 @@ def _satrec_to_record(tle: str) -> TLERecord:
         geo_drift_rate_deg_day=geo_drift,
         element_set_no=esn,
     )
-
-
-def _j2_raan_rate(rec: TLERecord) -> float:
-    """J2 RAAN drift rate (°/day)."""
-    n  = (MU_EARTH / rec.sma_km ** 3) ** 0.5
-    d  = (1.0 - rec.ecc ** 2) ** 2
-    rate = -1.5 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * math.cos(math.radians(rec.inc_deg)) / d
-    return math.degrees(rate) * 86400.0
-
-
-def _j2_argp_rate(rec: TLERecord) -> float:
-    """J2 arg-perigee drift rate (°/day)."""
-    n  = (MU_EARTH / rec.sma_km ** 3) ** 0.5
-    d  = (1.0 - rec.ecc ** 2) ** 2
-    # See the note in spectre.astro.dv_estimation._j2_argp_rate_deg_day: the
-    # previous form was the exact negative of the J2 perigee rate.
-    rate = 0.75 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * (5.0 * math.cos(math.radians(rec.inc_deg)) ** 2 - 1.0) / d
-    return math.degrees(rate) * 86400.0
 
 
 def _angle_diff(a: float, b: float) -> float:
@@ -778,6 +770,31 @@ def _tle_line_pairs(tle_text: str) -> list[tuple[str, str]]:
     return pairs
 
 
+class ParseCounts(NamedTuple):
+    """Element sets the parser dropped, by reason.
+
+    Only malformed pairs were counted; duplicates, unusable provenance and
+    other objects' sets dropped silently (audits F-205, F-206).
+    """
+
+    malformed: int = 0
+    duplicate_epoch: int = 0
+    bad_provenance: int = 0
+    other_object: int = 0
+
+
+# Alpha-5 catalogue numbers: a letter, I and O excluded, stands for 10 to 33.
+_ALPHA5 = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def _catalogue_number(l1: str) -> int:
+    """The catalogue number in columns 3-7 of line 1, alpha-5 included."""
+    field = l1[2:7].strip()
+    if field[:1].isalpha():
+        return (_ALPHA5.index(field[0].upper()) + 10) * 10_000 + int(field[1:])
+    return int(field)
+
+
 def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
     """Parse one pair, or None when it is unusable or a duplicate epoch.
 
@@ -841,35 +858,50 @@ def parse_tle_history(
     return records
 
 
+def _drop_reason(
+    l1: str, l2: str, satno: int | None, seen: set[str],
+    metadata: dict[str, tuple[str, str]] | None, rms_metadata: dict[str, float | None] | None,
+) -> tuple[TLERecord | None, str]:
+    """The record for one pair, or None and the ParseCounts field it counts under."""
+    try:
+        if satno is not None and _catalogue_number(l1) != satno:
+            return None, "other_object"
+        rec = _record_from_pair(l1, l2, seen)
+    except (ValueError, ZeroDivisionError):
+        return None, "malformed"
+    if rec is None:
+        return None, "duplicate_epoch"
+    if not _apply_metadata(rec, l1, metadata, rms_metadata):
+        return None, "bad_provenance"
+    return rec, ""
+
+
 def parse_tle_history_counted(
     tle_text: str,
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
     rms_metadata: dict[str, float | None] | None = None,
-) -> tuple[list[TLERecord], int]:
-    """As :func:`parse_tle_history`, also returning how many pairs were malformed.
+) -> tuple[list[TLERecord], ParseCounts]:
+    """As :func:`parse_tle_history`, also counting what was dropped and why.
 
     A corrupt epoch raised ValueError and a zero mean motion ZeroDivisionError
     out of the whole parse, so one bad element set lost the analysis (audit
-    F-083). Each now drops out and is counted.
+    F-083). Each now drops out and is counted. When *satno* is given, an
+    element set for another object is dropped and counted; the parameter was
+    accepted and ignored (audit F-206).
     """
     records: list[TLERecord] = []
     seen: set[str] = set()
-    malformed = 0
+    dropped: dict[str, int] = {}
     for l1, l2 in _tle_line_pairs(tle_text):
-        try:
-            rec = _record_from_pair(l1, l2, seen)
-        except (ValueError, ZeroDivisionError):
-            malformed += 1
-            continue
+        rec, reason = _drop_reason(l1, l2, satno, seen, metadata, rms_metadata)
         if rec is None:
-            continue
-        if not _apply_metadata(rec, l1, metadata, rms_metadata):
-            continue
-        records.append(rec)
+            dropped[reason] = dropped.get(reason, 0) + 1
+        else:
+            records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
-    return records, malformed
+    return records, ParseCounts(**dropped)
 
 
 def _screen_pairs(
@@ -920,8 +952,12 @@ def _detect_manoeuvres(
         d_ecc  = rc.ecc     - rp.ecc
         d_per  = (rc.period_min - rp.period_min) * 60.0
 
-        raan_j2  = _j2_raan_rate(rp)  * gap
-        argp_j2  = _j2_argp_rate(rp)  * gap
+        # SGP4's own secular rates, as the screening uses; the closed forms
+        # here disagreed with it by tens of m/s of phantom plane change
+        # (audit F-211).
+        raan_rate, argp_rate = secular_rates_deg_day(rp.tle, rp.sma_km, rp.ecc, rp.inc_deg)
+        raan_j2  = raan_rate * gap
+        argp_j2  = argp_rate * gap
         d_raan   = _angle_diff(rp.raan_deg + raan_j2, rc.raan_deg)
         d_argp   = _angle_diff(rp.argp_deg + argp_j2, rc.argp_deg)
 
@@ -1134,7 +1170,8 @@ def analyse_pattern_of_life(
     chart_eccs      = [round(r.ecc, 6)              for r in cr]
     chart_raans     = [round(r.raan_deg, 4)         for r in cr]
     chart_periods   = [round(r.period_min, 4)       for r in cr]
-    chart_lons      = [round(r.geo_longitude_deg, 3) if r.geo_longitude_deg is not None else 0 for r in cr]
+    # A missing longitude is a gap, not 0 degrees (audit F-212).
+    chart_lons      = [round(r.geo_longitude_deg, 3) if r.geo_longitude_deg is not None else None for r in cr]
     chart_drifts    = [round(r.geo_drift_rate_deg_day, 4) if r.geo_drift_rate_deg_day is not None else 0 for r in cr]
 
     man_epochs        = [m.epoch.strftime("%Y-%m-%d") for m in sorted_m]
