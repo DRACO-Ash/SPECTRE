@@ -60,12 +60,14 @@ echo
 echo "== 3. Python resolution floor =="
 echo "  The manifest must resolve on whatever interpreter the scanner runs."
 FLOOR=""
+SCANNER_RESOLVES=0
 for PY in 3.9 3.10 3.11 3.12 3.13 3.14; do
     TMP=$(mktemp -d)
     if pip download -q --only-binary :all: --python-version "$PY" \
             -r "$REQ" -d "$TMP" >/dev/null 2>&1; then
         echo "  python $PY  RESOLVES"
         [ -n "$FLOOR" ] || FLOOR="$PY"
+        [ "$PY" = "$SCANNER_PYTHON" ] && SCANNER_RESOLVES=1
     else
         echo "  python $PY  cannot resolve"
     fi
@@ -79,6 +81,15 @@ if [ -z "$FLOOR" ]; then
 fi
 
 echo "  Resolution floor: python ${FLOOR}."
+# A floor below the scanner's interpreter is not enough: a set resolving on
+# 3.9 and 3.10 but not 3.11 passed, though 3.11 is what the scanner runs
+# (audit F-296). The scanner's own version has to resolve.
+if [ "$SCANNER_RESOLVES" -ne 1 ]; then
+    echo "  FAIL  the manifest does not resolve on python ${SCANNER_PYTHON}, the interpreter"
+    echo "        the App Store's Dependency Scanning analyser runs."
+    echo "        Recompile with: sh scripts/lock.sh ${SCANNER_PYTHON}"
+    exit 1
+fi
 case "$FLOOR" in
     3.9|3.10|3.11)
         echo "  PASS  at or below python ${SCANNER_PYTHON}, which is what the App Store's"

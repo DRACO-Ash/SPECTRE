@@ -211,3 +211,100 @@ class TestF274OneCopyOfTheColourMaths:
 
         assert round(ratio("#000000", "#FFFFFF"), 2) == 21.0
         assert over("#FFFFFF", 0.5, "#000000") == "#808080"
+
+
+def _text(relative: str) -> str:
+    return (_ROOT / relative).read_text(encoding="utf-8")
+
+
+class TestF277SuidSweepRunsAsRootAndFailsLoud:
+    @pytest.mark.parametrize("path", [
+        ".github/workflows/ci.yml", "scripts/verify-container.sh", "scripts/simulate-pipeline.sh",
+    ])
+    def test_sweep(self, path: str) -> None:
+        text = _text(path)
+        assert any("docker run" in ln and "--user 0" in ln for ln in text.splitlines()), path
+        assert "-type d \\) -print'" in text, path
+        assert "-perm /6000 \\( -type f -o -type d \\) 2>/dev/null" not in text
+
+
+class TestF278QualityGateScope:
+    def test_quality_job_runs_on_pull_requests_only(self) -> None:
+        ci = yaml.safe_load(_text(".github/workflows/ci.yml"))
+        assert ci["jobs"]["quality"]["if"] == "github.event_name == 'pull_request'"
+
+    def test_whole_repo_coverage_precedes_the_early_exit(self) -> None:
+        text = _text("scripts/check-quality.sh")
+        assert text.index("Whole-repository coverage against the house standard ==") < text.index(
+            "Nothing to check."
+        )
+        assert "--include-untracked" in text
+
+
+class TestF279HooksUseTheLockedTools:
+    def test_no_pinned_tool_repos(self) -> None:
+        cfg = yaml.safe_load(_text(".pre-commit-config.yaml"))
+        repos = {r["repo"] for r in cfg["repos"]}
+        assert not repos & {
+            "https://github.com/astral-sh/ruff-pre-commit",
+            "https://github.com/PyCQA/bandit",
+            "https://github.com/pre-commit/mirrors-mypy",
+        }
+        local = next(r for r in cfg["repos"] if r["repo"] == "local")
+        assert {h["id"] for h in local["hooks"]} == {"ruff", "bandit", "mypy"}
+
+
+class TestF287CiIsBounded:
+    def test_every_job_has_a_timeout_and_the_boot_check_is_bounded(self) -> None:
+        ci = yaml.safe_load(_text(".github/workflows/ci.yml"))
+        assert all("timeout-minutes" in job for job in ci["jobs"].values())
+        assert "timeout 60 docker run --rm spectre:ci" in _text(".github/workflows/ci.yml")
+
+
+class TestF288NoFixedTmpPaths:
+    @pytest.mark.parametrize("path", ["scripts/check-quality.sh", "scripts/simulate-pipeline.sh"])
+    def test_no_fixed_out_files(self, path: str) -> None:
+        assert not re.search(r"/tmp/[a-z-]+\.out", _text(path))
+
+
+class TestF289And290Packaging:
+    def test_a_missing_ledger_fails(self) -> None:
+        text = _text("scripts/package-appstore.sh")
+        assert 'if [ ! -f "$LEDGER" ]; then' in text
+
+    def test_manifest_search_is_recursive_and_complete(self) -> None:
+        text = _text("scripts/package-appstore.sh")
+        assert 'find "$STAGE" -type f' in text
+        for name in ("requirements.in", "uv.lock", "Pipfile.lock", "pdm.lock"):
+            assert f"-name {name}" in text, name
+        assert "requirements-runtime" not in re.search(r'found=\$\(find.*?-print\)', text, re.S).group(0)
+
+
+class TestF291And292IgnoreRulesAreScoped:
+    @pytest.mark.parametrize("rule", ["env/", "lib/", "lib64/", "logs/", "parts/", "var/"])
+    def test_gitignore_root_rules_are_anchored(self, rule: str) -> None:
+        lines = _text(".gitignore").splitlines()
+        assert rule not in lines and f"/{rule}" in lines
+
+    def test_nested_paths_are_not_ignored(self) -> None:
+        import shutil
+        import subprocess
+
+        git = shutil.which("git")
+        if git is None:
+            pytest.skip("no git executable in this environment")
+        result = subprocess.run(
+            [git, "check-ignore", "spectre/lib/x.py", "tle_clustering/env/x.py"],
+            cwd=_ROOT, capture_output=True, text=True, check=False,
+        )
+        assert result.stdout == ""
+
+    @pytest.mark.parametrize("rule", ["**/.env", "**/.env.*", "**/__pycache__/", "**/*.py[cod]"])
+    def test_dockerignore_reaches_nested_copies(self, rule: str) -> None:
+        assert rule in _text(".dockerignore").splitlines()
+
+
+class TestF296TheScannerVersionMustResolve:
+    def test_the_audit_requires_the_scanner_python(self) -> None:
+        text = _text("scripts/audit-dependencies.sh")
+        assert 'SCANNER_RESOLVES" -ne 1' in text

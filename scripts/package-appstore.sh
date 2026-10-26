@@ -198,12 +198,18 @@ if [ "$MODE" = "python" ]; then
     fi
 else
     # Any recognised manifest would flip detection back to the python template.
-    for manifest in pyproject.toml requirements.txt setup.py setup.cfg Pipfile poetry.lock; do
-        if [ -f "$STAGE/$manifest" ]; then
-            echo "FAIL: $manifest at the root would select the python template, not docker-only."
-            exit 1
-        fi
-    done
+    # Searched at every depth and over the full list: the check looked at the
+    # root only and missed requirements.in and the other lock formats (F-290).
+    # Exact names only: requirements-runtime.txt is not one the analyser
+    # recognises, and ships on purpose.
+    found=$(find "$STAGE" -type f \( -name pyproject.toml -o -name requirements.txt \
+        -o -name requirements.in -o -name setup.py -o -name setup.cfg -o -name Pipfile \
+        -o -name Pipfile.lock -o -name poetry.lock -o -name uv.lock -o -name pdm.lock \) -print)
+    if [ -n "$found" ]; then
+        echo "FAIL: these Python manifests would select the python template, not docker-only:"
+        printf '      %s\n' $found
+        exit 1
+    fi
 fi
 
 # The platform's Code Quality stage analyses EVERY file in the uploaded
@@ -239,6 +245,12 @@ fi
 # what a failure would tell us. Seven submissions were spent on changes that
 # taught nothing when they failed; this is the control against an eighth.
 LEDGER="docs/CHANGE-LEDGER.md"
+# A missing ledger skipped every check below, so deleting it disabled the gate
+# (audit F-289). Missing is a failure.
+if [ ! -f "$LEDGER" ]; then
+    echo "FAIL: ${LEDGER} is missing, so no version can show a ledger entry."
+    exit 1
+fi
 # A gate whose input is untracked is not a gate. docs/ is gitignored by the
 # standard template and the ledger lives in docs/, so this gate once passed on
 # one machine and would have failed everywhere else until the file was

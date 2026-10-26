@@ -72,9 +72,11 @@ case "$uid" in
 esac
 pass "runs as non-root numeric uid $uid"
 
-suid="$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
-    'find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l')"
-[ "$suid" -eq 0 ] || fail "$suid setuid/setgid paths ship (container-scan stops on this)"
+# As root, so no directory is unreadable, and without 2>/dev/null, so a find
+# that fails is a failure rather than a count of zero (audit F-277).
+suid="$(docker run --rm --user 0 --entrypoint /bin/sh "$IMAGE" -c \
+    'find / -xdev -perm /6000 \( -type f -o -type d \) -print')" || fail "the setuid/setgid sweep did not run"
+[ -z "$suid" ] || { printf '%s\n' "$suid"; fail "setuid/setgid paths ship (container-scan stops on this)"; }
 pass "no setuid or setgid paths ship"
 
 for bin in pip pip3 apt apt-get dpkg; do

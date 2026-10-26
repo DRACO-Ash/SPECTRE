@@ -49,6 +49,11 @@ TEST_IGNORED="$IGNORED,S101,S105,S106,SLF001,PLR2004"
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; exit 1; }
 
+# Private scratch, not fixed /tmp names another run or user could race or
+# pre-create (audit F-288).
+OUT=$(mktemp -d)
+trap 'rm -rf "$OUT"' EXIT INT TERM
+
 # The MERGE BASE, so commits that landed on the base branch after this one
 # started are not scored as this branch's work.
 ANCHOR=$(git merge-base "$BASE" HEAD 2>/dev/null || printf '%s' "$BASE")
@@ -78,6 +83,44 @@ changed_in() {
 
 SRC_FILES=$(changed_in "$SOURCE_DIRS" | tr '\n' ' ')
 TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
+
+# ── Whole-repository coverage against the house standard ─────────────────────
+# Runs before the "nothing changed" exit below. It sat after it, so a change
+# touching no Python skipped the whole-repository figure too (audit F-278).
+# The gate condition above measures CHANGED lines. The house standard is a
+# whole-repository figure, and the project floor in pyproject.toml sat at 70
+# against a standard of 80 while actual coverage was 74: the loop reported
+# green from underneath the bar it exists to enforce. Declare the standard once,
+# here, and report the distance to it on every run so it cannot be silent again.
+HOUSE_COVERAGE_STANDARD=80
+printf '\n== Whole-repository coverage against the house standard ==\n'
+OVERALL=$(python3 -c "
+import sys, xml.etree.ElementTree as E
+try:
+    print(round(float(E.parse('$COVERAGE_XML').getroot().get('line-rate', 0)) * 100, 1))
+except Exception:
+    print(-1)
+")
+DECLARED=$(python3 -c "
+import re, pathlib
+m = re.search(r'^fail_under\s*=\s*(\d+)', pathlib.Path('pyproject.toml').read_text(), re.M)
+print(m.group(1) if m else -1)
+")
+if [ "$DECLARED" -gt "$HOUSE_COVERAGE_STANDARD" ] 2>/dev/null; then
+    fail "the declared floor (${DECLARED}%) is above the house standard; one of them is wrong"
+fi
+printf '  measured %s%%, project floor %s%%, house standard %s%%\n' \
+    "$OVERALL" "$DECLARED" "$HOUSE_COVERAGE_STANDARD"
+if python3 -c "import sys; sys.exit(0 if float('$OVERALL') >= $HOUSE_COVERAGE_STANDARD else 1)"; then
+    pass "at or above the house standard"
+elif python3 -c "import sys; sys.exit(0 if float('$OVERALL') + 0.05 >= float('$DECLARED') else 1)"; then
+    printf '  GAP   %s points below the house standard of %s%%. The floor is a\n' \
+        "$(python3 -c "print(round($HOUSE_COVERAGE_STANDARD - float('$OVERALL'), 1))")" \
+        "$HOUSE_COVERAGE_STANDARD"
+    printf '        ratchet at %s%% so this cannot slip, but the gap is real and open.\n' "$DECLARED"
+else
+    fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
+fi
 
 if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then
     printf '\nNo analysed Python files changed against %s. Nothing to check.\n\n' "$BASE"
@@ -124,47 +167,11 @@ fi
 
 printf '\n== Coverage on changed lines ==\n'
 [ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
-if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --fail-under="$COVERAGE_FLOOR" >/tmp/diffcov.out 2>&1; then
-    pass "$(grep -E '^Coverage: ' /tmp/diffcov.out || echo "at or above ${COVERAGE_FLOOR}%")"
+if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --include-untracked --fail-under="$COVERAGE_FLOOR" >"$OUT/diffcov.out" 2>&1; then
+    pass "$(grep -E '^Coverage: ' "$OUT/diffcov.out" || echo "at or above ${COVERAGE_FLOOR}%")"
 else
-    cat /tmp/diffcov.out
+    cat "$OUT/diffcov.out"
     fail "coverage on changed lines is below ${COVERAGE_FLOOR}%"
-fi
-
-# ── Whole-repository coverage against the house standard ─────────────────────
-# The gate condition above measures CHANGED lines. The house standard is a
-# whole-repository figure, and the project floor in pyproject.toml sat at 70
-# against a standard of 80 while actual coverage was 74: the loop reported
-# green from underneath the bar it exists to enforce. Declare the standard once,
-# here, and report the distance to it on every run so it cannot be silent again.
-HOUSE_COVERAGE_STANDARD=80
-printf '\n== Whole-repository coverage against the house standard ==\n'
-OVERALL=$(python3 -c "
-import sys, xml.etree.ElementTree as E
-try:
-    print(round(float(E.parse('$COVERAGE_XML').getroot().get('line-rate', 0)) * 100, 1))
-except Exception:
-    print(-1)
-")
-DECLARED=$(python3 -c "
-import re, pathlib
-m = re.search(r'^fail_under\s*=\s*(\d+)', pathlib.Path('pyproject.toml').read_text(), re.M)
-print(m.group(1) if m else -1)
-")
-if [ "$DECLARED" -gt "$HOUSE_COVERAGE_STANDARD" ] 2>/dev/null; then
-    fail "the declared floor (${DECLARED}%) is above the house standard; one of them is wrong"
-fi
-printf '  measured %s%%, project floor %s%%, house standard %s%%\n' \
-    "$OVERALL" "$DECLARED" "$HOUSE_COVERAGE_STANDARD"
-if python3 -c "import sys; sys.exit(0 if float('$OVERALL') >= $HOUSE_COVERAGE_STANDARD else 1)"; then
-    pass "at or above the house standard"
-elif python3 -c "import sys; sys.exit(0 if float('$OVERALL') + 0.05 >= float('$DECLARED') else 1)"; then
-    printf '  GAP   %s points below the house standard of %s%%. The floor is a\n' \
-        "$(python3 -c "print(round($HOUSE_COVERAGE_STANDARD - float('$OVERALL'), 1))")" \
-        "$HOUSE_COVERAGE_STANDARD"
-    printf '        ratchet at %s%% so this cannot slip, but the gap is real and open.\n' "$DECLARED"
-else
-    fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
 fi
 
 printf '\n== Duplication on changed files ==\n'
@@ -177,8 +184,8 @@ if command -v npx >/dev/null 2>&1; then
     # Thresholds match Sonar's Python defaults: 10 lines / 100 tokens minimum.
     npx --yes jscpd@4.3.0 "$SCAN" --min-lines 10 --min-tokens 100 \
         --formats-exts python:py --reporters console --silent \
-        --threshold "$DUPLICATION_CEILING" >/tmp/jscpd.out 2>&1 && DUP_OK=0 || DUP_OK=1
-    grep -E 'Found .* clones' /tmp/jscpd.out || true
+        --threshold "$DUPLICATION_CEILING" >"$OUT/jscpd.out" 2>&1 && DUP_OK=0 || DUP_OK=1
+    grep -E 'Found .* clones' "$OUT/jscpd.out" || true
     rm -rf "$SCAN"
     [ "$DUP_OK" -eq 0 ] || fail "duplication exceeds ${DUPLICATION_CEILING}%"
     pass "duplication at or below ${DUPLICATION_CEILING}%"

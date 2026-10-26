@@ -116,17 +116,19 @@ dist/
 dmypy.json
 eggs/
 ehthumbs.db
-env/
+# Anchored to the root: unanchored, these ignored any spectre/lib/ or
+# tle_clustering/env/ a contributor added, silently (audit F-291).
+/env/
 htmlcov/
-lib/
-lib64/
-logs/
+/lib/
+/lib64/
+/logs/
 memory/
-parts/
+/parts/
 persona Spec Orbital Warfare Analyst with Python Only
 pip-wheel-metadata/
 sdist/
 share/python-wheels/
-var/
+/var/
 venv/
 wheels/

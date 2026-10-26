@@ -24,9 +24,13 @@ HOST_PORT="${HOST_PORT:-18110}"
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; exit 1; }
 
+# Stage logs in a private directory, not fixed /tmp names (audit F-288).
+LOGS=$(mktemp -d)
+
 cleanup() {
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     [ -n "$WORK" ] && rm -rf "$WORK"
+    rm -rf "$LOGS"
     return 0
 }
 trap cleanup EXIT INT TERM
@@ -69,18 +73,18 @@ UNPINNED=$(grep -E '^[A-Za-z0-9]' "$WORK/requirements.txt" | grep -vE '==' || tr
 pass "every requirement pinned ($(grep -cE '^[A-Za-z0-9]' "$WORK/requirements.txt") packages)"
 
 # Resolve without downloading the world; catches an unsatisfiable set quickly.
-if "$PY" -m pip install --dry-run --quiet -r "$WORK/requirements.txt" >/tmp/sim-deps.out 2>&1; then
+if "$PY" -m pip install --dry-run --quiet -r "$WORK/requirements.txt" >"$LOGS/sim-deps.out" 2>&1; then
     pass "dependency set resolves"
 else
-    tail -20 /tmp/sim-deps.out
+    tail -20 "$LOGS/sim-deps.out"
     fail "dependency resolution failed; the platform's install stage would fail here"
 fi
 
 printf '\n== Stage 2: test the artefact in the platform environment ==\n'
 ( cd "$WORK" && GITLAB_CI=true SECRET_KEY=pipeline-sim-ephemeral-signing-key \
-    "$PY" -m pytest tests/ -q --cov --cov-report=xml:coverage.xml >/tmp/sim-test.out 2>&1 ) \
-    || { tail -30 /tmp/sim-test.out; fail "the suite is red on the artefact under GITLAB_CI=true"; }
-tail -1 /tmp/sim-test.out
+    "$PY" -m pytest tests/ -q --cov --cov-report=xml:coverage.xml >"$LOGS/sim-test.out" 2>&1 ) \
+    || { tail -30 "$LOGS/sim-test.out"; fail "the suite is red on the artefact under GITLAB_CI=true"; }
+tail -1 "$LOGS/sim-test.out"
 pass "suite green on the artefact with GITLAB_CI=true"
 
 # A comprehensive suite that emits no machine-readable report scores 0% at the
@@ -106,9 +110,9 @@ if [ -n "${PROXY_CA_BUNDLE:-}" ] && [ -f "$PROXY_CA_BUNDLE" ]; then
     BUILD_FILE="Dockerfile.sim"
     printf '  note  proxy CA trusted for the build only\n'
 fi
-( cd "$WORK" && docker build --network host -f "$BUILD_FILE" -t "$IMAGE" . >/tmp/sim-build.out 2>&1 ) \
-    || { tail -30 /tmp/sim-build.out; fail "image build from the artefact"; }
-grep -E 'OS PATCH|SUID SWEEP' /tmp/sim-build.out | sed 's/^/  /' || true
+( cd "$WORK" && docker build --network host -f "$BUILD_FILE" -t "$IMAGE" . >"$LOGS/sim-build.out" 2>&1 ) \
+    || { tail -30 "$LOGS/sim-build.out"; fail "image build from the artefact"; }
+grep -E 'OS PATCH|SUID SWEEP' "$LOGS/sim-build.out" | sed 's/^/  /' || true
 pass "image builds from the unzipped root as context"
 
 printf '\n== Stage 4: container scan equivalents ==\n'
@@ -116,9 +120,11 @@ uid=$(docker run --rm --entrypoint /opt/venv/bin/python "$IMAGE" -c 'import os;p
 [ "$uid" != "0" ] || fail "runs as root"
 pass "non-root uid $uid"
 
-suid=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
-    'find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l')
-[ "$suid" -eq 0 ] || fail "$suid setuid/setgid paths ship"
+# As root, so no directory is unreadable, and without 2>/dev/null, so a find
+# that fails is a failure rather than a count of zero (audit F-277).
+suid=$(docker run --rm --user 0 --entrypoint /bin/sh "$IMAGE" -c \
+    'find / -xdev -perm /6000 \( -type f -o -type d \) -print') || fail "the setuid/setgid sweep did not run"
+[ -z "$suid" ] || { printf '%s\n' "$suid"; fail "setuid/setgid paths ship"; }
 pass "no setuid or setgid paths"
 
 for bin in pip apt apt-get dpkg; do
