@@ -244,9 +244,10 @@ class TestFilterTleHistory:
             + [_make_record(_T0 + timedelta(hours=60))]                           # staleness gap
         )
         _, flags = filter_tle_history(recs)
-        if len(flags) >= 2:
-            epochs = [f.epoch for f in flags]
-            assert epochs == sorted(epochs, reverse=True)
+        # Unconditional: the guard let the order go unchecked (audit F-218).
+        assert len(flags) == 2
+        epochs = [f.epoch for f in flags]
+        assert epochs == sorted(epochs, reverse=True)
 
     def test_known_manoeuvre_not_hidden(self):
         """Manoeuvre epoch gap (> spacing threshold) creates two clusters, both kept."""

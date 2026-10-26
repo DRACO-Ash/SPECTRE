@@ -48,7 +48,7 @@ def test_a_48_hour_decay_at_450_km_matches_the_density_estimate() -> None:
     span = 48 * 3600.0
 
     def final_sma(ballistic: float) -> float:
-        out = solve_ivp(_j2_drag_ode, (0.0, span), state0, rtol=1e-10, atol=1e-10, args=(bstar, ballistic))
+        out = solve_ivp(_j2_drag_ode, (0.0, span), state0, rtol=1e-10, atol=1e-10, args=(ballistic,))
         return _state_to_keplerian(out.y[:3, -1], out.y[3:, -1])[0]
 
     # The drag-free run cancels the J2 short-period terms in the osculating a.

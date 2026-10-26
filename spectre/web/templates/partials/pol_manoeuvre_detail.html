@@ -153,8 +153,8 @@
     {% endif %}
     {% if snr is not none %}
     <span>Signal-to-noise
-      <strong style="color:{% if snr >= 10 %}#22c55e{% elif snr >= 5 %}#f59e0b{% else %}#ef4444{% endif %}">
-        {{ "%.1f"|format(snr) }}&times;</strong></span>
+      <strong style="color:{% if snr >= snr_high %}#22c55e{% elif snr >= snr_low %}#f59e0b{% else %}#ef4444{% endif %}">
+        {{ "%.1f"|format(snr) }}&times; MAD above the median</strong></span>
     {% endif %}
     {% if position_mismatch_km is not none %}
     <span>Closest approach of the two fits

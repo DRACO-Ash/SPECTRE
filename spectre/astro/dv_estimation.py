@@ -67,12 +67,9 @@ near-circular orbit:
 Secular J2 drift in RAAN and argument of perigee is removed before
 differencing, so natural precession is not read as a plane change.
 
-A second, independent estimator cross-checks the first. Velocity differencing
-is exact at the instant of the burn and only then, so rather than abandoning
-it, this searches the gap for the epoch at which the two trajectories actually
-coincide and differences the velocities there. It shares no algebra with the
-Gauss inversion — numerical SGP4 on both sides — so agreement between them is
-real corroboration. It also dates the burn, which element differencing cannot.
+The two estimators share no algebra (the swept one is numerical SGP4 on both
+sides, the other a Gauss inversion), so agreement between them is real
+corroboration. The swept estimator was described twice here (audit F-223).
 
 Every intermediate value is retained on the returned objects. An operator who
 does not believe a ΔV figure can read the element set that produced it, every
@@ -121,8 +118,9 @@ _SNR_HIGH   = 10.0
 #: this figure is never reported however quiet the object's own history is.
 _NOISE_ABSOLUTE_FLOOR_KM_S = 1.0e-4   # 0.1 m/s
 
-#: Scale factor on the robust spread when setting the reporting floor.
-_NOISE_SIGMA_MULTIPLIER = 5.0
+#: Multiple of the median absolute deviation (unscaled, not a sigma) at which
+#: the reporting floor is set. It was named as a sigma multiplier (audit F-226).
+_NOISE_MAD_MULTIPLIER = 5.0
 
 #: Above this the measured "floor" is not fit scatter (km/s).
 #:
@@ -173,7 +171,7 @@ _SWEPT_ESTIMATOR_LABEL = "Epoch-swept propagation"
 _SWEPT_METHOD = "epoch_swept"
 
 #: Resolution of the closest-approach search: coarse samples across the gap to
-#: bracket the minimum, then golden-section steps to narrow it. Module constants
+#: bracket the minimum, then ternary-search steps to narrow it. Module constants
 #: rather than parameters because no caller has ever varied them and carrying
 #: them on the signature put it over the project's argument limit.
 _SWEPT_COARSE_STEPS = 64
@@ -430,7 +428,7 @@ def _j2_argp_rate_deg_day(sma_km: float, ecc: float, inc_deg: float) -> float:
     0.75·(4 − 5sin²i) = 3 − 3.75sin²i. The form that used to sit here,
     1.5·(2.5sin²i − 2) = 3.75sin²i − 3, is the exact NEGATIVE of it, so the
     correction added the natural perigee rotation instead of removing it and
-    doubled it. On a 550 km, 53° orbit the rate is +3.10°/day, not −3.10.
+    doubled it. On a 550 km, 53° orbit the rate is about +3.0°/day, not −3.0.
 
     The blast radius was limited because :func:`secular_rates_deg_day` prefers
     SGP4's own ``argpdot`` wherever an element set is available and only falls
@@ -731,7 +729,10 @@ def _coarse_scan(probe: _Probe, coarse_steps: int) -> tuple[list[_Sample], _Samp
 
 def _refine_minimum(probe: _Probe, best: _Sample,
                     coarse_steps: int, refine_steps: int) -> _Sample:
-    """Golden-section refine of the closest approach, one coarse step either side.
+    """Ternary-search refine of the closest approach, one coarse step either side.
+
+    Each step keeps two thirds of the bracket; it was called golden-section,
+    which keeps 0.618 and reuses a probe (audit F-223).
 
     The two branches differ only in which end of the bracket moves and which
     probe becomes the candidate, so the "closer than the best so far" test is
@@ -779,7 +780,7 @@ def estimate_dv_epoch_swept(
     returned estimate is the measured answer.
     """
     try:
-        from spectre.astro.propagator import TLEOrbit
+        from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
         orb_a = TLEOrbit(before_tle)
         orb_b = TLEOrbit(after_tle)
     # BLE001: a malformed element set is reportable.
@@ -798,8 +799,9 @@ def estimate_dv_epoch_swept(
         try:
             sa = orb_a.propagate(t)
             sb = orb_b.propagate(t)
-        # BLE001: SGP4 can diverge; that sample is simply unusable.
-        except Exception:  # noqa: BLE001
+        # SGP4 can diverge; that sample is simply unusable. Only SGP4's own
+        # failures are caught, not every error (audit F-225).
+        except TLE_ERRORS:
             return None
         dr = math.sqrt(sum((float(y) - float(x)) ** 2 for x, y in zip(sa.r, sb.r, strict=True)))
         dv = math.sqrt(sum((float(y) - float(x)) ** 2 for x, y in zip(sa.v, sb.v, strict=True)))
@@ -815,7 +817,7 @@ def estimate_dv_epoch_swept(
             failure_reason="SGP4 failed at every sample across the gap.",
         )
 
-    # Golden-section refine around the coarse minimum.
+    # Ternary-search refine around the coarse minimum.
     best_frac, best_dr, best_dv = _refine_minimum(
         _probe, best, _SWEPT_COARSE_STEPS, _SWEPT_REFINE_STEPS)
 
@@ -831,6 +833,7 @@ def estimate_dv_epoch_swept(
         f"Trajectories are closest {best_frac * 100:.0f}% of the way through the gap, "
         f"at {burn_epoch.strftime('%Y-%m-%d %H:%M:%S')} UTC.",
         f"Closest approach between the two fits: {best_dr:.3f} km.",
+        f"{sampled} of {_SWEPT_COARSE_STEPS + 1} coarse samples across the gap propagated.",
     ]
     if ambiguous:
         notes.append(f"{comparable} instants across the gap are equally close, so the "
@@ -910,7 +913,7 @@ def calibrate_noise(dv_samples: list[float]) -> NoiseModel:
 
     med = _median(ordered)
     mad = _median(sorted(abs(x - med) for x in dv_samples))
-    floor = max(med + _NOISE_SIGMA_MULTIPLIER * mad, _NOISE_ABSOLUTE_FLOOR_KM_S)
+    floor = max(med + _NOISE_MAD_MULTIPLIER * mad, _NOISE_ABSOLUTE_FLOOR_KM_S)
 
     if floor >= _NOISE_IMPLAUSIBLE_CEILING_KM_S:
         return NoiseModel(

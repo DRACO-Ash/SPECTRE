@@ -184,9 +184,8 @@ def cluster_and_reduce_tle_cache(
         if outcome.tle is not None:
             reduced_cache[satno] = outcome.tle
 
-    # Aggregate stats — representatives_out is always 1 per clustered object.
-    total_reps_out = objects_clustered - objects_fallback + (1 if objects_fallback > 0 else 0)
-    # Simpler: count how many entries made it into reduced_cache.
+    # Representatives written; a fallback keeps the cached TLE, which the
+    # caller already holds, so it is not written again (audit F-213).
     total_reps_out = len(reduced_cache)
 
     overall_reduction = (
@@ -260,12 +259,14 @@ def _reduce_one(
             "Clustering failed for satno %s: %s — retaining existing cached TLE",
             satno, exc,
         )
-        # Retain existing cache value unchanged.
+        # Retain existing cache value unchanged. A fallback is counted as one,
+        # and a representative only when there is a cached TLE to fall back
+        # to; both were wrong here (audit F-215).
         return _Outcome(ObjectClusteringSummary(
             satno=satno, tles_in=len(tle_list),
-            clusters_found=0, representatives_out=1,
+            clusters_found=0, representatives_out=1 if existing_cache.get(satno) else 0,
             noise_count=0, reduction_pct=0.0, skipped=True, fallback=True,
-        ))
+        ), fallback=True)
 
     # Newest cluster first, by its most recent member epoch.
     clusters = sorted(
@@ -337,7 +338,7 @@ def _all_noise(
                 clusters_found=n_clusters, representatives_out=0,
                 noise_count=n_noise, reduction_pct=0.0, fallback=True,
             ),
-            clustered=True, noise=n_noise,
+            clustered=True, noise=n_noise, fallback=True,
         )
     logger.warning(
         "Clustering satno %s: all %d TLEs were noise — retaining existing cached TLE",

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
@@ -629,6 +630,10 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "gap_days":             float(getattr(m, "gap_days", 0.0) or 0.0),
         "agreement_ratio":      None,
         "snr":                  None,
+        # The colour bands are the module\'s own SNR cut-offs; the template
+        # hard-coded 10 and 5 (audit F-226).
+        "snr_high":             _SNR_HIGH,
+        "snr_low":              _SNR_LOW,
         "burn_epoch":           None,
         "burn_ambiguous":       False,
         "position_mismatch_km": None,
@@ -663,6 +668,10 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "gap_days":             bd.gap_days,
         "agreement_ratio":      bd.agreement_ratio,
         "snr":                  bd.snr,
+        # The colour bands are the module\'s own SNR cut-offs; the template
+        # hard-coded 10 and 5 (audit F-226).
+        "snr_high":             _SNR_HIGH,
+        "snr_low":              _SNR_LOW,
         "burn_epoch":           bd.burn_epoch,
         "burn_ambiguous":       bool(getattr(bd.swept, "burn_epoch_ambiguous", False)),
         "position_mismatch_km": getattr(bd.swept, "position_mismatch_km", None),

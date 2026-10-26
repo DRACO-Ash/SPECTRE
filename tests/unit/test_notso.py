@@ -72,9 +72,7 @@ class TestParseDt:
         assert dt == _dt("2025-03-14T12:00:00")
 
     def test_iso8601_without_z(self):
-        dt = _parse_dt("2025-03-14T12:00:00")
-        assert dt is not None
-        assert dt.year == 2025
+        assert _parse_dt("2025-03-14T12:00:00") == datetime(2025, 3, 14, 12, 0, tzinfo=UTC)
 
     def test_date_time_utc(self):
         assert _parse_dt("2025-03-14 12:00 UTC") == datetime(2025, 3, 14, 12, 0, tzinfo=UTC)
@@ -159,8 +157,9 @@ class TestSplitMessages:
     def test_msgid_implicit_separator(self):
         text = "MSGID: 001\nSATNO: 43689\nMSGID: 002\nSATNO: 43689"
         msgs = _split_messages(text)
-        # Each MSGID starts a new block
-        assert len(msgs) >= 2
+        # Each MSGID starts a new block (audit F-217: this read ">= 2").
+        assert len(msgs) == 2
+        assert msgs[0].startswith("MSGID: 001") and msgs[1].startswith("MSGID: 002")
 
 
 # ── Single NOTSO parsing ──────────────────────────────────────────────────────

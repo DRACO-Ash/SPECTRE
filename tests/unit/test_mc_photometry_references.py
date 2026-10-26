@@ -44,7 +44,7 @@ def test_the_j2_equations_regress_the_node_at_the_secular_rate() -> None:
     first = np.linspace(0.0, period, 200)
     last = np.linspace(span - period, span, 200)
     sol = solve_ivp(monte_carlo._j2_drag_ode, (0.0, span), state, method="DOP853", rtol=1e-10, atol=1e-12,
-                    t_eval=np.concatenate([first, last]), args=(0.0, 0.0))
+                    t_eval=np.concatenate([first, last]), args=(0.0,))
     nodes = np.unwrap(np.radians([_node_deg(sol.y[:, k]) for k in range(sol.y.shape[1])]))
     # Orbit-averaged nodes, so the short-period J2 terms cancel.
     drift = math.degrees(nodes[200:].mean() - nodes[:200].mean()) / ((span - period) / 86400.0)

@@ -186,7 +186,14 @@ _DT_PATTERNS = [
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*UTC",    # YYYY-MM-DD HH:MM UTC
     r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}(?::\d{2})?)\s*UTC",    # MM/DD/YYYY HH:MM UTC
     r"(\d{1,2}\s+\w+\s+\d{4}\s+\d{2}:\d{2})\s*UTC",           # DD Mon YYYY HH:MM UTC
+    r"\b(\d{6}Z\s+[A-Z]{3}\s+\d{2,4})\b",                     # military DTG: 141200Z MAR 25
 ]
+
+# A slash date with both fields 12 or under reads two ways (03/04 is 3 April
+# in the US and 4 March in the UK); it is refused rather than guessed
+# (audit F-214).
+_SLASH_DATE = re.compile(r"^(\d{2})/(\d{2})/\d{4}")
+_DTG = re.compile(r"^(\d{2})(\d{2})(\d{2})Z\s+([A-Za-z]{3})\s+(\d{2}|\d{4})$")
 
 _DT_FORMATS = [
     "%Y-%m-%dT%H:%M:%SZ",
@@ -204,6 +211,12 @@ def _parse_dt(s: str) -> datetime | None:
     """Parse a NOTSO date to UTC. ISO 8601 first, with fractional seconds and
     offsets, which the fixed formats below rejected (audit F-087)."""
     s = s.strip()
+    slash = _SLASH_DATE.match(s)
+    if slash and slash.group(1) != slash.group(2) and max(int(slash.group(1)), int(slash.group(2))) <= 12:  # noqa: PLR2004
+        return None
+    dtg = _DTG.match(s)
+    if dtg:
+        return _parse_dtg(dtg)
     try:
         iso = datetime.fromisoformat(s)
     except ValueError:
@@ -223,6 +236,17 @@ def _parse_dt(s: str) -> datetime | None:
     return None
 
 
+def _parse_dtg(m: re.Match[str]) -> datetime | None:
+    """A date-time group, DDHHMMZ MON YY: day, hour and minute, then month and year."""
+    day, hour, minute, month, year = m.groups()
+    full_year = int(year) + 2000 if len(year) == 2 else int(year)  # noqa: PLR2004
+    try:
+        stamp = datetime.strptime(f"{full_year} {month.title()} {day} {hour}:{minute}", "%Y %b %d %H:%M")
+    except ValueError:
+        return None
+    return stamp.replace(tzinfo=UTC)
+
+
 def _extract_datetime(text: str) -> datetime | None:
     for pattern in _DT_PATTERNS:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -233,20 +257,23 @@ def _extract_datetime(text: str) -> datetime | None:
     return None
 
 
+# Matched at the start of a word: a plain substring match read "latest" as a
+# test and "follower" as a lowered orbit (audit F-216). Checked in order.
+_TYPE_WORDS: tuple[tuple[NOTSOType, re.Pattern[str]], ...] = (
+    (NOTSOType.DEORBIT, re.compile(r"\b(?:deorbit|de-orbit|reentry|re-entry|passivat)")),
+    (NOTSOType.LAUNCH, re.compile(r"\b(?:launch|deployment|deployed)")),
+    (NOTSOType.PROXIMITY_OPS, re.compile(r"\b(?:proximity|rpo\b|rendezvous|approach|intercept)")),
+    (NOTSOType.TEST, re.compile(r"\b(?:test(?:s|ing|ed)?\b|calibration|demonstration)")),
+    (NOTSOType.MANOEUVRE, re.compile(
+        r"\b(?:manoeuv|maneuv|thruster|station ?keep|orbit adjust|orbit correction|repositioning"
+        r"|raise|lower)",
+    )),
+)
+
+
 def _infer_notso_type(text: str) -> NOTSOType:
     low = text.lower()
-    if any(w in low for w in ("deorbit", "de-orbit", "reentry", "re-entry", "passivat")):
-        return NOTSOType.DEORBIT
-    if any(w in low for w in ("launch", "deployment", "deployed")):
-        return NOTSOType.LAUNCH
-    if any(w in low for w in ("proximity", "rpo ", "rendezvous", "approach", "intercept")):
-        return NOTSOType.PROXIMITY_OPS
-    if any(w in low for w in ("test", "testing", "calibration", "demonstration")):
-        return NOTSOType.TEST
-    if any(w in low for w in ("manoeuv", "maneuv", "thruster", "station keep", "stationkeep",
-                               "orbit adjust", "orbit correction", "repositioning", "raise", "lower")):
-        return NOTSOType.MANOEUVRE
-    return NOTSOType.OTHER
+    return next((kind for kind, words in _TYPE_WORDS if words.search(low)), NOTSOType.OTHER)
 
 
 def _extract_norad_id(text: str) -> int | None:

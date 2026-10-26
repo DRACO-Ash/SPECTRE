@@ -811,7 +811,9 @@ def _row_observation(
         logger.warning("Row %d: missing epoch — skipping", i)
         return None
     try:
-        epoch = datetime.fromisoformat(epoch_str.rstrip("Z")).replace(tzinfo=UTC)
+        parsed = datetime.fromisoformat(epoch_str.rstrip("Z"))
+        # An explicit offset is converted, not overwritten (audit F-224).
+        epoch = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     except ValueError:
         logger.warning("Row %d: unparseable epoch %r — skipping", i, epoch_str)
         return None

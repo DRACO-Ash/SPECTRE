@@ -7,7 +7,8 @@ this module:
 - Propagates each sample forward using a J2 + exponential drag numerical
   integrator (RK45 via scipy.integrate.solve_ivp).
 - Aggregates the ensemble into a MonteCarloResult with regime probabilities,
-  orbital element percentiles, and a 3-σ position cloud radius.
+  orbital element percentiles, and the 99.7th percentile distance of the
+  position cloud from its centroid.
 
 Design notes
 ------------
@@ -17,8 +18,10 @@ Design notes
 - Propagation uses J2 + simplified exponential atmosphere drag.  At 48 h, the
   MC uncertainty envelope from ΔV variation dominates over force-model error,
   so high-fidelity ephemeris is unnecessary.
-- Concurrency: ThreadPoolExecutor (scipy/NumPy releases the GIL; no Windows
-  spawn restrictions).
+- Concurrency: ThreadPoolExecutor. The equations of motion are a Python
+  function, so the integrator holds the GIL for most of each step and threads
+  give little speed-up; they were described as releasing it (audit F-221).
+  A process pool or a vectorised ensemble would be the way to go faster.
 """
 
 from __future__ import annotations
@@ -298,7 +301,9 @@ class MonteCarloResult:
     regime_probabilities: dict[str, float]
 
     # Position uncertainty
-    position_3sigma_km: float      # 3-σ radius of position cloud at horizon
+    # 99.7th percentile distance from the cloud's centroid; not a 3-sigma of
+    # any fitted distribution (audit F-219). The name is kept for callers.
+    position_3sigma_km: float
     alt_km_p5: float               # 5th percentile altitude
     alt_km_p95: float              # 95th percentile altitude
 
@@ -342,7 +347,6 @@ def _ric_to_eci_rotation(r_eci: np.ndarray, v_eci: np.ndarray) -> np.ndarray:
 def _j2_drag_ode(
     t: float,
     state: np.ndarray,
-    bstar: float,
     bc_m2_kg: float,
 ) -> np.ndarray:
     """EOM: two-body + J2 + exponential drag (ECI frame, km, s).
@@ -350,7 +354,6 @@ def _j2_drag_ode(
     Parameters
     ----------
     state : (6,) — [x, y, z, vx, vy, vz]
-    bstar : B* parameter from TLE (used for regime check only; drag uses bc)
     bc_m2_kg : ballistic coefficient m / (Cd*A), in kg/m² despite the name
     """
     x, y, z, vx, vy, vz = state
@@ -386,10 +389,7 @@ def _j2_drag_ode(
 
 
 def _state_to_keplerian(r_vec: np.ndarray, v_vec: np.ndarray) -> tuple[float, ...]:
-    """Compute (sma_km, ecc, inc_deg, raan_deg, argp_deg, ta_deg) from state.
-
-    Returns (sma_km, ecc, inc_deg) — sufficient for MC classification.
-    """
+    """Return (sma_km, ecc, inc_deg) from a state: enough for MC classification."""
     r = float(np.linalg.norm(r_vec))
     v = float(np.linalg.norm(v_vec))
     h_vec = np.cross(r_vec, v_vec)
@@ -427,7 +427,10 @@ def generate_samples(hypothesis: ManoeuvreHypothesis) -> np.ndarray:
             size=n,
         )
     else:
-        half = 3.0 * hypothesis.delta_v_magnitude_1sigma_km_s
+        # A uniform distribution of half-width sqrt(3) sigma has standard
+        # deviation sigma. Three sigma, as it was, made the "uniform" option
+        # sqrt(3) times wider than the stated 1-sigma (audit F-220).
+        half = math.sqrt(3.0) * hypothesis.delta_v_magnitude_1sigma_km_s
         dv_mags = rng.uniform(
             hypothesis.delta_v_magnitude_km_s - half,
             hypothesis.delta_v_magnitude_km_s + half,
@@ -568,7 +571,7 @@ def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | N
         method="RK45",
         rtol=1e-8,
         atol=1e-10,
-        args=(bstar, _ballistic_coefficient_kg_m2(bstar)),
+        args=(_ballistic_coefficient_kg_m2(bstar),),
         dense_output=False,
     )
     return np.array(sol.y[:, -1]) if sol.success else None

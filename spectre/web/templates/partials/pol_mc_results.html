@@ -95,9 +95,9 @@
         </tbody>
       </table>
 
-      {# 3-sigma cloud radius #}
+      {# 99.7th percentile distance from the centroid: not a fitted 3-sigma (audit F-219) #}
       <div style="margin-top:0.4rem; font-size:0.62rem; color:var(--text-dim)">
-        Position cloud 3&sigma;: <strong style="color:var(--ops-gold)">{{ mc.position_3sigma_km | round(1) }} km</strong>
+        Position cloud, 99.7 % of samples within: <strong style="color:var(--ops-gold)">{{ mc.position_3sigma_km | round | int }} km</strong> of its centre
       </div>
     </div>
 
