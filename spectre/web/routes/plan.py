@@ -231,8 +231,8 @@ async def export_intercepts(
     )
 
     logger.info(
-        "Intercept export: operator=%s rows=%d filter=%s filename=%s",
-        log_safe(current_user.username), len(results), log_safe(run_id or "all"), log_safe(filename),
+        "Intercept export: operator=%s rows=%s filter=%s filename=%s",
+        log_safe(current_user.username), log_safe(len(results)), log_safe(run_id or "all"), log_safe(filename),
     )
 
     return StreamingResponse(

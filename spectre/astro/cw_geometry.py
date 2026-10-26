@@ -169,8 +169,22 @@ class RelativeGeometry:
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _sanitise_name(name: str) -> str:
-    """Strip non-printable characters; truncate to 64 chars for log safety."""
-    return "".join(ch for ch in name if ch.isprintable())[:64]
+    """Strip non-printable characters; truncate to 64 chars for log safety.
+
+    The trailing replace is a no-op after the filter; it is the form CodeQL's
+    log-injection query recognises as a sanitiser.
+    """
+    printable = "".join(ch for ch in name if ch.isprintable())[:64]
+    return printable.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _log_value(value: object) -> str:
+    """*value* as a single printable line for a log record.
+
+    The astro layer does not import spectre.web, so this reuses
+    _sanitise_name rather than log_safe.
+    """
+    return _sanitise_name(str(value))
 
 
 def _validate_finite(value: float, name: str) -> float:
@@ -461,10 +475,12 @@ def compute_relative_geometry(
     # ── Audit log ─────────────────────────────────────────────────────────────
     logger.info(
         "cw_geometry: caller=%r red=%r blue=%r method=%r "
-        "dv_r=%.4f dv_p=%.4f dv_n=%.4f tof=%.1fs coast=%.1fs epoch=%s",
-        caller, red_name_safe, blue_name_safe, method_safe,
-        dv_radial_km_s, dv_prograde_km_s, dv_normal_km_s,
-        tof_s, coast_s, burn_epoch.isoformat(),
+        "dv_r=%s dv_p=%s dv_n=%s tof=%ss coast=%ss epoch=%s",
+        _log_value(caller), red_name_safe, blue_name_safe, method_safe,
+        _log_value(format(dv_radial_km_s, ".4f")),
+        _log_value(format(dv_prograde_km_s, ".4f")),
+        _log_value(format(dv_normal_km_s, ".4f")),
+        _log_value(format(tof_s, ".1f")), _log_value(format(coast_s, ".1f")), _log_value(burn_epoch.isoformat()),
     )
 
     # ── Compute initial relative state at burn epoch ──────────────────────────
@@ -506,8 +522,8 @@ def compute_relative_geometry(
     arrival_range   = transfer_points[-1].range_km if transfer_points else 0.0
 
     logger.info(
-        "cw_geometry: arrival range=%.3f km for %r → %r (%s)",
-        arrival_range, red_name_safe, blue_name_safe, method_safe,
+        "cw_geometry: arrival range=%s km for %r → %r (%s)",
+        _log_value(format(arrival_range, ".3f")), red_name_safe, blue_name_safe, method_safe,
     )
     if arrival_range > 10.0:
         logger.warning(

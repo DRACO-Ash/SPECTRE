@@ -54,9 +54,21 @@ def log_safe(value: object, limit: int = _DEFAULT_LIMIT) -> str:
     # not become a payload of spaces.
     collapsed = " ".join(cleaned.split())
     if len(collapsed) <= limit:
-        return collapsed
+        bounded = collapsed
     # A limit no wider than the marker has no room for text and marker both;
     # appending it anyway returned more than *limit* characters (audit F-262).
-    if limit <= len(_ELLIPSIS):
-        return collapsed[: max(0, limit)]
-    return collapsed[: limit - len(_ELLIPSIS)] + _ELLIPSIS
+    elif limit <= len(_ELLIPSIS):
+        bounded = collapsed[: max(0, limit)]
+    else:
+        bounded = collapsed[: limit - len(_ELLIPSIS)] + _ELLIPSIS
+    return _without_line_breaks(bounded)
+
+
+def _without_line_breaks(text: str) -> str:
+    """*text* with any line break replaced; a no-op on what log_safe built.
+
+    The steps above already leave no line break, but CodeQL's log-injection
+    query recognises only a ``replace`` of the line-break characters as a
+    sanitiser, so every log_safe result used to raise an alert.
+    """
+    return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")

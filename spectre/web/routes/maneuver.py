@@ -876,9 +876,10 @@ async def apply_intercept(
         f"miss={result.intercept_range_km:.1f} km"
     )
     logger.info(
-        "apply_intercept: %s for operator %s (%s → %s total_dv=%.0f m/s, burns=%d)",
+        "apply_intercept: %s for operator %s (%s → %s total_dv=%s m/s, burns=%s)",
         log_safe(method), log_safe(current_user.username),
-        log_safe(red_sat), log_safe(blue_sat), result.total_delta_v_m_s, len(result.burns),
+        log_safe(red_sat), log_safe(blue_sat),
+        log_safe(format(result.total_delta_v_m_s, ".0f")), log_safe(len(result.burns)),
     )
 
     intel = _compute_intercept_intel(result, red_regime, max_dv_m_s)
@@ -1174,9 +1175,9 @@ async def apply_all_intercepts(
         f"{n_ok}/{len(_ALL_METHODS_SEQUENCE)} methods succeeded"
     )
     logger.info(
-        "apply_all_intercepts: %s → %s, %d/%d ok, by %s",
+        "apply_all_intercepts: %s → %s, %s/%s ok, by %s",
         log_safe(red_sat.strip()), log_safe(blue_sat.strip()),
-        n_ok, len(_ALL_METHODS_SEQUENCE), log_safe(current_user.username),
+        log_safe(n_ok), log_safe(len(_ALL_METHODS_SEQUENCE)), log_safe(current_user.username),
     )
 
     return render(request, "partials/all_intercepts_result.html", {

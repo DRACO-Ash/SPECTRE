@@ -28,6 +28,7 @@ from spectre.domain.pol_assessment import assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, udl_data_rate_limit
@@ -290,8 +291,8 @@ def _cadence_filtered(
     raw_count = len(records)
     filtered, quality_flags = filter_tle_history(records)
     logger.info(
-        "PoL cadence filter: %d → %d records, %d flags for %d",
-        raw_count, len(filtered), len(quality_flags), satno,
+        "PoL cadence filter: %s → %s records, %s flags for %s",
+        log_safe(raw_count), log_safe(len(filtered)), log_safe(len(quality_flags)), log_safe(satno),
     )
     return filtered, quality_flags
 
@@ -340,7 +341,7 @@ async def pol_analyse(
                 satno, udl_user.strip(), udl_pass, "REAL",
                 source=state.udl_tle_source,
             )
-            logger.info("PoL: %d chars from UDL (direct) for %d", len(archive_text), satno)
+            logger.info("PoL: %s chars from UDL (direct) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL direct failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
@@ -358,7 +359,7 @@ async def pol_analyse(
                 state.udl_data_mode,
                 source=state.udl_tle_source,
             )
-            logger.info("PoL: %d chars from UDL (session) for %d", len(archive_text), satno)
+            logger.info("PoL: %s chars from UDL (session) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL session failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
@@ -405,7 +406,7 @@ async def pol_analyse(
             f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
     except Exception as exc:
-        logger.exception("PoL analysis failed for %d", satno)
+        logger.exception("PoL analysis failed for %s", log_safe(satno))
         return _panel_error(request, state, f"Analysis error: {exc}")
 
     return render(request, "partials/pol_results.html", {
@@ -876,9 +877,9 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
             None,
             lambda: run_monte_carlo(hypothesis, satno=satno, prediction_horizon_hours=horizon_h),
         )
-    except Exception as exc:
-        logger.exception("Monte Carlo failed for %d", satno)
-        return HTMLResponse(f'<p class="error-msg">Monte Carlo error: {html.escape(str(exc))}</p>')
+    except Exception:
+        logger.exception("Monte Carlo failed for %s", log_safe(satno))
+        return HTMLResponse('<p class="error-msg">Monte Carlo failed; the server log has the detail.</p>')
 
     return render(request, "partials/pol_mc_results.html", {
         "mc": result,
@@ -1136,9 +1137,9 @@ async def pol_notso_correlate(
             f"{sum(1 for c in correlations if c.correlation_type == 'notso_only')} NOTSO-only, "
             f"{sum(1 for c in correlations if c.correlation_type == 'manoeuvre_only')} manoeuvre-only"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("NOTSO correlation failed for %d", pol.satno)
-        return HTMLResponse(f'<p class="error-msg">Correlation error: {html.escape(str(exc))}</p>')
+        return HTMLResponse('<p class="error-msg">NOTSO correlation failed; the server log has the detail.</p>')
 
     return render(request, "partials/notso_results.html", {
         # Rows carry their own m/s figures so the template does no arithmetic.
@@ -1216,9 +1217,9 @@ async def pol_photometry_analyse(
             + (f" for SATNO {pol.satno}" if pol else "")
             + f": {result.change_direction} (p={result.p_value:.4f})"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Photometry analysis failed")
-        return HTMLResponse(f'<p class="error-msg">Analysis error: {html.escape(str(exc))}</p>')
+        return HTMLResponse('<p class="error-msg">Photometry analysis failed; the server log has the detail.</p>')
 
     return render(request, "partials/photometry_results.html", {
         "result": result,

@@ -203,7 +203,7 @@ async def post_login(
         logger.warning("Failed login attempt for username: %s", log_safe(username))
         return render_login(request, "Invalid username or password.", status_code=401)
 
-    logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
+    logger.info("Successful login: %s (role=%s)", log_safe(username), log_safe(user.role))
     token = make_session_cookie(
         username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
         session_id=secrets.token_urlsafe(16),

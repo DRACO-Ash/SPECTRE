@@ -175,7 +175,7 @@ async def fetch_tle_for_satno(
         resp.raise_for_status()
         data = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("fetch_tle_for_satno(%s) failed: %s", satno, exc)
+        logger.warning("fetch_tle_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc))
         return None
 
     if isinstance(data, dict):
@@ -394,7 +394,7 @@ async def set_data_mode(
         mode = "REAL"
     state.udl_data_mode = mode
     state.append_log(f"[UDL] Data mode set to {mode}")
-    logger.info("UDL data mode set to %s for operator %s", mode, log_safe(current_user.username))
+    logger.info("UDL data mode set to %s for operator %s", log_safe(mode), log_safe(current_user.username))
     return render(request,
         "partials/data_mode_status.html",
         {"udl_data_mode": mode},
@@ -682,7 +682,7 @@ async def fetch_tle(
             {**_empty, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL TLE fetch failed for SATNO %s: %s", satno, exc)
+        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": f"UDL unreachable: {exc}"},
@@ -699,8 +699,8 @@ async def fetch_tle(
 
     # ── Select the best record ───────────────────────────────────────────────
     logger.info(
-        "UDL returned %d elset record(s) for SATNO %s mode=%s dataMode=%s",
-        len(records), satno, log_safe(mode), dm,
+        "UDL returned %s elset record(s) for SATNO %s mode=%s dataMode=%s",
+        log_safe(len(records)), log_safe(satno), log_safe(mode), log_safe(dm),
     )
 
     _log_elset_diagnostics(records)
@@ -738,7 +738,7 @@ async def fetch_tle(
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
-        satno, log_safe(name), log_safe(mode), log_safe(current_user.username),
+        log_safe(satno), log_safe(name), log_safe(mode), log_safe(current_user.username),
     )
 
     return render(request,
@@ -820,7 +820,7 @@ async def fetch_statevector(
         data = resp.json()
     except httpx.HTTPStatusError as exc:
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
-        logger.warning(error)
+        logger.warning("%s", log_safe(error))
         return render(request,
             "partials/statevector_fields.html",
             {"sv": None, "error": error},
@@ -831,7 +831,7 @@ async def fetch_statevector(
             {"sv": None, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL state vector fetch failed for SATNO %s: %s", satno, exc)
+        logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             "partials/statevector_fields.html",
             {"sv": None, "error": f"UDL unreachable: {exc}"},
@@ -870,7 +870,7 @@ async def fetch_statevector(
     )
     logger.info(
         "State vector fetched for SATNO %s (%s) by operator %s",
-        satno,
+        log_safe(satno),
         log_safe(sv["name"]),
         log_safe(current_user.username),
     )
@@ -1178,11 +1178,11 @@ async def udl_notso(
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (404, 405, 501):
             return JSONResponse([])
-        logger.warning("UDL NOTSO fetch error for %d: %s", satno, exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        logger.warning("UDL NOTSO fetch error for %s: %s", log_safe(satno), log_safe(exc))
+        return JSONResponse({"error": "UDL refused the NOTSO request; the server log has the detail."}, status_code=502)
     except (httpx.HTTPError, AttributeError) as exc:   # AttributeError: a record that is not an object
-        logger.warning("UDL NOTSO fetch failed for %d: %s", satno, exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        logger.warning("UDL NOTSO fetch failed for %s: %s", log_safe(satno), log_safe(exc))
+        return JSONResponse({"error": "UDL NOTSO fetch failed; the server log has the detail."}, status_code=502)
 
 
 _NOTSO_PAGE = 500

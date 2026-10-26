@@ -40,40 +40,50 @@ _MAX_ROWS = 5
 _MAX_HORIZON_H = 720.0
 
 
-class _InvalidInputError(ValueError):
-    """An input outside its meaning, with the sentence the operator is shown."""
+class _Inputs:
+    """The form's numbers, read one by one, keeping the first problem found.
 
-
-def _number(raw: str | None, label: str, high: float = 1.0, *, positive: bool = False) -> float:
-    """Parse one form number in [0, *high*], or in (0, *high*] when *positive*.
-
-    Every value this engine takes is a fraction in [0, 1], a time or the
-    horizon. It accepted any float, NaN and negatives included, and a blank
-    field produced a 422 that htmx does not swap, so the panel did nothing
-    (audit F-164).
+    The first problem is kept rather than raised. Raised, its sentence reached
+    the page through the caught exception, which CodeQL's exception-exposure
+    query reports however deliberate the sentence is.
     """
-    try:
-        value = float(raw or "")
-    except ValueError:
-        raise _InvalidInputError(f"Enter a number for {label}.") from None
-    low_ok = value > 0.0 if positive else value >= 0.0
-    if not (math.isfinite(value) and low_ok and value <= high):
-        bound = f"above 0 and at most {high:g}" if positive else f"between 0 and {high:g}"
-        raise _InvalidInputError(f"{label[0].upper()}{label[1:]} must be {bound}; got {raw}.")
-    return value
 
+    def __init__(self) -> None:
+        self.problem: str | None = None
 
-def _column(raws: list[str] | None, label: str, high: float = 1.0) -> list[float]:
-    """One numeric column of rows, each checked, named by its row."""
-    return [_number(raw, f"{label} in row {i + 1}", high) for i, raw in enumerate(raws or [])]
+    def _refuse(self, sentence: str) -> float:
+        if self.problem is None:
+            self.problem = sentence
+        return 0.0
 
+    def number(self, raw: str | None, label: str, high: float = 1.0, *, positive: bool = False) -> float:
+        """One form number in [0, *high*], or in (0, *high*] when *positive*.
 
-def _check_rows(adv_ids: list[str] | None, fr_ids: list[str] | None) -> None:
-    """Both sides take 1 to 5 rows, as README.md documents."""
-    if not (1 <= len(adv_ids or []) <= _MAX_ROWS and 1 <= len(fr_ids or []) <= _MAX_ROWS):
-        raise _InvalidInputError(
-            f"Define 1 to {_MAX_ROWS} adversary actions and 1 to {_MAX_ROWS} friendly responses."
-        )
+        Every value this engine takes is a fraction in [0, 1], a time or the
+        horizon. It accepted any float, NaN and negatives included, and a blank
+        field produced a 422 that htmx does not swap, so the panel did nothing
+        (audit F-164).
+        """
+        try:
+            value = float(raw or "")
+        except ValueError:
+            return self._refuse(f"Enter a number for {label}.")
+        low_ok = value > 0.0 if positive else value >= 0.0
+        if not (math.isfinite(value) and low_ok and value <= high):
+            bound = f"above 0 and at most {high:g}" if positive else f"between 0 and {high:g}"
+            return self._refuse(f"{label[0].upper()}{label[1:]} must be {bound}; got {raw}.")
+        return value
+
+    def column(self, raws: list[str] | None, label: str, high: float = 1.0) -> list[float]:
+        """One numeric column of rows, each checked, named by its row."""
+        return [self.number(raw, f"{label} in row {i + 1}", high) for i, raw in enumerate(raws or [])]
+
+    def rows(self, adv_ids: list[str] | None, fr_ids: list[str] | None) -> None:
+        """Both sides take 1 to 5 rows, as README.md documents."""
+        if not (1 <= len(adv_ids or []) <= _MAX_ROWS and 1 <= len(fr_ids or []) <= _MAX_ROWS):
+            self._refuse(
+                f"Define 1 to {_MAX_ROWS} adversary actions and 1 to {_MAX_ROWS} friendly responses."
+            )
 
 
 def _err(msg: str) -> HTMLResponse:
@@ -204,23 +214,19 @@ async def decision_evaluate(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Evaluate a decision scenario and return the ranked results partial."""
-    try:
-        _check_rows(adv_ids, fr_ids)
-        horizon = _number(horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
-        weights = [_number(w, "each scoring weight") for w in (w_custody, w_ca, w_dv, w_time, w_rev)]
-        adversary_actions = _adversary_rows(
-            adv_ids or [], adv_names or [], adv_types or [],
-            _column(adv_probs, "probability"), _column(adv_confs, "confidence"),
-        )
-        friendly_responses = _friendly_rows(
-            fr_ids or [], fr_names or [], fr_types or [],
-            _ResponseColumns(
-                _column(fr_costs, "cost"), _column(fr_revs, "reversibility"),
-                _column(fr_times, "time to execute (hours)", _MAX_HORIZON_H),
-            ),
-        )
-    except _InvalidInputError as exc:
-        return _err(str(exc))
+    inputs = _Inputs()
+    inputs.rows(adv_ids, fr_ids)
+    horizon = inputs.number(horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
+    weights = [inputs.number(w, "each scoring weight") for w in (w_custody, w_ca, w_dv, w_time, w_rev)]
+    adv_columns = (inputs.column(adv_probs, "probability"), inputs.column(adv_confs, "confidence"))
+    fr_columns = _ResponseColumns(
+        inputs.column(fr_costs, "cost"), inputs.column(fr_revs, "reversibility"),
+        inputs.column(fr_times, "time to execute (hours)", _MAX_HORIZON_H),
+    )
+    if inputs.problem is not None:
+        return _err(inputs.problem)
+    adversary_actions = _adversary_rows(adv_ids or [], adv_names or [], adv_types or [], *adv_columns)
+    friendly_responses = _friendly_rows(fr_ids or [], fr_names or [], fr_types or [], fr_columns)
     strat = _strategy(strategy)
     w_custody_n, w_ca_n, w_dv_n, w_time_n, w_rev_n = _normalised_weights(*weights)
 

@@ -179,7 +179,7 @@ async def create_user(
     # session, the new user's straight from the form (pythonsecurity:S5145).
     logger.info(
         "Admin '%s' created user '%s' (role=%s)",
-        log_safe(current_user.username), log_safe(username), role,
+        log_safe(current_user.username), log_safe(username), log_safe(role),
     )
 
     users = await _all_users(db)

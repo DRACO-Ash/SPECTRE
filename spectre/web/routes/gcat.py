@@ -512,7 +512,7 @@ async def _ensure_cached(key: str) -> bool:
         if df_result is None:
             return False
         _CACHE[key] = _entry(df_result)
-        log.info("[GCAT] '%s' cached: %d rows", key, len(df_result))
+        log.info("[GCAT] '%s' cached: %s rows", log_safe(key), log_safe(len(df_result)))
         return True
 
 
@@ -658,7 +658,7 @@ async def gcat_table(
         )
 
     if dataset not in _CACHE:
-        log.info("[GCAT] On-demand download: '%s' for %s", dataset, log_safe(current_user.username))
+        log.info("[GCAT] On-demand download: '%s' for %s", log_safe(dataset), log_safe(current_user.username))
     if not await _ensure_cached(dataset):
         label = DATASETS[dataset]["label"]
         return HTMLResponse(

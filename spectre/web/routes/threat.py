@@ -1468,8 +1468,9 @@ async def threat_sweep(
         f"{len(entries)} solutions, {elapsed:.1f}s"
     )
     logger.info(
-        "threat_sweep: %s vs %d targets (%s), %d solutions, %.1fs by %s",
-        log_safe(red_sat), len(targets), log_safe(group_label), len(entries), elapsed,
+        "threat_sweep: %s vs %s targets (%s), %s solutions, %ss by %s",
+        log_safe(red_sat), log_safe(len(targets)), log_safe(group_label),
+        log_safe(len(entries)), log_safe(format(elapsed, ".1f")),
         log_safe(current_user.username),
     )
 
