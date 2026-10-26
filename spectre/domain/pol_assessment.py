@@ -601,8 +601,12 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def _risk_level(overall: float) -> str:
-    """The risk label for an overall anomaly score, highest rung first."""
+def anomaly_risk_level(overall: float) -> str:
+    """The risk label for an overall anomaly score, highest rung first.
+
+    The threat verdict grades an anomaly score through this same ladder
+    (audit F-120).
+    """
     for threshold, level in _RISK_LADDER:
         if overall >= threshold:
             return level
@@ -673,7 +677,7 @@ def _assess_anomaly(
     overall = (dv_score * w["dv"] + lon_score * w["lon"] + drift_score * w["drift"]
                + reg_score * w["regularity"] + budget_score * w["budget"])
 
-    risk = _risk_level(overall)
+    risk = anomaly_risk_level(overall)
 
     return AnomalyAssessment(
         dv_magnitude=round(dv_score, 1), lon_coverage=round(lon_score, 1),

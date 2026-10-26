@@ -50,6 +50,7 @@ from spectre.domain.manoeuvre_calibration import (
     fastest_delivery_hours,
     kind_for_method,
 )
+from spectre.domain.pol_assessment import anomaly_risk_level
 
 __all__ = [
     "AccessEvidence",
@@ -119,7 +120,9 @@ _IMPAIRED_STATUS_MARKERS: tuple[str, ...] = (
 # PROPELLANT LOAD, which is reachable: about 1.57 km/s for a LEO smallsat and
 # 0.85 km/s for a chemical GEO comsat, both inside Table 2's envelopes.
 _PROPELLANT_SPENT_PCT: float = 95.0
-# Propellant remaining above this adds nothing; the object is simply capable.
+# Propellant remaining at or above this grades capability HIGH; below it, LOW,
+# so a scarce reserve cannot raise an assessed LOW (it graded MEDIUM, audit
+# F-120). Tuned, not sourced.
 _PROPELLANT_AMPLE_PCT: float = 50.0
 # The same cut applied to the discretionary reserve, as a share rather than a
 # percentage because that reading divides remaining by maximum directly. Half
@@ -137,9 +140,11 @@ _DISCRETIONARY_EXHAUSTED_M_S: float = 0.0
 # on an assessed label with little behaviour behind it.
 _EVIDENCE_FOR_HIGH_CONFIDENCE: int = 4
 
-# Behavioural anomaly above this is an object doing something unusual.
-_ANOMALY_NOTABLE: float = 60.0
-_ANOMALY_HIGH: float = 80.0
+# The behavioural anomaly score is graded through the Pattern of Life ladder
+# (pol_assessment._RISK_LADDER), so one score reads one band in both panels.
+# It had cut-offs of its own, 60 and 80, and any score, 0 included, graded
+# capability at least MEDIUM (audit F-120). The ladder's rungs are tuned, not
+# sourced; see pol_assessment.
 
 
 @dataclass(frozen=True)
@@ -275,12 +280,7 @@ class CapabilityEvidence:
                 candidates.append(Band[self.intel_threat_level.strip().upper()])
 
         if self.anomaly_score is not None:
-            if self.anomaly_score >= _ANOMALY_HIGH:
-                candidates.append(Band.CRITICAL)
-            elif self.anomaly_score >= _ANOMALY_NOTABLE:
-                candidates.append(Band.HIGH)
-            else:
-                candidates.append(Band.MEDIUM)
+            candidates.append(Band[anomaly_risk_level(self.anomaly_score)])
 
         # The discretionary reserve is the better reading where it is
         # available, because it is the budget a manoeuvre against someone comes
@@ -290,12 +290,12 @@ class CapabilityEvidence:
                 and self.discretionary_max_m_s > 0):
             share = self.discretionary_remaining_m_s / self.discretionary_max_m_s
             candidates.append(
-                Band.HIGH if share >= _DISCRETIONARY_AMPLE_SHARE else Band.MEDIUM
+                Band.HIGH if share >= _DISCRETIONARY_AMPLE_SHARE else Band.LOW
             )
         elif self.propellant_used_pct is not None:
             remaining = 100.0 - self.propellant_used_pct
             candidates.append(
-                Band.HIGH if remaining >= _PROPELLANT_AMPLE_PCT else Band.MEDIUM
+                Band.HIGH if remaining >= _PROPELLANT_AMPLE_PCT else Band.LOW
             )
 
         if self.manoeuvres_observed is not None and self.manoeuvres_observed > 0:
