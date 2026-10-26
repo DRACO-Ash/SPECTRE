@@ -60,10 +60,9 @@ def _operator(client: TestClient, name: str) -> str:
 
 def _progress(client: TestClient, name: str) -> TrainingProgress:
     async def read(session: Any) -> TrainingProgress:
-        row = (await session.execute(
+        return (await session.execute(  # type: ignore[no-any-return]
             select(TrainingProgress).where(TrainingProgress.username == name)
         )).scalar_one()
-        return row  # type: ignore[no-any-return]
 
     return _db(client, read)  # type: ignore[no-any-return]
 

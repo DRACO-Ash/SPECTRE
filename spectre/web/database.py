@@ -185,6 +185,19 @@ async def _apply_migrations(conn: Any) -> None:
 
 
 
+def _admin_password_refused(password: str) -> bool:
+    """Whether SPECTRE_ADMIN_PASS is too long for bcrypt; logged if so.
+
+    Raised from hash_password, it stopped the boot (audit F-150).
+    """
+    from spectre.web.auth import PASSWORD_TOO_LONG, password_too_long
+
+    if not password_too_long(password):
+        return False
+    logger.error("SPECTRE_ADMIN_PASS was not applied: %s Set a shorter one and redeploy.", PASSWORD_TOO_LONG)
+    return True
+
+
 async def _bootstrap_admin() -> None:
     """Create the first admin account, and say plainly what happened.
 
@@ -195,16 +208,14 @@ async def _bootstrap_admin() -> None:
     # Deferred: keeps the import cost on the boot path only.
     from sqlalchemy import select
 
-    from spectre.web.auth import PASSWORD_TOO_LONG, hash_password, password_too_long
+    from spectre.web.auth import hash_password
     from spectre.web.models import User
 
     settings = get_settings()
     username = settings.spectre_admin_user.strip()
     password = settings.spectre_admin_pass
 
-    if password and password_too_long(password):
-        # Raised from hash_password, this stopped the boot (audit F-150).
-        logger.error("SPECTRE_ADMIN_PASS was not applied: %s Set a shorter one and redeploy.", PASSWORD_TOO_LONG)
+    if _admin_password_refused(password):
         return
 
     async with AsyncSessionLocal() as session:
