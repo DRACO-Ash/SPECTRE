@@ -416,3 +416,167 @@ Flying the V-bar hop (F-082) found that a custom hop time was priced as if it we
 Observed, not an audit finding: training progress, attempts and sessions are keyed by username, not account id. A deleted account's training history passes to a recreated namesake, the pattern F-048 and F-148 fixed for sessions and planning state. Left for a decision, since moving the key needs a migration of three tables.
 
 `docs/SECURITY.md` lists the two new controls (password length, compute bounds). Observed, not an audit finding: the root `SECURITY.md` is stale. Its open items say there is no CSRF protection, no UDL rate limiting and no user-management UI; all three exist, and `docs/SECURITY.md` (rewritten for F-057) is the current policy. Left for the owner to replace with a pointer.
+
+### Low findings
+
+All 112 Low findings are closed or already were, except F-188, which is left for a decision. Each change has a gate test that fails on the commit before it: `tests/unit/test_low_findings_astro.py`, `test_low_findings_batch1.py`, `test_low_findings_batch2.py` (54 of 54 new gates failed on the old code) and `test_low_findings_batch3.py` (70 of 72), plus additions to the route, health and bootstrap suites.
+
+#### Astrodynamics, PoL and constants
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-191 | F-S01-17 | `4a986f3` | a retrograde circular equatorial orbit's true longitude runs with the motion |
+| F-192 | F-S01-20 | `4a986f3` | bi-elliptic refuses an intermediate radius inside either orbit or inside the Earth |
+| F-193 | F-S01-22 | `4a986f3` | seven unused unit and frame constants removed; a test refuses unused config constants |
+| F-194, F-203 | F-S01-23, F-S02-33 | `4a986f3` | no Earth-radius literal outside constants.py; sidereal day 86164.0905 s (IERS); constants cite WGS-84, EGM-96 and Vallado; named phasing perigee floor |
+| F-195 | F-S01-24 | `4a986f3` | GEO band edges built from its tolerance; regimes_compatible states it does not check apsis crossing |
+| F-196 | F-S02-18 | `4a986f3` | each collision-avoidance strategy reports the separation it reaches, including an in-track burn's radial swing |
+| F-189, F-198, F-204 | F-S01-14, F-S02-24, F-S02-34 | `4a986f3` | single-revolution Lambert limit named for what it is; envelope sketch is a lower bound; graveyard default cites the IADC formula |
+| F-199, F-200 | F-S02-29, F-S02-30 | `4a986f3` | CW docstring says validity limits are flagged, not refused; every caveat is logged |
+| F-201, F-202 | F-S02-31, F-S02-32 | `4a986f3` | spectre/domain/geometry.py, imported only by its own tests, removed with them |
+| F-205, F-206 | F-S03-17, F-S03-18 | `c847a96` | duplicate epochs, bad provenance and other objects' element sets counted by reason and shown; Alpha-5 catalogue numbers read |
+| F-207 | F-S03-19 | `c847a96` | sidereal time named and cited as GMST (Meeus 12.4) |
+| F-208 | F-S03-20 | `c847a96` | semi-major axis labelled a Kozai mean element |
+| F-210 | F-S03-22 | `c847a96` | the panel's station-keeping threshold is the module's 0.05 deg/day |
+| F-211 | F-S03-23 | `c847a96` | node and perigee corrections use SGP4's own secular rates; duplicate closed forms removed |
+| F-212 | F-S03-24 | `c847a96` | a missing longitude is a chart gap, not 0 degrees |
+| F-187 | F-S00-13 | `2e33bfa` | vendored JavaScript recorded in vendored.json and scanned against OSV in the SCA job |
+
+#### Clustering, NOTSO, Monte Carlo, delta-v and photometry
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-213, F-215 | F-S03-25, F-S03-28 | `d112615` | clustering failures and all-noise objects without a cache count as fallbacks |
+| F-214, F-216 | F-S03-26, F-S03-31 | `d112615`, `e5ec0dd` | an ambiguous slash date is refused; date-time groups parse; NOTSO types match at word starts |
+| F-217, F-218 | F-S03-33, F-S03-35 | `d112615` | three tests that could not fail pin exact values |
+| F-219, F-220, F-221, F-222 | F-S04-10, F-S04-16, F-S04-17, F-S04-18 | `d112615` | the 3-sigma cloud is the 99.7th percentile distance; the uniform spread has the stated sigma; the GIL claim corrected (the ensemble still runs on threads); unused B* argument removed |
+| F-223, F-225, F-226 | F-S04-19, F-S04-24, F-S04-25 | `d112615` | ternary search named; the probe catches only SGP4 failures and reports the sample count; MAD multiplier named; SNR bands taken from the module |
+| F-224 | F-S04-21 | `d112615` | a photometry epoch with an offset is converted |
+
+#### Domain
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-227 | F-S05-14 | `9920019` | each calibration band says whether it is a judgement; the assessment carries the caveat |
+| F-228 | F-S05-16 | `9920019` | the discretionary reserve is listed as evidence |
+| F-229 | F-S05-19 | `9920019` | each PoL ceiling flag has its own correct comment |
+| F-230 | F-S05-20 | `9920019` | the detection narrative names the smallest event it would catch |
+| F-231 | F-S05-21 | `9920019` | InterceptResult needs an arrival epoch rather than defaulting to now |
+| F-232 | F-S05-22 | `9920019` | adversary_idx, summary_table, the domain exceptions and maneuver_planner.py removed; ScenarioPlanner kept |
+| F-233 | F-S05-23 | `9920019` | a NaN, infinite or negative delta-v is refused |
+
+#### Threat and manoeuvre routes
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-234 | F-S06-12 | `623a3a7` | a TLE SGP4 cannot propagate is refused or swept with a stated assumption, not assumed LEO |
+| F-235 | F-S06-15 | `623a3a7` | clustering and epoch generation run off the event loop; at most two sweeps at once |
+| F-236 | F-S06-19 | `623a3a7` | an intercept's budget share is of the operator's budget |
+| F-237 | F-S06-21 | `623a3a7` | an unreadable manoeuvre start is refused; an offset is converted |
+| F-238 | F-S06-29 | `623a3a7` | route docstrings describe every method |
+| F-239 | F-S06-30 | `623a3a7` | the no-intercept refusal states the budget in m/s |
+| F-241 | F-S06-32 | `6e25829` | one TLE lookup (SessionState.tle_of) and one dominant-axis rule (burn_view.py) |
+| F-242 | F-S06-33 | `6e25829` | the Load button stages the first burn epoch |
+| F-243 | F-S06-34 | `6e25829` | solver and clustering exception text goes through log_safe |
+| F-244 | F-S06-35 | `6e25829` | three unreferenced partials deleted; /apply-intercept kept as the tested single-method API |
+| F-245 | F-S06-36 | `6e25829` | an unknown interceptor regime says the list is unfiltered |
+| F-246, F-256 | F-S06-37, F-S07-25 | `6e25829` | hx-vals built with tojson (hardening for satno, which was already valid JSON) |
+
+#### UDL, GCAT and PoL routes
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-247 | F-S07-06 | `6e25829` | GCAT fetches pinned to planet4589.org at every hop |
+| F-248 | F-S07-10 | `6e25829` | state vector query bounded to 7 days, newest picked, missing referenceFrame refused |
+| F-249 | F-S07-12 | `6e25829` | NOTSO sync messages escaped |
+| F-250 | F-S07-17 | `6e25829` | unreachable status handler removed |
+| F-251 | F-S07-18 | `6e25829` | UDL password sent as typed; autocomplete off |
+| F-252 | F-S07-21 | `6e25829` | UDL_BASE_URL defined once in settings |
+| F-253 | F-S07-22 | `6e25829` | docstring names all four returns |
+| F-254 | F-S07-23 | `6e25829` | GCAT body streamed under a 64 MiB cap; no per-page copy |
+| F-255 | F-S07-24 | `6e25829` | createdAt always UTC-aware; day of year outside 1 to 366 refused |
+
+#### Platform, identity and operator UI
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-257 | F-S08-09 | `6e25829` | /readyz probes the database |
+| F-258 | F-S08-13 | `6e25829` | one access line per request, path only; Keycloak claim corrected |
+| F-259 | F-S08-15 | `6e25829` | cookie age imported from auth |
+| F-260 | F-S08-17 | `6e25829` | admin and rate_limit docstrings corrected |
+| F-261 | F-S08-18 | `6e25829` | bootstrap username checked; break-glass promotion needs SPECTRE_ADMIN_RESET_PROMOTE |
+| F-262 | F-S08-19 | `6e25829` | log_safe never exceeds its limit |
+| F-263 | F-S08-20 | `6e25829` | revocation test docstring describes session_generation |
+| F-264 | F-S09-20 | `6e25829` | local now; scored.is_(True) |
+| F-266 | F-S09-24 | `6e25829` | scenario window converts offsets |
+| F-267 | F-S09-26 | `6e25829` | asset add refuses an empty name and a non-TLE; delete URLs encoded |
+| F-268 | F-S09-28 | `6e25829` | stale theme CSS and four orphan SVGs removed |
+| F-269 | F-S09-29 | `56518ab` | marking from SPECTRE_CLASSIFICATION and version from the package on banner and splash |
+| F-270 | F-S09-30 | `56518ab` | CSP comment counts corrected |
+
+#### Training, clustering config and test helpers
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-271 | F-S09-31 | `56518ab` | from_constants takes defaults from the fields; docstring names real modules |
+| F-272 | F-S09-33 | `56518ab` | 50 of 52 scenario checksums recomputed; tle_checksum_valid applied at manual entry |
+| F-273 | F-S09-34 | `56518ab` | tutorial labels match the buttons; efficiency promise removed |
+| F-274 | F-S09-35 | `56518ab` | shared colour maths in tests/unit/_css.py; the shadowed _rule_block renamed |
+| F-275 | F-S09-36 | `56518ab` | objective colours from the axis lookup; empty-list copy corrected |
+| F-276 | F-S09-37 | `56518ab` | the hub reuses the open session; a racing progress insert returns the existing row |
+
+#### CI, scripts and ignore rules
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-277 | F-S10-06 | `88f7b42` | setuid sweep runs as root, prints paths, fails when find fails |
+| F-278 | F-S10-07 | `88f7b42` | quality job on pull requests only; whole-repo coverage before the early exit; --include-untracked |
+| F-279 | F-S10-09 | `88f7b42` | ruff, bandit and mypy hooks run the locked versions |
+| F-287 | F-S10-26 | `88f7b42` | timeout-minutes on every job; boot check bounded |
+| F-288 | F-S10-27 | `88f7b42` | private mktemp scratch |
+| F-289 | F-S10-28 | `88f7b42` | a missing ledger fails packaging |
+| F-290 | F-S10-29 | `88f7b42` | manifest search covers the whole stage and every recognised name |
+| F-291 | F-S10-30 | `88f7b42` | root-only .gitignore rules anchored |
+| F-292 | F-S10-31 | `88f7b42` | .dockerignore uses **/ |
+| F-296 | F-S10-36 | `88f7b42` | the scanner's Python 3.11 must resolve |
+
+#### Documentation, locks and repository hygiene
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-280 | F-S10-16 | `bb9cd73` | architecture.md: ThreadPoolExecutor, 200 entries, no missing logo |
+| F-281 | F-S10-17 | `bb9cd73` | root SECURITY.md closes SEC-01 to SEC-03; SEC-04 (SBOM in CI) stays open |
+| F-282 | F-S10-18 | `bb9cd73` | READINESS.md left out of version rewrites and marked a point-in-time record |
+| F-283 | F-S10-20 | `bb9cd73` | python-docx moved to dev; hypothesis removed; relocked with no other pin moved |
+| F-284 | F-S10-22 | `bb9cd73` | query_UDL_Data.py deleted (its literal token is a placeholder; it disabled TLS verification) |
+| F-285 | F-S10-24 | `bb9cd73` | build comments describe the current flow |
+| F-293 | F-S10-32 | `bb9cd73` | STK notes marked historical; root STK-branded logo removed |
+| F-294 | F-S10-33 | `bb9cd73` | persona and prompt documents moved to prompts/ |
+| F-295 | F-S10-34 | `bb9cd73` | root splash fragment and duplicate SVGs removed |
+
+#### Already closed by earlier work
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-185 | F-S00-10 | `6bee4f2` | ci.yml no longer overrides the pyproject coverage ratchet |
+| F-186 | F-S00-11 | `e285c68` | the SPECTRE-1 gitlink is gone |
+| F-190 | F-S01-15 | `accb129` | the Lambert comment no longer claims Newton-Raphson |
+| F-197 | F-S02-21 | `5d73e39` | hop times off the odd or whole half-orbit cadence are refused (with F-082) |
+| F-209 | F-S03-21 | `f28f4b1` | the misleading wrap comment went with the F-096 split |
+| F-240 | F-S06-31 | `2d8ab36` | the sweep headline shows whole m/s |
+| F-265 | F-S09-21 | `22183cf` | the speed multiplier went with F-169 |
+| F-286 | F-S10-25 | `6bee4f2` | pip-audit covers requirements-dev.txt |
+
+Partly fixed at triage and completed above: F-189, F-194, F-203, F-217, F-222, F-232, F-254 and F-280.
+
+#### Left for a decision
+
+F-188 (origin F-S00-15): the test-naming convention `test_should_` is stated in the engineering persona (now `prompts/UK_Principal_Engineer_Persona.md`) and used by none of the suite's tests. Either the convention is dropped or the suite is renamed and a naming lint added. That is a standards call for the owner, not a defect fix.
+
+#### Notes
+
+● F-244: `/apply-intercept` is unreferenced by the UI but kept. It is the single-method API, and about ten integration tests exercise its error paths; deleting it would delete that coverage.
+● F-247: with the host pinned to planet4589.org, no redirect or configuration can point the fetch at a private, loopback or link-local address, so no separate resolved-address check was added.
+● F-272: the route-test TLEs had a 68-column line 2 (the perigee field had lost a space) as well as wrong checksums. Both were repaired once manual entry began checking.
+● F-274: the first of two `_rule_block` definitions was not dead. Module-level constants called it during import; every call made later silently reached the second. It is now `_sole_rule_block`.
+● Observation, not a finding: the house rule that tests must skip when a non-application file is absent detects literal paths only. A helper taking the path as a variable passes it unseen. The new batch 3 helper skips correctly; the detector itself is unchanged.
