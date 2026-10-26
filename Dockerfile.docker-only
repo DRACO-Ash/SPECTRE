@@ -8,7 +8,7 @@
 #
 # The only code change needed is here: the app ships as a plain package
 # directory and runs via `python -m`, rather than being pip-installed, because
-# installing requires pyproject.toml. requirements.lock is not a name the
+# installing requires pyproject.toml. requirements-runtime.txt is not a name the
 # platform treats as a manifest, so dependency pinning survives.
 #
 # Verified on 23 August 2026: builds clean, suid sweep clean, uid 10001, two

@@ -25,7 +25,7 @@
 # Evidence: the first upload had pyproject.toml and no requirements.txt, and a
 # Dependencies stage still ran and failed; a docker-only app has no such stage.
 # So docker-only requires that NO recognised manifest ships: no pyproject.toml
-# and no requirements.txt. requirements.lock is not a recognised name, so
+# and no requirements.txt. requirements-runtime.txt is not a recognised name, so
 # dependency pinning survives, and Dockerfile.docker-only runs the app via
 # `python -m` instead of installing it.
 

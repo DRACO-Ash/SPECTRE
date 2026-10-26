@@ -1,5 +1,9 @@
 # STK Object Model Notes
 
+> **Historical.** SPECTRE no longer drives STK; it computes with its own
+> pure-Python astrodynamics in `spectre/astro/`. These notes describe the
+> retired STK COM integration and are kept for reference only (audit F-293).
+
 Reference notes for implementing `StkComSession` against the STK 13 COM API.
 
 ## COM Dispatch Entry Point

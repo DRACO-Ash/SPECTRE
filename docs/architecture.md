@@ -54,7 +54,7 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 | `pattern_of_life.py` | Historical TLE sequence analysis: period tracking, manoeuvre detection, activity classification, behavioural baseline; `PolAnalysis` result dataclass |
 | `tle_filter.py` | Cadence-based TLE clustering: `cluster_tles()`, `select_representative()`, `quality_flag_sequence()`, `filter_tle_history()` |
 | `tle_preprocessing.py` | Bridge between `tle_clustering/` (DBSCAN) and `spectre.astro`; `cluster_and_reduce_tle_cache()` used by Threat Sweep |
-| `monte_carlo.py` | `ManoeuvreHypothesis`, `ManoeuvreType`, `MANOEUVRE_ARCHETYPES`; `run_monte_carlo()` (ProcessPoolExecutor, RK45 + J2 + drag); `MonteCarloResult` with P5/P50/P95 and regime probabilities |
+| `monte_carlo.py` | `ManoeuvreHypothesis`, `ManoeuvreType`, `MANOEUVRE_ARCHETYPES`; `run_monte_carlo()` (ThreadPoolExecutor, RK45 + J2 + drag); `MonteCarloResult` with P5/P50/P95 and regime probabilities |
 | `notso.py` | `NOTSORecord` parser (USSPACECOM format), `correlate_notsos_with_manoeuvres()`, `OperatorBehaviourProfile` |
 | `photometry.py` | `PhotometryObservation`, geometric corrections (range normalisation, Rozenberg airmass), `fit_baseline()` (quadratic phase function, sigma-clipping), `detect_change()` (Student's t-test), `PhotometryChangeAssessment` |
 
@@ -96,7 +96,7 @@ FastAPI application. All operator access via browser — no desktop install requ
 - **database.py** — async SQLAlchemy engine + admin account bootstrap from env vars
 - **models.py** — `User` ORM model
 - **deps.py** — centralised `get_templates()` shared by all route modules
-- **planning_state.py** — per-session in-memory state (`SessionState`): blue/red asset lists, UDL credentials, intercept history, `deque`-backed run log (O(1) eviction at 500 entries)
+- **planning_state.py** — per-session in-memory state (`SessionState`): blue/red asset lists, UDL credentials, intercept history, `deque`-backed run log (O(1) eviction at 200 entries)
 - **routes/**
   - `login.py` — `GET/POST /login`, `POST /logout`
   - `operator.py` — dashboard, asset CRUD, log, orbital events
@@ -109,7 +109,7 @@ FastAPI application. All operator access via browser — no desktop install requ
   - `gcat.py` — GCAT panel: 28 TSV datasets from planet4589.org, in-memory cache, on-demand per-dataset download, search/sort/paginate
   - `training.py` — Training mode: session management, scenario dispatch, tutorial progress, gamification XP awards
 - **templates/** — Jinja2 HTML: `base.html`, `login.html`, `operator.html`, `training.html`, and HTMX partials for every panel and result type
-- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, `SPECTRE_logo.svg`
+- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, and the theme package under `spectre-theme/` (logos and icons)
 
 ### `spectre/data/`
 
@@ -168,7 +168,7 @@ All operator actions return HTML fragments that HTMX swaps into targeted DOM ele
 
 ### Off-thread blocking calls
 
-Downloads and compute-intensive solvers that would block FastAPI's async event loop are dispatched via `asyncio.get_running_loop().run_in_executor(_EXECUTOR, ...)` using a shared `ThreadPoolExecutor`. The Monte Carlo engine additionally uses `ProcessPoolExecutor` for CPU-bound sample propagation.
+Downloads and compute-intensive solvers that would block FastAPI's async event loop are dispatched via `asyncio.get_running_loop().run_in_executor(_EXECUTOR, ...)` using a shared `ThreadPoolExecutor`. The Monte Carlo engine uses its own `ThreadPoolExecutor` for sample propagation. The equations of motion are Python, so the GIL is held for most of each step and the threads give little speed-up (see the note in `spectre/astro/monte_carlo.py`).
 
 ### In-memory session state
 

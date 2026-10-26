@@ -50,5 +50,3 @@ logs/
 # Design sources kept in the repo but not needed at runtime
 *.svg
 !spectre/web/static/**/*.svg
-spectre_splash_screen.html
-query_UDL_Data.py

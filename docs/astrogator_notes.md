@@ -1,5 +1,9 @@
 # STK Astrogator COM Notes
 
+> **Historical.** SPECTRE no longer drives STK; it computes with its own
+> pure-Python astrodynamics in `spectre/astro/`. These notes describe the
+> retired STK COM integration and are kept for reference only (audit F-293).
+
 Reference for implementing `StkComSession.compute_maneuver_options` and
 `StkComSession.apply_maneuver` against the STK 13 Astrogator Object Model.
 
