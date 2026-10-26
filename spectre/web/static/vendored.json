@@ -1,0 +1,33 @@
+{
+  "_comment": "Third-party JavaScript served from this directory. scripts/audit-vendored-js.py checks each against the OSV database in CI; a test holds the hashes and versions to the files (audit F-187).",
+  "packages": [
+    {
+      "file": "chart.umd.min.js",
+      "ecosystem": "npm",
+      "name": "chart.js",
+      "version": "4.4.7",
+      "sha256": "206b6e8bb00fc7bba2c7ee80ca41db3e9e05ba7be0aa35abeba9cfd5357f5d0e"
+    },
+    {
+      "file": "chartjs-plugin-zoom.min.js",
+      "ecosystem": "npm",
+      "name": "chartjs-plugin-zoom",
+      "version": "2.0.1",
+      "sha256": "503c709802be285c676afe0369bf5f72066d0b0c23929188c3158f35c0327a9c"
+    },
+    {
+      "file": "hammer.min.js",
+      "ecosystem": "npm",
+      "name": "hammerjs",
+      "version": "2.0.7",
+      "sha256": "7953631f0e54794d2352a3cfa591c0914d73e14f90141058e3cf16bee7939bcf"
+    },
+    {
+      "file": "htmx.min.js",
+      "ecosystem": "npm",
+      "name": "htmx.org",
+      "version": "1.9.12",
+      "sha256": "449317ade7881e949510db614991e195c3a099c4c791c24dacec55f9f4a2a452"
+    }
+  ]
+}

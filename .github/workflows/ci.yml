@@ -130,6 +130,10 @@ jobs:
         run: |
           pip-audit --desc on --no-deps --disable-pip --requirement requirements.txt
           pip-audit --desc on --no-deps --disable-pip --requirement requirements-dev.txt
+      - name: OSV — scan the vendored JavaScript
+        # The four libraries served from spectre/web/static are listed in
+        # vendored.json and were never scanned by anything (audit F-187).
+        run: python scripts/audit-vendored-js.py
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:
