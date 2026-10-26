@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from spectre.domain.provenance import Provenance, provenance, value_input
+
 logger = logging.getLogger(__name__)
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
@@ -178,6 +180,8 @@ class ScenarioResult:
     # F-S05-02, and the "modelled estimate" banner agreed in July 2026).
     modelled:               bool = True
     basis:                  str = MODELLED_BASIS
+    # The code, calibration and scenario behind this result (audit F-121).
+    provenance:             Provenance | None = None
 
     def summary_table(self) -> str:
         """ASCII summary table for CLI / operator guide output."""
@@ -426,4 +430,5 @@ def evaluate_scenario(
         robust_best_response=robust_response,
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
+        provenance=provenance([value_input("scenario", scenario)]),
     )

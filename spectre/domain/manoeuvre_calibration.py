@@ -189,6 +189,13 @@ class _Band:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#: The document every band below is drawn from. Results record it, so a
+#: figure can be traced to the edition of the source it used (audit F-121).
+CALIBRATION_SOURCE = (
+    "Satellite Manoeuvre Delta-v: Feasibility Above 0.5 km/s and Budgets by Regime "
+    "(Bluestaq Limited Space Watch, v1.0, 13 October 2026)"
+)
+
 # The bands. Keyed (regime, kind). Every figure cited.
 # ─────────────────────────────────────────────────────────────────────────────
 

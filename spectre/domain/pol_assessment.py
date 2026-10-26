@@ -67,6 +67,7 @@ from spectre.domain.manoeuvre_calibration import (
     propellant_mass_fraction,
     station_keeping_m_s_per_year,
 )
+from spectre.domain.provenance import Provenance, provenance, tle_input
 
 __all__ = [
     "AnomalyAssessment",
@@ -794,6 +795,8 @@ class PolAssessment:
 
     #: Manoeuvres the assessment's watchlist says to treat as high priority.
     escalations: tuple[str, ...] = field(default_factory=tuple)
+    #: The code, calibration and every element set behind this (audit F-121).
+    provenance: Provenance | None = None
 
     @property
     def total_dv_m_s(self) -> float:
@@ -864,6 +867,10 @@ def assess_pattern_of_life(
         propellant=propellant, anomaly=anomaly, detection=detection, intel=intel,
         sk_ceiling_m_s=sk_ceiling, sk_ceiling_basis=sk_basis,
         escalations=escalations,
+        provenance=provenance(
+            tle_input(f"TLE {r.epoch:%Y-%m-%dT%H:%M:%SZ}", getattr(r, "tle", ""), r.epoch)
+            for r in getattr(pol, "records", []) or []
+        ),
     )
 
 

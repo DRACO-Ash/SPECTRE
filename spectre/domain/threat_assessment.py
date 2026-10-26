@@ -51,6 +51,7 @@ from spectre.domain.manoeuvre_calibration import (
     kind_for_method,
 )
 from spectre.domain.pol_assessment import anomaly_risk_level
+from spectre.domain.provenance import Provenance, provenance, value_input
 
 __all__ = [
     "AccessEvidence",
@@ -348,6 +349,8 @@ class ThreatAssessment:
     posture_basis: str = ""
     #: Set when no flown platform could deliver the burn in the time available.
     undeliverable_reason: str = ""
+    #: The code, calibration and evidence behind this verdict (audit F-121).
+    provenance: Provenance | None = None
 
     @property
     def verdict_label(self) -> str:
@@ -458,6 +461,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         posture_label=posture.posture_label,
         posture_rationale=posture.rationale,
         posture_basis=posture.basis,
+        provenance=provenance([value_input("access", access), value_input("capability", capability)]),
         undeliverable_reason=undeliverable_reason,
     )
 
