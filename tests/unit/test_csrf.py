@@ -115,55 +115,8 @@ class TestEnforcement:
             data={"username": "nobody", "password": "wrong"},
             follow_redirects=False,
         )
-        assert resp.status_code != 403
-
-
-class TestSessionCookies:
-    def test_round_trips_a_username(self) -> None:
-        from spectre.web.auth import decode_session_cookie, make_session_cookie
-
-        assert decode_session_cookie(make_session_cookie("operator1")) == "operator1"
-
-    @pytest.mark.parametrize("bad", ["", "garbage", "a.b.c", "eyJzdWIiOiJ4In0.tampered.sig"])
-    def test_rejects_an_invalid_cookie(self, bad: str) -> None:
-        from spectre.web.auth import decode_session_cookie
-
-        assert decode_session_cookie(bad) is None
-
-    def test_a_cookie_signed_with_another_key_is_rejected(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Forging a session requires the signing key; a different key must fail."""
-        from spectre.web.auth import decode_session_cookie, make_session_cookie
-
-        forged = make_session_cookie("admin")
-        monkeypatch.setenv("SECRET_KEY", "a-completely-different-signing-key")
-        assert decode_session_cookie(forged) is None
-
-
-class TestPasswordHashing:
-    def test_verifies_a_correct_password(self) -> None:
-        from spectre.web.auth import hash_password, verify_password
-
-        assert verify_password("correct horse battery", hash_password("correct horse battery"))
-
-    def test_rejects_a_wrong_password(self) -> None:
-        from spectre.web.auth import hash_password, verify_password
-
-        assert not verify_password("wrong", hash_password("correct horse battery"))
-
-    def test_hash_is_salted(self) -> None:
-        """Equal passwords must not produce equal hashes."""
-        from spectre.web.auth import hash_password
-
-        assert hash_password("same-password") != hash_password("same-password")
-
-    def test_hash_does_not_contain_the_plaintext(self) -> None:
-        from spectre.web.auth import hash_password
-
-        assert "s3cret-value" not in hash_password("s3cret-value")
-
-
+        # Reached the password check, which refused the credentials: not a CSRF 403.
+        assert resp.status_code == 401
 
 
 class TestTemplateFormsCarryTheToken:

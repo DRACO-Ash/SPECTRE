@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-unit-tests")
 
 
@@ -47,3 +49,13 @@ class TestSessionCookie:
         token = make_session_cookie("alice")
         tampered = token[:-4] + "XXXX"
         assert decode_session_cookie(tampered) is None
+
+    def test_a_cookie_signed_with_another_key_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Forging a session requires the signing key; a different key must fail.
+
+        Moved from test_csrf.py, whose copies of this module's other cookie
+        and hashing tests were removed as duplicates (audit F-156).
+        """
+        forged = make_session_cookie("admin")
+        monkeypatch.setenv("SECRET_KEY", "a-completely-different-signing-key")
+        assert decode_session_cookie(forged) is None

@@ -105,3 +105,52 @@ def test_the_checker_catches_or_true() -> None:
 
     assert _cannot_fail(assertion("assert a <= b or True"))
     assert not _cannot_fail(assertion("assert a <= b or c"))
+
+
+def _searches_without_concluding(body: list[ast.stmt]) -> list[int]:
+    """Lines of ``for`` loops that ``break`` with no ``else`` and no assertion after them.
+
+    Such a loop finds a row and checks it, so when the row is absent nothing
+    is checked and the test passes (audit F-156).
+    """
+    lines: list[int] = []
+    for i, stmt in enumerate(body):
+        if isinstance(stmt, ast.For) and not stmt.orelse and _breaks(stmt):
+            following = body[i + 1] if i + 1 < len(body) else None
+            if not isinstance(following, ast.Assert):
+                lines.append(stmt.lineno)
+        blocks = [getattr(stmt, f, []) for f in ("body", "orelse", "finalbody")]
+        blocks += [h.body for h in getattr(stmt, "handlers", [])]
+        for block in blocks:
+            lines.extend(_searches_without_concluding(block))
+    return lines
+
+
+def _breaks(loop: ast.For) -> bool:
+    """Whether *loop* itself breaks (not a loop nested inside it)."""
+    stack: list[ast.AST] = list(loop.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Break):
+            return True
+        if not isinstance(node, (ast.For, ast.While, ast.AsyncFor, ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def test_no_search_loop_passes_when_it_finds_nothing() -> None:
+    offenders = sorted({
+        f"{where} line {line}"
+        for where, fn in _test_functions()
+        for line in _searches_without_concluding(fn.body)
+    })
+    assert offenders == [], f"these loops break on a find and assert nothing when there is none: {offenders}"
+
+
+def test_the_search_check_recognises_the_pattern() -> None:
+    bad = ast.parse("for x in xs:\n    if x:\n        assert x\n        break\n").body
+    with_else = ast.parse("for x in xs:\n    if x:\n        break\nelse:\n    raise AssertionError\n").body
+    with_assert = ast.parse("for x in xs:\n    if x:\n        found = x\n        break\nassert found\n").body
+    assert _searches_without_concluding(bad) == [1]
+    assert _searches_without_concluding(with_else) == []
+    assert _searches_without_concluding(with_assert) == []
