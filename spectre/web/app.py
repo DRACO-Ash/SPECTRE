@@ -57,6 +57,27 @@ templates.env.filters["m_s"] = format_m_s        # {{ dv | m_s }} → delta-v in
 templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m", one definition
 
 
+def banner_class(marking: str) -> str:
+    """The banner colour class for *marking*.
+
+    A marking the theme has no colour for gets the most restrictive one
+    rather than the unclassified green (audit F-269).
+    """
+    word = marking.strip().upper()
+    if word.startswith("UNCLASSIFIED"):
+        return "unclassified"
+    if word.startswith("OFFICIAL"):
+        return "official"
+    return "secret"
+
+
+# One source for the version and the marking; the splash said v2.0.0 and both
+# templates said UNCLASSIFIED whatever the deployment was (audit F-269).
+templates.env.globals["spectre_version"] = __version__
+templates.env.globals["classification_marking"] = get_settings().classification_marking
+templates.env.globals["classification_class"] = banner_class(get_settings().classification_marking)
+
+
 logger = logging.getLogger(__name__)
 _access_log = logging.getLogger("spectre.access")
 
@@ -229,21 +250,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 # forced by something already in the tree, and each is a KNOWN GAP recorded with
 # the work needed to close it:
 #
-#   script-src 'unsafe-inline'. 18 templates carry inline <script>; base.html
+#   script-src 'unsafe-inline'. 17 templates carry inline <script>; base.html
 #     holds two of them, the pre-paint theme bootstrap and the shared
-#     spectreActivate keyboard handler, and 159 inline onclick and onkeydown
+#     spectreActivate keyboard handler, and 158 inline onclick and onkeydown
 #     attributes drive the panels. A nonce does not cover event handler
 #     attributes at all, and hashes would need 'unsafe-hashes' and a hash per
 #     handler. To close: move the base.html blocks into /static and convert the
 #     handlers to delegated listeners, then drop the token.
 #   script-src 'unsafe-eval'. htmx 1.9.12 compiles hx-on::* attributes with
-#     new Function (static/htmx.min.js). Six of them clear forms and open panels
-#     in catalog_results, admin/users, operator and training_scenario_list.
-#     Without the token htmx raises htmx:evalDisallowedError and those six stop
-#     working. To close: replace the six attributes with listeners in a static
-#     file, then drop the token.
-#   style-src 'unsafe-inline'. Roughly 1500 inline style attributes and two
-#     inline <style> blocks. To close: move them into the stylesheet.
+#     new Function (static/htmx.min.js). Seven of them clear forms and open
+#     panels in catalog_results, sweep_target_config, admin/users, operator and
+#     training_scenario_list. Without the token htmx raises
+#     htmx:evalDisallowedError and those seven stop working. To close: replace
+#     the seven attributes with listeners in a static file, then drop the token.
+#   style-src 'unsafe-inline'. Roughly 1500 inline style attributes and three
+#     inline <style> blocks (splash_overlay, intercept_geometry, training).
+#     To close: move them into the stylesheet. Counts rechecked for F-270.
 #   frame-src and frame-ancestors 'self'. The training Console tab embeds the
 #     console itself: templates/training.html sets an iframe src of '/'.
 #     'none', or X-Frame-Options: DENY, blanks that tab. 'self' still refuses

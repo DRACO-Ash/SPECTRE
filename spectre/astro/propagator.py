@@ -83,6 +83,23 @@ class KeplerianElements:
 TLE_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError, ArithmeticError)
 
 
+_TLE_LINE_LENGTH = 69
+
+
+def tle_checksum_valid(line: str) -> bool:
+    """``True`` when column 69 of *line* is its modulo-10 checksum.
+
+    Digits count their value, a minus sign counts 1, everything else 0.
+    Nothing checked this, and 50 of the 52 training scenario lines carried a
+    wrong one (audit F-272).
+    """
+    line = line.rstrip()
+    if len(line) != _TLE_LINE_LENGTH or not line[-1].isdigit():
+        return False
+    total = sum(int(c) if c.isdigit() else int(c == "-") for c in line[:-1])
+    return total % 10 == int(line[-1])
+
+
 class TLEOrbit:
     """Satellite orbit defined by a TLE, propagated with SGP4."""
 

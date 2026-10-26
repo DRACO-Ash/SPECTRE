@@ -65,8 +65,17 @@
       Objectives ({{ scenario.scoring.passing_score }} pts to pass · {{ scenario.scoring.optimal_score }} pts optimal)
     </div>
     {% for obj in scenario.objectives %}
+    {# The same lookup as training_scenario_active.html. cfg_axis_colour was
+       never in any context, so every objective rendered grey (audit F-275). #}
+    {% set axis_colour = {
+      "situational_awareness": "#3b8beb",
+      "manoeuvre_planning":    "#22c55e",
+      "decision_quality":      "#f59e0b",
+      "operational_tempo":     "#ef4444",
+      "efficiency":            "#a855f7"
+    }.get(obj.skill_axis, "#6b7280") %}
     <div style="display:flex; align-items:flex-start; gap:0.4rem; margin-bottom:0.2rem">
-      <span style="font-size:0.6rem; font-weight:700; color:{{ cfg_axis_colour(obj.skill_axis) if cfg_axis_colour is defined else '#6b7280' }};
+      <span style="font-size:0.6rem; font-weight:700; color:{{ axis_colour }};
                    white-space:nowrap; padding-top:0.05rem">+{{ obj.points }} pts</span>
       <span style="font-size:0.63rem; color:var(--text-dim)">{{ obj.description }}</span>
     </div>

@@ -24,6 +24,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.domain.models import BlueAsset, RedTrack
@@ -70,7 +71,15 @@ async def _get_or_create_progress(
             unlocked_json=json.dumps(init_unlocks),
         )
         db.add(progress)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two first requests raced: the other one inserted the row between
+            # the select and this commit. Use its row rather than a 500 (F-276).
+            await db.rollback()
+            return (await db.execute(
+                select(TrainingProgress).where(TrainingProgress.username == username)
+            )).scalar_one()
         await db.refresh(progress)
     return progress
 
@@ -78,6 +87,19 @@ async def _get_or_create_progress(
 # ── Helper: open training session ─────────────────────────────────────────────
 
 async def _open_session(username: str, db: AsyncSession) -> TrainingSession:
+    """The operator's open session, or a new one when none is open.
+
+    Every visit to the hub inserted a row, so a refresh left an unclosed
+    session behind each time (audit F-276).
+    """
+    current = (await db.execute(
+        select(TrainingSession)
+        .where(TrainingSession.username == username, TrainingSession.ended_at.is_(None))
+        .order_by(TrainingSession.started_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if current is not None:
+        return current
     session = TrainingSession(username=username)
     db.add(session)
     await db.commit()

@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
@@ -97,6 +97,8 @@ def _add_refusal(name: str, tle: str) -> str | None:
     lines = [ln.strip() for ln in tle.splitlines() if ln.strip()]
     if len(lines) < 2 or not lines[-2].startswith("1 ") or not lines[-1].startswith("2 "):  # noqa: PLR2004
         return "The TLE needs its line 1 and line 2."
+    if not (tle_checksum_valid(lines[-2]) and tle_checksum_valid(lines[-1])):
+        return "A TLE line fails its checksum: check it was copied whole (audit F-272)."
     try:
         TLEOrbit(tle)
     except TLE_ERRORS:

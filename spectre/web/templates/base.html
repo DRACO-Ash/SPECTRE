@@ -59,7 +59,7 @@
 </head>
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <div class="app-chrome">
-    <div class="spectre-classification-banner unclassified">UNCLASSIFIED</div>
+    <div class="spectre-classification-banner {{ classification_class }}">{{ classification_marking }}</div>
     <nav class="nav-bar">
       <div class="nav-brand">
         {% block nav_brand %}

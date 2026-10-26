@@ -39,6 +39,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit._css import over as _over
+from tests.unit._css import ratio as _ratio
+
 _STATIC = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static"
 
 #: Non-text contrast floor, WCAG 2.1 SC 1.4.11. A focus ring carries no text.
@@ -96,25 +99,10 @@ def _tokens(filename: str, selector: str) -> dict[str, str]:
                            _block(filename, selector)))
 
 
-def _luminance(colour: str) -> float:
-    raw = colour.lstrip("#")
-    channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
-    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 
 
-def _ratio(foreground: str, background: str) -> float:
-    a, b = _luminance(foreground), _luminance(background)
-    lighter, darker = max(a, b), min(a, b)
-    return (lighter + 0.05) / (darker + 0.05)
 
 
-def _over(foreground: str, alpha: float, background: str) -> str:
-    f = [int(foreground.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
-    b = [int(background.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
-    return "#{:02X}{:02X}{:02X}".format(
-        *[round(f[i] * alpha + b[i] * (1 - alpha)) for i in range(3)]
-    )
 
 
 # ── The cascade, as the browser resolves it ────────────────────────────────

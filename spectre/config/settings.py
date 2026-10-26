@@ -377,6 +377,11 @@ class Settings:
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET_PROMOTE", "").strip().lower()
         in _TRUTHY
     )
+    # The marking on the banner and the splash. Both hard-coded UNCLASSIFIED,
+    # so a deployment handling anything else showed the wrong marking (F-269).
+    classification_marking: str = field(
+        default_factory=lambda: os.environ.get("SPECTRE_CLASSIFICATION", "").strip() or "UNCLASSIFIED"
+    )
 
 
 def get_settings() -> Settings:

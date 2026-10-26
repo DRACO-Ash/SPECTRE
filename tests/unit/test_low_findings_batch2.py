@@ -260,8 +260,8 @@ class TestF266ScenarioWindowConvertsOffsets:
 
 
 class TestF267AssetAddIsValidated:
-    _TLE = ("1 25544U 98067A   26065.50000000  .00016717  00000-0  10270-3 0  9994\n"
-            "2 25544  51.6420 195.0000 0001207 86.9689 273.1630 15.54320000365490")
+    _TLE = ("1 25544U 98067A   26065.50000000  .00016717  00000-0  10270-3 0  9999\n"
+            "2 25544  51.6420 195.0000 0001207  86.9689 273.1630 15.54320000365490")
 
     def test_refusals(self) -> None:
         from spectre.web.routes.operator import _add_refusal

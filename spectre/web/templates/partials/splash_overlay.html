@@ -1,6 +1,6 @@
 <!-- SPECTRE Splash Screen Overlay
      Shown once per session on operator console load.
-     Auto-dismissed after 3.2 s or on click/keypress.
+     Auto-dismissed after 3.4 s or on click/keypress.
      Stored in sessionStorage so it only fires once per browser session. -->
 <div id="spectre-splash"
      onclick="spectreCloseSplash()"
@@ -86,9 +86,9 @@
 
   <!-- Meta row -->
   <div class="sp-t3" style="display:flex;gap:20px;align-items:center;margin-bottom:18px;">
-    <span style="font-family:var(--spectre-font-mono,'JetBrains Mono',monospace);font-size:9px;color:#374151;letter-spacing:2px;">v2.0.0</span>
+    <span style="font-family:var(--spectre-font-mono,'JetBrains Mono',monospace);font-size:9px;color:#374151;letter-spacing:2px;">v{{ spectre_version }}</span>
     <span style="width:3px;height:3px;background:#E24B4A;border-radius:50%;display:inline-block;"></span>
-    <span style="font-family:var(--spectre-font-mono,'JetBrains Mono',monospace);font-size:9px;color:#374151;letter-spacing:2px;">UNCLASSIFIED</span>
+    <span style="font-family:var(--spectre-font-mono,'JetBrains Mono',monospace);font-size:9px;color:#374151;letter-spacing:2px;">{{ classification_marking }}</span>
     <span style="width:3px;height:3px;background:#E24B4A;border-radius:50%;display:inline-block;"></span>
     <span style="font-family:var(--spectre-font-mono,'JetBrains Mono',monospace);font-size:9px;color:#374151;letter-spacing:2px;">PROTECT &amp; DEFEND</span>
   </div>
