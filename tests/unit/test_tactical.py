@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from spectre.astro.constants import MU_EARTH, R_EARTH
+from spectre.astro.constants import GEO_RADIUS, MU_EARTH, R_EARTH
 from spectre.astro.tactical import (
     assess_intercept_intent,
     classify_manoeuvre,
@@ -33,7 +33,7 @@ from spectre.astro.tactical import (
 
 # ── Typical orbit radii ────────────────────────────────────────────────────
 LEO_R = R_EARTH + 500.0   # ~500 km altitude
-GEO_R = 42164.0           # GEO radius
+GEO_R = GEO_RADIUS        # GEO radius (audit F-203)
 
 
 def _drifted(raan_deg: float, a: float = LEO_R, ecc: float = 0.001, inc: float = 51.6, dt_s: float = 86400.0) -> float:
@@ -238,7 +238,9 @@ class TestCollisionAvoidance:
     def test_basic_cola(self) -> None:
         plan = collision_avoidance(LEO_R, desired_miss_km=1.0, time_before_tca_s=3600.0)
         assert plan.best.delta_v > 0
-        assert plan.best.miss_distance_km == 1.0
+        # The separation reached, at least the miss asked for (audit F-196).
+        assert plan.best.miss_distance_km >= 1.0
+        assert plan.best.miss_distance_km == pytest.approx(1.0245516, rel=1e-6)
         assert plan.best.strategy in ("radial", "along_track", "out_of_plane")
 
     def test_all_strategies_computed(self) -> None:

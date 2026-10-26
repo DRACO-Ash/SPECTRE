@@ -219,9 +219,13 @@ def _argp_and_ta(
     circular = ecc <= _CIRCULAR_ECC_TOL
 
     if circular and equatorial:
-        # True longitude: angle from the x-axis to the position vector.
+        # True longitude: angle from the x-axis to the position vector,
+        # measured in the direction of motion, so a retrograde orbit counts
+        # it the other way round (audit F-191).
         argp = 0.0
         ta = math.degrees(math.atan2(r[1], r[0])) % 360.0
+        if h[2] < 0:
+            ta = (360.0 - ta) % 360.0
     elif circular:
         # Argument of latitude: angle from the ascending node to the position.
         argp = 0.0

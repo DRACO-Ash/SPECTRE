@@ -63,6 +63,11 @@ class PhasingResult:
 #: or Lambert leg (audit F-025).
 _PHASING_RADIUS_TOLERANCE_KM = 10.0
 
+#: Lowest far apsis, in km above R_EARTH, a phasing orbit may have: the
+#: Karman line, the conventional edge of space. Below it the orbit decays
+#: within the phasing period. It was an unnamed literal (audit F-203).
+MIN_PERIGEE_ALT_KM = 100.0
+
 
 def phasing_orbit(
     r_chaser: float,
@@ -122,7 +127,7 @@ def phasing_orbit(
     # at 2*a_phase - r_chaser. A deep phasing orbit can put that inside the
     # atmosphere, which is a plan that cannot be flown.
     far_apsis = 2.0 * a_phase - r_chaser
-    if far_apsis <= R_EARTH + 100.0:
+    if far_apsis <= R_EARTH + MIN_PERIGEE_ALT_KM:
         raise ValueError(
             f"the phasing orbit needed to close {phase_angle_deg:.1f} degrees in "
             f"{n_revolutions} revolution(s) has its far apsis at "
@@ -635,6 +640,16 @@ class CollisionAvoidancePlan:
     total_delta_v: float      # km/s — ΔV of the best strategy
 
 
+def _cw_separation_km(n: float, t: float, dv_radial: float, dv_along: float) -> float:
+    """In-plane CW separation at *t* after radial and in-track impulses from rest."""
+    if not (math.isfinite(dv_radial) and math.isfinite(dv_along)):
+        return math.inf
+    s, c = math.sin(n * t), math.cos(n * t)
+    x = dv_radial / n * s + 2.0 * dv_along / n * (1.0 - c)
+    y = -2.0 * dv_radial / n * (1.0 - c) + dv_along * (4.0 * s - 3.0 * n * t) / n
+    return math.hypot(x, y)
+
+
 def collision_avoidance(
     r_ref: float,
     desired_miss_km: float,
@@ -659,7 +674,6 @@ def collision_avoidance(
     n = math.sqrt(mu / r_ref**3)
     nt = n * time_before_tca_s
     sin_nt = math.sin(nt)
-    _cos_nt = math.cos(nt)
 
     # Radial strategy: pure radial ΔV → radial displacement at TCA
     # x(t) = (Δvx / n) sin(nt)
@@ -683,22 +697,27 @@ def collision_avoidance(
     else:
         dv_oop = float("inf")
 
+    # Each burn is sized to put desired_miss_km on its own axis; the miss
+    # reported is the whole separation it reaches at TCA, which for the
+    # in-plane burns includes the swing on the other in-plane axis. It was
+    # reported as desired_miss_km for all three (audit F-196). This is the
+    # separation in the chief's frame, not projected on the encounter plane.
     radial = CollisionAvoidanceResult(
         strategy="radial",
         delta_v=dv_radial,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=_cw_separation_km(n, time_before_tca_s, dv_radial, 0.0),
         time_before_tca_s=time_before_tca_s,
     )
     along_track = CollisionAvoidanceResult(
         strategy="along_track",
         delta_v=dv_along_track,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=_cw_separation_km(n, time_before_tca_s, 0.0, dv_along_track),
         time_before_tca_s=time_before_tca_s,
     )
     out_of_plane = CollisionAvoidanceResult(
         strategy="out_of_plane",
         delta_v=dv_oop,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=abs(dv_oop / n * sin_nt) if math.isfinite(dv_oop) else desired_miss_km,
         time_before_tca_s=time_before_tca_s,
     )
 
@@ -807,10 +826,15 @@ def graveyard_transfer(
 ) -> GraveyardTransferResult:
     """Compute ΔV for a GEO → graveyard orbit transfer.
 
-    Standard end-of-life disposal: Hohmann transfer to GEO + 300 km.
+    End-of-life disposal by Hohmann transfer above GEO. The IADC guideline
+    (IADC-02-01, Rev. 3, section 5.3.1) sets the minimum raise as
+    235 km + 1000 C_R A/m (C_R the solar radiation pressure coefficient, A/m
+    in m^2/kg); the 300 km default is that minimum for C_R A/m = 0.065,
+    a typical comsat. It was stated as a standard with no source (audit F-204).
 
     Args:
-        graveyard_altitude_km: Altitude above GEO (km, default 300).
+        graveyard_altitude_km: Altitude above GEO (km, default 300); size it
+            with the IADC formula for the platform's C_R A/m.
         mu: Gravitational parameter.
     """
     r1 = GEO_RADIUS
@@ -1560,7 +1584,8 @@ def intercept_envelope_analytical(
        degenerates to zero delta-V over half a period, which describes no
        manoeuvre.
 
-       It is retained as a cheap upper-bound sketch for unequal radii. For an
+       Since it underestimates, it is at best a lower-bound sketch for
+       unequal radii (it read "upper-bound", audit F-198). For an
        intercept cost with real geometry use ``lambert_intercept``, which
        ``intercept_envelope_intercept`` now calls.
 
@@ -1676,7 +1701,6 @@ def relative_motion_stability(
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_ref**3)
-    _T = 2.0 * math.pi / n  # orbital period
 
     # CW boundedness condition: dvy0 + 2*n*dx0 = 0 for no secular drift
     drift_indicator = dvy0 + 2.0 * n * dx0

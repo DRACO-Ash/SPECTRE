@@ -332,7 +332,6 @@ spectre/                           ← repo root
 │   │   ├── scenario.py         ← ScenarioPlanner orchestrator
 │   │   ├── decision.py         ← Decision Engine: ActionType, AdversaryAction,
 │   │   │                          FriendlyResponse, OutcomeMetrics, evaluate_scenario()
-│   │   ├── geometry.py         ← AER, closure rate, orbital elements from TLE
 │   │   ├── maneuver_planner.py ← ManeuverPlanner: validates config, sorts options
 │   │   └── exceptions.py       ← Domain exception types
 │   ├── training/               ← Gamification and training mode

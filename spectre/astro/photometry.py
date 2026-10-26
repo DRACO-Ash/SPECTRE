@@ -43,9 +43,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Earth radius (km) — used only for geometry checks
-_R_EARTH_KM = 6371.0
-
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 

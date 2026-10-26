@@ -1163,7 +1163,7 @@ def detectability_intercept(
     red_orbit = TLEOrbit(red_tle)
     t_dep = manoeuvre_start + timedelta(seconds=coast_s)
     sv = red_orbit.propagate(t_dep)
-    altitude = sv.r_mag - 6378.137
+    altitude = sv.r_mag - R_EARTH
 
     det = detectability_metric(sol.total_delta_v, altitude, "lambert")
 

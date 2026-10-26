@@ -25,7 +25,9 @@ where  s = sin(nt),  c = cos(nt).
 
 Security
 --------
-- All numeric inputs are validated to be finite and within operational bounds.
+- Numeric inputs are validated to be finite and non-negative. Separation,
+  eccentricity and time of flight beyond CW's validity are flagged in the
+  result and logged, not refused (audit F-199).
 - Satellite names are sanitised before inclusion in audit log strings.
 - No eval/exec of user-supplied data.
 
@@ -74,7 +76,7 @@ _N_POINTS: int = 120
 # Hard cap on ΔV components (km/s) — flag implausible values.
 _DV_HARD_CAP_KM_S: float = 20.0
 # Hard cap on initial separation (km).
-_RANGE_HARD_CAP_KM: float = 100_000.0
+_RANGE_UNRELIABLE_KM: float = 100_000.0
 
 
 class RelativeGeometryError(ValueError):
@@ -350,9 +352,24 @@ def _check_validity(
             f"Secular drift terms may cause CW trajectory to diverge from truth."
         )
     if not notes:
-        notes.append("CW approximation valid for this geometry.")
+        notes.append(_VALID_NOTE)
 
     return valid, notes
+
+
+_VALID_NOTE = "CW approximation valid for this geometry."
+
+
+def _log_validity(notes: list[str]) -> None:
+    """Log every validity caveat.
+
+    Logging was gated on the result being invalid, and the time-of-flight
+    caveat does not make it invalid, so that one was never logged
+    (audit F-200).
+    """
+    for note in notes:
+        if note != _VALID_NOTE:
+            logger.warning("cw_geometry validity: %s", note)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -460,19 +477,17 @@ def compute_relative_geometry(
         )
         raise RelativeGeometryError(f"SGP4 propagation failed: {exc}") from exc
 
-    if initial_range > _RANGE_HARD_CAP_KM:
+    if initial_range > _RANGE_UNRELIABLE_KM:
         logger.warning(
             "cw_geometry: initial separation %.0f km between %r and %r "
-            "exceeds hard cap %d km — CW result will be unreliable",
-            initial_range, red_name_safe, blue_name_safe, _RANGE_HARD_CAP_KM,
+            "exceeds %d km — CW result will be unreliable",
+            initial_range, red_name_safe, blue_name_safe, _RANGE_UNRELIABLE_KM,
         )
 
     tof_hours = tof_s / 3600.0
     cw_valid, validity_notes = _check_validity(initial_range, ecc, tof_hours)
 
-    if not cw_valid:
-        for note in validity_notes:
-            logger.warning("cw_geometry validity: %s", note)
+    _log_validity(validity_notes)
 
     # ── Pre-burn coast ────────────────────────────────────────────────────────
     coast_points: list[TrajectoryPoint] = []

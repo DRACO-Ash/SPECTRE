@@ -340,7 +340,7 @@ _EDGE_HALVINGS: int = 60
 # The zero-revolution solution lies below z = 4*pi^2, where its time of flight
 # diverges; above it each band of z is one more complete revolution, solved by
 # _multi_revolution_z.
-_Z_PARABOLIC_LIMIT: float = 4.0 * math.pi**2
+_Z_SINGLE_REV_LIMIT: float = 4.0 * math.pi**2
 
 
 class _Geometry(NamedTuple):
@@ -408,9 +408,9 @@ def _solve_z(
     def residual(z: float) -> float:
         return _time_residual(z, geom, tof, mu)
 
-    # Upper bound: just inside the parabolic limit, where the time of flight
+    # Upper bound: just inside z = 4 pi^2, the end of the single-revolution branch, where the time of flight
     # diverges, so the residual is certainly positive there.
-    z_hi = _Z_PARABOLIC_LIMIT - 1e-6
+    z_hi = _Z_SINGLE_REV_LIMIT - 1e-6
     f_hi = residual(z_hi)
     if not math.isfinite(f_hi) or f_hi < 0.0:
         raise LambertConvergenceError(
