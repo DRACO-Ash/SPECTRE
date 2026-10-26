@@ -8,10 +8,17 @@ Pipeline
 1. Parse CSV observations into ``PhotometryObservation`` list.
 2. Apply geometric corrections (range normalisation, Rozenberg airmass,
    lunar quality flagging) → ``CorrectedObservation`` list.
-3. Fit a quadratic solar-phase-angle baseline using iterative sigma-clipping
-   → ``PhotometryBaseline``.
-4. Compute per-epoch residuals; run a two-sample Student's t-test on a
-   recent window vs the baseline window → ``PhotometryChangeAssessment``.
+3. Fit a quadratic solar-phase-angle baseline, with iterative sigma-clipping,
+   to the baseline window only → ``PhotometryBaseline``.
+4. Compute per-epoch residuals; run a two-sample Welch t-test on the recent
+   window vs the baseline window → ``PhotometryChangeAssessment``.
+
+The baseline is fitted before the recent window, never across it. Fitted to
+every observation, as it was, a real change in the recent window was partly
+absorbed into the fit, wholly so when phase angle trends with time
+(audit F-100). The test treats residuals as independent: it ignores the
+three fitted parameters and any correlation between observations on the
+same night, so its p-value is indicative.
 5. Correlate any detected brightness change with manoeuvres from the PoL
    engine (within ±48 h).
 
@@ -31,6 +38,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +82,7 @@ class CorrectedObservation:
 
 @dataclass
 class PhotometryBaseline:
-    """Fitted phase-angle baseline over a quiet period."""
+    """Phase-angle baseline fitted to the baseline window, before the recent window."""
 
     # Quadratic: mag = a0 + a1*phase + a2*phase**2
     a0: float
@@ -210,143 +219,123 @@ def _eval_quadratic(coeffs: tuple[float, float, float], phase: float) -> float:
     return a0 + a1 * phase + a2 * phase * phase
 
 
-# A pivot this small means the phase coverage cannot separate the coefficients.
-_SINGULAR_PIVOT = 1e-15
-
-
-def _gauss_solve(mat: list[list[float]], rhs: list[float]) -> list[float]:
-    """Solve mat x = rhs by Gauss elimination with partial pivoting."""
-    n_ = len(rhs)
-    m = [row[:] + [rhs[i]] for i, row in enumerate(mat)]  # augmented
-    for col in range(n_):
-        # Partial pivot
-        max_row = max(range(col, n_), key=lambda r: abs(m[r][col]))
-        m[col], m[max_row] = m[max_row], m[col]
-        if abs(m[col][col]) < _SINGULAR_PIVOT:
-            raise ValueError("Singular normal matrix — degenerate phase coverage")
-        for row in range(col + 1, n_):
-            f = m[row][col] / m[col][col]
-            for j in range(col, n_ + 1):
-                m[row][j] -= f * m[col][j]
-    # Back substitution
-    x = [0.0] * n_
-    for i in range(n_ - 1, -1, -1):
-        x[i] = m[i][n_] / m[i][i]
-        for j in range(i + 1, n_):
-            x[i] -= m[i][j] * x[j] / m[i][i]
-    return x
+_SINGULAR_RANK = "degenerate phase coverage"
+# A baseline needs this many usable observations.
+_MIN_FIT_OBS = 5
+# How far, in degrees, the recent window's phase angles may run past the
+# baseline's before the quadratic term is no longer trusted to extrapolate.
+_PHASE_EXTRAPOLATION_DEG = 1.0
 
 
 def _fit_least_squares_quadratic(
     phases: list[float],
     mags: list[float],
+    degree: int = 2,
 ) -> tuple[float, float, float, list[list[float]]]:
-    """Fit mag = a0 + a1*x + a2*x^2 via normal equations (numpy-free).
+    """Fit mag = a0 + a1*x + a2*x^2 (a2 = 0 when *degree* is 1) by least squares.
 
-    Returns (a0, a1, a2, cov3x3).  Uses standard normal equations X^T X b = X^T y.
+    Returns (a0, a1, a2, cov3x3), the covariance being res_var x (X^T X)^-1
+    in the raw phase coordinates (audit F-102).
+
+    Solved by numpy.linalg.lstsq on centred, scaled phase and converted back.
+    The hand-rolled normal equations on raw powers it replaced were poorly
+    conditioned: the x^4 sum is of order n x 1e8 at typical phase angles
+    (audit F-107).
     """
     n = len(phases)
-    if n < 3:
-        raise ValueError(f"Need at least 3 observations for quadratic fit, got {n}")
+    n_coef = degree + 1
+    if n < n_coef:
+        raise ValueError(f"Need at least {n_coef} observations for a degree-{degree} fit, got {n}")
 
-    # Build X^T X and X^T y
-    sx0 = float(n)
-    sx1 = sum(x for x in phases)
-    sx2 = sum(x * x for x in phases)
-    sx3 = sum(x * x * x for x in phases)
-    sx4 = sum(x * x * x * x for x in phases)
-    sy0 = sum(y for y in mags)
-    sy1 = sum(x * y for x, y in zip(phases, mags, strict=True))
-    sy2 = sum(x * x * y for x, y in zip(phases, mags, strict=True))
+    x = np.asarray(phases, dtype=float)
+    y = np.asarray(mags, dtype=float)
+    centre = float(x.mean())
+    scale = float(x.std()) or 1.0
+    u = (x - centre) / scale
+    design = np.vander(u, n_coef, increasing=True)
+    coef_u, _, rank, _ = np.linalg.lstsq(design, y, rcond=None)
+    if rank < n_coef:
+        raise ValueError(f"Singular normal matrix: {_SINGULAR_RANK}")
 
-    # 3×3 normal matrix
-    A = [
-        [sx0, sx1, sx2],
-        [sx1, sx2, sx3],
-        [sx2, sx3, sx4],
-    ]
-    b_vec = [sy0, sy1, sy2]
+    residuals = y - design @ coef_u
+    res_var = float(residuals @ residuals) / max(n - n_coef, 1)
+    cov_u = res_var * np.linalg.inv(design.T @ design)
 
-    coeffs = _gauss_solve(A, b_vec)
+    # mag = sum b_k ((x - c)/s)^k, expanded into powers of x.
+    c, s_ = centre, scale
+    to_raw = np.array([
+        [1.0, -c / s_, c * c / (s_ * s_)],
+        [0.0, 1.0 / s_, -2.0 * c / (s_ * s_)],
+        [0.0, 0.0, 1.0 / (s_ * s_)],
+    ])[:, :n_coef]
+    coef = to_raw @ coef_u
+    cov = to_raw @ cov_u @ to_raw.T
+    a2 = float(coef[2]) if degree == 2 else 0.0  # noqa: PLR2004
+    return float(coef[0]), float(coef[1]), a2, cov.tolist()
 
-    # Covariance: residual variance x (X^T X)^-1, the full inverse. The
-    # previous res_var / diag(X^T X) is not a covariance: over tens of degrees
-    # of phase the columns 1, x, x^2 are strongly correlated and it understated
-    # the variances by orders of magnitude (audit F-102). The inverse is built
-    # column by column from the same elimination.
-    residuals = [mags[i] - _eval_quadratic(tuple(coeffs), phases[i]) for i in range(n)]  # type: ignore[arg-type]
-    res_var   = sum(r * r for r in residuals) / max(n - 3, 1)
-    inv_cols  = [_gauss_solve(A, [1.0 if k == j else 0.0 for k in range(3)]) for j in range(3)]
-    cov = [[res_var * inv_cols[j][i] for j in range(3)] for i in range(3)]
 
-    return coeffs[0], coeffs[1], coeffs[2], cov
+def _sigma_clip_fit(
+    phases: list[float], mags: list[float], degree: int, threshold: float, max_iterations: int,
+) -> tuple[tuple[float, float, float], list[list[float]], list[bool], int]:
+    """Fit, drop points beyond *threshold* sigma, refit; until nothing moves.
+
+    Returns the coefficients, their covariance, the mask of points kept and
+    how many were dropped.
+    """
+    mask = [True] * len(phases)
+    n_outliers = 0
+    a0, a1, a2, cov = _fit_least_squares_quadratic(phases, mags, degree)
+    for _ in range(max_iterations):
+        kept = [i for i, keep in enumerate(mask) if keep]
+        if len(kept) < _MIN_FIT_OBS:
+            break
+        try:
+            a0, a1, a2, cov = _fit_least_squares_quadratic(
+                [phases[i] for i in kept], [mags[i] for i in kept], degree,
+            )
+        except ValueError:
+            break
+        residuals = [mags[i] - _eval_quadratic((a0, a1, a2), phases[i]) for i in kept]
+        mean_r = sum(residuals) / len(residuals)
+        std_r = math.sqrt(sum((r - mean_r) ** 2 for r in residuals) / max(len(residuals) - 1, 1))
+        if std_r < 1e-12:  # noqa: PLR2004
+            break
+        dropped = [i for i, r in zip(kept, residuals, strict=True) if abs(r - mean_r) > threshold * std_r]
+        if not dropped:
+            break
+        for i in dropped:
+            mask[i] = False
+        n_outliers += len(dropped)
+    return (a0, a1, a2), cov, mask, n_outliers
 
 
 def fit_baseline(
     corrected: Sequence[CorrectedObservation],
     sigma_clip_threshold: float = 3.0,
     max_iterations: int = 5,
+    degree: int = 2,
 ) -> PhotometryBaseline:
-    """Fit a quadratic phase-function baseline with iterative sigma-clipping.
+    """Fit a phase-function baseline (quadratic, or linear) with iterative sigma-clipping.
 
     Only observations flagged "ok" or "lunar" (mild contamination) are used.
     Returns the best-fit ``PhotometryBaseline``.
     """
-    usable = [c for c in corrected if c.quality_flag in ("ok", "lunar")]
-    if len(usable) < 5:
+    usable = sorted(
+        (c for c in corrected if c.quality_flag in ("ok", "lunar")), key=lambda c: c.epoch_utc,
+    )
+    if len(usable) < _MIN_FIT_OBS:
         raise ValueError(
-            f"Insufficient good observations for baseline fit ({len(usable)} < 5)"
+            f"Insufficient good observations for baseline fit ({len(usable)} < {_MIN_FIT_OBS})"
         )
 
-    # Sort by epoch
-    usable.sort(key=lambda c: c.epoch_utc)
     phases = [c.solar_phase_angle_deg for c in usable]
     mags   = [c.reduced_magnitude for c in usable]
-    mask   = [True] * len(usable)
-    n_outliers = 0
+    (a0, a1, a2), cov, mask, n_outliers = _sigma_clip_fit(
+        phases, mags, degree, sigma_clip_threshold, max_iterations,
+    )
 
-    a0, a1, a2, cov = _fit_least_squares_quadratic(phases, mags)
-
-    for _ in range(max_iterations):
-        active_phases = [phases[i] for i in range(len(usable)) if mask[i]]
-        active_mags   = [mags[i]   for i in range(len(usable)) if mask[i]]
-        if len(active_phases) < 5:
-            break
-        try:
-            a0, a1, a2, cov = _fit_least_squares_quadratic(active_phases, active_mags)
-        except ValueError:
-            break
-
-        residuals = [
-            mags[i] - _eval_quadratic((a0, a1, a2), phases[i])
-            for i in range(len(usable)) if mask[i]
-        ]
-        mean_r = sum(residuals) / len(residuals)
-        std_r  = math.sqrt(sum((r - mean_r) ** 2 for r in residuals) / max(len(residuals) - 1, 1))
-        if std_r < 1e-12:
-            break
-
-        new_mask = mask[:]
-        changed  = False
-        ri = 0
-        for i in range(len(usable)):
-            if not mask[i]:
-                continue
-            if abs(residuals[ri] - mean_r) > sigma_clip_threshold * std_r:
-                new_mask[i] = False
-                n_outliers  += 1
-                changed      = True
-            ri += 1
-        if not changed:
-            break
-        mask = new_mask
-
-    # Final residual std
-    final_phases = [phases[i] for i in range(len(usable)) if mask[i]]
-    final_mags   = [mags[i]   for i in range(len(usable)) if mask[i]]
     final_resids = [
-        final_mags[i] - _eval_quadratic((a0, a1, a2), final_phases[i])
-        for i in range(len(final_phases))
+        mags[i] - _eval_quadratic((a0, a1, a2), phases[i]) for i in range(len(usable)) if mask[i]
     ]
     res_std = math.sqrt(
         sum(r * r for r in final_resids) / max(len(final_resids) - 1, 1)
@@ -358,7 +347,7 @@ def fit_baseline(
         a2=round(a2, 6),
         covariance=cov,
         residual_std=round(res_std, 5),
-        n_used=len(final_phases),
+        n_used=len(final_resids),
         n_outliers=n_outliers,
         phase_coverage_deg=(min(phases), max(phases)),
         epoch_range=(usable[0].epoch_utc, usable[-1].epoch_utc),
@@ -505,6 +494,48 @@ def detect_change(
     return bm, bs, rm, rs, t, p
 
 
+def _window_cutoffs(
+    corrected: Sequence[CorrectedObservation], recent_window_days: float, baseline_window_days: float,
+) -> tuple[datetime, datetime]:
+    """Start of the baseline window and start of the recent window."""
+    now_epoch = max((c.epoch_utc for c in corrected), default=datetime.now(UTC))
+    recent_cutoff = now_epoch - timedelta(days=recent_window_days)
+    return recent_cutoff - timedelta(days=baseline_window_days), recent_cutoff
+
+
+def _baseline_window(
+    corrected: Sequence[CorrectedObservation], recent_window_days: float, baseline_window_days: float,
+) -> list[CorrectedObservation]:
+    """The observations the baseline is fitted to: the baseline window only."""
+    start, end = _window_cutoffs(corrected, recent_window_days, baseline_window_days)
+    return [c for c in corrected if start <= c.epoch_utc < end]
+
+
+def _window_counts(
+    corrected: Sequence[CorrectedObservation], recent_window_days: float, baseline_window_days: float,
+) -> tuple[int, int]:
+    """Observations not rejected in the baseline and the recent window."""
+    start, recent_cutoff = _window_cutoffs(corrected, recent_window_days, baseline_window_days)
+    kept = [c.epoch_utc for c in corrected if c.quality_flag != "reject"]
+    return sum(start <= e < recent_cutoff for e in kept), sum(e >= recent_cutoff for e in kept)
+
+
+def _phase_overhang(
+    corrected: Sequence[CorrectedObservation],
+    baseline_obs: Sequence[CorrectedObservation],
+    recent_window_days: float,
+) -> float:
+    """Degrees by which the recent window's phase angles run past the baseline's."""
+    usable = [c for c in baseline_obs if c.quality_flag in ("ok", "lunar")]
+    if not usable:
+        return 0.0
+    lo = min(c.solar_phase_angle_deg for c in usable)
+    hi = max(c.solar_phase_angle_deg for c in usable)
+    _, recent_cutoff = _window_cutoffs(corrected, recent_window_days, 0.0)
+    recent = [c.solar_phase_angle_deg for c in corrected if c.epoch_utc >= recent_cutoff and c.quality_flag != "reject"]
+    return max([0.0, *(lo - p for p in recent), *(p - hi for p in recent)])
+
+
 def _window_residuals(
     corrected: Sequence[CorrectedObservation],
     baseline: PhotometryBaseline,
@@ -512,9 +543,7 @@ def _window_residuals(
     baseline_window_days: float,
 ) -> tuple[list[float], list[float]]:
     """Residuals from the baseline model in the baseline and recent windows."""
-    now_epoch = max((c.epoch_utc for c in corrected), default=datetime.now(UTC))
-    recent_cutoff   = now_epoch - timedelta(days=recent_window_days)
-    baseline_cutoff = now_epoch - timedelta(days=recent_window_days + baseline_window_days)
+    baseline_cutoff, recent_cutoff = _window_cutoffs(corrected, recent_window_days, baseline_window_days)
 
     baseline_residuals: list[float] = []
     recent_residuals:   list[float] = []
@@ -613,20 +642,33 @@ def assess_photometry(
         reference_range_km=reference_range_km,
     )
 
-    # Step 2: baseline fit
+    # Step 2: baseline fit, to the baseline window alone. Where the recent
+    # window's phase angles run past the baseline's, a quadratic fitted to
+    # noise extrapolates into a false change, so the phase law is linear.
+    baseline_obs = _baseline_window(corrected, recent_window_days, baseline_window_days)
+    overhang = _phase_overhang(corrected, baseline_obs, recent_window_days)
     try:
-        baseline = fit_baseline(corrected, sigma_clip_threshold=sigma_clip)
+        baseline = fit_baseline(
+            baseline_obs, sigma_clip_threshold=sigma_clip,
+            degree=1 if overhang > _PHASE_EXTRAPOLATION_DEG else 2,
+        )
     except ValueError as exc:
         logger.warning("Baseline fitting failed: %s", exc)
-        # Return a degenerate assessment
+        n_base, n_recent = _window_counts(corrected, recent_window_days, baseline_window_days)
+        # Return a degenerate assessment, saying what the windows held.
         return PhotometryChangeAssessment(
             baseline_mean=0.0, baseline_std=0.0,
             recent_mean=0.0, recent_std=0.0,
             mean_residual=0.0, t_statistic=0.0, p_value=1.0,
             significant_at_95=False, significant_at_99=False,
             magnitude_change=0.0, change_direction="none",
-            estimated_change_epoch=None, n_baseline=0, n_recent=0,
-            confounding_factors=[str(exc)],
+            estimated_change_epoch=None, n_baseline=n_base, n_recent=n_recent,
+            confounding_factors=[
+                f"No change could be tested: the baseline window holds {n_base} usable "
+                f"observations and the recent window holds {n_recent}; the baseline fit "
+                f"needs at least {_MIN_FIT_OBS} in the baseline window",
+                str(exc),
+            ],
             correlated_manoeuvre_epochs=[],
         )
 
@@ -658,6 +700,12 @@ def assess_photometry(
         confounders.append(f"{n_lunar} observations affected by lunar proximity")
     if baseline.residual_std > 0.3:
         confounders.append(f"High baseline scatter (σ={baseline.residual_std:.3f} mag) — variable phase coverage")
+    if overhang > _PHASE_EXTRAPOLATION_DEG:
+        lo, hi = baseline.phase_coverage_deg
+        confounders.append(
+            f"Recent phase angles run {overhang:.1f}° beyond the baseline's {lo:.1f}–{hi:.1f}°; "
+            "the baseline is extrapolated with a linear phase law"
+        )
     # An empty or single-point window gives p = 1, which would otherwise read
     # as "no significant change" (audit F-108).
     base_res, recent_res = _window_residuals(corrected, baseline, recent_window_days, baseline_window_days)
@@ -720,55 +768,76 @@ def parse_photometry_csv(
     if reader.fieldnames is None:
         raise ValueError("Empty CSV or missing header row")
 
-    def _get(row: dict[str, Any], key: str, default: float) -> float:
-        for k, v in row.items():
-            if k.strip().lower() == key and v.strip():
-                try:
-                    return float(v.strip())
-                except ValueError:
-                    pass
-        return default
-
-    def _get_str(row: dict[str, Any], key: str, default: str) -> str:
-        for k, v in row.items():
-            vs = str(v).strip() if v is not None else ""
-            if k.strip().lower() == key and vs:
-                return vs
-        return default
+    # Header names are matched trimmed and case-blind, once, rather than by
+    # scanning every cell of every row (audit F-107).
+    columns: dict[str, list[str]] = {}
+    for name in reader.fieldnames:
+        columns.setdefault(name.strip().lower(), []).append(name)
 
     observations: list[PhotometryObservation] = []
     for i, row in enumerate(reader):
-        # Epoch
-        epoch_str = _get_str(row, epoch_col.lower(), "")
-        if not epoch_str:
-            logger.warning("Row %d: missing epoch — skipping", i)
-            continue
-        # Try ISO 8601
-        try:
-            epoch_str_clean = epoch_str.rstrip("Z")
-            epoch = datetime.fromisoformat(epoch_str_clean).replace(tzinfo=UTC)
-        except ValueError:
-            logger.warning("Row %d: unparseable epoch %r — skipping", i, epoch_str)
-            continue
-
-        mag = _get(row, mag_col.lower(), float("nan"))
-        if math.isnan(mag):
-            logger.warning("Row %d: missing magnitude — skipping", i)
-            continue
-
-        observations.append(PhotometryObservation(
-            epoch_utc=epoch,
-            apparent_magnitude=mag,
-            uncertainty=_get(row, "uncertainty", 0.05),
-            filter_band=_get_str(row, "filter_band", "unfiltered"),
-            observer_lat_deg=_get(row, "observer_lat_deg", 0.0),
-            observer_lon_deg=_get(row, "observer_lon_deg", 0.0),
-            observer_alt_m=_get(row, "observer_alt_m", 0.0),
-            range_km=_get(row, "range_km", 1000.0),
-            solar_phase_angle_deg=_get(row, "solar_phase_angle_deg", 45.0),
-            elevation_deg=_get(row, "elevation_deg", 45.0),
-            lunar_phase_fraction=_get(row, "lunar_phase_fraction", 0.0),
-            lunar_separation_deg=_get(row, "lunar_separation_deg", 90.0),
-        ))
-
+        observation = _row_observation(i, row, columns, epoch_col.lower(), mag_col.lower())
+        if observation is not None:
+            observations.append(observation)
     return observations
+
+
+def _cell(row: dict[str, Any], columns: dict[str, list[str]], key: str) -> str:
+    """The first non-empty cell under header *key*, trimmed, or ''."""
+    for name in columns.get(key, []):
+        value = row.get(name)
+        text = str(value).strip() if value is not None else ""
+        if text:
+            return text
+    return ""
+
+
+def _number(row: dict[str, Any], columns: dict[str, list[str]], key: str, default: float) -> float:
+    """The first cell under *key* that reads as a number, or *default*."""
+    for name in columns.get(key, []):
+        value = row.get(name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            return float(value.strip())
+        except ValueError:
+            continue
+    return default
+
+
+def _row_observation(
+    i: int, row: dict[str, Any], columns: dict[str, list[str]], epoch_key: str, mag_key: str,
+) -> PhotometryObservation | None:
+    """One CSV row as an observation, or ``None`` (logged) when it cannot be read."""
+    epoch_str = _cell(row, columns, epoch_key)
+    if not epoch_str:
+        logger.warning("Row %d: missing epoch — skipping", i)
+        return None
+    try:
+        epoch = datetime.fromisoformat(epoch_str.rstrip("Z")).replace(tzinfo=UTC)
+    except ValueError:
+        logger.warning("Row %d: unparseable epoch %r — skipping", i, epoch_str)
+        return None
+
+    mag = _number(row, columns, mag_key, float("nan"))
+    if math.isnan(mag):
+        logger.warning("Row %d: missing magnitude — skipping", i)
+        return None
+
+    def num(key: str, default: float) -> float:
+        return _number(row, columns, key, default)
+
+    return PhotometryObservation(
+        epoch_utc=epoch,
+        apparent_magnitude=mag,
+        uncertainty=num("uncertainty", 0.05),
+        filter_band=_cell(row, columns, "filter_band") or "unfiltered",
+        observer_lat_deg=num("observer_lat_deg", 0.0),
+        observer_lon_deg=num("observer_lon_deg", 0.0),
+        observer_alt_m=num("observer_alt_m", 0.0),
+        range_km=num("range_km", 1000.0),
+        solar_phase_angle_deg=num("solar_phase_angle_deg", 45.0),
+        elevation_deg=num("elevation_deg", 45.0),
+        lunar_phase_fraction=num("lunar_phase_fraction", 0.0),
+        lunar_separation_deg=num("lunar_separation_deg", 90.0),
+    )
