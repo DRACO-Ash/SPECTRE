@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import itertools
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
@@ -860,7 +861,7 @@ def parse_tle_history(
 
 def _drop_reason(
     l1: str, l2: str, satno: int | None, seen: set[str],
-    metadata: dict[str, tuple[str, str]] | None, rms_metadata: dict[str, float | None] | None,
+    apply_metadata: Callable[[TLERecord, str], bool],
 ) -> tuple[TLERecord | None, str]:
     """The record for one pair, or None and the ParseCounts field it counts under."""
     try:
@@ -871,7 +872,7 @@ def _drop_reason(
         return None, "malformed"
     if rec is None:
         return None, "duplicate_epoch"
-    if not _apply_metadata(rec, l1, metadata, rms_metadata):
+    if not apply_metadata(rec, l1):
         return None, "bad_provenance"
     return rec, ""
 
@@ -894,7 +895,9 @@ def parse_tle_history_counted(
     seen: set[str] = set()
     dropped: dict[str, int] = {}
     for l1, l2 in _tle_line_pairs(tle_text):
-        rec, reason = _drop_reason(l1, l2, satno, seen, metadata, rms_metadata)
+        rec, reason = _drop_reason(
+            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata),
+        )
         if rec is None:
             dropped[reason] = dropped.get(reason, 0) + 1
         else:

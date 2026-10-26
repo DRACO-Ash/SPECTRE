@@ -241,10 +241,9 @@ def _parse_dtg(m: re.Match[str]) -> datetime | None:
     day, hour, minute, month, year = m.groups()
     full_year = int(year) + 2000 if len(year) == 2 else int(year)  # noqa: PLR2004
     try:
-        stamp = datetime.strptime(f"{full_year} {month.title()} {day} {hour}:{minute}", "%Y %b %d %H:%M")
+        return datetime.strptime(f"{full_year} {month.title()} {day} {hour}:{minute} +0000", "%Y %b %d %H:%M %z")
     except ValueError:
         return None
-    return stamp.replace(tzinfo=UTC)
 
 
 def _extract_datetime(text: str) -> datetime | None:
