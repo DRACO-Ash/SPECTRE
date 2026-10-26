@@ -605,3 +605,12 @@ Not an audit finding; the open item in the root `SECURITY.md`, closed at the own
 
 Gates: `tests/unit/test_sbom_in_ci.py` (the checker passes a complete SBOM, names a missing pin and refuses a non-CycloneDX document; the SCA job writes, checks and uploads the SBOM; SEC-04 is closed in both policies).
 
+### Code scanning (CodeQL)
+
+Not an audit finding. The `master` ruleset requires CodeQL results before a pull request can merge, and the repository had no CodeQL workflow, so no pull request could satisfy it. The owner chose to keep the rule and add the scan, 26 October 2026.
+
+● `.github/workflows/codeql.yml` runs CodeQL over the Python with the security-extended queries on every push and pull request to `master`, and weekly.
+● The action is pinned to the v4.38.3 commit, 18 days old when pinned; v4.39.1 was 5 days old and so not taken.
+● JavaScript is not analysed: the application's own script is inline in the Jinja templates, which CodeQL does not extract, and `spectre/web/static` holds vendored third-party builds already scanned against OSV.
+● `docs/SECURITY.md` now lists code scanning and the SBOM under controls in place, each citing its file. The F-057 test that forbade both words, written against the old template's false claims, now requires the citation instead.
+

@@ -40,8 +40,19 @@ def test_every_control_in_place_cites_an_artefact_that_exists() -> None:
 def test_the_template_claims_are_gone() -> None:
     policy = _repo_only("docs/SECURITY.md").read_text(encoding="utf-8")
     in_place = _section(policy, "## Controls in place")
-    for word in ("CodeQL", "hypothesis", "Sigstore", "SBOM", "CONTRIBUTING.md"):
+    for word in ("hypothesis", "Sigstore", "CONTRIBUTING.md"):
         assert word not in in_place, word
+
+
+def test_code_scanning_and_the_sbom_are_claimed_only_with_their_workflows() -> None:
+    """Both were template claims (F-057); both now exist, and say where."""
+    policy = _repo_only("docs/SECURITY.md").read_text(encoding="utf-8")
+    in_place = _section(policy, "## Controls in place")
+    rows = {row.split("|")[1].strip(): row for row in in_place.splitlines() if row.startswith("| ")}
+    assert "`.github/workflows/codeql.yml`" in rows["Code scanning"]
+    assert "`scripts/check-sbom.py`" in rows["Software bill of materials"]
+    workflow = _repo_only(".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    assert "github/codeql-action/analyze@" in workflow and "languages: python" in workflow
     assert "your-domain.example" not in policy
     assert "`main` branch" not in policy
     assert "does not expose network services" not in policy

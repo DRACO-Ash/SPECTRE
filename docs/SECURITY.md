@@ -60,6 +60,8 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Actions pinned to commits | Each action is a 40-character commit, its release in a comment | `.github/workflows/ci.yml` |
 | Secret scanning | gitleaks over full history on every push and pull request; the binary is checked against its published SHA-256 first | CI job `secrets` in `.github/workflows/ci.yml`; hook in `.pre-commit-config.yaml` |
 | Static analysis | bandit, medium severity and above, fails the build | CI job `sast` in `.github/workflows/ci.yml` |
+| Code scanning | CodeQL (Python, security-extended queries) on every push and pull request to `master` and weekly; the `master` ruleset blocks a merge on a high or higher security alert or an error alert | `.github/workflows/codeql.yml` |
+| Software bill of materials | A CycloneDX SBOM of the image's Python packages, checked to list every pin and kept as the `sbom-cyclonedx` artifact; base-image OS packages and the vendored JavaScript are not in it | CI job `sca` in `.github/workflows/ci.yml`; `scripts/check-sbom.py` |
 | Dependency vulnerabilities | pip-audit over the committed lock files; weekly Dependabot updates for pip and Actions | CI job `sca` in `.github/workflows/ci.yml`; `.github/dependabot.yml` |
 | Hash-locked dependencies | Every install, in CI and in the image, uses `--require-hashes` | `requirements.txt`, `requirements-runtime.txt`, `Dockerfile` |
 | Lint and strict typing | ruff; mypy in strict mode | CI job `lint` in `.github/workflows/ci.yml`; `pyproject.toml` (`strict = true`) |
@@ -118,8 +120,6 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Disclosure email | The template's placeholder address was removed; add a monitored address if one is wanted |
 | Branch protection on `master` | A repository setting, not visible from the code; recommended settings were given on 23 October 2026 |
 | Signed commits | Not required by any setting the code can show |
-| SBOM | Produced in CI: a CycloneDX SBOM of `requirements-runtime.txt`, the image's Python packages, checked against the lock and kept as the `sbom-cyclonedx` artifact. It does not cover OS packages in the base image or the vendored JavaScript (listed in `spectre/web/static/vendored.json`) |
-| CodeQL | Not configured |
 | Release signing and provenance | Not in place; there is no release pipeline |
 | Container image vulnerability scan in CI | Not in CI; the hosting platform scans the image, which this repository cannot verify |
 | Licence audit | Not in place |
