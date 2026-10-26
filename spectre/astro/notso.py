@@ -385,8 +385,9 @@ def parse_notso_text_with_rejects(raw_text: str) -> tuple[list[NOTSORecord], lis
     for i, msg in enumerate(_split_messages(raw_text)):
         try:
             record = _parse_single_notso(msg, index=i)
-        except Exception as exc:  # noqa: BLE001 - one bad message must not lose the rest
-            rejects.append(f"message {i + 1}: {exc}")
+        except Exception:  # noqa: BLE001 - one bad message must not lose the rest
+            logger.exception("NOTSO parse failed for message %d", i + 1)
+            rejects.append(f"message {i + 1}: parse error")
         else:
             if record is None:
                 rejects.append(f"message {i + 1}: no labelled NORAD ID")
