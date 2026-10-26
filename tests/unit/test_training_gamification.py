@@ -49,11 +49,9 @@ class TestGetConfig:
 
     def test_point_actions_loaded(self):
         cfg = get_config()
-        assert len(cfg.point_actions) >= 5
         action_ids = [a.action_id for a in cfg.point_actions]
-        assert "tutorial_step_complete" in action_ids
-        assert "scenario_completed" in action_ids
-        assert "challenge_passed" in action_ids
+        # Only the three the submit route awards (audit F-169).
+        assert action_ids == ["scenario_completed", "challenge_passed", "challenge_passed_first_try"]
 
     def test_levels_loaded(self):
         cfg = get_config()
@@ -89,30 +87,15 @@ class TestGetConfig:
 
 class TestAwardPoints:
     def test_returns_point_award(self):
-        pa = award_points("tutorial_step_complete", {})
-        assert (pa.base_points, pa.total_points) == (5, 5)
-        assert sum(pa.axis_deltas.values()) == pytest.approx(5.0)
+        pa = award_points("scenario_completed", {})
+        assert (pa.base_points, pa.total_points) == (150, 150)
+        assert sum(pa.axis_deltas.values()) == pytest.approx(150.0)
 
     def test_base_points_match_config(self):
         cfg = get_config()
-        action_def = cfg.actions_by_id["tutorial_step_complete"]
-        pa = award_points("tutorial_step_complete", {})
-        assert pa.base_points == action_def.base_points
-
-    def test_total_points_no_speed_multiplier(self):
-        pa = award_points("scenario_completed", {})
-        assert pa.total_points == pa.base_points  # speed_multiplier=False
-
-    def test_speed_multiplier_applied(self):
-        """threat_assessed_timed has speed_multiplier: true."""
-        pa_fast = award_points("threat_assessed_timed", {}, speed_factor=1.5)
-        pa_slow = award_points("threat_assessed_timed", {}, speed_factor=0.5)
-        assert pa_fast.total_points > pa_slow.total_points
-
-    def test_speed_factor_clamped(self):
-        """speed_factor outside [0.5, 2.0] should be clamped."""
-        pa_high = award_points("threat_assessed_timed", {}, speed_factor=99.0)
-        assert pa_high.total_points <= award_points("threat_assessed_timed", {}, speed_factor=2.0).total_points + 1
+        action_def = cfg.actions_by_id["challenge_passed"]
+        pa = award_points("challenge_passed", {})
+        assert pa.base_points == action_def.base_points == 250
 
     def test_axis_deltas_sum_to_total_points(self):
         pa = award_points("scenario_completed", {})
