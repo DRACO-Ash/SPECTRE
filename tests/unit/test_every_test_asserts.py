@@ -62,7 +62,9 @@ def _type_only(test: ast.expr) -> bool:
 
 
 def _cannot_fail(test: ast.expr) -> bool:
-    """``x >= 0`` on a count is true of every count."""
+    """``x >= 0`` on a count is true of every count; ``... or True`` of everything (audit F-080)."""
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        return any(isinstance(v, ast.Constant) and v.value is True for v in test.values)
     return (
         isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.GtE)
         and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value == 0
@@ -93,3 +95,13 @@ def test_no_assertion_is_true_of_every_count() -> None:
         if isinstance(node, ast.Assert) and _cannot_fail(node.test)
     ]
     assert not offenders, f"these assertions cannot fail: {offenders}"
+
+
+def test_the_checker_catches_or_true() -> None:
+    def assertion(src: str) -> ast.expr:
+        node = ast.parse(src).body[0]
+        assert isinstance(node, ast.Assert)
+        return node.test
+
+    assert _cannot_fail(assertion("assert a <= b or True"))
+    assert not _cannot_fail(assertion("assert a <= b or c"))

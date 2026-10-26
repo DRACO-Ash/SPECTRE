@@ -417,18 +417,29 @@ class TestOptimalEvasion:
         assert plan.best.delta_v <= 0.001 + 1e-10
 
     def test_more_time_cheaper(self) -> None:
-        """More warning time generally allows cheaper evasion."""
-        short = optimal_evasion(LEO_R, 10.0, 600.0, fuel_budget_km_s=1.0)
-        long = optimal_evasion(LEO_R, 10.0, 7200.0, fuel_budget_km_s=1.0)
-        # With more time, along-track drift becomes very effective
-        cheapest_long = min(s.delta_v for s in long.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in long.strategies) else float("inf")
-        cheapest_short = min(s.delta_v for s in short.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in short.strategies) else float("inf")
-        # At least one timing should be cheaper with more time
-        # SIM222: the `or True` is deliberate and the assertion is therefore
-        # advisory. Timing singularities make the comparison genuinely
-        # indeterminate for some geometries, so it documents the expectation
-        # without failing the suite on a case physics allows.
-        assert cheapest_long <= cheapest_short or True  # noqa: SIM222
+        """More warning time makes evasion cheaper, by the CW closed forms (audit F-080).
+
+        This ended in ``assert ... or True``, which cannot fail. From rest, a
+        Clohessy-Wiltshire impulse gives along-track miss
+        dv |4 sin(nt) / n - 3t| (in-track burn) or dv sin(nt) / n (radial or
+        cross-track), so the cheapest 10 km miss is the smaller of
+        10 / |4 sin(nt) / n - 3t| and 10 n / sin(nt).
+        """
+        import math
+
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+
+        def closed_form(t: float) -> float:
+            in_track = 10.0 / abs(4.0 * math.sin(n * t) / n - 3.0 * t)
+            out_of_track = 10.0 * n / abs(math.sin(n * t))
+            return min(in_track, out_of_track)
+
+        short = optimal_evasion(LEO_R, 10.0, 600.0, fuel_budget_km_s=1.0).best
+        long = optimal_evasion(LEO_R, 10.0, 7200.0, fuel_budget_km_s=1.0).best
+        assert short.delta_v == pytest.approx(closed_form(600.0), rel=0.01)
+        assert long.delta_v == pytest.approx(closed_form(7200.0), rel=0.01)
+        assert long.strategy == "prograde", "two hours lets an in-track drift do the work"
+        assert long.delta_v < short.delta_v / 30.0
 
     def test_multiple_strategies_evaluated(self) -> None:
         plan = optimal_evasion(LEO_R, 5.0, 3600.0, fuel_budget_km_s=1.0)
