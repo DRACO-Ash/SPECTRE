@@ -636,9 +636,8 @@ def _assess_anomaly(
     mean_dv = sum(v.delta_v_m_s for v in views) / len(views)
     dv_score = _clamp01((mean_dv - sk_ceiling) / max(sk_ceiling * 9.0, 1e-6)) * 100
 
-    lons = [v.manoeuvre.tle_after.geo_longitude_deg for v in views
-            if v.manoeuvre.tle_after.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
+    lon_range = circular_span_deg([v.manoeuvre.tle_after.geo_longitude_deg for v in views
+                                   if v.manoeuvre.tle_after.geo_longitude_deg is not None])
     lon_score = _clamp01(lon_range / _ANOMALY_FULL_LON_DEG) * 100
 
     phases = getattr(pol, "drift_phases", []) or []
@@ -926,6 +925,27 @@ def _drift_direction(drift: float | None) -> str:
     return "STATIONARY"
 
 
+def wrap_longitude(deg: float) -> float:
+    """*deg* in (-180, 180], the interval the longitudes arrive in."""
+    wrapped = (deg + 180.0) % 360.0 - 180.0
+    return 180.0 if wrapped == -180.0 else wrapped  # noqa: PLR2004
+
+
+def circular_span_deg(lons: list[float]) -> float:
+    """The shortest arc of longitude that holds every value, in degrees.
+
+    It was max - min, so an object holding a slot at the antimeridian, read
+    at 179.9 and -179.9, spanned 359.8 degrees instead of 0.2 (audit F-117).
+    The shortest covering arc is the circle less its widest empty gap.
+    """
+    if len(lons) < 2:  # noqa: PLR2004
+        return 0.0
+    ordered = sorted(lon % 360.0 for lon in lons)
+    gaps = [b - a for a, b in zip(ordered, ordered[1:], strict=False)]
+    gaps.append(ordered[0] + 360.0 - ordered[-1])
+    return 360.0 - max(gaps)
+
+
 def _predicted_longitudes(
     last: Any, drift: float | None,
 ) -> tuple[float | None, float | None, float | None]:
@@ -937,9 +957,9 @@ def _predicted_longitudes(
     """
     if last is not None and last.geo_longitude_deg is not None and drift is not None:
         d30, d60, d90 = _PREDICTION_HORIZON_DAYS
-        return (round(last.geo_longitude_deg + drift * d30, 2),
-                round(last.geo_longitude_deg + drift * d60, 2),
-                round(last.geo_longitude_deg + drift * d90, 2))
+        return (round(wrap_longitude(last.geo_longitude_deg + drift * d30), 2),
+                round(wrap_longitude(last.geo_longitude_deg + drift * d60), 2),
+                round(wrap_longitude(last.geo_longitude_deg + drift * d90), 2))
     return (None, None, None)
 
 
@@ -1096,8 +1116,7 @@ def _assess_intel(
     drift = getattr(last, "geo_drift_rate_deg_day", None) if last else None
     direction = _drift_direction(drift)
 
-    lons = [r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
+    lon_range = circular_span_deg([r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None])
 
     pred_30, pred_60, pred_90 = _predicted_longitudes(last, drift)
 
