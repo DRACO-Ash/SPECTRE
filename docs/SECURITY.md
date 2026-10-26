@@ -69,12 +69,13 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Code owners | Review by the owner on CI, authentication and configuration paths | `CODEOWNERS` |
 | Pre-commit hooks | gitleaks, ruff, bandit, mypy, large files, no direct commit to `master` | `.pre-commit-config.yaml` |
 | Fail-closed signing key | Refuses to boot with a missing, short or example `SECRET_KEY` | `spectre/config/settings.py` |
-| Password storage | bcrypt; sign-in verification runs off the event loop, against a dummy hash for unknown users | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
+| Password storage | bcrypt; sign-in verification runs off the event loop, against a dummy hash for unknown users; a password over bcrypt's 72 bytes is refused at create and reset and counted as a failed sign-in | `spectre/web/auth.py`, `spectre/web/routes/login.py`, `spectre/web/routes/admin.py` |
 | Sessions | Signed cookie bound to the account (id and a per-account random nonce), 8 hour expiry, revoked server-side on logout and password change; only a live session can log out or receive a CSRF token | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
 | Cookie attributes | Secure (unless explicitly disabled for local HTTP), HttpOnly, SameSite=Lax | `spectre/web/routes/login.py` |
 | CSRF | Token on every state-changing request; a pre-session token on sign-in | `spectre/web/csrf.py` |
 | Sign-in throttling | Limits per client address and per username | `spectre/web/routes/login.py`, `spectre/web/rate_limit.py` |
 | UDL call throttling | Limits on UDL authentication, data and sync calls | `spectre/web/rate_limit.py` |
+| Compute bounds | Monte Carlo horizon at most 720 hours, photometry CSV at most 512 KiB, and a per-operator limit shared by both | `spectre/web/routes/pol.py`, `spectre/web/rate_limit.py` |
 | Security headers | Content Security Policy with no third-party hosts, nosniff, frame restrictions, HSTS over HTTPS | `spectre/web/app.py` |
 | Log injection | Operator-supplied values are neutralised before logging | `spectre/web/log_safety.py` |
 | Administration | Admin-only routes; the last admin cannot be removed, even by concurrent changes | `spectre/web/routes/admin.py` |

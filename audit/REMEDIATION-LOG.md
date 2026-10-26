@@ -349,3 +349,70 @@ With F-104, step 3's single-location findings are closed apart from those carrie
 | F-054 | F-S09-11 | `978a157` | each TLE's node is carried to the newest epoch at SGP4's own secular rate before clustering; three fits of one orbit six hours apart now form one cluster, and a 2 degree node change still separates |
 
 Fixtures in three places held a node fixed for hours or a day, which is itself a node change against J2; they now drift at the J2 or SGP4 rate.
+
+### Medium findings
+
+All 31 open Medium findings are closed. Each fix was test-first: the gate test fails on the code before the change.
+
+#### Web and authentication
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-150 | F-S08-06 | `e795712`, `1ca7696` | passwords are limited to 72 UTF-8 bytes, bcrypt's limit: sign-in counts an over-long one as a failed attempt charged to the limiter (it was an unmetered 500); create and update refuse it with a form error before anything changes; bootstrap logs and skips it rather than stopping the boot |
+| F-145 | F-S07-19 | `dfa0bb9` | the Monte Carlo horizon must be 1 to 720 hours; the photometry CSV is capped at 512 KiB with a stated reason (under Starlette's own 1 MiB field limit, found while testing) and parsed off the event loop; both forms share a 10 per minute per-operator compute limit |
+| F-154 | F-S08-11 | `578abf6` | the session log queue nothing read is removed; the log holds its 200 entries and nothing else |
+| F-157 | F-S08-16 | `db3b8fe` | the structlog setup that was never called, `Settings.log_dir`, SPECTRE_LOG_DIR and the structlog dependency are removed; a test requires every Settings field to be read by the application |
+
+#### Training
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-159 | F-S09-03 | `07c7904` | start, explore, submit and tutorial completion check the level or unlock; submit refuses a result row from another scenario |
+| F-168 | F-S09-19 | `07c7904` | elapsed time is measured by the server from the attempt's start; objectives marked `time_limited` score nothing after the limit; a non-list objectives value scores nothing |
+| F-167 | F-S09-18 | `07c7904` | exploration runs are left out of recent activity and of the attempt number |
+| F-172 | F-S09-38 | `07c7904` | "Skill Points Earned" shows how far each axis total really moved; objective points are labelled as such |
+| F-165 | F-S09-15 | `07c7904` | submit is built from tested helpers; tutorial completion shares the level-up loop; no function in the module is over 15 |
+| F-166 | F-S09-16 | `07c7904` | the route tests assert progress, not just status; a test refuses status assertions that accept both success and failure |
+| F-169 | F-S09-22 | `22183cf` | the six unused point actions, the speed multiplier and the efficiency threshold are removed; the unlock lists match each scenario's level and challenge flag, every scenario is announced once, and `unlock_problems()` checks this at load |
+
+The F-159 level gate made two step 3 tests (F-158, F-160) invalid: they submitted a Level 3 scenario as a Level 1 admin. They now use a Level 3 operator.
+
+#### Numerical correctness
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-100 | F-S04-07 | `6d76d3b` | the photometry baseline is fitted to the baseline window only; a 0.3 mag step across a season of drifting phase angle now reads 0.30, not 0.06. Held out, the fit extrapolates where the recent phases run past the baseline's, and a noise-fitted quadratic then manufactures a change, so past 1 degree of overhang the phase law is linear and the assessment says so |
+| F-107 | F-S04-22 | `6d76d3b` | numpy lstsq on centred, scaled phase replaces normal equations on raw powers; the sigma-clip loop and CSV header lookup are split out, the parser byte-identical over 400 generated CSVs |
+| F-103 | F-S04-11 | `c74c5ba` | results are aggregated in sample order, so a seed gives one answer on any thread count; converged means the 95 % bootstrap half-width of SMA P5, P50 and P95 is within 1 km, and the panel shows the half-width |
+| F-115 | F-S05-08 | `bc0cb50` | the access search's step adapts to range and relative speed (1 to 60 s); each window's closest approach is refined by golden-section search; a failed propagation closes the window; the horizon is `RunConfig.horizon_hours`. The old search overstated misses by up to 2.8 km against SGP4 sampled at 0.1 s |
+| F-117 | F-S05-11 | `bde3add` | longitude span is the shortest arc holding every value and predictions wrap into (-180, 180]; a slot at the antimeridian is no longer a belt roamer |
+| F-120 | F-S05-15 | `9964e77` | the anomaly score maps through the PoL ladder, so both panels agree and a quiet score cannot raise an assessed LOW; a scarce reserve contributes LOW, not MEDIUM |
+| F-162 | F-S09-10 | `01321b5` | DBSCAN runs on precomputed distances with RAAN compared the short way round; the centroid's node is taken within half a turn (unchanged to the last bit away from the seam); selection wraps too |
+| F-163 | F-S09-12 | `01321b5` | each cluster records its end-to-end span in tolerances and preprocessing logs a chain over one; the README states the tolerance holds between neighbours |
+| F-171 | F-S09-32 | `01321b5` | tests for the seam, chains, near-equatorial GEO and fits hours apart. Writing them found that fits of one equatorial orbit never clustered, its node being noise: below 0.1 degree of inclination two fits are no longer compared on RAAN |
+| F-109 | F-S04-26 | `f964e9e` | the J2 equations against the secular node rate (1 %), the incomplete beta against scipy (1e-9), Welch against scipy on small samples and the t-table, and the all-diverged path |
+| F-121 | F-S05-17 | `919c132` | ScenarioResult, ThreatAssessment and PolAssessment carry a Provenance: code version, calibration source (now the constant `CALIBRATION_SOURCE`), computed_at, and a SHA-256 of each input, TLEs with their epochs |
+
+`01321b5` also makes the tolerance boundary inclusive on purpose: TLE elements are quantised, pairs exactly one tolerance apart are common, and float noise put them either side. Against 300 generated groups that is the only change in clustering output.
+
+#### Structure and tests
+
+| Finding | Origin | Commit | Change |
+|---|---|---|---|
+| F-069 | F-S01-19 | `eff8280`, `1fa1f55` | closed by step 3 work not logged against it: `find_orbital_events` split (33 to 12, byte-identical over 15 cases) and its handler narrowed to `TLE_ERRORS` |
+| F-097 | F-S03-30 | `fd42da8` | closed by step 3 work: `_parse_single_notso` split (to 8) |
+| F-098 | F-S03-32 | `39693ba` | closed by step 3 work: `cluster_and_reduce_tle_cache` split (to 9) |
+| F-114 | F-S05-07 | `1fa1f55`, `bc0cb50`, `ea29066` | `plan` split (to 6); `compute_outcome_metrics` fell to 14 when the TLE refinement was removed; C901, PLR0912 and PLR0915 are clean |
+| F-096 | F-S03-29 | `f28f4b1` | `_compute_drift_phases` split (19 to under 15), byte-identical over 2,000 generated histories |
+| F-136 | F-S06-26 | `f28f4b1` | the HRR side, rank and regime rules are one set of helpers used by both functions, byte-identical over 26,000 calls |
+| F-080 | F-S02-26 | `3816a8f` | the evasion test's `or True` is replaced by the CW closed forms at both warning times; the assertion checker refuses `or True` |
+| F-082 | F-S02-28 | `5d73e39` | the CW solvers, collision avoidance and the V-bar hop are flown on two-body orbits; a checklist test requires every public solver in tactical.py to name its reference test or be a declared heuristic |
+| F-156 | F-S08-14 | `3ecf0bb` | the admin tests find their row or fail and read back what they changed; the duplicate cookie tests are removed; a check refuses a search loop with nothing asserted after it |
+
+With F-096 and F-136, no function in `spectre/` or `tle_clustering/` is over cognitive complexity 15, and a test now holds the whole tree to it; CI's gate held only changed functions.
+
+Flying the V-bar hop (F-082) found that a custom hop time was priced as if it were half an orbit. A radial hop lands on V-bar only after an odd number of half orbits, so any other cadence is now refused, as the H-bar hop already did. The one caller uses the default.
+
+Observed, not an audit finding: training progress, attempts and sessions are keyed by username, not account id. A deleted account's training history passes to a recreated namesake, the pattern F-048 and F-148 fixed for sessions and planning state. Left for a decision, since moving the key needs a migration of three tables.
+
+`docs/SECURITY.md` lists the two new controls (password length, compute bounds). Observed, not an audit finding: the root `SECURITY.md` is stale. Its open items say there is no CSRF protection, no UDL rate limiting and no user-management UI; all three exist, and `docs/SECURITY.md` (rewritten for F-057) is the current policy. Left for the owner to replace with a pointer.
