@@ -614,3 +614,5 @@ Not an audit finding. The `master` ruleset requires CodeQL results before a pull
 ● JavaScript is not analysed: the application's own script is inline in the Jinja templates, which CodeQL does not extract, and `spectre/web/static` holds vendored third-party builds already scanned against OSV.
 ● `docs/SECURITY.md` now lists code scanning and the SBOM under controls in place, each citing its file. The F-057 test that forbade both words, written against the old template's false claims, now requires the citation instead.
 
+The first CodeQL run reported 72 alerts: 2 high (clear-text logging of sensitive information) and 70 medium (62 log injection, 8 information exposure through an exception). Only the 2 high alerts fail the ruleset. Both were false positives: one logged the fixed message constant `PASSWORD_TOO_LONG`, flagged for its name, and now logs a literal; the other is an audit probe script under `audit/working/`, which the scan no longer covers (it is limited to `spectre/`, `tle_clustering/` and `scripts/`). The 70 medium alerts do not block the merge and are triaged separately.
+

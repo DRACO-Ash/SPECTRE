@@ -270,11 +270,17 @@ def _admin_password_refused(password: str) -> bool:
 
     Raised from hash_password, it stopped the boot (audit F-150).
     """
-    from spectre.web.auth import PASSWORD_TOO_LONG, password_too_long
+    from spectre.web.auth import password_too_long
 
     if not password_too_long(password):
         return False
-    logger.error("SPECTRE_ADMIN_PASS was not applied: %s Set a shorter one and redeploy.", PASSWORD_TOO_LONG)
+    # A literal message: nothing derived from a password-named value reaches
+    # the log, so CodeQL's clear-text logging query has nothing to trace. The
+    # 72 is auth.MAX_PASSWORD_BYTES, bcrypt's own limit, which does not move.
+    logger.error(
+        "SPECTRE_ADMIN_PASS was not applied: it is over bcrypt's 72 bytes "
+        "(fewer characters if it is not plain ASCII). Set a shorter one and redeploy.",
+    )
     return True
 
 

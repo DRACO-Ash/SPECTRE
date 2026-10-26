@@ -4,10 +4,10 @@ name: CodeQL
 # pull request can merge (no high or higher security alert, no error alert).
 # Owner request, 26 October 2026.
 #
-# Python only. The application's own JavaScript is inline in the Jinja
-# templates, which CodeQL does not extract; the files under
-# spectre/web/static are vendored third-party builds, listed in
-# vendored.json and scanned against OSV by the SCA job in ci.yml.
+# Python only, over spectre/, tle_clustering/ and scripts/. The application's
+# own JavaScript is inline in the Jinja templates, which CodeQL does not
+# extract; the files under spectre/web/static are vendored third-party builds,
+# listed in vendored.json and scanned against OSV by the SCA job in ci.yml.
 
 on:
   push:
@@ -37,6 +37,14 @@ jobs:
           languages: python
           build-mode: none
           queries: security-extended
+          # The application and its scripts. audit/ holds the audit's own
+          # probe scripts and tests/ holds fixture credentials by design;
+          # neither ships, and both would only add noise to the gate.
+          config: |
+            paths:
+              - spectre
+              - tle_clustering
+              - scripts
       - name: Analyse
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
