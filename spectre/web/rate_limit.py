@@ -4,6 +4,9 @@ Three tiers match the cost profile of UDL operations:
   - udl_auth  : credential probes      — 5 / 60 s   per operator
   - udl_data  : TLE / SV / HRR fetches — 60 / 60 s  per operator
   - udl_sync  : bulk NOTSO sync         — 3 / 600 s  per operator
+
+and one for the PoL forms that run a computation in the shared executor:
+  - pol_compute : Monte Carlo, photometry — 10 / 60 s per operator
 """
 
 from __future__ import annotations
@@ -137,6 +140,7 @@ class SlidingWindowLimiter:
 _udl_auth_limiter = SlidingWindowLimiter(max_calls=5, window_seconds=60)
 _udl_data_limiter = SlidingWindowLimiter(max_calls=60, window_seconds=60)
 _udl_sync_limiter = SlidingWindowLimiter(max_calls=3, window_seconds=600)
+_pol_compute_limiter = SlidingWindowLimiter(max_calls=10, window_seconds=60)
 
 
 async def _guard(limiter: SlidingWindowLimiter, user: User, label: str) -> None:
@@ -166,3 +170,8 @@ async def udl_data_rate_limit(current_user: User = Depends(require_login)) -> No
 async def udl_sync_rate_limit(current_user: User = Depends(require_login)) -> None:
     """3 NOTSO bulk-sync operations per 600 s per operator."""
     await _guard(_udl_sync_limiter, current_user, "UDL sync")
+
+
+async def pol_compute_rate_limit(current_user: User = Depends(require_login)) -> None:
+    """10 Monte Carlo or photometry runs per 60 s per operator (audit F-145)."""
+    await _guard(_pol_compute_limiter, current_user, "PoL computation")

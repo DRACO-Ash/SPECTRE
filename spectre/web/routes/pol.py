@@ -14,6 +14,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
@@ -27,7 +28,7 @@ from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
-from spectre.web.rate_limit import udl_auth_rate_limit, udl_data_rate_limit
+from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, udl_data_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
@@ -46,6 +47,15 @@ _POL_PANEL_TEMPLATE = "partials/pol_panel.html"
 # Returned by every drill-down that is asked about a SATNO the session has no
 # analysis for. Held here so the three exits stay byte-identical: the operator
 # reaching this from a stale tab should not be able to tell which one answered.
+# Both forms run in the shared default executor, so one operator's request is
+# every operator's wait (audit F-145). Thirty days is the longest horizon a
+# single TLE fit can say anything about. The CSV cap, about 10,000
+# observations, sits under Starlette's own 1 MiB form-field limit so the
+# operator reads why rather than a bare 400.
+MAX_HORIZON_H = 720.0
+_MIN_HORIZON_H = 1.0
+MAX_PHOTOMETRY_CSV_CHARS = 524_288
+
 _NO_ANALYSIS_HTML = (
     '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
 )
@@ -798,6 +808,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     n_samples: Annotated[int, Form()] = 500,
     horizon_h: Annotated[float, Form()] = 48.0,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Run Monte Carlo simulation for a specific detected manoeuvre."""
     import asyncio
@@ -807,6 +818,12 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
         hypothesis_from_tle_record,
         run_monte_carlo,
     )
+
+    # "not (a <= x <= b)" also refuses NaN, which every comparison fails.
+    if not (_MIN_HORIZON_H <= horizon_h <= MAX_HORIZON_H):
+        return HTMLResponse(
+            f'<p class="error-msg">Horizon must be between {_MIN_HORIZON_H:.0f} and {MAX_HORIZON_H:.0f} hours.</p>'
+        )
 
     state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
@@ -1140,6 +1157,7 @@ async def pol_photometry_analyse(
     baseline_window_days: Annotated[float, Form()] = 90.0,
     extinction_coeff: Annotated[float, Form()] = 0.12,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Parse photometry CSV and run change-detection analysis."""
     from spectre.astro.photometry import assess_photometry, parse_photometry_csv
@@ -1149,9 +1167,15 @@ async def pol_photometry_analyse(
 
     if not csv_text.strip():
         return HTMLResponse('<p class="error-msg">Paste a CSV with at least epoch_utc and apparent_magnitude columns.</p>')
+    if len(csv_text) > MAX_PHOTOMETRY_CSV_CHARS:
+        return HTMLResponse(
+            f'<p class="error-msg">CSV too large: {len(csv_text):,} characters, '
+            f'limit {MAX_PHOTOMETRY_CSV_CHARS:,}. Trim it to the windows being compared.</p>'
+        )
 
     try:
-        observations = parse_photometry_csv(csv_text)
+        # Off the event loop: parsing and the fit are pure CPU.
+        observations = await run_in_threadpool(parse_photometry_csv, csv_text)
         if len(observations) < 5:
             return HTMLResponse(
                 f'<p class="error-msg">Need at least 5 valid observations, got {len(observations)}.</p>'
@@ -1160,7 +1184,8 @@ async def pol_photometry_analyse(
         # Photometry corroborates in the same way a NOTSO does: a brightness
         # change beside a candidate detection is evidence for it.
         manoeuvres = _all_detections(pol) if pol else []
-        result = assess_photometry(
+        result = await run_in_threadpool(
+            assess_photometry,
             observations,
             manoeuvres=manoeuvres,
             extinction_coeff=extinction_coeff,
