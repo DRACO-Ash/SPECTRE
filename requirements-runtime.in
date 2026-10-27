@@ -4,7 +4,7 @@
 # subset of requirements.txt. scripts/preflight-gate.py (check_runtime_subset)
 # and tests/unit/test_deployment_contract.py (test_manifests_do_not_drift)
 # assert that.
-fastapi>=0.111
+fastapi>=0.162.0
 uvicorn[standard]>=0.29
 jinja2>=3.1
 python-multipart
