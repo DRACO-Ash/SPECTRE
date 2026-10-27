@@ -8,7 +8,7 @@ fastapi>=0.111
 uvicorn[standard]>=0.29
 jinja2>=3.1
 python-multipart
-sqlalchemy[asyncio]>=2.0
+sqlalchemy[asyncio]>=2.1.6
 aiosqlite
 # Async PostgreSQL driver. Required for the App Store POSTGRESQL add-on:
 # SQLite cannot run on the object-storage backed FILE_STORAGE volume.
