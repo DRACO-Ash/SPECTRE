@@ -90,7 +90,7 @@ jobs:
           coverage report --include=spectre/web/routes/threat.py --fail-under=75
           coverage report --include=spectre/domain/decision.py --fail-under=100
       - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-xml
           path: coverage.xml
@@ -150,7 +150,7 @@ jobs:
             --format cyclonedx-json --output "sbom/spectre-${version}-runtime.cdx.json"
           python scripts/check-sbom.py "sbom/spectre-${version}-runtime.cdx.json" requirements-runtime.txt
       - name: Keep the SBOM
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: sbom/
@@ -255,7 +255,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - name: Install the locked runtime, test and tooling sets

@@ -4,15 +4,15 @@
 # subset of requirements.txt. scripts/preflight-gate.py (check_runtime_subset)
 # and tests/unit/test_deployment_contract.py (test_manifests_do_not_drift)
 # assert that.
-fastapi>=0.111
+fastapi>=0.162.0
 uvicorn[standard]>=0.29
 jinja2>=3.1
 python-multipart
-sqlalchemy[asyncio]>=2.0
+sqlalchemy[asyncio]>=2.1.6
 aiosqlite
 # Async PostgreSQL driver. Required for the App Store POSTGRESQL add-on:
 # SQLite cannot run on the object-storage backed FILE_STORAGE volume.
-asyncpg>=0.30
+asyncpg>=0.32.0
 bcrypt>=4.0
 itsdangerous>=2.1
 httpx>=0.27
@@ -21,4 +21,4 @@ numpy>=2.0
 python-dotenv>=1.0
 pandas>=2.0
 scipy>=1.11
-scikit-learn>=1.4
+scikit-learn>=1.9.1
