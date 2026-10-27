@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from spectre.web.auth import hash_password, require_admin
+from spectre.training.models import TRAINING_TABLES
+from spectre.web.auth import (
+    PASSWORD_TOO_LONG,
+    USERNAME_PATTERN,
+    hash_password,
+    password_too_long,
+    require_admin,
+)
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
+from spectre.web.planning_state import clear_account_state
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +50,7 @@ _VALID_ROLES = {"operator", "admin"}
 # directory is commonly an e-mail address. A pattern that rejected any of
 # those would stop the application starting rather than merely refuse a form,
 # so letters, digits, dot, underscore, at-sign and hyphen are all accepted.
-_USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
+_USERNAME_PATTERN = USERNAME_PATTERN
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -63,7 +70,7 @@ def _table_response(
     point the HTML parser foster-parents the trailing flash <div> out of the
     table. htmx then handed a non-element to its out-of-band code, which threw
     "e.querySelectorAll is not a function" and abandoned the whole swap. The
-    server had already committed the change, so a created, renamed or deleted
+    server had already committed the change, so a created or deleted
     user was invisible until the page was reloaded by hand.
 
     Rooting the response at <div>/<table> keeps the flash a legal sibling and
@@ -86,6 +93,28 @@ async def _all_users(db: AsyncSession) -> list[User]:
 async def _admin_count(db: AsyncSession) -> int:
     result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
     return result.scalar_one()
+
+
+def _another_admin_remains() -> Any:
+    """SQL condition: more than one admin exists at the moment of the write.
+
+    The read-then-write guard let two admins demoting or deleting each other
+    at once each count two and both commit (audit F-149). Evaluated inside
+    the UPDATE or DELETE itself, the count is the one the write sees.
+    """
+    count = select(func.count()).select_from(User).where(User.role == "admin").scalar_subquery()
+    return count > 1
+
+
+async def _lock_admin_rows(db: AsyncSession) -> None:
+    """Take row locks on the admin rows where the database has them.
+
+    On PostgreSQL two transactions could otherwise each see the other's admin
+    in their own snapshot. SQLite has no row locks and runs one writer at a
+    time, so the conditional statement is enough there and this is a no-op.
+    """
+    if db.get_bind().dialect.name != "sqlite":
+        await db.execute(select(User.id).where(User.role == "admin").with_for_update())
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -132,6 +161,8 @@ async def create_user(
         )
     elif not password:
         error = "Password is required."
+    elif password_too_long(password):
+        error = PASSWORD_TOO_LONG
     else:
         existing = await db.execute(select(User).where(User.username == username))
         if existing.scalar_one_or_none():
@@ -148,7 +179,7 @@ async def create_user(
     # session, the new user's straight from the form (pythonsecurity:S5145).
     logger.info(
         "Admin '%s' created user '%s' (role=%s)",
-        log_safe(current_user.username), log_safe(username), role,
+        log_safe(current_user.username), log_safe(username), log_safe(role),
     )
 
     users = await _all_users(db)
@@ -196,6 +227,20 @@ async def cancel_edit_row(
     return HTMLResponse(html)
 
 
+async def _set_role(db: AsyncSession, user: User, role: str) -> bool:
+    """Change *user*'s role, refusing to demote the last admin. False if refused."""
+    guard = [User.id == user.id]
+    if user.role == "admin" and role != "admin":
+        await _lock_admin_rows(db)
+        guard.append(_another_admin_remains())
+    done = await db.execute(update(User).where(*guard).values(role=role).execution_options(synchronize_session=False))
+    if done.rowcount == 0:  # type: ignore[attr-defined]
+        await db.rollback()
+        return False
+    user.role = role
+    return True
+
+
 @router.post("/users/{user_id}", response_class=HTMLResponse)
 async def update_user(
     request: Request,
@@ -217,6 +262,13 @@ async def update_user(
             flash={"type": "error", "message": "Invalid role."},
         )
 
+    # Judged before anything changes, so a refused password leaves the role as it was.
+    if new_password and password_too_long(new_password):
+        return _table_response(
+            request, await _all_users(db), current_user,
+            flash={"type": "error", "message": PASSWORD_TOO_LONG},
+        )
+
     # Guard: cannot demote the last admin
     if user.role == "admin" and role != "admin":
         admin_count = await _admin_count(db)
@@ -228,7 +280,11 @@ async def update_user(
 
     changed: list[str] = []
     if user.role != role:
-        user.role = role
+        if not await _set_role(db, user, role):
+            return _table_response(
+                request, await _all_users(db), current_user,
+                flash={"type": "error", "message": "Cannot demote the last admin account."},
+            )
         changed.append("role")
 
     if new_password:
@@ -281,8 +337,26 @@ async def delete_user(
             )
 
     username = user.username
-    await db.delete(user)
+    await _lock_admin_rows(db)
+    guard = [User.id == user.id]
+    if user.role == "admin":
+        guard.append(_another_admin_remains())
+    removed = await db.execute(delete(User).where(*guard))
+    if removed.rowcount == 0:  # type: ignore[attr-defined]
+        await db.rollback()
+        return _table_response(
+            request, await _all_users(db), current_user,
+            flash={"type": "error", "message": "Cannot delete the last admin account."},
+        )
+    # Its training records go in the same transaction. They are keyed on the
+    # account id, and SQLite reuses a freed id, so left behind they would
+    # pass to the next account created.
+    for table in TRAINING_TABLES:
+        await db.execute(delete(table).where(table.user_id == user.id))
     await db.commit()
+    # The account's planning state goes with it, UDL password included, so a
+    # later account of the same name starts clean (audit F-148).
+    clear_account_state(user_id)
     logger.info("Admin '%s' deleted user '%s'", log_safe(current_user.username), log_safe(username))
 
     users = await _all_users(db)

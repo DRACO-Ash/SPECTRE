@@ -1,0 +1,8 @@
+spectre/astro/cw_geometry.py
+spectre/astro/tactical.py
+spectre/domain/geometry.py
+tests/unit/test_cw_geometry.py
+tests/unit/test_geometry.py
+tests/unit/test_intercept_envelope.py
+tests/unit/test_tactical.py
+tests/unit/test_tactical_validation.py

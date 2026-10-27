@@ -32,18 +32,16 @@ ISS_TLE = """\
 
 class TestHohmann:
     def test_leo_to_geo(self):
-        """LEO (300 km) → GEO (35 786 km) — classic textbook case."""
-        r1 = R_EARTH + 300.0
-        r2 = R_EARTH + 35786.0
-        result = hohmann(r1, r2)
+        """Vallado, Fundamentals of Astrodynamics and Applications, Example 6-1.
+
+        191.344 km to 35,781.349 km altitude: total 3.935224 km/s in 5.256713 h.
+        Bands of about 6 per cent stood here before (audit F-070).
+        """
+        result = hohmann(R_EARTH + 191.344, R_EARTH + 35781.349)
 
         assert result.method == "hohmann"
-        # ΔV₁ ≈ 2.46 km/s, ΔV₂ ≈ 1.48 km/s, total ≈ 3.94 km/s
-        assert 2.3 < result.delta_v_1 < 2.6
-        assert 1.3 < result.delta_v_2 < 1.6
-        assert 3.7 < result.total_delta_v < 4.1
-        # Transfer time ≈ 5.26 hours
-        assert 5.0 < result.transfer_time_s / 3600 < 5.5
+        assert result.total_delta_v == pytest.approx(3.935224, abs=1e-5)
+        assert result.transfer_time_s / 3600 == pytest.approx(5.256713, abs=1e-5)
 
     def test_same_orbit_zero_dv(self):
         r = R_EARTH + 500.0
@@ -59,8 +57,18 @@ class TestBielliptic:
         result = bielliptic(r1, r2, rb)
 
         assert result.method == "bielliptic"
-        assert result.delta_v_3 > 0
-        assert result.total_delta_v > 0
+        # Vis-viva closed form for the three burns, derived here (audit F-070;
+        # the totals above were only asserted positive).
+        def vv(r: float, a: float) -> float:
+            return math.sqrt(MU_EARTH * (2.0 / r - 1.0 / a))
+
+        a1, a2 = (r1 + rb) / 2.0, (r2 + rb) / 2.0
+        expected = (
+            abs(vv(r1, a1) - math.sqrt(MU_EARTH / r1))
+            + abs(vv(rb, a2) - vv(rb, a1))
+            + abs(vv(r2, a2) - math.sqrt(MU_EARTH / r2))
+        )
+        assert result.total_delta_v == pytest.approx(expected, rel=1e-12)
         # Bi-elliptic takes longer than Hohmann for this case.
         hoh = hohmann(r1, r2)
         assert result.transfer_time_s > hoh.transfer_time_s
@@ -83,9 +91,11 @@ class TestLambert:
 
         assert sol.v1.shape == (3,)
         assert sol.v2.shape == (3,)
-        # For a circular orbit the speed should be ≈ sqrt(mu/r).
+        # A quarter period between points 90 deg apart on the circle is the
+        # circular orbit itself, so the departure velocity is the circular
+        # velocity, exactly. This was a 15 per cent speed band (audit F-070).
         v_circ = math.sqrt(MU_EARTH / r_circ)
-        assert np.linalg.norm(sol.v1) == pytest.approx(v_circ, rel=0.15)
+        assert np.allclose(sol.v1, [0.0, v_circ, 0.0], atol=1e-7)  # 0.1 mm/s, above the solver tolerance
 
     def test_negative_tof_raises(self):
         with pytest.raises(ValueError, match="positive"):
@@ -108,6 +118,21 @@ class TestLambert:
 # ── Propagator tests ──────────────────────────────────────────────────────
 
 class TestTLEOrbit:
+    def test_sgp4_verification_case_00005_at_epoch(self):
+        """Vallado et al. (2006) SGP4-VER, satellite 00005 at t = 0, TEME.
+
+        Pinned to 1 m. The propagator was checked only by an altitude band
+        (audit F-070).
+        """
+        tle = (
+            "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753\n"
+            "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667"
+        )
+        epoch = datetime(2000, 1, 1, tzinfo=UTC) + timedelta(days=179.78495062 - 1.0)
+        sv = TLEOrbit(tle).propagate(epoch)
+        assert np.allclose(sv.r, [7022.46529266, -1400.08296755, 0.03995155], atol=1e-3)
+        assert np.allclose(sv.v, [1.893841015, 6.405893759, 4.534807250], atol=1e-6)
+
     def test_propagate_returns_state(self):
         orbit = TLEOrbit(ISS_TLE)
         epoch = datetime(2024, 2, 14, 12, 0, 0, tzinfo=UTC)

@@ -1,6 +1,7 @@
 # SPECTRE Training Scenario Library
 # All data is SYNTHETIC.  Orbital parameters are realistic but no real object.
-# Each scenario is completely isolated from operational data.
+# Each scenario's objects are synthetic. They are added to the operator's
+# planning lists while it runs and removed when the operator leaves training.
 #
 # TOOL CAPABILITIES WITH SYNTHETIC TLEs (99xxx SATNOs do not exist in UDL):
 #   Assets panel       — Load objects by pasting TLE lines.  Shows all orbital elements.
@@ -34,14 +35,14 @@ scenarios:
     difficulty: easy
     description: >
       A geostationary communications satellite (BLUE-01) must perform a routine
-      north-south station-keeping burn to maintain its assigned longitude slot.
+      east-west station-keeping burn to hold its assigned longitude slot.
       No threat present.  Practise loading the scenario, reading orbital elements
       from the Assets panel, and interpreting the ΔV requirement from the briefing.
     briefing: >
-      BLUE-01 has drifted 0.08° from its assigned longitude slot at 45.0° East.
+      BLUE-01 has drifted 0.08° from its assigned longitude slot at 128.5° West.
       Station-keeping budget: 50 m/s residual.
       Mission computer output: required corrective ΔV = 2.0 m/s
-      north-south component — well within budget.  Execute by 2025-06-15 12:00Z.
+      east-west (along-track) component — well within budget.  Execute by 2025-06-15 12:00Z.
       No threat object is present.  This is a single-asset maintenance task.
     scenario_epoch_utc: "2025-06-15T00:00:00Z"
     horizon_hours: 24
@@ -50,16 +51,18 @@ scenarios:
         name: "BLUE-01"
         side: blue
         regime: GEO
-        tle_line1: "1 99001U 25001A   25166.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99001   0.0100  45.0000 0000200  90.0000   0.0000  1.00270000 00011"
+        tle_line1: "1 99001U 25001A   25166.00000000  .00000000  00000-0  00000-0 0  9997"
+        tle_line2: "2 99001   0.0100  45.0000 0000200  90.0000   0.0000  1.00270000 00013"
     tool_workflow: >
       This is a single-asset scenario — no Red track or Intercept Engine is required.
       1. Open the SPECTRE Console tab (sidebar → ⚙ SPECTRE Console).
       2. Assets panel → confirm BLUE-01 appears in the Blue Assets list (pre-loaded by the scenario).
          If not, click Quick-Add Blue and paste the TLE lines from the objects list above.
       3. Click BLUE-01 in the Assets panel to expand its orbital elements.
-         Read the RAAN field — for a GEO satellite this equals the sub-satellite longitude in degrees East.
-         Record this value to answer Objective 2.
+         Read the RAAN field and record it for Objective 2. RAAN is an inertial angle,
+         measured from the vernal equinox; it is not the longitude. The sub-satellite
+         longitude also depends on the argument of perigee, the mean anomaly and the
+         Earth's rotation: here RAAN 45.0° puts BLUE-01 over 128.5° West.
       4. Read the briefing: the mission computer ΔV of 2.0 m/s is stated directly.
          Confirm it is within the 50 m/s budget and enter this value for Objective 3.
       5. Tick all objectives and click Submit & Score.
@@ -69,12 +72,12 @@ scenarios:
         skill_axis: situational_awareness
         points: 10
       - id: obj_read_elements
-        description: "Read the assigned longitude from the BLUE-01 orbital elements (RAAN field) — answer in degrees East"
+        description: "Read the right ascension of the ascending node (RAAN) from the BLUE-01 orbital elements — answer in degrees"
         skill_axis: situational_awareness
         points: 20
         answer: "45.0"
         tolerance: 0.5
-        unit: "degrees East"
+        unit: "degrees"
       - id: obj_confirm_dv
         description: "Enter the corrective ΔV stated by the mission computer in the briefing (m/s)"
         skill_axis: manoeuvre_planning
@@ -110,14 +113,14 @@ scenarios:
         name: "BLUE-02"
         side: blue
         regime: LEO
-        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9991"
-        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00011"
+        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9998"
+        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00013"
       - satno: 99003
         name: "RED-01"
         side: red
         regime: LEO
-        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9991"
-        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00011"
+        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9992"
+        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00013"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-02 (Blue) and RED-01 (Red) are pre-loaded.
       2. Intercept Engine → select BLUE-02 as Blue asset and RED-01 as Red track.
@@ -172,14 +175,14 @@ scenarios:
         name: "BLUE-02"
         side: blue
         regime: LEO
-        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9991"
-        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00011"
+        tle_line1: "1 99002U 25002A   25201.33333333  .00001000  00000-0  10000-3 0  9998"
+        tle_line2: "2 99002  51.6000  45.0000 0001000   0.0000 360.0000 15.49000000 00013"
       - satno: 99003
         name: "RED-01"
         side: red
         regime: LEO
-        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9991"
-        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00011"
+        tle_line1: "1 99003U 25003A   25201.33333333  .00002000  00000-0  20000-3 0  9992"
+        tle_line2: "2 99003  51.6000  45.0500 0001200   0.0000 359.8500 15.49100000 00013"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-02 and RED-01 are pre-loaded.
       2. Intercept Engine → select BLUE-02 (Blue) and RED-01 (Red).
@@ -209,6 +212,7 @@ scenarios:
       - id: obj_time_pressure
         description: "Submit decision within the 10-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 30
     manoeuvre_options:
       - id: opt_hohmann_intrack
@@ -269,7 +273,7 @@ scenarios:
     time_limit_minutes: 45
     scoring:
       passing_score: 350
-      optimal_score: 500
+      optimal_score: 350
 
   - id: operator_timed_full_cycle
     title: "Full Engagement Cycle — Timed"
@@ -292,14 +296,14 @@ scenarios:
         name: "BLUE-03"
         side: blue
         regime: GEO
-        tle_line1: "1 99004U 25004A   25244.50000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99004   0.0200  75.0000 0000150  90.0000   0.0000  1.00270000 00011"
+        tle_line1: "1 99004U 25004A   25244.50000000  .00000000  00000-0  00000-0 0  9995"
+        tle_line2: "2 99004   0.0200  75.0000 0000150  90.0000   0.0000  1.00270000 00014"
       - satno: 99005
         name: "RED-02"
         side: red
         regime: GEO
-        tle_line1: "1 99005U 25005A   25244.50000000  .00000050  00000-0  00000-0 0  9991"
-        tle_line2: "2 99005   0.0300  75.0300 0000200  90.0000   0.0000  1.00270000 00011"
+        tle_line1: "1 99005U 25005A   25244.50000000  .00000050  00000-0  00000-0 0  9992"
+        tle_line2: "2 99005   0.0300  75.0300 0000200  90.0000   0.0000  1.00270000 00015"
     tool_workflow: >
       Full engagement cycle — 20 minutes.
       1. DETECT: Assets panel → confirm BLUE-03 and RED-02 are pre-loaded.
@@ -331,6 +335,7 @@ scenarios:
       - id: obj_act
         description: "Submit all decisions within the 20-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 100
       - id: obj_efficiency
         description: "Selected manoeuvre ΔV is within 20% of the minimum feasible option from the Intercept Engine"
@@ -339,7 +344,7 @@ scenarios:
     time_limit_minutes: 20
     scoring:
       passing_score: 400
-      optimal_score: 600
+      optimal_score: 500
 
   # ── Level 2 additions ─────────────────────────────────────────────────────────
 
@@ -367,14 +372,14 @@ scenarios:
         name: "BLUE-LEO"
         side: blue
         regime: LEO
-        tle_line1: "1 99010U 25010A   25161.33333333  .00001200  00000-0  60000-4 0  9991"
-        tle_line2: "2 99010  97.6000  80.0000 0001000  90.0000 270.0000 15.19000000 00013"
+        tle_line1: "1 99010U 25010A   25161.33333333  .00001200  00000-0  60000-4 0  9999"
+        tle_line2: "2 99010  97.6000  80.0000 0001000  90.0000 270.0000 15.19000000 00017"
       - satno: 99011
         name: "DEBRIS-07"
         side: red
         regime: LEO
         tle_line1: "1 99011U 19055C   25161.33333333  .00002500  00000-0  11000-3 0  9991"
-        tle_line2: "2 99011  97.6100  80.0050 0001050  90.5000 269.5000 15.19000000 00016"
+        tle_line2: "2 99011  97.6100  80.0050 0001050  90.5000 269.5000 15.19000000 00017"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-LEO and DEBRIS-07 are pre-loaded.
       2. The pre-manoeuvre conjunction distance of 0.8 km is provided in the briefing —
@@ -432,14 +437,14 @@ scenarios:
         name: "BLUE-INS"
         side: blue
         regime: LEO
-        tle_line1: "1 99020U 25020A   25196.43750000  .00000800  00000-0  40000-4 0  9991"
-        tle_line2: "2 99020  51.6000 100.0000 0002000  45.0000 315.0000 15.49000000 00011"
+        tle_line1: "1 99020U 25020A   25196.43750000  .00000800  00000-0  40000-4 0  9997"
+        tle_line2: "2 99020  51.6000 100.0000 0002000  45.0000 315.0000 15.49000000 00015"
       - satno: 99021
         name: "UNKNOWN-RSO"
         side: red
         regime: LEO
-        tle_line1: "1 99021U 25021A   25196.43750000  .00000900  00000-0  45000-4 0  9991"
-        tle_line2: "2 99021  51.6000 100.0200 0001800  45.2000 314.8000 15.49000000 00009"
+        tle_line1: "1 99021U 25021A   25196.43750000  .00000900  00000-0  45000-4 0  9995"
+        tle_line2: "2 99021  51.6000 100.0200 0001800  45.2000 314.8000 15.49000000 00003"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-INS (Blue) and UNKNOWN-RSO (Red) are pre-loaded.
       2. Intercept Engine → select BLUE-INS and UNKNOWN-RSO.
@@ -499,14 +504,14 @@ scenarios:
         name: "GEO-COMM"
         side: blue
         regime: GEO
-        tle_line1: "1 99030U 25030A   25232.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99030   0.0500  75.0000 0000300  10.0000   0.0000  1.00270000 00018"
+        tle_line1: "1 99030U 25030A   25232.00000000  .00000000  00000-0  00000-0 0  9995"
+        tle_line2: "2 99030   0.0500  75.0000 0000300  10.0000   0.0000  1.00270000 00015"
       - satno: 99031
         name: "DRIFTER-09"
         side: red
         regime: GEO
-        tle_line1: "1 99031U 25031A   25232.00000000  .00000010  00000-0  00000-0 0  9991"
-        tle_line2: "2 99031   0.0800  74.8500 0000500  10.5000   0.0000  1.00275000 00012"
+        tle_line1: "1 99031U 25031A   25232.00000000  .00000010  00000-0  00000-0 0  9998"
+        tle_line2: "2 99031   0.0800  74.8500 0000500  10.5000   0.0000  1.00275000 00013"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm GEO-COMM (Blue) and DRIFTER-09 (Red) are pre-loaded.
       2. The conjunction TCA (T+18h) and pre-manoeuvre range (1.8 km) are from the briefing.
@@ -567,14 +572,14 @@ scenarios:
         name: "BLUE-GEO"
         side: blue
         regime: GEO
-        tle_line1: "1 99040U 25040A   25253.25000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99040   0.0300  90.0000 0000200  20.0000   0.0000  1.00270000 00021"
+        tle_line1: "1 99040U 25040A   25253.25000000  .00000000  00000-0  00000-0 0  9997"
+        tle_line2: "2 99040   0.0300  90.0000 0000200  20.0000   0.0000  1.00270000 00022"
       - satno: 99041
         name: "ADVERSARY-GEO"
         side: red
         regime: GEO
-        tle_line1: "1 99041U 25041A   25253.25000000  .00000005  00000-0  00000-0 0  9991"
-        tle_line2: "2 99041   0.0400  90.2000 0000250  20.5000   0.0000  1.00270000 00014"
+        tle_line1: "1 99041U 25041A   25253.25000000  .00000005  00000-0  00000-0 0  9994"
+        tle_line2: "2 99041   0.0400  90.2000 0000250  20.5000   0.0000  1.00270000 00015"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-GEO and ADVERSARY-GEO are pre-loaded.
       2. Navigate to the Decision Engine panel (Planning tab or top tab bar).
@@ -635,14 +640,14 @@ scenarios:
         name: "RSO-NOTSO"
         side: red
         regime: GEO
-        tle_line1: "1 99050U 25050A   25213.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99050   0.1000  60.0000 0000400  30.0000   0.0000  1.00270000 00008"
+        tle_line1: "1 99050U 25050A   25213.00000000  .00000000  00000-0  00000-0 0  9998"
+        tle_line2: "2 99050   0.1000  60.0000 0000400  30.0000   0.0000  1.00270000 00009"
       - satno: 99051
         name: "BLUE-GEO-REF"
         side: blue
         regime: GEO
-        tle_line1: "1 99051U 25051A   25213.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99051   0.0300  59.0000 0000200  10.0000   0.0000  1.00270000 00005"
+        tle_line1: "1 99051U 25051A   25213.00000000  .00000000  00000-0  00000-0 0  9990"
+        tle_line2: "2 99051   0.0300  59.0000 0000200  10.0000   0.0000  1.00270000 00006"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm RSO-NOTSO (Red) and BLUE-GEO-REF (Blue) are loaded.
       2. Read the NOTSO notification from the briefing:
@@ -710,14 +715,14 @@ scenarios:
         name: "BLUE-HVA"
         side: blue
         regime: GEO
-        tle_line1: "1 99060U 25060A   25274.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99060   0.0200  50.0000 0000100  15.0000   0.0000  1.00270000 00031"
+        tle_line1: "1 99060U 25060A   25274.00000000  .00000000  00000-0  00000-0 0  9997"
+        tle_line2: "2 99060   0.0200  50.0000 0000100  15.0000   0.0000  1.00270000 00033"
       - satno: 99061
         name: "SHADOW-01"
         side: red
         regime: GEO
-        tle_line1: "1 99061U 25061A   25274.00000000  .00000015  00000-0  00000-0 0  9991"
-        tle_line2: "2 99061   0.0600  50.3500 0000350  16.2000   0.0000  1.00271000 00019"
+        tle_line1: "1 99061U 25061A   25274.00000000  .00000015  00000-0  00000-0 0  9995"
+        tle_line2: "2 99061   0.0600  50.3500 0000350  16.2000   0.0000  1.00271000 00015"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-HVA (Blue) and SHADOW-01 (Red) are pre-loaded.
       2. Read the pre-processed intelligence from the briefing: two confirmed manoeuvres,
@@ -755,7 +760,7 @@ scenarios:
     time_limit_minutes: null
     scoring:
       passing_score: 260
-      optimal_score: 360
+      optimal_score: 260
 
   - id: planner_05_leo_phasing_campaign
     title: "LEO Phasing Campaign — Multi-Step Manoeuvre"
@@ -779,14 +784,14 @@ scenarios:
         name: "BLUE-PH"
         side: blue
         regime: LEO
-        tle_line1: "1 99070U 25070A   25305.25000000  .00000700  00000-0  35000-4 0  9991"
-        tle_line2: "2 99070  63.4000 200.0000 0005000  60.0000 300.0000 14.91000000 00041"
+        tle_line1: "1 99070U 25070A   25305.25000000  .00000700  00000-0  35000-4 0  9990"
+        tle_line2: "2 99070  63.4000 200.0000 0005000  60.0000 300.0000 14.91000000 00045"
       - satno: 99071
         name: "TARGET-LEO"
         side: red
         regime: LEO
-        tle_line1: "1 99071U 25071A   25305.25000000  .00000720  00000-0  36000-4 0  9991"
-        tle_line2: "2 99071  63.4000 200.0000 0005100  60.2000 294.3000 14.91000000 00038"
+        tle_line1: "1 99071U 25071A   25305.25000000  .00000720  00000-0  36000-4 0  9995"
+        tle_line2: "2 99071  63.4000 200.0000 0005100  60.2000 294.3000 14.91000000 00033"
     tool_workflow: >
       1. SPECTRE Console → Assets panel → confirm BLUE-PH (Blue) and TARGET-LEO (Red) are pre-loaded.
       2. Intercept Engine → select BLUE-PH and TARGET-LEO.
@@ -819,8 +824,9 @@ scenarios:
         points: 50
     time_limit_minutes: null
     scoring:
-      passing_score: 300
-      optimal_score: 460
+      # The objectives total 260; this asked for 300 and could not be passed (audit F-052).
+      passing_score: 200
+      optimal_score: 260
 
   # ── Level 5 additions ─────────────────────────────────────────────────────────
 
@@ -849,32 +855,32 @@ scenarios:
         name: "BLUE-A"
         side: blue
         regime: GEO
-        tle_line1: "1 99080U 25080A   25335.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99080   0.0300 100.0000 0000150  10.0000   0.0000  1.00270000 00051"
+        tle_line1: "1 99080U 25080A   25335.00000000  .00000000  00000-0  00000-0 0  9999"
+        tle_line2: "2 99080   0.0300 100.0000 0000150  10.0000   0.0000  1.00270000 00054"
       - satno: 99081
         name: "BLUE-B"
         side: blue
         regime: GEO
         tle_line1: "1 99081U 25081A   25335.00000000  .00000000  00000-0  00000-0 0  9991"
-        tle_line2: "2 99081   0.0400 101.5000 0000200  12.0000   0.0000  1.00270000 00043"
+        tle_line2: "2 99081   0.0400 101.5000 0000200  12.0000   0.0000  1.00270000 00049"
       - satno: 99082
         name: "CRIMSON-01"
         side: red
         regime: GEO
-        tle_line1: "1 99082U 25082A   25335.00000000  .00000020  00000-0  00000-0 0  9991"
-        tle_line2: "2 99082   0.0700 100.2500 0000400  10.8000   0.0000  1.00271000 00029"
+        tle_line1: "1 99082U 25082A   25335.00000000  .00000020  00000-0  00000-0 0  9995"
+        tle_line2: "2 99082   0.0700 100.2500 0000400  10.8000   0.0000  1.00271000 00021"
       - satno: 99083
         name: "CRIMSON-02"
         side: red
         regime: GEO
-        tle_line1: "1 99083U 25083A   25335.00000000  .00000018  00000-0  00000-0 0  9991"
-        tle_line2: "2 99083   0.0600 101.6500 0000350  11.5000   0.0000  1.00270000 00022"
+        tle_line1: "1 99083U 25083A   25335.00000000  .00000018  00000-0  00000-0 0  9994"
+        tle_line2: "2 99083   0.0600 101.6500 0000350  11.5000   0.0000  1.00270000 00027"
       - satno: 99084
         name: "CRIMSON-03"
         side: red
         regime: GEO
-        tle_line1: "1 99084U 25084A   25335.00000000  .00000012  00000-0  00000-0 0  9991"
-        tle_line2: "2 99084   0.0500  99.8000 0000300  10.2000   0.0000  1.00270000 00017"
+        tle_line1: "1 99084U 25084A   25335.00000000  .00000012  00000-0  00000-0 0  9990"
+        tle_line2: "2 99084   0.0500  99.8000 0000300  10.2000   0.0000  1.00270000 00010"
     tool_workflow: >
       Theatre defence — 30 minutes.  NOTE: Intercept Engine runs one Blue vs one Red at a time.
       Run all six combinations and record the total ΔV for each:
@@ -908,6 +914,7 @@ scenarios:
       - id: obj_time_limit
         description: "Submit all decisions within the 30-minute time limit"
         skill_axis: operational_tempo
+        time_limited: true
         points: 80
       - id: obj_coordinated_defence
         description: "Verify both defensive responses are orbitally compatible — no fratricide or interference"
@@ -916,4 +923,4 @@ scenarios:
     time_limit_minutes: 30
     scoring:
       passing_score: 500
-      optimal_score: 650
+      optimal_score: 550

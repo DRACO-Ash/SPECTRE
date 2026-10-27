@@ -467,23 +467,23 @@
                 <label title="Pre-burn coast duration in hours">Coast (hr)
                   <input type="number" name="coast_hours" value="1.000" min="0.001" step="any" />
                 </label>
-                <label id="ie-tof-row" title="Post-burn time-of-flight in hours — Lambert and Optimal">Intercept TOF (hr)
+                <label id="ie-tof-row" title="Post-burn time-of-flight in hours, for the methods that take one">Intercept TOF (hr)
                   <input type="number" name="intercept_hours" value="6.000" min="0.001" step="any" />
                 </label>
                 <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
                   <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
                 </label>
-                <label id="ie-burns-row" title="Number of burn segments — Optimal only">Burns
-                  <input type="number" name="number_of_burns" value="1" min="1" max="5" step="1" />
+                <label title="Revolutions of the phasing orbit before arrival — Phasing">Revolutions
+                  <input type="number" name="revolutions" value="1" min="1" max="50" step="1" />
+                </label>
+                <label title="Number of hops along the V-bar or H-bar — V-bar and H-bar hop">Hops
+                  <input type="number" name="hops" value="3" min="1" max="20" step="1" />
+                </label>
+                <label title="Drift duration in days; leave blank for the solver's own — GEO drift">Drift (days)
+                  <input type="number" name="drift_days" value="" min="0" step="any" />
                 </label>
                 <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
                   <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
-                </label>
-              </div>
-
-              <div id="ie-minimize-row" class="mnv-check-group" style="margin-top:0.3rem">
-                <label title="Minimise total delta-V (Optimal only)">
-                  <input type="checkbox" name="minimize_delta_v" value="true" checked> Minimise &#916;V
                 </label>
               </div>
 
@@ -1022,7 +1022,7 @@ function switchToTradeSpace() {
               pointRadius: 7, pointHoverRadius: 10, data: []
             };
           }
-          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km });
+          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km, score: pt.score });
         });
 
         var allX = data.map(function(p) { return p.transfer_time_min; });
@@ -1055,7 +1055,8 @@ function switchToTradeSpace() {
                   label: function(ctx) {
                     var pt = ctx.raw;
                     return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
-                            'Transfer: ' + fmtTime(pt.x), 'Miss: ' + pt.miss.toFixed(1) + ' km'];
+                            'Transfer: ' + fmtTime(pt.x),
+                            pt.score !== undefined ? 'Score: ' + pt.score + '/100' : 'Miss: ' + pt.miss.toFixed(1) + ' km'];
                   }
                 },
                 backgroundColor: '#001529', titleColor: '#C8A415',

@@ -10,7 +10,9 @@ epoch moved forward dies with the cookie it was bound to.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
+import secrets
 
 from fastapi import HTTPException, Request, status
 from itsdangerous import BadSignature, Signer
@@ -63,16 +65,52 @@ def verify_csrf_token(session_cookie: str, submitted: str) -> bool:
         return False
 
 
+#: The pre-session token that guards POST /login (audit F-151), set by the
+#: login page as a cookie and a hidden field.
+LOGIN_COOKIE = "spectre_login_csrf"
+LOGIN_FIELD = "login_csrf"
+
+
+def new_login_token() -> str:
+    """A fresh token for one rendering of the login page."""
+    return secrets.token_urlsafe(32)
+
+
+async def _require_login_token(request: Request) -> None:
+    """Refuse a browser login that did not come from our own login page.
+
+    There is no session yet to bind a token to, so the login page sets a
+    random token as a cookie and as a hidden field, and a browser's POST must
+    return both, matching. A page on another site can make the browser send
+    the cookie but cannot read it to fill the field. Host is never read, so
+    the check holds behind a router that rewrites it. A request carrying
+    neither Origin nor Referer is not a browser form post and passes.
+    """
+    if not (request.headers.get("origin") or request.headers.get("referer")):
+        return
+    cookie = request.cookies.get(LOGIN_COOKIE, "")
+    submitted = ""
+    content_type = request.headers.get("content-type", "").split(";")[0].strip()
+    if content_type in _FORM_CONTENT_TYPES:
+        form = await request.form()
+        submitted = str(form.get(LOGIN_FIELD, "") or "")
+    if not (cookie and submitted and hmac.compare_digest(cookie, submitted)):
+        logger.warning("Login refused: missing or mismatched login token")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Login form expired or forged.")
+
+
 async def require_csrf(request: Request) -> None:
     """Global FastAPI dependency: reject non-safe requests without a valid CSRF token.
 
     HTMX requests carry the token in X-CSRF-Token (configured via hx-headers on
     <body>). Plain HTML form submissions carry it in a hidden csrf_token field.
-    GET/HEAD/OPTIONS/TRACE and the public /login POST are exempted.
+    GET/HEAD/OPTIONS/TRACE are exempt. The public /login POST has no session
+    to bind a token to, so it is checked against the login page's own token.
     """
     if request.method in _SAFE_METHODS:
         return
     if request.url.path in _EXEMPT_PATHS:
+        await _require_login_token(request)
         return
 
     session_cookie = request.cookies.get("spectre_session", "")
@@ -87,7 +125,7 @@ async def require_csrf(request: Request) -> None:
             try:
                 form = await request.form()
                 token = str(form.get(_CSRF_FIELD, "") or "")
-            except Exception:
+            except Exception:   # noqa: BLE001 - any unreadable body has no token, and the check below then refuses it
                 token = ""
 
     if not verify_csrf_token(session_cookie, token):

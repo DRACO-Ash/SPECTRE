@@ -107,7 +107,7 @@
   {# ── Chart tabs ── #}
   <div style="display:flex; gap:0.3rem; margin-top:0.5rem; margin-bottom:0.4rem">
     {% for tid, tlabel in [("vr","V-bar / R-bar"), ("hr","H-bar / R-bar"), ("rt","Range vs Time")] %}
-    <button id="gtab-{{ tid }}" onclick="geomTab('{{ tid }}')"
+    <button id="gtab-{{ tid }}" data-tab="{{ tid }}" onclick="geomTab(this.dataset.tab)"
             style="font-size:0.65rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:3px;
                    cursor:pointer; border:1px solid var(--border);
                    background:{% if loop.first %}rgba(59,139,235,0.18){% else %}transparent{% endif %};

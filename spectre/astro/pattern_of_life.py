@@ -1,29 +1,41 @@
-"""Pattern of Life (PoL) analysis from historical TLE sequences.
+"""Pattern of Life (PoL) measurements from historical TLE sequences.
 
-Given a chronological list of TLEs for a single object this module:
-  - Extracts mean orbital elements at each epoch (direct from SGP4 Satrec)
-  - Computes subsatellite geographic longitude for GEO/GSO objects
-  - Estimates ΔV between successive TLEs (propagation-difference method)
-  - Detects and classifies manoeuvres (SK / plane-change / repositioning)
-  - Corrects RAAN and argp changes for J2 secular drift
-  - Tracks longitude drift phases (East / West / Stationary)
-  - Computes statistical Pattern of Life bounds (μ ± 2σ)
-  - Scores the object on an anomaly scale vs GEO-SK baseline
-  - Estimates propellant budget and remaining operational life
-  - Produces an operator-level intelligence assessment
+Given element sets for a single object, this module measures and stops there:
+  ● parses the history into mean elements from SGP4's own Satrec, dropping
+    and counting element sets that will not parse;
+  ● for GEO and GSO objects, the subsatellite longitude and the drift SGP4
+    flies over one sidereal day;
+  ● screens consecutive pairs against a noise floor measured from the
+    object's own fit scatter (``dv_estimation.calibrate_noise``), and
+    confirms detections with the forensic ΔV breakdown
+    (``dv_estimation.build_breakdown``: epoch-swept propagation and mean
+    element differencing, J2-corrected);
+  ● merges the same burn reported by more than one provider;
+  ● tracks longitude drift phases (east, west, stationary);
+  ● computes ΔV and interval statistics, a small-sample prediction interval
+    for the next burn, and a status scoring the latest burn against the
+    earlier ones.
+
+Judgements against cited per-regime budgets (station-keeping classification,
+anomaly scoring, propellant budget, the operator-level assessment) live in
+``spectre.domain.pol_assessment``, built on
+``spectre.domain.manoeuvre_calibration``. This header used to list them here,
+with a propagation-difference ΔV method the module no longer uses (audit
+F-095).
 """
-
 from __future__ import annotations
 
+import itertools
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
+from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
 from spectre.astro.constants import (
-    J2_EARTH,
     MU_EARTH,
     R_EARTH,
     SIDEREAL_DAY,
@@ -41,7 +53,6 @@ from spectre.astro.dv_estimation import (
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
-_EARTH_ROT  = 86400.0 / SIDEREAL_DAY  # rev/solar-day ≈ 1.002737
 
 # ── Element set format ────────────────────────────────────────────────────────
 
@@ -118,6 +129,7 @@ _DRIFT_SIGNIFICANT = 0.20   # °/day — above this → meaningful drift phase
 _STATUS_RECENT_DAYS     = 10.0  # days: older than this and there is no "latest" manoeuvre
 _STATUS_ANOMALOUS_SIGMA = 3.0   # σ above the historical mean ΔV → "ANOMALOUS"
 _STATUS_CAUTION_SIGMA   = 2.0   # σ above the historical mean ΔV → "CAUTION"
+_STATUS_MIN_PRIOR       = 3     # earlier manoeuvres needed to score the latest
 
 # _SK_DV_LIMIT and _GEO_SK_BASELINE used to live here. Both are gone, and
 # nothing in this module replaces them, because neither was a measurement.
@@ -219,6 +231,23 @@ class Manoeuvre:
         return self.epoch
 
     @property
+    def long_gap(self) -> bool:
+        """True when the bracketing gap is long enough to hide several burns."""
+        return self.gap_days > _LONG_GAP_WARN_DAYS
+
+    @property
+    def burn_window(self) -> tuple[datetime, datetime]:
+        """Earliest and latest times the burn can have happened.
+
+        The measured burn epoch where the estimator dated it; otherwise the
+        bracket between the element sets either side, since the burn lies
+        somewhere in that gap.
+        """
+        if self.burn_epoch is not self.epoch:
+            return self.burn_epoch, self.burn_epoch
+        return self.tle_before.epoch, self.epoch
+
+    @property
     def confidence(self) -> str:
         return self.breakdown.confidence if self.breakdown else "UNASSESSED"
 
@@ -275,7 +304,7 @@ class PolAnalysis:
     chart_periods:  list[float]
 
     # GEO longitude time series
-    chart_longitudes:   list[float]
+    chart_longitudes:   list[float | None]
     chart_drift_rates:  list[float]
 
     # Manoeuvre chart data
@@ -321,7 +350,17 @@ class PolAnalysis:
     rejected_on_evidence:   int = 0   # survived the floor, failed the forensics
     skipped_long_gap:       int = 0   # gap too large to read as a single burn
     merged_duplicates:      int = 0   # same burn reported by more than one provider
+    malformed_element_sets: int = 0   # pairs that would not parse, dropped
+    duplicate_epoch_sets:   int = 0   # the same epoch again, dropped
+    bad_provenance_sets:    int = 0   # provenance in an unusable shape, dropped
+    other_object_sets:      int = 0   # another object's element set, dropped
     breakdowns_truncated:   int = 0   # detections past the forensic budget
+    # Newest archived epoch when the archive pull hit its record cap, so the
+    # history may have a gap between it and the current element set.
+    history_truncated_at:   datetime | None = None
+    # The drift rate below which the panel says station-keeping. The template
+    # used 0.005 against this module's 0.05 (audit F-210).
+    drift_stationary_deg_day: float = _DRIFT_STATIONARY
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -345,10 +384,32 @@ def _epoch_to_jd(epoch: datetime) -> float:
     return 2451545.0 + dt_days
 
 
-def _gst_deg(epoch: datetime) -> float:
-    """Greenwich Apparent Sidereal Time (degrees) at *epoch*."""
+def _gmst_deg(epoch: datetime) -> float:
+    """Greenwich Mean Sidereal Time (degrees) at *epoch*: Meeus, Astronomical
+    Algorithms, eq. 12.4. It was labelled apparent sidereal time, which also
+    carries the nutation in right ascension (audit F-207)."""
     jd = _epoch_to_jd(epoch)
     return (280.46061837 + 360.98564736629 * (jd - 2451545.0)) % 360.0
+
+
+def _geo_drift_deg_day(sat: Satrec, epoch: datetime) -> float | None:
+    """Longitude drift (deg/day, positive east) that SGP4 flies from *epoch*.
+
+    The Earth-fixed longitude change over one sidereal day of propagation,
+    which cancels the daily swing an eccentric orbit adds. Mean motion alone
+    leaves out the secular node and perigee rates (J2 alone is about
+    0.0134 deg/day at GEO) and the deep-space terms SGP4 applies there
+    (audit F-093). None if SGP4 reports an error.
+    """
+    jd = _epoch_to_jd(epoch)
+    lons = []
+    for days in (0.0, SIDEREAL_DAY / 86400.0):
+        err, r, _ = sat.sgp4(jd + days, 0.0)
+        if err:
+            return None
+        lons.append(math.degrees(math.atan2(r[1], r[0])) - _gmst_deg(epoch + timedelta(days=days)))
+    change = (lons[1] - lons[0] + 180.0) % 360.0 - 180.0
+    return change / (SIDEREAL_DAY / 86400.0)
 
 
 def _satrec_to_record(tle: str) -> TLERecord:
@@ -360,6 +421,9 @@ def _satrec_to_record(tle: str) -> TLERecord:
     l1, l2 = lines[-2], lines[-1]
     sat = Satrec.twoline2rv(l1, l2)
 
+    # Kozai mean motion, and the semi-major axis from it with WGS-84 mu: a
+    # Kozai mean element, not SGP4's internal Brouwer semi-major axis, and
+    # the altitude from it is a mean altitude (audit F-208).
     n_rad_min = sat.no_kozai          # rad/min
     n_rad_s   = n_rad_min / 60.0
     sma       = (MU_EARTH / (n_rad_s ** 2)) ** (1.0 / 3.0)
@@ -379,11 +443,10 @@ def _satrec_to_record(tle: str) -> TLERecord:
     geo_drift = None
     if regime in ("GEO", "DEEP") or (abs(inc_deg) < 15.0 and alt_km > 30000.0):
         mean_lon_eci = (raan_deg + argp_deg + ma_deg) % 360.0
-        gst          = _gst_deg(epoch)
+        gst          = _gmst_deg(epoch)
         lon          = (mean_lon_eci - gst) % 360.0
         geo_lon      = lon - 360.0 if lon > _LONGITUDE_WRAP_DEG else lon
-        # Drift rate: positive = east
-        geo_drift = 360.0 * (n_revday - _EARTH_ROT)
+        geo_drift    = _geo_drift_deg_day(sat, epoch)
 
     # Element Set Number — TLE line 1, columns 65-68 (1-indexed), right-justified
     try:
@@ -401,24 +464,6 @@ def _satrec_to_record(tle: str) -> TLERecord:
         geo_drift_rate_deg_day=geo_drift,
         element_set_no=esn,
     )
-
-
-def _j2_raan_rate(rec: TLERecord) -> float:
-    """J2 RAAN drift rate (°/day)."""
-    n  = (MU_EARTH / rec.sma_km ** 3) ** 0.5
-    d  = (1.0 - rec.ecc ** 2) ** 2
-    rate = -1.5 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * math.cos(math.radians(rec.inc_deg)) / d
-    return math.degrees(rate) * 86400.0
-
-
-def _j2_argp_rate(rec: TLERecord) -> float:
-    """J2 arg-perigee drift rate (°/day)."""
-    n  = (MU_EARTH / rec.sma_km ** 3) ** 0.5
-    d  = (1.0 - rec.ecc ** 2) ** 2
-    # See the note in spectre.astro.dv_estimation._j2_argp_rate_deg_day: the
-    # previous form was the exact negative of the J2 perigee rate.
-    rate = 0.75 * n * J2_EARTH * (R_EARTH / rec.sma_km) ** 2 * (5.0 * math.cos(math.radians(rec.inc_deg)) ** 2 - 1.0) / d
-    return math.degrees(rate) * 86400.0
 
 
 def _angle_diff(a: float, b: float) -> float:
@@ -645,54 +690,58 @@ def _downsample(records: list[Any], max_pts: int = 500) -> list[Any]:
 
 # ── Drift phase analysis ──────────────────────────────────────────────────────
 
+def _drift_direction(rate: float) -> str:
+    """EAST, WEST or STATIONARY for a longitude drift rate in degrees a day."""
+    if rate > _DRIFT_STATIONARY:
+        return "EAST"
+    if rate < -_DRIFT_STATIONARY:
+        return "WEST"
+    return "STATIONARY"
+
+
+def _drift_phase(start: TLERecord, end: TLERecord, rates: list[float], direction: str) -> DriftPhase | None:
+    """One drift phase from *start* to *end*, or ``None`` if under half a day."""
+    dur = (end.epoch - start.epoch).total_seconds() / 86400.0
+    if dur < 0.5:  # noqa: PLR2004
+        return None
+    mean_rate = sum(rates) / len(rates)
+    return DriftPhase(
+        start_epoch=start.epoch, end_epoch=end.epoch,
+        direction=direction, rate_deg_day=round(mean_rate, 3),
+        start_lon=round(start.geo_longitude_deg or 0.0, 2), end_lon=round(end.geo_longitude_deg or 0.0, 2),
+        distance_deg=round(mean_rate * dur, 2), duration_days=round(dur, 1),
+        peak_rate=round(max(abs(r) for r in rates), 3),
+    )
+
+
+def _direction_runs(geo_recs: list[TLERecord]) -> list[tuple[TLERecord, TLERecord, list[float], str]]:
+    """(start, end, rates, direction) for each run of one drift direction.
+
+    A run ends at the first record of the next, so consecutive phases share
+    their boundary record; the last ends at the last record.
+    """
+    runs: list[tuple[TLERecord, TLERecord, list[float], str]] = []
+    start = geo_recs[0]
+    rates = [start.geo_drift_rate_deg_day or 0.0]
+    direction = _drift_direction(rates[0])
+    for rec in geo_recs[1:]:
+        rate = rec.geo_drift_rate_deg_day or 0.0
+        if _drift_direction(rate) == direction:
+            rates.append(rate)
+            continue
+        runs.append((start, rec, rates, direction))
+        start, rates, direction = rec, [rate], _drift_direction(rate)
+    runs.append((start, geo_recs[-1], rates, direction))
+    return runs
+
+
 def _compute_drift_phases(records: list[TLERecord]) -> list[DriftPhase]:
     """Detect contiguous periods of East / West / Stationary longitude drift."""
     geo_recs = [r for r in records if r.geo_longitude_deg is not None and r.geo_drift_rate_deg_day is not None]
-    if len(geo_recs) < 3:
+    if len(geo_recs) < 3:  # noqa: PLR2004
         return []
-
-    def _dir(rate: float) -> str:
-        if rate > _DRIFT_STATIONARY:
-            return "EAST"
-        if rate < -_DRIFT_STATIONARY:
-            return "WEST"
-        return "STATIONARY"
-
-    phases: list[DriftPhase] = []
-    phase_start = geo_recs[0]
-    cur_dir     = _dir(geo_recs[0].geo_drift_rate_deg_day or 0.0)
-    rates_in_phase: list[float] = [geo_recs[0].geo_drift_rate_deg_day or 0.0]
-
-    def _flush(start: TLERecord, end: TLERecord, rates: list[float], direction: str) -> None:
-        dur = (end.epoch - start.epoch).total_seconds() / 86400.0
-        if dur < 0.5:
-            return
-        mean_rate  = sum(rates) / len(rates)
-        peak_rate  = max(abs(r) for r in rates)
-        dist       = mean_rate * dur
-        # Use signed raw longitude difference for distance (handles 180° wrap)
-        start_lon  = start.geo_longitude_deg or 0.0
-        end_lon    = end.geo_longitude_deg   or 0.0
-        phases.append(DriftPhase(
-            start_epoch=start.epoch, end_epoch=end.epoch,
-            direction=direction, rate_deg_day=round(mean_rate, 3),
-            start_lon=round(start_lon, 2), end_lon=round(end_lon, 2),
-            distance_deg=round(dist, 2), duration_days=round(dur, 1),
-            peak_rate=round(peak_rate, 3),
-        ))
-
-    for rec in geo_recs[1:]:
-        d = _dir(rec.geo_drift_rate_deg_day or 0.0)
-        if d != cur_dir:
-            _flush(phase_start, rec, rates_in_phase, cur_dir)
-            phase_start    = rec
-            cur_dir        = d
-            rates_in_phase = [rec.geo_drift_rate_deg_day or 0.0]
-        else:
-            rates_in_phase.append(rec.geo_drift_rate_deg_day or 0.0)
-
-    _flush(phase_start, geo_recs[-1], rates_in_phase, cur_dir)
-    return phases
+    phases = (_drift_phase(*run) for run in _direction_runs(geo_recs))
+    return [p for p in phases if p is not None]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -722,11 +771,38 @@ def _tle_line_pairs(tle_text: str) -> list[tuple[str, str]]:
     return pairs
 
 
+class ParseCounts(NamedTuple):
+    """Element sets the parser dropped, by reason.
+
+    Only malformed pairs were counted; duplicates, unusable provenance and
+    other objects' sets dropped silently (audits F-205, F-206).
+    """
+
+    malformed: int = 0
+    duplicate_epoch: int = 0
+    bad_provenance: int = 0
+    other_object: int = 0
+
+
+# Alpha-5 catalogue numbers: a letter, I and O excluded, stands for 10 to 33.
+_ALPHA5 = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def _catalogue_number(l1: str) -> int:
+    """The catalogue number in columns 3-7 of line 1, alpha-5 included."""
+    field = l1[2:7].strip()
+    if field[:1].isalpha():
+        return (_ALPHA5.index(field[0].upper()) + 10) * 10_000 + int(field[1:])
+    return int(field)
+
+
 def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
     """Parse one pair, or None when it is unusable or a duplicate epoch.
 
     A history block routinely carries the same element set twice from two
-    providers, and a malformed pair must drop out rather than stop the parse.
+    providers. A malformed pair raises ValueError or ZeroDivisionError, which
+    the caller catches and counts so that it drops out rather than stopping
+    the parse.
     """
     rec = _satrec_to_record(f"{l1}\n{l2}")
     key = rec.epoch.strftime("%Y%j%H%M%S")
@@ -779,18 +855,56 @@ def parse_tle_history(
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
     """
+    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata)
+    return records
+
+
+def _drop_reason(
+    l1: str, l2: str, satno: int | None, seen: set[str],
+    apply_metadata: Callable[[TLERecord, str], bool],
+) -> tuple[TLERecord | None, str]:
+    """The record for one pair, or None and the ParseCounts field it counts under."""
+    try:
+        if satno is not None and _catalogue_number(l1) != satno:
+            return None, "other_object"
+        rec = _record_from_pair(l1, l2, seen)
+    except (ValueError, ZeroDivisionError):
+        return None, "malformed"
+    if rec is None:
+        return None, "duplicate_epoch"
+    if not apply_metadata(rec, l1):
+        return None, "bad_provenance"
+    return rec, ""
+
+
+def parse_tle_history_counted(
+    tle_text: str,
+    satno: int | None = None,
+    metadata: dict[str, tuple[str, str]] | None = None,
+    rms_metadata: dict[str, float | None] | None = None,
+) -> tuple[list[TLERecord], ParseCounts]:
+    """As :func:`parse_tle_history`, also counting what was dropped and why.
+
+    A corrupt epoch raised ValueError and a zero mean motion ZeroDivisionError
+    out of the whole parse, so one bad element set lost the analysis (audit
+    F-083). Each now drops out and is counted. When *satno* is given, an
+    element set for another object is dropped and counted; the parameter was
+    accepted and ignored (audit F-206).
+    """
     records: list[TLERecord] = []
     seen: set[str] = set()
+    dropped: dict[str, int] = {}
     for l1, l2 in _tle_line_pairs(tle_text):
-        rec = _record_from_pair(l1, l2, seen)
+        rec, reason = _drop_reason(
+            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata),
+        )
         if rec is None:
-            continue
-        if not _apply_metadata(rec, l1, metadata, rms_metadata):
-            continue
-        records.append(rec)
+            dropped[reason] = dropped.get(reason, 0) + 1
+        else:
+            records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
-    return records
+    return records, ParseCounts(**dropped)
 
 
 def _screen_pairs(
@@ -841,8 +955,12 @@ def _detect_manoeuvres(
         d_ecc  = rc.ecc     - rp.ecc
         d_per  = (rc.period_min - rp.period_min) * 60.0
 
-        raan_j2  = _j2_raan_rate(rp)  * gap
-        argp_j2  = _j2_argp_rate(rp)  * gap
+        # SGP4's own secular rates, as the screening uses; the closed forms
+        # here disagreed with it by tens of m/s of phantom plane change
+        # (audit F-211).
+        raan_rate, argp_rate = secular_rates_deg_day(rp.tle, rp.sma_km, rp.ecc, rp.inc_deg)
+        raan_j2  = raan_rate * gap
+        argp_j2  = argp_rate * gap
         d_raan   = _angle_diff(rp.raan_deg + raan_j2, rc.raan_deg)
         d_argp   = _angle_diff(rp.argp_deg + argp_j2, rc.argp_deg)
 
@@ -863,35 +981,91 @@ def _detect_manoeuvres(
     return manoeuvres
 
 
+def _pol_status_for_history(
+    latest_epoch: datetime,
+    manoeuvres: list[Manoeuvre],
+) -> tuple[str, str]:
+    """Status of the latest manoeuvre, scored against the ones before it.
+
+    Leave-one-out. Scoring the latest delta-V against statistics that already
+    include it caps its z-score at (n - 1) / sqrt(n) (Samuelson's inequality),
+    so ANOMALOUS could not happen below 11 manoeuvres and a burn 100 times its
+    only predecessor read NORMAL (audit F-026).
+    """
+    prior = [m.delta_v_km_s for m in manoeuvres[:-1]]
+    return _pol_status_and_reason(latest_epoch, manoeuvres, _pol_stats(prior), len(prior))
+
+
 def _pol_status_and_reason(
     latest_epoch: datetime,
     manoeuvres: list[Manoeuvre],
-    dv_stats: PolStats | None,
+    prior_stats: PolStats | None,
+    n_prior: int = _STATUS_MIN_PRIOR,
 ) -> tuple[str, str]:
     """The backward-compatible PoL status and the sentence explaining it.
 
-    *latest_epoch* is the epoch of the last element set in the history: a
-    manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not "the
-    latest" and leaves the status at NORMAL, because an object that has simply
-    stopped manoeuvring is not an anomaly.
+    *prior_stats* describe the manoeuvres before the latest, of which there
+    are *n_prior*. *latest_epoch* is the epoch of the last element set in the
+    history: a manoeuvre older than ``_STATUS_RECENT_DAYS`` against it is not
+    "the latest" and leaves the status at NORMAL, because an object that has
+    simply stopped manoeuvring is not an anomaly. A recent manoeuvre with
+    fewer than ``_STATUS_MIN_PRIOR`` before it is INSUFFICIENT, not NORMAL:
+    there is nothing to measure it against.
     """
-    pol_status = "NORMAL"
-    pol_reason = "All metrics within normal historical bounds."
-    if manoeuvres and dv_stats:
-        last_dv = manoeuvres[-1].delta_v_km_s if (
-            latest_epoch - manoeuvres[-1].epoch
-        ).total_seconds() / 86400.0 < _STATUS_RECENT_DAYS else None
-        if last_dv and dv_stats.std > 0:
-            z = (last_dv - dv_stats.mean) / dv_stats.std
-            if z > _STATUS_ANOMALOUS_SIGMA:
-                pol_status = "ANOMALOUS"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above historical mean."
-            elif z > _STATUS_CAUTION_SIGMA:
-                pol_status = "CAUTION"
-                pol_reason = f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above mean — approaching anomalous threshold."
     if not manoeuvres:
-        pol_reason = "No manoeuvres detected — object appears passive."
-    return pol_status, pol_reason
+        return "NORMAL", "No manoeuvres detected — object appears passive."
+    age_days = (latest_epoch - manoeuvres[-1].epoch).total_seconds() / 86400.0
+    if age_days >= _STATUS_RECENT_DAYS:
+        return "NORMAL", "All metrics within normal historical bounds."
+    if prior_stats is None or n_prior < _STATUS_MIN_PRIOR:
+        return "INSUFFICIENT", (
+            f"Only {n_prior} earlier manoeuvre(s); at least {_STATUS_MIN_PRIOR} are needed "
+            "to judge whether the latest is unusual."
+        )
+    last_dv = manoeuvres[-1].delta_v_km_s
+    if prior_stats.std > 0:
+        z = (last_dv - prior_stats.mean) / prior_stats.std
+    else:
+        z = math.inf if last_dv > prior_stats.mean else 0.0
+    if z > _STATUS_ANOMALOUS_SIGMA:
+        return "ANOMALOUS", f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean."
+    if z > _STATUS_CAUTION_SIGMA:
+        return "CAUTION", (
+            f"Latest ΔV {last_dv:.4f} km/s is {z:.1f}σ above the earlier mean — "
+            "approaching anomalous threshold."
+        )
+    return "NORMAL", "All metrics within normal historical bounds."
+
+
+def _burn_epoch_of(m: Manoeuvre) -> datetime:
+    return m.burn_epoch
+
+
+def _burn_intervals(manoeuvres: list[Manoeuvre], burn_time: Any) -> list[float]:
+    """Days between successive burns, in burn order."""
+    times = sorted(burn_time(m) for m in manoeuvres)
+    return [(b - a).total_seconds() / 86400.0 for a, b in itertools.pairwise(times)]
+
+
+def _next_manoeuvre(
+    manoeuvres: list[Manoeuvre], burn_time: Any = _burn_epoch_of,
+) -> tuple[str | None, float | None]:
+    """Predicted next burn and the half-width (days) of its 95% interval.
+
+    The band is a prediction interval for the next interval between burns,
+    t(0.975, n-1) x s x sqrt(1 + 1/n). It was 2 s, which with three intervals
+    understates a 95% band by more than half (t = 4.30), and was timed on the
+    after-element-set epochs rather than the burns (audit F-094). None below
+    _MIN_INTERVALS_FOR_PREDICTION intervals.
+    """
+    intervals = _burn_intervals(manoeuvres, burn_time)
+    stats_ = _pol_stats(intervals)
+    if stats_ is None or stats_.n < _MIN_INTERVALS_FOR_PREDICTION:
+        return None, None
+    last = max(burn_time(m) for m in manoeuvres)
+    pred = last + timedelta(days=stats_.mean)
+    t_factor = float(student_t.ppf(0.975, stats_.n - 1))
+    return pred.strftime("%Y-%m-%d %H:%M UTC"), round(t_factor * stats_.std * math.sqrt(1.0 + 1.0 / stats_.n), 1)
 
 
 def analyse_pattern_of_life(
@@ -984,25 +1158,12 @@ def analyse_pattern_of_life(
     total_dv  = float(sum(dv_vals))
     sorted_m  = sorted(manoeuvres, key=lambda m: m.epoch)
 
-    intervals: list[float] = [
-        (sorted_m[j].epoch - sorted_m[j - 1].epoch).total_seconds() / 86400.0
-        for j in range(1, len(sorted_m))
-    ]
-
     dv_stats       = _pol_stats(dv_vals)
-    interval_stats = _pol_stats(intervals)
-
-    # Prediction
-    next_est = next_unc = None
-    if interval_stats and interval_stats.n >= _MIN_INTERVALS_FOR_PREDICTION and sorted_m:
-        pred = sorted_m[-1].epoch + timedelta(days=interval_stats.mean)
-        next_est = pred.strftime("%Y-%m-%d %H:%M UTC")
-        next_unc = round(interval_stats.std * 2.0, 1)
+    interval_stats = _pol_stats(_burn_intervals(manoeuvres, _burn_epoch_of))
+    next_est, next_unc = _next_manoeuvre(manoeuvres, _burn_epoch_of)
 
     # PoL status
-    pol_status, pol_reason = _pol_status_and_reason(
-        records[-1].epoch, manoeuvres, dv_stats,
-    )
+    pol_status, pol_reason = _pol_status_for_history(records[-1].epoch, manoeuvres)
 
     # ── Chart data ────────────────────────────────────────────────────────────
     cr = _downsample(records, 500)
@@ -1012,7 +1173,8 @@ def analyse_pattern_of_life(
     chart_eccs      = [round(r.ecc, 6)              for r in cr]
     chart_raans     = [round(r.raan_deg, 4)         for r in cr]
     chart_periods   = [round(r.period_min, 4)       for r in cr]
-    chart_lons      = [round(r.geo_longitude_deg, 3) if r.geo_longitude_deg is not None else 0 for r in cr]
+    # A missing longitude is a gap, not 0 degrees (audit F-212).
+    chart_lons      = [round(r.geo_longitude_deg, 3) if r.geo_longitude_deg is not None else None for r in cr]
     chart_drifts    = [round(r.geo_drift_rate_deg_day, 4) if r.geo_drift_rate_deg_day is not None else 0 for r in cr]
 
     man_epochs        = [m.epoch.strftime("%Y-%m-%d") for m in sorted_m]

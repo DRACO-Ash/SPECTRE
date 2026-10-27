@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from spectre.astro.constants import MU_EARTH, R_EARTH
+from spectre.astro.constants import GEO_RADIUS, MU_EARTH, R_EARTH
 from spectre.astro.tactical import (
     assess_intercept_intent,
     classify_manoeuvre,
@@ -23,7 +23,6 @@ from spectre.astro.tactical import (
     intercept_envelope_analytical,
     j2_drift_plan,
     j2_raan_rate,
-    min_time_intercept_analytical,
     nmc_safety_ellipse,
     optimal_evasion,
     orbital_terrain,
@@ -34,7 +33,18 @@ from spectre.astro.tactical import (
 
 # ── Typical orbit radii ────────────────────────────────────────────────────
 LEO_R = R_EARTH + 500.0   # ~500 km altitude
-GEO_R = 42164.0           # GEO radius
+GEO_R = GEO_RADIUS        # GEO radius (audit F-203)
+
+
+def _drifted(raan_deg: float, a: float = LEO_R, ecc: float = 0.001, inc: float = 51.6, dt_s: float = 86400.0) -> float:
+    """The node a day later with no manoeuvre: J2 moves it about -5 deg/day here.
+
+    Holding the node fixed for a day, as these fixtures did, is itself a node
+    change against precession; the classifier hid that until audit F-023.
+    """
+    from spectre.astro.tactical import j2_raan_rate
+
+    return raan_deg + j2_raan_rate(a, ecc, inc) * dt_s / 86400.0
 
 
 class TestPhasingOrbit:
@@ -119,13 +129,32 @@ class TestCWCombined:
         assert result.along_track_sep_km == 5.0
         assert result.method == "combined"
 
-    def test_pure_radial_recoverable(self) -> None:
-        """Combined with zero along-track should match pure radial."""
-        pure = cw_radial_separation(LEO_R, 5.0, 1800.0)
-        combined = cw_combined(LEO_R, 5.0, 0.0, 1800.0)
-        # Not exact match because combined solves the full 2×2 system
-        # but radial ΔV should be close
-        assert abs(combined.delta_v_radial - pure.delta_v_radial) < 0.01
+    @pytest.mark.parametrize("time_s", [600.0, 1800.0, 2900.0, 4100.0, 7000.0])
+    def test_the_burns_fly_to_their_targets(self, time_s: float) -> None:
+        """Fly each solver's burn through the CW solution and check the result.
+
+        The premise of the test this replaces, that the combined solve with no
+        along-track target matches the pure radial burn, is false: by hand at
+        1,800 s the pure radial burn is +6.06 m/s and the combined one -2.21
+        m/s radial with +2.68 m/s along-track, and the 10 m/s tolerance let both
+        signs pass (audit F-081).
+        """
+        from spectre.astro.cw_geometry import CWState, _cw_propagate
+
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+
+        def flown(result: object) -> CWState:
+            return _cw_propagate(
+                CWState(0.0, 0.0, 0.0, result.delta_v_radial, result.delta_v_along_track, 0.0),  # type: ignore[attr-defined]
+                n, time_s,
+            )
+
+        pure = flown(cw_radial_separation(LEO_R, 5.0, time_s))
+        assert pure.x == pytest.approx(5.0, abs=1e-9)
+
+        combined = flown(cw_combined(LEO_R, 5.0, 0.0, time_s))
+        assert combined.x == pytest.approx(5.0, abs=1e-9)
+        assert combined.y == pytest.approx(0.0, abs=1e-9)
 
 
 class TestPlaneChange:
@@ -133,7 +162,7 @@ class TestPlaneChange:
         result = plane_change(LEO_R, inclination_change_deg=5.0)
         assert result.optimal_delta_v > 0
         assert result.inclination_change_deg == 5.0
-        assert result.optimal_location in ("node", "apogee")
+        assert result.optimal_location == "node"
 
     def test_zero_inclination_change(self) -> None:
         result = plane_change(LEO_R, inclination_change_deg=0.0)
@@ -209,7 +238,9 @@ class TestCollisionAvoidance:
     def test_basic_cola(self) -> None:
         plan = collision_avoidance(LEO_R, desired_miss_km=1.0, time_before_tca_s=3600.0)
         assert plan.best.delta_v > 0
-        assert plan.best.miss_distance_km == 1.0
+        # The separation reached, at least the miss asked for (audit F-196).
+        assert plan.best.miss_distance_km >= 1.0
+        assert plan.best.miss_distance_km == pytest.approx(1.0245516, rel=1e-6)
         assert plan.best.strategy in ("radial", "along_track", "out_of_plane")
 
     def test_all_strategies_computed(self) -> None:
@@ -280,18 +311,18 @@ class TestManoeuvreClassification:
     def test_altitude_change(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R + 50, 0.001, 51.6, 100.0,
+            LEO_R + 50, 0.001, 51.6, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "altitude_change"
         assert result.estimated_delta_v > 0
         assert result.burn_direction == "prograde"
-        assert result.confidence > 0.5
+        assert result.branch_score > 0.5
 
     def test_plane_change_detected(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R, 0.001, 53.0, 100.0,
+            LEO_R, 0.001, 53.0, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "plane_change"
@@ -300,7 +331,7 @@ class TestManoeuvreClassification:
     def test_no_manoeuvre(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R, 0.001, 51.6, 100.0,
+            LEO_R, 0.001, 51.6, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "station_keeping"
@@ -309,7 +340,7 @@ class TestManoeuvreClassification:
     def test_combined_manoeuvre(self) -> None:
         result = classify_manoeuvre(
             LEO_R, 0.001, 51.6, 100.0,
-            LEO_R + 100, 0.001, 53.0, 100.0,
+            LEO_R + 100, 0.001, 53.0, _drifted(100.0),
             86400.0,
         )
         assert result.manoeuvre_type == "combined"
@@ -352,12 +383,12 @@ class TestDetectabilityMetric:
     def test_micro_manoeuvre(self) -> None:
         result = detectability_metric(0.0005, 500.0)
         assert result.delta_v_category == "micro"
-        assert result.tracking_detection_prob < 0.5
+        assert result.detection_score < 0.5
 
     def test_large_manoeuvre(self) -> None:
         result = detectability_metric(0.5, 500.0)
         assert result.delta_v_category == "large"
-        assert result.tracking_detection_prob > 0.9
+        assert result.detection_score > 0.9
 
     def test_leo_detected_faster(self) -> None:
         leo = detectability_metric(0.01, 500.0)
@@ -367,7 +398,7 @@ class TestDetectabilityMetric:
     def test_larger_dv_higher_prob(self) -> None:
         small = detectability_metric(0.001, 500.0)
         big = detectability_metric(0.1, 500.0)
-        assert big.tracking_detection_prob > small.tracking_detection_prob
+        assert big.detection_score > small.detection_score
 
     def test_observability_bounded(self) -> None:
         result = detectability_metric(1.0, 500.0)
@@ -388,18 +419,29 @@ class TestOptimalEvasion:
         assert plan.best.delta_v <= 0.001 + 1e-10
 
     def test_more_time_cheaper(self) -> None:
-        """More warning time generally allows cheaper evasion."""
-        short = optimal_evasion(LEO_R, 10.0, 600.0, fuel_budget_km_s=1.0)
-        long = optimal_evasion(LEO_R, 10.0, 7200.0, fuel_budget_km_s=1.0)
-        # With more time, along-track drift becomes very effective
-        cheapest_long = min(s.delta_v for s in long.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in long.strategies) else float("inf")
-        cheapest_short = min(s.delta_v for s in short.strategies if s.resulting_miss_km >= 10.0) if any(s.resulting_miss_km >= 10.0 for s in short.strategies) else float("inf")
-        # At least one timing should be cheaper with more time
-        # SIM222: the `or True` is deliberate and the assertion is therefore
-        # advisory. Timing singularities make the comparison genuinely
-        # indeterminate for some geometries, so it documents the expectation
-        # without failing the suite on a case physics allows.
-        assert cheapest_long <= cheapest_short or True  # noqa: SIM222
+        """More warning time makes evasion cheaper, by the CW closed forms (audit F-080).
+
+        This ended in ``assert ... or True``, which cannot fail. From rest, a
+        Clohessy-Wiltshire impulse gives along-track miss
+        dv |4 sin(nt) / n - 3t| (in-track burn) or dv sin(nt) / n (radial or
+        cross-track), so the cheapest 10 km miss is the smaller of
+        10 / |4 sin(nt) / n - 3t| and 10 n / sin(nt).
+        """
+        import math
+
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+
+        def closed_form(t: float) -> float:
+            in_track = 10.0 / abs(4.0 * math.sin(n * t) / n - 3.0 * t)
+            out_of_track = 10.0 * n / abs(math.sin(n * t))
+            return min(in_track, out_of_track)
+
+        short = optimal_evasion(LEO_R, 10.0, 600.0, fuel_budget_km_s=1.0).best
+        long = optimal_evasion(LEO_R, 10.0, 7200.0, fuel_budget_km_s=1.0).best
+        assert short.delta_v == pytest.approx(closed_form(600.0), rel=0.01)
+        assert long.delta_v == pytest.approx(closed_form(7200.0), rel=0.01)
+        assert long.strategy == "prograde", "two hours lets an in-track drift do the work"
+        assert long.delta_v < short.delta_v / 30.0
 
     def test_multiple_strategies_evaluated(self) -> None:
         plan = optimal_evasion(LEO_R, 5.0, 3600.0, fuel_budget_km_s=1.0)
@@ -422,7 +464,7 @@ class TestIntentPredictor:
             relative_range_km=30.0, range_rate_km_s=-0.8,
             is_coplanar=True,
         )
-        assert r.likelihood > 0.5
+        assert r.indicator_score > 0.5
         assert r.risk_level in ("medium", "high", "critical")
         assert r.predicted_tca_hours < 1.0
 
@@ -434,7 +476,7 @@ class TestIntentPredictor:
             is_coplanar=False,
         )
         assert r.risk_level == "low"
-        assert r.likelihood < 0.3
+        assert r.indicator_score < 0.3
 
     def test_inspector_profile(self) -> None:
         """Close, slow approach, coplanar → inspection or repositioning."""
@@ -444,7 +486,7 @@ class TestIntentPredictor:
             is_coplanar=True,
         )
         assert r.intent_type in ("inspection", "co_orbital_intercept", "repositioning")
-        assert r.likelihood > 0.3
+        assert r.indicator_score > 0.3
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -459,8 +501,8 @@ class TestInterceptEnvelope:
         r = intercept_envelope_analytical(LEO_R, LEO_R + 200.0, max_delta_v=5.0, tof_max_hours=6.0)
         assert r.hohmann_dv_km_s > 0
         assert r.hohmann_tof_hours > 0
-        # With generous budget, at least some points should be feasible
-        assert r.feasible_count >= 0  # envelope may still reject fast transfers
+        # A 5 km/s budget for a 200 km raise leaves feasible points.
+        assert r.feasible_count > 0
 
     def test_tight_budget_fewer_feasible(self) -> None:
         """Smaller ΔV budget → fewer feasible solutions."""
@@ -524,10 +566,10 @@ class TestFingerprinting:
         r = fingerprint_manoeuvre(0.5, "retrograde", 500.0, 65.0, 0.15)
         assert r.primary_classification == "asat_test"
 
-    def test_probabilities_sum_reasonable(self) -> None:
-        """All probabilities should be between 0 and 1."""
+    def test_each_score_is_between_0_and_1(self) -> None:
+        """Each classification's heuristic score lies in [0, 1]."""
         r = fingerprint_manoeuvre(0.05, "combined", 800.0, 98.0, 0.001)
-        for p in r.probabilities.values():
+        for p in r.scores.values():
             assert 0.0 <= p <= 1.0
 
 
@@ -540,18 +582,26 @@ class TestFormationDefence:
 
     def test_basic_formation_burn(self) -> None:
         """Should compute a ΔV and assess formation impact."""
-        r = formation_defence_burn(LEO_R, LEO_R + 100, 3600.0, 5.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 5.0)
         assert r.delta_v > 0
-        assert r.formation_impact_km >= 0
+        # An along-track impulse from the slot: x = 2(dv/n)(1 - cos nt),
+        # y = (dv/n)(4 sin nt - 3 nt). Its furthest point in one orbit, where
+        # cos nt = 3/4 late in the orbit, is about 19.3 dv/n.
+        n = math.sqrt(MU_EARTH / LEO_R**3)
+        furthest = max(
+            math.hypot(2.0 * (1.0 - math.cos(nt)), 4.0 * math.sin(nt) - 3.0 * nt)
+            for nt in (2.0 * math.pi * k / 10_000 for k in range(10_001))
+        ) * r.delta_v / n
+        assert r.formation_impact_km == pytest.approx(furthest, rel=1e-3)
 
     def test_wide_tolerance_maintains_formation(self) -> None:
         """Large formation spacing → should maintain formation."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 1.0, formation_spacing_km=500.0)
+        r = formation_defence_burn(LEO_R, 3600.0, 1.0, formation_spacing_km=500.0)
         assert r.maintains_formation
 
     def test_tight_tolerance_may_exceed(self) -> None:
         """Very tight formation spacing → may exceed tolerance."""
-        r = formation_defence_burn(LEO_R, LEO_R + 50, 3600.0, 10.0, formation_spacing_km=0.001)
+        r = formation_defence_burn(LEO_R, 3600.0, 10.0, formation_spacing_km=0.001)
         # With very tight tolerance, the burn likely exceeds it
         assert r.formation_impact_km > 0
 
@@ -583,30 +633,3 @@ class TestOrbitalTerrain:
         """Low LEO (300 km) → moderate debris."""
         r = orbital_terrain(300.0, 51.6)
         assert r.debris_risk == "medium"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestMinTimeIntercept:
-    """Tests for min_time_intercept_analytical()."""
-
-    def test_feasible_transfer(self) -> None:
-        """LEO-to-LEO with generous budget → feasible."""
-        r = min_time_intercept_analytical(LEO_R, LEO_R + 200.0, max_delta_v=1.0)
-        assert r.is_feasible
-        assert r.min_tof_s > 0
-        assert r.delta_v_km_s <= 1.0
-
-    def test_infeasible_large_gap(self) -> None:
-        """LEO to GEO with tiny budget → infeasible."""
-        r = min_time_intercept_analytical(LEO_R, GEO_R, max_delta_v=0.01)
-        assert not r.is_feasible
-
-    def test_faster_with_more_dv(self) -> None:
-        """More ΔV budget → faster min transfer time."""
-        slow = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=0.5)
-        fast = min_time_intercept_analytical(LEO_R, LEO_R + 500.0, max_delta_v=2.0)
-        if slow.is_feasible and fast.is_feasible:
-            assert fast.min_tof_s <= slow.min_tof_s

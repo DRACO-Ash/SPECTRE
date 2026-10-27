@@ -172,6 +172,13 @@ async def _apply_migrations(conn: Any) -> None:
     migrations: list[tuple[str, str, str]] = [
         ("training_challenge_results", "scored", "BOOLEAN NOT NULL DEFAULT TRUE"),
         ("users", "session_generation", "INTEGER NOT NULL DEFAULT 0"),
+        # Existing rows take the empty nonce, and their tokens carry it too.
+        ("users", "session_nonce", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        # Training rows keyed on the account. Nullable here only because a
+        # legacy row has no value until _key_training_on_account fills it.
+        ("training_progress", "user_id", "INTEGER"),
+        ("training_sessions", "user_id", "INTEGER"),
+        ("training_challenge_results", "user_id", "INTEGER"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)
@@ -180,7 +187,147 @@ async def _apply_migrations(conn: Any) -> None:
             continue  # table absent, so create_all will build it complete
         if column not in existing:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+    await _key_training_on_account(conn)
 
+
+# Whole statements, one set per table, so no SQL is assembled from strings at
+# all: backfill the account id from the username, remove what no account
+# holds, and index the new key (progress takes its unique index separately).
+_TRAINING_KEY_SQL: dict[str, tuple[str, str, str | None]] = {
+    "training_progress": (
+        "UPDATE training_progress SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_progress.username) WHERE user_id IS NULL",
+        "DELETE FROM training_progress WHERE user_id IS NULL",
+        None,
+    ),
+    "training_sessions": (
+        "UPDATE training_sessions SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_sessions.username) WHERE user_id IS NULL",
+        "DELETE FROM training_sessions WHERE user_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_training_sessions_user_id ON training_sessions (user_id)",
+    ),
+    "training_challenge_results": (
+        "UPDATE training_challenge_results SET user_id = (SELECT users.id FROM users "
+        "WHERE users.username = training_challenge_results.username) WHERE user_id IS NULL",
+        "DELETE FROM training_challenge_results WHERE user_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_training_challenge_results_user_id "
+        "ON training_challenge_results (user_id)",
+    ),
+}
+
+
+def _index_uniqueness(sync_conn: Any, table: str) -> dict[str, bool]:
+    """Each index on *table*, by name, mapped to whether it is unique."""
+    from sqlalchemy import inspect
+
+    return {str(ix["name"]): bool(ix["unique"]) for ix in inspect(sync_conn).get_indexes(table)}
+
+
+async def _key_training_on_account(conn: Any) -> None:
+    """Move legacy training rows from the username key to the account id.
+
+    Training rows were keyed on the username, so a deleted account's history
+    passed to a namesake created later. Legacy rows take the id of the
+    account that holds their username now; rows whose username no account
+    holds belong to a deleted account and are removed. Progress was unique on
+    the username: that index becomes a plain one, and uniqueness moves to the
+    account id. Safe to re-run: every step is a no-op once applied.
+    """
+    from sqlalchemy import text
+
+    removed = 0
+    for table, (backfill, drop_orphans, index) in _TRAINING_KEY_SQL.items():
+        if "user_id" not in await conn.run_sync(_existing_columns, table):
+            continue
+        await conn.execute(text(backfill))
+        orphans = await conn.execute(text(drop_orphans))
+        removed += orphans.rowcount or 0
+        if index is not None:
+            await conn.execute(text(index))
+    if removed:
+        logger.warning(
+            "Removed %d training record(s) whose account no longer exists while keying "
+            "training on the account id.", removed,
+        )
+    if not await conn.run_sync(_existing_columns, "training_progress"):
+        return
+    indexes = await conn.run_sync(_index_uniqueness, "training_progress")
+    if indexes.get("ix_training_progress_username"):
+        await conn.execute(text("DROP INDEX ix_training_progress_username"))
+        await conn.execute(text(
+            "CREATE INDEX ix_training_progress_username ON training_progress (username)"
+        ))
+    if not indexes.get("ix_training_progress_user_id"):
+        await conn.execute(text("DROP INDEX IF EXISTS ix_training_progress_user_id"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX ix_training_progress_user_id ON training_progress (user_id)"
+        ))
+
+
+
+def _admin_password_refused(password: str) -> bool:
+    """Whether SPECTRE_ADMIN_PASS is too long for bcrypt; logged if so.
+
+    Raised from hash_password, it stopped the boot (audit F-150).
+    """
+    from spectre.web.auth import password_too_long
+
+    if not password_too_long(password):
+        return False
+    # A literal message: nothing derived from a password-named value reaches
+    # the log, so CodeQL's clear-text logging query has nothing to trace. The
+    # 72 is auth.MAX_PASSWORD_BYTES, bcrypt's own limit, which does not move.
+    logger.error(
+        "SPECTRE_ADMIN_PASS was not applied: it is over bcrypt's 72 bytes "
+        "(fewer characters if it is not plain ASCII). Set a shorter one and redeploy.",
+    )
+    return True
+
+
+def _admin_username_refused(username: str) -> bool:
+    """Log and return ``True`` when SPECTRE_ADMIN_USER fails the username rule.
+
+    The admin form enforced the pattern and bootstrap did not, so the one
+    account made from the environment could hold a name no form would accept
+    (audit F-261). An empty name is left to the "no credentials" branch.
+    """
+    from spectre.web.auth import USERNAME_PATTERN
+
+    if not username or USERNAME_PATTERN.fullmatch(username):
+        return False
+    logger.error(
+        "SPECTRE_ADMIN_USER was not applied: a username is 1 to 64 characters of "
+        "letters, digits and . _ @ -. Set a valid one and redeploy.",
+    )
+    return True
+
+
+async def _break_glass(
+    session: AsyncSession, existing: list[Any], username: str, password: str, promote: bool,
+) -> None:
+    """Reset *username*'s password, creating the admin account if it has gone."""
+    from spectre.web.auth import hash_password
+    from spectre.web.models import User
+
+    target = next((u for u in existing if u.username == username), None)
+    if target is not None and target.role != "admin" and not promote:
+        logger.error(
+            "ADMIN RESET REFUSED for %r: the account exists and is not an admin. "
+            "Set SPECTRE_ADMIN_RESET_PROMOTE=true as well to promote it, or name an admin.",
+            username,
+        )
+        return
+    if target is None:
+        target = User(username=username, hashed_password="", role="admin")
+        session.add(target)
+    target.hashed_password = hash_password(password)
+    target.role = "admin"
+    await session.commit()
+    logger.warning(
+        "ADMIN RESET APPLIED for %r because SPECTRE_ADMIN_RESET is set. "
+        "Unset it and redeploy: leaving it on resets the password every boot.",
+        username,
+    )
 
 
 async def _bootstrap_admin() -> None:
@@ -200,6 +347,9 @@ async def _bootstrap_admin() -> None:
     username = settings.spectre_admin_user.strip()
     password = settings.spectre_admin_pass
 
+    if _admin_password_refused(password) or _admin_username_refused(username):
+        return
+
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(select(User))).scalars().all()
 
@@ -208,17 +358,8 @@ async def _bootstrap_admin() -> None:
                 # Break-glass recovery. Without it, a forgotten password means
                 # dropping the database, because bootstrap only runs on an
                 # empty table.
-                target = next((u for u in existing if u.username == username), None)
-                if target is None:
-                    target = User(username=username, hashed_password="", role="admin")
-                    session.add(target)
-                target.hashed_password = hash_password(password)
-                target.role = "admin"
-                await session.commit()
-                logger.warning(
-                    "ADMIN RESET APPLIED for %r because SPECTRE_ADMIN_RESET is set. "
-                    "Unset it and redeploy: leaving it on resets the password every boot.",
-                    username,
+                await _break_glass(
+                    session, list(existing), username, password, settings.admin_reset_promote,
                 )
                 return
             logger.info(

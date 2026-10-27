@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from sqlalchemy import DateTime, Integer, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
 from spectre.web.database import Base
+
+
+class SessionKey(NamedTuple):
+    """One sign-in: the account and the random id its token was issued with.
+
+    Planning state, and the UDL credentials on it, are filed under this rather
+    than the username, so a second sign-in of the same account starts clean
+    and nothing outlives the account (audit F-044, F-148).
+    """
+
+    user_id: int
+    session_id: str
 
 
 class User(Base):
@@ -20,6 +34,8 @@ class User(Base):
         hashed_password: bcrypt hash of the password; never store plaintext.
         role: ``"operator"`` or ``"admin"``.
         created_at: UTC timestamp of account creation.
+        session_nonce: random per-account value stamped into every session
+            token, so a recreated namesake cannot accept the old account's.
         session_generation: counter stamped into every session token this
             account mints. Logout and a password change increment it, which
             refuses every token carrying an older value. A counter rather than
@@ -33,6 +49,8 @@ class User(Base):
     """
 
     __tablename__ = "users"
+    # session_key below is per request, not a column.
+    __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -56,6 +74,22 @@ class User(Base):
         server_default="0",
         nullable=False,
     )
+    # A random value set when the account is created and carried in every
+    # session token it mints. A deleted and recreated "alice" gets a new one,
+    # so the old account's unexpired tokens no longer match even where SQLite
+    # hands the new row the old row's id (audit F-048). A row from before the
+    # column existed arrives with the empty string, and its tokens carry the
+    # same empty string, so it keeps working; any account created after the
+    # upgrade is random.
+    session_nonce: Mapped[str] = mapped_column(
+        String(32),
+        default=lambda: secrets.token_hex(16),
+        server_default="",
+        nullable=False,
+    )
+
+    # Set by require_login from the token that authenticated this request.
+    session_key: SessionKey | None = None
 
 
 # A password change has to end the sessions that were opened with the old
@@ -79,3 +113,9 @@ def _revoke_sessions_on_password_change(
         # opened with one, so there is nothing to revoke.
         return
     target.session_generation = (target.session_generation or 0) + 1
+    # Every sign-in it ended loses its planning state too, UDL password
+    # included (audit F-148). Deferred: planning_state imports this module.
+    if target.id is not None:
+        from spectre.web.planning_state import clear_account_state
+
+        clear_account_state(target.id)

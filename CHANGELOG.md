@@ -7,6 +7,154 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed (audit step 3, solvers and screening)
+- Hohmann and bi-elliptic intercepts sign each burn correctly for raising and lowering, and report the propagated miss instead of 0 km (F-011, F-012, F-013).
+- Evasion is planned against the threat's predicted position; the reported miss is the separation achieved (F-014).
+- Combined altitude and plane change burns follow the geometry they are priced on, from a crossing of the target plane (F-015).
+- Molniya and Tundra orbits classify as HEO, so Tundra objects are screened against GEO assets (F-016).
+- Object names reach inline handlers as data attributes, never as JavaScript source (F-038).
+- Lambert transfers longer than one orbit are priced on the cheapest revolution count, in intercepts and the envelope sweep (F-010).
+- The NMC burn is flown from the interceptor's actual relative state, and refused when it is not on the requested ellipse (F-017).
+- J2 drift acceleration closes the RAAN gap the short way in half the natural time and costs both burns (F-024).
+- Pattern-of-life status scores the latest manoeuvre against earlier ones only, and reads INSUFFICIENT below three (F-026).
+- NOTSO correlation uses the burn window, not the next element set (F-027).
+- TLE clustering writes the newest cluster's representative (F-028).
+- Monte Carlo: timing dispersion moves the burn (F-029), the ΔV direction comes from the detection (F-030), and drag uses the SGP4 B* relation (F-031).
+- CW stability radial extent, RAAN-change cost, plane-change node pricing, H-bar hop description and formation slot displacement corrected (F-071, F-073 to F-075, F-077, F-078).
+- Pattern of life: malformed element sets dropped and counted (F-083), long-gap detections flagged (F-084), GEO drift measured from SGP4 (F-093), next-burn band a small-sample prediction interval on burn epochs (F-094).
+- TLE cadence clusters bounded by their span (F-085).
+- NOTSO parsing and correlation: ΔV fields read, inferred dates flagged, messages split correctly, only labelled IDs taken, rejects shown, true lead time, closest-first pairing (F-086 to F-092).
+- Monte Carlo density is Vallado's exponential atmosphere (F-105); photometry Welch test, fit covariance and empty windows corrected (F-101, F-102, F-108).
+
+### Fixed (audit step 3, web routes and operator UI)
+- Evasion from the intercept engine uses the operator's ΔV budget (F-037).
+- A training attempt is scored once; objectives count once each; challenge awards go to challenge scenarios only; Reset no longer submits the score; training objects leave the operational lists when training ends (F-049, F-158, F-160, F-050, F-051).
+- PoL analysis is rate limited; the orbital-event search is bounded and off the event loop (F-045, F-040).
+- Sweep and screen results say when element sets are not live tracking, including a failed actor refresh (F-039, F-135).
+- Sweep: refusal reasons keep their figures and name their target and epoch; refine reports refusals, flies the swept orbits and cannot write into a newer sweep; an unreadable manual number no longer fails the sweep; pasted targets survive the cap; manual targets are bounded (F-058, F-123 to F-128, F-134).
+- Intercept engine: computed miss shown for every method; assessment scores never labelled km; unread controls removed; revolutions, hops and drift days have their own fields; the Data Mode badge states actual provenance (F-129 to F-133).
+- Add TLE sends its fields before clearing them (F-043).
+- GCAT search is literal and off the event loop; refresh is admin only and cannot wipe a load in progress (F-138, F-139).
+- UDL: an elset with no element lines is refused; the catalogue and NOTSO cache need the operator's own UDL session; login tasks are held, single-flight, refreshed and cancelled on UDL logout; a PoL history at the record cap is flagged (F-140, F-142 to F-144).
+- Login carries a pre-session token against login CSRF; the last-admin guard holds under concurrent changes (F-151, F-149).
+- Decision Engine inputs are range-checked with inline errors (F-164).
+- Fonts are served from the console's own origin; the content security policy no longer names Google (F-170).
+- Rendezvous and Proximity are declared aliases of Hohmann and Lambert; the docs list the 23 solvers (F-174).
+
+### Fixed (audit step 3, build, CI, config and data)
+- The NOTSO cache reads real UDL records, so correlation from the cache works; it lives in the data directory and writes atomically off the event loop (F-046, F-062, F-141).
+- Every training scenario can be passed and its optimal score is reachable; cadet_01 no longer teaches that RAAN is longitude (F-052, F-053).
+- An unknown database sslmode is refused rather than downgraded to no verification (F-153).
+- .env.example lists every setting and says where SQLite lives (F-182).
+- The proxy-CA build hook edits the Dockerfile it claims to; the complexity meter follows sonar-python; the dependency analyser is pinned and opt-in; comments name the real subset check (F-176 to F-178, F-183, F-184).
+- CI actions are pinned to commits, the gitleaks download is checksum-verified, and jscpd is an exact version (F-175).
+- Intelligence records' sources are stated as they are, threat level is labelled an analyst judgement, and the file carries its UNCLASS // PAIR marking (F-146).
+
+### Fixed (audit step 3, documentation)
+- Any example "change me" signing key is refused at boot, and the README no longer publishes one; the quick start runs (F-056, F-064).
+- The docs state the TEME frame, the Lambert solver that exists, the real level and axis tables, the real intercept result and routes, and the real test suite and CI jobs (F-055, F-173, F-161, F-181, F-180).
+- SECURITY.md states only controls the repository implements, each evidenced, with the rest as open items (F-057).
+
+### Fixed (audit step 3, domain)
+- The Decision Engine no longer runs a TLE refinement that hid its errors and could only lower the score; its docstrings describe it as the uncalibrated lookup model it is (F-111, F-113).
+- Decision Engine inputs are validated in the domain, not only at the route (F-112).
+- The GEO protected region ends at GEO plus 200 km, as the IADC guidelines define it (F-116).
+- Routine station-keeping no longer draws down the discretionary reserve (F-118).
+- An unrecognised solver is scored against the widest band rather than rendezvous (F-119).
+- CI lint checks broad exception handlers; most now catch only what their block raises (F-065).
+
+### Fixed (audit step 4, High)
+- A node change against J2 precession is detected, and manoeuvre detection no longer removes the drift twice (F-023).
+- Phasing refuses an altitude gap it cannot close and reports the gap it leaves (F-025).
+- An unmeasured detection floor is no longer called measured (F-032).
+- Losing custody costs in the Decision Engine whatever our own reversibility, so doing nothing is no longer the robust pick against a manoeuvre (F-035).
+- TLE clustering compares nodes at one epoch, so fits of one orbit hours apart cluster (F-054).
+
+### Changed (audit step 4, heuristic scores)
+- Assessment results carry a score, its kind and its provenance; the miss distance is only ever a distance (F-072).
+- Heuristic figures say so: scores, not probabilities, likelihoods or confidences, with a shared "modelled estimate, not a computed solution" badge on intercept assessments, the Decision Engine and the PoL anomaly index (F-041, F-018 to F-022, F-034, F-036).
+- Photometry reports the p-value and sample sizes instead of a "confidence" percentage (F-033).
+- The tactical heuristics' thresholds are named tables; the evasion planner no longer claims combined burns and survives a zero fuel budget (F-079, F-076).
+
+### Security (audit step 4, identity)
+- Session tokens are bound to the account, so a deleted and recreated account of the same name no longer accepts the old account's tokens (F-048). Operators sign in once after upgrading.
+- Planning state, and the UDL credentials on it, belongs to one sign-in: another sign-in of the same account does not see it, and logout, a password change, account deletion and cookie expiry all clear it (F-044, F-148).
+- A revoked token can no longer log the operator out or obtain a CSRF token (F-152).
+
+### Fixed (audit step 3, operator UI)
+- The Monte Carlo panel shows period percentiles under its percentile headers, an altitude median, and states that its dispersions are an archetype's assumptions, not measurements (F-104).
+
+### Fixed (audit step 3, tests)
+- The threat sweep shows the group's best ΔV and the worst-case headline in whole m/s, not to three decimals (F-137).
+- Tests that checked nothing, only a type, or a condition true of every value now pin values; a meta-test keeps them out (F-066, F-147).
+- The threat sweep, TLE year pivot, NOTSO cache and Decision Engine tests pin reference values; the Decision Engine is held at full coverage (F-137, F-147, F-122).
+- The docker-only archive's contract is checked against the built archive, not from inside it where the suite never travels (F-179).
+
+### Added
+- Regression gates for the Secure cookie flag, CSRF on DELETE and revoked sessions on the root page (F-059 to F-061).
+- Threat route tests and a per-file coverage floor for `spectre/web/routes/threat.py` (F-042).
+- A regression gate for session expiry (F-155).
+- `spectre/astro/kepler.py`: universal-variable two-body propagator.
+- `solve_lambert_all` and `cheapest_lambert`: multi-revolution Lambert solutions.
+
+Remediation of the whole-repository audit of 23 October 2026 (`audit/`).
+Step 1 of 4: the eight Blockers. Each fix landed test-first, with the defect
+reproduced by a failing test before the change and the full suite green
+after it. The finding-to-commit map is `audit/REMEDIATION-LOG.md`.
+
+### Fixed
+
+- **Login brute force** (F-008). An exhausted login budget refused only
+  wrong passwords; the correct one still signed in. Both limiter tiers are
+  now read, without charging, before the password is compared.
+- **GEO drift duration** (F-007). The coast time in hours reached the GEO
+  relocation solver as days, so a 48 h coast became a 48-day drift and the
+  reported delta-V was about 1/24 of the true cost.
+- **CW secular drift** (F-005). Along-track drift per orbit was reported at
+  -0.5 times the Clohessy-Wiltshire value.
+- **CW stability frame** (F-006). The stability analysis received inertial
+  rather than rotating-frame relative velocity, so bounded motion read as
+  drifting.
+- **Manoeuvre detection units** (F-001). Inclination and RAAN, already in
+  degrees, were converted to degrees again, pricing a 0.1 deg trim at
+  754 m/s instead of 13 m/s. The static guard now catches any alias.
+- **Plane-change cost** (F-002). The angle between planes ignored RAAN, so
+  aligning two 53 deg planes 10 deg apart in RAAN cost nothing. The burn is
+  now also placed at the line of nodes.
+- **Lambert arc direction** (F-003). Every retrograde or sun-synchronous
+  orbit took the arc running against its own motion, about 15 km/s per burn
+  in LEO. The arc now follows the departure orbit's sense by default.
+- **Minimum-time intercept** (F-004). The analytic search always returned
+  1 per cent of the Hohmann time at less than Hohmann cost. It is replaced
+  by a Lambert sweep against the target's real position.
+
+### Changed (step 3 of 4: decision engine relabelled)
+
+- **The Decision Engine says it is a modelled estimate.** Its Phase 1 outcomes
+  are lookup constants and weights, not propagated orbits. The result now
+  carries a `modelled` flag and a basis statement, the banner reads "Modelled
+  Recommendation" with "Modelled estimate, not a computed solution.", and each
+  cell marks its closest approach "(model)". This is the July 2026 agreed
+  remediation, built at last.
+- **"Maximin" is renamed "Minimin".** The selector minimised the best-case
+  cost, the optimistic rule; "maximin" names the cautious one. The form value
+  is now `minimin`.
+
+### Changed (step 2 of 4: CI executes its checks)
+
+- **CI installs the locked sets.** The lint, test and quality jobs installed
+  an undefined `.[dev]` extra, so they had no tools and failed with exit 127
+  before checking anything. They now install `requirements.txt` and
+  `requirements-dev.txt` with hashes and confirm the tools are present.
+- **One version per shared package.** The dev lock is constrained by the
+  runtime lock, so the two install together. Dev-only pins moved for tomli,
+  urllib3, filelock and setuptools; the last three clear published advisories.
+- **SCA covers the dev lock**, and CI no longer overrides the pyproject
+  coverage floor.
+- **The orphan `SPECTRE-1` submodule pointer is removed.**
+
 ## [0.5.24] - 2026-10-22
 
 The SonarQube Code Quality gate. 57 findings reported, 55 cleared, 2 left for a

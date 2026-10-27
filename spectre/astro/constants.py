@@ -1,4 +1,10 @@
-"""Physical constants for orbital mechanics."""
+"""Physical constants for orbital mechanics.
+
+Sources (audit F-194): MU_EARTH and R_EARTH are the WGS-84 values; J2_EARTH
+is the EGM-96 zonal coefficient as tabulated by Vallado, Fundamentals of
+Astrodynamics and Applications, 4th ed., Table D-3; SIDEREAL_DAY is the IERS
+mean sidereal day.
+"""
 
 from __future__ import annotations
 
@@ -13,14 +19,15 @@ J2_EARTH: float = 1.08263e-3
 
 # GEO parameters
 GEO_RADIUS: float = 42164.0   # km — geostationary orbit radius
-SIDEREAL_DAY: float = 86164.1  # seconds — Earth's sidereal rotation period
+SIDEREAL_DAY: float = 86164.0905  # seconds — mean sidereal day (IERS)
 
 # Orbit regime boundaries (altitude km above Earth's surface)
 _LEO_MAX_ALT: float = 2000.0
-_MEO_MAX_ALT: float = 35386.0   # GEO lower bound − 400 km
 _GEO_BAND_ALT: float = 35786.0  # nominal GEO altitude
 _GEO_TOL_ALT: float = 400.0     # ± tolerance for GEO band
-_GEO_MAX_ALT: float = 36186.0   # GEO upper bound + 400 km
+_MEO_MAX_ALT: float = _GEO_BAND_ALT - _GEO_TOL_ALT   # the GEO band's lower edge
+_GEO_MAX_ALT: float = _GEO_BAND_ALT + _GEO_TOL_ALT   # the GEO band's upper edge
+_HEO_MIN_ECC: float = 0.25      # eccentric enough to leave the GEO or MEO bands
 
 # Mapping of raw UDL orbitRegime strings → canonical family
 _REGIME_MAP: dict[str, str] = {
@@ -51,7 +58,9 @@ def regimes_compatible(r1: str, r2: str) -> bool:
 
     Same-regime pairings are always allowed.  HEO and GTO are inherently
     trans-belt orbits whose apogee/perigee naturally reaches both LEO and GEO
-    altitudes, so they are permitted against any regime they physically cross.
+    altitudes, so they are permitted against every regime. No check is made
+    that the particular orbit's apsides actually cross the other regime
+    (audit F-195).
     All other cross-regime pairings (e.g. LEO ↔ GEO) require impractical
     delta-V and are rejected.
     """
@@ -76,8 +85,12 @@ def classify_orbit_regime(semi_major_axis_km: float, eccentricity: float = 0.0) 
     if perigee_alt >= _MEO_MAX_ALT and apogee_alt <= _GEO_MAX_ALT:
         return "GEO"
     if perigee_alt < _LEO_MAX_ALT and apogee_alt > _MEO_MAX_ALT:
-        # High apogee + low perigee — GTO or HEO depending on eccentricity
-        return "GTO" if apogee_alt > _MEO_MAX_ALT and eccentricity > 0.5 else "HEO"
+        # Low perigee and high apogee: a transfer orbit only if the apogee is
+        # at GEO; Molniya, with its apogee near 40,000 km, is HEO.
+        return "GTO" if apogee_alt <= _GEO_MAX_ALT else "HEO"
+    if eccentricity > _HEO_MIN_ECC and apogee_alt > _MEO_MAX_ALT:
+        # Eccentric with apogee above GEO: Tundra (e about 0.27) and similar.
+        return "HEO"
     if eccentricity > 0.3 and apogee_alt > _LEO_MAX_ALT:
         return "HEO"
     if perigee_alt >= _LEO_MAX_ALT:

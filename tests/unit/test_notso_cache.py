@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -126,8 +126,12 @@ class TestNotsoCache:
         assert cache2.total_records() == 1
 
     def test_last_sync_utc_set_after_append(self, tmp_cache: NotsoCache) -> None:
+        before = datetime.now(UTC)
         tmp_cache.append([{"msgId": "sync-01", "satNo": 1, "createdAt": "2026-01-01T00:00:00Z"}])
-        assert tmp_cache.last_sync_utc() is not None
+        raw = tmp_cache.last_sync_utc()
+        assert raw is not None
+        synced = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        assert before - timedelta(seconds=1) <= synced <= datetime.now(UTC) + timedelta(seconds=1)
 
     def test_corrupt_file_resets_gracefully(self, tmp_path: Path) -> None:
         path = tmp_path / "corrupt.json"
@@ -135,14 +139,14 @@ class TestNotsoCache:
         cache = NotsoCache(path=path)
         assert cache.total_records() == 0
 
-    def test_missing_msgid_uses_empty_string_key(self, tmp_cache: NotsoCache) -> None:
-        # Records with no msgId — both have the same (empty) key so only first is kept
-        records = [
-            {"satNo": 5, "createdAt": "2026-01-01T00:00:00Z"},
-        ]
-        added = tmp_cache.append(records)
-        # The record with empty msgId should still be handled without error
-        assert added >= 0  # may or may not be deduplicated
+    def test_a_record_with_no_id_is_kept_not_deduplicated(self, tmp_cache: NotsoCache) -> None:
+        """With no id there is nothing to deduplicate on, so every such record
+        is kept rather than all but the first being dropped as duplicates."""
+        record = {"satNo": 5, "createdAt": "2026-01-01T00:00:00Z"}
+        before = tmp_cache.total_records()
+        assert tmp_cache.append([record, dict(record)]) == 2
+        assert tmp_cache.append([dict(record)]) == 1
+        assert tmp_cache.total_records() == before + 3
 
     def test_messageId_alias(self, tmp_cache: NotsoCache) -> None:
         """Records using 'messageId' instead of 'msgId' should be deduplicated."""

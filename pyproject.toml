@@ -54,9 +54,6 @@ requires-python = ">=3.12"
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-    "integration: marks tests requiring a live network connection (deselect with -m 'not integration')",
-]
 addopts = "-ra -q"
 asyncio_mode = "auto"
 
@@ -81,7 +78,8 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE", "S110", "RUF100"]
+external = ["S", "PLR", "PLC", "PLW"]
 ignore = [
     "B008",   # FastAPI Depends() in default args — intentional pattern
     "E501",   # line too long — enforced by line-length setting above

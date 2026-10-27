@@ -52,17 +52,6 @@ _TOF_MAX_HOURS = 168.0   # one week
 _COAST_MAX_H   = 24.0
 
 
-def _find_tle(state: object, name: str) -> str | None:
-    """Locate a TLE in session state by stk_name."""
-    for a in state.blue_assets:  # type: ignore[attr-defined]
-        if a.stk_name == name:
-            return str(a.tle)
-    for t in state.red_tracks:  # type: ignore[attr-defined]
-        if t.stk_name == name:
-            return str(t.tle)
-    return None
-
-
 def _parse_epoch(epoch_str: str) -> datetime | None:
     """Parse a datetime-local string to an aware UTC datetime.
 
@@ -83,14 +72,18 @@ def _parse_epoch(epoch_str: str) -> datetime | None:
         return None
 
 
-def _clamp_validate(value: float, lo: float, hi: float, label: str) -> float:
-    """Raise ValueError if *value* is outside [lo, hi] or is not finite."""
+def _range_problem(value: float, lo: float, hi: float, label: str) -> str | None:
+    """Why *value* is not usable, or ``None`` when it is finite and in [lo, hi].
+
+    Returned rather than raised: a message carried by an exception and then
+    shown to the operator is what CodeQL's exception-exposure query reports.
+    """
     import math
     if not math.isfinite(value):
-        raise ValueError(f"{label} is not a finite number")
+        return f"{label} is not a finite number"
     if value < lo or value > hi:
-        raise ValueError(f"{label} = {value} is outside permitted range [{lo}, {hi}]")
-    return value
+        return f"{label} = {value} is outside permitted range [{lo}, {hi}]"
+    return None
 
 
 @router.post("/intercept", response_class=HTMLResponse)
@@ -132,14 +125,15 @@ async def intercept_geometry(
         )
 
     # ── Validate numeric inputs ───────────────────────────────────────────────
-    try:
-        _clamp_validate(dv_prograde_m_s, -_DV_MAX_M_S, _DV_MAX_M_S, "dv_prograde")
-        _clamp_validate(dv_normal_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_normal")
-        _clamp_validate(dv_radial_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_radial")
-        _clamp_validate(tof_hours,   0.0, _TOF_MAX_HOURS, "tof_hours")
-        _clamp_validate(coast_hours, 0.0, _COAST_MAX_H,   "coast_hours")
-    except ValueError as exc:
-        return _err(str(exc))
+    problem = next((p for p in (
+        _range_problem(dv_prograde_m_s, -_DV_MAX_M_S, _DV_MAX_M_S, "dv_prograde"),
+        _range_problem(dv_normal_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_normal"),
+        _range_problem(dv_radial_m_s,   -_DV_MAX_M_S, _DV_MAX_M_S, "dv_radial"),
+        _range_problem(tof_hours,   0.0, _TOF_MAX_HOURS, "tof_hours"),
+        _range_problem(coast_hours, 0.0, _COAST_MAX_H,   "coast_hours"),
+    ) if p is not None), None)
+    if problem is not None:
+        return _err(problem)
 
     # ── Parse epoch ───────────────────────────────────────────────────────────
     burn_epoch = _parse_epoch(burn_epoch_str)
@@ -147,9 +141,9 @@ async def intercept_geometry(
         return _err(f"Could not parse burn epoch: {burn_epoch_str!r}")
 
     # ── Fetch TLEs from session state ─────────────────────────────────────────
-    state = get_session_state(current_user.username)
-    red_tle  = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    state = get_session_state(current_user)
+    red_tle  = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle:
         return _err(f"No TLE found for red satellite {red_sat!r}")
@@ -173,14 +167,17 @@ async def intercept_geometry(
             coast_s          = coast_hours * 3600.0,
             caller           = current_user.username,
         )
+    # The detail goes to the log, not the page: exception text can carry
+    # internals (TLE fragments, solver state) the operator has no use for.
     except RelativeGeometryError as exc:
-        return _err(str(exc))
+        logger.warning("geometry/intercept refused: %s", log_safe(exc))
+        return _err("the relative geometry could not be computed from these inputs; see the server log.")
     except Exception as exc:
         logger.exception(
             "geometry/intercept unexpected error for %r: %s",
             log_safe(current_user.username), log_safe(exc),
         )
-        return _err(f"Internal computation error: {exc}")
+        return _err("internal computation error; see the server log.")
 
     # ── Serialise chart data (json.dumps — safe, no HTML injection) ───────────
     chart_data = {
@@ -198,9 +195,9 @@ async def intercept_geometry(
     }
 
     logger.info(
-        "geometry/intercept: %r red=%r blue=%r method=%r arrival_range=%.3f km valid=%s",
+        "geometry/intercept: %r red=%r blue=%r method=%r arrival_range=%s km valid=%s",
         log_safe(current_user.username), log_safe(red_sat), log_safe(blue_sat), log_safe(method),
-        geom.arrival_range_km, geom.cw_valid,
+        log_safe(format(geom.arrival_range_km, ".3f")), log_safe(geom.cw_valid),
     )
 
     return render(request, "partials/intercept_geometry.html", {

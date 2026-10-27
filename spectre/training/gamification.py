@@ -40,7 +40,6 @@ class PointActionDef:
     label: str
     base_points: int
     axis_weights: dict[str, float]      # must sum to 1.0
-    speed_multiplier: bool = False
 
 
 @dataclass
@@ -67,7 +66,6 @@ class GamificationConfig:
     skill_axes: list[AxisDef]
     point_actions: list[PointActionDef]
     levels: list[LevelDef]
-    efficiency_bonus_dv_threshold_ms: float = 50.0
 
     @property
     def axes_by_id(self) -> dict[str, AxisDef]:
@@ -104,7 +102,6 @@ def get_config() -> GamificationConfig:
             label=pa["label"],
             base_points=int(pa.get("base_points", 0)),
             axis_weights={k: float(v) for k, v in pa.get("axis_weights", {}).items()},
-            speed_multiplier=bool(pa.get("speed_multiplier", False)),
         )
         for pa in raw.get("point_actions", [])
     ]
@@ -127,12 +124,58 @@ def get_config() -> GamificationConfig:
             unlocks=lv.get("unlocks", []),
         ))
 
-    return GamificationConfig(
-        skill_axes=axes,
-        point_actions=actions,
-        levels=levels,
-        efficiency_bonus_dv_threshold_ms=float(raw.get("efficiency_bonus_dv_threshold_ms", 50.0)),
+    config = GamificationConfig(skill_axes=axes, point_actions=actions, levels=levels)
+    for problem in unlock_problems(config):
+        logger.error("gamification.yaml: %s", problem)
+    return config
+
+
+def _unlock_problem(level: int, entry: str, scenarios: dict[str, object], tutorials: set[str]) -> str | None:
+    """What is wrong with one ``kind:id`` unlock entry at *level*, if anything."""
+    kind, _, item = entry.partition(":")
+    if kind == "tutorial":
+        return None if item in tutorials else f"level {level} unlocks {entry}, which does not exist"
+    if kind not in {"scenario", "challenge"}:
+        return f"level {level} unlocks {entry}, which is not a scenario, challenge or tutorial"
+    scenario = scenarios.get(item)
+    if scenario is None:
+        return f"level {level} unlocks {entry}, which does not exist"
+    if getattr(scenario, "challenge", False) != (kind == "challenge"):
+        return f"level {level} lists {entry}, but its challenge flag says otherwise"
+    required = getattr(scenario, "level_required", None)
+    if required != level:
+        return f"level {level} unlocks {entry}, but the scenario requires level {required}"
+    return None
+
+
+def unlock_problems(config: GamificationConfig) -> list[str]:
+    """Every unlock entry that does not match the scenarios and tutorials.
+
+    Scenarios are gated by their own level_required, so the unlock lists
+    only announce them. They announced content that was locked or absent:
+    level 2 named three Level 3 scenarios and level 6 two challenges that
+    do not exist (audit F-169). Every scenario must also be announced once.
+    """
+    # Deferred: scenarios and tutorials are siblings that read YAML of their own.
+    from spectre.training.scenarios import load_scenarios
+    from spectre.training.tutorials import load_tutorials
+
+    scenarios: dict[str, object] = {s.id: s for s in load_scenarios()}
+    tutorials = {t.id for t in load_tutorials()}
+    problems: list[str] = []
+    announced: list[str] = []
+    for lv in config.levels:
+        for entry in lv.unlocks:
+            problem = _unlock_problem(lv.level, entry, scenarios, tutorials)
+            if problem:
+                problems.append(problem)
+            if not entry.startswith("tutorial:"):
+                announced.append(entry.partition(":")[2])
+    problems.extend(
+        f"scenario {sid} is announced {announced.count(sid)} times, not once"
+        for sid in scenarios if announced.count(sid) != 1
     )
+    return problems
 
 
 # ── Point award ────────────────────────────────────────────────────────────────
@@ -149,7 +192,6 @@ class PointAward:
 def award_points(
     action_id: str,
     axis_points: dict[str, float],
-    speed_factor: float = 1.0,
 ) -> PointAward:
     """Compute a point award for *action_id*.
 
@@ -159,9 +201,6 @@ def award_points(
         One of the ``action_id`` values from gamification.yaml.
     axis_points:
         Current per-axis totals (read-only; not modified here).
-    speed_factor:
-        Speed multiplier [0.5, 1.5] applied when ``speed_multiplier: true``
-        in the action definition.
 
     Returns
     -------
@@ -173,8 +212,7 @@ def award_points(
     if action is None:
         raise KeyError(f"Unknown point action: {action_id!r}")
 
-    multiplier   = max(0.5, min(2.0, speed_factor)) if action.speed_multiplier else 1.0
-    total        = int(round(action.base_points * multiplier))
+    total        = action.base_points
     axis_deltas  = {axis: total * weight for axis, weight in action.axis_weights.items()}
 
     return PointAward(

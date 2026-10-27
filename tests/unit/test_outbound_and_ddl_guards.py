@@ -146,6 +146,14 @@ class TestTheCatalogFetcherRechecksEveryRedirectHop:
             def __exit__(self, *exc: object) -> bool:
                 return False
 
+            def build_request(
+                self, method: str, url: str, headers: dict[str, str] | None = None,
+            ) -> httpx.Request:
+                return httpx.Request(method, url, headers=headers)
+
+            def send(self, request: httpx.Request, stream: bool = False) -> httpx.Response:
+                return self.get(str(request.url))
+
             def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
                 requested.append(url)
                 status, location = script.get(url, (200, ""))

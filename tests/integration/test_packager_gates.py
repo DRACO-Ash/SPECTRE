@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -83,7 +84,6 @@ def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "SKIP_PACKAGE_TESTS": "1",  # the suite is exercised by its own run
-        "SKIP_DS_VERIFY": "1",      # the advisory analyser needs a Go toolchain
     }
     # S603: fixed argv, no shell, and every path is test-controlled.
     return subprocess.run(  # noqa: S603
@@ -127,6 +127,50 @@ class TestTheHarnessItself:
             f"{(result.stdout + result.stderr)[-2000:]}"
         )
         assert list((tree / "out").glob("*.zip")), "no archive was produced"
+
+
+class TestTheDockerOnlyArchive:
+    """What the docker-only archive must and must not carry, read from the zip.
+
+    These assertions used to live in tests/unit/test_deployment_contract.py,
+    gated to run only inside the docker-only archive. The packager drops
+    tests/ from that archive, so they were skipped everywhere they could run
+    (audit F-179). Built here once, the archive is inspected at every depth.
+    """
+
+    _RECOGNISED = frozenset({
+        "requirements.txt", "requirements.in", "requirements.pip", "requires.txt",
+        "setup.py", "setup.cfg", "pyproject.toml", "Pipfile", "Pipfile.lock",
+        "poetry.lock", "uv.lock", "pdm.lock", "pipdeptree.json",
+    })
+
+    @pytest.fixture(scope="class")
+    def archive(self) -> Iterator[zipfile.ZipFile]:
+        tmp = Path(tempfile.mkdtemp(prefix="spectre-archive-"))
+        try:
+            _tracked_tree(tmp)
+            result = _run_packager(tmp)
+            assert result.returncode == 0, (result.stdout + result.stderr)[-2000:]
+            (zip_path,) = (tmp / "out").glob("*.zip")
+            with zipfile.ZipFile(zip_path) as zf:
+                yield zf
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_no_recognised_manifest_at_any_depth(self, archive: zipfile.ZipFile) -> None:
+        """A single one anywhere flips the analyser to the python template."""
+        strays = sorted(n for n in archive.namelist() if Path(n).name in self._RECOGNISED)
+        assert not strays, f"these would select the python template: {strays}"
+
+    def test_the_image_still_has_a_hashed_lock_to_install(self, archive: zipfile.ZipFile) -> None:
+        """Dropping the manifests must not drop the pinning with them."""
+        assert "requirements-runtime.txt" in archive.namelist(), "the image has nothing to install from"
+        body = archive.read("requirements-runtime.txt").decode("utf-8")
+        assert "--hash=sha256:" in body, "the runtime lock must stay hash-pinned"
+
+    def test_the_suite_does_not_travel(self, archive: zipfile.ZipFile) -> None:
+        """Why the assertions above live here: the archive carries no tests."""
+        assert not [n for n in archive.namelist() if n.startswith("tests/")]
 
 
 class TestLedgerGate:

@@ -97,7 +97,7 @@
         <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ "%.3f" | format(worst_coa.dv) }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
+        <div class="stat-val">{{ worst_coa.dv | m_s }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
         <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
@@ -148,6 +148,8 @@
 
   {% include "partials/clustering_summary.html" %}
 
+  {% include "partials/_provenance_banner.html" %}
+
   {% if assessment.errors %}
   <div class="callout callout-amber" style="margin:0.4rem 0">
     {% for err in assessment.errors %}
@@ -166,12 +168,12 @@
   {% if method_refusals %}
   <details style="margin:0.4rem 0">
     <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
-      {{ method_refusals | length }} method(s) produced no solution
+      {{ method_refusals | length }} method(s) produced no solution for a target
     </summary>
     <div style="padding:0.4rem 0.6rem">
-      {% for method, reason in method_refusals %}
+      {% for subject, method, reason in method_refusals %}
       <p style="margin:0.15rem 0; font-size:0.74rem">
-        <strong>{{ method | upper }}</strong>
+        {{ subject }} &#183; <strong>{{ method | upper }}</strong>
         <span style="color:var(--text-muted)">{{ reason }}</span>
       </p>
       {% endfor %}
@@ -195,6 +197,7 @@
         <option value="SIMULATED">SIMULATED</option>
         <option value="TEST">TEST</option>
         <option value="EXERCISE">EXERCISE</option>
+        <option value="SYNTHETIC">SYNTHETIC</option>
         <option value="MANUAL">MANUAL</option>
       </select>
     </label>
@@ -265,6 +268,7 @@
           </td>
           <td class="col-name" title="{{ group.target.target_name }}{% if group.target.target_satno %} [{{ group.target.target_satno }}]{% endif %}">
             {{ group.target.target_name }}{% if group.target.target_satno %} <span style="opacity:0.6; font-size:0.75em">[{{ group.target.target_satno }}]</span>{% endif %}
+            {% if group.data_mode not in ("REAL", "MANUAL") %}{% set badge_mode = group.data_mode %}{% include "partials/_provenance_badge.html" %}{% endif %}
           </td>
           <td class="col-dim">
             {% if group.target.target_source == "manual" %}
@@ -282,7 +286,7 @@
             {% endif %}
           </td>
           <td class="col-dim">{{ group.target.hrr_rank if group.target.hrr_rank is not none else '—' }}</td>
-          <td class="mnv-dv"><strong>{{ "%.3f" | format(group.best_dv) }}</strong></td>
+          <td class="mnv-dv"><strong>{{ group.best_dv | m_s }}</strong></td>
           <td class="col-dim">{{ group.best_method }}</td>
           {# The row tint encodes this posture, so the word has to be on the
              collapsed row as well. Carried by colour alone it was invisible to
@@ -358,7 +362,9 @@
             {% endif %}
             <button class="btn-secondary btn-sm"
                     type="button"
-                    onclick="event.stopPropagation(); loadInEngine('{{ assessment.red_name }}', '{{ child.entry.target.target_name }}', '{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ child.entry.method }}')"
+                    data-red="{{ assessment.red_name }}" data-blue="{{ child.entry.target.target_name }}"
+                    data-epoch="{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ child.entry.method }}"
+                    onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
                     title="Pre-fill the intercept engine with this solution">Load</button>
           </td>
         </tr>

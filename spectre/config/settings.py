@@ -14,7 +14,9 @@ platform-injected variable, then a safe local default.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
+import re
 import secrets
 import ssl
 from dataclasses import dataclass, field
@@ -24,6 +26,12 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+# The one UDL endpoint root. udl.py and pol.py each kept a copy, and udl.py a
+# second one inside a function that shadowed its own (audit F-252).
+UDL_BASE_URL = "https://unifieddatalibrary.com/udl"
 
 # Load .env from project root (two levels up from this file). Absent in the
 # container image, which is intentional: the platform injects the environment.
@@ -35,8 +43,9 @@ load_dotenv(_env_path)
 # in the Dockerfile, because that would override the platform's injection.
 DEFAULT_PORT = 8080
 
-# Placeholder values shipped in .env.example. Booting with one of these means
-# the operator never set a real secret, so the app must refuse to start.
+# Placeholder values operators have been seen to leave in place (.env.example
+# itself ships SECRET_KEY blank). Booting with one of these means the operator
+# never set a real secret, so the app must refuse to start.
 _PLACEHOLDER_SECRETS = frozenset({
     "change-me-to-a-random-string",
     "change-me",
@@ -44,6 +53,11 @@ _PLACEHOLDER_SECRETS = frozenset({
     "secret",
     "test",
 })
+
+# A key containing any spelling of "change me" is an example value, however
+# long. The README once published a 34-character one that passed the length
+# floor and missed the list above (audit F-056).
+_PLACEHOLDER_MARKER = re.compile(r"change[\s_-]?me", re.IGNORECASE)
 
 # Minimum acceptable length for a session-signing key.
 _MIN_SECRET_LENGTH = 16
@@ -171,11 +185,10 @@ def _resolve_database_url() -> str:
     """Return the database URL, resolved at runtime.
 
     An explicit ``DATABASE_URL`` wins (the POSTGRESQL add-on injects one).
-    Otherwise SQLite is placed inside the resolved data directory.
-
-    Without one, SQLite is used on the container's own filesystem, never on the
+    Without one, SQLite is used under ./data or SPECTRE_SQLITE_DIR on the
+    container's own filesystem, never in the data directory or on the
     FILE_STORAGE mount: see :func:`_resolve_sqlite_dir` for why that mount
-    cannot host a database.
+    cannot host a database, and why the file is ephemeral there.
     """
     explicit = os.environ.get("DATABASE_URL", "").strip()
     if explicit:
@@ -196,6 +209,9 @@ _LIBPQ_ONLY_PARAMS = frozenset({
 _SSLMODE_DISABLED = frozenset({"disable"})
 _SSLMODE_NEGOTIATE = frozenset({"allow", "prefer"})
 _SSLMODE_VERIFYING = frozenset({"verify-ca", "verify-full"})
+_SSLMODE_REQUIRE = "require"
+# Client certificate parameters asyncpg cannot take from the URL.
+_CLIENT_CERT_PARAMS = ("sslcert", "sslkey", "sslcrl")
 
 
 def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
@@ -227,7 +243,7 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         context.check_hostname = sslmode == "verify-full"
         context.verify_mode = ssl.CERT_REQUIRED
         connect_args["ssl"] = context
-    elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
+    elif sslmode == _SSLMODE_REQUIRE:
         # "require" means encrypt, and explicitly does NOT mean verify. Passing
         # asyncpg ssl=True would build a verifying context instead, which
         # rejects the private certificate authorities managed databases
@@ -236,6 +252,20 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         connect_args["ssl"] = context
+    elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
+        # Any other value used to land in the branch above, so a typo such as
+        # "verify_full" silently downgraded verification to none (F-153).
+        raise ConfigurationError(
+            f"Unrecognised sslmode {sslmode!r} in DATABASE_URL. Use disable, allow, "
+            "prefer, require, verify-ca or verify-full."
+        )
+
+    ignored = [k for k in _CLIENT_CERT_PARAMS if k in dropped]
+    if ignored:
+        logger.warning(
+            "DATABASE_URL parameters %s are not applied: asyncpg takes client "
+            "certificates through an SSL context, not the URL.", ", ".join(ignored),
+        )
 
     if "connect_timeout" in dropped:
         with contextlib.suppress(ValueError):
@@ -322,9 +352,6 @@ class Settings:
     log_level: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_LOG_LEVEL", "INFO")
     )
-    log_dir: str = field(
-        default_factory=lambda: os.environ.get("SPECTRE_LOG_DIR", "logs")
-    )
     secret_key: str = field(default_factory=_resolve_secret_key)
     database_url: str = field(default_factory=_resolve_database_url)
     data_dir: str = field(default_factory=_resolve_data_dir)
@@ -343,6 +370,17 @@ class Settings:
     admin_reset: bool = field(
         default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET", "").strip().lower()
         in _TRUTHY
+    )
+    # Break-glass resets an admin's password. Turning an existing operator
+    # into an admin is a further step and needs its own switch (audit F-261).
+    admin_reset_promote: bool = field(
+        default_factory=lambda: os.environ.get("SPECTRE_ADMIN_RESET_PROMOTE", "").strip().lower()
+        in _TRUTHY
+    )
+    # The marking on the banner and the splash. Both hard-coded UNCLASSIFIED,
+    # so a deployment handling anything else showed the wrong marking (F-269).
+    classification_marking: str = field(
+        default_factory=lambda: os.environ.get("SPECTRE_CLASSIFICATION", "").strip() or "UNCLASSIFIED"
     )
 
 
@@ -369,7 +407,7 @@ def validate_secret_key(secret_key: str) -> None:
             f"{_MIN_SECRET_LENGTH} characters (for example: "
             "python -c 'import secrets; print(secrets.token_urlsafe(32))')."
         )
-    if candidate.lower() in _PLACEHOLDER_SECRETS:
+    if candidate.lower() in _PLACEHOLDER_SECRETS or _PLACEHOLDER_MARKER.search(candidate):
         raise ConfigurationError(
             "SECRET_KEY is still set to the example placeholder value. "
             "Replace it with a real random secret before deploying."

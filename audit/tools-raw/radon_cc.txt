@@ -1,0 +1,96 @@
+$ radon cc -s -n C spectre tle_clustering
+spectre/config/settings.py
+    F 201:0 split_database_url - C (12)
+spectre/training/gamification.py
+    F 198:0 check_level_up - C (14)
+spectre/web/database.py
+    F 186:0 _bootstrap_admin - C (13)
+spectre/web/app.py
+    F 89:0 _load_hrr_from_disk - C (17)
+spectre/web/routes/udl.py
+    F 1008:0 udl_notso - D (24)
+    F 1071:0 udl_notso_sync - C (20)
+    F 970:0 search_catalog - C (17)
+    F 142:0 fetch_tle_for_satno - C (15)
+    F 72:0 fetch_tle_history_for_satno - C (13)
+    F 453:0 _log_elset_diagnostics - C (12)
+    F 878:0 parse_hrr_notification - C (12)
+    F 562:0 fetch_tle - C (11)
+spectre/web/routes/decision.py
+    F 56:0 decision_evaluate - E (33)
+spectre/web/routes/maneuver.py
+    F 1046:0 apply_all_intercepts - C (15)
+    F 784:0 apply_intercept - C (14)
+    F 724:0 orbital_events - C (13)
+spectre/web/routes/gcat.py
+    F 312:0 _fetch_one - C (12)
+spectre/web/routes/training.py
+    F 364:0 training_scenario_submit - D (29)
+    F 215:0 _start_scenario - C (13)
+spectre/web/routes/pol.py
+    F 53:0 _parse_udl_elset_response - D (25)
+    F 992:0 pol_notso_correlate - C (17)
+    F 278:0 pol_analyse - C (11)
+spectre/web/routes/operator.py
+    F 102:0 quick_add_blue_asset - C (11)
+    F 164:0 quick_add_red_track - C (11)
+spectre/web/routes/threat.py
+    F 357:0 fetch_targets - C (17)
+    F 1609:0 screen_config - C (16)
+    F 1259:0 threat_sweep - C (14)
+    F 208:0 _objects_for_group - C (12)
+    F 71:0 red_orbit_info - C (11)
+    F 947:0 _build_actor_list - C (11)
+    F 1570:0 _resolve_asset - C (11)
+spectre/data/notso_cache.py
+    M 112:4 NotsoCache.append - C (12)
+spectre/astro/monte_carlo.py
+    F 509:0 run_monte_carlo - C (13)
+spectre/astro/tle_preprocessing.py
+    F 106:0 cluster_and_reduce_tle_cache - C (13)
+spectre/astro/notso.py
+    F 319:0 _parse_single_notso - F (48)
+    F 596:0 extract_behaviour_profile - D (23)
+    F 417:0 correlate_notsos_with_manoeuvres - C (15)
+    F 220:0 _infer_notso_type - C (11)
+spectre/astro/constants.py
+    F 63:0 classify_orbit_regime - C (12)
+spectre/astro/cw_geometry.py
+    F 360:0 compute_relative_geometry - C (15)
+spectre/astro/lambert.py
+    F 44:0 solve_lambert - C (12)
+spectre/astro/tactical.py
+    F 791:0 classify_manoeuvre - E (31)
+    F 1617:0 fingerprint_manoeuvre - D (29)
+    F 1135:0 optimal_evasion - D (25)
+    F 1839:0 orbital_terrain - D (25)
+    F 1293:0 assess_intercept_intent - C (18)
+spectre/astro/events.py
+    F 38:0 find_orbital_events - C (15)
+spectre/astro/dv_estimation.py
+    F 1106:0 _disqualifying_verdict - C (14)
+    F 537:0 estimate_dv_mean_elements - C (13)
+    F 996:0 build_breakdown - C (13)
+    F 954:0 _provenance_warnings - C (12)
+spectre/astro/pattern_of_life.py
+    F 897:0 analyse_pattern_of_life - E (36)
+    F 648:0 _compute_drift_phases - C (12)
+spectre/astro/photometry.py
+    F 271:0 fit_baseline - D (28)
+    F 539:0 assess_photometry - C (16)
+    F 208:0 _fit_least_squares_quadratic - C (14)
+spectre/domain/decision.py
+    F 155:0 compute_outcome_metrics - C (17)
+    F 289:0 find_robust_response - C (12)
+spectre/domain/threat_assessment.py
+    M 267:4 CapabilityEvidence._signals - C (13)
+spectre/domain/pol_assessment.py
+    F 1047:0 _assess_intel - C (19)
+    F 766:0 assess_pattern_of_life - C (18)
+    F 586:0 _assess_anomaly - C (13)
+    F 688:0 _assess_detection - C (13)
+    F 452:0 _assess_propellant - C (11)
+    F 905:0 _mission_profile - C (11)
+tle_clustering/clustering.py
+    F 77:0 cluster_records - C (14)
+[exit 0]

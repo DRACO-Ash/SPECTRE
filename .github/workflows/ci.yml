@@ -19,16 +19,26 @@ jobs:
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install the full dev environment
-        # The same install the test job and a developer use. A partial set here
-        # let mypy disagree with the local loop and kept master red.
-        run: pip install -e ".[dev]"
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: ruff — style and import checks
         run: ruff check spectre/ tests/
       - name: mypy — strict type checking
@@ -38,23 +48,49 @@ jobs:
   test:
     name: Tests (pytest)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history: the cognitive-complexity meter's calibration test
+          # replays the commit SonarQube scanned, which a depth-1 checkout
+          # does not contain.
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: Run tests with coverage
         env:
           # Boot now fails closed on a missing or placeholder signing key.
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
         run: >
-          pytest tests/ -q --cov=spectre --cov-report=term-missing
-          --cov-report=xml --cov-fail-under=70
+          pytest tests/ -q --cov=spectre --cov=tle_clustering --cov-report=term-missing
+          --cov-report=xml
+      - name: Per-file coverage floors
+        # The threat sweep routes stood at 48 per cent with no test touching
+        # the sweep, refine or manual-target paths (audit F-042). Raise a floor
+        # only with the tests that earn it.
+        # The Decision Engine's selectors were tested only for returning some
+        # response (audit F-122); its own tests now run every line.
+        run: |
+          coverage report --include=spectre/web/routes/threat.py --fail-under=75
+          coverage report --include=spectre/domain/decision.py --fail-under=100
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-xml
           path: coverage.xml
@@ -64,9 +100,10 @@ jobs:
   sast:
     name: SAST (bandit)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: Install bandit
@@ -79,32 +116,63 @@ jobs:
   sca:
     name: SCA (pip-audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
       - name: Install pip-audit
         run: pip install pip-audit
-      - name: pip-audit — scan the committed lockfile
-        # Audits requirements.txt, the same hash-pinned set the image installs, so
-        # CI and the container can never disagree about what was scanned.
-        run: pip-audit --desc on --requirement requirements.txt
+      - name: pip-audit — scan the committed lockfiles
+        # requirements.txt is the hash-pinned set the image installs, so CI and
+        # the container can never disagree about what was scanned. The dev lock
+        # is installed by CI and every developer, so it is scanned too: it was
+        # carrying urllib3, filelock and setuptools advisories unseen (audit
+        # F-S10-25).
+        run: |
+          pip-audit --desc on --no-deps --disable-pip --requirement requirements.txt
+          pip-audit --desc on --no-deps --disable-pip --requirement requirements-dev.txt
+      - name: OSV — scan the vendored JavaScript
+        # The four libraries served from spectre/web/static are listed in
+        # vendored.json and were never scanned by anything (audit F-187).
+        run: python scripts/audit-vendored-js.py
+      - name: SBOM — CycloneDX for what the image installs
+        # SEC-04. requirements-runtime.txt is the lock the image installs, so
+        # this SBOM describes the shipped container's Python packages. The
+        # check refuses an SBOM that leaves out any pinned package, because a
+        # partial SBOM is read as a complete one.
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' spectre/__init__.py)
+          mkdir -p sbom
+          pip-audit --no-deps --disable-pip --requirement requirements-runtime.txt \
+            --format cyclonedx-json --output "sbom/spectre-${version}-runtime.cdx.json"
+          python scripts/check-sbom.py "sbom/spectre-${version}-runtime.cdx.json" requirements-runtime.txt
+      - name: Keep the SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom/
+          if-no-files-found: error
 
   # ── Secret detection ──────────────────────────────────────────────────────────
   secrets:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Install gitleaks
+        # Checked against the SHA-256 in the release's own checksums file
+        # before it runs (audit F-175); it was piped straight into tar.
         run: |
-          curl -sSfL \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
-            | tar -xz -C /usr/local/bin gitleaks
+          curl -sSfL -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
+          echo "ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz -C /usr/local/bin gitleaks
       - name: gitleaks — scan repository history for secrets
         run: gitleaks detect --source . --redact -v
 
@@ -112,8 +180,9 @@ jobs:
   container:
     name: Container Contract
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build the image
         run: docker build -t spectre:ci .
       - name: Must run as a non-root numeric user
@@ -124,10 +193,12 @@ jobs:
       - name: Must ship no setuid or setgid paths
         # The container-scan policy stops, not warns, on suid_or_guid_set.
         run: |
-          count=$(docker run --rm --entrypoint /bin/sh spectre:ci -c \
-            'find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l')
-          echo "suid/sgid paths=$count"
-          [ "$count" -eq 0 ]
+          # As root and without 2>/dev/null: as uid 10001 an unreadable
+          # directory hid its contents and a failed find counted zero (F-277).
+          paths=$(docker run --rm --user 0 --entrypoint /bin/sh spectre:ci -c \
+            'find / -xdev -perm /6000 \( -type f -o -type d \) -print')
+          echo "suid/sgid paths: ${paths:-none}"
+          [ -z "$paths" ]
       - name: Must ship no package manager
         run: |
           for b in pip pip3 apt apt-get dpkg; do
@@ -156,7 +227,9 @@ jobs:
           done
       - name: Must refuse to boot without a real SECRET_KEY
         run: |
-          if docker run --rm spectre:ci 2>&1 | grep -q "ConfigurationError"; then
+          # Bounded: an image that boots instead of refusing would otherwise
+          # hold the runner until the job limit (audit F-287).
+          if timeout 60 docker run --rm spectre:ci 2>&1 | grep -q "ConfigurationError"; then
             echo "fails closed as required"
           else
             echo "FAIL: booted without a valid SECRET_KEY"; exit 1
@@ -168,21 +241,36 @@ jobs:
   # ── Quality gate — SonarQube-equivalent checks on changed code ───────────────
   quality:
     name: Quality Gate (changed code)
+    # Changed-code scope needs a base to compare with. On a push to master the
+    # base is master itself, so every leg measured an empty diff (F-278).
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # diff-cover and the scope filter need the base branch to compare against.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-      - name: Install the full dev environment
-        run: pip install -e ".[dev]" diff-cover
+      - name: Install the locked runtime, test and tooling sets
+        # The hash-locked sets the image and a developer use. This step used
+        # to be `pip install -e ".[dev]"`, but pyproject defines no `dev`
+        # extra, so it installed the package alone and every later step died
+        # with "command not found" (exit 127) without checking anything
+        # (audit F-S00-01). The package itself goes in last, without deps,
+        # because it carries no hash.
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        # Fails here, with a named tool, rather than later as a bare exit 127.
+        run: ruff --version && mypy --version && pytest --version
       - name: Produce the coverage report the gate reads
         env:
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret

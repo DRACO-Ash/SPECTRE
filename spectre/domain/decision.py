@@ -1,9 +1,15 @@
 """Decision Engine — Phase 1: deterministic scenario evaluation.
 
-Evaluates a grid of adversary actions × friendly responses using deterministic
-SGP4 propagation and a weighted composite scoring function.  A minimax selector
-identifies the "robust" friendly response that minimises worst-case cost across
-all adversary actions.
+Evaluates a grid of adversary actions × friendly responses with a lookup model
+and a weighted composite scoring function. No orbit is propagated: custody,
+closest approach, time to approach and delta-V are rules of thumb and
+constants per action type, scaled by the operator's inputs, and they are
+uncalibrated against any observed outcome. A selector (minimax by default)
+picks the friendly response with the least worst-case cost.
+
+An earlier "TLE refinement" took one instant's separation, could only lower
+the estimate, hid every error behind a bare except, and never ran because the
+route passed no red element set; it was removed (audit F-111).
 
 Phase 2 (future sprint) will attach a ``ManoeuvreHypothesis`` to
 ``AdversaryAction`` and wire in the Monte Carlo engine for probabilistic scoring.
@@ -17,22 +23,21 @@ Typical use::
         friendly_responses=[...],
         horizon_hours=72.0,
     )
-    result = evaluate_scenario(scenario, blue_tle="...", red_tle="...")
+    result = evaluate_scenario(scenario)
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from spectre.domain.provenance import Provenance, provenance, value_input
+
 logger = logging.getLogger(__name__)
-
-# Earth radius (km) — used for GCA (ground closest approach) estimates
-_R_EARTH_KM = 6371.0
-
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
 
@@ -46,10 +51,28 @@ class ActionType(Enum):
 class SelectorStrategy(Enum):
     MINIMAX           = "minimax"           # minimise worst-case cost
     EXPECTED_VALUE    = "expected_value"    # minimise expected cost (uses probability)
-    MAXIMIN           = "maximin"           # maximise worst-case benefit
+    # Minimise the BEST-case cost: the optimistic rule, not a robust one. It
+    # was labelled MAXIMIN, the name of the cautious rule, so an operator
+    # asking for caution got the riskiest response (audit F-S05-01).
+    MINIMIN           = "minimin"
+
+
+#: What every Phase 1 outcome rests on, shown to the operator with the result.
+MODELLED_BASIS = (
+    "Outcomes are Phase 1 lookup constants and weights, not propagated orbits: "
+    "closest approach is a fixed figure per action type scaled by response cost, "
+    "time to approach is a fixed fraction of the horizon, and custody follows a "
+    "rule of thumb. Use it to compare trade-offs, not as an operational answer."
+)
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
+
+def _require_fraction(owner: str, field_name: str, value: float) -> None:
+    """Refuse a value outside [0, 1], NaN or infinite included (audit F-112)."""
+    if not (math.isfinite(value) and 0.0 <= value <= 1.0):
+        raise ValueError(f"{owner}.{field_name} must be in [0, 1]; got {value!r}")
+
 
 @dataclass
 class AdversaryAction:
@@ -62,6 +85,10 @@ class AdversaryAction:
     confidence:  float            # [0, 1] — intelligence confidence
     description: str = ""
     # Phase 2: hypothesis: ManoeuvreHypothesis | None = None
+
+    def __post_init__(self) -> None:
+        _require_fraction("AdversaryAction", "probability", self.probability)
+        _require_fraction("AdversaryAction", "confidence", self.confidence)
 
 
 @dataclass
@@ -76,6 +103,15 @@ class FriendlyResponse:
     time_to_execute_hours: float   # Execution latency
     description:          str = ""
 
+    def __post_init__(self) -> None:
+        _require_fraction("FriendlyResponse", "cost", self.cost)
+        _require_fraction("FriendlyResponse", "reversibility", self.reversibility)
+        if not (math.isfinite(self.time_to_execute_hours) and self.time_to_execute_hours >= 0.0):
+            raise ValueError(
+                f"FriendlyResponse.time_to_execute_hours must be finite and >= 0; "
+                f"got {self.time_to_execute_hours!r}"
+            )
+
 
 @dataclass
 class OutcomeMetrics:
@@ -87,6 +123,10 @@ class OutcomeMetrics:
     time_to_closest_hours: float
     delta_v_cost_km_s:    float    # Friendly ΔV expended
     composite_score:      float    # Higher = worse for friendly
+    # Every figure above is a Phase 1 lookup or weighting, not a propagated
+    # result. Carried on the data so no consumer can present it as computed.
+    modelled:             bool = True
+    basis:                str = MODELLED_BASIS
 
     def __str__(self) -> str:
         cust = "✓" if self.custody_maintained else "✗"
@@ -114,6 +154,13 @@ class Scenario:
     w_time_to_exec:     float = 0.10    # Penalty for slow response
     w_reversibility:    float = 0.10    # Reward for reversible actions
 
+    def __post_init__(self) -> None:
+        # A zero horizon divided by zero in the score (audit F-112).
+        if not (math.isfinite(self.horizon_hours) and self.horizon_hours > 0.0):
+            raise ValueError(f"Scenario.horizon_hours must be finite and > 0; got {self.horizon_hours!r}")
+        for name in ("w_custody", "w_closest_approach", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
+            _require_fraction("Scenario", name, getattr(self, name))
+
 
 @dataclass
 class ScenarioResult:
@@ -128,26 +175,13 @@ class ScenarioResult:
     robust_best_response:   FriendlyResponse
     robust_strategy:        SelectorStrategy
     computation_time_s:     float
-
-    def summary_table(self) -> str:
-        """ASCII summary table for CLI / operator guide output."""
-        adv  = self.scenario.adversary_actions
-        fr   = self.scenario.friendly_responses
-        lines = []
-        header = f"{'':25s}" + "".join(f"{r.name[:12]:>13s}" for r in fr)
-        lines.append(header)
-        lines.append("-" * len(header))
-        for i, a in enumerate(adv):
-            row = f"{a.name[:24]:<25s}"
-            for j in range(len(fr)):
-                row += f"{self.outcome_matrix[i][j].composite_score:>13.3f}"
-            lines.append(row)
-        lines.append("")
-        lines.append(
-            f"Robust response ({self.robust_strategy.value}): "
-            f"{self.robust_best_response.name}"
-        )
-        return "\n".join(lines)
+    # Phase 1 outcomes come from lookup constants, not propagation. The flag
+    # and basis travel with the result so the page can say so (audit
+    # F-S05-02, and the "modelled estimate" banner agreed in July 2026).
+    modelled:               bool = True
+    basis:                  str = MODELLED_BASIS
+    # The code, calibration and scenario behind this result (audit F-121).
+    provenance:             Provenance | None = None
 
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
@@ -156,22 +190,25 @@ def compute_outcome_metrics(
     adversary: AdversaryAction,
     friendly: FriendlyResponse,
     scenario: Scenario,
-    blue_tle: str | None = None,
-    red_tle: str | None = None,
 ) -> OutcomeMetrics:
-    """Compute deterministic outcome metrics for one (adversary, friendly) pair.
+    """Outcome metrics for one (adversary, friendly) pair, from the lookup model.
 
-    Phase 1 uses a simplified analytic model since full SGP4 propagation
-    requires TLE strings.  When both ``blue_tle`` and ``red_tle`` are supplied,
-    closest-approach estimation uses the TLE epoch separation as a proxy.
-
-    Scoring model (Phase 1)
-    -----------------------
-    - custody_maintained: True unless adversary is a MANOEUVRE and friendly is NO_ACTION
-    - custody_gap_hours: 0 if maintained, else horizon * (1 - friendly.reversibility)
-    - closest_approach_km: modelled by action type and response combination
-    - delta_v_cost_km_s: 0 for non-manoeuvre responses, else friendly.cost * 0.05
-    - composite_score: weighted sum (higher = worse for friendly)
+    Rules as implemented (Phase 1, uncalibrated)
+    --------------------------------------------
+    - custody: lost when the adversary manoeuvres and the response is
+      NO_ACTION or POSTURE_CHANGE; a MANOEUVRE or SENSOR_RETASK response keeps it
+    - custody_gap_hours: when lost, horizon * adversary confidence, a property
+      of the adversary's action alone; against a SENSOR_RETASK response to a
+      manoeuvre, half the response's time to execute. Detection capability is
+      not modelled. Friendly reversibility counts only in its own term: it
+      used to scale this gap too, so a fully reversible NO_ACTION lost custody
+      at no cost and won the minimax ranking (audit F-035)
+    - closest_approach_km: a constant per adversary action type, raised by
+      response cost for a MANOEUVRE (x(1 + 5 cost)) or POSTURE_CHANGE
+      (x(1 + 2 cost)) response
+    - time_to_closest_hours: 0.4 of the horizon
+    - delta_v_cost_km_s: friendly.cost * 0.05 for a MANOEUVRE response, else 0
+    - composite_score: weighted sum of the normalised terms (higher = worse)
     """
     # ── Custody ──────────────────────────────────────────────────────────────
     adversary_is_manoeuvre = adversary.action_type == ActionType.MANOEUVRE
@@ -182,8 +219,9 @@ def compute_outcome_metrics(
 
     if adversary_is_manoeuvre and not friendly_is_active:
         custody_maintained = False
-        # Gap proportional to adversary confidence and horizon
-        custody_gap_hours = scenario.horizon_hours * adversary.confidence * (1.0 - friendly.reversibility)
+        # Gap proportional to adversary confidence and horizon, and nothing of
+        # ours: how reversible our response is does not shorten their gap.
+        custody_gap_hours = scenario.horizon_hours * adversary.confidence
     elif adversary_is_manoeuvre and friendly.action_type == ActionType.SENSOR_RETASK:
         # Sensor retask reduces gap but doesn't eliminate manoeuvre risk
         custody_maintained = True
@@ -207,29 +245,6 @@ def compute_outcome_metrics(
         ca_km = base_ca_km * (1.0 + friendly.cost * 2.0)
     else:
         ca_km = base_ca_km
-
-    # TLE-based refinement (Phase 1.5): if TLEs supplied, use epoch delta as a
-    # proxy for current conjunction geometry
-    if blue_tle and red_tle:
-        try:
-            from spectre.astro.propagator import TLEOrbit
-            blue_orbit = TLEOrbit(blue_tle)
-            red_orbit  = TLEOrbit(red_tle)
-            # Use propagation difference at horizon midpoint as geometry hint
-            t_mid_min  = scenario.horizon_hours * 30.0
-            t_mid_dt   = scenario.epoch_utc + __import__("datetime").timedelta(minutes=t_mid_min)
-            blue_sv = blue_orbit.propagate(t_mid_dt)
-            red_sv  = red_orbit.propagate(t_mid_dt)
-            import math
-            sep = math.sqrt(sum(
-                (blue_sv.r[i] - red_sv.r[i]) ** 2
-                for i in range(3)
-            ))
-            if sep > 0:
-                # Scale analytic CA by ratio of actual/typical separation
-                ca_km = min(ca_km, sep * friendly.reversibility + base_ca_km * (1.0 - friendly.reversibility))
-        except Exception:
-            pass   # Fall back to analytic estimate
 
     time_to_ca = scenario.horizon_hours * 0.4   # Phase 1: simplified
 
@@ -274,7 +289,6 @@ def compute_outcome_metrics(
 # ── Response ranking ──────────────────────────────────────────────────────────
 
 def rank_responses(
-    adversary_idx: int,
     friendly_responses: list[FriendlyResponse],
     outcome_row: list[OutcomeMetrics],
 ) -> list[tuple[FriendlyResponse, float]]:
@@ -302,7 +316,8 @@ def find_robust_response(
     strategy:
         MINIMAX  — minimise the maximum (worst-case) composite score.
         EXPECTED_VALUE — minimise expected score weighted by adversary probabilities.
-        MAXIMIN  — maximise the minimum (best-case) composite score.
+        MINIMIN  — minimise the minimum (best-case) composite score: optimistic,
+                   not robust.
 
     Returns
     -------
@@ -332,7 +347,7 @@ def find_robust_response(
             )
         best_j = min(range(n_friendly), key=lambda j: scores[j])
 
-    else:  # MAXIMIN — maximise best-case score (here: minimise min score)
+    else:  # MINIMIN: minimise the best-case score, the optimistic rule
         for j in range(n_friendly):
             scores[j] = min(outcome_matrix[i][j].composite_score for i in range(n_adversary))
         best_j = min(range(n_friendly), key=lambda j: scores[j])
@@ -344,8 +359,6 @@ def find_robust_response(
 
 def evaluate_scenario(
     scenario: Scenario,
-    blue_tle: str | None = None,
-    red_tle: str | None = None,
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
 ) -> ScenarioResult:
     """Evaluate all (adversary × friendly) combinations and return a ranked result.
@@ -354,10 +367,6 @@ def evaluate_scenario(
     ----------
     scenario:
         Fully populated Scenario dataclass.
-    blue_tle:
-        Two-line element string for the friendly (blue) object (optional).
-    red_tle:
-        Two-line element string for the adversary (red) object (optional).
     strategy:
         Selector strategy for the robust recommendation.
 
@@ -378,13 +387,13 @@ def evaluate_scenario(
     for adversary in scenario.adversary_actions:
         row: list[OutcomeMetrics] = []
         for friendly in scenario.friendly_responses:
-            metrics = compute_outcome_metrics(adversary, friendly, scenario, blue_tle, red_tle)
+            metrics = compute_outcome_metrics(adversary, friendly, scenario)
             row.append(metrics)
         outcome_matrix.append(row)
 
     # Rank per adversary action
     ranked_per_adversary = [
-        rank_responses(i, scenario.friendly_responses, outcome_matrix[i])
+        rank_responses(scenario.friendly_responses, outcome_matrix[i])
         for i in range(len(scenario.adversary_actions))
     ]
 
@@ -400,4 +409,5 @@ def evaluate_scenario(
         robust_best_response=robust_response,
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
+        provenance=provenance([value_input("scenario", scenario)]),
     )

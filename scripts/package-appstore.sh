@@ -25,7 +25,7 @@
 # Evidence: the first upload had pyproject.toml and no requirements.txt, and a
 # Dependencies stage still ran and failed; a docker-only app has no such stage.
 # So docker-only requires that NO recognised manifest ships: no pyproject.toml
-# and no requirements.txt. requirements.lock is not a recognised name, so
+# and no requirements.txt. requirements-runtime.txt is not a recognised name, so
 # dependency pinning survives, and Dockerfile.docker-only runs the app via
 # `python -m` instead of installing it.
 
@@ -122,7 +122,8 @@ done
 # requirements-runtime.txt is not a filename the analyser recognises, so the
 # gate never reads it. That is why it must stay a strict, version-identical
 # subset of requirements.txt: otherwise the image would ship a version no stage
-# examined. scripts/check-quality.sh asserts the subset.
+# examined. scripts/preflight-gate.py (check_runtime_subset, run below) and the
+# deployment contract test assert the subset.
 
 # The root is matched, file for file, against PSIRENS, an application that
 # clears this gate. Its root carries exactly seven entries: Dockerfile,
@@ -197,12 +198,18 @@ if [ "$MODE" = "python" ]; then
     fi
 else
     # Any recognised manifest would flip detection back to the python template.
-    for manifest in pyproject.toml requirements.txt setup.py setup.cfg Pipfile poetry.lock; do
-        if [ -f "$STAGE/$manifest" ]; then
-            echo "FAIL: $manifest at the root would select the python template, not docker-only."
-            exit 1
-        fi
-    done
+    # Searched at every depth and over the full list: the check looked at the
+    # root only and missed requirements.in and the other lock formats (F-290).
+    # Exact names only: requirements-runtime.txt is not one the analyser
+    # recognises, and ships on purpose.
+    found=$(find "$STAGE" -type f \( -name pyproject.toml -o -name requirements.txt \
+        -o -name requirements.in -o -name setup.py -o -name setup.cfg -o -name Pipfile \
+        -o -name Pipfile.lock -o -name poetry.lock -o -name uv.lock -o -name pdm.lock \) -print)
+    if [ -n "$found" ]; then
+        echo "FAIL: these Python manifests would select the python template, not docker-only:"
+        printf '      %s\n' $found
+        exit 1
+    fi
 fi
 
 # The platform's Code Quality stage analyses EVERY file in the uploaded
@@ -238,6 +245,12 @@ fi
 # what a failure would tell us. Seven submissions were spent on changes that
 # taught nothing when they failed; this is the control against an eighth.
 LEDGER="docs/CHANGE-LEDGER.md"
+# A missing ledger skipped every check below, so deleting it disabled the gate
+# (audit F-289). Missing is a failure.
+if [ ! -f "$LEDGER" ]; then
+    echo "FAIL: ${LEDGER} is missing, so no version can show a ledger entry."
+    exit 1
+fi
 # A gate whose input is untracked is not a gate. docs/ is gitignored by the
 # standard template and the ledger lives in docs/, so this gate once passed on
 # one machine and would have failed everywhere else until the file was
@@ -328,7 +341,9 @@ if [ "$MODE" = "python" ] && [ -f scripts/preflight-gate.py ]; then
     echo
     python3 scripts/preflight-gate.py "$STAGE" || exit 1
 fi
-if [ "${SKIP_DS_VERIFY:-0}" != "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
+# Opt-in: it builds and runs a third-party analyser, which no packaging run
+# should do unasked (audit F-183). RUN_DS_VERIFY=1 to see its parse warnings.
+if [ "${RUN_DS_VERIFY:-0}" = "1" ] && [ -x scripts/verify-dependency-scan.sh ]; then
     echo
     sh scripts/verify-dependency-scan.sh "$ZIP_PATH" || true
 fi

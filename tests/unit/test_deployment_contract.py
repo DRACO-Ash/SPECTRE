@@ -67,8 +67,9 @@ _DOCKER_ONLY = _is_docker_only_package()
 
 # Assertions about files only the python template ships. They still run in the
 # repository and in the python-template package; only the docker-only archive
-# skips them, and TestDockerOnlyContract below asserts the inverse there so the
-# skip is not a hole.
+# skips them. The inverse is asserted against the built archive itself, by the
+# docker-only archive class in the packager gate tests, because that archive
+# carries no tests to assert it from inside (F-179).
 _python_template_only = pytest.mark.skipif(
     _DOCKER_ONLY,
     reason="docker-only package: no recognised Python manifest ships, by design",
@@ -766,59 +767,6 @@ class TestBuildBackendContract:
         assert '"tests' not in include, "tests/ must not be declared as a package"
 
 
-class TestDockerOnlyContract:
-    """The inverse contract, asserted only inside the docker-only archive.
-
-    Every assertion the python template makes about manifests skips here, so
-    without these the docker-only package would travel with a hole where its
-    contract should be. The property that matters is the absence that selects
-    the template, plus the presence of everything the image actually needs.
-    """
-
-    _RECOGNISED = frozenset(
-        {
-            "requirements.txt",
-            "requirements.in",
-            "requirements.pip",
-            "requires.txt",
-            "setup.py",
-            "setup.cfg",
-            "pyproject.toml",
-            "Pipfile",
-            "Pipfile.lock",
-            "poetry.lock",
-            "uv.lock",
-            "pdm.lock",
-            "pipdeptree.json",
-        }
-    )
-
-    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
-    def test_no_recognised_manifest_at_any_depth(self) -> None:
-        """A single one anywhere flips the template and restores the broken stage.
-
-        Checked at every depth, not just the root: the analyser walks the tree
-        and selects the first directory carrying a name it recognises.
-        """
-        strays = sorted(
-            str(path.relative_to(_REPO_ROOT))
-            for path in _REPO_ROOT.rglob("*")
-            if path.is_file() and path.name in self._RECOGNISED
-        )
-        assert not strays, (
-            f"these would select the python template: {strays}. The docker-only "
-            "archive must carry none of them."
-        )
-
-    @pytest.mark.skipif(not _DOCKER_ONLY, reason="python template: manifests ship by design")
-    def test_the_image_still_has_a_hashed_lock_to_install(self) -> None:
-        """Dropping the manifests must not drop the pinning with them."""
-        runtime = _repo_only("requirements-runtime.txt")
-        assert runtime.is_file(), "the image has nothing to install from"
-        body = runtime.read_text(encoding="utf-8")
-        assert "--hash=sha256:" in body, "the runtime lock must stay hash-pinned"
-
-
 class TestClusteringPackageTravels:
     """tle_clustering must ship, in both templates.
 
@@ -1509,13 +1457,25 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         holds the declaration as well as a call.
         """
         calls = [
-            cls._split_arguments(markup, m.end())
+            (m.start(), cls._split_arguments(markup, m.end()))
             for m in re.finditer(r'onclick="[^"]*?\bloadInEngine\(', markup)
         ]
         assert len(calls) == 1, (
             f"expected exactly one loadInEngine call site, found {len(calls)}"
         )
-        return calls[0]
+        start, args = calls[0]
+        # Arguments read as this.dataset.x come from the data-x attribute on
+        # the same element, which precedes the handler (audit F-038).
+        resolved = []
+        for arg in args:
+            ref = re.fullmatch(r"this\.dataset\.(\w+)", arg.strip())
+            if not ref:
+                resolved.append(arg)
+                continue
+            attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
+            assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
+            resolved.append(attrs[-1])
+        return resolved
 
     @staticmethod
     def _header_bindings(row: str) -> list[str]:
@@ -1589,3 +1549,74 @@ class TestHtmxSwapFragmentsMatchTheirTable:
             "screen reader loses the column names on exactly the row they "
             "asked the solver to improve."
         )
+
+
+class TestContinuousIntegrationCanRun:
+    """CI on master installed no tools and failed before checking anything.
+
+    The install step named a ``dev`` extra that pyproject.toml never defined,
+    so pip installed the package alone and lint, tests and the quality gate
+    each died with "command not found" (audit F-S00-01). The obvious repair,
+    installing both locks, then failed too, because they pinned tomli
+    differently (audit F-S00-08). Each property below would have caught one.
+    """
+
+    _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
+
+    def test_the_threat_routes_keep_their_coverage_floor(self) -> None:
+        """Audit F-042: the sweep routes were untested at 48 per cent."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
+
+    def test_no_test_runs_only_where_the_suite_is_absent(self) -> None:
+        """Audit F-179: a test skipped unless in the docker-only archive never
+        runs, because that archive does not carry the suite."""
+        offenders = [
+            str(path.relative_to(_REPO_ROOT))
+            for path in (_REPO_ROOT / "tests").rglob("test_*.py")
+            if re.search(r"skipif\(\s*not\s+_DOCKER_ONLY", path.read_text(encoding="utf-8"))
+        ]
+        assert not offenders, f"these hold tests that can never run: {offenders}"
+
+    def test_the_decision_engine_keeps_its_coverage_floor(self) -> None:
+        """Audit F-122: the selectors were tested only for returning a response."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/domain/decision.py --fail-under=100" in ci
+
+    def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
+        workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        installs = [
+            ln.strip() for ln in workflow.splitlines()
+            if re.search(r"\bpip install\b", ln) and not ln.lstrip().startswith("#")
+        ]
+        assert not [ln for ln in installs if ".[" in ln], (
+            f"CI installs an extra: {installs}. pyproject.toml declares none, so pip "
+            "would install the package with no tools at all"
+        )
+        assert any("--require-hashes" in ln and "requirements-dev.txt" in ln for ln in installs)
+
+    def test_both_locks_agree_on_every_package_they_share(self) -> None:
+        runtime = dict(self._PIN.findall(_repo_only("requirements.txt").read_text(encoding="utf-8")))
+        dev = dict(self._PIN.findall(_repo_only("requirements-dev.txt").read_text(encoding="utf-8")))
+        clashes = {name: (runtime[name], dev[name]) for name in runtime.keys() & dev.keys() if runtime[name] != dev[name]}
+        assert not clashes, f"the locks cannot be installed together: {clashes}"
+
+    def test_ci_does_not_override_the_coverage_ratchet(self) -> None:
+        workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--cov-fail-under" not in workflow, (
+            "the floor lives in pyproject.toml [tool.coverage.report]; a lower CI "
+            "value let coverage fall unnoticed (audit F-S00-10)"
+        )
+
+    def test_no_orphan_submodule_pointer_is_tracked(self) -> None:
+        if not (_REPO_ROOT / ".git").exists():
+            pytest.skip("no git repository: running from the submission package")
+        try:
+            listing = subprocess.run(
+                ["git", "ls-files", "-s"],  # noqa: S607
+                cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+            ).stdout
+        except FileNotFoundError:
+            pytest.skip("no git executable: the runner's job image ships none")
+        gitlinks = [ln.split("\t", 1)[1] for ln in listing.splitlines() if ln.startswith("160000 ")]
+        assert not gitlinks, f"gitlinks with no .gitmodules break every CI checkout: {gitlinks}"

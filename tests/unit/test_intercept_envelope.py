@@ -8,8 +8,10 @@ replaced the whole sweep body with three constants and all 1,397 tests stayed
 green, because no test file in the repository named the function.
 
 Every expected figure below is re-derived from the CONTRACT, which is 24 arrival
-times spread evenly across the time of flight and solved with ``solve_lambert``,
-rather than read back out of the implementation. Each test says why the
+times spread evenly across the time of flight and solved with
+``cheapest_lambert`` (the cheapest of the zero-revolution and every
+multi-revolution transfer, audit F-010), rather than read back out of the
+implementation. Each test says why the
 magnitude it asserts is the one the physics gives, because a test that only
 checks the shape of the answer is what let the original defect ship.
 """
@@ -23,7 +25,7 @@ from typing import NamedTuple
 import pytest
 
 from spectre.astro.constants import MU_EARTH
-from spectre.astro.lambert import solve_lambert
+from spectre.astro.lambert import cheapest_lambert, solve_lambert
 from spectre.astro.maneuvers import intercept_envelope_intercept
 from spectre.astro.propagator import TLEOrbit
 from spectre.domain.manoeuvre_calibration import (
@@ -106,7 +108,7 @@ def _reference_sweep(
         tof = tof_s * (index + 1) / _SWEEP_STEPS
         try:
             arrival = target_orbit.propagate(_EPOCH + timedelta(seconds=tof))
-            arc = solve_lambert(
+            arc = cheapest_lambert(
                 departure.r, arrival.r, tof,
                 mu=MU_EARTH, v1_initial=departure.v, v2_target=arrival.v,
             )
@@ -122,17 +124,18 @@ class TestAFeasibleCoOrbitalIntercept:
     """One degree of GEO belt, which is the cheap case and must stay cheap."""
 
     def test_the_reported_cost_is_the_cheapest_lambert_arc_in_the_sweep(self) -> None:
-        """6.3 m/s, and that figure is what a one degree belt move costs.
+        """3.4 m/s at 46 h, and that figure is what a one degree belt move costs.
 
         The belt turns at 15.0 deg/h. To arrive one degree ahead of where it
-        would otherwise have been after 22 h, red must raise its mean motion by
-        one degree in 22 h, which is 2.0e-3 of its semi-major axis, about 85 km,
-        and it has to leave the belt radius and return to it. Two impulses at
-        that scale come to single-digit m/s, which is the order the calibration
-        assessment records for GEO relocation: 11 m/s for 62 degrees over 30
-        days, 170 m/s for 90 degrees in 3 days. It also sits inside the 15 m/s
-        BENIGN ceiling ``manoeuvre_calibration`` gives GEO phasing, which is
-        where a one degree reposition belongs.
+        would otherwise have been, red changes its mean motion by one degree
+        over the flight; the longer the flight, the smaller the change. At 22 h
+        that is 6.3 m/s on the zero-revolution arc; at 46 h, going once round,
+        it is 3.4 m/s, about half, as a drift twice as long should be. Before
+        audit F-010 every arrival past one revolution was priced on the
+        zero-revolution arc at km/s, so the sweep could only find the 22 h
+        answer. Both figures are the order the calibration assessment records
+        for GEO relocation (11 m/s for 62 degrees over 30 days) and sit inside
+        the 15 m/s BENIGN ceiling ``manoeuvre_calibration`` gives GEO phasing.
         """
         reference = _reference_sweep(_RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, budget_km_s=0.5)
         assert reference.dropped == 0, "this geometry is clean; no step should be refused"
@@ -143,9 +146,10 @@ class TestAFeasibleCoOrbitalIntercept:
         )
 
         assert solution.method == "intercept_envelope"
-        assert cheapest_tof_s == pytest.approx(79200.0), (
-            "the cheapest arrival is 22 h, just inside one belt revolution; a sweep "
-            "that found it anywhere else is not stepping where the contract says"
+        assert cheapest_tof_s == pytest.approx(165600.0), (
+            "the cheapest arrival is 46 h, the longest one-revolution drift in the "
+            "sweep; a sweep that found it anywhere else is not stepping where the "
+            "contract says, or is not pricing the revolution"
         )
         assert solution.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12), (
             "the sweep must report the cheapest arc it found, not an average, not the "
@@ -153,17 +157,19 @@ class TestAFeasibleCoOrbitalIntercept:
         )
         cost_m_s = from_km_s(solution.total_delta_v)
         assert 1.0 < cost_m_s < 15.0, (
-            f"a one degree GEO reposition inside a day costs single-digit m/s; this "
+            f"a one degree GEO reposition over two days costs single-digit m/s; this "
             f"reports {cost_m_s:.1f} m/s"
         )
 
-    def test_miss_distance_km_carries_the_feasible_count(self) -> None:
+    def test_the_score_carries_the_feasible_count(self) -> None:
         """The field is overloaded, so its value has to be checked, not trusted.
 
-        ``miss_distance_km`` holds a COUNT for this method, which the docstring
-        states and no other method does. 11 of the 24 arrivals come in under
-        500 m/s: every one inside the first belt revolution except the 24 h
-        wrap, where the transfer angle collapses and the cost jumps to 8.9 km/s.
+        ``score`` holds a COUNT for this method, which the docstring
+        states and no other method does. 23 of the 24 arrivals come in under
+        500 m/s. The one that does not is 34 h: the one-revolution transfer's
+        minimum time of flight for that geometry is 34.03 h, so only the
+        zero-revolution arc exists, at 4.2 km/s. Before audit F-010 the count
+        was 11, every arrival past one revolution priced at km/s.
         """
         reference = _reference_sweep(_RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, budget_km_s=0.5)
 
@@ -171,9 +177,9 @@ class TestAFeasibleCoOrbitalIntercept:
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.5,
         )
 
-        assert len(reference.feasible) == 11
-        assert solution.miss_distance_km == pytest.approx(float(len(reference.feasible))), (
-            "miss_distance_km carries the number of feasible arrival times for this "
+        assert len(reference.feasible) == 23
+        assert solution.score == pytest.approx(float(len(reference.feasible))), (
+            "score carries the number of feasible arrival times for this "
             "method; a value that ignores the sweep is a count of nothing"
         )
 
@@ -182,7 +188,7 @@ class TestAFeasibleCoOrbitalIntercept:
 
         ``total_delta_v`` is the CHEAPEST arc and the arrival epoch is the
         EARLIEST feasible one, and for this pair those are different arrivals:
-        2 h against 22 h. The quoted cost therefore does not belong to the
+        2 h against 46 h. The quoted cost therefore does not belong to the
         quoted arrival time. Asserted as it stands rather than corrected,
         because this stream owns no file under ``spectre/``, and reported
         upwards instead.
@@ -206,10 +212,10 @@ class TestNothingFeasibleRaises:
         """415 km and 51.64 degrees against GEO: no arrival time saves it.
 
         A Hohmann transfer from a 415 km orbit to the belt costs about 3.9 km/s
-        before the 51.6 degree plane change is paid for, and the sweep's
-        single-revolution arcs are nowhere near Hohmann-optimal, so the cheapest
-        of the 24 comes in at 11.1 km/s. That is 22 times the 500 m/s budget,
-        which is a margin no numerical detail is going to close.
+        before the 51.6 degree plane change is paid for, and the cheapest of
+        the 24 arrivals, over every revolution count, comes in at 9.8 km/s.
+        That is 20 times the 500 m/s budget, which is a margin no numerical
+        detail is going to close.
         """
         reference = _reference_sweep(_RED_LEO, _BLUE_GEO_ONE_DEGREE_AHEAD, budget_km_s=0.5)
         assert reference.feasible == []
@@ -233,7 +239,7 @@ class TestNothingFeasibleRaises:
             )
 
         message = str(refusal.value)
-        assert "0.500 km/s" in message, f"the budget is missing from: {message}"
+        assert "500 m/s" in message, f"the budget is missing from: {message}"
         assert "24 arrival times" in message, f"the sweep width is missing from: {message}"
         assert "48.0 h" in message
 
@@ -264,26 +270,28 @@ class TestDegenerateStepsAreDropped:
             )
 
     def test_a_sweep_that_loses_steps_still_counts_the_rest(self) -> None:
-        """10 feasible out of 24, with the refused steps counted as neither.
+        """22 feasible out of 24, with the refused steps counted as neither.
 
         The risk the ``except (ValueError, RuntimeError)`` branch carries is
         that a refused step is quietly treated as a free one. It must not raise
-        the feasible count and it must not lower the reported cost. The same
-        belt with no refusals gives 11; this pair gives 10, and the difference
-        is the 12 h arrival the solver would not touch.
+        the feasible count and it must not lower the reported cost. Two steps
+        are refused here: 12 h, with blue diametrically opposite, and 24 h,
+        where the transfer angle is 0.49 deg, inside the half-degree guard.
+        Every other step is under budget, so the count is 22.
         """
         reference = _reference_sweep(
             _RED_GEO, _BLUE_GEO_OPPOSED_AT_TWELVE_HOURS, budget_km_s=0.5,
         )
         assert reference.dropped >= 1, "this pair is meant to exercise the drop branch"
-        assert len(reference.feasible) == 10
+        assert reference.dropped == 2
+        assert len(reference.feasible) == 22
         _, cheapest_dv_km_s = reference.cheapest
 
         solution = intercept_envelope_intercept(
             _RED_GEO, _BLUE_GEO_OPPOSED_AT_TWELVE_HOURS, _EPOCH, max_delta_v_km_s=0.5,
         )
 
-        assert solution.miss_distance_km == pytest.approx(10.0), (
+        assert solution.score == pytest.approx(22.0), (
             "a step the solver refused is not a feasible arrival time"
         )
         assert solution.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
@@ -298,8 +306,8 @@ class TestTheBudgetReachesTheSolver:
     ) -> None:
         """Same pair, same epoch, same sweep: only the budget moves.
 
-        The cheapest arc for this pair costs 6.3 m/s. A 1 m/s budget cannot buy
-        it and a 500 m/s budget buys it 11 times over, so if the budget were
+        The cheapest arc for this pair costs 3.4 m/s. A 1 m/s budget cannot buy
+        it and a 500 m/s budget buys 23 arrival times, so if the budget were
         ignored, hardcoded or taken from a distance in kilometres, as it was in
         both of this function's previous versions, these two calls would return
         the same thing.
@@ -308,7 +316,7 @@ class TestTheBudgetReachesTheSolver:
         _, cheapest_dv_km_s = reference.cheapest
         assert 0.001 < cheapest_dv_km_s < 0.5, "the two budgets must straddle the cheapest arc"
 
-        with pytest.raises(ValueError, match=r"0\.001 km/s budget"):
+        with pytest.raises(ValueError, match=r"within the 1 m/s budget"):
             intercept_envelope_intercept(
                 _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.001,
             )
@@ -317,7 +325,7 @@ class TestTheBudgetReachesTheSolver:
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=0.5,
         )
         assert generous.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
-        assert generous.miss_distance_km == pytest.approx(11.0)
+        assert generous.score == pytest.approx(23.0)
 
 
 class TestAnUnreachableInterceptIsNeverFree:
@@ -341,7 +349,7 @@ class TestAnUnreachableInterceptIsNeverFree:
             return
 
         pytest.fail(
-            f"an intercept costing at least 11 km/s was priced at "
+            f"an intercept costing at least 9.8 km/s was priced at "
             f"{priced.total_delta_v:.3f} km/s against a 0.5 km/s budget. At 0.0 it takes "
             "the top row of a table that ranks ascending on cost."
         )
@@ -375,10 +383,10 @@ class TestTheOperatorsBudgetArrivesInKilometresPerSecond:
         assert default == pytest.approx(to_km_s(DEFAULT_SWEEP_BUDGET_M_S))
 
     def test_a_budget_typed_in_m_s_straddles_the_cheapest_arc(self) -> None:
-        """End to end, in the operator's units: 5 m/s refuses, 10 m/s solves.
+        """End to end, in the operator's units: 2 m/s refuses, 5 m/s solves.
 
-        The cheapest arc costs 6.3 m/s, so these two budgets sit either side of
-        it by a fifth and a half. Any conversion error larger than that, and a
+        The cheapest arc costs 3.4 m/s, so these two budgets sit either side of
+        it by two fifths and a half. Any conversion error larger than that, and a
         missing or inverted divide is 1,000,000 times larger than that, moves
         both calls to the same side and one of these assertions fails. The
         refusal message is checked in km/s as well, because that string is how
@@ -386,17 +394,17 @@ class TestTheOperatorsBudgetArrivesInKilometresPerSecond:
         """
         reference = _reference_sweep(_RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, budget_km_s=0.5)
         _, cheapest_dv_km_s = reference.cheapest
-        assert to_km_s(5.0) < cheapest_dv_km_s < to_km_s(10.0)
+        assert to_km_s(2.0) < cheapest_dv_km_s < to_km_s(5.0)
 
-        with pytest.raises(ValueError, match=r"0\.005 km/s budget"):
+        with pytest.raises(ValueError, match=r"within the 2 m/s budget"):
             intercept_envelope_intercept(
                 _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
-                max_delta_v_km_s=to_km_s(5.0),
+                max_delta_v_km_s=to_km_s(2.0),
             )
 
         solution = intercept_envelope_intercept(
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
-            max_delta_v_km_s=to_km_s(10.0),
+            max_delta_v_km_s=to_km_s(5.0),
         )
         assert solution.total_delta_v == pytest.approx(cheapest_dv_km_s, rel=1e-12)
 
@@ -427,7 +435,7 @@ class TestTheTwoMutantsThatSurvivedTheFirstPass:
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH,
             tof_s=21600.0, max_delta_v_km_s=0.5,
         )
-        assert solution.miss_distance_km == pytest.approx(21.0), (
+        assert solution.score == pytest.approx(21.0), (
             "the six-hour sweep lost a step, so the grid no longer starts at "
             "one slice in"
         )
@@ -449,7 +457,7 @@ class TestTheTwoMutantsThatSurvivedTheFirstPass:
         at_the_boundary = intercept_envelope_intercept(
             _RED_GEO, _BLUE_GEO_ONE_DEGREE_AHEAD, _EPOCH, max_delta_v_km_s=exactly,
         )
-        assert at_the_boundary.miss_distance_km == pytest.approx(1.0), (
+        assert at_the_boundary.score == pytest.approx(1.0), (
             "an arc costing exactly the budget was refused, so the budget is "
             "exclusive and the cheapest solution is unreachable by its own price"
         )

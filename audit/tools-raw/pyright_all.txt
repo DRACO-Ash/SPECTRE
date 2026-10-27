@@ -1,0 +1,270 @@
+$ pyright spectre tle_clustering scripts tests query_UDL_Data.py
+<clone>/scripts/cognitive_complexity.py
+  <clone>/scripts/cognitive_complexity.py:209:21 - error: Type "(self: Self@_Scorer, node: Try) -> None" is not assignable to declared type "(self: Self@NodeVisitor, node: TryStar) -> Any"
+    Type "(self: Self@_Scorer, node: Try) -> None" is not assignable to type "(self: Self@NodeVisitor, node: TryStar) -> Any"
+      "NodeVisitor*" is not assignable to "_Scorer"
+      Parameter 2: type "TryStar" is incompatible with type "Try"
+        "TryStar" is not assignable to "Try" (reportAssignmentType)
+  <clone>/scripts/cognitive_complexity.py:514:58 - error: "splitlines" is not a known attribute of "None" (reportOptionalMemberAccess)
+<clone>/spectre/astro/pattern_of_life.py
+  <clone>/spectre/astro/pattern_of_life.py:1030:26 - error: Argument of type "list[Any | int]" cannot be assigned to parameter "chart_longitudes" of type "list[float]" in function "__init__"
+    "list[Any | int]" is not assignable to "list[float]"
+      Type parameter "_T@list" is invariant, but "Any | int" is not the same as "float"
+      Consider switching from "list" to "Sequence" which is covariant (reportArgumentType)
+  <clone>/spectre/astro/pattern_of_life.py:1030:56 - error: Argument of type "list[Any | int]" cannot be assigned to parameter "chart_drift_rates" of type "list[float]" in function "__init__"
+    "list[Any | int]" is not assignable to "list[float]"
+      Type parameter "_T@list" is invariant, but "Any | int" is not the same as "float"
+      Consider switching from "list" to "Sequence" which is covariant (reportArgumentType)
+<clone>/spectre/data/intel.py
+  <clone>/spectre/data/intel.py:23:12 - error: Type "dict[str, dict[str, Any]] | None" is not assignable to return type "dict[str, dict[str, Any]]"
+    Type "dict[str, dict[str, Any]] | None" is not assignable to type "dict[str, dict[str, Any]]"
+      "None" is not assignable to "dict[str, dict[str, Any]]" (reportReturnType)
+<clone>/spectre/web/routes/gcat.py
+  <clone>/spectre/web/routes/gcat.py:476:14 - error: Type "Series | Unknown | Self@DataFrame" is not assignable to declared type "DataFrame"
+    Type "Series | Unknown | DataFrame*" is not assignable to type "DataFrame"
+      "Series" is not assignable to "DataFrame" (reportAssignmentType)
+<clone>/spectre/web/routes/training.py
+  <clone>/spectre/web/routes/training.py:168:24 - error: Operator "-" not supported for "None" (reportOptionalOperand)
+<clone>/tests/integration/test_login_hardening.py
+  <clone>/tests/integration/test_login_hardening.py:50:17 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:51:22 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:92:25 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:95:24 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:98:54 - error: Cannot access attribute "content" for class "object"
+    Attribute "content" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:99:63 - error: Cannot access attribute "content" for class "object"
+    Attribute "content" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:114:71 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:115:67 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:124:74 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:145:84 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:146:72 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:172:26 - error: Arguments for ParamSpec "P@run_in_threadpool" are missing (reportCallIssue)
+  <clone>/tests/integration/test_login_hardening.py:172:66 - error: Argument of type "object" cannot be assigned to parameter "func" of type "(**P@run_in_threadpool) -> T@run_in_threadpool" in function "run_in_threadpool"
+    Type "object" is not assignable to type "(**P@run_in_threadpool) -> T@run_in_threadpool" (reportArgumentType)
+  <clone>/tests/integration/test_login_hardening.py:177:21 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:190:80 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:213:79 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:296:79 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:312:80 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:339:78 - error: Cannot access attribute "cookies" for class "object"
+    Attribute "cookies" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_login_hardening.py:368:34 - error: Argument of type "str | None" cannot be assigned to parameter "args" of type "StrPath" in function "__new__"
+    Type "str | None" is not assignable to type "StrPath"
+      Type "None" is not assignable to type "StrPath"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "PathLike[str]"
+          "__fspath__" is not present (reportArgumentType)
+  <clone>/tests/integration/test_login_hardening.py:368:34 - error: Argument of type "str | None" cannot be assigned to parameter "args" of type "StrPath" in function "__init__"
+    Type "str | None" is not assignable to type "StrPath"
+      Type "None" is not assignable to type "StrPath"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "PathLike[str]"
+          "__fspath__" is not present (reportArgumentType)
+  <clone>/tests/integration/test_login_hardening.py:369:36 - error: Argument of type "str | None" cannot be assigned to parameter "args" of type "StrPath" in function "__new__"
+    Type "str | None" is not assignable to type "StrPath"
+      Type "None" is not assignable to type "StrPath"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "PathLike[str]"
+          "__fspath__" is not present (reportArgumentType)
+  <clone>/tests/integration/test_login_hardening.py:369:36 - error: Argument of type "str | None" cannot be assigned to parameter "args" of type "StrPath" in function "__init__"
+    Type "str | None" is not assignable to type "StrPath"
+      Type "None" is not assignable to type "StrPath"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "PathLike[str]"
+          "__fspath__" is not present (reportArgumentType)
+<clone>/tests/integration/test_threat_screen_route.py
+  <clone>/tests/integration/test_threat_screen_route.py:42:21 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:43:46 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:47:21 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:48:51 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:52:21 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:53:48 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:54:50 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:73:25 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:74:47 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:90:21 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:91:47 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:95:45 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:115:25 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:116:46 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:117:36 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:118:39 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:136:25 - error: Cannot access attribute "status_code" for class "object"
+    Attribute "status_code" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:137:49 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/integration/test_threat_screen_route.py:138:62 - error: Cannot access attribute "text" for class "object"
+    Attribute "text" is unknown (reportAttributeAccessIssue)
+<clone>/tests/integration/test_xss_escaping.py
+  <clone>/tests/integration/test_xss_escaping.py:236:19 - error: Cannot assign to attribute "last_pol_analysis" for class "SessionState"
+    Attribute "last_pol_analysis" is unknown (reportAttributeAccessIssue)
+<clone>/tests/unit/test_cognitive_complexity_meter.py
+  <clone>/tests/unit/test_cognitive_complexity_meter.py:43:46 - error: Argument of type "ModuleSpec | None" cannot be assigned to parameter "spec" of type "ModuleSpec" in function "module_from_spec"
+    Type "ModuleSpec | None" is not assignable to type "ModuleSpec"
+      "None" is not assignable to "ModuleSpec" (reportArgumentType)
+  <clone>/tests/unit/test_cognitive_complexity_meter.py:45:10 - error: "loader" is not a known attribute of "None" (reportOptionalMemberAccess)
+  <clone>/tests/unit/test_cognitive_complexity_meter.py:45:17 - error: "exec_module" is not a known attribute of "None" (reportOptionalMemberAccess)
+<clone>/tests/unit/test_contrast_floors.py
+  <clone>/tests/unit/test_contrast_floors.py:108:5 - error: Function declaration "_rule_block" is obscured by a declaration of the same name (reportRedeclaration)
+<clone>/tests/unit/test_cw_geometry.py
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "red_tle" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "blue_tle" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "burn_epoch" of type "datetime" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "datetime"
+      "float" is not assignable to "datetime" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "dv_radial_km_s" of type "float" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "float"
+      "datetime" is not assignable to "float" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "dv_prograde_km_s" of type "float" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "float"
+      "datetime" is not assignable to "float" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "dv_normal_km_s" of type "float" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "float"
+      "datetime" is not assignable to "float" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "tof_s" of type "float" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "float"
+      "datetime" is not assignable to "float" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "method" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "red_name" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "blue_name" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "coast_s" of type "float" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "float"
+      "datetime" is not assignable to "float" (reportArgumentType)
+  <clone>/tests/unit/test_cw_geometry.py:369:44 - error: Argument of type "str | datetime | float" cannot be assigned to parameter "caller" of type "str" in function "compute_relative_geometry"
+    Type "str | datetime | float" is not assignable to type "str"
+      "datetime" is not assignable to "str" (reportArgumentType)
+<clone>/tests/unit/test_deployment_contract.py
+  <clone>/tests/unit/test_deployment_contract.py:1236:16 - error: Type "AST | None" is not assignable to declared type "AST"
+    Type "AST | None" is not assignable to type "AST"
+      "None" is not assignable to "AST" (reportAssignmentType)
+  <clone>/tests/unit/test_deployment_contract.py:1242:16 - error: Type "AST | None" is not assignable to declared type "AST"
+    Type "AST | None" is not assignable to type "AST"
+      "None" is not assignable to "AST" (reportAssignmentType)
+  <clone>/tests/unit/test_deployment_contract.py:1360:67 - error: Cannot access attribute "lineno" for class "AST"
+    Attribute "lineno" is unknown (reportAttributeAccessIssue)
+<clone>/tests/unit/test_operator_sees_metres_per_second.py
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:431:24 - error: Cannot access attribute "propellant" for class "object"
+    Attribute "propellant" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:434:24 - error: Cannot access attribute "propellant" for class "object"
+    Attribute "propellant" is unknown (reportAttributeAccessIssue)
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:439:16 - error: Operator "<" not supported for types "float" and "object" (reportOperatorIssue)
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:439:22 - error: Operator "<" not supported for types "object" and "float" (reportOperatorIssue)
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:441:15 - error: "__getitem__" method not defined on type "object" (reportIndexIssue)
+  <clone>/tests/unit/test_operator_sees_metres_per_second.py:460:35 - error: Cannot access attribute "propellant" for class "object"
+    Attribute "propellant" is unknown (reportAttributeAccessIssue)
+<clone>/tests/unit/test_pattern_of_life.py
+  <clone>/tests/unit/test_pattern_of_life.py:191:60 - error: Argument of type "dict[str, float]" cannot be assigned to parameter "rms_metadata" of type "dict[str, float | None] | None" in function "parse_tle_history"
+    Type "dict[str, float]" is not assignable to type "dict[str, float | None] | None"
+      "dict[str, float]" is not assignable to "dict[str, float | None]"
+        Type parameter "_VT@dict" is invariant, but "float" is not the same as "float | None"
+        Consider switching from "dict" to "Mapping" which is covariant in the value type
+      "dict[str, float]" is not assignable to "None" (reportArgumentType)
+  <clone>/tests/unit/test_pattern_of_life.py:254:51 - error: Argument of type "dict[str, tuple[str, str, str]]" cannot be assigned to parameter "metadata" of type "dict[str, tuple[str, str]] | None" in function "parse_tle_history"
+    Type "dict[str, tuple[str, str, str]]" is not assignable to type "dict[str, tuple[str, str]] | None"
+      "dict[str, tuple[str, str, str]]" is not assignable to "dict[str, tuple[str, str]]"
+        Type parameter "_VT@dict" is invariant, but "tuple[str, str, str]" is not the same as "tuple[str, str]"
+        Consider switching from "dict" to "Mapping" which is covariant in the value type
+      "dict[str, tuple[str, str, str]]" is not assignable to "None" (reportArgumentType)
+<clone>/tests/unit/test_pol_assessment.py
+  <clone>/tests/unit/test_pol_assessment.py:269:16 - error: Operator ">" not supported for "None" (reportOptionalOperand)
+  <clone>/tests/unit/test_pol_assessment.py:318:24 - error: Argument of type "float | None" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "float | None" is not assignable to type "ConvertibleToInt"
+      Type "None" is not assignable to type "ConvertibleToInt"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  <clone>/tests/unit/test_pol_assessment.py:318:24 - error: Argument of type "float | None" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "float | None" is not assignable to type "ConvertibleToInt"
+      Type "None" is not assignable to type "ConvertibleToInt"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+  <clone>/tests/unit/test_pol_assessment.py:419:16 - error: Object of type "object" is not callable
+    Attribute "__call__" is unknown (reportCallIssue)
+  <clone>/tests/unit/test_pol_assessment.py:499:52 - error: Argument of type "list[_Stub]" cannot be assigned to parameter "manoeuvres" of type "list[Manoeuvre]" in function "_merge_duplicate_detections"
+    "list[_Stub]" is not assignable to "list[Manoeuvre]"
+      Type parameter "_T@list" is invariant, but "_Stub" is not the same as "Manoeuvre"
+      Consider switching from "list" to "Sequence" which is covariant (reportArgumentType)
+  <clone>/tests/unit/test_pol_assessment.py:521:13 - error: Argument of type "list[_Stub]" cannot be assigned to parameter "manoeuvres" of type "list[Manoeuvre]" in function "_merge_duplicate_detections"
+    "_Stub" is not assignable to "Manoeuvre"
+    "_Stub" is not assignable to "Manoeuvre" (reportArgumentType)
+  <clone>/tests/unit/test_pol_assessment.py:547:13 - error: Argument of type "list[_Stub]" cannot be assigned to parameter "manoeuvres" of type "list[Manoeuvre]" in function "_merge_duplicate_detections"
+    "_Stub" is not assignable to "Manoeuvre"
+    "_Stub" is not assignable to "Manoeuvre"
+    "_Stub" is not assignable to "Manoeuvre"
+    "_Stub" is not assignable to "Manoeuvre" (reportArgumentType)
+  <clone>/tests/unit/test_pol_assessment.py:567:16 - error: Operator ">" not supported for types "Band | None" and "Band | None"
+    Operator ">" not supported for types "Band" and "None"
+    Operator ">" not supported for types "None" and "Band"
+    Operator ">" not supported for types "None" and "None" (reportOperatorIssue)
+<clone>/tests/unit/test_quality_gate_scope.py
+  <clone>/tests/unit/test_quality_gate_scope.py:115:46 - error: Argument of type "ModuleSpec | None" cannot be assigned to parameter "spec" of type "ModuleSpec" in function "module_from_spec"
+    Type "ModuleSpec | None" is not assignable to type "ModuleSpec"
+      "None" is not assignable to "ModuleSpec" (reportArgumentType)
+  <clone>/tests/unit/test_quality_gate_scope.py:117:10 - error: "loader" is not a known attribute of "None" (reportOptionalMemberAccess)
+  <clone>/tests/unit/test_quality_gate_scope.py:117:17 - error: "exec_module" is not a known attribute of "None" (reportOptionalMemberAccess)
+<clone>/tests/unit/test_rate_limit_memory.py
+  <clone>/tests/unit/test_rate_limit_memory.py:51:16 - error: Operator "<=" not supported for types "object" and "Literal[50]" (reportOperatorIssue)
+  <clone>/tests/unit/test_rate_limit_memory.py:142:16 - error: "__getitem__" method not defined on type "object" (reportIndexIssue)
+  <clone>/tests/unit/test_rate_limit_memory.py:143:16 - error: "__getitem__" method not defined on type "object" (reportIndexIssue)
+  <clone>/tests/unit/test_rate_limit_memory.py:189:41 - error: Argument of type "dict[str, deque[float]]" cannot be assigned to parameter "calls" of type "dict[str, object]" in function "_retained_bytes"
+    "dict[str, deque[float]]" is not assignable to "dict[str, object]"
+      Type parameter "_VT@dict" is invariant, but "deque[float]" is not the same as "object"
+      Consider switching from "dict" to "Mapping" which is covariant in the value type (reportArgumentType)
+<clone>/tests/unit/test_template_markup_is_well_formed.py
+  <clone>/tests/unit/test_template_markup_is_well_formed.py:92:16 - error: "markup" is possibly unbound (reportPossiblyUnboundVariable)
+<clone>/tests/unit/test_training_gamification.py
+  <clone>/tests/unit/test_training_gamification.py:264:37 - error: Argument of type "dict[str, int]" cannot be assigned to parameter "axis_points" of type "dict[str, float]" in function "recommended_next_step"
+    "dict[str, int]" is not assignable to "dict[str, float]"
+      Type parameter "_VT@dict" is invariant, but "int" is not the same as "float"
+      Consider switching from "dict" to "Mapping" which is covariant in the value type (reportArgumentType)
+94 errors, 0 warnings, 0 informations
+[exit 1]

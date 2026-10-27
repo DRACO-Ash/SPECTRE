@@ -10,10 +10,10 @@ Accessed through a browser-based operator interface built on FastAPI + HTMX.
 SPECTRE provides analysts with a web console for:
 
 - **Asset Management** — define Blue (friendly) and Red (adversary) satellite sets with TLE propagators; fetch live TLEs from UDL; one-click import from the HRR watchlist
-- **Intercept Engine** (23 methods) — Lambert, Hohmann, bi-elliptic, rendezvous, proximity; tactical manoeuvres (phasing, CW relative motion, plane change, J2 RAAN drift, COLA, evasion); advanced analysis (GEO drift, NMC, manoeuvre classification, detectability); decision support (intent prediction, intercept envelope, stability, fingerprinting, formation defence, orbital terrain, minimum-time intercept)
+- **Intercept Engine** (23 solvers) — classical transfers (Lambert, Hohmann, bi-elliptic, minimum-time); proximity operations (phasing, R-bar, V-bar and H-bar hops, CW drift, NMC safety ellipse); orbital manoeuvres (plane change, J2 RAAN drift, GEO drift); defensive (COLA, evasion, formation defence); assessment (detectability, intent prediction, stability, fingerprinting, orbital terrain, manoeuvre classification, intercept envelope). Rendezvous and Proximity are declared aliases of Hohmann and Lambert, not separate solvers
 - **Threat Sweep** — batch Hohmann evaluation across HRR target groups at 5 orbital epochs; Lambert refinement of top results; TLE clustering and de-duplication via DBSCAN; per-object uncertainty flagging
 - **Pattern of Life (PoL)** — historical TLE sequence analysis: manoeuvre detection, activity classification, behavioural baseline; TLE cadence filtering and de-duplication; NOTSO message correlation with detected manoeuvres; Monte Carlo simulation of adversary manoeuvre hypotheses; historical photometry change assessment
-- **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Maximin); robust recommendation banner
+- **Decision Engine (Phase 1)** — deterministic what-if analysis: build a grid of adversary actions × friendly responses; compute an outcome matrix (composite score, custody gap, closest approach); three selector strategies (Minimax, Expected Value, Minimin); results labelled as a modelled estimate, not a computed solution, because Phase 1 outcomes are lookup constants rather than propagated orbits
 - **GCAT Browser** — interactive browser for the General Catalog of Artificial Space Objects (J. McDowell, planet4589.org): 28 datasets across Derived, Objects, Payloads, and Supporting categories; searchable, sortable, paginated; on-demand download with in-session caching
 - **Training Mode** — full gamification system for operator skill development: six proficiency levels, 13 structured scenarios (Cadet through Expert), timed challenges, step-by-step tutorials, live SPECTRE console embed, XP/points progression, session tracking
 
@@ -25,7 +25,7 @@ All orbital mechanics computations use the pure-Python `spectre.astro` package �
 
 | Component | Minimum version | Notes |
 |-----------|-----------------|-------|
-| Python | 3.14 | |
+| Python | 3.12 | The version CI, the lock files and the container use |
 | uvicorn | 0.29 | Bundled via `pip install` |
 
 ---
@@ -37,21 +37,23 @@ All orbital mechanics computations use the pure-Python `spectre.astro` package �
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. Install in editable mode with dev extras
-pip install -e ".[dev]"
+# 2. Install the locked dependencies, then the package itself, as CI does
+pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+pip install --no-deps -e .
 
-# 3. Set required environment variables
-$env:SECRET_KEY      = "change-me-to-a-long-random-string"
+# 3. Set required environment variables. Generate the key; never reuse an
+#    example value (the app refuses any key containing "change me").
+$env:SECRET_KEY         = python -c "import secrets; print(secrets.token_urlsafe(32))"
 $env:SPECTRE_ADMIN_USER = "admin"
-$env:SPECTRE_ADMIN_PASS = "change-me"
+$env:SPECTRE_ADMIN_PASS = Read-Host "Choose the admin password"
+# Local plain-HTTP only: without this the session cookie is Secure (HTTPS only)
+$env:SPECTRE_COOKIE_SECURE = "false"
 
-# 4. Start the server
-spectre-serve
-# or equivalently:
-uvicorn spectre.web.app:app --reload
+# 4. Start the server (listens on 8080, or PORT if set)
+python -m spectre.web._entrypoint
 ```
 
-Then open **http://localhost:8000** in your browser.
+Then open **http://localhost:8080** in your browser.
 
 ### First Login
 
@@ -69,16 +71,18 @@ docker build -t spectre:latest .
 
 # Run with a named volume for the database
 docker run -d \
-  -p 8000:8000 \
+  -p 8080:8080 \
   -v spectre_data:/app/data \
-  -e SECRET_KEY="change-me-to-a-long-random-string" \
+  -e SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
   -e SPECTRE_ADMIN_USER="admin" \
-  -e SPECTRE_ADMIN_PASS="change-me" \
+  -e SPECTRE_ADMIN_PASS="$(read -rsp 'Admin password: ' p; echo "$p")" \
+  -e SPECTRE_COOKIE_SECURE=false \
   --name spectre \
   spectre:latest
 ```
 
-Then open **http://localhost:8000** in your browser.
+Then open **http://localhost:8080** in your browser. `SPECTRE_COOKIE_SECURE=false`
+is for plain-HTTP local use only; behind HTTPS, leave it unset.
 
 To use PostgreSQL instead of SQLite, add:
 
@@ -99,7 +103,6 @@ No code changes are required — the adapter swap is entirely via `DATABASE_URL`
 | `SPECTRE_ADMIN_USER` | No | `admin` | Bootstrap admin username (first run only). |
 | `SPECTRE_ADMIN_PASS` | No | — | Bootstrap admin password (first run only). Omit to skip bootstrap. |
 | `SPECTRE_LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `SPECTRE_LOG_DIR` | No | `logs` | Directory for structlog output files. |
 
 ---
 
@@ -142,10 +145,13 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
 6. **Compute orbital events** — select a red and/or blue satellite, click **Compute Events**. Apogee, perigee, and node crossings are detected via SGP4 propagation and displayed as clickable badges that auto-populate the manoeuvre start time.
 
 7. **Run intercept calculations** — in the **Intercept Engine** panel, select a red target, a blue asset, and choose a method. Methods are grouped into:
-   - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Rendezvous, Proximity
-   - **Tactical Manoeuvres**: Phasing, CW Radial Separation, CW Along-Track Drift, Plane Change, J2 Drift, COLA, Evasion
-   - **Advanced Analysis**: GEO Drift, NMC (safety ellipse), Manoeuvre Detect, Detectability
-   - **Decision Support**: Intent Predict, Intercept Envelope, Stability, Fingerprint, Formation Defence, Terrain, Min-Time
+   - **Classical Transfers**: Lambert, Hohmann, Bi-elliptic, Min-Time
+   - **Proximity Operations**: Phasing, R-bar hop (CW radial), V-bar hop, H-bar hop, CW Along-Track Drift, NMC (safety ellipse)
+   - **Orbital Manoeuvres**: Plane Change, J2 Drift, GEO Drift
+   - **Defensive**: COLA, Evasion, Formation Defence
+   - **Assessment**: Detectability, Intent Predict, Stability, Fingerprint, Terrain, Manoeuvre Detect, Intercept Envelope
+
+   That is 23 solvers. Rendezvous and Proximity are aliases (of Hohmann and Lambert respectively): the batch runs each solver once, and a result requested under an alias says which solver it ran.
 
    Set coast and time-of-flight parameters, then click **Calculate Intercept**. The per-burn ΔV breakdown appears with VNB components, arrival epoch, and miss distance.
 
@@ -166,8 +172,8 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
     - Define 1–5 adversary action rows (type, probability, confidence)
     - Define 1–5 friendly response rows (type, cost, reversibility, time-to-execute)
     - Click **Evaluate** — the engine computes an N × M outcome matrix with composite scores, custody indicators, and closest-approach estimates
-    - Choose selector strategy: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), or **Maximin** (maximise best-case)
-    - The robust recommendation banner shows the best response across all adversary action probabilities
+    - Choose selector strategy: **Minimax** (cautious: best worst case), **Expected Value** (probability-weighted), or **Minimin** (optimistic: best best case, not robust)
+    - The recommendation banner shows the selected response and states that it is a **modelled estimate, not a computed solution**: Phase 1 outcomes are lookup constants and weights, not propagated orbits
 
 11. **Compare solutions** — run multiple intercept calculations with different methods or parameters. After the second solution, a trade-space scatter plot (ΔV vs transfer time) appears automatically, colour-coded by method.
 
@@ -186,26 +192,29 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
 
 ### Levels and progression
 
-| Level | Title | Min Points |
-|-------|-------|-----------|
-| 1 | Cadet | 0 |
-| 2 | Trainee | 200 |
-| 3 | Operator | 500 |
-| 4 | Senior Operator | 1 000 |
-| 5 | Analyst | 2 000 |
-| 6 | Expert | 4 000 |
+Generated from `spectre/training/config/gamification.yaml`; a level needs both its
+points total and its unlock condition.
+
+| Level | Title | Min Points | Unlock condition |
+|-------|-------|-----------|------------------|
+| 1 | Cadet | 0 | Starting level |
+| 2 | Observer | 100 | Complete the `orientation` tutorial |
+| 3 | Planner | 400 | Pass 3 scenarios |
+| 4 | Analyst | 1,200 | 300 points on Decision Quality |
+| 5 | Operator | 3,000 | Pass 3 challenges |
+| 6 | Instructor | 8,000 | 1000 points on Operational Tempo |
 
 ### Skill axes
 
 Scenarios and tutorials each contribute points to one or more of five skill axes:
 
-| Axis | Description |
-|------|-------------|
-| `intercept_planning` | Intercept Engine and transfer methods |
-| `threat_assessment` | Threat Sweep, HRR, detectability |
-| `pattern_analysis` | Pattern of Life, NOTSO, photometry |
-| `decision_making` | Decision Engine, what-if analysis |
-| `situational_awareness` | GCAT, regime identification, data literacy |
+| Axis | Label | Description |
+|------|-------|-------------|
+| `situational_awareness` | Situational Awareness | Speed and accuracy of reading a threat scenario |
+| `manoeuvre_planning` | Manoeuvre Planning | Ability to compute effective orbital responses |
+| `decision_quality` | Decision Quality | Selecting the optimal option, not merely a valid one |
+| `operational_tempo` | Operational Tempo | Working at mission-required speed |
+| `efficiency` | Efficiency | Minimising resource expenditure (ΔV, sensor tasking) |
 
 ### Scenario design rules
 
@@ -239,19 +248,19 @@ pytest
 | Module | Contents |
 |--------|---------|
 | `test_astro.py` | Hohmann, Lambert, bi-elliptic, SGP4 propagation |
-| `test_tactical.py` | 74 parametrised tactical solver cases |
+| `test_tactical.py` | Tactical solvers: phasing, CW, plane change, J2 drift, COLA, evasion and the rest |
 | `test_cw_geometry.py` | Clohessy-Wiltshire relative motion |
 | `test_monte_carlo.py` | MC sampling, convergence, regime classification |
 | `test_notso.py` | NOTSO parser, correlation algorithm, behaviour profile |
 | `test_photometry.py` | Geometric corrections, baseline fitting, change detection |
 | `test_tle_filter.py` | TLE cadence clustering and quality flags |
-| `test_decision.py` | Decision Engine models, minimax/EV/maximin selectors |
+| `test_decision.py`, `test_decision_labelling.py` | Decision Engine models, minimax/EV/minimin selectors, modelled-estimate labelling |
 | `test_training_gamification.py` | XP/level progression, scenario unlocks |
 | `test_threat_sweep.py` | Threat Sweep solver dispatch |
 | `test_domain_models.py` | Data model validation |
 | `test_planning_state.py` | Session state management |
 | `tests/unit/tle_clustering/` | TLE DBSCAN clustering pipeline |
-| `tests/integration/` | FastAPI TestClient routes; opt-in network tests |
+| `tests/integration/` | FastAPI TestClient routes against an in-memory database; UDL is stubbed |
 
 ---
 
@@ -306,8 +315,8 @@ spectre/                           ← repo root
 │   ├── astro/                  ← pure-Python orbital mechanics
 │   │   ├── constants.py        ← μ, R_Earth, J2, sidereal rate, unit conversions
 │   │   ├── maneuvers.py        ← Hohmann, bi-elliptic, rendezvous, proximity
-│   │   ├── transfers.py        ← Lambert solver (universal variable method)
-│   │   ├── lambert.py          ← Lambert targeting (multi-rev, batched)
+│   │   ├── transfers.py        ← Hohmann and bi-elliptic closed forms (vis-viva)
+│   │   ├── lambert.py          ← Lambert solver: Curtis Alg. 5.2, universal variables, multi-revolution
 │   │   ├── tactical.py         ← 17 solver categories (phasing, CW, J2, COLA, evasion…)
 │   │   ├── cw_geometry.py      ← Clohessy-Wiltshire relative motion geometry
 │   │   ├── propagator.py       ← TLEOrbit: SGP4 propagation, state-to-Keplerian
@@ -323,9 +332,6 @@ spectre/                           ← repo root
 │   │   ├── scenario.py         ← ScenarioPlanner orchestrator
 │   │   ├── decision.py         ← Decision Engine: ActionType, AdversaryAction,
 │   │   │                          FriendlyResponse, OutcomeMetrics, evaluate_scenario()
-│   │   ├── geometry.py         ← AER, closure rate, orbital elements from TLE
-│   │   ├── maneuver_planner.py ← ManeuverPlanner: validates config, sorts options
-│   │   └── exceptions.py       ← Domain exception types
 │   ├── training/               ← Gamification and training mode
 │   │   ├── gamification.py     ← XP engine, level unlock rules, progress tracking
 │   │   ├── scenarios.py        ← Scenario loader and unlock logic
@@ -356,7 +362,6 @@ spectre/                           ← repo root
 │   ├── data/
 │   │   ├── intel.py            ← Intelligence data helpers
 │   │   └── notso_cache.py      ← NOTSO record persistence and retrieval
-│   ├── app_logging/            ← structlog setup, run_id correlation
 │   └── config/                 ← Constants and runtime settings
 ├── tle_clustering/             ← Standalone TLE de-duplication package (DBSCAN)
 │   ├── __init__.py             ← cluster_tle_strings() — primary entry point
@@ -370,7 +375,7 @@ spectre/                           ← repo root
 │   └── integration/            ← FastAPI TestClient + TLE clustering pipeline tests
 ├── docs/                       ← Architecture notes, planning docs, reference PDFs
 ├── .github/
-│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets jobs
+│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets / container / quality jobs
 │   └── dependabot.yml          ← Weekly pip + Actions dependency updates
 ├── .pre-commit-config.yaml     ← gitleaks, ruff, bandit, mypy on every commit
 ├── CODEOWNERS                  ← Security-path review gates
@@ -393,10 +398,13 @@ raw TLE history (N TLEs per sat)
   parse_tle_strings()       ← extract inc, RAAN, ecc via sgp4
          │
          ▼
+  RAAN to a common epoch    ← each node moved to the newest epoch at SGP4's own rate
+         │
+         ▼
   normalise per tolerance   ← divide by [inc_tol, raan_tol, ecc_tol]
          │
          ▼
-  DBSCAN (Chebyshev / L-∞)  ← eps=1.0 → all three elements within tolerance
+  DBSCAN (Chebyshev / L-∞)  ← eps=1.0 → each NEIGHBOURING pair within tolerance on all three
          │
          ├─ cluster members ─▶ select_representative()
          │                        (min Chebyshev dist to centroid, recency tie-break)
@@ -408,8 +416,12 @@ raw TLE history (N TLEs per sat)
 | Element | Default | Rationale |
 |---------|---------|-----------|
 | Inclination | 0.01° | J2 + fitting noise < 0.01° |
-| RAAN | 0.05° | Provider epoch offsets of minutes → ~0.05° J2 drift |
+| RAAN | 0.05° | Fit scatter, after each node is carried to the newest epoch in the group by SGP4's secular rate; without that, an ISS-like node's ~5°/day regression put fits more than ~15 minutes apart outside the tolerance |
 | Eccentricity | 1×10⁻⁴ | Typical inter-provider LEO variation |
+
+**What "within tolerance" means.** DBSCAN links neighbours: a pair is linked when every element is within its tolerance (equality included), and a cluster is every set reachable through such links. A chain of fits each within tolerance of the next is therefore one cluster whose ends can be several tolerances apart. Each cluster records that end-to-end span (`span_tolerances`); one over a single tolerance is logged as a warning, since a slow drift or a small manoeuvre bridged by intermediate fits looks exactly like that.
+
+**Awkward geometry.** RAAN is compared the short way round the circle, so fits at 359.99° and 0.01° are 0.02° apart and their centroid sits on the seam. Below 0.1° of inclination the node is not a meaningful direction (fits of one near-equatorial GEO object scatter across any RAAN), so two such fits are compared on inclination and eccentricity only.
 
 **Elevated uncertainty flag:** When DBSCAN finds >1 cluster for a satellite, the sweep results show a red ▲ warning — the orbit is not well-determined (possible recent unannounced manoeuvre or poor tracking coverage).
 
@@ -463,8 +475,14 @@ If the admin account is lost (e.g. all admins deleted via direct SQL), restore a
 
 ## Naming Conventions
 
-All times are UTC. Distances in km, speeds in km/s, angles in degrees.
-Coordinate frame: ICRF/J2000.
+All times are UTC. Distances in km, orbital speeds in km/s, delta-V in m/s
+wherever it is shown or stored (`InterceptResult`, `BurnResult`), angles in
+degrees.
+
+Coordinate frame: TEME (True Equator, Mean Equinox), the frame SGP4 returns.
+States are not converted to J2000 or GCRF; the difference reaches tens of
+kilometres at GEO, so positions here are not interchangeable with an
+inertial-frame product without that rotation.
 
 ---
 

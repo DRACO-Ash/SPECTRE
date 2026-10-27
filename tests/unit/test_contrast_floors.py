@@ -52,6 +52,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit._css import over as _over
+from tests.unit._css import ratio as _ratio
+
 _STATIC = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static"
 _AA_NORMAL = 4.5
 
@@ -84,29 +87,18 @@ def _tokens(filename: str, selector: str) -> dict[str, str]:
     return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{6})\s*;", block))
 
 
-def _luminance(colour: str) -> float:
-    raw = colour.lstrip("#")
-    channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
-    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 
 
-def _ratio(foreground: str, background: str) -> float:
-    a, b = _luminance(foreground), _luminance(background)
-    lighter, darker = max(a, b), min(a, b)
-    return (lighter + 0.05) / (darker + 0.05)
 
 
-def _over(foreground: str, alpha: float, background: str) -> str:
-    """*foreground* at *alpha* composited onto *background*."""
-    f = [int(foreground.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
-    b = [int(background.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
-    mixed = [round(f[i] * alpha + b[i] * (1 - alpha)) for i in range(3)]
-    return "#{:02X}{:02X}{:02X}".format(*mixed)
 
 
-def _rule_block(filename: str, selector: str) -> str:
+def _sole_rule_block(filename: str, selector: str) -> str:
     """The declarations inside the one rule whose selector is *selector*.
+
+    Named apart from the looser ``_rule_block`` further down, which used to
+    share this name and silently replace it for every call made after the
+    module loaded (audit F-274).
 
     Comments are stripped first so prose that quotes a selector cannot be
     mistaken for one, and the selector is matched with its trailing ``{`` so
@@ -138,7 +130,7 @@ def _declared(filename: str, selector: str, prop: str) -> str:
     This reads the RULE, not the token table, and that is the whole point of
     it. The lookbehind keeps ``color`` from matching ``border-bottom-color``.
     """
-    block = _rule_block(filename, selector)
+    block = _sole_rule_block(filename, selector)
     match = re.search(rf"(?<![-\w]){re.escape(prop)}\s*:\s*([^;}}]+)", block)
     assert match, f"`{selector}` in {filename} declares no {prop}"
     return match.group(1).strip()

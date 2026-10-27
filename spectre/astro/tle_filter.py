@@ -116,10 +116,13 @@ def cluster_tles(
     if min_spacing is None:
         min_spacing = _min_spacing(sorted_tles[0].regime)
 
+    # Each cluster is bounded by its span from its first member. Measuring
+    # the gap to the last member let a run of sets each under the spacing
+    # chain into one unbounded cluster that could span a burn (audit F-085).
     clusters: list[TLECluster] = [TLECluster(tles=[sorted_tles[0]])]
     for tle in sorted_tles[1:]:
-        gap = tle.epoch - clusters[-1].tles[-1].epoch
-        if gap >= min_spacing:
+        span = tle.epoch - clusters[-1].tles[0].epoch
+        if span >= min_spacing:
             clusters.append(TLECluster(tles=[tle]))
         else:
             clusters[-1].tles.append(tle)

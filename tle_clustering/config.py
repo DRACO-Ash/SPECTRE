@@ -17,7 +17,7 @@ Override inclination tolerance only::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 
@@ -56,9 +56,10 @@ class ClusteringConfig:
     Notes
     -----
     To add a fourth clustering dimension (e.g. mean motion), add a
-    ``mean_motion_tolerance_rev_per_day`` field here and update
-    ``parser.TLERecord`` and ``clustering._normalise`` accordingly — no other
-    files need to change.
+    ``mean_motion_tolerance_rev_per_day`` field here, carry the element on
+    ``models.TLERecord`` (filled by ``parser``), add its axis to
+    ``clustering._axis_distances``, and add it to the per-record distance in
+    ``selection._chebyshev_distance_normalised``.
     """
 
     # Per-element tolerances
@@ -92,25 +93,17 @@ class ClusteringConfig:
             Populated from dict values; any missing key falls back to the
             field default defined on the dataclass.
         """
+        # Defaults come from the fields, not a second copy of the numbers that
+        # could drift from them (audit F-271).
+        defaults = {f.name: f.default for f in fields(cls)}
+        merged = {**defaults, **{k: v for k, v in config_dict.items() if k in defaults}}
         return cls(
-            inclination_tolerance_deg=float(
-                config_dict.get("inclination_tolerance_deg", 0.01)
-            ),
-            raan_tolerance_deg=float(
-                config_dict.get("raan_tolerance_deg", 0.05)
-            ),
-            eccentricity_tolerance=float(
-                config_dict.get("eccentricity_tolerance", 1e-4)
-            ),
-            dbscan_eps=float(
-                config_dict.get("dbscan_eps", 1.0)
-            ),
-            dbscan_min_samples=int(
-                config_dict.get("dbscan_min_samples", 2)
-            ),
-            dbscan_metric=str(
-                config_dict.get("dbscan_metric", "chebyshev")
-            ),
+            inclination_tolerance_deg=float(merged["inclination_tolerance_deg"]),
+            raan_tolerance_deg=float(merged["raan_tolerance_deg"]),
+            eccentricity_tolerance=float(merged["eccentricity_tolerance"]),
+            dbscan_eps=float(merged["dbscan_eps"]),
+            dbscan_min_samples=int(merged["dbscan_min_samples"]),
+            dbscan_metric=str(merged["dbscan_metric"]),
         )
 
     def __post_init__(self) -> None:

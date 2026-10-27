@@ -1,10 +1,11 @@
+{% import "partials/_modelled.html" as modelled %}
 {# Pattern of Life — enhanced analysis results with full intelligence output #}
 {# Context: pol (PolAnalysis), source (str) #}
 
 {% set RISK_COLOR  = {"CRITICAL":"#ef4444","HIGH":"#f59e0b","MEDIUM":"#eab308","LOW":"#3b8beb","MINIMAL":"#22c55e"} %}
 {% set RISK_BG     = {"CRITICAL":"rgba(239,68,68,0.04)","HIGH":"rgba(245,158,11,0.04)","MEDIUM":"rgba(234,179,8,0.04)","LOW":"rgba(59,139,235,0.04)","MINIMAL":"rgba(34,197,94,0.04)"} %}
 {% set RISK_ICON   = {"CRITICAL":"⚠","HIGH":"⚠","MEDIUM":"◈","LOW":"◉","MINIMAL":"✓"} %}
-{% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444"} %}
+{% set STATUS_COLOR= {"NORMAL":"#22c55e","CAUTION":"#f59e0b","ANOMALOUS":"#ef4444","INSUFFICIENT":"var(--text-dim)"} %}
 {% set ELSET_TABLE_CAP = 400 %}
 {% set CONF_COL    = {"HIGH":"#22c55e","MODERATE":"#f59e0b","LOW":"#ef4444","UNASSESSED":"var(--text-dim)"} %}
 {# Manoeuvre labels and posture colours come from the domain assessment now.
@@ -18,6 +19,15 @@
 {% set rc          = RISK_COLOR.get(risk_level, "#6b7280") %}
 {% set rb          = RISK_BG.get(risk_level, "rgba(107,114,128,0.10)") %}
 {% set is_geo      = pol.regime in ("GEO","DEEP") or (pol.records and pol.records[-1].geo_longitude_deg is not none) %}
+
+{% if pol.history_truncated_at %}
+{# Audit F-144: the archive pull hit UDL's record cap; there may be a gap. #}
+<div class="callout callout-amber" role="note" style="margin:0 0 0.5rem; font-size:0.78rem">
+  <strong>&#9888; History truncated at {{ pol.history_truncated_at.strftime('%Y-%m-%d %H:%M UTC') }}.</strong>
+  UDL returned its record cap for the archive, so element sets between that epoch and the
+  current one may be missing, and manoeuvres in that gap would not be detected.
+</div>
+{% endif %}
 
 {# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
@@ -36,7 +46,7 @@
       <div style="font-size:1.5rem; font-weight:900; color:{{ rc }}; line-height:1; margin-top:0.2rem">
         {{ anomaly.overall | round(0) | int }}<span style="font-size:0.65rem; color:var(--text-dim)">/100</span>
       </div>
-      <div style="font-size:0.58rem; color:var(--text-dim)">anomaly score</div>
+      <div style="font-size:0.58rem; color:var(--text-dim)">heuristic anomaly index (uncalibrated)</div>
       {% endif %}
     </div>
 
@@ -147,7 +157,7 @@
   {# Anomaly Score Component Bars #}
   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px; padding:0.65rem 0.8rem">
     <div style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem">
-      Anomaly Score — Component Breakdown
+      Heuristic Anomaly Index — Component Breakdown {{ modelled.badge(anomaly.basis if anomaly else "") }}
     </div>
     {% if anomaly %}
     {% set anoms = anomaly %}
@@ -171,14 +181,15 @@
     {{ score_bar("Longitude Coverage", anoms.lon_coverage, "Total GEO belt traversed — >60° = full score") }}
     {{ score_bar("Drift Rate", anoms.drift_rate, "Max drift rate vs ±0.05°/day SK tolerance") }}
     {{ score_bar("SK Irregularity", anoms.sk_regularity, "Coefficient of variation of manoeuvre intervals") }}
-    {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV vs 200 m/s/yr reference ceiling") }}
+    {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV against this regime's own routine budget; see the basis below") }}
     <div style="margin-top:0.5rem; padding-top:0.4rem; border-top:1px solid var(--border);
                 display:flex; align-items:center; justify-content:space-between">
-      <div style="font-size:0.62rem; color:var(--text-dim)">Overall (weighted composite)</div>
+      <div style="font-size:0.62rem; color:var(--text-dim)">Overall heuristic index (tuned weights)</div>
       <div style="font-size:1.25rem; font-weight:900; color:{{ rc }}">
         {{ anoms.overall | round(1) }}<span style="font-size:0.6rem; color:var(--text-dim)">/100</span>
       </div>
     </div>
+    <div style="margin-top:0.35rem; font-size:0.6rem; color:var(--text-dim); line-height:1.4">{{ anoms.basis }}</div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Insufficient manoeuvres for anomaly scoring (need ≥ 2).</p>
     {% endif %}
@@ -314,7 +325,7 @@
                "derived from Table 3, not asserted") }}
   {% endif %}
   {% if pol.next_manoeuvre_est %}
-  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (2σ)", color="var(--ops-gold)") }}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--ops-gold)") }}
   {% endif %}
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
@@ -325,8 +336,8 @@
   {% endif %}
   {% if pol.records[-1].geo_drift_rate_deg_day is not none %}
   {% set dr = pol.records[-1].geo_drift_rate_deg_day %}
-  {{ stat_card("Drift Rate", dr | round(4) | abs ~ "°/d " ~ ("→E" if dr > 0.005 else ("←W" if dr < -0.005 else "—SK")),
-               "current longitude drift", color=("#22c55e" if dr | abs < 0.05 else "#f59e0b")) }}
+  {{ stat_card("Drift Rate", dr | round(4) | abs ~ "°/d " ~ ("→E" if dr > pol.drift_stationary_deg_day else ("←W" if dr < -pol.drift_stationary_deg_day else "—SK")),
+               "current longitude drift", color=("#22c55e" if dr | abs < pol.drift_stationary_deg_day else "#f59e0b")) }}
   {% endif %}
   {% endif %}
   {% if pol.drift_phases %}
@@ -618,15 +629,19 @@
               letter-spacing:0.05em; margin-bottom:0.3rem">Detection Provenance</div>
   <div style="font-size:0.63rem; color:var(--text-primary); line-height:1.5">
     {{ detection.pairs_examined }} consecutive element set pairs examined.
-    Detection floor <strong>{{ detection.noise_floor_m_s | m_s }} m/s</strong>, measured from this
-    object's own fit scatter (median {{ detection.noise_median_m_s | m_s }},
-    median absolute deviation {{ detection.noise_mad_m_s | m_s }} m/s over
-    {{ detection.noise_samples }} pairs), not assumed.
+    {% import "partials/_noise_floor.html" as nf %}
+    {{ nf.floor({"floor_m_s": detection.noise_floor_m_s, "measured": detection.noise_floor_measured,
+                 "samples": detection.noise_samples, "median_m_s": detection.noise_median_m_s,
+                 "mad_m_s": detection.noise_mad_m_s, "method": detection.noise_method}) }}
   </div>
   <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem; line-height:1.5">
     ● {{ detection.rejected_below_floor }} pairs fell below the floor
     {% if detection.rejected_on_evidence %}● {{ detection.rejected_on_evidence }} cleared the floor but failed the forensic checks{% endif %}
     {% if detection.merged_duplicates %}● {{ detection.merged_duplicates }} merged as the same burn seen by more than one provider{% endif %}
+    {% if detection.malformed_element_sets %}● {{ detection.malformed_element_sets }} element sets would not parse and were dropped{% endif %}
+    {% if detection.duplicate_epoch_sets %}● {{ detection.duplicate_epoch_sets }} repeated an epoch already held and were dropped{% endif %}
+    {% if detection.bad_provenance_sets %}● {{ detection.bad_provenance_sets }} carried provenance in an unusable shape and were dropped{% endif %}
+    {% if detection.other_object_sets %}● {{ detection.other_object_sets }} belonged to another object and were dropped{% endif %}
     {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
     {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
     <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>
@@ -699,7 +714,8 @@
           </td>
           {% endif %}
           <td class="col-dim">{{ m.dominant_element }}</td>
-          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}</td>
+          <td class="col-dim" data-val="{{ m.gap_days|round(1) }}">{{ m.gap_days|round(1) }}{% if m.long_gap %}
+            <span style="color:#f59e0b" title="Gap longer than the long-gap threshold: this may be several burns read as one">⚑</span>{% endif %}</td>
           <td class="col-dim" style="text-align:right">{{ m.tle_after.alt_km|round(1) }}</td>
           <td style="white-space:nowrap">
             <span style="color:{{ CONF_COL.get(m.confidence, 'var(--text-dim)') }}; font-weight:700">

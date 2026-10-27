@@ -172,23 +172,30 @@ class TestRateLimitSink:
 
 
 class TestSessionStateSink:
-    """spectre/web/planning_state.py: the debug record keyed by username."""
+    """spectre/web/planning_state.py: the debug record for a new sign-in's state.
+
+    The record used to carry the username, so a name with a newline could
+    forge a second line. State is now filed by account id and sign-in id, and
+    the record carries only the id, so nothing operator-typed reaches it.
+    """
 
     def test_new_session_record_occupies_exactly_one_line(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        from spectre.web.models import SessionKey
         from spectre.web.planning_state import clear_session_state, get_session_state
 
+        key = SessionKey(4242, _FORGED_USERNAME)
         # The record is only written when the state is created, so clear first.
-        clear_session_state(_FORGED_USERNAME)
+        clear_session_state(key)
         try:
             with caplog.at_level(logging.DEBUG, logger="spectre.web.planning_state"):
-                get_session_state(_FORGED_USERNAME)
+                get_session_state(key)
 
             lines = _lines_from(caplog, "spectre.web.planning_state")
             assert lines, "creating a session state must log it"
             assert all(len(line.splitlines()) == 1 for line in lines), lines
-            assert "Created new session state" in lines[0]
-            assert "Successful login: root" in lines[0]
+            assert "Created new session state for account 4242" in lines[0]
+            assert "Successful login" not in lines[0]
         finally:
-            clear_session_state(_FORGED_USERNAME)
+            clear_session_state(key)

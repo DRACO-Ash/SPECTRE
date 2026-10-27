@@ -15,8 +15,6 @@ from __future__ import annotations
 import pytest
 
 from spectre.training.gamification import (
-    GamificationConfig,
-    PointAward,
     award_points,
     check_level_up,
     get_config,
@@ -25,7 +23,6 @@ from spectre.training.gamification import (
     recommended_next_step,
 )
 from spectre.training.scenarios import (
-    TrainingScenario,
     get_scenario,
     load_scenarios,
     scenarios_for_level,
@@ -36,7 +33,9 @@ from spectre.training.scenarios import (
 class TestGetConfig:
     def test_returns_gamification_config(self):
         cfg = get_config()
-        assert isinstance(cfg, GamificationConfig)
+        levels = [lv.level for lv in cfg.levels]
+        assert levels == list(range(1, len(levels) + 1)), "levels run 1, 2, 3 ... with no gap"
+        assert cfg.levels[0].total_points_required == 0
 
     def test_skill_axes_loaded(self):
         cfg = get_config()
@@ -50,11 +49,9 @@ class TestGetConfig:
 
     def test_point_actions_loaded(self):
         cfg = get_config()
-        assert len(cfg.point_actions) >= 5
         action_ids = [a.action_id for a in cfg.point_actions]
-        assert "tutorial_step_complete" in action_ids
-        assert "scenario_completed" in action_ids
-        assert "challenge_passed" in action_ids
+        # Only the three the submit route awards (audit F-169).
+        assert action_ids == ["scenario_completed", "challenge_passed", "challenge_passed_first_try"]
 
     def test_levels_loaded(self):
         cfg = get_config()
@@ -90,29 +87,15 @@ class TestGetConfig:
 
 class TestAwardPoints:
     def test_returns_point_award(self):
-        pa = award_points("tutorial_step_complete", {})
-        assert isinstance(pa, PointAward)
+        pa = award_points("scenario_completed", {})
+        assert (pa.base_points, pa.total_points) == (150, 150)
+        assert sum(pa.axis_deltas.values()) == pytest.approx(150.0)
 
     def test_base_points_match_config(self):
         cfg = get_config()
-        action_def = cfg.actions_by_id["tutorial_step_complete"]
-        pa = award_points("tutorial_step_complete", {})
-        assert pa.base_points == action_def.base_points
-
-    def test_total_points_no_speed_multiplier(self):
-        pa = award_points("scenario_completed", {})
-        assert pa.total_points == pa.base_points  # speed_multiplier=False
-
-    def test_speed_multiplier_applied(self):
-        """threat_assessed_timed has speed_multiplier: true."""
-        pa_fast = award_points("threat_assessed_timed", {}, speed_factor=1.5)
-        pa_slow = award_points("threat_assessed_timed", {}, speed_factor=0.5)
-        assert pa_fast.total_points > pa_slow.total_points
-
-    def test_speed_factor_clamped(self):
-        """speed_factor outside [0.5, 2.0] should be clamped."""
-        pa_high = award_points("threat_assessed_timed", {}, speed_factor=99.0)
-        assert pa_high.total_points <= award_points("threat_assessed_timed", {}, speed_factor=2.0).total_points + 1
+        action_def = cfg.actions_by_id["challenge_passed"]
+        pa = award_points("challenge_passed", {})
+        assert pa.base_points == action_def.base_points == 250
 
     def test_axis_deltas_sum_to_total_points(self):
         pa = award_points("scenario_completed", {})
@@ -215,8 +198,10 @@ class TestCheckLevelUp:
             axis_points={}, tutorials_completed=["orientation"],
             scenarios_passed=0, challenges_passed=0,
         )
-        if result.levelled_up:
-            assert isinstance(result.newly_unlocked, list)
+        assert result.levelled_up
+        assert result.new_level == 2
+        assert result.newly_unlocked == result.new_level_def.unlocks
+        assert "tutorial:threat_assessment" in result.newly_unlocked
 
 
 # ── Progress helpers ───────────────────────────────────────────────────────────
@@ -275,8 +260,13 @@ class TestRecommendedNextStep:
 
 class TestScenarioLoader:
     def test_load_scenarios_returns_list(self):
+        import yaml
+
+        from spectre.training.scenarios import _CONFIG_PATH
+
         scenarios = load_scenarios()
-        assert isinstance(scenarios, list)
+        declared = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))["scenarios"]
+        assert [s.id for s in scenarios] == [d["id"] for d in declared]
 
     def test_minimum_three_scenarios(self):
         assert len(load_scenarios()) >= 3
@@ -304,7 +294,7 @@ class TestScenarioLoader:
     def test_get_scenario_by_id(self):
         s = get_scenario("cadet_01_geo_stationkeeping")
         assert s is not None
-        assert isinstance(s, TrainingScenario)
+        assert s.id == "cadet_01_geo_stationkeeping"
 
     def test_get_scenario_unknown_returns_none(self):
         assert get_scenario("does_not_exist_xyz") is None

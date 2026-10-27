@@ -1,9 +1,17 @@
-"""In-process sliding-window rate limiters for SPECTRE UDL proxy routes.
+"""In-process sliding-window rate limiters for SPECTRE.
 
 Three tiers match the cost profile of UDL operations:
   - udl_auth  : credential probes      — 5 / 60 s   per operator
   - udl_data  : TLE / SV / HRR fetches — 60 / 60 s  per operator
   - udl_sync  : bulk NOTSO sync         — 3 / 600 s  per operator
+
+and one for the PoL forms that run a computation in the shared executor:
+  - pol_compute : Monte Carlo, photometry — 10 / 60 s per operator
+
+The login route builds two more from :class:`SlidingWindowLimiter`, in
+spectre/web/routes/login.py, counting failed sign-ins only:
+  - by source address : 10 / 300 s
+  - by username       : 10 / 300 s
 """
 
 from __future__ import annotations
@@ -101,6 +109,23 @@ class SlidingWindowLimiter:
         for key in elapsed:
             del self._calls[key]
 
+    async def is_blocked(self, key: str) -> bool:
+        """Return ``True`` when *key* has already spent its budget, without charging it.
+
+        The login route has to refuse an exhausted account BEFORE it compares
+        the password. Asking ``is_allowed`` there would charge a successful
+        sign-in, which this limiter must never do, so the read is separate.
+        """
+        key = key[: self._MAX_KEY_CHARS]
+        now = time.monotonic()
+        async with self._lock:
+            q = self._calls.get(key)
+            if not q:
+                return False
+            while q and now - q[0] > self._window:
+                q.popleft()
+            return len(q) >= self._max
+
     async def is_allowed(self, key: str) -> bool:
         # Clamped here rather than at the call sites so every present and
         # future caller inherits the bound.
@@ -120,6 +145,7 @@ class SlidingWindowLimiter:
 _udl_auth_limiter = SlidingWindowLimiter(max_calls=5, window_seconds=60)
 _udl_data_limiter = SlidingWindowLimiter(max_calls=60, window_seconds=60)
 _udl_sync_limiter = SlidingWindowLimiter(max_calls=3, window_seconds=600)
+_pol_compute_limiter = SlidingWindowLimiter(max_calls=10, window_seconds=60)
 
 
 async def _guard(limiter: SlidingWindowLimiter, user: User, label: str) -> None:
@@ -149,3 +175,8 @@ async def udl_data_rate_limit(current_user: User = Depends(require_login)) -> No
 async def udl_sync_rate_limit(current_user: User = Depends(require_login)) -> None:
     """3 NOTSO bulk-sync operations per 600 s per operator."""
     await _guard(_udl_sync_limiter, current_user, "UDL sync")
+
+
+async def pol_compute_rate_limit(current_user: User = Depends(require_login)) -> None:
+    """10 Monte Carlo or photometry runs per 60 s per operator (audit F-145)."""
+    await _guard(_pol_compute_limiter, current_user, "PoL computation")

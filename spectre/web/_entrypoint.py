@@ -37,11 +37,15 @@ def main() -> None:
         # container whose only route in is the platform ingress, which reaches it on
         # the pod IP. Binding loopback would make the readiness probe unreachable and
         # the deploy fail. Exposure is bounded by the pod network policy and the
-        # Keycloak single-sign-on gateway in front of the service, not by this bind.
+        # platform ingress in front of the service, not by this bind. There is no
+        # single-sign-on gateway: SPECTRE authenticates its own users (F-258).
         host="0.0.0.0",  # nosec B104
         port=settings.port,
         reload=False,
-        access_log=False,  # request logging is handled by the application's own audit path
+        # Off because uvicorn's line carries the query string, which can hold
+        # operator input. app._log_request writes one line per request with the
+        # path only (audit F-258).
+        access_log=False,
     )
 
 

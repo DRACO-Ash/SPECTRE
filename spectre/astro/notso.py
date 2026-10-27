@@ -59,6 +59,10 @@ class NOTSORecord:
     predicted_delta_v_km_s: float | None
     predicted_direction:    str | None
     raw_message:            str
+    #: Date fields not read from their own field: "issue date", "effective
+    #: start", "effective end". Each was inferred from the text, from another
+    #: date, or defaulted, and is shown to the operator as such.
+    inferred_fields:        tuple[str, ...] = ()
 
 
 @dataclass
@@ -68,9 +72,13 @@ class NOTSOManoeuvreCorrelation:
     notso:             NOTSORecord | None
     manoeuvre:         object | None    # Manoeuvre from pattern_of_life
     correlation_type:  str             # "matched" | "notso_only" | "manoeuvre_only"
-    time_offset_hours: float | None    # NOTSO effective_start − manoeuvre epoch (h)
+    time_offset_hours: float | None    # window offset: NOTSO effective_start − burn (h)
     magnitude_ratio:   float | None    # Predicted ΔV / detected ΔV
     notes:             str = ""
+    #: Burn minus the NOTSO's issue date (h): positive when the notice came
+    #: first. "Lead time" used to be the window offset above, which ignores
+    #: when the notice was issued and is negative for a timely one (audit F-091).
+    lead_time_hours:   float | None = None
 
 
 @dataclass
@@ -127,7 +135,7 @@ class OperatorBehaviourProfile:
     inconsistent_notifier:  bool = False   # 0.30 ≤ rate ≤ 0.90
     low_notification_rate:  bool = False   # rate < 0.30
     behaviour_unassessable: bool = False   # too few reportable manoeuvres
-    predictable_timing:     bool = False   # std_lead_time < 6 h
+    predictable_timing:     bool = False   # std_lead_time < _PREDICTABLE_LEAD_STD_H
 
     def summary(self) -> str:
         rate_pct = f"{self.notification_rate * 100:.0f}%"
@@ -178,7 +186,14 @@ _DT_PATTERNS = [
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*UTC",    # YYYY-MM-DD HH:MM UTC
     r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}(?::\d{2})?)\s*UTC",    # MM/DD/YYYY HH:MM UTC
     r"(\d{1,2}\s+\w+\s+\d{4}\s+\d{2}:\d{2})\s*UTC",           # DD Mon YYYY HH:MM UTC
+    r"\b(\d{6}Z\s+[A-Z]{3}\s+\d{2,4})\b",                     # military DTG: 141200Z MAR 25
 ]
+
+# A slash date with both fields 12 or under reads two ways (03/04 is 3 April
+# in the US and 4 March in the UK); it is refused rather than guessed
+# (audit F-214).
+_SLASH_DATE = re.compile(r"^(\d{2})/(\d{2})/\d{4}")
+_DTG = re.compile(r"^(\d{2})(\d{2})(\d{2})Z\s+([A-Za-z]{3})\s+(\d{2}|\d{4})$")
 
 _DT_FORMATS = [
     "%Y-%m-%dT%H:%M:%SZ",
@@ -193,7 +208,21 @@ _DT_FORMATS = [
 
 
 def _parse_dt(s: str) -> datetime | None:
+    """Parse a NOTSO date to UTC. ISO 8601 first, with fractional seconds and
+    offsets, which the fixed formats below rejected (audit F-087)."""
     s = s.strip()
+    slash = _SLASH_DATE.match(s)
+    if slash and slash.group(1) != slash.group(2) and max(int(slash.group(1)), int(slash.group(2))) <= 12:  # noqa: PLR2004
+        return None
+    dtg = _DTG.match(s)
+    if dtg:
+        return _parse_dtg(dtg)
+    try:
+        iso = datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    else:
+        return iso.replace(tzinfo=UTC) if iso.tzinfo is None else iso.astimezone(UTC)
     # Strip timezone suffixes before trying strptime formats
     for suffix in (" UTC", " utc", "Z"):
         if s.endswith(suffix):
@@ -207,6 +236,16 @@ def _parse_dt(s: str) -> datetime | None:
     return None
 
 
+def _parse_dtg(m: re.Match[str]) -> datetime | None:
+    """A date-time group, DDHHMMZ MON YY: day, hour and minute, then month and year."""
+    day, hour, minute, month, year = m.groups()
+    full_year = int(year) + 2000 if len(year) == 2 else int(year)  # noqa: PLR2004
+    try:
+        return datetime.strptime(f"{full_year} {month.title()} {day} {hour}:{minute} +0000", "%Y %b %d %H:%M %z")
+    except ValueError:
+        return None
+
+
 def _extract_datetime(text: str) -> datetime | None:
     for pattern in _DT_PATTERNS:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -217,28 +256,35 @@ def _extract_datetime(text: str) -> datetime | None:
     return None
 
 
+# Matched at the start of a word: a plain substring match read "latest" as a
+# test and "follower" as a lowered orbit (audit F-216). Checked in order.
+_TYPE_WORDS: tuple[tuple[NOTSOType, re.Pattern[str]], ...] = (
+    (NOTSOType.DEORBIT, re.compile(r"\b(?:deorbit|de-orbit|reentry|re-entry|passivat)")),
+    (NOTSOType.LAUNCH, re.compile(r"\b(?:launch|deployment|deployed)")),
+    (NOTSOType.PROXIMITY_OPS, re.compile(r"\b(?:proximity|rpo\b|rendezvous|approach|intercept)")),
+    (NOTSOType.TEST, re.compile(r"\b(?:test(?:s|ing|ed)?\b|calibration|demonstration)")),
+    (NOTSOType.MANOEUVRE, re.compile(
+        r"\b(?:manoeuv|maneuv|thruster|station ?keep|orbit adjust|orbit correction|repositioning"
+        r"|raise|lower)",
+    )),
+)
+
+
 def _infer_notso_type(text: str) -> NOTSOType:
     low = text.lower()
-    if any(w in low for w in ("deorbit", "de-orbit", "reentry", "re-entry", "passivat")):
-        return NOTSOType.DEORBIT
-    if any(w in low for w in ("launch", "deployment", "deployed")):
-        return NOTSOType.LAUNCH
-    if any(w in low for w in ("proximity", "rpo ", "rendezvous", "approach", "intercept")):
-        return NOTSOType.PROXIMITY_OPS
-    if any(w in low for w in ("test", "testing", "calibration", "demonstration")):
-        return NOTSOType.TEST
-    if any(w in low for w in ("manoeuv", "maneuv", "thruster", "station keep", "stationkeep",
-                               "orbit adjust", "orbit correction", "repositioning", "raise", "lower")):
-        return NOTSOType.MANOEUVRE
-    return NOTSOType.OTHER
+    return next((kind for kind, words in _TYPE_WORDS if words.search(low)), NOTSOType.OTHER)
 
 
 def _extract_norad_id(text: str) -> int | None:
-    """Extract NORAD catalogue number from common NOTSO field patterns."""
+    """Extract a labelled NORAD catalogue number from the message text.
+
+    Only a number introduced by a catalogue label counts. The fallbacks that
+    took the first five-digit number anywhere, or any five digits after an
+    OBJECT label, could pick another object, a quantity or a reference: "close
+    approach with 43013" was attributed to 43013 (audit F-090).
+    """
     patterns = [
         r"(?:SATNO|SAT\s*NO|NORAD\s*ID|NORAD|CATALOG\s*NO|CATNO)[:\s#]+(\d{4,6})",
-        r"(?:OBJECT|OBJ)[:\s]+\d+[^\d].*?(\d{5})",
-        r"\b(\d{5})\b",   # Fallback: any 5-digit number
     ]
     for pat in patterns:
         m = re.search(pat, text, re.IGNORECASE)
@@ -249,12 +295,19 @@ def _extract_norad_id(text: str) -> int | None:
     return None
 
 
-def _extract_delta_v(text: str) -> float | None:
-    """Extract predicted ΔV magnitude from NOTSO description."""
+def _extract_delta_v(text: str, *, bare: bool = False) -> float | None:
+    """Extract predicted ΔV magnitude from NOTSO description.
+
+    With *bare*, *text* is a dedicated field's value, whose key the field
+    parser has already stripped, so a plain "1.5 m/s" is accepted (audit
+    F-086).
+    """
     patterns = [
         r"(?:delta.?v|dv|delta.v)[:\s]*([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)",
         r"([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)\s+(?:burn|manoeuvre|maneuver|impulse)",
     ]
+    if bare:
+        patterns.insert(0, r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(?:m/s|km/s)")
     for pat in patterns:
         m = re.search(pat, text, re.IGNORECASE)
         if m:
@@ -274,18 +327,32 @@ def _split_messages(text: str) -> list[str]:
         text,
         flags=re.IGNORECASE,
     )
-    # Also split on "MESSAGE ID:" or "MSGID:" as a reliable separator
+    # A MSGID line also starts a new message when the message so far already
+    # has one, or follows a blank line. Splitting on every MSGID cut a message
+    # whose SATNO came first in two, and the half holding the window was
+    # dropped for want of a SATNO (audit F-088).
     expanded: list[str] = []
     for msg in messages:
-        sub = re.split(r"(?:MESSAGE\s*ID|MSGID)\s*:", msg, flags=re.IGNORECASE)
-        if len(sub) > 1:
-            # Re-prepend the split token
-            expanded.append(sub[0])
-            for s in sub[1:]:
-                expanded.append("MSGID: " + s)
-        else:
-            expanded.append(msg)
+        expanded.extend(_split_on_msgid(msg))
     return [m.strip() for m in expanded if m.strip()]
+
+
+_MSGID_LINE = re.compile(r"^\s*(?:MESSAGE\s*ID|MSGID)\s*:", re.IGNORECASE)
+
+
+def _split_on_msgid(text: str) -> list[str]:
+    """Split *text* before each MSGID line that begins a new message."""
+    fragments: list[list[str]] = [[]]
+    has_msgid = False
+    previous_blank = True
+    for line in text.splitlines():
+        if _MSGID_LINE.match(line):
+            if any(ln.strip() for ln in fragments[-1]) and (has_msgid or previous_blank):
+                fragments.append([])
+            has_msgid = True
+        fragments[-1].append(line)
+        previous_blank = not line.strip()
+    return ["\n".join(f) for f in fragments]
 
 
 def parse_notso_text(raw_text: str) -> list[NOTSORecord]:
@@ -298,34 +365,111 @@ def parse_notso_text(raw_text: str) -> list[NOTSORecord]:
     Returns
     -------
     list[NOTSORecord]
-        Parsed records.  Unparseable messages are skipped with a log warning.
+        Parsed records. See :func:`parse_notso_text_with_rejects` for the
+        messages that did not parse and why.
     """
-    messages = _split_messages(raw_text)
-    records: list[NOTSORecord] = []
+    records, _ = parse_notso_text_with_rejects(raw_text)
+    return records
 
-    for i, msg in enumerate(messages):
-        if not msg.strip():
-            continue
+
+def parse_notso_text_with_rejects(raw_text: str) -> tuple[list[NOTSORecord], list[str]]:
+    """Parse NOTSO messages, also returning a reason for each one rejected.
+
+    A message without a labelled NORAD ID used to drop with no log, and one
+    that raised reached only the server log, so the operator could not tell a
+    pasted message had been lost (audit F-089). Each reject is logged and
+    returned as "message N: reason" for the page to show.
+    """
+    records: list[NOTSORecord] = []
+    rejects: list[str] = []
+    for i, msg in enumerate(_split_messages(raw_text)):
         try:
             record = _parse_single_notso(msg, index=i)
-            if record is not None:
+        # Any failure: one bad message must not lose the rest. The detail goes
+        # to the log, not to the reject list the operator is shown.
+        except Exception:
+            logger.exception("NOTSO parse failed for message %d", i + 1)
+            rejects.append(f"message {i + 1}: parse error")
+        else:
+            if record is None:
+                rejects.append(f"message {i + 1}: no labelled NORAD ID")
+            else:
                 records.append(record)
-        except Exception as exc:
-            logger.warning("NOTSO parse error for message %d: %s", i, exc)
+    for reason in rejects:
+        logger.warning("NOTSO not parsed, %s", reason)
+    return records, rejects
 
-    return records
+
+def _notso_dates(
+    fields: dict[str, str], text: str,
+) -> tuple[datetime, datetime, datetime, tuple[str, ...]]:
+    """Issue date, window start and end, and which of them were inferred.
+
+    A date missing from its own field is taken from the first date in the
+    text, then from another date, or defaulted; each such field is named in
+    the returned tuple instead of being replaced silently (audit F-087).
+    """
+    inferred: list[str] = []
+
+    issue_raw = fields.get("ISSUE DATE") or fields.get("ISSUED") or fields.get("DATE") or ""
+    issue_dt = _parse_dt(issue_raw)
+    if issue_dt is None:
+        inferred.append("issue date")
+        issue_dt = _extract_datetime(text) or datetime.now(UTC)
+
+    start_raw = (
+        fields.get("EFFECTIVE START") or fields.get("START") or
+        fields.get("WINDOW START") or fields.get("BEGIN") or ""
+    )
+    start_dt = _parse_dt(start_raw)
+    if start_dt is None:
+        inferred.append("effective start")
+        start_dt = _extract_datetime(text) or issue_dt
+
+    end_raw = (
+        fields.get("EFFECTIVE END") or fields.get("END") or
+        fields.get("WINDOW END") or fields.get("STOP") or ""
+    )
+    end_dt = _parse_dt(end_raw)
+    if end_dt is None:
+        # Default: window of 24h if not specified
+        inferred.append("effective end")
+        end_dt = start_dt + timedelta(hours=24.0)
+
+    return issue_dt, start_dt, end_dt, tuple(inferred)
+
+
+def _fields(text: str) -> dict[str, str]:
+    """The message's "key: value" lines, keys upper-cased."""
+    fields: dict[str, str] = {}
+    for line in text.strip().splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            fields[key.strip().upper()] = val.strip()
+    return fields
+
+
+def _norad_id_of(fields: dict[str, str], text: str) -> int | None:
+    """The catalogue number from its own field, else a labelled one in the text."""
+    norad_raw = (
+        fields.get("SATNO") or fields.get("SAT NO") or
+        fields.get("NORAD ID") or fields.get("NORAD") or
+        fields.get("CATALOG NO") or ""
+    )
+    m = re.search(r"\d+", norad_raw)
+    return int(m.group()) if m else _extract_norad_id(text)
+
+
+def _predicted_dv(fields: dict[str, str], text: str) -> float | None:
+    """Predicted ΔV from its own field, else from the text (audit F-086)."""
+    dv_field = fields.get("PREDICTED DV") or fields.get("DELTA-V")
+    dv = _extract_delta_v(dv_field, bare=True) if dv_field else None
+    return dv if dv is not None else _extract_delta_v(text)
 
 
 def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
     """Parse a single NOTSO message block."""
-    lines = text.strip().splitlines()
-    fields: dict[str, str] = {}
-
-    # Parse key: value lines
-    for line in lines:
-        if ":" in line:
-            key, _, val = line.partition(":")
-            fields[key.strip().upper()] = val.strip()
+    fields = _fields(text)
 
     # Message ID
     msg_id = (
@@ -333,19 +477,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("MESSAGE_ID") or f"NOTSO-{index+1:04d}"
     )
 
-    # NORAD ID
-    norad_raw = (
-        fields.get("SATNO") or fields.get("SAT NO") or
-        fields.get("NORAD ID") or fields.get("NORAD") or
-        fields.get("CATALOG NO") or ""
-    )
-    norad_id = None
-    if norad_raw:
-        m = re.search(r"\d+", norad_raw)
-        if m:
-            norad_id = int(m.group())
-    if norad_id is None:
-        norad_id = _extract_norad_id(text)
+    norad_id = _norad_id_of(fields, text)
     if norad_id is None:
         return None  # Can't correlate without NORAD ID
 
@@ -355,26 +487,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("OPERATOR") or fields.get("FROM") or "UNKNOWN"
     )
 
-    # Dates — issue date
-    issue_raw = fields.get("ISSUE DATE") or fields.get("ISSUED") or fields.get("DATE") or ""
-    issue_dt  = _parse_dt(issue_raw) or _extract_datetime(text) or datetime.now(UTC)
-
-    # Window start
-    start_raw = (
-        fields.get("EFFECTIVE START") or fields.get("START") or
-        fields.get("WINDOW START") or fields.get("BEGIN") or ""
-    )
-    start_dt = _parse_dt(start_raw) or _extract_datetime(text) or issue_dt
-
-    # Window end
-    end_raw = (
-        fields.get("EFFECTIVE END") or fields.get("END") or
-        fields.get("WINDOW END") or fields.get("STOP") or ""
-    )
-    end_dt = _parse_dt(end_raw)
-    if end_dt is None:
-        # Default: window of 24h if not specified
-        end_dt = start_dt + timedelta(hours=24.0)
+    issue_dt, start_dt, end_dt, inferred = _notso_dates(fields, text)
 
     # Type
     type_raw = fields.get("TYPE") or fields.get("ACTIVITY TYPE") or text
@@ -386,10 +499,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         fields.get("COMMENT") or text[:500]
     )
 
-    # Optional predicted ΔV
-    dv = _extract_delta_v(
-        fields.get("PREDICTED DV") or fields.get("DELTA-V") or text
-    )
+    dv = _predicted_dv(fields, text)
 
     direction = (
         fields.get("DIRECTION") or fields.get("BURN DIRECTION") or None
@@ -409,6 +519,7 @@ def _parse_single_notso(text: str, index: int = 0) -> NOTSORecord | None:
         predicted_delta_v_km_s=dv,
         predicted_direction=direction,
         raw_message=text,
+        inferred_fields=inferred,
     )
 
 
@@ -424,12 +535,19 @@ def correlate_notsos_with_manoeuvres(
 
     Matching logic
     --------------
-    1. A NOTSO matches a manoeuvre if the manoeuvre epoch falls within
-       [effective_start − tolerance, effective_end + tolerance].
-    2. Multiple manoeuvre candidates → select closest to window midpoint.
-    3. Multiple NOTSO candidates → select closest effective_start.
-    4. Unmatched NOTSOs → "notso_only" (filed but no manoeuvre detected).
-    5. Unmatched manoeuvres → "manoeuvre_only" (no corresponding NOTSO).
+    1. A NOTSO matches a manoeuvre if the manoeuvre's burn window overlaps
+       [effective_start − tolerance, effective_end + tolerance]. The burn
+       window is the measured burn epoch, or when the burn could not be dated
+       the bracket between the element sets either side. The after-element-set
+       epoch alone can lag the burn by the whole gap, which reported notified
+       burns as silent (audit F-027).
+    2. Pairs are assigned closest first: of every NOTSO-manoeuvre pair within
+       tolerance, the one whose burn window lies nearest the NOTSO window
+       midpoint is taken, then the next, each NOTSO and manoeuvre used once
+       (ties go to the earlier window). The time offset is measured to the
+       point of the burn window nearest that midpoint.
+    3. Unmatched NOTSOs → "notso_only" (filed but no manoeuvre detected).
+    4. Unmatched manoeuvres → "manoeuvre_only" (no corresponding NOTSO).
     """
     tolerance = timedelta(hours=time_tolerance_hours)
 
@@ -442,58 +560,27 @@ def correlate_notsos_with_manoeuvres(
         key=lambda m: m.epoch,
     )
 
-    matched_notso_ids: set[str]      = set()
-    matched_mnv_epochs: set[datetime] = set()
-    correlations: list[NOTSOManoeuvreCorrelation] = []
-
-    # Match each NOTSO to at most one manoeuvre
-    for notso in obj_notsos:
-        window_start = notso.effective_start_utc - tolerance
-        window_end   = notso.effective_end_utc   + tolerance
-
-        candidates = [
-            m for m in obj_manoeuvres
-            if window_start <= m.epoch <= window_end
-            and m.epoch not in matched_mnv_epochs
-        ]
-
-        if candidates:
-            # Select candidate closest to window midpoint
-            midpoint = notso.effective_start_utc + (
-                notso.effective_end_utc - notso.effective_start_utc
-            ) / 2
-            best = min(candidates, key=lambda m: abs((m.epoch - midpoint).total_seconds()))
-
-            offset_h = (
-                (notso.effective_start_utc - best.epoch).total_seconds() / 3600.0
-            )
-            mag_ratio = None
-            if notso.predicted_delta_v_km_s and best.delta_v_km_s > 1e-9:
-                mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
-
-            correlations.append(NOTSOManoeuvreCorrelation(
-                notso=notso,
-                manoeuvre=best,
-                correlation_type="matched",
-                time_offset_hours=round(offset_h, 2),
-                magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
-            ))
-            matched_notso_ids.add(notso.message_id)
-            matched_mnv_epochs.add(best.epoch)
-        else:
-            correlations.append(NOTSOManoeuvreCorrelation(
-                notso=notso,
-                manoeuvre=None,
-                correlation_type="notso_only",
-                time_offset_hours=None,
-                magnitude_ratio=None,
-                notes="NOTSO filed but no manoeuvre detected in TLE analysis",
-            ))
-            matched_notso_ids.add(notso.message_id)
+    # Pair closest first: every NOTSO-manoeuvre pair within tolerance, ordered
+    # by the burn's distance from the NOTSO window midpoint, each side used
+    # once. Walking the NOTSOs in start order let an early, wide notice claim
+    # a burn a later notice's window fits better (audit F-092).
+    pairing = _closest_first(obj_notsos, obj_manoeuvres, tolerance)
+    matched_mnv = {id(m) for m in pairing.values()}
+    correlations: list[NOTSOManoeuvreCorrelation] = [
+        _matched(notso, pairing[id(notso)]) if id(notso) in pairing else NOTSOManoeuvreCorrelation(
+            notso=notso,
+            manoeuvre=None,
+            correlation_type="notso_only",
+            time_offset_hours=None,
+            magnitude_ratio=None,
+            notes="NOTSO filed but no manoeuvre detected in TLE analysis",
+        )
+        for notso in obj_notsos
+    ]
 
     # Unmatched manoeuvres
     for m in obj_manoeuvres:
-        if m.epoch not in matched_mnv_epochs:
+        if id(m) not in matched_mnv:
             correlations.append(NOTSOManoeuvreCorrelation(
                 notso=None,
                 manoeuvre=m,
@@ -506,7 +593,72 @@ def correlate_notsos_with_manoeuvres(
     return correlations
 
 
+# Below this detected ΔV (km/s) a predicted-to-detected ratio is meaningless.
+_MIN_DETECTED_DV_KM_S = 1e-9
+
+
+def _midpoint(notso: NOTSORecord) -> datetime:
+    return notso.effective_start_utc + (notso.effective_end_utc - notso.effective_start_utc) / 2
+
+
+def _closest_first(
+    notsos: list[NOTSORecord], manoeuvres: list[Any], tolerance: timedelta,
+) -> dict[int, Any]:
+    """Map id(notso) to its manoeuvre, assigning the closest pairs first."""
+    candidates = []
+    for notso in notsos:
+        window_start = notso.effective_start_utc - tolerance
+        window_end = notso.effective_end_utc + tolerance
+        mid = _midpoint(notso)
+        for order, m in enumerate(manoeuvres):
+            lo, hi = _burn_window(m)
+            if lo <= window_end and hi >= window_start:
+                distance = abs((_nearest(m, mid) - mid).total_seconds())
+                candidates.append((distance, notso.effective_start_utc, order, notso, m))
+    pairing: dict[int, Any] = {}
+    used: set[int] = set()
+    for _, _, _, notso, m in sorted(candidates, key=lambda c: c[:3]):
+        if id(notso) not in pairing and id(m) not in used:
+            pairing[id(notso)] = m
+            used.add(id(m))
+    return pairing
+
+
+def _matched(notso: NOTSORecord, best: Any) -> NOTSOManoeuvreCorrelation:
+    """The correlation row for a NOTSO paired with a manoeuvre."""
+    burn_at = _nearest(best, _midpoint(notso))
+    offset_h = (notso.effective_start_utc - burn_at).total_seconds() / 3600.0
+    lead_h = (burn_at - notso.issue_date_utc).total_seconds() / 3600.0
+    mag_ratio = None
+    if notso.predicted_delta_v_km_s and best.delta_v_km_s > _MIN_DETECTED_DV_KM_S:
+        mag_ratio = notso.predicted_delta_v_km_s / best.delta_v_km_s
+    return NOTSOManoeuvreCorrelation(
+        notso=notso,
+        manoeuvre=best,
+        correlation_type="matched",
+        time_offset_hours=round(offset_h, 2),
+        magnitude_ratio=round(mag_ratio, 3) if mag_ratio else None,
+        lead_time_hours=round(lead_h, 2),
+    )
+
+
+def _burn_window(m: Any) -> tuple[datetime, datetime]:
+    """The manoeuvre's burn window, or its epoch for an object that has none."""
+    window = getattr(m, "burn_window", None)
+    return window if window is not None else (m.epoch, m.epoch)
+
+
+def _nearest(m: Any, when: datetime) -> datetime:
+    """The point of the manoeuvre's burn window nearest *when*."""
+    lo, hi = _burn_window(m)
+    return min(max(when, lo), hi)
+
+
 # ── Behaviour profile extraction ──────────────────────────────────────────────
+
+# Lead-time scatter below which an operator's notification timing is called
+# predictable. A tuned figure, not a sourced one.
+_PREDICTABLE_LEAD_STD_H = 6.0
 
 # Smallest sample a spread may be quoted from: a standard deviation over a
 # single observation is not a spread, it is zero information.
@@ -635,8 +787,8 @@ def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
     assessable = (reportable >= min_reportable_for_behaviour
                   and reportable_threshold_km_s is not None)
 
-    # Lead times (NOTSO effective_start − manoeuvre epoch)
-    lead_times = [c.time_offset_hours for c in matched if c.time_offset_hours is not None]
+    # Lead times: burn minus issue date, positive when the notice came first.
+    lead_times = [c.lead_time_hours for c in matched if c.lead_time_hours is not None]
     mean_lt, std_lt = _mean_and_std(lead_times)
 
     # Magnitude accuracy
@@ -674,6 +826,6 @@ def extract_behaviour_profile(  # noqa: PLR0913, PLR0917
         inconsistent_notifier=(assessable
                                and _LOW_NOTIFIER_RATE <= notif_rate <= _CONSISTENT_NOTIFIER_RATE),
         low_notification_rate=assessable and notif_rate < _LOW_NOTIFIER_RATE,
-        predictable_timing=bool(std_lt is not None and std_lt < 6.0),
+        predictable_timing=bool(std_lt is not None and std_lt < _PREDICTABLE_LEAD_STD_H),
     )
     return profile

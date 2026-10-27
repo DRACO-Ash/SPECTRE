@@ -1,0 +1,4 @@
+$ gitleaks detect --source . --no-git --redact -v --no-banner
+9:28PM INF scan completed in 1.31s
+9:28PM INF no leaks found
+[exit 0]

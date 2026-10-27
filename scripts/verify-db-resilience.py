@@ -39,7 +39,7 @@ async def main() -> int:
             await s.execute(select(User).where(User.username == "admin"))
         print("  login query after the kill: RECOVERED")
         rc = 0
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - the probe reports whatever the failure was
         print(f"  login query after the kill: FAILED -> {type(exc).__name__}")
         rc = 1
     await db.engine.dispose()

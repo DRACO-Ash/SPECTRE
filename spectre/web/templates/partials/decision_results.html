@@ -1,17 +1,18 @@
 {# Decision Engine Results — rendered into #decision-results #}
 {# Context: result (ScenarioResult) #}
+{% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}
 
-{# ── Robust Recommendation Banner ─────────────────────────────────────────── #}
+{# ── Recommendation Banner: a modelled estimate, and it says so ─────────────────────────────────────────── #}
 <div style="background:rgba(59,139,235,0.10); border:1px solid rgba(59,139,235,0.45);
             border-radius:6px; padding:0.6rem 0.9rem; margin-bottom:0.5rem">
   <div style="display:flex; justify-content:space-between; align-items:center">
     <div>
       <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.06em">
-        Robust Recommendation
-      </span>
+        Heuristic ranking
+      </span>{{ modelled.badge(result.basis) }}
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
         {{ result.robust_strategy.value | replace('_',' ') | title }} strategy ·
         {{ result.computation_time_s }}s
@@ -21,6 +22,11 @@
       {{ adv | length }} adversary action(s) × {{ fr | length }} response(s)
     </span>
   </div>
+
+  <div role="note" style="margin-top:0.35rem; font-size:0.64rem; font-weight:700; color:var(--ops-gold)">
+    Modelled estimate, not a computed solution.
+  </div>
+  <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.1rem">{{ result.basis }}</div>
 
   <div style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
     {{ result.robust_best_response.name }}
@@ -89,8 +95,9 @@
               {{ "%.3f" | format(om.composite_score) }}
             </div>
             <div style="font-size:0.57rem; color:var(--text-dim)">
-              {{ "%.0f" | format(om.closest_approach_km) }}km ·
+              <span title="{{ om.basis }}">{{ "%.0f" | format(om.closest_approach_km) }} km{% if om.modelled %} (model){% endif %} ·
               {% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
+              custody{% if om.modelled %} (model){% endif %}</span>
             </div>
           </td>
         {% endfor %}

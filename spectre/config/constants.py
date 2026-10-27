@@ -4,19 +4,6 @@
 BLUE_PREFIX: str = ""
 RED_PREFIX: str = ""
 
-# ── Propagation / analysis step sizes ────────────────────────────────────────
-PROP_STEP_SEC: int = 10
-ANALYSIS_STEP_SEC: int = 10
-
-# ── Physical units (documentation / validation) ───────────────────────────────
-DISTANCE_UNIT: str = "km"
-SPEED_UNIT: str = "m/s"
-ANGLE_UNIT: str = "deg"
-
-# ── Reference frames ─────────────────────────────────────────────────────────
-COORD_FRAME: str = "ICRF"
-TIME_SYSTEM: str = "UTC"
-
 # ── TLE Clustering Configuration ─────────────────────────────────────────────
 # Controls how near-duplicate TLEs from multiple providers are clustered and
 # reduced to a single representative per cluster before sweep analysis.

@@ -41,13 +41,17 @@ if [ -n "${PROXY_CA_BUNDLE:-}" ]; then
     cp "$PROXY_CA_BUNDLE" ./.verify-proxy-ca.crt
     # The ONLY delta from the shipped Dockerfile: trust the proxy CA so pip can
     # reach the index. Nothing about the runtime contract changes.
+    # Matched requirements.lock, which no Dockerfile copies, so nothing was
+    # inserted while the note below claimed it was (audit F-176).
     awk '
-      /^COPY requirements\.lock \.\/$/ {
+      /^COPY requirements-runtime\.txt \.\/$/ {
         print "COPY .verify-proxy-ca.crt /tmp/ca.crt"
         print "ENV PIP_CERT=/tmp/ca.crt"
       }
       { print }
     ' Dockerfile > "$WORK/Dockerfile.verify"
+    cmp -s Dockerfile "$WORK/Dockerfile.verify" \
+        && fail "proxy CA hook matched no line in Dockerfile; the CA would not be trusted"
     cp "$WORK/Dockerfile.verify" ./.Dockerfile.verify
     BUILD_FILE=".Dockerfile.verify"
     printf '  note  building with proxy CA trusted (build-time only)\n'
@@ -68,9 +72,11 @@ case "$uid" in
 esac
 pass "runs as non-root numeric uid $uid"
 
-suid="$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
-    'find / -xdev -perm /6000 \( -type f -o -type d \) 2>/dev/null | wc -l')"
-[ "$suid" -eq 0 ] || fail "$suid setuid/setgid paths ship (container-scan stops on this)"
+# As root, so no directory is unreadable, and without 2>/dev/null, so a find
+# that fails is a failure rather than a count of zero (audit F-277).
+suid="$(docker run --rm --user 0 --entrypoint /bin/sh "$IMAGE" -c \
+    'find / -xdev -perm /6000 \( -type f -o -type d \) -print')" || fail "the setuid/setgid sweep did not run"
+[ -z "$suid" ] || { printf '%s\n' "$suid"; fail "setuid/setgid paths ship (container-scan stops on this)"; }
 pass "no setuid or setgid paths ship"
 
 for bin in pip pip3 apt apt-get dpkg; do

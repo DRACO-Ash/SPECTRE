@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 pytestmark = pytest.mark.anyio
 
@@ -63,9 +64,8 @@ class TestTheScreenRefusesClearly:
         is reached only by clearing it, which is what this does, because the
         branch still has to say something when an operator wipes the list.
         """
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         saved_objects = list(state.hrr_objects)
         state.hrr_objects = []
         try:
@@ -93,15 +93,19 @@ class TestTheScreenRefusesClearly:
             "UDL connection"
         )
         assert "candidate actor(s)" in resp.text
+        # Audit F-039: the bundled watchlist is SYNTHETIC, and the result
+        # built from it has to say so where it is read.
+        assert "not from live tracking" in " ".join(resp.text.split())
+        assert 'class="provenance-badge"' in resp.text
 
 
 class TestTheScreenRunsAgainstAWatchlist:
     def test_it_ranks_a_red_object_that_can_reach_the_asset(
         self, client: object, auth_cookie: str
     ) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "41838", "name": "SJ-17", "country": "CHN",
              "rank": 1, "orbit_regime": "GEO"},
@@ -117,15 +121,18 @@ class TestTheScreenRunsAgainstAWatchlist:
             assert "SJ-17" in resp.text, "the one candidate actor must be listed"
             assert "km/s" not in resp.text
         finally:
-            state.hrr_objects = []
+            # Restore rather than clear: the cache is shared, and clearing it
+            # wiped the bootstrap element sets for every later test.
+            state.hrr_objects = saved_objects
             state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
 
     def test_a_blue_only_watchlist_reports_no_candidates(
         self, client: object, auth_cookie: str
     ) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
         state.hrr_objects = [
             {"satno": "30793", "name": "SKYNET-5A", "country": "GBR",
              "rank": 1, "orbit_regime": "GEO"},
@@ -137,15 +144,17 @@ class TestTheScreenRunsAgainstAWatchlist:
             assert "No red HRR objects" in resp.text
             assert "0 red object(s) were considered" in resp.text
         finally:
-            state.hrr_objects = []
+            # Restore rather than clear: the cache is shared, and clearing it
+            # wiped the bootstrap element sets for every later test.
+            state.hrr_objects = saved_objects
             state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
 
 
 class TestTheAssetSelector:
     def test_it_lists_only_blue_objects(self, client: object, auth_cookie: str) -> None:
-        from spectre.web.planning_state import get_session_state
 
-        state = get_session_state("testadmin")
+        state = session_state(auth_cookie)
         state.hrr_objects = [
             {"satno": "41838", "name": "SJ-17", "country": "CHN",
              "rank": 1, "orbit_regime": "GEO"},
@@ -167,3 +176,29 @@ class TestTheAssetSelector:
         finally:
             state.hrr_objects = []
             state.udl_username = None
+
+
+class TestAFailedRefreshIsShown:
+    """Audit F-135: an actor screened after a failed refresh says so on the result."""
+
+    def test_the_note_reaches_the_provenance_banner(self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        from spectre.web.routes import udl
+
+        async def _down(*_a: object, **_k: object) -> None:
+            return None
+
+        monkeypatch.setattr(udl, "fetch_tle_for_satno", _down)
+        state = session_state(auth_cookie)
+        saved = (state.udl_username, state.udl_password, state.hrr_objects)
+        state.udl_username, state.udl_password = "u", "p"
+        state.hrr_objects = [{"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"}]
+        state.hrr_tle_cache["41838"] = _RED_TLE
+        state.hrr_tle_data_mode["41838"] = "SYNTHETIC"
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.udl_password, state.hrr_objects = saved
+            state.hrr_tle_cache.pop("41838", None)
+            state.hrr_tle_data_mode.pop("41838", None)
+        flat = " ".join(resp.text.split())  # type: ignore[attr-defined]
+        assert "SJ-17 (41838): live element set not fetched; screened on the set already held" in flat

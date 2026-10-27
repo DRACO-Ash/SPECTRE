@@ -12,7 +12,6 @@ from spectre.domain.decision import (
     FriendlyResponse,
     OutcomeMetrics,
     Scenario,
-    ScenarioResult,
     SelectorStrategy,
     compute_outcome_metrics,
     evaluate_scenario,
@@ -69,7 +68,7 @@ class TestSelectorStrategy:
     def test_all_strategies_accessible(self):
         assert SelectorStrategy.MINIMAX.value        == "minimax"
         assert SelectorStrategy.EXPECTED_VALUE.value == "expected_value"
-        assert SelectorStrategy.MAXIMIN.value        == "maximin"
+        assert SelectorStrategy.MINIMIN.value        == "minimin"
 
 
 # ── Data model validation ─────────────────────────────────────────────────────
@@ -102,7 +101,12 @@ class TestComputeOutcomeMetrics:
         r = _fr()
         s = _scenario([a], [r])
         om = compute_outcome_metrics(a, r, s)
-        assert isinstance(om, OutcomeMetrics)
+        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km; 0.25 x 0.99 + 0.20 x 0.15
+        # + 0.10 x 6/72 + 0.10 x 0.2 = 0.305833.
+        assert om == OutcomeMetrics(
+            custody_maintained=True, custody_gap_hours=0.0, closest_approach_km=500.0,
+            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.305833,
+        )
 
     def test_composite_score_in_unit_interval(self):
         a = _adv()
@@ -148,6 +152,18 @@ class TestComputeOutcomeMetrics:
         om = compute_outcome_metrics(a, r, s)
         assert om.delta_v_cost_km_s == 0.0
 
+    @pytest.mark.parametrize(("atype", "base_km"), [
+        (ActionType.NO_ACTION, 5000.0),
+        (ActionType.MANOEUVRE, 200.0),
+        (ActionType.SENSOR_RETASK, 10000.0),
+        (ActionType.POSTURE_CHANGE, 3000.0),
+    ])
+    def test_each_adversary_type_has_its_closest_approach(self, atype, base_km):
+        """Against a sensor retask the response leaves the base figure alone."""
+        a = _adv(atype=atype)
+        r = _fr(atype=ActionType.SENSOR_RETASK)
+        assert compute_outcome_metrics(a, r, _scenario([a], [r])).closest_approach_km == base_km
+
     def test_str_representation(self):
         a = _adv()
         r = _fr()
@@ -166,7 +182,7 @@ class TestRankResponses:
         s = _scenario([a], [r_cola, r_noop])
         om_cola = compute_outcome_metrics(a, r_cola, s)
         om_noop = compute_outcome_metrics(a, r_noop, s)
-        ranked  = rank_responses(0, [r_cola, r_noop], [om_cola, om_noop])
+        ranked  = rank_responses([r_cola, r_noop], [om_cola, om_noop])
         assert ranked[0][1] <= ranked[1][1]   # sorted ascending by score
 
     def test_returns_all_responses(self):
@@ -174,7 +190,7 @@ class TestRankResponses:
         rs = [_fr(id=f"R{i}", name=f"R{i}") for i in range(4)]
         s  = _scenario([a], rs)
         row = [compute_outcome_metrics(a, r, s) for r in rs]
-        ranked = rank_responses(0, rs, row)
+        ranked = rank_responses(rs, row)
         assert len(ranked) == 4
 
 
@@ -191,20 +207,10 @@ class TestFindRobustResponse:
         om = [[compute_outcome_metrics(a, r, s) for r in [r1, r2, r3]] for a in [a1, a2]]
         return s, om
 
-    def test_minimax_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.MINIMAX)
-        assert isinstance(robust, FriendlyResponse)
-
-    def test_expected_value_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE)
-        assert isinstance(robust, FriendlyResponse)
-
-    def test_maximin_returns_a_friendly_response(self):
-        s, om = self._two_adversary_scenario()
-        robust = find_robust_response(s, om, SelectorStrategy.MAXIMIN)
-        assert isinstance(robust, FriendlyResponse)
+    # Which response each rule picks is pinned on a matrix built to separate
+    # them in tests/unit/test_decision_labelling.py. Three tests here only
+    # checked that some FriendlyResponse came back, which is why the
+    # mislabelled "Maximin" selector went unnoticed (audit F-S05-01, F-S00-14).
 
     def test_minimax_deterministic(self):
         """Same scenario → same minimax recommendation on repeated calls."""
@@ -212,6 +218,44 @@ class TestFindRobustResponse:
         r1 = find_robust_response(s, om, SelectorStrategy.MINIMAX)
         r2 = find_robust_response(s, om, SelectorStrategy.MINIMAX)
         assert r1.id == r2.id
+
+    def test_composite_scores_match_the_hand_calculation(self):
+        """A1 (manoeuvre, confidence 0.8) against R1 (manoeuvre, cost 0.4,
+        reversibility 0.7, 6 h), 72 h horizon, default weights:
+        custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
+        0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;
+        time 6/72, 0.10 x 0.0833 = 0.008333; reversibility 0.10 x 0.3 = 0.03.
+        Total 0.325333. A1/R3 (doing nothing against the manoeuvre) loses
+        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.249 + 0.008333 =
+        0.537333. Before audit F-035 that gap was scaled by R3's reversibility
+        of 1.0 to nothing, and R3 scored 0.257333. The other four follow the
+        same rules."""
+        _, om = self._two_adversary_scenario()
+        assert [[m.composite_score for m in row] for row in om] == [
+            [0.325333, 0.267333, 0.537333],
+            [0.253333, 0.243333, 0.233333],
+        ]
+
+    @pytest.mark.parametrize(("strategy", "pick"), [
+        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.325, 0.267, 0.537
+        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.289, 0.255, 0.385
+        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.253, 0.243, 0.233
+    ])
+    def test_each_selector_picks_its_response(self, strategy, pick):
+        """The sensor retask keeps custody cheaply, so the robust rules pick it;
+        the optimistic one picks doing nothing, on the no-action branch."""
+        s, om = self._two_adversary_scenario()
+        assert find_robust_response(s, om, strategy).id == pick
+
+    def test_expected_value_with_no_probability_mass_takes_the_first_response(self):
+        """With every probability zero, every response's expected score is 0
+        and the first listed is returned, not a division by zero."""
+        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.0)
+        a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.0)
+        rs = [_fr(id="R1", cost=0.4, rev=0.7), _fr(id="R2", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)]
+        s = _scenario([a1, a2], rs)
+        om = [[compute_outcome_metrics(a, r, s) for r in rs] for a in (a1, a2)]
+        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE).id == "R1"
 
     def test_no_friendly_raises(self):
         s  = _scenario(fr_list=[])
@@ -227,7 +271,8 @@ class TestEvaluateScenario:
     def test_smoke_test_minimal(self):
         s      = _scenario()
         result = evaluate_scenario(s)
-        assert isinstance(result, ScenarioResult)
+        assert result.robust_best_response.id == "R1"
+        assert result.outcome_matrix[0][0].composite_score == 0.305833
 
     def test_outcome_matrix_shape(self):
         adv_list = [_adv(id=f"A{i}") for i in range(3)]
@@ -251,20 +296,12 @@ class TestEvaluateScenario:
         result  = evaluate_scenario(s)
         assert result.robust_best_response in s.friendly_responses
 
-    def test_wall_time_positive(self):
+    def test_wall_time_is_measured(self):
+        """A one-by-one lookup takes well under a second; a figure outside that
+        means the timer is not measuring this call."""
         s = _scenario()
         result = evaluate_scenario(s)
-        assert result.computation_time_s >= 0.0
-
-    def test_summary_table_contains_robust_header(self):
-        s = Scenario(
-            name="Test GEO Scenario",
-            epoch_utc=_epoch(),
-            adversary_actions=[_adv()],
-            friendly_responses=[_fr()],
-        )
-        result = evaluate_scenario(s)
-        assert "Robust response" in result.summary_table()
+        assert 0.0 <= result.computation_time_s < 1.0
 
     def test_empty_adversary_raises(self):
         s = Scenario(
@@ -293,12 +330,3 @@ class TestEvaluateScenario:
         )
         result = evaluate_scenario(s, strategy=SelectorStrategy.EXPECTED_VALUE)
         assert result.robust_strategy == SelectorStrategy.EXPECTED_VALUE
-
-    def test_mc_integration_stub_does_not_crash(self):
-        """Ensure Phase 2 ManoeuvreHypothesis field absence doesn't crash."""
-        a = AdversaryAction(
-            id="A1", name="Intercept approach",
-            action_type=ActionType.MANOEUVRE,
-            probability=0.6, confidence=0.8,
-        )
-        assert not hasattr(a, "hypothesis")   # Phase 1: no hypothesis attribute

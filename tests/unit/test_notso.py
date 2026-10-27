@@ -72,13 +72,10 @@ class TestParseDt:
         assert dt == _dt("2025-03-14T12:00:00")
 
     def test_iso8601_without_z(self):
-        dt = _parse_dt("2025-03-14T12:00:00")
-        assert dt is not None
-        assert dt.year == 2025
+        assert _parse_dt("2025-03-14T12:00:00") == datetime(2025, 3, 14, 12, 0, tzinfo=UTC)
 
     def test_date_time_utc(self):
-        dt = _parse_dt("2025-03-14 12:00 UTC")
-        assert dt is not None  # format may not match exactly but shouldn't crash
+        assert _parse_dt("2025-03-14 12:00 UTC") == datetime(2025, 3, 14, 12, 0, tzinfo=UTC)
 
     def test_invalid_returns_none(self):
         assert _parse_dt("not a date") is None
@@ -118,8 +115,9 @@ class TestExtractNoradId:
     def test_norad_id_prefix(self):
         assert _extract_norad_id("NORAD ID: 25544") == 25544
 
-    def test_five_digit_fallback(self):
-        assert _extract_norad_id("Object 43689 in LEO") == 43689
+    def test_an_unlabelled_five_digit_number_is_not_an_id(self):
+        # The bare fallback attributed stray numbers to objects (audit F-090).
+        assert _extract_norad_id("Object 43689 in LEO") is None
 
     def test_no_id_returns_none(self):
         assert _extract_norad_id("no numbers here") is None
@@ -159,8 +157,9 @@ class TestSplitMessages:
     def test_msgid_implicit_separator(self):
         text = "MSGID: 001\nSATNO: 43689\nMSGID: 002\nSATNO: 43689"
         msgs = _split_messages(text)
-        # Each MSGID starts a new block
-        assert len(msgs) >= 2
+        # Each MSGID starts a new block (audit F-217: this read ">= 2").
+        assert len(msgs) == 2
+        assert msgs[0].startswith("MSGID: 001") and msgs[1].startswith("MSGID: 002")
 
 
 # ── Single NOTSO parsing ──────────────────────────────────────────────────────
@@ -262,7 +261,8 @@ class TestCorrelateNotsos:
         notso = self._notso(43689, "2025-03-14T12:00:00", "2025-03-14T18:00:00")
         mnv   = _FakeManoeuvre(_dt("2025-03-14T14:00:00"))
         corrs = correlate_notsos_with_manoeuvres([notso], [mnv], norad_id=43689)
-        assert corrs[0].time_offset_hours is not None
+        # The window opens at 12:00 and the burn is at 14:00.
+        assert corrs[0].time_offset_hours == pytest.approx(-2.0)
 
     def test_matched_has_magnitude_ratio(self):
         """Matched correlation with known ΔVs includes magnitude_ratio."""
@@ -329,6 +329,7 @@ class TestExtractBehaviourProfile:
                 correlation_type="matched",
                 time_offset_hours=-2.0,
                 magnitude_ratio=1.0,
+                lead_time_hours=14.0,
             ))
         for i in range(n_total - n_matched):
             mnv = _FakeManoeuvre(start + timedelta(days=100 + i))
@@ -422,9 +423,13 @@ class TestExtractBehaviourProfile:
         assert p.manoeuvres_without_notso == 4
 
     def test_mean_lead_time_computed(self):
-        """All matched rows have lead time = -2.0h."""
+        """Each notice is issued at 00:00 for a 14:00 burn: lead time 14 h.
+
+        This read -2 h, the window start minus the burn, before lead time was
+        defined as burn minus issue date (audit F-091).
+        """
         p = self._build_profile(4, 4)
-        assert p.mean_lead_time_h == pytest.approx(-2.0)
+        assert p.mean_lead_time_h == pytest.approx(14.0)
 
     def test_window_accuracy_rate(self):
         """Manoeuvre at t+14h falls inside window [t+12h, t+18h] → 100% accuracy."""

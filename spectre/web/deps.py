@@ -45,6 +45,10 @@ def render(
     tmpl = get_templates()
     ctx = context or {}
     if "csrf_token" not in ctx:
+        # Only for a cookie that require_login or optional_login accepted on
+        # this request. Minted for any cookie presented, as it was, a revoked
+        # token got a fresh CSRF token from GET /login (audit F-152).
         session_cookie = request.cookies.get("spectre_session", "")
-        ctx["csrf_token"] = make_csrf_token(session_cookie) if session_cookie else ""
+        current = getattr(request.state, "session_current", False)
+        ctx["csrf_token"] = make_csrf_token(session_cookie) if session_cookie and current else ""
     return cast(HTMLResponse, tmpl.TemplateResponse(request, name, ctx, status_code=status_code))

@@ -27,11 +27,13 @@ def _checksum(line: str) -> int:
     return total % 10
 
 
-def _make_tle_pair(norad: int, inc: float, raan: float, ecc: float) -> tuple[str, str]:
+def _make_tle_pair(
+    norad: int, inc: float, raan: float, ecc: float, epoch: str = _EPOCH,
+) -> tuple[str, str]:
     n = f"{norad:05d}"
     ecc_str = f"{ecc:.7f}"[2:]
     l1_body = (
-        f"1 {n}U 98067A   {_EPOCH}"
+        f"1 {n}U 98067A   {epoch}"
         f"  .00000000"
         f"  00000-0"
         f"  00000-0"
@@ -51,8 +53,8 @@ def _make_tle_pair(norad: int, inc: float, raan: float, ecc: float) -> tuple[str
     return l1, l2
 
 
-def _tle_string(norad: int, inc: float, raan: float, ecc: float) -> str:
-    l1, l2 = _make_tle_pair(norad, inc, raan, ecc)
+def _tle_string(norad: int, inc: float, raan: float, ecc: float, epoch: str = _EPOCH) -> str:
+    l1, l2 = _make_tle_pair(norad, inc, raan, ecc, epoch)
     return f"{l1}\n{l2}"
 
 
@@ -234,11 +236,11 @@ class TestClusterAndReduceTleCache:
         norad = 55555
         cluster_a = [
             _tle_string(norad, 28.5, 45.0, 0.0003),
-            _tle_string(norad, 28.5, 45.1, 0.0003),
+            _tle_string(norad, 28.5, 45.01, 0.0003),
         ]
         cluster_b = [
             _tle_string(norad, 51.6, 247.0, 0.0001),
-            _tle_string(norad, 51.6, 247.1, 0.0001),
+            _tle_string(norad, 51.6, 247.01, 0.0001),
         ]
         all_tles = cluster_a + cluster_b
         existing = {str(norad): all_tles[0]}
@@ -247,12 +249,45 @@ class TestClusterAndReduceTleCache:
             {str(norad): all_tles}, existing, _CONFIG
         )
 
-        obj = next((o for o in summary.objects if o.satno == str(norad)), None)
-        if obj and obj.clusters_found > 1:
-            assert obj.multi_cluster is True
-        # Regardless, exactly one TLE written per satno.
-        if str(norad) in reduced:
-            assert reduced[str(norad)].count("\n") == 1
+        # Asserted unconditionally: guarded by "if obj and clusters_found > 1"
+        # this test passed whether or not two clusters ever formed (audit F-028).
+        obj = next(o for o in summary.objects if o.satno == str(norad))
+        assert obj.clusters_found == 2
+        assert obj.multi_cluster is True
+        assert reduced[str(norad)].count("\n") == 1
+
+    def test_the_newest_cluster_supplies_the_representative(self):
+        """A manoeuvre splits the history: the post-burn orbit must be written.
+
+        DBSCAN numbers clusters in scan order and the representatives come out
+        in cluster-id order, so "first representative" was the cluster holding
+        the earliest input record: the pre-burn orbit of an object that had
+        just manoeuvred (audit F-028).
+        """
+        from spectre.astro.tle_preprocessing import cluster_and_reduce_tle_cache
+
+        norad = 55556
+
+        def drifted(inc: float, day: float) -> str:
+            # The node regresses under J2 between fits, as a real catalogue's
+            # does; holding it fixed for hours was itself a node change, which
+            # the clustering ignored until it compared nodes at one epoch
+            # (audit F-054).
+            import math
+
+            from sgp4.api import Satrec
+
+            rate = math.degrees(Satrec.twoline2rv(*_tle_string(norad, inc, 45.0, 0.0003).splitlines()).nodedot)
+            raan = 45.0 + rate * (day - 91.1) * 1440.0
+            return _tle_string(norad, inc, raan % 360.0, 0.0003, f"26{day:012.8f}")
+
+        pre_burn = [drifted(28.5, 91.1), drifted(28.5, 91.2)]
+        post_burn = [drifted(28.7, 91.6), drifted(28.7, 91.7)]
+        reduced, summary = cluster_and_reduce_tle_cache(
+            {str(norad): pre_burn + post_burn}, {}, _CONFIG,
+        )
+        assert next(o for o in summary.objects if o.satno == str(norad)).clusters_found == 2
+        assert reduced[str(norad)] in post_burn
 
     def test_all_noise_uses_fallback_not_error(self):
         """When all TLEs are noise, the fallback cached TLE must be retained."""

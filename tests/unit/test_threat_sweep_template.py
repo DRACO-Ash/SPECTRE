@@ -68,12 +68,13 @@ def _context(**overrides: Any) -> dict[str, Any]:
         "hrr_count": 0,
         "worst_coa": worst_coa,
         "method_refusals": [
-            ("bielliptic", "exceeds the 500 m/s budget"),
-            ("lambert", "transfer angle within 0.5 degrees of 180"),
+            ("B_SAT_Alpha", "bielliptic", "at now: exceeds the 500 m/s budget"),
+            ("B_SAT_Alpha", "lambert", "at now: transfer angle within 0.5 degrees of 180"),
         ],
         "red_satno": "41838",
         "manual_red_confidence": None,
         "clustering_summary": None,
+        "provenance_warnings": [],
         "error": None,
     }
     context.update(overrides)
@@ -117,7 +118,7 @@ class TestEveryNameTheTemplateUsesIsSupplied:
 class TestTheRefusalsPanelIsVisible:
     def test_each_refused_method_and_its_reason_appear(self) -> None:
         html = _render(_context())
-        assert "2 method(s) produced no solution" in html
+        assert "2 method(s) produced no solution for a target" in html
         assert "BIELLIPTIC" in html
         assert "exceeds the 500 m/s budget" in html
         assert "transfer angle within 0.5 degrees of 180" in html
@@ -143,7 +144,8 @@ class TestTheTwoFindingsStaySeparatelyVisible:
 
     def test_missing_evidence_is_declared_not_hidden(self) -> None:
         html = _render(_context())
-        assert "3 input(s) unavailable" in html
+        # Four: the discretionary reserve is listed too since audit F-228.
+        assert "4 input(s) unavailable" in html
         assert "propellant budget" in html
 
 
@@ -196,4 +198,5 @@ class TestWarningTimeLeads:
         html = _render(_context())
         assert "401" in html
         assert "0.4012" not in html, "that is km/s with four decimals of noise"
+        assert "401." not in html, "a figure this size is shown in whole m/s, with no decimals"
         assert "km/s" not in html, "no operator-facing figure is in km/s"

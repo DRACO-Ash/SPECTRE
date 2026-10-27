@@ -8,12 +8,7 @@ For the full internal security policy (UK NCSC / SSCoP aligned), see [`docs/SECU
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| Current (`master`) | Yes |
-| All prior releases | No — patch to latest |
-
-SPECTRE follows a rolling-release model on `master`. There are no long-term support branches. All security fixes are applied to `master` only.
+The supported-version policy is stated once, in [`docs/SECURITY.md`](docs/SECURITY.md#supported-versions): the latest commit on `master` is supported, and there are no release branches or backports.
 
 ---
 
@@ -62,11 +57,13 @@ pip-audit
 
 ## Known Security Limitations (Open Items)
 
-| ID | Description | Risk | Target sprint |
-|----|-------------|------|---------------|
-| SEC-01 | No CSRF middleware — form submissions are session-cookie authenticated only | Medium | P1 |
-| SEC-02 | No per-user rate limiting on `/udl/*` proxy routes | Medium | P1 |
-| SEC-03 | No user management web UI — new users require direct DB access | Operational | P1 |
-| SEC-04 | No SBOM (Software Bill of Materials) generation in CI | Low | P2 |
+| ID | Description | Risk | Status |
+|----|-------------|------|--------|
+| SEC-01 | No CSRF middleware | Medium | Closed: `spectre/web/csrf.py`, a global dependency on every unsafe method |
+| SEC-02 | No per-user rate limiting on `/udl/*` proxy routes | Medium | Closed: `spectre/web/rate_limit.py` (UDL auth, data and sync tiers, plus login) |
+| SEC-03 | No user management web UI | Operational | Closed: `spectre/web/routes/admin.py` |
+| SEC-04 | No SBOM (Software Bill of Materials) generation in CI | Low | Closed: the SCA job writes a CycloneDX SBOM of `requirements-runtime.txt`, checks it lists every pin (`scripts/check-sbom.py`) and keeps it as the `sbom-cyclonedx` artifact |
+
+SEC-01 to SEC-03 were closed in code that has been present since commit d671abe; this table was not updated at the time (audit F-281).
 
 See `docs/SECURITY.md` for the full security policy and control framework.

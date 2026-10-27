@@ -130,21 +130,20 @@ class TestGenerateSamples:
 # ── Convergence check ─────────────────────────────────────────────────────────
 
 class TestCheckConvergence:
+    """The criterion itself is pinned in test_mc_convergence.py (audit F-103)."""
+
     def test_too_few_samples_returns_false(self):
-        assert not check_convergence([1.0] * 100)
+        assert not check_convergence([1.0] * 20)
 
     def test_constant_sequence_converges(self):
-        # A constant sequence has zero std — should converge
-        vals = [6778.0] * 1000
-        assert check_convergence(vals, window_size=200)
+        # A constant sequence has no scatter, so its percentiles are exact.
+        assert check_convergence([6778.0] * 1000)
 
     def test_random_unconverged_sequence(self):
         rng = np.random.default_rng(0)
-        # Small window relative to high-variance data → unlikely to converge
+        # 50 km of scatter in 400 samples leaves P5 and P95 uncertain by km.
         vals = rng.normal(6778.0, 50.0, 400).tolist()
-        # With only 400 samples and window=200, result may vary — just test no crash
-        result = check_convergence(vals, window_size=200)
-        assert isinstance(result, bool)
+        assert check_convergence(vals) is False
 
 
 # ── Full MC run (small N for speed) ──────────────────────────────────────────

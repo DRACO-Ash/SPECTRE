@@ -25,7 +25,9 @@ where  s = sin(nt),  c = cos(nt).
 
 Security
 --------
-- All numeric inputs are validated to be finite and within operational bounds.
+- Numeric inputs are validated to be finite and non-negative. Separation,
+  eccentricity and time of flight beyond CW's validity are flagged in the
+  result and logged, not refused (audit F-199).
 - Satellite names are sanitised before inclusion in audit log strings.
 - No eval/exec of user-supplied data.
 
@@ -74,7 +76,7 @@ _N_POINTS: int = 120
 # Hard cap on ΔV components (km/s) — flag implausible values.
 _DV_HARD_CAP_KM_S: float = 20.0
 # Hard cap on initial separation (km).
-_RANGE_HARD_CAP_KM: float = 100_000.0
+_RANGE_UNRELIABLE_KM: float = 100_000.0
 
 
 class RelativeGeometryError(ValueError):
@@ -167,8 +169,22 @@ class RelativeGeometry:
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _sanitise_name(name: str) -> str:
-    """Strip non-printable characters; truncate to 64 chars for log safety."""
-    return "".join(ch for ch in name if ch.isprintable())[:64]
+    """Strip non-printable characters; truncate to 64 chars for log safety.
+
+    The trailing replace is a no-op after the filter; it is the form CodeQL's
+    log-injection query recognises as a sanitiser.
+    """
+    printable = "".join(ch for ch in name if ch.isprintable())[:64]
+    return printable.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _log_value(value: object) -> str:
+    """*value* as a single printable line for a log record.
+
+    The astro layer does not import spectre.web, so this reuses
+    _sanitise_name rather than log_safe.
+    """
+    return _sanitise_name(str(value))
 
 
 def _validate_finite(value: float, name: str) -> float:
@@ -350,9 +366,24 @@ def _check_validity(
             f"Secular drift terms may cause CW trajectory to diverge from truth."
         )
     if not notes:
-        notes.append("CW approximation valid for this geometry.")
+        notes.append(_VALID_NOTE)
 
     return valid, notes
+
+
+_VALID_NOTE = "CW approximation valid for this geometry."
+
+
+def _log_validity(notes: list[str]) -> None:
+    """Log every validity caveat.
+
+    Logging was gated on the result being invalid, and the time-of-flight
+    caveat does not make it invalid, so that one was never logged
+    (audit F-200).
+    """
+    for note in notes:
+        if note != _VALID_NOTE:
+            logger.warning("cw_geometry validity: %s", note)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -444,10 +475,12 @@ def compute_relative_geometry(
     # ── Audit log ─────────────────────────────────────────────────────────────
     logger.info(
         "cw_geometry: caller=%r red=%r blue=%r method=%r "
-        "dv_r=%.4f dv_p=%.4f dv_n=%.4f tof=%.1fs coast=%.1fs epoch=%s",
-        caller, red_name_safe, blue_name_safe, method_safe,
-        dv_radial_km_s, dv_prograde_km_s, dv_normal_km_s,
-        tof_s, coast_s, burn_epoch.isoformat(),
+        "dv_r=%s dv_p=%s dv_n=%s tof=%ss coast=%ss epoch=%s",
+        _log_value(caller), red_name_safe, blue_name_safe, method_safe,
+        _log_value(format(dv_radial_km_s, ".4f")),
+        _log_value(format(dv_prograde_km_s, ".4f")),
+        _log_value(format(dv_normal_km_s, ".4f")),
+        _log_value(format(tof_s, ".1f")), _log_value(format(coast_s, ".1f")), _log_value(burn_epoch.isoformat()),
     )
 
     # ── Compute initial relative state at burn epoch ──────────────────────────
@@ -460,19 +493,17 @@ def compute_relative_geometry(
         )
         raise RelativeGeometryError(f"SGP4 propagation failed: {exc}") from exc
 
-    if initial_range > _RANGE_HARD_CAP_KM:
+    if initial_range > _RANGE_UNRELIABLE_KM:
         logger.warning(
             "cw_geometry: initial separation %.0f km between %r and %r "
-            "exceeds hard cap %d km — CW result will be unreliable",
-            initial_range, red_name_safe, blue_name_safe, _RANGE_HARD_CAP_KM,
+            "exceeds %d km — CW result will be unreliable",
+            initial_range, red_name_safe, blue_name_safe, _RANGE_UNRELIABLE_KM,
         )
 
     tof_hours = tof_s / 3600.0
     cw_valid, validity_notes = _check_validity(initial_range, ecc, tof_hours)
 
-    if not cw_valid:
-        for note in validity_notes:
-            logger.warning("cw_geometry validity: %s", note)
+    _log_validity(validity_notes)
 
     # ── Pre-burn coast ────────────────────────────────────────────────────────
     coast_points: list[TrajectoryPoint] = []
@@ -480,8 +511,11 @@ def compute_relative_geometry(
     if coast_s > 0.0:
         coast_points = _build_trajectory(state0, n, coast_s)
         state_at_burn = _cw_propagate(state0, n, coast_s)
-        logger.debug("cw_geometry: coast %.0fs, state at burn: x=%.2f y=%.2f z=%.2f km",
-                     coast_s, state_at_burn.x, state_at_burn.y, state_at_burn.z)
+        logger.debug(
+            "cw_geometry: coast %ss, state at burn: x=%s y=%s z=%s km",
+            _log_value(format(coast_s, ".0f")), _log_value(format(state_at_burn.x, ".2f")),
+            _log_value(format(state_at_burn.y, ".2f")), _log_value(format(state_at_burn.z, ".2f")),
+        )
 
     # ── Apply ΔV ──────────────────────────────────────────────────────────────
     burn_state = _apply_dv(state_at_burn, dv_radial_km_s, dv_prograde_km_s, dv_normal_km_s)
@@ -491,8 +525,8 @@ def compute_relative_geometry(
     arrival_range   = transfer_points[-1].range_km if transfer_points else 0.0
 
     logger.info(
-        "cw_geometry: arrival range=%.3f km for %r → %r (%s)",
-        arrival_range, red_name_safe, blue_name_safe, method_safe,
+        "cw_geometry: arrival range=%s km for %r → %r (%s)",
+        _log_value(format(arrival_range, ".3f")), red_name_safe, blue_name_safe, method_safe,
     )
     if arrival_range > 10.0:
         logger.warning(

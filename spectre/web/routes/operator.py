@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
@@ -53,9 +54,11 @@ async def dashboard(
     valid session.
     """
     if current_user is None:
-        return render(request, "login.html", {"error": None})
+        from spectre.web.routes.login import render_login
 
-    state = get_session_state(current_user.username)
+        return render_login(request)
+
+    state = get_session_state(current_user)
     return render(request, "operator.html", {
         "user": current_user,
         "blue_assets": state.blue_assets,
@@ -73,6 +76,36 @@ async def dashboard(
 # ── Asset management partials ─────────────────────────────────────────────────
 
 
+def _as_utc(moment: datetime) -> datetime:
+    """*moment* in UTC: converted when it carries an offset, assumed UTC when naive.
+
+    ``.replace(tzinfo=UTC)`` relabelled an offset time instead of converting
+    it, so "12:00+01:00" became 12:00 UTC, an hour late (audit F-266).
+    """
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+
+
+def _add_refusal(name: str, tle: str) -> str | None:
+    """Why a hand-entered asset cannot be added, or ``None`` when it can.
+
+    The add routes used to accept an empty name and any text as a TLE, and
+    the bad TLE then failed far from here, in whichever solver met it first
+    (audit F-267).
+    """
+    if not name:
+        return "A name is required."
+    lines = [ln.strip() for ln in tle.splitlines() if ln.strip()]
+    if len(lines) < 2 or not lines[-2].startswith("1 ") or not lines[-1].startswith("2 "):  # noqa: PLR2004
+        return "The TLE needs its line 1 and line 2."
+    if not (tle_checksum_valid(lines[-2]) and tle_checksum_valid(lines[-1])):
+        return "A TLE line fails its checksum: check it was copied whole (audit F-272)."
+    try:
+        TLEOrbit(tle)
+    except TLE_ERRORS:
+        return "The TLE could not be parsed."
+    return None
+
+
 @router.post("/assets/blue", response_class=HTMLResponse)
 async def add_blue_asset(
     request: Request,
@@ -81,10 +114,14 @@ async def add_blue_asset(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a blue asset and return the updated blue list partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     name = name.strip()
     tle = tle.strip()
+    refusal = _add_refusal(name, tle)
+    if refusal is not None:
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
+        return _list_response(request, "partials/blue_list.html", ctx)
     asset = BlueAsset(name=name, tle=tle)
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
@@ -111,7 +148,7 @@ async def quick_add_blue_asset(
     Called from the HRR watchlist "→ Blue" button for one-click ingestion.
     Returns the updated blue list partial with OOB select updates.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     clean_name = name.strip() or str(satno)
 
     # Skip if already in the session.
@@ -174,7 +211,7 @@ async def quick_add_red_track(
     Returns the updated red list partial with OOB select updates and an OOB
     badge replacing the button that was clicked.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     clean_name = name.strip() or str(satno)
 
     prospective_stk = f"{RED_PREFIX}{clean_name}"
@@ -221,14 +258,16 @@ async def quick_add_red_track(
     return HTMLResponse(list_html2 + oob_badge)
 
 
-@router.delete("/assets/blue/{name}", response_class=HTMLResponse)
+# {name:path}: a name may hold "/", which the template percent-encodes and the
+# router decodes before matching (audit F-267).
+@router.delete("/assets/blue/{name:path}", response_class=HTMLResponse)
 async def remove_blue_asset(
     request: Request,
     name: str,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
@@ -243,10 +282,14 @@ async def add_red_track(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Add a red track and return the updated red list partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     name = name.strip()
     tle = tle.strip()
+    refusal = _add_refusal(name, tle)
+    if refusal is not None:
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
+        return _list_response(request, "partials/red_list.html", ctx)
     track = RedTrack(name=name, tle=tle)
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
@@ -260,14 +303,14 @@ async def add_red_track(
     return _list_response(request, "partials/red_list.html", ctx)
 
 
-@router.delete("/assets/red/{name}", response_class=HTMLResponse)
+@router.delete("/assets/red/{name:path}", response_class=HTMLResponse)
 async def remove_red_track(
     request: Request,
     name: str,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Remove a red track by name and return the updated partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
@@ -285,11 +328,11 @@ async def set_scenario_time(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the scenario time window for event detection and planning."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     try:
-        start_dt = datetime.fromisoformat(scenario_start.strip()).replace(tzinfo=UTC)
-        stop_dt = datetime.fromisoformat(scenario_stop.strip()).replace(tzinfo=UTC)
+        start_dt = _as_utc(datetime.fromisoformat(scenario_start.strip()))
+        stop_dt = _as_utc(datetime.fromisoformat(scenario_stop.strip()))
     except ValueError:
         # datetime.fromisoformat quotes the offending input verbatim in its
         # message, and this response is built by hand rather than by Jinja, so
@@ -332,7 +375,7 @@ async def log_entries(
     console has always polled this route. Removed rather than sanitised,
     because a live defect in code nobody runs is still a line in the scan.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})
 
 
@@ -342,6 +385,6 @@ async def clear_log(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear the session run log and return the empty partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.log_entries.clear()
     return render(request, "partials/run_log.html", {"log_entries": state.log_entries})

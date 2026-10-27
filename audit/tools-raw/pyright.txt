@@ -1,0 +1,22 @@
+$ pyright spectre tle_clustering
+<clone>/spectre/astro/pattern_of_life.py
+  <clone>/spectre/astro/pattern_of_life.py:1030:26 - error: Argument of type "list[Any | int]" cannot be assigned to parameter "chart_longitudes" of type "list[float]" in function "__init__"
+    "list[Any | int]" is not assignable to "list[float]"
+      Type parameter "_T@list" is invariant, but "Any | int" is not the same as "float"
+      Consider switching from "list" to "Sequence" which is covariant (reportArgumentType)
+  <clone>/spectre/astro/pattern_of_life.py:1030:56 - error: Argument of type "list[Any | int]" cannot be assigned to parameter "chart_drift_rates" of type "list[float]" in function "__init__"
+    "list[Any | int]" is not assignable to "list[float]"
+      Type parameter "_T@list" is invariant, but "Any | int" is not the same as "float"
+      Consider switching from "list" to "Sequence" which is covariant (reportArgumentType)
+<clone>/spectre/data/intel.py
+  <clone>/spectre/data/intel.py:23:12 - error: Type "dict[str, dict[str, Any]] | None" is not assignable to return type "dict[str, dict[str, Any]]"
+    Type "dict[str, dict[str, Any]] | None" is not assignable to type "dict[str, dict[str, Any]]"
+      "None" is not assignable to "dict[str, dict[str, Any]]" (reportReturnType)
+<clone>/spectre/web/routes/gcat.py
+  <clone>/spectre/web/routes/gcat.py:476:14 - error: Type "Series | Unknown | Self@DataFrame" is not assignable to declared type "DataFrame"
+    Type "Series | Unknown | DataFrame*" is not assignable to type "DataFrame"
+      "Series" is not assignable to "DataFrame" (reportAssignmentType)
+<clone>/spectre/web/routes/training.py
+  <clone>/spectre/web/routes/training.py:168:24 - error: Operator "-" not supported for "None" (reportOptionalOperand)
+5 errors, 0 warnings, 0 informations
+[exit 1]

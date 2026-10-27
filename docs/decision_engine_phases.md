@@ -18,8 +18,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
   - `custody_maintained` (bool — can friendly satellite keep track?)
   - `closest_approach_km` (minimum separation during horizon — analytic SMA-difference approximation)
   - `time_to_intercept_h`, `delta_v_cost_km_s` (analytic estimates from orbital mechanics rules of thumb)
-- Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Maximin** (maximise best-case)
-- Results: robust recommendation banner + full outcome matrix + per-adversary ranked response cards
+- Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
+- Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") + full outcome matrix + per-adversary ranked response cards
 
 ### Key files
 

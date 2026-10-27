@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from spectre.domain.models import (
     ThreatAssessment,
     ThreatSweepEntry,
@@ -213,6 +215,40 @@ class TestSweepHelpers:
         assert entries[0].burn_location == "now"
         assert entries[0].delta_v_m_s > 0
 
+    def test_the_sweep_hohmann_matches_the_textbook_value(self) -> None:
+        """Coplanar circular orbits at 400 and 600 km: the two-burn Hohmann
+        cost from vis-viva is 110.69 m/s. The sweep propagates SGP4 element
+        sets, whose osculating radii differ slightly from the mean ones, so it
+        is held to 1 m/s rather than to the last digit."""
+        import math
+
+        from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
+
+        mu, r_earth = 398600.4418, 6378.137
+
+        def circular(alt_km: float) -> str:
+            rev_per_day = math.sqrt(mu / (r_earth + alt_km) ** 3) * 86400.0 / (2.0 * math.pi)
+            return ("1 99001U 24001A   24001.00000000  .00000000  00000-0  00000-0 0  9990\n"
+                    f"2 99001  51.6400 100.0000 0000001   0.0000   0.0000 {rev_per_day:11.8f}    10")
+
+        r1, r2 = r_earth + 400.0, r_earth + 600.0
+        a_t = (r1 + r2) / 2.0
+        textbook_m_s = 1000.0 * (
+            (math.sqrt(mu * (2 / r1 - 1 / a_t)) - math.sqrt(mu / r1))
+            + (math.sqrt(mu / r2) - math.sqrt(mu * (2 / r2 - 1 / a_t)))
+        )
+        assert textbook_m_s == pytest.approx(110.69, abs=0.01)
+
+        entries = _sweep_all_methods(
+            _SweepRequest(
+                red_tle=circular(400.0), target_tle=circular(600.0),
+                target=ThreatTarget("T", "", "blue", None), max_dv_m_s=10_000.0, regime="LEO",
+            ),
+            [("now", datetime(2024, 1, 1, tzinfo=UTC))],
+        )
+        hohmann = next(e for e in entries if e.method == "hohmann")
+        assert hohmann.delta_v_m_s == pytest.approx(textbook_m_s, abs=1.0)
+
     def test_sweep_all_methods_filters_by_max_dv(self) -> None:
         from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
 
@@ -231,7 +267,7 @@ class TestSweepHelpers:
         assert len(entries) == 0
 
     def test_group_entries(self) -> None:
-        """_group_entries groups by target and sorts by best delta-V."""
+        """_group_entries groups by target and ranks groups by warning time."""
         from spectre.web.routes.threat import _group_entries
 
         now = datetime(2024, 1, 1, tzinfo=UTC)
@@ -290,26 +326,6 @@ class TestSweepHelpers:
         # Red HRR: 1× rank 0, 1× rank 2
         assert (0, 1) in red_hrr
         assert (2, 1) in red_hrr
-
-    def test_entry_sorting(self) -> None:
-        """Entries should be sortable by delta_v_m_s."""
-        target = ThreatTarget("X", "", "blue", None)
-        now = datetime(2024, 1, 1, tzinfo=UTC)
-        entries = [
-            ThreatSweepEntry(target=target, burn_epoch=now, burn_location="now",
-                             delta_v_m_s=2.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
-                             dv_radial=0, method="hohmann"),
-            ThreatSweepEntry(target=target, burn_epoch=now, burn_location="apogee",
-                             delta_v_m_s=0.5, tof_hours=1.0, dv_prograde=0, dv_normal=0,
-                             dv_radial=0, method="hohmann"),
-            ThreatSweepEntry(target=target, burn_epoch=now, burn_location="perigee",
-                             delta_v_m_s=1.0, tof_hours=1.0, dv_prograde=0, dv_normal=0,
-                             dv_radial=0, method="hohmann"),
-        ]
-        entries.sort(key=lambda e: e.delta_v_m_s)
-        assert entries[0].delta_v_m_s == 0.5
-        assert entries[1].delta_v_m_s == 1.0
-        assert entries[2].delta_v_m_s == 2.0
 
 
 class TestColourAndWordsAgreeInTheSweep:

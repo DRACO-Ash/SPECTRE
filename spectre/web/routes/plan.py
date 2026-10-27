@@ -165,7 +165,7 @@ async def export_intercepts(
     anywhere.
     """
     _assert_run_id_is_well_formed(run_id, current_user.username)
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     results = _results_for_export(state, run_id)
 
     buf = io.StringIO()
@@ -231,8 +231,8 @@ async def export_intercepts(
     )
 
     logger.info(
-        "Intercept export: operator=%s rows=%d filter=%s filename=%s",
-        log_safe(current_user.username), len(results), log_safe(run_id or "all"), log_safe(filename),
+        "Intercept export: operator=%s rows=%s filter=%s filename=%s",
+        log_safe(current_user.username), log_safe(len(results)), log_safe(run_id or "all"), log_safe(filename),
     )
 
     return StreamingResponse(

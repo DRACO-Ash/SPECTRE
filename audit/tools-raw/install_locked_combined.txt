@@ -1,0 +1,6 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Using Python 3.12.3 environment at: <venv>
+  × No solution found when resolving dependencies:
+  ╰─▶ Because you require tomli==2.5.0 and tomli==2.4.1, we can conclude that
+      your requirements are unsatisfiable.
+locked exit=1

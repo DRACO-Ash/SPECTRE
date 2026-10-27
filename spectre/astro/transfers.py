@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from spectre.astro.constants import MU_EARTH
+from spectre.astro.constants import MU_EARTH, R_EARTH
 
 
 @dataclass
@@ -76,7 +76,15 @@ def bielliptic(
 
     Returns:
         :class:`TransferResult` with three burns and transfer time.
+
+    Raises:
+        ValueError: if *rb* is not beyond both orbits, or any radius is
+            inside the Earth. Both were documented and unchecked (audit F-192).
     """
+    if min(r1, r2, rb) <= R_EARTH:
+        raise ValueError(f"bi-elliptic radii must be above the Earth ({R_EARTH} km): {r1}, {r2}, {rb}")
+    if rb <= max(r1, r2):
+        raise ValueError(f"bi-elliptic rb={rb} km must exceed both orbit radii ({max(r1, r2)} km)")
     a1 = (r1 + rb) / 2.0
     a2 = (r2 + rb) / 2.0
 

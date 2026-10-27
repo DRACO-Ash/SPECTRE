@@ -164,3 +164,25 @@ class TestEveryProbePathTheContractNames:
         body = client.get(path).text  # type: ignore[attr-defined]
         assert "version" not in body.lower(), f"{path} leaks the version"
         assert "data_dir" not in body, f"{path} leaks the data directory"
+
+
+class TestReadinessProbesTheDatabase:
+    """Audit F-257: readiness tested storage only, so a dead database stayed in rotation."""
+
+    def test_readyz_is_503_when_the_database_does_not_answer(
+        self, client: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from spectre.web import health
+
+        async def down() -> tuple[bool, str | None]:
+            return False, "database probe failed: OperationalError"
+
+        monkeypatch.setattr(health, "check_database", down)
+        resp = client.get("/readyz")  # type: ignore[attr-defined]
+        assert resp.status_code == 503
+        assert "database" in resp.json()["detail"]
+
+    async def test_the_real_probe_passes_against_the_test_database(self) -> None:
+        from spectre.web.health import check_database
+
+        assert await check_database() == (True, None)

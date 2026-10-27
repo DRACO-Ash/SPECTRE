@@ -1,14 +1,15 @@
 """Maneuver planning routes — intercept option generation.
 
 Provides endpoints for intercept calculations and orbital event detection.
-All computations use the pure-Python ``spectre.astro`` package (Lambert, Hohmann,
-bi-elliptic).  Orbital event detection uses SGP4 via ``spectre.astro.events``.
+All computations use the pure-Python ``spectre.astro`` package: every method
+in ``_INTERCEPT_METHOD_MAP``, from the closed-form transfers and Lambert to the
+CW, tactical and assessment methods. Orbital event detection uses SGP4 via
+``spectre.astro.events``. This named three methods (audit F-238).
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import math
 from collections.abc import Callable
@@ -47,7 +48,7 @@ from spectre.astro.maneuvers import (
     terrain_intercept,
     vbar_hop_intercept,
 )
-from spectre.astro.propagator import regime_from_tle
+from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
@@ -66,6 +67,7 @@ from spectre.domain.models import (
     OrbitalEvent,
 )
 from spectre.web.auth import require_login
+from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, INTENT_LABELS, dominant_axis
 from spectre.web.deps import render
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
@@ -108,33 +110,6 @@ _ASSESSMENT_METHODS = {
     InterceptMethod.MANOEUVRE_DETECT,
 }
 
-_INTENT_LABELS: dict[InterceptMethod, str] = {
-    InterceptMethod.LAMBERT: "Close-Proximity Operation",
-    InterceptMethod.PROXIMITY: "Close-Proximity Operation",
-    InterceptMethod.RENDEZVOUS: "Close-Proximity Operation",
-    InterceptMethod.HOHMANN: "Orbital Transfer — Energy Change",
-    InterceptMethod.BIELLIPTIC: "Orbital Transfer — Energy Change",
-    InterceptMethod.PHASING: "Phasing Rendezvous",
-    InterceptMethod.RBAR_HOP: "R-Bar Hop (Radial Proximity Approach)",
-    InterceptMethod.VBAR_HOP: "V-Bar Hop Sequence (Along-Track Approach)",
-    InterceptMethod.HBAR_HOP: "H-Bar Hop Sequence (Orbit-Normal Approach)",
-    InterceptMethod.CW_DRIFT: "Proximity Manoeuvre (CW)",
-    InterceptMethod.NMC: "Proximity Manoeuvre (CW)",
-    InterceptMethod.PLANE_CHANGE: "Plane Change — Orbit Alignment",
-    InterceptMethod.J2_DRIFT: "J2-Assisted RAAN Drift",
-    InterceptMethod.COLA: "Collision Avoidance",
-    InterceptMethod.GEO_DRIFT: "GEO Longitude Relocation",
-    InterceptMethod.MANOEUVRE_DETECT: "Observed Manoeuvre — Classification",
-    InterceptMethod.DETECTABILITY: "Detectability Assessment",
-    InterceptMethod.EVASION: "Evasion Manoeuvre",
-    InterceptMethod.INTENT_PREDICT: "Adversary Intent Assessment",
-    InterceptMethod.INTERCEPT_ENVELOPE: "Intercept Reachability Envelope",
-    InterceptMethod.STABILITY: "Relative Motion Stability Analysis",
-    InterceptMethod.FINGERPRINT: "Behavioural Fingerprint Analysis",
-    InterceptMethod.FORMATION: "Formation-Aware Defensive Burn",
-    InterceptMethod.TERRAIN: "Orbital Terrain Risk Assessment",
-    InterceptMethod.MIN_TIME: "Minimum-Time Intercept",
-}
 
 
 #: Delta-v landmarks in m/s, from the manoeuvre assessment. Named rather than
@@ -225,7 +200,8 @@ def _observability(dv: float) -> tuple[str, str, str]:
     """
     if dv > _MOST_AGGRESSIVE_OBSERVED_M_S:
         return ("HIGH", "#ef4444",
-                "Large ΔV signature — high probability of SSN detection and attribution")
+                "Large ΔV signature — routine surveillance would very likely see it "
+                "(heuristic band from ΔV alone; no sensor model)")
     if dv > _ANNUAL_STATION_KEEPING_M_S:
         return ("MEDIUM", "#f59e0b",
                 "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance")
@@ -250,23 +226,17 @@ _BURN_DIRECTION_DETAIL: dict[str, str] = {
 }
 
 
-def _burn_direction(pro: float, nor: float, rad: float, threshold: float) -> str:
-    """Name the dominant axis of a burn, or "Combined" if no axis dominates.
+#: Most recent intercepts kept for the trade space (F-134). The history grew
+#: by one per apply-intercept call, in process-global state that survives
+#: session expiry, until the operator cleared it.
+_MAX_INTERCEPT_HISTORY = 200
 
-    *threshold* is the share of the burn's vector magnitude an axis has to
-    carry before it is named; the caller sets it.
 
-    Lifted out of _burn_breakdown whole rather than split in half: the chain
-    sat inside the per-burn loop, and the nesting penalty it carried there
-    was most of that function's cognitive complexity score.
-    """
-    if abs(pro) >= threshold:
-        return "Prograde" if pro >= 0 else "Retrograde"
-    if abs(nor) >= threshold:
-        return "Normal" if nor >= 0 else "Anti-normal"
-    if abs(rad) >= threshold:
-        return "Radial" if rad >= 0 else "Anti-radial"
-    return "Combined"
+def _record_intercept(state: Any, result: InterceptResult) -> None:
+    """Make *result* the latest intercept and keep the history bounded."""
+    state.last_intercept_result = result
+    state.intercept_history.append(result)
+    del state.intercept_history[:-_MAX_INTERCEPT_HISTORY]
 
 
 def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
@@ -288,8 +258,7 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
         rad_pct = min(100.0, abs(rad) / dv_total * 100.0)
 
         # Direction
-        threshold = 0.7 * dv_total
-        direction = _burn_direction(pro, nor, rad, threshold)
+        direction = dominant_axis(pro, nor, rad, DOMINANT_AXIS_FRACTION * dv_total)
         direction_detail = _BURN_DIRECTION_DETAIL.get(direction, "Multi-axis manoeuvre — combined orbit change")
 
         burn_intel.append({
@@ -410,41 +379,41 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.HOHMANN:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.BIELLIPTIC:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km (coplanar)"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.PHASING:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": "0.0 km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
                 {"label": _LABEL_TRANSFER_TYPE, "value": "Phasing orbit"},
             ]
         ),
     InterceptMethod.DETECTABILITY:
         lambda result, dv, miss: (
             [
-                {"label": "Observability Score", "value": f"{miss:.0f}/100"},
-                {"label": "Detection Probability", "value": _score_band(miss / 100.0)},
+                {"label": "Observability score (heuristic)", "value": f"{miss:.0f}/100"},
+                {"label": "Observability band", "value": _score_band(miss / 100.0)},
             ]
         ),
     InterceptMethod.INTENT_PREDICT:
         lambda result, dv, miss: (
             [
-                {"label": "Intercept Likelihood", "value": f"{miss:.0f}%"},
-                {"label": "Assessment", "value": _banded(
+                {"label": "Intent indicator score (heuristic, uncalibrated)", "value": f"{miss:.0f}/100"},
+                {"label": "Indicators", "value": _banded(
                     miss / 100.0,
                     (
-                        "High confidence intercept intent",
-                        "Possible intercept intent",
-                        "Low probability of intercept intent",
+                        "Strong intercept indicators",
+                        "Some intercept indicators",
+                        "Few intercept indicators",
                     ),
                     bounds=(_INTENT_CONFIDENT, _INTENT_POSSIBLE),
                 )},
@@ -453,7 +422,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.STABILITY:
         lambda result, dv, miss: (
             [
-                {"label": "Stability Score", "value": f"{miss:.0f}/100"},
+                {"label": "Stability score (heuristic)", "value": f"{miss:.0f}/100"},
                 {"label": "Assessment", "value": _banded(
                     miss / 100.0,
                     (
@@ -467,21 +436,22 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.FINGERPRINT:
         lambda result, dv, miss: (
             [
-                {"label": "Fingerprint Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Fingerprint match score (heuristic, uncalibrated)", "value": f"{miss:.0f}/100"},
                 {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
             ]
         ),
     InterceptMethod.TERRAIN:
         lambda result, dv, miss: (
             [
-                {"label": "Operational Risk", "value": f"{miss:.0f}/100"},
-                {"label": "Risk Level", "value": _score_band(miss / 100.0)},
+                {"label": "Operational risk score (heuristic, indicative bands)", "value": f"{miss:.0f}/100"},
+                {"label": "Risk band", "value": _score_band(miss / 100.0)},
             ]
         ),
     InterceptMethod.MANOEUVRE_DETECT:
         lambda result, dv, miss: (
             [
-                {"label": "Detection Confidence", "value": f"{miss:.0f}%"},
+                {"label": "Detection score (heuristic, fixed per classification branch)",
+                 "value": f"{miss:.0f}/100"},
                 {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
             ]
         ),
@@ -595,12 +565,12 @@ _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.BIELLIPTIC: _hohmann_summary,
     InterceptMethod.INTENT_PREDICT:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Intent assessment indicates {int(miss)}% probability of intercept "
-            f"intent against {result.blue_name}."
+            f"Intent indicator score {int(miss)}/100 against {result.blue_name}: a weighted "
+            f"score of uncalibrated indicators, not a calibrated estimate."
         ),
     InterceptMethod.DETECTABILITY:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Detectability assessment scores {int(miss)}/100 observability for "
+            f"Detectability assessment scores {int(miss)}/100 observability (heuristic) for "
             f"{result.red_name} manoeuvre against {result.blue_name}."
         ),
     InterceptMethod.COLA:
@@ -636,14 +606,21 @@ def _summary_text(
     return builder(result, dv, miss, tof_label, arrival)
 
 
-def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[str, Any]:
+def _compute_intercept_intel(
+    result: InterceptResult, regime: str = "", budget_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+) -> dict[str, Any]:
     """Pre-compute all intelligence analysis data for the intercept result template.
+
+    *budget_m_s* is the operator's submitted budget; the share of it a result
+    uses was taken against the default whatever the operator set (audit F-236).
 
     Returns a plain dict that is Jinja-safe — no custom objects, all primitives.
     """
     method = result.method
     dv = result.total_delta_v_m_s
-    miss = result.intercept_range_km
+    # An assessment method's figure is its score; the builders below read it
+    # as "miss" for the physics methods' sake.
+    miss = result.score if result.score is not None else result.intercept_range_km
 
     # ── Threat classification ────────────────────────────────────────────────
     if method in _ASSESSMENT_METHODS:
@@ -670,7 +647,7 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
         ]
 
     # ── Operational intent ───────────────────────────────────────────────────
-    intent_label = _INTENT_LABELS.get(method, "Intercept Calculation")
+    intent_label = INTENT_LABELS.get(method, "Intercept Calculation")
 
     dv_class = _dv_classification(dv)
 
@@ -685,7 +662,7 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
     # ── ΔV budget percentage ─────────────────────────────────────────────────
     # Against the default realistic budget rather than a hardcoded 3.0, which
     # in m/s would read 100 per cent for any burn above 3 m/s.
-    dv_budget_pct = min(100.0, dv / DEFAULT_SWEEP_BUDGET_M_S * 100.0)
+    dv_budget_pct = min(100.0, dv / budget_m_s * 100.0) if budget_m_s > 0 else 100.0
 
     burn_intel = _burn_breakdown(result)
 
@@ -708,7 +685,7 @@ def _compute_intercept_intel(result: InterceptResult, regime: str = "") -> dict[
         # carry its own hardcoded "3.0 m/s", which survived the 0.5.15 move to
         # the realistic 500 m/s budget and left the panel reporting a figure
         # against a number 167 times smaller than the one it was computed with.
-        "dv_budget_m_s": DEFAULT_SWEEP_BUDGET_M_S,
+        "dv_budget_m_s": budget_m_s,
         "burn_intel": burn_intel,
         "obs_level": obs_level,
         "obs_color": obs_color,
@@ -730,13 +707,14 @@ async def orbital_events(
     """Compute upcoming orbital events for both red and blue satellites.
 
     Uses sgp4 to propagate the satellite TLEs and detect apogee, perigee,
-    ascending node, and descending node crossings.
+    ascending node, and descending node crossings. The search runs in a
+    worker thread, not on the event loop (audit F-040).
     """
     logger.info(
         "orbital_events called: red_sat=%r blue_sat=%r by %s",
         log_safe(red_sat), log_safe(blue_sat), log_safe(current_user.username),
     )
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if not red_sat.strip() and not blue_sat.strip():
         return render(request, "partials/orbital_events.html", {
@@ -752,17 +730,17 @@ async def orbital_events(
     blue_events: list[Any] = []
 
     if red_sat.strip():
-        tle = _find_tle(state, red_sat.strip())
+        tle = state.tle_of(red_sat.strip())
         if tle:
-            raw = find_orbital_events(tle, sc_start, sc_stop)
+            raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             red_events = [_astro_event_to_domain(e) for e in raw]
         else:
             logger.warning("orbital_events: no TLE found for red %s", log_safe(red_sat))
 
     if blue_sat.strip():
-        tle = _find_tle(state, blue_sat.strip())
+        tle = state.tle_of(blue_sat.strip())
         if tle:
-            raw = find_orbital_events(tle, sc_start, sc_stop)
+            raw = await asyncio.to_thread(find_orbital_events, tle, sc_start, sc_stop)
             blue_events = [_astro_event_to_domain(e) for e in raw]
         else:
             logger.warning("orbital_events: no TLE found for blue %s", log_safe(blue_sat))
@@ -789,36 +767,37 @@ async def apply_intercept(
     manoeuvre_start: Annotated[str, Form()] = "",
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
-    number_of_burns: Annotated[int, Form()] = 1,
     target_distance_m: Annotated[float, Form()] = 0.0,
-    minimize_delta_v: Annotated[bool, Form()] = True,
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Calculate an intercept trajectory using spectre.astro solvers.
 
-    Runs Lambert, Hohmann, or bi-elliptic transfer calculations using
-    the pure-Python astro package.
+    Runs the one method named in *method*, any of ``_INTERCEPT_METHOD_MAP``,
+    using the pure-Python astro package.
 
     Returns the intercept result partial with per-burn breakdown.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if method not in _INTERCEPT_METHOD_MAP:
         return render(request, "partials/intercept_result.html", {
             "result": None, "error": f"Unknown intercept method: {method!r}",
         })
 
-    # Parse manoeuvre start time.
-    manoeuvre_start_dt = datetime.now(tz=UTC)
-    if manoeuvre_start.strip():
-        with contextlib.suppress(ValueError):
-            manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
+    manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
+    if manoeuvre_start_dt is None:
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "error": _BAD_START.format(manoeuvre_start.strip()),
+        })
 
     # Look up TLEs.
-    red_tle = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    red_tle = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle or not blue_tle:
         missing = []
@@ -831,16 +810,17 @@ async def apply_intercept(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
-    if intercept_data_mode.strip():
-        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+        red_tle, blue_tle, intercept_data_mode, state,
+    )
 
     # Regime compatibility check — block cross-belt intercepts.
-    try:
-        red_regime = regime_from_tle(red_tle)
-        blue_regime = regime_from_tle(blue_tle)
-    except Exception:
-        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+    regimes = _pair_regimes(red_tle, blue_tle)
+    if isinstance(regimes, str):
+        return render(request, "partials/intercept_result.html", {
+            "result": None, "intercept_data_mode": effective_dm, "error": regimes,
+        })
+    red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
         return render(request, "partials/intercept_result.html", {
@@ -867,14 +847,16 @@ async def apply_intercept(
             lambda: _run_intercept(
                 intercept_method, red_tle, blue_tle,
                 manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
+                shaping=_shaping_from_form(revolutions, hops, drift_days),
             ),
         )
     # BLE001: any solver failure is reported to the operator, not raised.
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "apply_intercept failed for operator %s: %s", log_safe(current_user.username), exc
+            "apply_intercept failed for operator %s: %s",
+            log_safe(current_user.username), log_safe(exc),
         )
-        state.append_log(f"[INTERCEPT] {method} failed: {exc}")
+        state.append_log(f"[INTERCEPT] {method} failed: {log_safe(exc)}")
         return render(request, "partials/intercept_result.html", {
             "result": None, "error": f"Intercept calculation failed: {exc}",
         })
@@ -882,8 +864,7 @@ async def apply_intercept(
     # Map astro InterceptSolution → domain InterceptResult for the template.
     result = _solution_to_result(sol, red_sat.strip(), blue_sat.strip(), intercept_method)
 
-    state.last_intercept_result = result
-    state.intercept_history.append(result)
+    _record_intercept(state, result)
     burn_summary = ", ".join(
         f"burn{b.burn_number} ΔV={b.delta_v_m_s:.3f}" for b in result.burns
     )
@@ -895,12 +876,13 @@ async def apply_intercept(
         f"miss={result.intercept_range_km:.1f} km"
     )
     logger.info(
-        "apply_intercept: %s for operator %s (%s → %s total_dv=%.0f m/s, burns=%d)",
+        "apply_intercept: %s for operator %s (%s → %s total_dv=%s m/s, burns=%s)",
         log_safe(method), log_safe(current_user.username),
-        log_safe(red_sat), log_safe(blue_sat), result.total_delta_v_m_s, len(result.burns),
+        log_safe(red_sat), log_safe(blue_sat),
+        log_safe(format(result.total_delta_v_m_s, ".0f")), log_safe(len(result.burns)),
     )
 
-    intel = _compute_intercept_intel(result, red_regime)
+    intel = _compute_intercept_intel(result, red_regime, max_dv_m_s)
     pair = get_intel(satno_from_tle(red_tle))
 
     return render(request, "partials/intercept_result.html", {
@@ -950,6 +932,19 @@ _THREAT_SORT_ORDER: dict[str, int] = {
 }
 
 
+class _Shaping(NamedTuple):
+    """Counts and durations some solvers take instead of a time of flight.
+
+    Each has its own field on the form. They used to be read off the coast
+    time, so a 6 h coast asked for six revolutions or six hops and those
+    solvers were given no coast at all (audit F-132).
+    """
+
+    revolutions: int = 1
+    hops: int = 3
+    drift_days: float | None = None
+
+
 class _InterceptArgs(NamedTuple):
     """One intercept run's solver inputs, carried together.
 
@@ -965,6 +960,40 @@ class _InterceptArgs(NamedTuple):
     tof_s: float
     target_km: float
     max_dv_m_s: float
+    shaping: _Shaping = _Shaping()
+
+
+_BAD_START = "Manoeuvre start {!r} is not an ISO 8601 date and time, for example 2026-03-14T12:00:00Z."
+
+
+def _manoeuvre_start(text: str) -> datetime | None:
+    """The operator's manoeuvre start in UTC, now when blank, None when unreadable.
+
+    An unreadable value was silently replaced by now, and an explicit offset
+    was overwritten rather than converted (audit F-237).
+    """
+    if not text.strip():
+        return datetime.now(tz=UTC)
+    try:
+        parsed = datetime.fromisoformat(text.strip())
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _pair_regimes(red_tle: str, blue_tle: str) -> tuple[str, str] | str:
+    """Both objects' regimes, or the reason one could not be classified.
+
+    A TLE SGP4 could not propagate was assumed to be LEO and the intercept
+    went ahead on that silent guess (audit F-234).
+    """
+    regimes = []
+    for side, tle in (("red", red_tle), ("blue", blue_tle)):
+        try:
+            regimes.append(regime_from_tle(tle))
+        except TLE_ERRORS as exc:
+            return f"The {side} TLE could not be propagated to classify its orbit: {exc}"
+    return regimes[0], regimes[1]
 
 
 def _missing_tle_labels(
@@ -1003,6 +1032,7 @@ def _run_all_methods(
             sol = _run_intercept(
                 method, args.red_tle, args.blue_tle,
                 args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
+                shaping=args.shaping,
             )
             result = _solution_to_result(sol, red_name, blue_name, method)
             out.append((method, result, None))
@@ -1015,6 +1045,7 @@ def _run_all_methods(
 def _items_from_solutions(
     raw: list[tuple[InterceptMethod, InterceptResult | None, str | None]],
     red_regime: str,
+    budget_m_s: float,
 ) -> list[dict[str, Any]]:
     """Turn each method's outcome into one row of the comparison table.
 
@@ -1024,7 +1055,7 @@ def _items_from_solutions(
     items: list[dict[str, Any]] = []
     for method, result, error in raw:
         if result is not None:
-            intel = _compute_intercept_intel(result, red_regime)
+            intel = _compute_intercept_intel(result, red_regime, budget_m_s)
             items.append({"method": method, "result": result, "intel": intel, "error": None})
         else:
             items.append({"method": method, "result": None, "intel": None, "error": error})
@@ -1051,25 +1082,31 @@ async def apply_all_intercepts(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
 
-    Executes all 23 methods concurrently using sensible shared parameters,
+    Runs every method in turn, in one executor job, using shared parameters,
     computes intelligence assessments for each successful result, and returns
     a sortable table where every row can expand to show the full analysis.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
-    manoeuvre_start_dt = datetime.now(tz=UTC)
-    if manoeuvre_start.strip():
-        with contextlib.suppress(ValueError):
-            manoeuvre_start_dt = datetime.fromisoformat(manoeuvre_start.strip()).replace(tzinfo=UTC)
+    manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
+    if manoeuvre_start_dt is None:
+        return render(request, "partials/all_intercepts_result.html", {
+            "items": [], "error": _BAD_START.format(manoeuvre_start.strip()),
+            "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
+            "intercept_history": state.intercept_history,
+        })
 
-    red_tle = _find_tle(state, red_sat.strip())
-    blue_tle = _find_tle(state, blue_sat.strip())
+    red_tle = state.tle_of(red_sat.strip())
+    blue_tle = state.tle_of(blue_sat.strip())
 
     if not red_tle or not blue_tle:
         missing = _missing_tle_labels(red_tle, red_sat, blue_tle, blue_sat)
@@ -1080,16 +1117,19 @@ async def apply_all_intercepts(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    effective_dm = intercept_data_mode.strip().upper() or state.udl_data_mode or "REAL"
-    if intercept_data_mode.strip():
-        red_tle, blue_tle = await _refetch_tles(red_tle, blue_tle, effective_dm, state)
+    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+        red_tle, blue_tle, intercept_data_mode, state,
+    )
 
     # Regime compatibility check — block cross-belt intercepts.
-    try:
-        red_regime = regime_from_tle(red_tle)
-        blue_regime = regime_from_tle(blue_tle)
-    except Exception:
-        red_regime = blue_regime = "LEO"  # assume compatible on parse failure
+    regimes = _pair_regimes(red_tle, blue_tle)
+    if isinstance(regimes, str):
+        return render(request, "partials/all_intercepts_result.html", {
+            "items": [], "error": regimes,
+            "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
+            "intercept_history": state.intercept_history,
+        })
+    red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
         return render(request, "partials/all_intercepts_result.html", {
@@ -1111,6 +1151,7 @@ async def apply_all_intercepts(
 
     args = _InterceptArgs(
         red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
+        _shaping_from_form(revolutions, hops, drift_days),
     )
 
     loop = asyncio.get_running_loop()
@@ -1118,7 +1159,7 @@ async def apply_all_intercepts(
         None, lambda: _run_all_methods(args, red_sat.strip(), blue_sat.strip())
     )
 
-    items = _items_from_solutions(raw, red_regime)
+    items = _items_from_solutions(raw, red_regime, max_dv_m_s)
     items.sort(key=_sort_key)
 
     # Replace history with current batch so trade-space shows the full comparison
@@ -1134,9 +1175,9 @@ async def apply_all_intercepts(
         f"{n_ok}/{len(_ALL_METHODS_SEQUENCE)} methods succeeded"
     )
     logger.info(
-        "apply_all_intercepts: %s → %s, %d/%d ok, by %s",
+        "apply_all_intercepts: %s → %s, %s/%s ok, by %s",
         log_safe(red_sat.strip()), log_safe(blue_sat.strip()),
-        n_ok, len(_ALL_METHODS_SEQUENCE), log_safe(current_user.username),
+        log_safe(n_ok), log_safe(len(_ALL_METHODS_SEQUENCE)), log_safe(current_user.username),
     )
 
     return render(request, "partials/all_intercepts_result.html", {
@@ -1154,20 +1195,27 @@ async def trade_space_data(
     current_user: User = Depends(require_login),
 ) -> JSONResponse:
     """Return JSON array of trade-space points from intercept history."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     points = []
     for r in state.intercept_history:
         transfer_s = (
             (r.arrival_epoch - r.burns[0].burn_epoch).total_seconds()
             if r.burns else 0.0
         )
-        points.append({
+        point: dict[str, Any] = {
             "method": r.method.value,
             "delta_v": round(r.total_delta_v_m_s, 1),  # m/s
             "transfer_time_min": round(transfer_s / 60.0, 2),
             "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
-            "miss_km": round(r.intercept_range_km, 2),
-        })
+        }
+        # An assessment method carries a score, not a distance; emitted as
+        # miss_km, a score of 73 was plotted as a 73 km miss (F-131, F-072).
+        if r.score is not None:
+            point["score"] = round(r.score)
+            point["provenance"] = r.provenance
+        else:
+            point["miss_km"] = round(r.intercept_range_km, 2)
+        points.append(point)
     return JSONResponse(content=points)
 
 
@@ -1177,7 +1225,7 @@ async def clear_history(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear intercept history and last result."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.intercept_history.clear()
     state.last_intercept_result = None
     state.append_log("[INTERCEPT] Trade-space history cleared")
@@ -1191,15 +1239,24 @@ async def clear_history(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _find_tle(state: object, sat_name: str) -> str | None:
-    """Look up a satellite TLE from session state by object name."""
-    for a in state.blue_assets:  # type: ignore[attr-defined]
-        if a.stk_name == sat_name:
-            return str(a.tle)
-    for t in state.red_tracks:  # type: ignore[attr-defined]
-        if t.stk_name == sat_name:
-            return str(t.tle)
-    return None
+class _Fetched(NamedTuple):
+    """An element set and the UDL dataMode it is known to have."""
+
+    tle: str
+    mode: str
+
+
+def _held_mode(state: object, tle: str) -> str:
+    """The known mode of a set already held, or UNVERIFIED when none is recorded.
+
+    A mode is known only for the very set the HRR cache holds; an operator's
+    pasted set for the same object has no recorded provenance.
+    """
+    satno = satno_from_tle(tle)
+    key = str(satno) if satno is not None else ""
+    if not key or state.hrr_tle_cache.get(key) != tle:  # type: ignore[attr-defined]
+        return "UNVERIFIED"
+    return str(state.hrr_tle_data_mode.get(key, "UNVERIFIED"))  # type: ignore[attr-defined]
 
 
 async def _refetch_tles(
@@ -1207,21 +1264,22 @@ async def _refetch_tles(
     blue_tle: str,
     data_mode: str,
     state: object,
-) -> tuple[str, str]:
+) -> tuple[_Fetched, _Fetched]:
     """Re-fetch the red and blue TLEs from UDL using *data_mode*.
 
-    Falls back silently to the supplied originals when UDL credentials are
-    absent, the SATNO cannot be extracted from the TLE, or the fetch fails.
+    Keeps the supplied originals when UDL credentials are absent, the SATNO
+    cannot be extracted from the TLE, or the fetch fails, and then reports
+    the mode the original is known to have rather than the one requested.
     """
     if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return red_tle, blue_tle
+        return _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
-    async def _try_fetch(tle: str) -> str:
+    async def _try_fetch(tle: str) -> _Fetched:
         satno = satno_from_tle(tle)
         if satno is None:
-            return tle
+            return _Fetched(tle, _held_mode(state, tle))
         result = await fetch_tle_for_satno(
             satno,
             state.udl_username,  # type: ignore[attr-defined]
@@ -1229,10 +1287,26 @@ async def _refetch_tles(
             data_mode=data_mode,
             source=getattr(state, "udl_tle_source", ""),
         )
-        return result[0] if result else tle
+        return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue
+
+
+async def _resolve_provenance(
+    red_tle: str, blue_tle: str, requested: str, state: object,
+) -> tuple[str, str, str]:
+    """The element sets to fly and the badge naming their actual provenance.
+
+    The badge used to show the requested mode, defaulting to REAL, even when
+    nothing was fetched and the sets were the operator's own (audit F-133).
+    """
+    if requested.strip():
+        red, blue = await _refetch_tles(red_tle, blue_tle, requested.strip().upper(), state)
+    else:
+        red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
+    label = red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}"
+    return red.tle, blue.tle, label
 
 
 # ── Intercept solver dispatch ────────────────────────────────────────────────
@@ -1248,18 +1322,16 @@ async def _refetch_tles(
 #: ``spectre.web.format_units``, because a bare 3600 beside a revolution count
 #: and a drift time in days reads as neither.
 _SECONDS_PER_HOUR: float = 3600.0
+_SECONDS_PER_DAY: float = 86400.0
 
 
-def _hop_count(coast_s: float, default: int) -> int:
-    """Whole hours of coast, read as a revolution or hop count.
-
-    The phasing and hop solvers count revolutions rather than taking a
-    duration, so the panel's coast time doubles as that count once it runs past
-    an hour. Below that the solver's own default stands.
-    """
-    if coast_s > _SECONDS_PER_HOUR:
-        return max(1, int(coast_s / _SECONDS_PER_HOUR))
-    return default
+def _shaping_from_form(revolutions: int, hops: int, drift_days: str) -> _Shaping:
+    """The form's counts, with a blank or non-positive drift left to the solver."""
+    try:
+        days = float(drift_days) if drift_days.strip() else None
+    except ValueError:
+        days = None
+    return _Shaping(revolutions, hops, days if days is not None and days > 0 else None)
 
 
 def _hop_distance_km(target_km: float) -> float | None:
@@ -1273,22 +1345,8 @@ def _hop_distance_km(target_km: float) -> float | None:
     return None
 
 
-def _geo_drift_days(coast_s: float) -> float | None:
-    """Drift time for the GEO relocation solver, or None to leave it to the solver."""
-    if coast_s > _SECONDS_PER_HOUR:
-        return coast_s / _SECONDS_PER_HOUR
-    return None
-
-
-def _evasion_fuel_km_s(coast_s: float) -> float:
-    """Fuel budget for the evasion solver, falling back to half a km/s."""
-    if coast_s > 0:
-        return coast_s / _SECONDS_PER_HOUR
-    return 0.5
-
-
 def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
-    """Solve the Lambert arc, which LAMBERT and PROXIMITY both fly."""
+    """Solve the Lambert arc LAMBERT flies (PROXIMITY is its declared alias)."""
     return lambert_intercept(
         red_tle=a.red_tle, blue_tle=a.blue_tle,
         manoeuvre_start=a.start, tof_s=a.tof_s, coast_s=a.coast_s,
@@ -1296,14 +1354,44 @@ def _lambert_transfer(a: _InterceptArgs) -> InterceptSolution:
     )
 
 
+#: Method names that run another method's solver, declared rather than hidden
+#: (audit F-174). Rendezvous had no solver of its own and ran Hohmann;
+#: Proximity ran the same Lambert transfer as Lambert. The docs described both
+#: as distinct, so a result under either name now says what it ran, and the
+#: batch, which runs each solver once, leaves them out.
+_METHOD_ALIASES: dict[InterceptMethod, InterceptMethod] = {
+    InterceptMethod.RENDEZVOUS: InterceptMethod.HOHMANN,
+    InterceptMethod.PROXIMITY: InterceptMethod.LAMBERT,
+}
+
+
+def _result_note(method: InterceptMethod, solver: str, provenance: str = "physics") -> str:
+    """The result's provenance line, naming the solver an alias ran.
+
+    A heuristic assessment is not "computed via a solver": its figure is a
+    weighted score of uncalibrated constants, and the note says so (audit
+    F-072).
+    """
+    if provenance == "heuristic":
+        return (
+            f"Heuristic assessment by spectre.astro {solver}: a score of uncalibrated "
+            "weights and thresholds, not a computed solution"
+        )
+    target = _METHOD_ALIASES.get(method)
+    if target is None:
+        return f"Computed via spectre.astro {solver} solver"
+    return (
+        f"{method.value.capitalize()} is an alias: this is the {target.value.capitalize()} "
+        f"solution, computed via spectre.astro {solver} solver"
+    )
+
+
 #: Methods whose solver takes the two TLEs, the manoeuvre start and the coast
-#: time, and nothing else. RENDEZVOUS flies the Hohmann transfer, as it did in
-#: the chain this table replaced. These entries hold the solver object itself,
+#: time, and nothing else. These entries hold the solver object itself,
 #: bound at import, so rebinding the name on this module does not reach them;
 #: the shaped table below resolves its solver on every call.
 _COAST_ONLY_SOLVERS: dict[InterceptMethod, Callable[..., InterceptSolution]] = {
     InterceptMethod.HOHMANN: hohmann_intercept,
-    InterceptMethod.RENDEZVOUS: hohmann_intercept,
     InterceptMethod.BIELLIPTIC: bielliptic_intercept,
     InterceptMethod.PLANE_CHANGE: plane_change_intercept,
     InterceptMethod.J2_DRIFT: j2_drift_intercept,
@@ -1319,13 +1407,13 @@ _COAST_ONLY_SOLVERS: dict[InterceptMethod, Callable[..., InterceptSolution]] = {
 #: the old chain, and only the method it is keyed on reaches it.
 _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolution]] = {
     InterceptMethod.LAMBERT: _lambert_transfer,
-    InterceptMethod.PROXIMITY: _lambert_transfer,
     # Phasing counts whole revolutions rather than taking a time of flight, so
     # the panel's intercept hours have no part in it.
     InterceptMethod.PHASING:
         lambda a: phasing_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
-            manoeuvre_start=a.start, n_revolutions=_hop_count(a.coast_s, 1),
+            manoeuvre_start=a.start, n_revolutions=a.shaping.revolutions,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.RBAR_HOP:
         lambda a: cw_radial_intercept(
@@ -1339,17 +1427,17 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: vbar_hop_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            n_hops=_hop_count(a.coast_s, 3),
+            n_hops=a.shaping.hops,
             hop_distance_km=_hop_distance_km(a.target_km),
-            coast_s=0.0,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.HBAR_HOP:
         lambda a: hbar_hop_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            n_hops=_hop_count(a.coast_s, 3),
+            n_hops=a.shaping.hops,
             hop_distance_km=_hop_distance_km(a.target_km),
-            coast_s=0.0,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.CW_DRIFT:
         lambda a: cw_drift_intercept(
@@ -1371,7 +1459,8 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
         lambda a: geo_drift_intercept(
             red_tle=a.red_tle, blue_tle=a.blue_tle,
             manoeuvre_start=a.start,
-            drift_time_days=_geo_drift_days(a.coast_s),
+            drift_time_days=a.shaping.drift_days,
+            coast_s=a.coast_s,
         ),
     InterceptMethod.NMC:
         lambda a: nmc_intercept(
@@ -1392,7 +1481,9 @@ _SHAPED_SOLVERS: dict[InterceptMethod, Callable[[_InterceptArgs], InterceptSolut
             manoeuvre_start=a.start,
             desired_miss_km=max(a.target_km, 10.0),
             time_before_tca_s=a.tof_s,
-            fuel_budget_km_s=_evasion_fuel_km_s(a.coast_s),
+            # The operator's ΔV budget. This was the coast time in hours read
+            # as km/s, so a 6 h coast meant a 6 km/s budget (audit F-037).
+            fuel_budget_km_s=to_km_s(a.max_dv_m_s),
             coast_s=0.0,
         ),
     InterceptMethod.INTERCEPT_ENVELOPE:
@@ -1427,6 +1518,8 @@ def _run_intercept(
     tof_s: float,
     target_km: float,
     max_dv_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+    *,
+    shaping: _Shaping = _Shaping(),
 ) -> InterceptSolution:
     """Dispatch to the appropriate spectre.astro solver.
 
@@ -1437,6 +1530,7 @@ def _run_intercept(
     that defect; the first was recorded in 0.5.13 for
     ``intercept_envelope_intercept``.
     """
+    method = _METHOD_ALIASES.get(method, method)
     coast_only = _COAST_ONLY_SOLVERS.get(method)
     if coast_only is not None:
         return coast_only(
@@ -1447,7 +1541,7 @@ def _run_intercept(
     if shaped is None:
         raise ValueError(f"Unsupported intercept method: {method}")
     return shaped(
-        _InterceptArgs(red_tle, blue_tle, start, coast_s, tof_s, target_km, max_dv_m_s)
+        _InterceptArgs(red_tle, blue_tle, start, coast_s, tof_s, target_km, max_dv_m_s, shaping)
     )
 
 
@@ -1483,7 +1577,10 @@ def _solution_to_result(
         total_delta_v_m_s=from_km_s(sol.total_delta_v),
         arrival_epoch=sol.arrival_epoch,
         intercept_range_km=sol.miss_distance_km,
-        notes=f"Computed via spectre.astro {sol.method} solver",
+        notes=_result_note(method, sol.method, sol.provenance),
+        score=sol.score,
+        score_kind=sol.score_kind,
+        provenance=sol.provenance,
     )
 
 

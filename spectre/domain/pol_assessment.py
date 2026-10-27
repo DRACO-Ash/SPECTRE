@@ -35,6 +35,13 @@ and they were wrong in a specific and costly way:
 Two sets of numbers for the same physics is worse than one set that is wrong,
 because only one of them ever gets updated. There is now one set, and it is the
 cited one.
+
+One exception, stated rather than hidden (audit F-036): the anomaly index's
+component weights and three of its normalisers (60 degrees of longitude,
+1.5 degrees per day of drift, an interval coefficient of variation of 2) are
+tuned, not sourced, and the risk ladder over it is a convention. The index is a
+heuristic and the panel labels it so; its budget and ΔV terms rest on the cited
+figures.
 """
 
 from __future__ import annotations
@@ -42,8 +49,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
+from spectre.astro.constants import _GEO_BAND_ALT
 from spectre.domain.manoeuvre_calibration import (
     ON_STATION_ANOMALY_EXPLANATIONS,
     ON_STATION_ANOMALY_M_S,
@@ -59,6 +67,7 @@ from spectre.domain.manoeuvre_calibration import (
     propellant_mass_fraction,
     station_keeping_m_s_per_year,
 )
+from spectre.domain.provenance import Provenance, provenance, tle_input
 
 __all__ = [
     "AnomalyAssessment",
@@ -163,8 +172,8 @@ _CHANNEL_TO_KIND: dict[tuple[bool, str], ManoeuvreKind] = {
     # A manoeuvre that moves altitude and plane together, above the
     # station-keeping ceiling, is the signature of inspection or shadowing
     # work. Note this is the OPPOSITE fallback to kind_for_method, which sends
-    # an unrecognised SOLVER to the permissive rendezvous band so a new solver
-    # cannot be scored as more alarming than it is. Here the object has already
+    # an unrecognised SOLVER to the widest band so a new solver cannot be
+    # scored as more alarming than it is. Here the object has already
     # manoeuvred and we are reading its behaviour, so the permissive choice is
     # the unsafe one: Cosmos 2576's inspector campaign, 25 to 30 m/s in LEO
     # across altitude and inclination together, reads BENIGN against the
@@ -173,10 +182,14 @@ _CHANNEL_TO_KIND: dict[tuple[bool, str], ManoeuvreKind] = {
     (False, "mixed"):       ManoeuvreKind.PROXIMITY,
 }
 
-#: Upper edge of the GEO protected region, km of altitude. A raise that ends
-#: above it is disposal, not relocation, and the two look identical in the
-#: elements alone.
-_GEO_PROTECTED_MAX_ALT_KM: float = 36186.0
+#: Upper edge of the GEO protected region, km of altitude: GEO altitude plus
+#: 200 km, as the IADC Space Debris Mitigation Guidelines define the region
+#: (GEO altitude plus or minus 200 km, latitude within 15 degrees). A raise that
+#: ends above it is disposal, not relocation, and the two look identical in the
+#: elements alone. It was 36,186 km, the regime band edge (GEO plus 400 km),
+#: so a standard 300 km graveyard raise read as relocation (audit F-116).
+_GEO_PROTECTED_HALF_WIDTH_KM: float = 200.0
+_GEO_PROTECTED_MAX_ALT_KM: float = _GEO_BAND_ALT + _GEO_PROTECTED_HALF_WIDTH_KM
 
 #: Operator label for a manoeuvre inside the routine per-event budget.
 #: Three places decide on this one string: the classifier that assigns it,
@@ -208,9 +221,12 @@ class ManoeuvreView:
     sk_ceiling_basis: str
     confirmed:        bool
 
+    #: True when this single manoeuvre is above what an object already on
+    #: station in this regime spends: the assessment's on-station anomaly line.
+    exceeds_on_station_anomaly: bool
     #: True when this single manoeuvre exceeds what any platform in this regime
     #: could hold in total. The assessment's second watchlist recommendation.
-    exceeds_on_station_anomaly: bool
+    #: The comment sat on the field above (audit F-229).
     exceeds_platform_ceiling:   bool
     escalation:                 str
 
@@ -449,10 +465,24 @@ class PropellantAssessment:
         return "Within routine"
 
 
+class _Spend(NamedTuple):
+    """Confirmed ΔV, in m/s, three ways.
+
+    *discretionary_since_reset* leaves out routine station-keeping: Table 2's
+    discretionary reserve is what remains AFTER the routine share of the
+    lifetime budget, so counting maintenance burns against it would empty a
+    well-behaved GEO object's reserve within a few years (audit F-118).
+    """
+
+    total: float
+    since_reset: float
+    discretionary_since_reset: float
+
+
 def _assess_propellant(
-    regime: str, total_dv_m_s: float, since_reset_m_s: float,
-    span_days: float, reserve_reset: datetime | None,
+    regime: str, spend: _Spend, span_days: float, reserve_reset: datetime | None,
 ) -> PropellantAssessment:
+    total_dv_m_s, since_reset_m_s = spend.total, spend.since_reset
     platform = platform_class_for_regime(regime)
     isp = _ASSUMED_ISP_S.get(regime.strip().upper(), 320.0)
     ve_m_s = isp * _G0_M_S2
@@ -471,7 +501,7 @@ def _assess_propellant(
     multiple = (annual / routine) if routine else None
 
     lifetime = platform_total_budget_m_s(regime)
-    remaining = max(0.0, platform.discretionary_max_m_s - since_reset_m_s)
+    remaining = max(0.0, platform.discretionary_max_m_s - spend.discretionary_since_reset)
 
     caveats = [
         f"Platform class assumed from the orbit regime alone: {platform.name}. "
@@ -575,12 +605,28 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def _risk_level(overall: float) -> str:
-    """The risk label for an overall anomaly score, highest rung first."""
+def anomaly_risk_level(overall: float) -> str:
+    """The risk label for an overall anomaly score, highest rung first.
+
+    The threat verdict grades an anomaly score through this same ladder
+    (audit F-120).
+    """
     for threshold, level in _RISK_LADDER:
         if overall >= threshold:
             return level
     return _RISK_FLOOR_LEVEL
+
+
+# Normalisers at which a component reaches full score. Tuned, not sourced
+# (audit F-036): the module docstring and the basis line both say so.
+_ANOMALY_FULL_LON_DEG = 60.0
+_ANOMALY_FULL_DRIFT_DEG_DAY = 1.5
+_ANOMALY_FULL_CV = 2.0
+_ANOMALY_TUNED_NOTE = (
+    " The component weights and the longitude, drift and interval normalisers "
+    "(60 degrees, 1.5 degrees per day, a coefficient of variation of 2) are tuned, "
+    "not sourced, so the overall figure is a heuristic index, not a measurement."
+)
 
 
 def _assess_anomaly(
@@ -598,22 +644,21 @@ def _assess_anomaly(
     mean_dv = sum(v.delta_v_m_s for v in views) / len(views)
     dv_score = _clamp01((mean_dv - sk_ceiling) / max(sk_ceiling * 9.0, 1e-6)) * 100
 
-    lons = [v.manoeuvre.tle_after.geo_longitude_deg for v in views
-            if v.manoeuvre.tle_after.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
-    lon_score = _clamp01(lon_range / 60.0) * 100
+    lon_range = circular_span_deg([v.manoeuvre.tle_after.geo_longitude_deg for v in views
+                                   if v.manoeuvre.tle_after.geo_longitude_deg is not None])
+    lon_score = _clamp01(lon_range / _ANOMALY_FULL_LON_DEG) * 100
 
     phases = getattr(pol, "drift_phases", []) or []
     if phases:
         max_drift = max(abs(p.rate_deg_day) for p in phases)
         # Table 3: GEO east-west keeping holds a slot to about 0.05 deg/day.
-        drift_score = _clamp01((max_drift - 0.05) / 1.5) * 100
+        drift_score = _clamp01((max_drift - 0.05) / _ANOMALY_FULL_DRIFT_DEG_DAY) * 100
     else:
         drift_score = 0.0
 
     intervals = getattr(pol, "interval_stats", None)
     if intervals and intervals.std > 0:
-        reg_score = _clamp01((intervals.std / max(intervals.mean, 0.01)) / 2.0) * 100
+        reg_score = _clamp01((intervals.std / max(intervals.mean, 0.01)) / _ANOMALY_FULL_CV) * 100
     else:
         reg_score = 0.0
 
@@ -631,11 +676,12 @@ def _assess_anomaly(
         basis = (f"No published station-keeping budget for {regime}, so the "
                  "budget term is not scored rather than guessed.")
 
+    basis += _ANOMALY_TUNED_NOTE
     w = _W_GEO if regime.strip().upper() in ("GEO", "DEEP") else _W_OTHER
     overall = (dv_score * w["dv"] + lon_score * w["lon"] + drift_score * w["drift"]
                + reg_score * w["regularity"] + budget_score * w["budget"])
 
-    risk = _risk_level(overall)
+    risk = anomaly_risk_level(overall)
 
     return AnomalyAssessment(
         dv_magnitude=round(dv_score, 1), lon_coverage=round(lon_score, 1),
@@ -709,11 +755,12 @@ def _assess_detection(noise: Any, _regime: str) -> DetectionLimits | None:
             "avoidance manoeuvres in twelve months, none of which any element-set "
             "method could resolve."
         )
-    if invisible and not missed_routine:
+    # It was guarded by "invisible and not missed_routine", which cannot
+    # both hold since the smallest reference event is routine (audit F-230).
+    if visible:
         narrative += (
-            " Counterspace-scale behaviour is above it: the smallest event on "
-            "open record that this would catch is "
-            f"{visible[0][1]:.0f} m/s ({visible[0][0]})." if visible else ""
+            " The smallest event on open record that this would catch is "
+            f"{visible[0][1]:.0f} m/s ({visible[0][0]})."
         )
     return DetectionLimits(
         floor_m_s=round(floor, 3),
@@ -752,6 +799,8 @@ class PolAssessment:
 
     #: Manoeuvres the assessment's watchlist says to treat as high priority.
     escalations: tuple[str, ...] = field(default_factory=tuple)
+    #: The code, calibration and every element set behind this (audit F-121).
+    provenance: Provenance | None = None
 
     @property
     def total_dv_m_s(self) -> float:
@@ -789,19 +838,21 @@ def assess_pattern_of_life(
     candidate_views = [_view(m, regime, sk_ceiling, sk_basis, False) for m in candidates]
 
     span_days = float(getattr(pol, "span_days", 0.0) or 0.0)
-    total_m_s = sum(v.delta_v_m_s for v in confirmed_views)
+    counted = confirmed_views
     if reserve_reset is not None:
-        since = sum(v.delta_v_m_s for v in confirmed_views
-                    if v.manoeuvre.epoch >= reserve_reset)
+        counted = [v for v in confirmed_views if v.manoeuvre.epoch >= reserve_reset]
         records = getattr(pol, "records", []) or []
         if records:
             span_days = max(
                 (records[-1].epoch - max(reserve_reset, records[0].epoch))
                 .total_seconds() / 86400.0, 1e-6)
-    else:
-        since = total_m_s
+    spend = _Spend(
+        total=sum(v.delta_v_m_s for v in confirmed_views),
+        since_reset=sum(v.delta_v_m_s for v in counted),
+        discretionary_since_reset=sum(v.delta_v_m_s for v in counted if not v.is_routine),
+    )
 
-    propellant = _assess_propellant(regime, total_m_s, since, span_days, reserve_reset)
+    propellant = _assess_propellant(regime, spend, span_days, reserve_reset)
     anomaly = _assess_anomaly(confirmed_views, pol, regime, propellant)
     detection = _assess_detection(getattr(pol, "noise_model", None), regime)
 
@@ -820,6 +871,10 @@ def assess_pattern_of_life(
         propellant=propellant, anomaly=anomaly, detection=detection, intel=intel,
         sk_ceiling_m_s=sk_ceiling, sk_ceiling_basis=sk_basis,
         escalations=escalations,
+        provenance=provenance(
+            tle_input(f"TLE {r.epoch:%Y-%m-%dT%H:%M:%SZ}", getattr(r, "tle", ""), r.epoch)
+            for r in getattr(pol, "records", []) or []
+        ),
     )
 
 
@@ -885,6 +940,27 @@ def _drift_direction(drift: float | None) -> str:
     return "STATIONARY"
 
 
+def wrap_longitude(deg: float) -> float:
+    """*deg* in (-180, 180], the interval the longitudes arrive in."""
+    wrapped = (deg + 180.0) % 360.0 - 180.0
+    return 180.0 if wrapped == -180.0 else wrapped  # noqa: PLR2004
+
+
+def circular_span_deg(lons: list[float]) -> float:
+    """The shortest arc of longitude that holds every value, in degrees.
+
+    It was max - min, so an object holding a slot at the antimeridian, read
+    at 179.9 and -179.9, spanned 359.8 degrees instead of 0.2 (audit F-117).
+    The shortest covering arc is the circle less its widest empty gap.
+    """
+    if len(lons) < 2:  # noqa: PLR2004
+        return 0.0
+    ordered = sorted(lon % 360.0 for lon in lons)
+    gaps = [b - a for a, b in zip(ordered, ordered[1:], strict=False)]
+    gaps.append(ordered[0] + 360.0 - ordered[-1])
+    return 360.0 - max(gaps)
+
+
 def _predicted_longitudes(
     last: Any, drift: float | None,
 ) -> tuple[float | None, float | None, float | None]:
@@ -896,9 +972,9 @@ def _predicted_longitudes(
     """
     if last is not None and last.geo_longitude_deg is not None and drift is not None:
         d30, d60, d90 = _PREDICTION_HORIZON_DAYS
-        return (round(last.geo_longitude_deg + drift * d30, 2),
-                round(last.geo_longitude_deg + drift * d60, 2),
-                round(last.geo_longitude_deg + drift * d90, 2))
+        return (round(wrap_longitude(last.geo_longitude_deg + drift * d30), 2),
+                round(wrap_longitude(last.geo_longitude_deg + drift * d60), 2),
+                round(wrap_longitude(last.geo_longitude_deg + drift * d90), 2))
     return (None, None, None)
 
 
@@ -1055,8 +1131,7 @@ def _assess_intel(
     drift = getattr(last, "geo_drift_rate_deg_day", None) if last else None
     direction = _drift_direction(drift)
 
-    lons = [r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None]
-    lon_range = (max(lons) - min(lons)) if len(lons) > 1 else 0.0
+    lon_range = circular_span_deg([r.geo_longitude_deg for r in records if r.geo_longitude_deg is not None])
 
     pred_30, pred_60, pred_90 = _predicted_longitudes(last, drift)
 

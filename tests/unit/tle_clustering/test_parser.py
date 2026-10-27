@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import timedelta
 
 from tests.unit.tle_clustering.conftest import make_tle_pair, make_tle_strings
 from tle_clustering.parser import group_by_norad, parse_tle_pair, parse_tle_strings
@@ -32,7 +33,7 @@ class TestParseTlePair:
     def test_epoch_is_utc_aware(self) -> None:
         l1, l2 = make_tle_pair(25544, 51.64, 247.12, 0.000123)
         rec = parse_tle_pair(l1, l2)
-        assert rec.epoch.tzinfo is not None
+        assert rec.epoch.utcoffset() == timedelta(0)
 
     def test_tle_property_roundtrips_lines(self) -> None:
         l1, l2 = make_tle_pair(25544, 51.64, 247.12, 0.000123)

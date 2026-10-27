@@ -1,14 +1,15 @@
 """DBSCAN-based TLE clustering.
 
 Clusters a list of :class:`~tle_clustering.models.TLERecord` objects for a
-single NORAD ID by normalising their mean Keplerian elements according to
-per-element tolerances and then running DBSCAN with the Chebyshev (L-∞) metric.
+single NORAD ID by measuring each pair's separation on every element in
+tolerances and then running DBSCAN on those distances (Chebyshev, L-∞, by
+default).
 
-The normalisation step maps each tolerance value to 1.0 in the scaled space, so
-that ``eps=1.0`` in DBSCAN corresponds exactly to "every element must be within
-its own tolerance".  The L-∞ norm enforces this independently per axis: a pair
-of TLEs is neighbours only if *all* elements simultaneously satisfy their
-respective tolerance, not just the Euclidean average.
+Each tolerance is 1.0 in that measure, so ``eps=1.0`` means "every element
+within its own tolerance" FOR A PAIR OF NEIGHBOURS. DBSCAN links neighbours:
+a chain of sets each within tolerance of the next is one cluster whose ends
+can be several tolerances apart. Each cluster carries that span, and
+``exceeds_tolerance`` says when it is over one (audit F-163).
 
 Usage::
 
@@ -21,9 +22,12 @@ Usage::
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
+from sgp4.api import Satrec
 from sklearn.cluster import DBSCAN
 
 from tle_clustering.config import ClusteringConfig
@@ -33,45 +37,105 @@ from tle_clustering.models import (
     NoiseTLE,
     TLERecord,
 )
-from tle_clustering.selection import select_representative
+from tle_clustering.selection import NODE_UNDEFINED_INC_DEG, select_representative
 
 logger = logging.getLogger(__name__)
 
 
-def _build_feature_matrix(
+def _raan_at_common_epoch(records: list[TLERecord]) -> list[float]:
+    """Each record's RAAN carried to the latest epoch among them, in degrees.
+
+    Elements were compared at each TLE's own epoch. An ISS-like node regresses
+    about 5 degrees a day, so two fits of one orbit taken more than about a
+    quarter of an hour apart differed by more than the 0.05 degree tolerance
+    and never clustered (audit F-054). Each node is moved by the secular rate
+    SGP4 itself derives for that element set (``Satrec.nodedot``), so the
+    correction is the one the propagator applies. The results are kept within
+    half a turn of the newest record's node, so a group straddling 0/360 is
+    not split by the wrap.
+    """
+    reference = max(r.epoch for r in records)
+    newest = max(records, key=lambda r: r.epoch)
+    moved = []
+    for r in records:
+        rate_deg_per_min = math.degrees(Satrec.twoline2rv(r.line1, r.line2).nodedot)
+        minutes = (reference - r.epoch).total_seconds() / 60.0
+        raan = r.raan_deg + rate_deg_per_min * minutes
+        moved.append(newest.raan_deg + ((raan - newest.raan_deg + 180.0) % 360.0 - 180.0))
+    return moved
+
+
+def _axis_distances(
     records: list[TLERecord],
     config: ClusteringConfig,
 ) -> NDArray[np.float64]:
-    """Build the normalised feature matrix for DBSCAN.
+    """Pairwise separations on each element, in tolerances: shape ``(3, n, n)``.
 
-    Each row is ``[inclination / inc_tol, raan / raan_tol, ecc / ecc_tol]``,
-    making the feature space dimensionless and each tolerance equal to 1.0.
-
-    Parameters
-    ----------
-    records:
-        TLE records to featurise; must be non-empty.
-    config:
-        Clustering configuration supplying per-element tolerances.
-
-    Returns
-    -------
-    NDArray[np.float64]
-        Array of shape ``(n, 3)`` where ``n == len(records)``.
+    Axis 0 is inclination, 1 RAAN, 2 eccentricity. RAAN is compared at a
+    common epoch (audit F-054), the short way round the circle (it was
+    linear, so 359.99 and 0.01 degrees were 7,199.6 tolerances apart, audit
+    F-162), and not at all between two orbits too near the equator for the
+    node to mean anything (audit F-171).
     """
-    raw = np.array(
-        [[r.inclination_deg, r.raan_deg, r.eccentricity] for r in records],
-        dtype=np.float64,
-    )
-    tolerances = np.array(
-        [
-            config.inclination_tolerance_deg,
-            config.raan_tolerance_deg,
-            config.eccentricity_tolerance,
-        ],
-        dtype=np.float64,
-    )
-    return raw / tolerances
+    inc = np.array([r.inclination_deg for r in records], dtype=np.float64)
+    raan = np.array(_raan_at_common_epoch(records), dtype=np.float64)
+    ecc = np.array([r.eccentricity for r in records], dtype=np.float64)
+
+    d_inc = np.abs(inc[:, None] - inc[None, :]) / config.inclination_tolerance_deg
+    around = np.abs(raan[:, None] - raan[None, :]) % 360.0
+    d_raan = np.minimum(around, 360.0 - around) / config.raan_tolerance_deg
+    no_node = (inc[:, None] < NODE_UNDEFINED_INC_DEG) & (inc[None, :] < NODE_UNDEFINED_INC_DEG)
+    d_raan[no_node] = 0.0
+    d_ecc = np.abs(ecc[:, None] - ecc[None, :]) / config.eccentricity_tolerance
+    return np.stack([d_inc, d_raan, d_ecc])
+
+
+# TLE elements are quantised (1e-4 degrees), so a pair exactly one tolerance
+# apart is common, and float noise put it either side of eps. "Within
+# tolerance" includes equality; this makes it so.
+_INCLUSIVE = 1.0 + 1e-9
+
+def _chebyshev(d: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.asarray(d.max(axis=0), dtype=np.float64)
+
+
+def _euclidean(d: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.asarray(np.sqrt((d * d).sum(axis=0)), dtype=np.float64)
+
+
+def _manhattan(d: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.asarray(d.sum(axis=0), dtype=np.float64)
+
+
+# How each metric the configuration may name combines the three axes.
+_COMBINE: dict[str, Callable[[NDArray[np.float64]], NDArray[np.float64]]] = {
+    "chebyshev": _chebyshev,
+    "euclidean": _euclidean,
+    "manhattan": _manhattan,
+    "cityblock": _manhattan,
+}
+
+
+def _distance_matrix(axes: NDArray[np.float64], metric: str) -> NDArray[np.float64]:
+    """The DBSCAN distance matrix for *metric*, from the per-axis separations."""
+    try:
+        combine = _COMBINE[metric]
+    except KeyError:
+        raise ValueError(f"Unsupported dbscan_metric {metric!r}; use one of {sorted(_COMBINE)}") from None
+    return combine(axes)
+
+
+def _circular_mean_deg(values: list[float]) -> float:
+    """Mean node of *values*, in [0, 360): a group either side of the seam centres on it.
+
+    Each value is first taken within half a turn of the first, so away from
+    the seam this is the plain arithmetic mean, to the last bit.
+    """
+    if max(values) - min(values) <= 180.0:  # noqa: PLR2004
+        return float(np.mean(values))
+    ref = values[0]
+    unwrapped = [ref + ((v - ref + 180.0) % 360.0 - 180.0) for v in values]
+    return float(np.mean(unwrapped)) % 360.0
 
 
 def cluster_records(
@@ -125,15 +189,14 @@ def cluster_records(
         )
         return result
 
-    # --- Build normalised feature matrix and run DBSCAN -----------------------
-    X = _build_feature_matrix(records, config)
-
+    # --- Pairwise distances in tolerances, then DBSCAN on them ----------------
+    axes = _axis_distances(records, config)
     db = DBSCAN(
-        eps=config.dbscan_eps,
+        eps=config.dbscan_eps * _INCLUSIVE,
         min_samples=config.dbscan_min_samples,
-        metric=config.dbscan_metric,
+        metric="precomputed",
     )
-    labels: NDArray[np.intp] = db.fit_predict(X)
+    labels: NDArray[np.intp] = db.fit_predict(_distance_matrix(axes, config.dbscan_metric))
 
     # --- Partition records into clusters and noise ----------------------------
     unique_labels = sorted({int(lbl) for lbl in labels})
@@ -160,9 +223,10 @@ def cluster_records(
             )
             continue
 
-        # Centroid in original (non-normalised) element space
+        # Centroid in original (non-normalised) element space; the node as a
+        # direction, so a group either side of 0/360 centres on the seam.
         centroid_inc  = float(np.mean([m.inclination_deg for m in members]))
-        centroid_raan = float(np.mean([m.raan_deg for m in members]))
+        centroid_raan = _circular_mean_deg([m.raan_deg for m in members])
         centroid_ecc  = float(np.mean([m.eccentricity for m in members]))
 
         representative = select_representative(
@@ -180,6 +244,7 @@ def cluster_records(
             centroid_inclination_deg=centroid_inc,
             centroid_raan_deg=centroid_raan,
             centroid_eccentricity=centroid_ecc,
+            span_tolerances=float(axes[:, indices][:, :, indices].max()),
         )
         clusters.append(cluster)
 

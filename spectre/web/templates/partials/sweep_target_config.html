@@ -20,6 +20,11 @@
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   No HRR objects in regime <strong>{{ interceptor_regime }}</strong> — select a different red satellite or fetch a fresh HRR watchlist.
 </p>
+{% elif interceptor_regime is none %}
+{# The interceptor TLE gave no regime, so nothing was filtered (audit F-245). #}
+<p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
+  Regime unknown for {{ interceptor_name }}: the target list is not filtered by orbit.
+</p>
 {% else %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
   Regime: <strong style="color:var(--ops-blue)">{{ interceptor_regime }}</strong> — targets filtered to match interceptor orbit.
@@ -98,12 +103,15 @@
                 placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
                 style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem"></textarea>
     </label>
+    {# The fields clear after the request. Cleared in onclick, they were empty
+       before htmx read them, so every add sent a blank name and TLE
+       (audit F-043, reproduced in Chromium). #}
     <button type="button" class="btn-secondary btn-sm"
             hx-post="/plan/threat/add-manual-tle"
             hx-target="#manual-tle-list"
             hx-swap="outerHTML"
             hx-include="[name='manual_name'],[name='manual_tle'],[name='manual_confidence']"
-            onclick="document.getElementById('ts-manual-name').value=''; document.getElementById('ts-manual-tle').value='';"
+            hx-on::after-request="if (event.detail.successful) { document.getElementById('ts-manual-name').value=''; document.getElementById('ts-manual-tle').value=''; }"
             style="margin-bottom:0.4rem">Add TLE</button>
   </div>
 

@@ -1,0 +1,18 @@
+{#- The one way a modelled or heuristic figure is marked, for every panel that
+    shows one. Imported rather than repeated.
+
+    Scores of uncalibrated weights reached the operator with the same weight
+    as solved trajectories: percentages called probabilities, scores in the
+    miss-distance field, a decision ranking under a "robust" banner. The
+    remediation agreed in July 2026 was a single visible mark wherever a
+    modelled value appears (audit step 4, heuristic-scores cluster).
+
+    `{% import "partials/_modelled.html" as modelled %}` then
+    `{{ modelled.badge(basis) }}`. *basis* says what the figure rests on and
+    is shown as the badge's title. -#}
+{% macro badge(basis="") -%}
+<span class="modelled-badge" title="{{ basis }}"
+      style="display:inline-block; font-size:0.58rem; font-weight:700; letter-spacing:0.04em;
+             text-transform:uppercase; color:var(--gold); border:1px solid var(--gold);
+             border-radius:3px; padding:0 0.3rem; margin-left:0.3rem; vertical-align:middle">modelled estimate, not a computed solution</span>
+{%- endmacro %}

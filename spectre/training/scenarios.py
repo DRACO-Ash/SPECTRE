@@ -44,6 +44,9 @@ class ScenarioObjective:
     answer: str | None = None
     tolerance: float | None = None
     unit: str | None = None
+    # Earned only when the attempt is submitted within the scenario's time
+    # limit, as the server measures it (audit F-168).
+    time_limited: bool = False
 
 
 @dataclass
@@ -123,6 +126,7 @@ def _parse_scenario(raw: dict[str, Any]) -> TrainingScenario:
             answer=ob.get("answer"),
             tolerance=ob.get("tolerance"),
             unit=ob.get("unit"),
+            time_limited=bool(ob.get("time_limited", False)),
         )
         for ob in raw.get("objectives", [])
     ]
@@ -177,7 +181,7 @@ def load_scenarios() -> list[TrainingScenario]:
     except FileNotFoundError:
         logger.warning("Training scenario config not found: %s", _CONFIG_PATH)
         return []
-    except Exception as exc:
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
         logger.error("Failed to load training scenarios: %s", exc)
         return []
 

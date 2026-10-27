@@ -14,7 +14,7 @@ tutorials:
         body: >
           SPECTRE (Space Planning, Evaluation & Counter-Threat Response Engine) is your operational interface for
           space domain awareness, manoeuvre planning, and threat assessment.
-          In Training Mode all data is synthetic — no operational systems are accessed.
+          In Training Mode all data is synthetic — no operational systems are accessed, and scenario objects leave your planning lists when you leave training.
           You can experiment freely without any real-world consequences.
 
       - heading: "The Main Panels"
@@ -66,17 +66,17 @@ tutorials:
         body: >
           Click "Free-Play" in the left sidebar to see available scenarios.
           Each card shows the difficulty, a description, and the level required to access it.
-          Click "View Scenario" to read the full briefing before committing to an attempt.
+          Click "View & Load" to read the full briefing before committing to an attempt.
 
       - heading: "Starting a Scored Attempt"
         body: >
-          Click "Start Scored Attempt" on the scenario detail page to begin.
+          Click "Start Scenario" on the scenario detail page to begin.
           Your objectives will be listed — tick each one off as you complete it using
           the SPECTRE panels.  Points are only awarded on scored attempts.
 
       - heading: "Explore Mode"
         body: >
-          Not sure how to approach a scenario?  Use "Explore (Unscored)" instead.
+          Not sure how to approach a scenario?  Use "Explore" instead.
           You can interact with all the same panels and tick objectives, but no points
           are recorded and the attempt counter does not increment.  Use it to practice.
 
@@ -134,7 +134,6 @@ tutorials:
       - heading: "ΔV Budget"
         body: >
           Every manoeuvre costs propellant.  Your blue asset has a finite ΔV budget for
-          its mission life.  The efficiency score in your debrief rewards low-ΔV solutions.
           Always check: is the avoidance worth the propellant cost given the threat confidence?
 
       - heading: "Geometry and Timing"

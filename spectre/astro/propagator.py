@@ -75,6 +75,31 @@ class KeplerianElements:
         return self.a * (1.0 - self.ecc)
 
 
+#: What a malformed or unpropagatable element set raises: ValueError from the
+#: parser, RuntimeError from SGP4, and ZeroDivisionError (an ArithmeticError)
+#: from a zero mean motion in ``regime_from_tle``. Handlers around element set
+#: parsing catch this rather than Exception, so a programming error elsewhere
+#: in the block is not reported as a bad element set.
+TLE_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError, ArithmeticError)
+
+
+_TLE_LINE_LENGTH = 69
+
+
+def tle_checksum_valid(line: str) -> bool:
+    """``True`` when column 69 of *line* is its modulo-10 checksum.
+
+    Digits count their value, a minus sign counts 1, everything else 0.
+    Nothing checked this, and 50 of the 52 training scenario lines carried a
+    wrong one (audit F-272).
+    """
+    line = line.rstrip()
+    if len(line) != _TLE_LINE_LENGTH or not line[-1].isdigit():
+        return False
+    total = sum(int(c) if c.isdigit() else int(c == "-") for c in line[:-1])
+    return total % 10 == int(line[-1])
+
+
 class TLEOrbit:
     """Satellite orbit defined by a TLE, propagated with SGP4."""
 
@@ -211,9 +236,13 @@ def _argp_and_ta(
     circular = ecc <= _CIRCULAR_ECC_TOL
 
     if circular and equatorial:
-        # True longitude: angle from the x-axis to the position vector.
+        # True longitude: angle from the x-axis to the position vector,
+        # measured in the direction of motion, so a retrograde orbit counts
+        # it the other way round (audit F-191).
         argp = 0.0
         ta = math.degrees(math.atan2(r[1], r[0])) % 360.0
+        if h[2] < 0:
+            ta = (360.0 - ta) % 360.0
     elif circular:
         # Argument of latitude: angle from the ascending node to the position.
         argp = 0.0

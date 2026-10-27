@@ -1,0 +1,15 @@
+{#- Audit F-039. A result built on generated orbits must not read like one
+    built on tracked ones. The screening form already said so; the result is
+    where the figures are read and briefed, so it says so here too. Expects
+    provenance_warnings: one line per non-live UDL dataMode, naming its
+    subjects (see _provenance_warnings in routes/threat.py). -#}
+{% if provenance_warnings %}
+<div class="callout callout-amber" role="note" style="margin:0.4rem 0; font-size:0.78rem">
+  <p style="margin:0.15rem 0"><strong>&#9888; Element sets not from live tracking.</strong>
+    These figures rest on orbits that did not come from live tracking. Treat
+    them as illustrative until the element sets are refreshed from UDL.</p>
+  {% for line in provenance_warnings %}
+  <p style="margin:0.15rem 0">{{ line }}</p>
+  {% endfor %}
+</div>
+{% endif %}

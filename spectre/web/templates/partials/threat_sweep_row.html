@@ -34,6 +34,8 @@
      comparing does, which is what the contract test now does. #}
   <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ entry.posture_label or '—' }}</td>
   <td class="col-actions" style="white-space:nowrap">
+    {# Why a refine produced nothing, on the row it was asked of (F-123). #}
+    {% if refine_error is defined and refine_error %}<span class="error-msg" role="alert" style="white-space:normal; font-size:0.72rem">{{ refine_error }}</span>{% endif %}
     {% if entry.method == "hohmann" %}
     <button class="btn-secondary btn-sm"
             hx-post="/plan/threat/refine"
@@ -51,7 +53,9 @@
        objects and showed the operator nothing to say so. #}
     <button class="btn-secondary btn-sm"
             type="button"
-            onclick="event.stopPropagation(); loadInEngine('{{ red_name }}', '{{ entry.target.target_name }}', '{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}', '{{ entry.method }}')"
+            data-red="{{ red_name }}" data-blue="{{ entry.target.target_name }}"
+            data-epoch="{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ entry.method }}"
+            onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
             title="Pre-fill the intercept engine with this solution">Load</button>
   </td>
 </tr>

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import dataclass
 from typing import Annotated
 
 import bcrypt
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from spectre.config.settings import get_settings
 from spectre.web.database import get_db
 from spectre.web.log_safety import log_safe
-from spectre.web.models import User
+from spectre.web.models import SessionKey, User
 
 logger = logging.getLogger(__name__)
 
@@ -34,44 +36,124 @@ def _serializer() -> URLSafeTimedSerializer:
 # ── Password helpers ──────────────────────────────────────────────────────────
 
 
+# bcrypt reads at most 72 bytes of a password. The pinned release raises
+# ValueError past that rather than truncating, so every caller must check
+# first (audit F-150). The limit is in UTF-8 bytes, not characters.
+MAX_PASSWORD_BYTES = 72
+
+# One username rule for the admin form and for the bootstrap account made
+# from SPECTRE_ADMIN_USER (audit F-261).
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
+PASSWORD_TOO_LONG = f"Password must be {MAX_PASSWORD_BYTES} bytes or fewer (fewer characters if it is not plain ASCII)."
+
+
+def password_too_long(plaintext: str) -> bool:
+    """Return ``True`` if bcrypt cannot hash *plaintext*."""
+    return len(plaintext.encode()) > MAX_PASSWORD_BYTES
+
+
 def hash_password(plaintext: str) -> str:
-    """Return the bcrypt hash of *plaintext*."""
+    """Return the bcrypt hash of *plaintext*, which must be 72 bytes or fewer."""
+    if password_too_long(plaintext):
+        raise ValueError(PASSWORD_TOO_LONG)
     hashed: bytes = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt())
     return hashed.decode()
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
-    """Return ``True`` if *plaintext* matches *hashed*."""
+    """Return ``True`` if *plaintext* matches *hashed*.
+
+    A password bcrypt cannot hash can never have been stored, so it never
+    matches; the caller charges it as any other failed attempt.
+    """
+    if password_too_long(plaintext):
+        return False
     return bool(bcrypt.checkpw(plaintext.encode(), hashed.encode()))
 
 
 # ── Cookie helpers ────────────────────────────────────────────────────────────
 
 
-def make_session_cookie(username: str, generation: int = 0) -> str:
+@dataclass(frozen=True)
+class SessionClaims:
+    """What a session token says about whose session it is."""
+
+    username: str
+    user_id: int | None
+    generation: int
+    nonce: str = ""
+    session_id: str = ""
+
+    @property
+    def key(self) -> SessionKey | None:
+        """The sign-in this token belongs to, or ``None`` for a token naming no account."""
+        return None if self.user_id is None else SessionKey(self.user_id, self.session_id)
+
+
+def make_session_cookie(
+    username: str, generation: int = 0, user_id: int | None = None, nonce: str = "", session_id: str = "",
+) -> str:
     """Create a signed, time-limited session token for *username*.
 
     *generation* is the account's session generation at the moment of signing
     in. It travels in the payload so that a later logout or password change,
     which increments the stored counter, refuses this token by value rather
     than by clock.
+
+    *user_id* binds the token to the account rather than the name. Without it
+    a token outlived the account it was issued to: delete "alice", create a
+    new "alice", and every unexpired token of the old one opened the new one,
+    with the new one's role (audit F-048). A token with no id is refused by
+    :func:`require_login`. *nonce* is the account's random ``session_nonce``,
+    which a recreated namesake does not share even when SQLite reuses the id.
+    *session_id* is random per sign-in and files the planning state.
     """
-    return str(_serializer().dumps({"sub": username, "gen": int(generation)}))
+    payload: dict[str, object] = {"sub": username, "gen": int(generation), "non": nonce, "sid": session_id}
+    if user_id is not None:
+        payload["uid"] = int(user_id)
+    return str(_serializer().dumps(payload))
 
 
-def _decode_session(token: str) -> tuple[str, int] | None:
-    """Return the username and the session generation carried by *token*.
+def _decode_session(token: str) -> SessionClaims | None:
+    """Return the claims carried by *token*.
 
-    ``None`` means expired, tampered with, or not one of ours. A token minted
-    before the generation claim existed carries no "gen" key and is read as
-    generation 0, which is where every account starts, so an operator signed
-    in across the upgrade is not thrown out by it.
+    ``None`` means expired, tampered with, or not one of ours.
     """
     try:
         data = _serializer().loads(token, max_age=_SESSION_MAX_AGE)
-        return str(data["sub"]), int(data.get("gen", 0))
-    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError):
+        uid = data.get("uid")
+        return SessionClaims(
+            username=str(data["sub"]),
+            user_id=None if uid is None else int(uid),
+            generation=int(data.get("gen", 0)),
+            nonce=str(data.get("non", "")),
+            session_id=str(data.get("sid", "")),
+        )
+    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError, AttributeError):
         return None
+
+
+def session_key_for(token: str) -> SessionKey | None:
+    """The sign-in *token* belongs to, without checking it is still current."""
+    claims = _decode_session(token)
+    return None if claims is None else claims.key
+
+
+async def current_user_for(token: str, db: AsyncSession) -> User | None:
+    """The account *token* is a live session of, or ``None``.
+
+    For the routes that read the cookie themselves rather than through
+    :func:`require_login`, so they apply the same binding and revocation.
+    """
+    claims = _decode_session(token)
+    if claims is None:
+        return None
+    result = await db.execute(select(User).where(User.username == claims.username))
+    user: User | None = result.scalar_one_or_none()
+    if user is None or not _bound_to(user, claims):
+        return None
+    user.session_key = claims.key
+    return user
 
 
 def decode_session_cookie(token: str) -> str | None:
@@ -80,7 +162,7 @@ def decode_session_cookie(token: str) -> str | None:
     Returns the username on success, or ``None`` if the token is expired/invalid.
     """
     claims = _decode_session(token)
-    return None if claims is None else claims[0]
+    return None if claims is None else claims.username
 
 
 def _session_revoked(user: User, generation: int) -> bool:
@@ -102,10 +184,21 @@ def _session_revoked(user: User, generation: int) -> bool:
     return generation < (user.session_generation or 0)
 
 
+def _bound_to(user: User, claims: SessionClaims) -> bool:
+    """Return ``True`` when the token was issued to this account, not a namesake."""
+    return (
+        claims.user_id is not None
+        and claims.user_id == user.id
+        and claims.nonce == (user.session_nonce or "")
+        and not _session_revoked(user, claims.generation)
+    )
+
+
 # ── FastAPI dependency ────────────────────────────────────────────────────────
 
 
 async def require_login(
+    request: Request,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -127,7 +220,7 @@ async def require_login(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
         )
-    username, generation = claims
+    username = claims.username
 
     result = await db.execute(select(User).where(User.username == username))
     user: User | None = result.scalar_one_or_none()
@@ -138,13 +231,18 @@ async def require_login(
             headers={"Location": "/login"},
         )
 
-    if _session_revoked(user, generation):
-        logger.info("Refused a session ended by logout or password change: %s", log_safe(username))
+    if not _bound_to(user, claims):
+        logger.info(
+            "Refused a session ended by logout or password change, or issued to a deleted namesake: %s",
+            log_safe(username),
+        )
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
         )
 
+    user.session_key = claims.key
+    request.state.session_current = True
     return user
 
 
@@ -170,6 +268,7 @@ async def optional_login(
     # one. FastAPI resolves dependencies by name and the only call site is
     # Depends(optional_login), so no caller passes these positionally.
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
 ) -> User | None:
     """Return the authenticated user, or ``None`` when there is no valid session.
@@ -185,13 +284,14 @@ async def optional_login(
     claims = _decode_session(spectre_session)
     if claims is None:
         return None
-    username, generation = claims
 
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(select(User).where(User.username == claims.username))
     user: User | None = result.scalar_one_or_none()
     # A session ended by logout or a password change must read as anonymous
     # here too, or the console greets the operator by name on the public page
     # after they have signed out of it.
-    if user is None or _session_revoked(user, generation):
+    if user is None or not _bound_to(user, claims):
         return None
+    user.session_key = claims.key
+    request.state.session_current = True
     return user

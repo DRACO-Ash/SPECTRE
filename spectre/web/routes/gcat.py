@@ -39,7 +39,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.web.auth import require_login
+from spectre.web.auth import require_admin, require_login
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -62,7 +62,19 @@ _ALLOWED_URL_SCHEMES = frozenset({"https"})
 # rather than following it until the timeout.
 _MAX_REDIRECT_HOPS = 5
 
+# The scheme check alone let a redirect name any https host, including one
+# that resolves inside the cluster (audit F-247). Every dataset lives on
+# planet4589.org, so the host is pinned there at the first request and at
+# every hop; with the host pinned, no operator- or redirect-supplied name can
+# point the fetch at a private, loopback or link-local address.
+_ALLOWED_HOSTS = frozenset({"planet4589.org", "www.planet4589.org"})
+
+# The largest GCAT table is tens of megabytes. Without a cap a hostile or
+# broken server could stream until the pod ran out of memory (audit F-254).
+_MAX_TSV_BYTES = 64 * 1024 * 1024
+
 PAGE_SIZE = 100
+_MAX_QUERY = 100  # characters in a table search
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gcat-dl")
 
 # ── Dataset registry ──────────────────────────────────────────────────────────
@@ -270,38 +282,56 @@ CATEGORIES: dict[str, dict[str, str]] = {
 
 # ── In-memory cache ───────────────────────────────────────────────────────────
 _CACHE: dict[str, dict[str, Any]] = {}
-_CACHE_FETCH_TIME: datetime | None = None
-_FETCHING: bool = False
-_FETCH_ERRORS: list[str] = []
+class _RefreshState:
+    """Mutable refresh bookkeeping, held on one object rather than rebound globals."""
+
+    def __init__(self) -> None:
+        self.fetching = False
+        self.fetched_at: datetime | None = None
+        self.errors: list[str] = []
+
+
+_REFRESH = _RefreshState()
 
 
 # ── TSV fetcher (sync — runs in ThreadPoolExecutor) ───────────────────────────
 
+def _url_refusal(url: str) -> str | None:
+    """Why *url* may not be fetched, or ``None`` when its scheme and host are allowed."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in _ALLOWED_URL_SCHEMES:
+        return f"unsupported URL scheme '{parts.scheme}'"
+    if (parts.hostname or "") not in _ALLOWED_HOSTS:
+        return f"host '{parts.hostname or ''}' is not on the GCAT allowlist"
+    return None
+
+
 def _get_rechecking_every_hop(
     client: httpx.Client, url: str, label: str,
 ) -> httpx.Response | None:
-    """GET *url*, re-applying the scheme allowlist at every redirect hop.
+    """GET *url*, re-applying the scheme and host allowlists at every redirect hop.
 
     ``follow_redirects=True`` carries no policy of its own, so the check made
     once against the table's URL said nothing about where the transport
     actually went: a 30x from planet4589.org could walk the fetch onto plain
-    http, or onto an address inside the cluster, with the allowlist never
-    consulted again (CWE-918). Returns ``None`` when a hop is refused or the
-    chain runs past :data:`_MAX_REDIRECT_HOPS`.
+    http, or onto another host, with the allowlist never consulted again
+    (CWE-918). Returns ``None`` when a hop is refused or the chain runs past
+    :data:`_MAX_REDIRECT_HOPS`.
     """
     for _ in range(_MAX_REDIRECT_HOPS + 1):
-        resp = client.get(url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        # Streamed, so the body is read under the size cap in _read_capped
+        # rather than in full before anything can look at its length.
+        request = client.build_request("GET", url, headers={"User-Agent": "SPECTRE-GCAT/1.0"})
+        resp = client.send(request, stream=True)
         if not resp.is_redirect:
             return resp
+        resp.close()
         # Relative Location headers are legal, so the hop is resolved against
         # the URL that served the redirect before its scheme is read.
         url = urllib.parse.urljoin(url, resp.headers.get("location", ""))
-        scheme = urllib.parse.urlsplit(url).scheme
-        if scheme not in _ALLOWED_URL_SCHEMES:
-            log.error(
-                "[GCAT] ✗  Refusing %-20s: redirected to unsupported scheme '%s'",
-                label, scheme,
-            )
+        refusal = _url_refusal(url)
+        if refusal is not None:
+            log.error("[GCAT] ✗  Refusing %-20s: redirected to %s", label, refusal)
             return None
     log.error(
         "[GCAT] ✗  Refusing %-20s: more than %d redirects", label, _MAX_REDIRECT_HOPS,
@@ -309,13 +339,26 @@ def _get_rechecking_every_hop(
     return None
 
 
+def _read_capped(resp: httpx.Response, label: str) -> bytes | None:
+    """The response body, or ``None`` once it passes :data:`_MAX_TSV_BYTES`."""
+    body = bytearray()
+    for chunk in resp.iter_bytes():
+        body.extend(chunk)
+        if len(body) > _MAX_TSV_BYTES:
+            log.error(
+                "[GCAT] ✗  Refusing %-20s: body passed the %d byte cap", label, _MAX_TSV_BYTES,
+            )
+            return None
+    return bytes(body)
+
+
 def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None]:
     """Download and parse one GCAT TSV.  Returns (key, df) or (key, None)."""
     url = meta["url"]
     label = meta["label"]
-    scheme = urllib.parse.urlsplit(url).scheme
-    if scheme not in _ALLOWED_URL_SCHEMES:
-        log.error("[GCAT] ✗  Refusing %-20s: unsupported URL scheme '%s'", label, scheme)
+    refusal = _url_refusal(url)
+    if refusal is not None:
+        log.error("[GCAT] ✗  Refusing %-20s: %s", label, refusal)
         return key, None
 
     log.info("[GCAT] ↓  %-24s  %s", label, url)
@@ -334,12 +377,18 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             resp = _get_rechecking_every_hop(client, url, label)
             if resp is None:
                 return key, None
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+                body = _read_capped(resp, label)
+            finally:
+                resp.close()
+            if body is None:
+                return key, None
             # Not resp.text: that runs charset detection, and GCAT serves
             # mixed encodings. Decoding as UTF-8 with replacement is what the
             # parser below has always been handed.
-            raw = resp.content.decode("utf-8", errors="replace")
-    except Exception as exc:
+            raw = body.decode("utf-8", errors="replace")
+    except Exception as exc:   # noqa: BLE001 - one unreachable dataset must not take the others down
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
         return key, None
 
@@ -359,7 +408,7 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             on_bad_lines="skip",
             low_memory=False,
         )
-    except Exception as exc:
+    except ValueError as exc:   # pandas' ParserError and EmptyDataError are ValueErrors
         log.error("[GCAT] ✗  Parse error %-20s: %s", label, exc)
         return key, None
 
@@ -375,17 +424,13 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
 
 # ── Bulk async downloader (used by /refresh only) ─────────────────────────────
 
-async def _load_all() -> None:
-    """Concurrently download all 28 GCAT datasets into _CACHE.
-    Called only by the manual Refresh endpoint — never blocks panel load.
-    """
-    global _FETCHING, _CACHE_FETCH_TIME, _FETCH_ERRORS
-    if _FETCHING:
-        log.info("[GCAT] Refresh already running — skipping duplicate")
-        return
+async def _download_all() -> dict[str, dict[str, Any]]:
+    """Download every GCAT dataset and return the ones that loaded.
 
-    _FETCHING = True
-    _FETCH_ERRORS = []
+    Touches nothing shared but the error list: the caller swaps the result in.
+    """
+    errors: list[str] = []
+    _REFRESH.errors = errors
     log.info("[GCAT] ══ Starting full refresh (%d datasets) ══", len(DATASETS))
     t_start = time.perf_counter()
 
@@ -396,43 +441,91 @@ async def _load_all() -> None:
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    loaded = failed = 0
+    fresh: dict[str, dict[str, Any]] = {}
     for result in results:
         if isinstance(result, BaseException):
             log.error("[GCAT] gather exception: %s", result)
-            _FETCH_ERRORS.append(str(result))
-            failed += 1
+            errors.append(str(result))
             continue
         key, df = result
-        if df is not None:
-            _CACHE[key] = {
-                "df": df,
-                "fetched_at": datetime.now(UTC),
-                "rows": len(df),
-                "cols": len(df.columns),
-                "columns": list(df.columns),
-            }
-            loaded += 1
-        else:
-            _FETCH_ERRORS.append(f"failed: {DATASETS[key]['label']}")
-            failed += 1
+        if df is None:
+            errors.append(f"failed: {DATASETS[key]['label']}")
+            continue
+        fresh[key] = _entry(df)
 
-    _CACHE_FETCH_TIME = datetime.now(UTC)
-    _FETCHING = False
-    total_rows = sum(v["rows"] for v in _CACHE.values())
-    elapsed = time.perf_counter() - t_start
     log.info(
         "[GCAT] ══ Refresh done: %d loaded / %d failed / %d total rows (%.1fs) ══",
-        loaded, failed, total_rows, elapsed,
+        len(fresh), len(DATASETS) - len(fresh), sum(v["rows"] for v in fresh.values()),
+        time.perf_counter() - t_start,
     )
+    return fresh
+
+
+def _entry(df: pd.DataFrame) -> dict[str, Any]:
+    """One cache entry for a downloaded dataset."""
+    return {
+        "df": df,
+        "fetched_at": datetime.now(UTC),
+        "rows": len(df),
+        "cols": len(df.columns),
+        "columns": list(df.columns),
+    }
+
+
+async def _refresh_cache() -> None:
+    """Re-download every dataset and swap the results into the shared cache.
+
+    The cache was cleared before the running-refresh check, so a second
+    refresh wiped what the first was loading, and the flag was reset without
+    try/finally (F-139). Now a refresh already running is left to finish, the
+    old entries serve until the new ones are in, a dataset that fails to
+    download keeps its previous copy, and the swap has no await inside it.
+    """
+    if _REFRESH.fetching:
+        log.info("[GCAT] Refresh already running — skipping duplicate")
+        return
+    _REFRESH.fetching = True
+    try:
+        fresh = await _download_all()
+        merged = {**_CACHE, **fresh}
+        _CACHE.clear()
+        _CACHE.update(merged)
+        _REFRESH.fetched_at = datetime.now(UTC)
+    finally:
+        _REFRESH.fetching = False
+
+
+#: One lock per dataset, so N concurrent first views download it once.
+_KEY_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+async def _ensure_cached(key: str) -> bool:
+    """Download *key* on first access, once however many views ask at once."""
+    if key in _CACHE:
+        return True
+    lock = _KEY_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        if key in _CACHE:
+            return True
+        loop = asyncio.get_event_loop()
+        _, df_result = await loop.run_in_executor(_EXECUTOR, _fetch_one, key, DATASETS[key])
+        if df_result is None:
+            return False
+        _CACHE[key] = _entry(df_result)
+        log.info("[GCAT] '%s' cached: %s rows", log_safe(key), log_safe(len(df_result)))
+        return True
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _panel_context() -> dict[str, Any]:
-    """Build common context dict for gcat_panel.html."""
+def _panel_context(user: User) -> dict[str, Any]:
+    """Build common context dict for gcat_panel.html.
+
+    *can_refresh* hides the Refresh control from operators, who would get 403.
+    """
     gcat_total_rows = sum(v["rows"] for v in _CACHE.values())
     return {
+        "can_refresh": user.role == "admin",
         "datasets": DATASETS,
         "categories": CATEGORIES,
         "cache_rows": {k: v["rows"] for k, v in _CACHE.items()},
@@ -444,11 +537,11 @@ def _panel_context() -> dict[str, Any]:
         "loaded_count": len(_CACHE),
         "total_count": len(DATASETS),
         "last_updated": (
-            _CACHE_FETCH_TIME.strftime("%Y-%m-%d %H:%M UTC")
-            if _CACHE_FETCH_TIME else "—"
+            _REFRESH.fetched_at.strftime("%Y-%m-%d %H:%M UTC")
+            if _REFRESH.fetched_at else "—"
         ),
-        "fetch_errors": _FETCH_ERRORS,
-        "fetching": _FETCHING,
+        "fetch_errors": _REFRESH.errors,
+        "fetching": _REFRESH.fetching,
     }
 
 
@@ -464,16 +557,20 @@ def _page_data(
     if not cached:
         return None
 
-    df: pd.DataFrame = cached["df"].copy()
+    # No copy: every step below returns a new frame, and copying the whole
+    # cached table on each page request cost more than the page (F-254).
+    df: pd.DataFrame = cached["df"]
     total_rows = len(df)
 
     if q.strip():
         qlo = q.strip().lower()
         mask = (
-            df.apply(lambda col: col.astype(str).str.lower().str.contains(qlo, na=False))
+            # regex=False: the operator's text is text. As a pattern "(" raised
+            # and a catastrophic one could hold a thread indefinitely (F-138).
+            df.apply(lambda col: col.astype(str).str.lower().str.contains(qlo, na=False, regex=False))
             .any(axis=1)
         )
-        df = df[mask]
+        df = df.loc[mask]
         log.debug("[GCAT] search '%s' on %s: %d → %d rows", log_safe(q), key, total_rows, len(df))
 
     filtered_rows = len(df)
@@ -481,7 +578,7 @@ def _page_data(
     if sort and sort in df.columns:
         try:
             df = df.sort_values(sort, ascending=bool(asc), key=lambda s: s.str.lower())
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             log.warning("[GCAT] sort failed for '%s': %s", log_safe(sort), exc)
     elif sort:
         log.warning("[GCAT] sort column '%s' not found in %s", log_safe(sort), key)
@@ -529,7 +626,7 @@ async def gcat_panel(
         "[GCAT] Panel opened by %s — %d/%d datasets in cache",
         log_safe(current_user.username), len(_CACHE), len(DATASETS),
     )
-    return render(request, "partials/gcat_panel.html", _panel_context())
+    return render(request, "partials/gcat_panel.html", _panel_context(current_user))
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -537,7 +634,7 @@ async def gcat_table(
     request: Request,
     dataset: str = Query("currentcat"),
     page: int = Query(1, ge=1),
-    q: str = Query(""),
+    q: str = Query("", max_length=_MAX_QUERY),
     sort: str = Query(""),
     asc: int = Query(1),
     current_user: User = Depends(require_login),
@@ -561,30 +658,20 @@ async def gcat_table(
         )
 
     if dataset not in _CACHE:
-        log.info("[GCAT] On-demand download: '%s' for %s", dataset, log_safe(current_user.username))
-        loop = asyncio.get_event_loop()
-        _, df_result = await loop.run_in_executor(
-            _EXECUTOR, _fetch_one, dataset, DATASETS[dataset]
+        log.info("[GCAT] On-demand download: '%s' for %s", log_safe(dataset), log_safe(current_user.username))
+    if not await _ensure_cached(dataset):
+        label = DATASETS[dataset]["label"]
+        return HTMLResponse(
+            '<div class="gcat-error-state">'
+            f'<span class="gcat-error-icon">✗</span>'
+            f'Failed to download <strong>{label}</strong>. '
+            'Check your network connection and try again.'
+            '</div>'
         )
-        if df_result is None:
-            label = DATASETS[dataset]["label"]
-            return HTMLResponse(
-                '<div class="gcat-error-state">'
-                f'<span class="gcat-error-icon">✗</span>'
-                f'Failed to download <strong>{label}</strong>. '
-                'Check your network connection and try again.'
-                '</div>'
-            )
-        _CACHE[dataset] = {
-            "df": df_result,
-            "fetched_at": datetime.now(UTC),
-            "rows": len(df_result),
-            "cols": len(df_result.columns),
-            "columns": list(df_result.columns),
-        }
-        log.info("[GCAT] '%s' cached: %d rows", dataset, len(df_result))
 
-    td = _page_data(dataset, page=page, q=q, sort=sort, asc=asc)
+    # Off the event loop: a search scans every column of tens of thousands of rows.
+    loop = asyncio.get_running_loop()
+    td = await loop.run_in_executor(None, lambda: _page_data(dataset, page=page, q=q, sort=sort, asc=asc))
     if td is None:
         return HTMLResponse('<div class="gcat-error-state">Dataset unavailable.</div>')
 
@@ -594,24 +681,22 @@ async def gcat_table(
 @router.post("/refresh", response_class=HTMLResponse)
 async def gcat_refresh(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: User = Depends(require_admin),
 ) -> HTMLResponse:
-    """Clear the in-memory cache and re-download all 28 GCAT datasets.
+    """Re-download all 28 GCAT datasets into the cache every operator shares.
 
-    This is the slow path (~10-30s). Use it intentionally via the Refresh button.
-    Returns a fresh panel HTML on completion.
+    This is the slow path (~10-30s). Admin only: any operator could clear the
+    shared cache and start 28 downloads (F-139). A refresh already running is
+    left to finish, and the panel shows the cache as it stands.
     """
-    global _CACHE_FETCH_TIME
     log.info(
-        "[GCAT] ══ Manual refresh by %s — clearing %d cached datasets ══",
+        "[GCAT] ══ Manual refresh by %s — %d datasets cached ══",
         log_safe(current_user.username), len(_CACHE),
     )
-    _CACHE.clear()
-    _CACHE_FETCH_TIME = None
-    await _load_all()
+    await _refresh_cache()
 
     log.info(
         "[GCAT] Refresh complete for %s — %d datasets, %d total rows",
         log_safe(current_user.username), len(_CACHE), sum(v["rows"] for v in _CACHE.values()),
     )
-    return render(request, "partials/gcat_panel.html", _panel_context())
+    return render(request, "partials/gcat_panel.html", _panel_context(current_user))

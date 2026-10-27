@@ -27,6 +27,27 @@ def _operator_session(client: object, username: str, password: str) -> dict[str,
     return dict(resp.cookies)
 
 
+def _row(client: object, cookies: dict[str, str], username: str) -> tuple[str, str]:  # type: ignore[type-arg]
+    """(row id, row HTML) of *username* in the admin table; fails if absent.
+
+    These tests searched in a loop and broke out with no assertion after it,
+    so they passed when the row was missing (audit F-156).
+    """
+    import re
+
+    page = client.get("/admin/users", cookies=cookies).content.decode()  # type: ignore[attr-defined]
+    for match in re.finditer(r'<tr id="user-row-(\d+)".*?</tr>', page, re.S):
+        if f">{username}<" in match.group(0):
+            return match.group(1), match.group(0)
+    raise AssertionError(f"{username} is not in the admin user table")
+
+
+def _role(client: object, cookies: dict[str, str], username: str) -> str:  # type: ignore[type-arg]
+    """The role badge the admin table shows for *username*."""
+    row = _row(client, cookies, username)[1]
+    return "admin" if ">admin</span>" in row else "operator"
+
+
 class TestAdminAccess:
     def test_unauthenticated_redirects(self, client: object) -> None:
         resp = client.get("/admin/users", follow_redirects=False)  # type: ignore[attr-defined]
@@ -142,137 +163,97 @@ class TestEditUser:
         assert f'id="user-row-{user_id}"'.encode() in cancel_resp.content
 
     def test_update_role(self, client: object) -> None:
-        """POST /admin/users/{id} changes the role."""
+        """POST /admin/users/{id} changes the role, as the table then shows."""
         cookies = _admin_session(client)
-        # Find new_op's row id
-        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        content = resp.content.decode()
-        # Find the row that contains new_op
-        import re
-        # Look for user-row id near "new_op" text
-        matches = re.findall(r'id="user-row-(\d+)"', content)
-        assert matches
-
-        # Try updating each user until we find new_op by checking the response
-        found = False
-        for uid in matches:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"new_op" in edit_resp.content:
-                update_resp = client.post(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}",
-                    data={"role": "operator", "new_password": ""},
-                    cookies=cookies,
-                    headers=csrf_headers(cookies),
-                )
-                assert update_resp.status_code == 200
-                found = True
-                break
-        assert found, "new_op user not found in admin table"
+        uid, _ = _row(client, cookies, "new_op")
+        assert _role(client, cookies, "new_op") == "operator"
+        promote = client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}", data={"role": "admin", "new_password": ""},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        assert promote.status_code == 200
+        assert _role(client, cookies, "new_op") == "admin"
+        # Put it back: other tests count the admins.
+        client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}", data={"role": "operator", "new_password": ""},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+        assert _role(client, cookies, "new_op") == "operator"
 
     def test_password_reset(self, client: object) -> None:
         """POST /admin/users/{id} with new_password resets the password."""
         cookies = _admin_session(client)
-        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-        matches = re.findall(r'id="user-row-(\d+)"', resp.content.decode())
-        for uid in matches:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"new_op" in edit_resp.content:
-                reset_resp = client.post(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}",
-                    data={"role": "operator", "new_password": "newpassword99"},
-                    cookies=cookies,
-                    headers=csrf_headers(cookies),
-                )
-                assert reset_resp.status_code == 200
-                assert b"updated" in reset_resp.content.lower()
-                # Verify new password works
-                login_resp = client.post(  # type: ignore[attr-defined]
-                    "/login",
-                    data={"username": "new_op", "password": "newpassword99"},
-                    follow_redirects=False,
-                )
-                assert login_resp.status_code == 302
-                break
+        uid, _ = _row(client, cookies, "new_op")
+        reset_resp = client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}",
+            data={"role": "operator", "new_password": "newpassword99"},
+            cookies=cookies,
+            headers=csrf_headers(cookies),
+        )
+        assert reset_resp.status_code == 200
+        assert b"updated" in reset_resp.content.lower()
+        old = client.post(  # type: ignore[attr-defined]
+            "/login", data={"username": "new_op", "password": "hunter2"}, follow_redirects=False,
+        )
+        new = client.post(  # type: ignore[attr-defined]
+            "/login", data={"username": "new_op", "password": "newpassword99"}, follow_redirects=False,
+        )
+        assert (old.status_code, new.status_code) == (401, 302)
 
 
 class TestDeleteUser:
     def test_delete_operator(self, client: object) -> None:
-        """Admin can delete an operator account."""
+        """Admin can delete an operator account, and it is gone from the table."""
         cookies = _admin_session(client)
-        # Create a throwaway user
         client.post(  # type: ignore[attr-defined]
             "/admin/users",
             data={"username": "throwaway", "password": "pass", "role": "operator"},
             cookies=cookies,
             headers=csrf_headers(cookies),
         )
-        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-        matches = re.findall(r'id="user-row-(\d+)"', resp.content.decode())
-        for uid in matches:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"throwaway" in edit_resp.content:
-                del_resp = client.delete(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
-                )
-                assert del_resp.status_code == 200
-                # Username appears in flash message but must not appear in any user row
-                assert b'id="user-row-' + uid.encode() + b'"' not in del_resp.content
-                assert b"deleted" in del_resp.content.lower()
-                break
+        uid, _ = _row(client, cookies, "throwaway")
+        del_resp = client.delete(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
+        )
+        assert del_resp.status_code == 200
+        assert b"deleted" in del_resp.content.lower()
+        page = client.get("/admin/users", cookies=cookies).content  # type: ignore[attr-defined]
+        assert f'id="user-row-{uid}"'.encode() not in page
 
     def test_cannot_delete_self(self, client: object) -> None:
         """Admin cannot delete their own account."""
         cookies = _admin_session(client)
-        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-        matches = re.findall(r'id="user-row-(\d+)"', resp.content.decode())
-        for uid in matches:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"testadmin" in edit_resp.content:
-                del_resp = client.delete(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
-                )
-                assert del_resp.status_code == 200
-                assert b"cannot delete your own" in del_resp.content.lower()
-                break
+        uid, _ = _row(client, cookies, "testadmin")
+        del_resp = client.delete(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}", cookies=cookies, headers=csrf_headers(cookies)
+        )
+        assert del_resp.status_code == 200
+        assert b"cannot delete your own" in del_resp.content.lower()
+        assert _row(client, cookies, "testadmin")[0] == uid
 
-    def test_cannot_delete_last_admin(self, client: object) -> None:
-        """Cannot delete an admin if they are the only admin remaining."""
+    def test_cannot_demote_the_last_admin(self, client: object) -> None:
+        """The last admin cannot be demoted.
+
+        This was named for deletion but tested demotion. Deleting the last
+        admin cannot be asked for over HTTP: the only admin left is the one
+        asking, and the self-delete guard answers first. The delete guard
+        itself is driven directly, under a race, in test_last_admin_race.
+        """
         cookies = _admin_session(client)
-        # Delete second_admin first so testadmin is the only admin
-        resp = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-        matches = re.findall(r'id="user-row-(\d+)"', resp.content.decode())
-        second_admin_id = None
-        for uid in matches:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"second_admin" in edit_resp.content:
-                second_admin_id = uid
-                break
-        if second_admin_id:
-            client.delete(f"/admin/users/{second_admin_id}", cookies=cookies, headers=csrf_headers(cookies))  # type: ignore[attr-defined]
-
-        # Now try to delete testadmin — should fail (cannot delete self)
-        # Instead create a second admin and try to delete it when it's the last one:
-        # This test verifies the last-admin guard fires; we use a fresh scenario
-        # by checking that after second_admin is gone, demoting testadmin fails.
-        resp2 = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        matches2 = re.findall(r'id="user-row-(\d+)"', resp2.content.decode())
-        for uid in matches2:
-            edit_resp = client.get(f"/admin/users/{uid}/edit", cookies=cookies)  # type: ignore[attr-defined]
-            if b"testadmin" in edit_resp.content:
-                # Try to demote to operator — last admin guard
-                demote_resp = client.post(  # type: ignore[attr-defined]
-                    f"/admin/users/{uid}",
-                    data={"role": "operator", "new_password": ""},
-                    cookies=cookies,
-                    headers=csrf_headers(cookies),
-                )
-                assert demote_resp.status_code == 200
-                assert b"last admin" in demote_resp.content.lower()
-                break
+        # Leave testadmin as the only admin.
+        if ">second_admin<" in client.get("/admin/users", cookies=cookies).content.decode():  # type: ignore[attr-defined]
+            second, _ = _row(client, cookies, "second_admin")
+            client.delete(f"/admin/users/{second}", cookies=cookies, headers=csrf_headers(cookies))  # type: ignore[attr-defined]
+        uid, _ = _row(client, cookies, "testadmin")
+        demote_resp = client.post(  # type: ignore[attr-defined]
+            f"/admin/users/{uid}",
+            data={"role": "operator", "new_password": ""},
+            cookies=cookies,
+            headers=csrf_headers(cookies),
+        )
+        assert demote_resp.status_code == 200
+        assert b"last admin" in demote_resp.content.lower()
+        assert _role(client, cookies, "testadmin") == "admin"
 
 
 class TestFlashResponseShape:

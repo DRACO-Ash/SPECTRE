@@ -37,6 +37,11 @@ ZIP="${1:-}"
 CACHE="${DS_CACHE_DIR:-.cache/ds-analyzer}"
 BIN="${DS_ANALYZER_BIN:-$CACHE/analyzer}"
 REPO="https://gitlab.com/gitlab-org/security-products/analyzers/dependency-scanning.git"
+# Pinned and verified (audit F-183). It cloned whatever HEAD was current on
+# first use and then reused that cache. To move the pin, update both lines from
+# `git ls-remote --tags "$REPO"` and delete the cache directory.
+DS_TAG="v2.5.18"
+DS_COMMIT="e175fc63ac2e159d3f2ef9c19a5f914b2c5b126a"
 
 if [ ! -x "$BIN" ]; then
     command -v go >/dev/null 2>&1 || {
@@ -46,7 +51,13 @@ if [ ! -x "$BIN" ]; then
     }
     echo "  building the analyser (first run only)..."
     mkdir -p "$CACHE"
-    [ -d "$CACHE/src/.git" ] || git clone --depth 1 --quiet "$REPO" "$CACHE/src"
+    [ -d "$CACHE/src/.git" ] || git clone --depth 1 --branch "$DS_TAG" --quiet "$REPO" "$CACHE/src"
+    GOT=$(git -C "$CACHE/src" rev-parse HEAD)
+    [ "$GOT" = "$DS_COMMIT" ] || {
+        echo "FAIL: $CACHE/src is at $GOT, not the pinned $DS_TAG ($DS_COMMIT)."
+        echo "      Delete $CACHE to rebuild from the pinned commit."
+        exit 1
+    }
     ( cd "$CACHE/src" && go build -o ../analyzer ./cmd/dependency-scanning )
     BIN="$CACHE/analyzer"
 fi

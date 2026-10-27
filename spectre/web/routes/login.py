@@ -13,19 +13,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from spectre.config.settings import get_settings
-from spectre.web.auth import _COOKIE_NAME, hash_password, make_session_cookie, verify_password
+from spectre.web.auth import (
+    _COOKIE_NAME,
+    _SESSION_MAX_AGE,
+    current_user_for,
+    hash_password,
+    make_session_cookie,
+    verify_password,
+)
+from spectre.web.csrf import LOGIN_COOKIE, new_login_token
 from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
+from spectre.web.planning_state import clear_account_state
 from spectre.web.rate_limit import SlidingWindowLimiter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Session lifetime in seconds (8 hours), matching auth._SESSION_MAX_AGE.
-_SESSION_COOKIE_MAX_AGE = 28_800
+# The cookie lives exactly as long as the token inside it is honoured, so the
+# value is imported rather than copied beside a comment (audit F-259).
+_SESSION_COOKIE_MAX_AGE = _SESSION_MAX_AGE
+# A login page left open longer than this asks for a reload before sign-in.
+_LOGIN_TOKEN_MAX_AGE = 3600
 
 # 10 failed attempts per source address per 300 s. This is the console's only
 # unauthenticated credential endpoint and it is CSRF-exempt, so until this
@@ -105,10 +117,46 @@ def _client_address(request: Request) -> str:
     return client.host if client else "unknown"
 
 
+def render_login(request: Request, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    """The login page, carrying a fresh login token as a cookie and a field.
+
+    Every rendering of the form issues one, so whichever page the operator
+    signs in from, the POST can prove it came from here (audit F-151).
+    """
+    token = new_login_token()
+    response = render(request, "login.html", {"error": error, "login_csrf": token}, status_code=status_code)
+    response.set_cookie(
+        key=LOGIN_COOKIE,
+        value=token,
+        httponly=True,
+        secure=get_settings().session_cookie_secure,
+        samesite="strict",
+        max_age=_LOGIN_TOKEN_MAX_AGE,
+        path="/login",
+    )
+    return response
+
+
+def _refuse_rate_limited(request: Request, address: str, username: str) -> HTMLResponse:
+    """Log and render the 429 login page for an exhausted budget."""
+    # Both values are caller-supplied, so both are flattened before they reach
+    # the log (pythonsecurity:S5145).
+    logger.warning(
+        "Login rate limit reached: address=%s username=%s",
+        log_safe(address), log_safe(username),
+    )
+    # A browser is what reaches this endpoint, so the refusal is the login page
+    # carrying an explanation, not a bare JSON body the operator would have to
+    # read in the network tab.
+    return render_login(
+        request, "Too many failed sign-in attempts. Wait a few minutes and try again.", status_code=429,
+    )
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
-    return render(request, "login.html", {"error": None})
+    return render_login(request)
 
 
 @router.post("/login", response_model=None)
@@ -119,6 +167,15 @@ async def post_login(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse | RedirectResponse:
     """Authenticate and set a session cookie, or re-render with an error."""
+    address = _client_address(request)
+    # An exhausted budget is judged BEFORE the password is compared. Judged
+    # after, as it was, a locked account still accepted the right password, so
+    # 429 refused only wrong guesses and a brute force was bounded by bcrypt
+    # throughput rather than by the limiter (audit F-008). Both tiers answer
+    # alike for a real and an absent account, so this read leaks nothing.
+    if await _LOGIN_ADDRESS_LIMITER.is_blocked(address) or await _LOGIN_USERNAME_LIMITER.is_blocked(username):
+        return _refuse_rate_limited(request, address, username)
+
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
@@ -132,37 +189,25 @@ async def post_login(
     matched = await run_in_threadpool(verify_password, password, hashed)
 
     if user is None or not matched:
-        address = _client_address(request)
         # Both tiers are charged before either is judged, so an attempt always
         # costs both budgets. Short-circuiting on the first would let a caller
         # who has exhausted the address tier keep probing a username for free.
         address_ok = await _LOGIN_ADDRESS_LIMITER.is_allowed(address)
         username_ok = await _LOGIN_USERNAME_LIMITER.is_allowed(username)
         if not (address_ok and username_ok):
-            # Both values are caller-supplied, so both are flattened before
-            # they reach the log (pythonsecurity:S5145).
-            logger.warning(
-                "Login rate limit reached: address=%s username=%s",
-                log_safe(address), log_safe(username),
-            )
-            # A browser is what reaches this endpoint, so the refusal is the
-            # login page carrying an explanation, not a bare JSON body the
-            # operator would have to read in the network tab.
-            return render(
-                request,
-                "login.html",
-                {"error": "Too many failed sign-in attempts. Wait a few minutes and try again."},
-                status_code=429,
-            )
+            return _refuse_rate_limited(request, address, username)
         # The only unauthenticated path that writes an operator-supplied value
         # into the audit log, so the only one an attacker can pick freely. A bare
         # %s here lets a newline in the form field forge a second record that
         # reads exactly like a successful login (pythonsecurity:S5145).
         logger.warning("Failed login attempt for username: %s", log_safe(username))
-        return render(request, "login.html", {"error": "Invalid username or password."}, status_code=401)
+        return render_login(request, "Invalid username or password.", status_code=401)
 
-    logger.info("Successful login: %s (role=%s)", log_safe(username), user.role)
-    token = make_session_cookie(username, user.session_generation or 0)
+    logger.info("Successful login: %s (role=%s)", log_safe(username), log_safe(user.role))
+    token = make_session_cookie(
+        username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
+        session_id=secrets.token_urlsafe(16),
+    )
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
         key=_COOKIE_NAME,
@@ -175,19 +220,17 @@ async def post_login(
     return response
 
 
-async def _revoke_sessions(db: AsyncSession, username: str) -> None:
-    """Advance *username*'s session generation, ending every live session.
+async def _revoke_sessions(db: AsyncSession, user: User) -> None:
+    """Advance *user*'s session generation, ending every live session.
 
     Every session, not only the cookie that asked: the operator signing out of
     a shared terminal has no way to know which other copies of their token are
     still in circulation, and that is the case this control exists for.
     """
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
-    if user is None:
-        return
     user.session_generation = (user.session_generation or 0) + 1
     await db.commit()
+    # Every sign-in it ended loses its planning state, UDL password included.
+    clear_account_state(user.id)
 
 
 @router.post("/logout", response_model=None)
@@ -196,21 +239,21 @@ async def post_logout(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RedirectResponse:
     """Revoke the session, clear the cookie, wipe planning state, then redirect."""
-    from spectre.web.auth import decode_session_cookie  # noqa: PLC0415
-    from spectre.web.planning_state import clear_session_state  # noqa: PLC0415
-
     cookie = request.cookies.get(_COOKIE_NAME)
     if cookie:
-        username = decode_session_cookie(cookie)
-        if username:
+        # Only a live session may end the account's sessions. Decoded without
+        # that check, as it was, a token already revoked by an earlier logout
+        # could keep ending the operator's new sessions for the rest of its
+        # 8 hours (audit F-152).
+        user = await current_user_for(cookie, db)
+        if user is not None:
             # Deleting the cookie only asks the browser to forget it. The token
             # itself stayed signed and valid for its full 8 hours, so a copy
             # captured before this point still answered 200 from /admin/users.
             # On a shared operations-room terminal logout is the operator's
             # only way to end a session, so it has to end it on the server.
-            await _revoke_sessions(db, username)
-            clear_session_state(username)
-            logger.info("Session state cleared on logout for: %s", log_safe(username))
+            await _revoke_sessions(db, user)
+            logger.info("Session state cleared on logout for: %s", log_safe(user.username))
 
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=_COOKIE_NAME)

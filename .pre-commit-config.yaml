@@ -8,29 +8,30 @@ repos:
     hooks:
       - id: gitleaks
 
-  # Ruff — fast Python linting and import sorting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.0
+  # Ruff, Bandit and Mypy run from the environment, so the hook versions are
+  # the hash-locked ones in requirements-dev.txt. Pinned hook repos sat at
+  # ruff 0.9.0, bandit 1.7.10 and mypy 1.14.0 against locks of 0.16.5, 1.9.4
+  # and 2.3.1, so a commit passed hooks that CI then failed (audit F-279).
+  # Install the dev set first: pip install --require-hashes -r requirements-dev.txt
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
-
-  # Bandit — Python security linter
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
-    hooks:
+        name: ruff (locked version)
+        entry: ruff check --fix
+        language: system
+        types: [python]
       - id: bandit
-        args: [-c, pyproject.toml, -ll]
-        additional_dependencies: ["bandit[toml]"]
-
-  # Mypy — type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
-    hooks:
+        name: bandit (locked version)
+        entry: bandit -c pyproject.toml -ll
+        language: system
+        types: [python]
+        exclude: ^tests/
       - id: mypy
-        args: [--ignore-missing-imports]
-        additional_dependencies:
-          - types-requests
+        name: mypy (locked version, as CI runs it)
+        entry: mypy spectre/ --ignore-missing-imports
+        language: system
+        types: [python]
+        pass_filenames: false
 
   # General hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks

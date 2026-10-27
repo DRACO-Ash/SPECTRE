@@ -44,9 +44,9 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 | Module | Contents |
 |--------|----------|
 | `constants.py` | Earth gravitational parameter (μ), radius, J2 coefficient, sidereal rate, unit conversions |
-| `maneuvers.py` | `hohmann_transfer()`, `bielliptic_transfer()`, `rendezvous()`, `proximity_rendezvous()` — all return ΔV vectors in VNB frame |
-| `transfers.py` | Lambert solver (universal variable method); two-impulse intercept ΔV |
-| `lambert.py` | Lambert targeting: multi-revolution solutions, batched evaluation |
+| `maneuvers.py` | the intercept solvers (`hohmann_intercept()`, `bielliptic_intercept()`, `phasing_intercept()` and the rest), each returning an `InterceptSolution` with per-burn ΔV |
+| `transfers.py` | Hohmann and bi-elliptic transfer costs from vis-viva closed forms |
+| `lambert.py` | Lambert solver (Curtis Algorithm 5.2, universal variables, bisection on z); multi-revolution solutions and the cheapest of them |
 | `tactical.py` | 17 solver categories: phasing orbit, CW radial separation, CW along-track drift, plane change, J2 RAAN drift, COLA avoidance, optimal evasion, GEO drift (longitude relocation), NMC safety ellipse, manoeuvre classification, intercept detectability, adversary intent prediction, intercept envelope, relative motion stability, manoeuvre fingerprinting, formation defence, minimum-time intercept |
 | `cw_geometry.py` | Clohessy-Wiltshire equations, Hill-frame relative motion, relative state vectors |
 | `propagator.py` | `TLEOrbit`: SGP4 propagation via `sgp4` library; `state_to_keplerian()`, `keplerian_to_state()` |
@@ -54,7 +54,7 @@ Pure-Python orbital mechanics. No GUI, no COM, no licensed software.
 | `pattern_of_life.py` | Historical TLE sequence analysis: period tracking, manoeuvre detection, activity classification, behavioural baseline; `PolAnalysis` result dataclass |
 | `tle_filter.py` | Cadence-based TLE clustering: `cluster_tles()`, `select_representative()`, `quality_flag_sequence()`, `filter_tle_history()` |
 | `tle_preprocessing.py` | Bridge between `tle_clustering/` (DBSCAN) and `spectre.astro`; `cluster_and_reduce_tle_cache()` used by Threat Sweep |
-| `monte_carlo.py` | `ManoeuvreHypothesis`, `ManoeuvreType`, `MANOEUVRE_ARCHETYPES`; `run_monte_carlo()` (ProcessPoolExecutor, RK45 + J2 + drag); `MonteCarloResult` with P5/P50/P95 and regime probabilities |
+| `monte_carlo.py` | `ManoeuvreHypothesis`, `ManoeuvreType`, `MANOEUVRE_ARCHETYPES`; `run_monte_carlo()` (ThreadPoolExecutor, RK45 + J2 + drag); `MonteCarloResult` with P5/P50/P95 and regime probabilities |
 | `notso.py` | `NOTSORecord` parser (USSPACECOM format), `correlate_notsos_with_manoeuvres()`, `OperatorBehaviourProfile` |
 | `photometry.py` | `PhotometryObservation`, geometric corrections (range normalisation, Rozenberg airmass), `fit_baseline()` (quadratic phase function, sigma-clipping), `detect_change()` (Student's t-test), `PhotometryChangeAssessment` |
 
@@ -72,9 +72,6 @@ Pure Python. No I/O. Contains:
 - **decision.py** — Decision Engine Phase 1: `ActionType`, `AdversaryAction`, `FriendlyResponse`,
   `OutcomeMetrics`, `Scenario`, `ScenarioResult`, `compute_outcome_metrics()`,
   `rank_responses()`, `find_robust_response()`, `evaluate_scenario()`
-- **geometry.py** — stateless helpers (AER, closure rate, orbital elements from TLE)
-- **maneuver_planner.py** — `ManeuverPlanner`: validates search config, sorts options by ΔV
-- **exceptions.py** — domain exception types
 
 ### `spectre/training/`
 
@@ -99,12 +96,12 @@ FastAPI application. All operator access via browser — no desktop install requ
 - **database.py** — async SQLAlchemy engine + admin account bootstrap from env vars
 - **models.py** — `User` ORM model
 - **deps.py** — centralised `get_templates()` shared by all route modules
-- **planning_state.py** — per-session in-memory state (`SessionState`): blue/red asset lists, UDL credentials, intercept history, `deque`-backed run log (O(1) eviction at 500 entries)
+- **planning_state.py** — per-session in-memory state (`SessionState`): blue/red asset lists, UDL credentials, intercept history, `deque`-backed run log (O(1) eviction at 200 entries)
 - **routes/**
   - `login.py` — `GET/POST /login`, `POST /logout`
   - `operator.py` — dashboard, asset CRUD, log, orbital events
   - `udl.py` — UDL login/logout, TLE fetch (latest + epoch modes), HRR watchlist, orbit catalogue search, NOTSO cache sync
-  - `maneuver.py` — full intercept engine: 23 methods across Classical, Tactical, Advanced Analysis, and Decision Support categories; trade-space data endpoint
+  - `maneuver.py` — full intercept engine: 23 solvers across Classical, Proximity, Orbital, Defensive and Assessment categories, plus two declared aliases (Rendezvous, Proximity); trade-space data endpoint
   - `threat.py` — Threat Sweep: batch Hohmann evaluation + Lambert refinement across HRR target groups; sentinel pattern; per-epoch sweep (now/apogee/perigee/nodes); TLE clustering
   - `pol.py` — Pattern of Life: historical TLE analysis, manoeuvre detection, cadence filtering, NOTSO correlation, Monte Carlo simulation, photometry assessment
   - `decision.py` — `GET /plan/decision/panel` (scenario builder form), `POST /plan/decision/evaluate` (runs `evaluate_scenario()`)
@@ -112,7 +109,7 @@ FastAPI application. All operator access via browser — no desktop install requ
   - `gcat.py` — GCAT panel: 28 TSV datasets from planet4589.org, in-memory cache, on-demand per-dataset download, search/sort/paginate
   - `training.py` — Training mode: session management, scenario dispatch, tutorial progress, gamification XP awards
 - **templates/** — Jinja2 HTML: `base.html`, `login.html`, `operator.html`, `training.html`, and HTMX partials for every panel and result type
-- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, `SPECTRE_logo.svg`
+- **static/** — `style.css` (Bluestaq dark ops theme), `Chart.js`, `hammer.min.js`, `chartjs-plugin-zoom.min.js`, and the theme package under `spectre-theme/` (logos and icons)
 
 ### `spectre/data/`
 
@@ -171,7 +168,7 @@ All operator actions return HTML fragments that HTMX swaps into targeted DOM ele
 
 ### Off-thread blocking calls
 
-Downloads and compute-intensive solvers that would block FastAPI's async event loop are dispatched via `asyncio.get_running_loop().run_in_executor(_EXECUTOR, ...)` using a shared `ThreadPoolExecutor`. The Monte Carlo engine additionally uses `ProcessPoolExecutor` for CPU-bound sample propagation.
+Downloads and compute-intensive solvers that would block FastAPI's async event loop are dispatched via `asyncio.get_running_loop().run_in_executor(_EXECUTOR, ...)` using a shared `ThreadPoolExecutor`. The Monte Carlo engine uses its own `ThreadPoolExecutor` for sample propagation. The equations of motion are Python, so the GIL is held for most of each step and the threads give little speed-up (see the note in `spectre/astro/monte_carlo.py`).
 
 ### In-memory session state
 
@@ -199,18 +196,19 @@ Training sessions are DB-persisted (`TrainingSession` ORM model). XP awards and 
 
 | Layer | Test type | Notes |
 |-------|-----------|-------|
-| `spectre/astro/` | unit | No external deps; fast; 74+ parametrised tactical cases |
+| `spectre/astro/` | unit | No external deps; fast; solver results checked against closed forms, published examples or independent propagation |
 | `spectre/astro/monte_carlo.py` | unit | Smoke (100 samples), convergence, regime classification, RIC→ECI |
 | `spectre/astro/notso.py` | unit | Parser, all four correlation match cases, behaviour profile |
 | `spectre/astro/photometry.py` | unit | Geometric corrections, sigma-clipping, t-test significance |
 | `spectre/astro/tle_filter.py` | unit | Cadence clustering, representative selection, quality flags |
-| `domain/` | unit | Pure-Python models; decision engine minimax/EV/maximin selectors |
+| `domain/` | unit | Pure-Python models; decision engine minimax/EV/minimin selectors (modelled estimates) |
 | `training/` | unit | XP progression, level unlock gates, scenario unlock logic |
 | `web/routes/` | integration (TestClient) | In-memory SQLite; covers login, operator, UDL, maneuver, training |
 | `tle_clustering/` | unit + integration | DBSCAN pipeline: parser → clustering → selection; full pipeline |
 
-Integration tests that require a live network (UDL, GCAT) are guarded by
-`@pytest.mark.integration` and skipped unless `SPECTRE_INTEGRATION_TESTS=1` is set.
+No test depends on a live network: UDL calls are stubbed, and the one GCAT
+route test that attempts a real download passes whether or not it succeeds.
+There is no marker or switch for network tests, because there are none.
 
 ---
 

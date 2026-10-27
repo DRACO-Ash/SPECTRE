@@ -1,6 +1,6 @@
 # Intercept Engine
 
-The SPECTRE intercept engine is implemented entirely in pure Python across `spectre/astro/` and dispatched by `spectre/web/routes/maneuver.py`. It provides 23 solver methods grouped into four categories.
+The SPECTRE intercept engine is implemented entirely in pure Python across `spectre/astro/` and dispatched by `spectre/web/routes/maneuver.py`. It provides 23 solvers in five categories, and two declared aliases.
 
 > **Historical note:** An earlier version of SPECTRE used STK Astrogator COM integration for intercept planning (`spectre/intercept_engine/`, `spectre/stk_adapter/`). That architecture was removed when the codebase migrated to pure-Python astrodynamics. This document describes the current implementation.
 
@@ -8,48 +8,64 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 ## Method Categories
 
+The batch runs each of the 23 solvers once and ranks the results.
+
 ### Classical Transfers
 
 | Method | Key input | Output |
 |--------|-----------|--------|
 | **Lambert** | coast_h, tof_h | Δv₁ (VNB), Δv₂ (VNB), miss distance |
-| **Hohmann** | — | Δv₁, Δv₂, transfer time |
+| **Hohmann** | — | Δv₁, Δv₂, transfer time, propagated miss |
 | **Bi-elliptic** | intermediate SMA | Δv₁, Δv₂, Δv₃, transfer time |
-| **Rendezvous** | coast_h | Δv (VNB), relative velocity at arrival |
-| **Proximity** | coast_h, stand-off km | Δv (VNB), range at arrival |
+| **Min-Time** | ΔV budget | fastest feasible transfer within the budget |
 
-### Tactical Manoeuvres
-
-| Method | Description |
-|--------|-------------|
-| **Phasing** | Phasing orbit to advance/retard along-track position by a target angle |
-| **CW Radial** | Clohessy-Wiltshire radial separation — set a prescribed radial offset |
-| **CW Along-Track** | Clohessy-Wiltshire along-track drift — controlled drift in the Hill frame |
-| **Plane Change** | Combined or pure plane change; node-crossing timing |
-| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target; coast or active |
-| **COLA** | Collision avoidance manoeuvre — minimum ΔV to achieve a target miss distance |
-| **Evasion** | Optimal defensive evasion — maximise miss distance per ΔV unit |
-
-### Advanced Analysis
+### Proximity Operations
 
 | Method | Description |
 |--------|-------------|
-| **GEO Drift** | Longitude relocation via drift orbit; east/west drift rate; station acquisition epoch |
+| **Phasing** | Phasing orbit to advance or retard along-track position; Revolutions field |
+| **R-bar hop** | Clohessy-Wiltshire radial separation to a prescribed radial offset |
+| **V-bar hop** | Hops along the velocity vector; Hops field |
+| **H-bar hop** | Hops across track; Hops field |
+| **CW Drift** | Clohessy-Wiltshire along-track drift, controlled in the Hill frame |
 | **NMC** | Natural Motion Circumnavigation — passive safety ellipse sizing and phasing |
-| **Manoeuvre Detect** | Classify a TLE-pair delta as manoeuvre type (Hohmann, plane change, combined, drag) |
-| **Detectability** | Assess observability of an intercept given ground-based sensor geometry |
 
-### Decision Support
+### Orbital Manoeuvres
 
 | Method | Description |
 |--------|-------------|
+| **Plane Change** | Combined or pure plane change; node-crossing timing |
+| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target |
+| **GEO Drift** | Longitude relocation via drift orbit; Drift (days) field |
+
+### Defensive
+
+| Method | Description |
+|--------|-------------|
+| **COLA** | Collision avoidance — minimum ΔV to achieve a target miss distance |
+| **Evasion** | Defensive evasion against the threat's predicted position, within the ΔV budget |
+| **Formation Defence** | Formation-aware defensive burn |
+
+### Assessment
+
+These return a 0-100 score, not a miss distance.
+
+| Method | Description |
+|--------|-------------|
+| **Detectability** | Observability of an intercept given ground-based sensor geometry |
 | **Intent Predict** | Adversary intent prediction from approach geometry, ΔV budget, and NOTSO history |
-| **Intercept Envelope** | Reachability analysis — ΔV-feasible intercept positions over the planning horizon |
 | **Stability** | Relative motion stability classification (bounded, drifting, diverging) |
 | **Fingerprint** | Behavioural classification of a manoeuvre sequence against known archetypes |
-| **Formation Defence** | Formation-aware COLA — simultaneous protection of multiple Blue assets |
-| **Terrain** | Orbital regime risk mapping — identify crowded altitude/inclination bands |
-| **Min-Time** | Minimum-time intercept — fastest feasible transfer given a ΔV budget |
+| **Terrain** | Orbital regime risk mapping — crowded altitude and inclination bands |
+| **Manoeuvre Detect** | Classify a TLE-pair delta as a manoeuvre type |
+| **Intercept Envelope** | Reachability — ΔV-feasible intercepts over the planning horizon |
+
+### Aliases
+
+**Rendezvous** and **Proximity** are not separate solvers. Rendezvous runs the
+Hohmann solver and Proximity the Lambert transfer; the batch leaves them out,
+and a result requested under either name says which solver it ran
+(`_METHOD_ALIASES` in `spectre/web/routes/maneuver.py`).
 
 ---
 
@@ -57,9 +73,9 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 | Module | Responsibility |
 |--------|---------------|
-| `spectre/astro/maneuvers.py` | Hohmann, bi-elliptic, rendezvous, proximity |
-| `spectre/astro/transfers.py` | Lambert solver (universal variable method) |
-| `spectre/astro/lambert.py` | Lambert targeting: multi-revolution, batched evaluation |
+| `spectre/astro/maneuvers.py` | the intercept solvers: Hohmann, bi-elliptic, phasing, hops, plane change, drift, COLA, evasion and the rest |
+| `spectre/astro/transfers.py` | Hohmann and bi-elliptic transfer costs (vis-viva closed forms) |
+| `spectre/astro/lambert.py` | Lambert solver: universal variables, single and multiple revolutions |
 | `spectre/astro/tactical.py` | All 17 tactical and decision-support categories |
 | `spectre/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
 | `spectre/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
@@ -70,50 +86,66 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 ## Result Format
 
-Every method returns an `InterceptResult` dataclass:
+Every method returns an `InterceptResult` dataclass (`spectre/domain/models.py`).
+Delta-V is in m/s throughout.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `method` | `InterceptMethod` | Enum value identifying the solver |
-| `total_delta_v_km_s` | `float` | Total ΔV magnitude (km/s) |
+| `red_name` | `str` | The interceptor |
+| `blue_name` | `str` | The target |
+| `method` | `InterceptMethod` | Enum value identifying the solver (an alias names the solver it ran in `notes`) |
 | `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
-| `intercept_range_km` | `float` | Miss distance at arrival epoch (km) |
-| `transfer_time_h` | `float` | Coast time from burn to intercept (hours) |
-| `notes` | `str` | Human-readable summary |
+| `total_delta_v_m_s` | `float` | Sum of the burn magnitudes (m/s) |
+| `arrival_epoch` | `datetime` | UTC time the interceptor reaches its final position |
+| `intercept_range_km` | `float` | Miss distance at arrival (km), and nothing else |
+| `notes` | `str` | Provenance line: the solver, or for a heuristic assessment that it is an uncalibrated score |
+| `option_id` | `str` | Unique result identifier (`INT_…`) |
+| `score` | `float \| None` | An assessment's 0 to 100 score, the envelope's feasible count, or a drift method's angular gap; `None` for a trajectory |
+| `score_kind` | `str` | What `score` measures, with its unit where it has one |
+| `provenance` | `str` | `physics` for a solved quantity, `heuristic` for a score of uncalibrated weights, shown with a "modelled estimate" badge |
 
 Each `BurnResult`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `burn_epoch` | `datetime` | UTC time of burn |
-| `delta_v_km_s` | `float` | Burn magnitude (km/s) |
-| `dv_radial` | `float` | Radial (R) component in VNB frame |
-| `dv_along_track` | `float` | Along-track (T) / in-track component |
-| `dv_cross_track` | `float` | Cross-track (N) component |
-| `location_label` | `str` | Human label (e.g. "Apogee", "Ascending Node") |
+| `burn_number` | `int` | Position in the sequence, from 1 |
+| `segment_name` | `str` | Display label, "Burn 1", "Burn 2" and so on |
+| `burn_epoch` | `datetime` | UTC time of the burn |
+| `delta_v_m_s` | `float` | Burn magnitude (m/s) |
+| `dv_prograde` | `float` | Along the velocity vector (m/s) |
+| `dv_normal` | `float` | Along the orbit normal (m/s) |
+| `dv_radial` | `float` | Along the radius vector (m/s) |
 
 ---
 
 ## Route Dispatch (`maneuver.py`)
 
-`POST /plan/maneuver/calculate` — main intercept solver route:
+All under `/plan/maneuver`, behind login.
 
-1. Parse form fields: `red_satno`, `blue_satno`, `method`, `coast_h`, `tof_h`, plus method-specific params
-2. Fetch TLEs from `SessionState` (assets must already be loaded)
-3. Resolve `InterceptMethod` enum → dispatch to the appropriate `spectre.astro` function
-4. Wrap result in `InterceptResult`; append to `state.intercept_history`
-5. Return `partials/intercept_result.html` fragment via HTMX swap
+`POST /plan/maneuver/apply-all-intercepts`: what the Intercept Engine form posts.
+Runs each of the 23 solvers once on the same inputs (red and blue satellite,
+manoeuvre start, coast, time of flight, target distance, ΔV budget, revolutions,
+hops, drift days, data mode), ranks the results, replaces the trade-space history
+with them and returns `partials/all_intercepts_result.html`.
 
-`GET /plan/maneuver/tradespace` — trade-space scatter data:
+`POST /plan/maneuver/apply-intercept`: one method by name, for scripted use. It
+appends its result to the history (the latest 200 are kept) and returns
+`partials/intercept_result.html`.
 
-- Returns all `InterceptResult` objects from `state.intercept_history` as a Chart.js dataset
-- Called automatically after the second intercept result is added (HTMX trigger)
+`GET /plan/maneuver/trade-space-data`: the history as JSON points (ΔV in m/s,
+transfer time in minutes, `miss_km` or, for an assessment method, `score`),
+fetched when the operator renders the trade-space chart.
+
+`POST /plan/maneuver/clear-history`: empties the history.
+
+`GET /plan/maneuver/orbital-events`: apogee, perigee and node times for the
+selected satellites.
 
 ---
 
 ## Trade-Space Plot
 
-After two or more intercept results are computed, a scatter plot appears automatically showing all results in ΔV vs transfer-time space, colour-coded by method. Zoom/pan is enabled via `hammer.min.js` + `chartjs-plugin-zoom.min.js`.
+Once results exist, the operator renders a scatter plot of the history in ΔV against transfer-time space, colour-coded by method, from the trade-space bar. Assessment methods carry a score, not a miss, and their points say so. Zoom/pan is enabled via `hammer.min.js` + `chartjs-plugin-zoom.min.js`.
 
 Use this to identify the optimal trade-off between fuel cost and time of arrival. Methods that appear in the lower-left quadrant (low ΔV, short time) are the most efficient under the current orbital geometry.
 
@@ -123,7 +155,18 @@ Use this to identify the optimal trade-off between fuel cost and time of arrival
 
 ### Lambert (universal variable method)
 
-The Lambert solver in `transfers.py` uses the universal variable (Battin) formulation. It iterates on the universal variable `x` using Halley's method until the desired time of flight is matched. The solution is always computed for the prograde direction; retrograde and multi-revolution solutions are available via `lambert.py`.
+The Lambert solver is in `spectre/astro/lambert.py`. It is Curtis, *Orbital
+Mechanics for Engineering Students*, Algorithm 5.2: universal variables with
+Stumpff functions, solved for z by bracketed bisection on the time-of-flight
+residual. The transfer direction follows the departure velocity, so a
+retrograde orbit gets a retrograde arc. `solve_lambert` returns the
+zero-revolution arc; `solve_lambert_all` also returns the multi-revolution
+solutions (each band (2πN)² < z < (2π(N+1))², both branches), and
+`cheapest_lambert` the one costing least, which the intercept engine and the
+envelope sweep use. Branches are bracketed on a fixed grid of z, so a pair
+whose minimum time of flight only just reaches the request can be missed.
+Validated against Curtis Example 5.2 and by propagating each solution
+(tests/unit/test_lambert_validation.py, test_lambert_multi_revolution.py).
 
 ### J2 RAAN drift
 

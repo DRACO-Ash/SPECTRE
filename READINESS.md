@@ -3,6 +3,8 @@
 **Band: Likely after fixes** · Weighted score **94%** (17 of 18 applicable dimensions pass)
 Archetype: server (container) · Template: **python** · Version **0.5.24**
 Assessed 21 August 2026 against branch `claude/app-store-readiness-09re0q`.
+This is a point-in-time record of version 0.5.24. Later releases are not
+reassessed here, and its counts and figures describe that build only.
 All six SonarQube quality gate conditions are met on changed code.
 
 This is a pre-flight estimate, not the binding App Store decision. The platform's

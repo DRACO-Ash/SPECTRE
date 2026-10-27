@@ -67,7 +67,6 @@
         hx-swap="innerHTML"
         id="scenario-submit-form">
     <input type="hidden" name="result_id" value="{{ result_id }}">
-    <input type="hidden" name="time_taken_minutes" id="time-taken-input" value="0">
     <input type="hidden" name="objectives_completed" id="objectives-json" value="[]">
 
     <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
@@ -168,16 +167,17 @@
               style="flex:1; font-size:0.7rem; font-weight:700; padding:0.45rem 0">
         {% if scored %}Submit &amp; Score{% else %}Finish Exploration{% endif %}
       </button>
-      <form hx-post="/training/scenario/{{ scenario.id }}/reset"
-            hx-target="#scenario-detail"
-            hx-swap="innerHTML"
-            style="display:inline">
-        <input type="hidden" name="result_id" value="{{ result_id }}">
-        <button type="submit" class="btn-secondary" style="font-size:0.68rem"
-                title="Return to briefing — this attempt is cancelled with no side effects">
-          &#8635; Reset
-        </button>
-      </form>
+      {# Not a nested form: a <form> inside the scoring form is dropped by the
+         parser and its </form> closes the scoring form, which made Reset a
+         submit button of the score (audit F-050). htmx sends the enclosing
+         form's fields, result_id among them, with this button's request. #}
+      <button type="button" class="btn-secondary" style="font-size:0.68rem"
+              hx-post="/training/scenario/{{ scenario.id }}/reset"
+              hx-target="#scenario-detail"
+              hx-swap="innerHTML"
+              title="Return to briefing — this attempt is cancelled with no side effects">
+        &#8635; Reset
+      </button>
       <button type="button" class="btn-secondary"
               style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
               onclick="document.getElementById('scenario-detail').innerHTML=''"
@@ -194,7 +194,6 @@
 (function() {
   {% if scenario.time_limit_minutes %}
   var remaining = {{ scenario.time_limit_minutes * 60 }};
-  var startTime = Date.now();
   var timerInterval = setInterval(function() {
     remaining--;
     if (remaining < 0) {
@@ -207,9 +206,9 @@
     document.getElementById('timer-display').textContent = m + ':' + (s < 10 ? '0' : '') + s;
     if (remaining < 120) document.getElementById('timer-display').style.color = '#ef4444';
   }, 1000);
+  // The countdown is a display only: the server measures the elapsed time
+  // from when the attempt started and judges the time limit itself.
   document.getElementById('scenario-submit-form').addEventListener('submit', function() {
-    var elapsed = (Date.now() - startTime) / 60000;
-    document.getElementById('time-taken-input').value = elapsed.toFixed(2);
     clearInterval(timerInterval);
   });
   {% endif %}

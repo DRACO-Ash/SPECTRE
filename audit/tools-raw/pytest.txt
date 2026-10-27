@@ -1,0 +1,150 @@
+$ SECRET_KEY=<ci value> pytest tests/ -q -p no:cacheprovider --cov=spectre --cov=tle_clustering --cov-branch --cov-report=term-missing --cov-report=xml:<scratch>/cache/coverage.xml --cov-report=json:<scratch>/cache/coverage.json --durations=15
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+........................................................................ [ 15%]
+........................................................................ [ 18%]
+........................................................................ [ 22%]
+........................................................................ [ 26%]
+........................................................................ [ 30%]
+....................................ss.................................. [ 34%]
+........................................................................ [ 37%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 91%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+..........................                                               [100%]
+=============================== warnings summary ===============================
+../venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  <venv>/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/integration/test_admin_routes.py: 48 warnings
+tests/integration/test_all_intercepts_ranking.py: 6 warnings
+tests/integration/test_audit_log_integrity.py: 7 warnings
+tests/integration/test_login_hardening.py: 17 warnings
+tests/integration/test_plan_export.py: 17 warnings
+tests/integration/test_root_contract.py: 6 warnings
+tests/integration/test_security_headers.py: 1 warning
+tests/integration/test_threat_screen_route.py: 8 warnings
+tests/integration/test_web_routes.py: 8 warnings
+tests/integration/test_web_routes_extended.py: 55 warnings
+tests/integration/test_xss_escaping.py: 7 warnings
+tests/unit/test_csrf.py: 1 warning
+  <venv>/lib/python3.12/site-packages/starlette/testclient.py:455: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.3-final-0 ________________
+
+Name                                      Stmts   Miss Branch BrPart  Cover   Missing
+-------------------------------------------------------------------------------------
+spectre/__init__.py                           2      0      0      0   100%
+spectre/app_logging/__init__.py               0      0      0      0   100%
+spectre/astro/__init__.py                     0      0      0      0   100%
+spectre/astro/constants.py                   35      3     14      3    88%   75, 82, 85
+spectre/astro/cw_geometry.py                181      2     40      2    98%   281, 464
+spectre/astro/dv_estimation.py              409     19     90     14    93%   239->241, 720, 740, 744, 798-799, 808, 950, 964, 969-971, 984, 991, 1119, 1128, 1130, 1153-1157
+spectre/astro/events.py                      72      3     20      1    96%   79-80, 103
+spectre/astro/lambert.py                    111      5     32      5    93%   80, 119, 129, 284, 318
+spectre/astro/maneuvers.py                  513     17     52     18    93%   118-119, 237->240, 478->484, 548->556, 712, 714, 792, 796, 855, 857, 920->923, 989, 1129, 1131, 1346, 1348, 1352, 1408-1411
+spectre/astro/monte_carlo.py                219     19     28      9    89%   76, 307->315, 310->315, 378, 392, 451, 465, 482-483, 562, 574-575, 654-667
+spectre/astro/notso.py                      275     29     96      8    85%   133-170, 211-217, 247->243, 308, 313-314, 326->325, 345->347, 377, 471->474, 571->569, 585->584
+spectre/astro/pattern_of_life.py            448     18     88     10    95%   359, 391-392, 610, 658, 669, 687-690, 810-811, 834, 837, 851, 998-1000
+spectre/astro/photometry.py                 349     33    116     23    88%   121-127, 218, 247, 296->331, 300, 303-304, 313, 410, 418, 421, 427, 430, 436, 480, 492, 512, 519, 586-589, 613, 623, 625, 627, 633, 686, 693-694, 709-710
+spectre/astro/propagator.py                 151      9     26      3    93%   70, 75, 115-116, 121-122, 148, 229, 233
+spectre/astro/tactical.py                   833     60    244     45    90%   78, 218, 276, 361-362, 506, 517, 599, 607, 614, 814, 848, 863-864, 868-873, 881, 883, 1070, 1075, 1077, 1180, 1186, 1192, 1197->1199, 1200->1203, 1208, 1222, 1254, 1361, 1484-1486, 1573, 1575, 1577, 1651->1653, 1653->1655, 1656, 1667->1669, 1712, 1723-1724, 1793-1798, 1866-1867, 1885, 1900-1901, 1906-1907, 1909-1910, 2014-2016, 2023, 2032-2034, 2095->2099, 2161->2165
+spectre/astro/tle_filter.py                  87      1     32      1    98%   75, 184->161
+spectre/astro/tle_preprocessing.py           96     15     16      2    85%   152-156, 192-206, 234-243, 248-249
+spectre/astro/transfers.py                   41      0      2      1    98%   27->exit
+spectre/config/__init__.py                    0      0      0      0   100%
+spectre/config/constants.py                  11      0      0      0   100%
+spectre/config/settings.py                  175      1     44      1    99%   147
+spectre/data/__init__.py                      0      0      0      0   100%
+spectre/data/intel.py                        24      4      8      3    78%   29, 41->39, 44-46
+spectre/data/notso_cache.py                  73      3     20      1    94%   80->84, 163-165
+spectre/domain/__init__.py                    0      0      0      0   100%
+spectre/domain/decision.py                  170     19     46      4    88%   198-201, 207, 214-232, 327
+spectre/domain/exceptions.py                  5      0      0      0   100%
+spectre/domain/geometry.py                   39      0      4      0   100%
+spectre/domain/maneuver_planner.py           20      0     14      0   100%
+spectre/domain/manoeuvre_calibration.py     130      2     24      2    97%   381, 609
+spectre/domain/models.py                    199      0      0      0   100%
+spectre/domain/pol_assessment.py            382     30     88     21    89%   240, 272, 276, 376, 444, 446, 583, 608-610, 616, 630-631, 690, 713, 758, 763, 797->804, 810, 882, 884, 898-899, 913-914, 918-919, 931-932, 980, 1025, 1078
+spectre/domain/scenario.py                   53     17     14      1    64%   70-74, 84-85, 90-106, 109
+spectre/domain/threat_assessment.py         189      0     50      0   100%
+spectre/training/__init__.py                  0      0      0      0   100%
+spectre/training/gamification.py            142      9     32      4    91%   92-94, 228, 244, 282, 304-306
+spectre/training/models.py                  100     18      0      0    82%   66-67, 77-78, 88-89, 147-150, 158-161, 169-172
+spectre/training/scenarios.py                92      6      0      0    93%   177-182
+spectre/training/tutorials.py                40      6      2      0    86%   51-56
+spectre/web/__init__.py                       0      0      0      0   100%
+spectre/web/_entrypoint.py                    8      1      2      1    80%   49
+spectre/web/app.py                          120      2     16      2    97%   174, 205
+spectre/web/auth.py                          70      4     18      3    92%   30, 126, 135-136
+spectre/web/csrf.py                          46      3     14      1    93%   35, 90-91
+spectre/web/database.py                      82      3     22      3    94%   114, 180, 182
+spectre/web/deps.py                          16      0      2      1    94%   47->50
+spectre/web/format_units.py                  37      2     14      0    96%   34-35
+spectre/web/health.py                        44      0      2      0   100%
+spectre/web/log_safety.py                    10      0      2      0   100%
+spectre/web/models.py                        19      0      2      0   100%
+spectre/web/planning_state.py                85      7      8      1    91%   95, 128->130, 156, 161, 167-169, 175
+spectre/web/rate_limit.py                    50      4     10      2    90%   113, 126->exit, 141, 146, 151
+spectre/web/routes/__init__.py                0      0      0      0   100%
+spectre/web/routes/admin.py                 122     12     40     10    86%   127, 134, 172, 191, 212, 215, 223->229, 231-232, 264-265, 277-278
+spectre/web/routes/decision.py               76     11     10      2    85%   112-113, 127-128, 140-141, 146, 173, 182-184
+spectre/web/routes/gcat.py                  168     70     38      3    56%   348-349, 362-364, 383-424, 463-500, 578-591, 605-617
+spectre/web/routes/geometry.py               81     10     20      3    87%   90, 92, 141-142, 157, 176-183
+spectre/web/routes/login.py                  73      1     12      3    95%   188, 203->215, 205->215
+spectre/web/routes/maneuver.py              371     36    108     22    87%   269, 284, 338, 754->762, 760, 762->770, 768, 772, 816-817, 825->827, 827->829, 836, 842-843, 846, 873-878, 982->984, 984->986, 1085, 1091-1092, 1095, 1216-1235, 1261, 1272, 1279, 1286, 1448
+spectre/web/routes/operator.py              145     28     24      9    78%   120-122, 126-128, 139-141, 151->158, 182-184, 187-189, 200-202, 212->219, 231-235, 270-274, 304, 335-336, 345-347
+spectre/web/routes/plan.py                   64      0     16      0   100%
+spectre/web/routes/pol.py                   341    203     88      6    38%   63-103, 114-132, 146-160, 229-242, 256-262, 274, 301-303, 312-321, 324, 339, 359-361, 383, 400, 675-702, 766-811, 827-857, 900-905, 922-927, 944-954, 965-969, 977, 1002-1086, 1104-1106, 1121-1156
+spectre/web/routes/threat.py                670    333    198     22    48%   77-152, 159-173, 195, 197-199, 218, 222-224, 238-269, 281-285, 298-301, 327-353, 362-427, 474, 481, 496-502, 512->510, 541->548, 599, 698, 701, 717-721, 746, 769, 933, 943-944, 962, 1008, 1054-1065, 1077-1085, 1097-1111, 1123-1150, 1164-1181, 1204-1240, 1250-1255, 1266-1392, 1421-1439, 1474-1475, 1481-1485, 1502, 1547-1551, 1755-1803
+spectre/web/routes/training.py              273     65     76     13    70%   65->67, 155-171, 192, 225, 238-242, 332-337, 344-354, 390-391, 406-429, 440->447, 448-457, 463-465, 486->470, 630-636
+spectre/web/routes/udl.py                   490    308    128      7    37%   102-139, 153-188, 197-214, 224-243, 262-319, 340-347, 360-371, 383-389, 429, 434, 435->437, 463->476, 473, 505->499, 608-625, 634, 707-783, 803-804, 821-859, 926-959, 981-1000, 1021-1067, 1086-1191
+tle_clustering/__init__.py                   12      0      2      0   100%
+tle_clustering/clustering.py                 51      1     14      1    97%   238
+tle_clustering/config.py                     25      5     10      5    71%   119, 123, 127, 131, 133
+tle_clustering/models.py                     58      0      0      0   100%
+tle_clustering/parser.py                     49      5     16      2    89%   74, 138-143, 146-147
+tle_clustering/selection.py                  19      0      2      0   100%
+-------------------------------------------------------------------------------------
+TOTAL                                      9341   1462   2156    304    82%
+Coverage XML written to file <scratch>/cache/coverage.xml
+Coverage JSON written to file <scratch>/cache/coverage.json
+Required test coverage of 74.0% reached. Total coverage: 81.84%
+============================= slowest 15 durations =============================
+8.94s call     tests/unit/test_monte_carlo.py::TestRunMonteCarlo::test_leo_stays_in_leo
+8.89s call     tests/unit/test_monte_carlo.py::TestRunMonteCarlo::test_regime_probabilities_sum_to_one
+8.72s call     tests/unit/test_monte_carlo.py::TestRunMonteCarlo::test_smoke_test_leo
+8.70s call     tests/unit/test_monte_carlo.py::TestRunMonteCarlo::test_sma_percentiles_ordered
+5.97s call     tests/integration/test_login_hardening.py::TestTheLimiterCannotBeOutrunByRotatingTheHeader::test_a_rotating_source_address_still_hits_the_ceiling
+4.95s teardown tests/unit/test_health.py::TestStorageProbe::test_reports_a_stalled_mount_rather_than_hanging
+4.16s call     tests/integration/test_login_hardening.py::TestTheLimiterCannotBeOutrunByRotatingTheHeader::test_a_successful_sign_in_is_never_charged
+3.68s call     tests/integration/test_login_hardening.py::TestTheLimiterCannotBeOutrunByRotatingTheHeader::test_one_account_being_locked_does_not_lock_another
+3.34s call     tests/integration/test_login_hardening.py::TestTheLimiterCannotBeOutrunByRotatingTheHeader::test_an_account_that_does_not_exist_is_metered_the_same_way
+1.60s call     tests/integration/test_threat_screen_route.py::TestTheScreenRefusesClearly::test_a_fresh_session_can_screen_without_udl
+1.41s call     tests/integration/test_admin_bootstrap.py::TestBreakGlassReset::test_reset_is_off_unless_explicitly_enabled
+1.30s call     tests/unit/test_deployment_contract.py::TestNoTestAssertsAFileIsPresent::test_every_non_application_path_goes_through_the_guard
+1.21s call     tests/unit/test_db_pool_contract.py::TestPoolArguments::test_recycling_an_in_memory_database_would_destroy_it
+1.00s call     tests/integration/test_login_hardening.py::TestSessionRevocation::test_a_password_change_ends_a_live_session
+0.99s call     tests/integration/test_login_hardening.py::TestRevocationDoesNotRefuseTheNextSession::test_a_password_change_does_not_refuse_the_session_that_follows_it
+=========================== short test summary info ============================
+SKIPPED [1] tests/unit/test_deployment_contract.py:796: python template: manifests ship by design
+SKIPPED [1] tests/unit/test_deployment_contract.py:813: python template: manifests ship by design
+[exit 0]

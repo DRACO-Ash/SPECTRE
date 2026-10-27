@@ -1,19 +1,18 @@
 """Per-session in-memory planning state for SPECTRE web console.
 
 In a single-node deployment this module holds run results and asset lists
-in a plain dict keyed by session username.  Replace with a Redis-backed
+in a plain dict keyed by sign-in (account id and session id).  Replace with a Redis-backed
 store for multi-node cloud deployments.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from spectre.domain.models import (
     BlueAsset,
@@ -24,7 +23,7 @@ from spectre.domain.models import (
     RedTrack,
     ThreatAssessment,
 )
-from spectre.web.log_safety import log_safe
+from spectre.web.models import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +39,12 @@ class SessionState:
         blue_assets: List of friendly assets added in this session.
         red_tracks: List of threat tracks added in this session.
         results: Last set of :class:`InterceptWindow` results from ``/plan``.
-        log_queue: Async queue of log-line strings for SSE streaming.
-        log_entries: Fixed-size deque of recent log entries (polling fallback).
-            Oldest entries are evicted automatically when the deque is full.
+        log_entries: The newest 200 log entries; older ones are evicted.
     """
 
     blue_assets: list[BlueAsset] = field(default_factory=list)
     red_tracks: list[RedTrack] = field(default_factory=list)
     results: list[InterceptWindow] = field(default_factory=list)
-    log_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     log_entries: deque[str] = field(
         default_factory=lambda: deque(maxlen=_MAX_LOG_ENTRIES)
     )
@@ -98,23 +94,64 @@ class SessionState:
             f"hrr_cache={len(self.hrr_tle_cache)})"
         )
 
-    def append_log(self, message: str) -> None:
-        """Append *message* to the session log.
+    def tle_of(self, name: str) -> str | None:
+        """The TLE of the blue asset or red track called *name*, if any.
 
-        The underlying :class:`collections.deque` automatically evicts the
-        oldest entry when the log is full — no manual size check required.
+        Three routes kept their own copy of this lookup (audit F-241).
+        """
+        for asset in self.blue_assets:
+            if asset.stk_name == name:
+                return asset.tle
+        for track in self.red_tracks:
+            if track.stk_name == name:
+                return track.tle
+        return None
+
+    def append_log(self, message: str) -> None:
+        """Append *message* to the session log, evicting the oldest past 200.
+
+        The log used to be copied to an unbounded queue that nothing read, so
+        every line a session wrote was retained (audit F-154).
         """
         self.log_entries.append(message)
-        with contextlib.suppress(asyncio.QueueFull):
-            self.log_queue.put_nowait(message)
 
 
-# Module-level store: username → SessionState.
-_store: dict[str, SessionState] = {}
+# Module-level store: one sign-in → SessionState, with when it was created.
+#
+# Keyed by SessionKey (account id and the sign-in's random id), not the
+# username. Keyed by name, the state outlived the account: a recreated
+# namesake inherited the old holder's UDL password and results (audit F-148),
+# and every concurrent sign-in of a user drove UDL with whichever password the
+# last one entered (audit F-044).
+_store: dict[SessionKey, tuple[float, SessionState]] = {}
+
+# No token is accepted after this long (spectre.web.auth._SESSION_MAX_AGE), so
+# state older than it can never be reached again and is dropped.
+_STATE_MAX_AGE_S = 28_800
 
 
-def get_session_state(username: str) -> SessionState:
-    """Return the :class:`SessionState` for *username*, creating it if absent.
+class _HasSessionKey(Protocol):
+    session_key: SessionKey | None
+
+
+def _key_of(owner: SessionKey | _HasSessionKey) -> SessionKey:
+    if isinstance(owner, SessionKey):
+        return owner
+    if owner.session_key is None:
+        raise RuntimeError("planning state requested for a request with no authenticated sign-in")
+    return owner.session_key
+
+
+def _prune(now: float) -> None:
+    for key in [k for k, (created, _) in _store.items() if now - created > _STATE_MAX_AGE_S]:
+        del _store[key]
+
+
+def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
+    """Return the :class:`SessionState` for this sign-in, creating it if absent.
+
+    *owner* is the authenticated user from ``require_login``, which carries the
+    sign-in's key, or a :class:`SessionKey` directly.
 
     New sessions are pre-populated with the default HRR object list, and with
     any element sets that came with it, so the threat sweep and the asset
@@ -123,26 +160,39 @@ def get_session_state(username: str) -> SessionState:
     object, so seeding the list alone would populate a dropdown that then
     refuses to run.
     """
-    if username not in _store:
+    key = _key_of(owner)
+    now = time.monotonic()
+    _prune(now)
+    if key not in _store:
         state = SessionState()
         if _default_hrr_objects:
             state.hrr_objects = list(_default_hrr_objects)
         if _default_hrr_tles:
             state.hrr_tle_cache.update(_default_hrr_tles)
             state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
-        _store[username] = state
-        # The session key arrives from the signed cookie, and before that from
-        # whatever an administrator typed into the create-user form, so it
-        # reaches this record from outside. A name carrying a newline would
-        # split one debug entry into two, and the second line is then
-        # indistinguishable from a genuine audit record (pythonsecurity:S5145).
-        logger.debug("Created new session state for user: %s", log_safe(username))
-    return _store[username]
+        _store[key] = (now, state)
+        logger.debug("Created new session state for account %d", key.user_id)
+    return _store[key][1]
 
 
-def clear_session_state(username: str) -> None:
-    """Remove and discard the state for *username* (e.g. on logout)."""
-    _store.pop(username, None)
+def has_session_state(key: SessionKey) -> bool:
+    """Whether this sign-in still holds planning state."""
+    return key in _store
+
+
+def clear_session_state(owner: SessionKey | _HasSessionKey) -> None:
+    """Remove and discard the state for one sign-in."""
+    _store.pop(_key_of(owner), None)
+
+
+def clear_account_state(user_id: int) -> None:
+    """Discard the state of every sign-in of an account.
+
+    Called when its sessions are revoked (logout, password change) and when it
+    is deleted, so its UDL password goes with them.
+    """
+    for key in [k for k in _store if k.user_id == user_id]:
+        del _store[key]
 
 
 # ── App-level on-orbit catalog (shared across all operator sessions) ─────────

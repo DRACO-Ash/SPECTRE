@@ -176,7 +176,7 @@ class TestUnknownInputsFailWide:
     """An unrecognised input must never be scored as MORE alarming."""
 
     def test_an_unknown_method_gets_the_most_permissive_kind(self) -> None:
-        assert kind_for_method("some_new_solver") is ManoeuvreKind.RENDEZVOUS
+        assert kind_for_method("some_new_solver") is ManoeuvreKind.UNCLASSIFIED
 
     def test_an_unknown_regime_uses_the_widest_band(self) -> None:
         known = classify_posture(150.0, "GEO", ManoeuvreKind.PHASING)

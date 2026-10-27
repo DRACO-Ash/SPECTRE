@@ -286,8 +286,8 @@ class TestKnownBurns:
 
         Pinned because an adversarial review read the overshoot backwards and
         reported the epoch-swept figure as under-reporting. It is not: against
-        the exact two-burn total the swept figure is accurate to better than
-        0.4% across this whole range, and the element figure is the one that
+        the exact two-burn total the swept figure is within the 1% pinned
+        below across this whole range, and the element figure is the one that
         drifts. A harness sharing the first-order formula cannot see that, so
         the truth value here is the exact Hohmann cost.
         """
@@ -481,7 +481,6 @@ class TestTwoTierReporting:
         assert pol.pairs_examined > 0
         assert pol.noise_model is not None
         assert pol.noise_model.samples == pol.pairs_examined
-        assert pol.rejected_below_floor >= 0
         assert (pol.rejected_below_floor
                 + len(pol.manoeuvres) + len(pol.candidate_manoeuvres)
                 + pol.rejected_on_evidence + pol.merged_duplicates) <= pol.pairs_examined
@@ -723,3 +722,12 @@ class TestPhysicsReviewFindings:
 def _build_pairs_safe(records: list[TLERecord]) -> list:
     from spectre.astro.pattern_of_life import _build_pairs
     return _build_pairs(records)
+
+
+def test_the_module_claims_no_accuracy_the_tests_do_not_pin() -> None:
+    """Audit F-106: the module claimed better than 0.1%; the tests pin 1%."""
+    import spectre.astro.dv_estimation as dv
+
+    doc = dv.__doc__ or ""
+    assert "better than 0.1%" not in doc
+    assert "better than 0.4%" not in doc

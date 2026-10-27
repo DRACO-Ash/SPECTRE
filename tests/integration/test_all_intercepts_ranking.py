@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import csrf_headers
+from tests.integration.conftest import session_state
 
 _ROUTE = "/plan/maneuver/apply-all-intercepts"
 _TEST_USER = "testadmin"
@@ -48,12 +49,11 @@ _BLUE_GEO = (
 
 
 @pytest.fixture()
-def seeded_state() -> Any:
+def seeded_state(auth_cookie: str) -> Any:
     """A session holding one red track and one blue asset, both real GEO TLEs."""
     from spectre.domain.models import BlueAsset, RedTrack
-    from spectre.web.planning_state import get_session_state
 
-    state = get_session_state(_TEST_USER)
+    state = session_state(auth_cookie)
     saved_red, saved_blue = list(state.red_tracks), list(state.blue_assets)
     saved_history = list(state.intercept_history)
     state.red_tracks = [RedTrack(name="RED-GEO", tle=_RED_GEO)]
@@ -122,12 +122,12 @@ class TestTheOperatorBudgetReachesTheSolver:
     ) -> None:
         """The message is the operator's only sight of the number in force.
 
-        1 m/s is 0.001 km/s. If the sweep were still on its old hardcoded
-        value the message would read 3.000, which is the defect stated out
-        loud in the user interface.
+        It is stated in m/s, the unit the operator set it in (audit F-239:
+        it read "0.001 km/s"). If the sweep were still on its old hardcoded
+        value the message would read 3000, the defect stated out loud.
         """
         row = _envelope_row(_run(client, auth_cookie, budget_m_s=1.0))
-        assert "0.001 km/s" in row, (
+        assert "within the 1 m/s budget" in row, (
             f"the refusal does not name the operator's budget; row was:\n{row[:600]}"
         )
         assert "3.000 km/s" not in row, "the hardcoded budget is back"

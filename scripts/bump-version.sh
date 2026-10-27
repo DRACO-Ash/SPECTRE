@@ -6,10 +6,11 @@
 # version so the platform, the pipeline log and the artefact on disk can never
 # disagree about which build is which.
 #
-# The version is single-sourced in spectre/__init__.py; hatch reads it from
-# there for pyproject, and the packager reads it for the zip name. This script
-# updates that one line, then rewrites the documentation references that quote
-# the version literally so they cannot drift.
+# The version is single-sourced in spectre/__init__.py, and the packager reads
+# it for the zip name. pyproject.toml carries a literal copy (setuptools, no
+# dynamic version), which this script rewrites alongside. README.md quotes it
+# too. READINESS.md is a dated assessment of one version and is left alone
+# (audit F-282, F-285).
 #
 # Usage:
 #   scripts/bump-version.sh patch     0.4.0 -> 0.4.1   (default)
@@ -68,7 +69,7 @@ SONAR_VERSION=$(sed -n 's/^sonar.projectVersion=\(.*\)$/\1/p' sonar-project.prop
 
 # Documentation quotes the version as literal text, so rewrite those too. Only
 # whole-version matches are replaced, guarded by a word boundary either side.
-DOCS="READINESS.md README.md"
+DOCS="README.md"
 for doc in $DOCS; do
     [ -f "$doc" ] || continue
     sed -i "s/\b${CURRENT}\b/${NEXT}/g" "$doc"

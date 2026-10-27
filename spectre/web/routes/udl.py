@@ -8,7 +8,10 @@ and are never written to disk or the database.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import time
+from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
 from math import inf
 from typing import Annotated, Any
@@ -17,10 +20,11 @@ import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
-from spectre.web.models import User
+from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import (
     SessionState,
     get_catalog_status,
@@ -47,12 +51,17 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
         day_frac = float(epoch_str[2:])
         year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
         day_int = int(day_frac)
+        # Day 0 or 367 is a corrupt field, not a date a timedelta should
+        # quietly roll into the neighbouring year (audit F-255).
+        if not 1 <= day_int <= _DAYS_IN_LEAP_YEAR:
+            return None
         frac = day_frac - day_int
         return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_int - 1 + frac)
     except (ValueError, IndexError):
         return None
 
-_UDL_BASE = "https://unifieddatalibrary.com/udl"
+_UDL_BASE = UDL_BASE_URL
+_DAYS_IN_LEAP_YEAR = 366
 # TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
 # than this cannot hold one and is logged whole rather than sliced to nothing.
 _TLE_EPOCH_FIELD_END = 32
@@ -123,7 +132,7 @@ async def fetch_tle_history_for_satno(
             )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_history_for_satno(%s) failed: %s", satno, exc)
         return []
 
@@ -165,8 +174,8 @@ async def fetch_tle_for_satno(
             )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
-        logger.warning("fetch_tle_for_satno(%s) failed: %s", satno, exc)
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("fetch_tle_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc))
         return None
 
     if isinstance(data, dict):
@@ -188,14 +197,62 @@ async def fetch_tle_for_satno(
     return (f"{line1}\n{line2}", data_mode_tag)
 
 
+#: Background tasks started at UDL login. The loop holds only weak references
+#: to tasks, so a discarded handle could be collected before the task finished
+#: (audit F-143); these sets hold them until they are done.
+_BACKGROUND: set[asyncio.Task[None]] = set()
+_SESSION_TASKS: dict[SessionKey | None, set[asyncio.Task[None]]] = {}
+
+#: The catalogue is pulled again once it is this old.
+_CATALOG_TTL_S = 24 * 3600.0
+class _CatalogClock:
+    """When the catalogue last loaded (time.monotonic), or None."""
+
+    loaded_at: float | None = None
+
+
+_CATALOG_CLOCK = _CatalogClock()
+
+
+def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
+    """Start *coro* as a task held until it finishes, filed under *owner*."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND.add(task)
+    _SESSION_TASKS.setdefault(owner, set()).add(task)
+
+    def _forget(t: asyncio.Task[None]) -> None:
+        _BACKGROUND.discard(t)
+        owned = _SESSION_TASKS.get(owner)
+        if owned is not None:
+            owned.discard(t)
+            if not owned:
+                _SESSION_TASKS.pop(owner, None)
+
+    task.add_done_callback(_forget)
+    return task
+
+
+def _cancel_session_tasks(owner: SessionKey | None) -> None:
+    """Cancel the background tasks still using *owner*'s UDL password."""
+    for task in list(_SESSION_TASKS.get(owner, ())):
+        task.cancel()
+
+
 async def _fetch_onorbit_background(username: str, password: str) -> None:
     """Fetch the UDL on-orbit catalog in the background and cache it app-wide.
 
     Called as an asyncio background task immediately after successful UDL login.
-    Only runs when the catalog has not already been loaded (status != 'ready').
+    Single-flight: a pull already loading is left to finish, so concurrent
+    logins no longer each start the 60 s download, and a catalogue younger
+    than _CATALOG_TTL_S is kept rather than never being refreshed (F-143).
     """
-    if get_catalog_status() == "ready":
-        return  # Already loaded — no need to fetch again
+    status = get_catalog_status()
+    if status == "loading":
+        return
+    loaded_at = _CATALOG_CLOCK.loaded_at
+    fresh = loaded_at is not None and time.monotonic() - loaded_at < _CATALOG_TTL_S
+    if status == "ready" and fresh:
+        return
     set_catalog_status("loading")
     logger.info("Background: fetching on-orbit catalog from UDL")
     try:
@@ -208,8 +265,9 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         resp.raise_for_status()
         data = resp.json()
         set_onorbit_catalog(data if isinstance(data, list) else [])
+        _CATALOG_CLOCK.loaded_at = time.monotonic()
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - a background task; any failure must reach the status flag
         set_catalog_status("error")
         logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
 
@@ -239,7 +297,7 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
         })
         state.udl_available_sources = sources
         logger.info("UDL TLE sources discovered: %s", log_safe(sources))
-    except Exception as exc:
+    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the default source list
         logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
 
 
@@ -259,7 +317,7 @@ async def udl_login(
     Performs a lightweight probe request to UDL to confirm the credentials
     are accepted before storing them.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     try:
         async with httpx.AsyncClient() as client:
@@ -286,15 +344,8 @@ async def udl_login(
                 "partials/udl_status.html",
                 {"udl_user": None, "error": error},
             )
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
-        error = f"UDL probe returned HTTP {exc.response.status_code}: {body}"
-        logger.warning("UDL login probe HTTP error for operator %s: %s", log_safe(current_user.username), exc)
-        return render(request,
-            "partials/udl_status.html",
-            {"udl_user": None, "error": error},
-        )
+    # No raise_for_status: every non-success status returned above, so the
+    # HTTPStatusError branch it fed could never run (audit F-250).
     except httpx.TimeoutException:
         return render(request,
             "partials/udl_status.html",
@@ -313,8 +364,8 @@ async def udl_login(
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
     # Kick off background tasks (no-op for catalog if already loaded).
-    asyncio.create_task(_fetch_onorbit_background(username, password))
-    asyncio.create_task(_discover_tle_sources(username, password, state))
+    _spawn(_fetch_onorbit_background(username, password), current_user.session_key)
+    _spawn(_discover_tle_sources(username, password, state), current_user.session_key)
 
     return render(request,
         "partials/udl_status.html",
@@ -337,13 +388,13 @@ async def set_data_mode(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the UDL data classification mode for this session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     mode = data_mode.strip().upper()
     if mode not in _VALID_DATA_MODES:
         mode = "REAL"
     state.udl_data_mode = mode
     state.append_log(f"[UDL] Data mode set to {mode}")
-    logger.info("UDL data mode set to %s for operator %s", mode, log_safe(current_user.username))
+    logger.info("UDL data mode set to %s for operator %s", log_safe(mode), log_safe(current_user.username))
     return render(request,
         "partials/data_mode_status.html",
         {"udl_data_mode": mode},
@@ -357,7 +408,7 @@ async def set_tle_source(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Set the preferred TLE source provider for this session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     source = tle_source.strip()
     state.udl_tle_source = source
     if source:
@@ -380,9 +431,11 @@ async def udl_logout(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Clear UDL credentials from the operator session."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     state.udl_username = None
     state.udl_password = None
+    # The login's background tasks hold the password; stop them too (F-143).
+    _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
     logger.info("UDL session closed for operator: %s", log_safe(current_user.username))
 
@@ -474,9 +527,7 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
 
     # Log every candidate's TLE line1 epoch for diagnostics.
     for i, candidate in enumerate(records):
-        l1_raw = str(
-            candidate.get("line1") or candidate.get("TLE_LINE1") or candidate.get("tle1") or ""
-        ).strip()
+        l1_raw = _elset_line(candidate, 1)
         ep = _parse_tle_epoch(l1_raw)
         logger.info(
             "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
@@ -485,6 +536,20 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
             ep.isoformat() if ep else "None",
             log_safe(candidate.get("objectName") or candidate.get(_UDL_NAME_KEY_UPPER) or "?"),
         )
+
+
+#: Every spelling of the two element lines a UDL record has been seen to use.
+#: Diagnostics read "tle1" while extraction ignored it (audit F-140), so one
+#: list now serves selection, extraction and diagnostics alike.
+_LINE_KEYS = {
+    1: ("line1", "TLE_LINE1", "tle1", "TLE1"),
+    2: ("line2", "TLE_LINE2", "tle2", "TLE2"),
+}
+
+
+def _elset_line(rec: Any, n: int) -> str:
+    """Line *n* (1 or 2) of a UDL record, under whichever spelling it carries."""
+    return next((str(rec[k]).strip() for k in _LINE_KEYS[n] if rec.get(k)), "")
 
 
 def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any | None:
@@ -497,8 +562,7 @@ def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any 
     best_rec = None
     best_delta = inf
     for candidate in records:
-        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-        ep = _parse_tle_epoch(l1)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         if ep is None or ep > scenario_start:
             continue
         delta = (scenario_start - ep).total_seconds()
@@ -515,12 +579,9 @@ def _select_latest_elset(records: list[Any]) -> Any:
     so the newest is chosen here rather than taken on trust.
     """
     best_rec = records[0]
-    best_epoch = _parse_tle_epoch(
-        str(best_rec.get("line1") or best_rec.get("TLE_LINE1") or "").strip()
-    )
+    best_epoch = _parse_tle_epoch(_elset_line(best_rec, 1))
     for candidate in records[1:]:
-        l1 = str(candidate.get("line1") or candidate.get("TLE_LINE1") or "").strip()
-        ep = _parse_tle_epoch(l1)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         if ep is not None and (best_epoch is None or ep > best_epoch):
             best_epoch = ep
             best_rec = candidate
@@ -538,8 +599,8 @@ def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, 
     both are read before falling back to the catalogue number.
     """
     name = name_override.strip() or str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER) or satno).strip()
-    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
-    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
+    line1 = _elset_line(rec, 1)
+    line2 = _elset_line(rec, 2)
     return name, f"{line1}\n{line2}", line1
 
 
@@ -577,7 +638,7 @@ async def fetch_tle(
       scenario time to be set first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     _empty = {"name": "", "tle": "", "tle_epoch_str": None,
                "tle_age_days": None, "mode": mode, "error": None}
@@ -621,7 +682,7 @@ async def fetch_tle(
             {**_empty, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL TLE fetch failed for SATNO %s: %s", satno, exc)
+        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             "partials/tle_fields.html",
             {**_empty, "error": f"UDL unreachable: {exc}"},
@@ -638,8 +699,8 @@ async def fetch_tle(
 
     # ── Select the best record ───────────────────────────────────────────────
     logger.info(
-        "UDL returned %d elset record(s) for SATNO %s mode=%s dataMode=%s",
-        len(records), satno, log_safe(mode), dm,
+        "UDL returned %s elset record(s) for SATNO %s mode=%s dataMode=%s",
+        log_safe(len(records)), log_safe(satno), log_safe(mode), log_safe(dm),
     )
 
     _log_elset_diagnostics(records)
@@ -661,6 +722,12 @@ async def fetch_tle(
 
     # ── Extract fields ───────────────────────────────────────────────────────
     name, tle, line1 = _extract_tle_fields(rec, name_override, satno)
+    if not line1 or not _elset_line(rec, 2):
+        # Rendered as success with a TLE of "\n" before (audit F-140).
+        return render(request,
+            "partials/tle_fields.html",
+            {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
+        )
 
     # TLE epoch metadata for the partial
     tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
@@ -671,7 +738,7 @@ async def fetch_tle(
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
-        satno, log_safe(name), log_safe(mode), log_safe(current_user.username),
+        log_safe(satno), log_safe(name), log_safe(mode), log_safe(current_user.username),
     )
 
     return render(request,
@@ -691,6 +758,29 @@ async def fetch_tle(
 # ── State vector fetch proxy ───────────────────────────────────────────────
 
 
+
+# The query used to ask for any vector after 2020 with maxResults=1, which
+# returns whichever record UDL sorts first, not the newest (audit F-248). The
+# window is bounded and the newest record is picked here instead.
+_SV_WINDOW_DAYS = 7
+_SV_MAX_RESULTS = 100
+
+
+def _sv_window_start() -> str:
+    """The UDL epoch filter bound, :data:`_SV_WINDOW_DAYS` before now."""
+    start = datetime.now(UTC) - timedelta(days=_SV_WINDOW_DAYS)
+    return start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _newest_state_vector(data: object) -> dict[str, Any] | None:
+    """The record with the latest epoch, from a list or a single-object payload."""
+    records = [data] if isinstance(data, dict) else data if isinstance(data, list) else []
+    dated = [r for r in records if isinstance(r, dict) and isinstance(r.get("epoch"), str)]
+    if not dated:
+        return None
+    # ISO 8601 UTC strings of one shape sort in time order.
+    return max(dated, key=lambda r: str(r["epoch"]))
+
 @router.get("/statevector", response_model=None)
 async def fetch_statevector(
     request: Request,
@@ -701,10 +791,10 @@ async def fetch_statevector(
     """Fetch the latest Cartesian state vector for *satno* from UDL.
 
     Returns position (km) and velocity (km s⁻¹) in the J2000 reference frame
-    at the most recent available epoch. Useful for initialising high-fidelity
+    at the newest epoch in the last week (_SV_WINDOW_DAYS). Useful for initialising high-fidelity
     intercept geometry without propagating a TLE.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     if not state.udl_username or not state.udl_password:
         return render(request,
@@ -721,8 +811,8 @@ async def fetch_statevector(
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_UDL_BASE}/statevector",
-                params={"satNo": satno, "epoch": ">2020-01-01T00:00:00.000000Z",
-                        "dataMode": dm, "maxResults": 1},
+                params={"satNo": satno, "epoch": f">{_sv_window_start()}",
+                        "dataMode": dm, "maxResults": _SV_MAX_RESULTS},
                 auth=(state.udl_username, state.udl_password),
                 timeout=10.0,
             )
@@ -730,7 +820,7 @@ async def fetch_statevector(
         data = resp.json()
     except httpx.HTTPStatusError as exc:
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
-        logger.warning(error)
+        logger.warning("%s", log_safe(error))
         return render(request,
             "partials/statevector_fields.html",
             {"sv": None, "error": error},
@@ -741,23 +831,28 @@ async def fetch_statevector(
             {"sv": None, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL state vector fetch failed for SATNO %s: %s", satno, exc)
+        logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             "partials/statevector_fields.html",
             {"sv": None, "error": f"UDL unreachable: {exc}"},
         )
 
-    if not data:
+    rec = _newest_state_vector(data)
+    if rec is None:
         return render(request,
             "partials/statevector_fields.html",
             {
-    
                 "sv": None,
-                "error": f"No state vector found for SATNO {satno}.",
+                "error": f"No state vector found for SATNO {satno} in the last {_SV_WINDOW_DAYS} days.",
             },
         )
-
-    rec = data[0]
+    # A vector with no stated frame cannot be placed: guessing J2000 for a
+    # TEME or ECEF record puts the satellite kilometres away (audit F-248).
+    if not rec.get("referenceFrame"):
+        return render(request,
+            "partials/statevector_fields.html",
+            {"sv": None, "error": f"UDL state vector for SATNO {satno} has no referenceFrame; refused."},
+        )
     sv = {
         "name": str(rec.get("objectName") or rec.get(_UDL_NAME_KEY_UPPER, satno)).strip(),
         "epoch": rec.get("epoch", "—"),
@@ -767,7 +862,7 @@ async def fetch_statevector(
         "x_dot": rec.get("xvel"),
         "y_dot": rec.get("yvel"),
         "z_dot": rec.get("zvel"),
-        "ref_frame": rec.get("referenceFrame", "J2000"),
+        "ref_frame": rec["referenceFrame"],
     }
 
     state.append_log(
@@ -775,7 +870,7 @@ async def fetch_statevector(
     )
     logger.info(
         "State vector fetched for SATNO %s (%s) by operator %s",
-        satno,
+        log_safe(satno),
         log_safe(sv["name"]),
         log_safe(current_user.username),
     )
@@ -799,9 +894,12 @@ def _parse_created_at(rec: dict[str, Any]) -> datetime:
     """
     raw = str(rec.get("createdAt") or "").strip().replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return datetime.min.replace(tzinfo=UTC)
+    # A createdAt with no offset is UTC by UDL convention. Left naive, max()
+    # over a mixed list raised TypeError comparing it with aware values (F-255).
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 
@@ -923,7 +1021,7 @@ async def fetch_hrr(
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
 
     _empty_err = {"hrr_blue": [], "hrr_red": [], "hrr_lookback": 0}
 
@@ -966,6 +1064,29 @@ async def fetch_hrr(
 # ── On-orbit catalog search ────────────────────────────────────────────────
 
 
+_MAX_CATALOGUE_RESULTS = 50
+
+
+def _catalogue_matches(catalog: list[dict[str, Any]], q: str) -> list[dict[str, Any]]:
+    """Up to 50 objects whose name or catalogue number contains *q*."""
+    q_lower = q.strip().lower()
+    results: list[dict[str, Any]] = []
+    for obj in catalog:
+        name = str(obj.get("name") or obj.get("objectName") or "").lower()
+        satno = str(obj.get("satNo") or obj.get("satno") or "")
+        if q_lower not in name and q_lower not in satno:
+            continue
+        results.append({
+            "satno": obj.get("satNo") or obj.get("satno") or "—",
+            "name": obj.get("name") or obj.get("objectName") or "—",
+            "obj_type": obj.get("objectType") or obj.get("type") or "—",
+            "country": obj.get("country") or "—",
+        })
+        if len(results) >= _MAX_CATALOGUE_RESULTS:
+            break
+    return results
+
+
 @router.get("/catalog/search", response_model=None)
 async def search_catalog(
     request: Request,
@@ -978,30 +1099,40 @@ async def search_catalog(
     the current catalog status (loading, ready, error) so the operator can
     see progress without searching.
     """
+    # The catalogue was pulled with another operator's UDL credential. It is
+    # searchable only by an operator holding a UDL session of their own
+    # (audit F-142); the bare status line stays visible to everyone.
+    state = get_session_state(current_user)
+    if q.strip() and not (state.udl_username and state.udl_password):
+        return HTMLResponse('<p class="error-msg">Log in to UDL to search the on-orbit catalogue.</p>')
+
     catalog = get_onorbit_catalog()
     status = get_catalog_status()
 
-    results: list[dict[str, Any]] = []
-    if q.strip():
-        q_lower = q.strip().lower()
-        for obj in catalog:
-            name = str(obj.get("name") or obj.get("objectName") or "").lower()
-            satno = str(obj.get("satNo") or obj.get("satno") or "")
-            if q_lower in name or q_lower in satno:
-                results.append({
-                    "satno": obj.get("satNo") or obj.get("satno") or "—",
-                    "name": obj.get("name") or obj.get("objectName") or "—",
-                    "obj_type": obj.get("objectType") or obj.get("type") or "—",
-                    "country": obj.get("country") or "—",
-                })
-                if len(results) >= 50:
-                    break
+    results = _catalogue_matches(catalog, q) if q.strip() else []
 
     return render(request,
         "partials/catalog_results.html",
         {"results": results, "q": q,
          "status": status, "total": len(catalog)},
     )
+
+
+#: Output field -> the UDL fields that may carry it, in order of preference.
+_NOTSO_FIELDS: dict[str, tuple[str, str]] = {
+    "message_id":  ("messageId", "id"),
+    "issue_date":  ("issueDate", "date"),
+    "start":       ("effectiveStart", "startTime"),
+    "end":         ("effectiveEnd", "stopTime"),
+    "type":        ("notificationType", "type"),
+    "description": ("description", "remarks"),
+    "raw":         ("rawMessage", "message"),
+}
+
+
+def _normalise_notso(rec: dict[str, Any]) -> dict[str, str]:
+    """One UDL notification in a consistent shape, whichever field names it used."""
+    return {out: str(rec.get(first) or rec.get(second) or "") for out, (first, second) in _NOTSO_FIELDS.items()}
 
 
 @router.get("/notso", response_model=None)
@@ -1020,11 +1151,10 @@ async def udl_notso(
     """
     from fastapi.responses import JSONResponse
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     if not state.udl_username or not state.udl_password:
         return JSONResponse({"error": "No active UDL session"}, status_code=401)
 
-    _UDL_BASE = "https://unifieddatalibrary.com/udl"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
@@ -1039,32 +1169,111 @@ async def udl_notso(
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except ValueError:
             return JSONResponse([])
 
-        # Normalise to a consistent shape
         records = data if isinstance(data, list) else [data]
-        normalised = []
-        for rec in records:
-            normalised.append({
-                "message_id":   str(rec.get("messageId") or rec.get("id") or ""),
-                "issue_date":   str(rec.get("issueDate") or rec.get("date") or ""),
-                "start":        str(rec.get("effectiveStart") or rec.get("startTime") or ""),
-                "end":          str(rec.get("effectiveEnd") or rec.get("stopTime") or ""),
-                "type":         str(rec.get("notificationType") or rec.get("type") or ""),
-                "description":  str(rec.get("description") or rec.get("remarks") or ""),
-                "raw":          str(rec.get("rawMessage") or rec.get("message") or ""),
-            })
-        return JSONResponse(normalised)
+        return JSONResponse([_normalise_notso(rec) for rec in records])
 
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (404, 405, 501):
             return JSONResponse([])
-        logger.warning("UDL NOTSO fetch error for %d: %s", satno, exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
-    except Exception as exc:
-        logger.warning("UDL NOTSO fetch failed for %d: %s", satno, exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        logger.warning("UDL NOTSO fetch error for %s: %s", log_safe(satno), log_safe(exc))
+        return JSONResponse({"error": "UDL refused the NOTSO request; the server log has the detail."}, status_code=502)
+    except (httpx.HTTPError, AttributeError) as exc:   # AttributeError: a record that is not an object
+        logger.warning("UDL NOTSO fetch failed for %s: %s", log_safe(satno), log_safe(exc))
+        return JSONResponse({"error": "UDL NOTSO fetch failed; the server log has the detail."}, status_code=502)
+
+
+_NOTSO_PAGE = 500
+
+
+def _notso_query(latest: datetime | None) -> dict[str, str | int]:
+    """UDL query for TACREP_NOTSO records newer than the cache holds.
+
+    An empty cache starts at 2024-01-01, to pull reasonable history without
+    hitting UDL too hard; otherwise the newest record plus 1 microsecond, so
+    the boundary record is not fetched again.
+    """
+    from datetime import timedelta
+
+    since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
+    return {
+        "createdAt":  f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z",
+        "dataMode":   "REAL",
+        "msgType":    "TACREP_NOTSO",
+        "source":     "JCO",
+        "maxResults": _NOTSO_PAGE,
+    }
+
+
+def _notso_page_records(resp: Any, page: int) -> tuple[list[Any] | None, str | None]:
+    """One page's records, or the reason paging stops here."""
+    if resp.status_code in (404, 405, 501):
+        return None, (
+            f"UDL /notification endpoint returned HTTP {resp.status_code} — "
+            "TACREP_NOTSO may not be available on this instance."
+        )
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return None, f"HTTP error on page {page}: {exc}"
+    try:
+        data = resp.json()
+    # BLE001: any undecodable body ends paging with a reason, not a 500.
+    except Exception:  # noqa: BLE001
+        return None, f"Non-JSON response on page {page}"
+    return (data if isinstance(data, list) else ([data] if data else [])), None
+
+
+async def _pull_notso_pages(
+    cache: Any, base_params: dict[str, str | int], auth: tuple[str, str],
+) -> tuple[int, int, list[str]]:
+    """Page through /notification into *cache*: (records added, pages, errors)."""
+    total_added = 0
+    page = 0
+    errors: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while True:
+                params: dict[str, str | int] = dict(base_params)
+                if page > 0:
+                    params["offset"] = page * _NOTSO_PAGE
+                resp = await client.get(f"{_UDL_BASE}/notification", params=params, auth=auth)
+                records, error = _notso_page_records(resp, page)
+                if error:
+                    errors.append(error)
+                if not records:
+                    break
+                # A sync page rewrites the whole file; off the event loop (F-141).
+                total_added += await asyncio.to_thread(cache.append, records)
+                page += 1
+                # Fewer than a full page means the end has been reached.
+                if len(records) < _NOTSO_PAGE:
+                    break
+    # BLE001: a failed sync is reported with what it had added so far.
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Sync failed: {exc}")
+        logger.warning("notso_sync failed: %s", exc)
+    return total_added, page, errors
+
+
+def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
+    """The status callout: red when nothing was added and something failed."""
+    if errors and total_added == 0:
+        # Escaped: the messages carry exception text and UDL response bodies (F-249).
+        error_html = "".join(f'<p style="margin:0.1rem 0">{html.escape(e)}</p>' for e in errors)
+        return f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
+    warn_html = "".join(
+        f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {html.escape(e)}</p>'
+        for e in errors
+    )
+    return (
+        f'<div class="callout callout-green" style="font-size:0.72rem; padding:0.4rem 0.6rem">'
+        f'<strong>+{total_added}</strong> new records added &mdash; '
+        f'{cache.total_records()} total in cache. Last sync: {cache.last_sync_utc() or "—"}.'
+        f'</div>{warn_html}'
+    )
 
 
 @router.post("/notso/sync", response_model=None)
@@ -1078,7 +1287,7 @@ async def udl_notso_sync(
     Uses ``createdAt`` of the newest cached record as the lower bound for each
     pull.  Pages through the UDL ``/notification`` endpoint (500 records per
     page) until no more results are returned, then writes everything to
-    ``spectre/data/notso_cache.json``.
+    ``notso_cache.json`` in the configured data directory.
 
     Always returns an HTML partial suitable for ``hx-swap="innerHTML"`` on the
     NOTSO sync status ``<div>``.
@@ -1087,110 +1296,20 @@ async def udl_notso_sync(
 
     from spectre.data.notso_cache import get_notso_cache
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     if not state.udl_username or not state.udl_password:
         return _HTMLResponse(
             '<p class="error-msg" style="font-size:0.72rem">No active UDL session — connect first.</p>'
         )
 
     cache = get_notso_cache()
-    latest = cache.latest_created_at()
-
-    # Build the createdAt lower-bound filter.  If the cache is empty, default
-    # to 2024-01-01 to pull reasonable history without hitting UDL too hard.
-    if latest is not None:
-        # Advance by 1 µs so we don't re-fetch the boundary record.
-        from datetime import timedelta
-        since = latest + timedelta(microseconds=1)
-    else:
-        from datetime import timedelta
-        since = datetime(2024, 1, 1, tzinfo=UTC)
-
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-    base_params: dict[str, str | int] = {
-        "createdAt":  f">{since_str}",
-        "dataMode":   "REAL",
-        "msgType":    "TACREP_NOTSO",
-        "source":     "JCO",
-        "maxResults": 500,
-    }
-
-    total_added = 0
-    page = 0
-    errors: list[str] = []
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while True:
-                params: dict[str, str | int] = dict(base_params)
-                if page > 0:
-                    params["offset"] = page * 500
-
-                resp = await client.get(
-                    f"{_UDL_BASE}/notification",
-                    params=params,
-                    auth=(state.udl_username, state.udl_password),
-                )
-
-                if resp.status_code in (404, 405, 501):
-                    errors.append(
-                        f"UDL /notification endpoint returned HTTP {resp.status_code} — "
-                        "TACREP_NOTSO may not be available on this instance."
-                    )
-                    break
-
-                try:
-                    resp.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    errors.append(f"HTTP error on page {page}: {exc}")
-                    break
-
-                try:
-                    data = resp.json()
-                except Exception:
-                    errors.append(f"Non-JSON response on page {page}")
-                    break
-
-                records = data if isinstance(data, list) else ([data] if data else [])
-                if not records:
-                    break  # No more pages
-
-                added = cache.append(records)
-                total_added += added
-                page += 1
-
-                # If we got fewer records than a full page, we've reached the end.
-                if len(records) < 500:
-                    break
-
-    except Exception as exc:
-        errors.append(f"Sync failed: {exc}")
-        logger.warning("notso_sync failed: %s", exc)
+    params = _notso_query(cache.latest_created_at())
+    total_added, page, errors = await _pull_notso_pages(
+        cache, params, (state.udl_username, state.udl_password),
+    )
 
     state.append_log(
         f"[NOTSO] Sync complete: +{total_added} new records "
         f"(total {cache.total_records()}, {page} page(s) fetched)"
     )
-
-    # Build status HTML
-    if errors and total_added == 0:
-        error_html = "".join(f'<p style="margin:0.1rem 0">{e}</p>' for e in errors)
-        return _HTMLResponse(
-            f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
-        )
-
-    warn_html = ""
-    if errors:
-        warn_html = "".join(
-            f'<p style="margin:0.1rem 0; font-size:0.68rem; color:var(--text-dim)">⚠ {e}</p>'
-            for e in errors
-        )
-
-    last_sync = cache.last_sync_utc() or "—"
-    total = cache.total_records()
-    return _HTMLResponse(
-        f'<div class="callout callout-green" style="font-size:0.72rem; padding:0.4rem 0.6rem">'
-        f'<strong>+{total_added}</strong> new records added &mdash; '
-        f'{total} total in cache. Last sync: {last_sync}.'
-        f'</div>{warn_html}'
-    )
+    return _HTMLResponse(_notso_sync_status(total_added, errors, cache))

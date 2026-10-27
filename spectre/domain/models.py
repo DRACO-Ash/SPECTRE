@@ -18,11 +18,15 @@ class BlueAsset:
     Attributes:
         name: Human-readable short name (e.g. ``Alpha``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (equals ``name``).
+        stk_name: Auto-derived object name: ``name`` with the side's prefix
+            from spectre.config.constants (audit F-231).
     """
 
     name: str
     tle: str
+    #: Added by a training scenario and removed when the operator leaves
+    #: training (audit F-051).
+    training: bool = False
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -36,11 +40,15 @@ class RedTrack:
     Attributes:
         name: Human-readable track identifier (e.g. ``Track01``).
         tle: Two-line element string (lines 1 & 2, newline-separated).
-        stk_name: Auto-derived object name (equals ``name``).
+        stk_name: Auto-derived object name: ``name`` with the side's prefix
+            from spectre.config.constants (audit F-231).
     """
 
     name: str
     tle: str
+    #: Added by a training scenario and removed when the operator leaves
+    #: training (audit F-051).
+    training: bool = False
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -93,8 +101,8 @@ class InterceptMethod(Enum):
     ``LAMBERT``      — pre-burn coast → burn → post-burn coast (R=0).
     ``HOHMANN``      — two-burn circular coplanar transfer.
     ``BIELLIPTIC``   — three-burn transfer via intermediate apoapsis.
-    ``RENDEZVOUS``   — coast → burn (match position + velocity).
-    ``PROXIMITY``    — coast → burn (minimise range to target_distance_m).
+    ``RENDEZVOUS``   — alias of HOHMANN; it has no solver of its own.
+    ``PROXIMITY``    — alias of LAMBERT; it has no solver of its own.
     ``PHASING``      — period-adjustment rendezvous after N revolutions.
     ``RBAR_HOP``     — R-bar hop (CW radial separation, single impulse).
     ``VBAR_HOP``     — V-bar hop sequence (multi-hop along velocity vector).
@@ -202,7 +210,9 @@ class ManeuverOption:
         delta_v_m_s: Total delta-V magnitude in m/s.
         dv_prograde: VNC prograde (along-track) component in m/s.
         dv_normal: VNC normal (orbit-normal) component in m/s.
-        dv_radial: VNC radial (cross-track) component in m/s.
+        dv_radial: VNC co-normal component in m/s: in the orbit plane, normal
+            to the velocity (near-radial for a circular orbit). It was called
+            cross-track, which is the orbit-normal axis (audit F-231).
         intercept_epoch: UTC datetime when the intercept occurs.
         transfer_duration_s: Coast time from burn to intercept in seconds.
         intercept_range_km: Miss distance at intercept in km.
@@ -337,7 +347,12 @@ class InterceptResult:
         burns: Per-burn breakdown (epoch, ΔV components for each manoeuvre).
         total_delta_v_m_s: Sum of all burn magnitudes, in m/s.
         arrival_epoch: UTC time when the red satellite reaches its final position.
-        intercept_range_km: Miss distance at arrival in km.
+        intercept_range_km: Miss distance at arrival in km, and nothing else.
+        score: An assessment method's 0-100 score (a count for the envelope),
+            never a distance (audit F-072).
+        score_kind: What the score measures, for the label.
+        provenance: "physics" for a solved trajectory, "heuristic" for a score
+            of uncalibrated weights.
     """
 
     red_name: str
@@ -345,9 +360,14 @@ class InterceptResult:
     method: InterceptMethod
     burns: list[BurnResult] = field(default_factory=list)
     total_delta_v_m_s: float = 0.0
-    arrival_epoch: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    # Required: a default of "now" put a plausible, wrong arrival time on any
+    # result built without one (audit F-231).
+    arrival_epoch: datetime = field(kw_only=True)
     intercept_range_km: float = 0.0
     notes: str = ""
+    score: float | None = None
+    score_kind: str = ""
+    provenance: str = "physics"
     option_id: str = field(default_factory=lambda: f"INT_{uuid.uuid4().hex[:10].upper()}")
 
 
@@ -420,6 +440,9 @@ class ThreatAssessment:
     target_count: int = 0
     elapsed_s: float = 0.0
     errors: list[str] = field(default_factory=list)
+    #: The red element set the sweep flew, manual override included, so a
+    #: refine flies the same orbit rather than looking it up again.
+    red_tle: str | None = None
 
 
 @dataclass
@@ -431,6 +454,7 @@ class RunConfig:
         source: Data source tag for the inputs (e.g. ``SPADOC``, ``MANUAL``).
         timestamp: UTC-aware datetime when the run was created.
         run_id: Unique run identifier; auto-generated as ``RUN_<uuid>`` if not supplied.
+        horizon_hours: How far past ``timestamp`` the planner searches for access.
     """
 
     operator: str
@@ -439,3 +463,4 @@ class RunConfig:
         default_factory=lambda: datetime.now(tz=UTC)
     )
     run_id: str = field(default_factory=lambda: f"RUN_{uuid.uuid4().hex[:12].upper()}")
+    horizon_hours: float = 24.0

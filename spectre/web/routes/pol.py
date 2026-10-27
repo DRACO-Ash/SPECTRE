@@ -6,6 +6,7 @@ rendered partials for the Historical PoL hero tab.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import logging
 from datetime import UTC, datetime
@@ -13,23 +14,29 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history
+from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
+from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
+from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
+from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
 from spectre.domain.pol_assessment import assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.format_units import to_m_s
+from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, udl_data_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
 
-_UDL_BASE = "https://unifieddatalibrary.com/udl"
+_UDL_BASE = UDL_BASE_URL
 
 # Maximum TLEs to fetch from UDL historical endpoint.
 _UDL_MAX_RESULTS = 5000
@@ -43,12 +50,29 @@ _POL_PANEL_TEMPLATE = "partials/pol_panel.html"
 # Returned by every drill-down that is asked about a SATNO the session has no
 # analysis for. Held here so the three exits stay byte-identical: the operator
 # reaching this from a stale tab should not be able to tell which one answered.
+# Both forms run in the shared default executor, so one operator's request is
+# every operator's wait (audit F-145). Thirty days is the longest horizon a
+# single TLE fit can say anything about. The CSV cap, about 10,000
+# observations, sits under Starlette's own 1 MiB form-field limit so the
+# operator reads why rather than a bare 400.
+MAX_HORIZON_H = 720.0
+_MIN_HORIZON_H = 1.0
+MAX_PHOTOMETRY_CSV_CHARS = 524_288
+
 _NO_ANALYSIS_HTML = (
     '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
 )
 
 
 # ── UDL helper ────────────────────────────────────────────────────────────────
+
+def _first(rec: dict[str, Any], *keys: str) -> str:
+    """The first truthy value among *keys*, as stripped text; empty if none."""
+    for key in keys:
+        if rec.get(key):
+            return str(rec[key]).strip()
+    return ""
+
 
 def _parse_udl_elset_response(
     resp: httpx.Response,
@@ -66,7 +90,7 @@ def _parse_udl_elset_response(
 
     try:
         data = resp.json()
-    except Exception:
+    except ValueError:
         # Plain TLE text — no provenance metadata available.
         return raw, {}, {}, ""
 
@@ -82,22 +106,15 @@ def _parse_udl_elset_response(
     rms_metadata: dict[str, float | None] = {}
     sat_name: str = ""
     for rec in records:
-        l1 = str(rec.get("line1") or rec.get("TLE_LINE1") or rec.get("tle1") or "").strip()
-        l2 = str(rec.get("line2") or rec.get("TLE_LINE2") or rec.get("tle2") or "").strip()
+        l1 = _first(rec, "line1", "TLE_LINE1", "tle1")
+        l2 = _first(rec, "line2", "TLE_LINE2", "tle2")
         if l1.startswith("1 ") and l2.startswith("2 "):
-            lines.append(l1)
-            lines.append(l2)
-            dm  = str(rec.get("dataMode") or rec.get("data_mode") or "").strip()
-            src = str(rec.get("source") or "").strip()
-            metadata[l1] = (dm, src)
+            lines += [l1, l2]
+            metadata[l1] = (_first(rec, "dataMode", "data_mode"), _first(rec, "source"))
             rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")
             rms_metadata[l1] = float(rms_raw) if rms_raw is not None else None
             # Capture satellite name from first valid record that has one
-            if not sat_name:
-                sat_name = str(
-                    rec.get("satName") or rec.get("objectName") or
-                    rec.get("OBJECT_NAME") or rec.get("name") or ""
-                ).strip()
+            sat_name = sat_name or _first(rec, "satName", "objectName", "OBJECT_NAME", "name")
 
     logger.info("PoL UDL: parsed %d TLE pairs from %d records", len(lines) // 2, len(records))
     return "\n".join(lines), metadata, rms_metadata, sat_name
@@ -108,7 +125,7 @@ async def _fetch_udl_history(
 ) -> tuple[str, dict[str, tuple[str, str]], dict[str, float | None], str]:
     """Fetch historical TLEs from UDL elset endpoint (2015 → now, max 5 000).
 
-    Returns ``(tle_text, metadata, rms_metadata)``.
+    Returns ``(tle_text, metadata, rms_metadata, sat_name)``.
     Records may arrive in any order — the parser will sort chronologically.
     """
     params: dict[str, Any] = {
@@ -179,7 +196,7 @@ async def pol_panel(
     silent default, would have rendered the panel with every figure blank and
     nothing to say why.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     context: dict[str, object] = {
         "has_udl": bool(state.udl_username),
@@ -242,6 +259,24 @@ async def _fetch_merged_history(
     return archive_text, merged_text, merged_meta, merged_rms, name
 
 
+def _archive_end_if_capped(archive_text: str) -> datetime | None:
+    """The newest archived epoch when the archive pull hit its record cap.
+
+    One request returns at most _UDL_MAX_RESULTS sets with no paging, and the
+    current set is appended after it, so a capped archive leaves a gap that
+    used to pass without a word (audit F-144). None when under the cap.
+    """
+    line1s = [ln.strip() for ln in archive_text.splitlines() if ln.strip().startswith("1 ")]
+    if len(line1s) < _UDL_MAX_RESULTS:
+        return None
+    epochs = []
+    for ln in line1s:
+        # A line 1 too damaged to date is skipped; parsing drops it anyway.
+        with contextlib.suppress(ValueError, IndexError):
+            epochs.append(tle_epoch(ln))
+    return max(epochs, default=None)
+
+
 def _cadence_filtered(
     records: list[Any], apply_filter: bool, satno: int,
 ) -> tuple[list[Any], list[Any]]:
@@ -256,8 +291,8 @@ def _cadence_filtered(
     raw_count = len(records)
     filtered, quality_flags = filter_tle_history(records)
     logger.info(
-        "PoL cadence filter: %d → %d records, %d flags for %d",
-        raw_count, len(filtered), len(quality_flags), satno,
+        "PoL cadence filter: %s → %s records, %s flags for %s",
+        log_safe(raw_count), log_safe(len(filtered)), log_safe(len(quality_flags)), log_safe(satno),
     )
     return filtered, quality_flags
 
@@ -284,21 +319,30 @@ async def pol_analyse(
     dv_threshold_ms: Annotated[float, Form()] = 2.0,
     cadence_filter: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
+    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
-    """Fetch historical TLEs from UDL and run PoL analysis."""
-    state = get_session_state(current_user.username)
+    """Fetch historical TLEs from UDL and run PoL analysis.
+
+    Held to the UDL data limit, and to the five-per-minute credential limit
+    of /udl/login when the form carries credentials: without either it was
+    an unthrottled credential oracle (audit F-045).
+    """
+    state = get_session_state(current_user)
 
     # ── UDL direct credentials ────────────────────────────────────────────────
     if pol_source == "udl_direct":
-        if not udl_user.strip() or not udl_pass.strip():
+        await udl_auth_rate_limit(current_user)
+        if not udl_user.strip() or not udl_pass:
             return _panel_error(request, state, "Enter UDL username and password.")
         try:
+            # The password goes as typed: a leading or trailing space is part
+            # of it, and stripping sent a different credential (audit F-251).
             archive_text, merged_text, merged_meta, merged_rms, name = await _fetch_merged_history(
-                satno, udl_user.strip(), udl_pass.strip(), "REAL",
+                satno, udl_user.strip(), udl_pass, "REAL",
                 source=state.udl_tle_source,
             )
-            logger.info("PoL: %d chars from UDL (direct) for %d", len(archive_text), satno)
-        except Exception as exc:
+            logger.info("PoL: %s chars from UDL (direct) for %s", log_safe(len(archive_text)), log_safe(satno))
+        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL direct failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
@@ -315,8 +359,8 @@ async def pol_analyse(
                 state.udl_data_mode,
                 source=state.udl_tle_source,
             )
-            logger.info("PoL: %d chars from UDL (session) for %d", len(archive_text), satno)
-        except Exception as exc:
+            logger.info("PoL: %s chars from UDL (session) for %s", log_safe(len(archive_text)), log_safe(satno))
+        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
             logger.warning("PoL: UDL session failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
@@ -331,7 +375,7 @@ async def pol_analyse(
     try:
         threshold_km_s = dv_threshold_ms / 1000.0
         apply_filter = bool(cadence_filter)
-        records = parse_tle_history(
+        records, dropped = parse_tle_history_counted(
             merged_text, satno=satno,
             metadata=merged_meta, rms_metadata=merged_rms,
         )
@@ -350,6 +394,11 @@ async def pol_analyse(
             dv_threshold=threshold_km_s,
             quality_flags=quality_flags,
         )
+        pol.malformed_element_sets = dropped.malformed
+        pol.duplicate_epoch_sets = dropped.duplicate_epoch
+        pol.bad_provenance_sets = dropped.bad_provenance
+        pol.other_object_sets = dropped.other_object
+        pol.history_truncated_at = _archive_end_if_capped(archive_text)
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
@@ -357,7 +406,7 @@ async def pol_analyse(
             f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
     except Exception as exc:
-        logger.exception("PoL analysis failed for %d", satno)
+        logger.exception("PoL analysis failed for %s", log_safe(satno))
         return _panel_error(request, state, f"Analysis error: {exc}")
 
     return render(request, "partials/pol_results.html", {
@@ -465,6 +514,10 @@ def _detection_view(pol: object) -> dict[str, object]:
         "rejected_on_evidence": getattr(pol, "rejected_on_evidence", 0),
         "skipped_long_gap":     getattr(pol, "skipped_long_gap", 0),
         "merged_duplicates":    getattr(pol, "merged_duplicates", 0),
+        "malformed_element_sets": getattr(pol, "malformed_element_sets", 0),
+        "duplicate_epoch_sets": getattr(pol, "duplicate_epoch_sets", 0),
+        "bad_provenance_sets":  getattr(pol, "bad_provenance_sets", 0),
+        "other_object_sets":    getattr(pol, "other_object_sets", 0),
         "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
         "confirmed":            len(getattr(pol, "manoeuvres", [])),
         "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),
@@ -473,6 +526,7 @@ def _detection_view(pol: object) -> dict[str, object]:
         "noise_mad_m_s":        to_m_s(noise.mad_km_s) if noise else None,
         "noise_samples":        noise.samples if noise else 0,
         "noise_method":         noise.method if noise else "",
+        "noise_floor_measured": noise.floor_is_measured if noise else False,
     }
 
 
@@ -580,6 +634,10 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "gap_days":             float(getattr(m, "gap_days", 0.0) or 0.0),
         "agreement_ratio":      None,
         "snr":                  None,
+        # The colour bands are the module\'s own SNR cut-offs; the template
+        # hard-coded 10 and 5 (audit F-226).
+        "snr_high":             _SNR_HIGH,
+        "snr_low":              _SNR_LOW,
         "burn_epoch":           None,
         "burn_ambiguous":       False,
         "position_mismatch_km": None,
@@ -594,6 +652,8 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "noise_median_m_s":     None,
         "noise_mad_m_s":        None,
         "noise_samples":        0,
+        "noise_method":         "",
+        "noise_floor_measured": False,
     }
 
     bd = getattr(m, "breakdown", None)
@@ -612,6 +672,10 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "gap_days":             bd.gap_days,
         "agreement_ratio":      bd.agreement_ratio,
         "snr":                  bd.snr,
+        # The colour bands are the module\'s own SNR cut-offs; the template
+        # hard-coded 10 and 5 (audit F-226).
+        "snr_high":             _SNR_HIGH,
+        "snr_low":              _SNR_LOW,
         "burn_epoch":           bd.burn_epoch,
         "burn_ambiguous":       bool(getattr(bd.swept, "burn_epoch_ambiguous", False)),
         "position_mismatch_km": getattr(bd.swept, "position_mismatch_km", None),
@@ -646,6 +710,8 @@ def _breakdown_view(m: object) -> dict[str, object]:
         "noise_median_m_s": to_m_s(bd.noise.median_km_s) if bd.noise else None,
         "noise_mad_m_s":    to_m_s(bd.noise.mad_km_s) if bd.noise else None,
         "noise_samples":    bd.noise.samples if bd.noise else 0,
+        "noise_method":     bd.noise.method if bd.noise else "",
+        "noise_floor_measured": bd.noise.floor_is_measured if bd.noise else False,
     })
     return view
 
@@ -672,7 +738,7 @@ async def pol_reserve_reset(
     assessment marks unconfirmed, and inventing a number here would put a
     fabricated reserve into a capability verdict.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     if pol is None or pol.satno != satno:
         return HTMLResponse(_NO_ANALYSIS_HTML)
@@ -720,7 +786,7 @@ async def pol_manoeuvre_detail(
     decomposition with the numbers that produced it, all three estimators, and
     why the result was or was not believed.
     """
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
@@ -761,6 +827,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     n_samples: Annotated[int, Form()] = 500,
     horizon_h: Annotated[float, Form()] = 48.0,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Run Monte Carlo simulation for a specific detected manoeuvre."""
     import asyncio
@@ -771,7 +838,13 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
         run_monte_carlo,
     )
 
-    state = get_session_state(current_user.username)
+    # "not (a <= x <= b)" also refuses NaN, which every comparison fails.
+    if not (_MIN_HORIZON_H <= horizon_h <= MAX_HORIZON_H):
+        return HTMLResponse(
+            f'<p class="error-msg">Horizon must be between {_MIN_HORIZON_H:.0f} and {MAX_HORIZON_H:.0f} hours.</p>'
+        )
+
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None or pol.satno != satno:
@@ -804,9 +877,9 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
             None,
             lambda: run_monte_carlo(hypothesis, satno=satno, prediction_horizon_hours=horizon_h),
         )
-    except Exception as exc:
-        logger.exception("Monte Carlo failed for %d", satno)
-        return HTMLResponse(f'<p class="error-msg">Monte Carlo error: {html.escape(str(exc))}</p>')
+    except Exception:
+        logger.exception("Monte Carlo failed for %s", log_safe(satno))
+        return HTMLResponse('<p class="error-msg">Monte Carlo failed; the server log has the detail.</p>')
 
     return render(request, "partials/pol_mc_results.html", {
         "mc": result,
@@ -824,7 +897,7 @@ async def pol_chart_data(
     current_user: User = Depends(require_login),
 ) -> JSONResponse:
     """Return Chart.js-ready JSON for the most recent PoL analysis."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     if pol is None or pol.satno != satno:
         return JSONResponse({"error": "No PoL analysis available"}, status_code=404)
@@ -898,7 +971,7 @@ async def pol_notso_panel(
 ) -> HTMLResponse:
     """Return the NOTSO correlation input panel."""
     from spectre.data.notso_cache import get_notso_cache
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     cache = get_notso_cache()
     cache_count_for_sat = len(cache.get_for_satno(pol.satno)) if pol else 0
@@ -911,46 +984,20 @@ async def pol_notso_panel(
     })
 
 
-def _notso_message_text(rec: dict[str, Any]) -> str:
-    """The parseable NOTSO text for one cached record.
-
-    A cached record normally carries the whole notification in ``msgText``.
-    Some carry only the structured fields, and a minimal message is rebuilt
-    from those rather than the record being dropped: a declared burn the
-    operator never sees is indistinguishable from one that was never declared.
-    """
-    msg_text = str(rec.get("msgText") or rec.get("message") or "")
-    if msg_text:
-        return msg_text
-    # Reconstruct minimal parseable text from structured fields
-    created = rec.get("createdAt") or ""
-    return (
-        f"MSGID: {rec.get('msgId', '')}\n"
-        f"SATNO: {rec.get('satNo', '')}\n"
-        f"ISSUE DATE: {created}\n"
-        f"EFFECTIVE START: {created}\n"
-        f"TYPE: MANOEUVRE\n"
-        f"DESCRIPTION: {rec.get('msgType', 'TACREP_NOTSO')}"
-    )
-
-
-def _notsos_from_cache_records(raw_records: list[dict[str, Any]]) -> list[Any]:
-    """Cached NOTSO dicts as ``NOTSORecord`` objects.
+def _notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
+    """Cached NOTSO dicts as ``NOTSORecord`` objects, for one satellite.
 
     The cache holds raw dicts, so they go back through the same text parser the
     pasted-text path uses. One grammar, one set of results, whichever source
-    the operator correlated from.
+    the operator correlated from. A JCO record can name several objects, so
+    its text is built for the satellite under analysis (audit F-046).
     """
     from spectre.astro.notso import parse_notso_text
+    from spectre.data.notso_cache import message_text
 
     notsos: list[Any] = []
     for rec in raw_records:
-        parsed = parse_notso_text(_notso_message_text(rec))
-        # If parser couldn't extract satno, force it from the record
-        for p in parsed:
-            if p.norad_id == 0 or p.norad_id is None:
-                p.norad_id = int(rec.get("satNo") or 0)
-        notsos.extend(parsed)
+        notsos.extend(parse_notso_text(message_text(rec, satno)))
     return notsos
 
 
@@ -988,6 +1035,46 @@ def _correlation_rows(correlations: list[Any]) -> list[dict[str, object]]:
     ]
 
 
+def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list[str], str] | HTMLResponse:
+    """The NOTSOs to correlate, the rejected messages and where they came from.
+
+    Pasted text needs no UDL session; the local cache holds UDL data fetched
+    with another operator's credential, so it does (audit F-142). Returns the
+    refusal to show instead when there is nothing usable.
+    """
+    from spectre.astro.notso import parse_notso_text_with_rejects
+    from spectre.data.notso_cache import get_notso_cache
+
+    if notso_text:
+        notsos, rejects = parse_notso_text_with_rejects(notso_text)
+        if not notsos:
+            return HTMLResponse(
+                '<p class="error-msg">No NOTSO records could be parsed. '
+                'Check the message format (SATNO, effective window, and type fields are required).</p>'
+            )
+        return notsos, rejects, "pasted text"
+    if not (state.udl_username and state.udl_password):
+        return HTMLResponse(
+            '<p class="error-msg">Log in to UDL to correlate against the NOTSO cache, '
+            'or paste NOTSO messages.</p>'
+        )
+    raw_records = get_notso_cache().get_for_satno(pol.satno)
+    if not raw_records:
+        return HTMLResponse(
+            '<p class="error-msg">No NOTSOs in local cache for SATNO '
+            f'{pol.satno}. Run a cache sync first, or paste NOTSO messages manually.</p>'
+        )
+    # Each cache record carries a msgText field (the full notification text),
+    # or the text is reconstructed from its fields.
+    notsos = _notsos_from_cache_records(raw_records, pol.satno)
+    if not notsos:
+        return HTMLResponse(
+            f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
+            f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
+        )
+    return notsos, [], f"local cache ({len(raw_records)} records)"
+
+
 @router.post("/notso-correlate", response_class=HTMLResponse)
 async def pol_notso_correlate(
     request: Request,
@@ -1000,14 +1087,11 @@ async def pol_notso_correlate(
       2. Local NOTSO cache for the current satno (automatic if text is empty).
     """
     from spectre.astro.notso import (
-        NOTSORecord,
         correlate_notsos_with_manoeuvres,
         extract_behaviour_profile,
-        parse_notso_text,
     )
-    from spectre.data.notso_cache import get_notso_cache
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if pol is None:
@@ -1018,36 +1102,10 @@ async def pol_notso_correlate(
     form = await request.form()
     notso_text = str(form.get("notso_text") or "").strip()
 
-    notsos: list[NOTSORecord] = []
-    source_label = ""
-
-    if notso_text:
-        # Path 1: operator-pasted text
-        notsos = parse_notso_text(notso_text)
-        source_label = "pasted text"
-        if not notsos:
-            return HTMLResponse(
-                '<p class="error-msg">No NOTSO records could be parsed. '
-                'Check the message format (SATNO, effective window, and type fields are required).</p>'
-            )
-    else:
-        # Path 2: load from local cache for this satno
-        cache = get_notso_cache()
-        raw_records = cache.get_for_satno(pol.satno)
-        if not raw_records:
-            return HTMLResponse(
-                '<p class="error-msg">No NOTSOs in local cache for SATNO '
-                f'{pol.satno}. Run a cache sync first, or paste NOTSO messages manually.</p>'
-            )
-        # Convert raw cache dicts → NOTSORecord using the existing text parser
-        # Each record has a msgText field (full notification text) or we reconstruct it.
-        notsos = _notsos_from_cache_records(raw_records)
-        source_label = f"local cache ({len(raw_records)} records)"
-        if not notsos:
-            return HTMLResponse(
-                f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
-                f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
-            )
+    loaded = _load_notsos(state, pol, notso_text)
+    if isinstance(loaded, HTMLResponse):
+        return loaded
+    notsos, rejects, source_label = loaded
 
     try:
         # A NOTSO follows human analysis and is deliberately withheld for
@@ -1079,9 +1137,9 @@ async def pol_notso_correlate(
             f"{sum(1 for c in correlations if c.correlation_type == 'notso_only')} NOTSO-only, "
             f"{sum(1 for c in correlations if c.correlation_type == 'manoeuvre_only')} manoeuvre-only"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("NOTSO correlation failed for %d", pol.satno)
-        return HTMLResponse(f'<p class="error-msg">Correlation error: {html.escape(str(exc))}</p>')
+        return HTMLResponse('<p class="error-msg">NOTSO correlation failed; the server log has the detail.</p>')
 
     return render(request, "partials/notso_results.html", {
         # Rows carry their own m/s figures so the template does no arithmetic.
@@ -1090,6 +1148,8 @@ async def pol_notso_correlate(
         "profile": profile,
         "pol": pol,
         "source_label": source_label,
+        "notso_parsed": len(notsos),
+        "notso_rejects": rejects,
     })
 
 
@@ -1101,7 +1161,7 @@ async def pol_photometry_panel(
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the photometry analysis input panel."""
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
     return render(request, "partials/photometry_panel.html", {
         "pol": pol,
@@ -1116,18 +1176,25 @@ async def pol_photometry_analyse(
     baseline_window_days: Annotated[float, Form()] = 90.0,
     extinction_coeff: Annotated[float, Form()] = 0.12,
     current_user: User = Depends(require_login),
+    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Parse photometry CSV and run change-detection analysis."""
     from spectre.astro.photometry import assess_photometry, parse_photometry_csv
 
-    state = get_session_state(current_user.username)
+    state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
     if not csv_text.strip():
         return HTMLResponse('<p class="error-msg">Paste a CSV with at least epoch_utc and apparent_magnitude columns.</p>')
+    if len(csv_text) > MAX_PHOTOMETRY_CSV_CHARS:
+        return HTMLResponse(
+            f'<p class="error-msg">CSV too large: {len(csv_text):,} characters, '
+            f'limit {MAX_PHOTOMETRY_CSV_CHARS:,}. Trim it to the windows being compared.</p>'
+        )
 
     try:
-        observations = parse_photometry_csv(csv_text)
+        # Off the event loop: parsing and the fit are pure CPU.
+        observations = await run_in_threadpool(parse_photometry_csv, csv_text)
         if len(observations) < 5:
             return HTMLResponse(
                 f'<p class="error-msg">Need at least 5 valid observations, got {len(observations)}.</p>'
@@ -1136,7 +1203,8 @@ async def pol_photometry_analyse(
         # Photometry corroborates in the same way a NOTSO does: a brightness
         # change beside a candidate detection is evidence for it.
         manoeuvres = _all_detections(pol) if pol else []
-        result = assess_photometry(
+        result = await run_in_threadpool(
+            assess_photometry,
             observations,
             manoeuvres=manoeuvres,
             extinction_coeff=extinction_coeff,
@@ -1149,9 +1217,9 @@ async def pol_photometry_analyse(
             + (f" for SATNO {pol.satno}" if pol else "")
             + f": {result.change_direction} (p={result.p_value:.4f})"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Photometry analysis failed")
-        return HTMLResponse(f'<p class="error-msg">Analysis error: {html.escape(str(exc))}</p>')
+        return HTMLResponse('<p class="error-msg">Photometry analysis failed; the server log has the detail.</p>')
 
     return render(request, "partials/photometry_results.html", {
         "result": result,

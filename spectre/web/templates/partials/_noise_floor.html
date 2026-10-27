@@ -1,0 +1,21 @@
+{#- The one sentence that says where a detection floor came from, for the
+    Pattern of Life panel and the manoeuvre drill-down. Imported, not repeated.
+
+    Both said "measured from N pairs" whether or not the robust statistics had
+    produced the floor; when they could not (too few pairs, or a median that
+    was itself a burn) the fixed absolute floor stood in, and the operator was
+    told a REJECT rested on the object's own history (audit F-032).
+
+    `{% import "partials/_noise_floor.html" as nf %}{{ nf.floor(f) }}` with
+    f = {floor_m_s, measured, samples, median_m_s, mad_m_s, method}. -#}
+{% macro floor(f) -%}
+{%- if f.measured -%}
+Detection floor <strong style="color:var(--text-primary)">{{ f.floor_m_s | m_s }} m/s</strong>,
+measured from {{ f.samples }} consecutive element set pairs
+(median {{ f.median_m_s | m_s }}, median absolute deviation {{ f.mad_m_s | m_s }} m/s).
+{%- else -%}
+Detection floor <strong style="color:var(--text-primary)">{{ f.floor_m_s | m_s }} m/s</strong>:
+the absolute floor (not measured), standing in because the robust statistics
+could not produce one from {{ f.samples }} element set pairs. {{ f.method }}
+{%- endif -%}
+{%- endmacro %}

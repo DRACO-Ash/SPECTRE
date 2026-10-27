@@ -49,6 +49,11 @@ TEST_IGNORED="$IGNORED,S101,S105,S106,SLF001,PLR2004"
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; exit 1; }
 
+# Private scratch, not fixed /tmp names another run or user could race or
+# pre-create (audit F-288).
+OUT=$(mktemp -d)
+trap 'rm -rf "$OUT"' EXIT INT TERM
+
 # The MERGE BASE, so commits that landed on the base branch after this one
 # started are not scored as this branch's work.
 ANCHOR=$(git merge-base "$BASE" HEAD 2>/dev/null || printf '%s' "$BASE")
@@ -79,57 +84,9 @@ changed_in() {
 SRC_FILES=$(changed_in "$SOURCE_DIRS" | tr '\n' ' ')
 TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
 
-if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then
-    printf '\nNo analysed Python files changed against %s. Nothing to check.\n\n' "$BASE"
-    exit 0
-fi
-
-printf '\n== Static analysis on changed LINES (bugs, vulnerabilities, smells) ==\n'
-# Findings are filtered to lines this branch changed, matching the gate's
-# new-code scope. A pre-existing smell in a touched file is not a new violation.
-SCOPED_OK=0
-if [ -n "$SRC_FILES" ]; then
-    # shellcheck disable=SC2086
-    ruff check --no-cache --isolated --line-length 120 --target-version py312 \
-        --select "$RULES" --ignore "$IGNORED" --output-format=json --exit-zero $SRC_FILES \
-        | python3 scripts/sonar_scope.py "$BASE" || SCOPED_OK=1
-fi
-if [ -n "$TST_FILES" ]; then
-    # shellcheck disable=SC2086
-    ruff check --no-cache --isolated --line-length 120 --target-version py312 \
-        --select "$RULES" --ignore "$TEST_IGNORED" --output-format=json --exit-zero $TST_FILES \
-        | python3 scripts/sonar_scope.py "$BASE" || SCOPED_OK=1
-fi
-[ "$SCOPED_OK" -eq 0 ] || fail "the findings above land on changed code and must be zero"
-pass "no new bugs, vulnerabilities or code smells on changed lines"
-
-# ── Cognitive complexity on changed code ─────────────────────────────────────
-# SonarQube's Code Quality gate caps python:S3776 at 15 and scopes it to NEW
-# code, so a function nobody touched is not reported however bad it is. This
-# leg reproduces both halves: the score, which the tool computes exactly (it is
-# calibrated against sixteen functions whose Sonar scores are known), and the
-# scoping, so the check stays predictive instead of failing on 43 pre-existing
-# functions and being ignored within a day.
-#
-# Ruff's C901 is not a substitute. It counts decision points; S3776 adds a
-# nesting penalty, and the two diverge by a factor of three on real code.
-printf '\n== Cognitive complexity on changed code (SonarQube S3776) ==\n'
-if python3 scripts/cognitive_complexity.py --changed "$BASE" --max 15; then
-    pass "no function this branch touched is over the Sonar limit of 15"
-else
-    fail "the functions above will be reported by the Code Quality gate"
-fi
-
-printf '\n== Coverage on changed lines ==\n'
-[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
-if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --fail-under="$COVERAGE_FLOOR" >/tmp/diffcov.out 2>&1; then
-    pass "$(grep -E '^Coverage: ' /tmp/diffcov.out || echo "at or above ${COVERAGE_FLOOR}%")"
-else
-    cat /tmp/diffcov.out
-    fail "coverage on changed lines is below ${COVERAGE_FLOOR}%"
-fi
-
 # ── Whole-repository coverage against the house standard ─────────────────────
+# Runs before the "nothing changed" exit below. It sat after it, so a change
+# touching no Python skipped the whole-repository figure too (audit F-278).
 # The gate condition above measures CHANGED lines. The house standard is a
 # whole-repository figure, and the project floor in pyproject.toml sat at 70
 # against a standard of 80 while actual coverage was 74: the loop reported
@@ -165,6 +122,58 @@ else
     fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
 fi
 
+if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then
+    printf '\nNo analysed Python files changed against %s. Nothing to check.\n\n' "$BASE"
+    exit 0
+fi
+
+printf '\n== Static analysis on changed LINES (bugs, vulnerabilities, smells) ==\n'
+# Findings are filtered to lines this branch changed, matching the gate's
+# new-code scope. A pre-existing smell in a touched file is not a new violation.
+SCOPED_OK=0
+if [ -n "$SRC_FILES" ]; then
+    # shellcheck disable=SC2086
+    ruff check --no-cache --isolated --line-length 120 --target-version py312 \
+        --select "$RULES" --ignore "$IGNORED" --output-format=json --exit-zero $SRC_FILES \
+        | python3 scripts/sonar_scope.py "$BASE" || SCOPED_OK=1
+fi
+if [ -n "$TST_FILES" ]; then
+    # shellcheck disable=SC2086
+    ruff check --no-cache --isolated --line-length 120 --target-version py312 \
+        --select "$RULES" --ignore "$TEST_IGNORED" --output-format=json --exit-zero $TST_FILES \
+        | python3 scripts/sonar_scope.py "$BASE" || SCOPED_OK=1
+fi
+[ "$SCOPED_OK" -eq 0 ] || fail "the findings above land on changed code and must be zero"
+pass "no new bugs, vulnerabilities or code smells on changed lines"
+
+# ── Cognitive complexity on changed code ─────────────────────────────────────
+# SonarQube's Code Quality gate caps python:S3776 at 15 and scopes it to NEW
+# code, so a function nobody touched is not reported however bad it is. This
+# leg reproduces both halves: the score, which matches Sonar on sixteen
+# calibration functions whose Sonar scores are known (finally, try-else,
+# loop-else and match are checked against sonar-python's source, not a
+# measured function), and the
+# scoping, so the check stays predictive instead of failing on 43 pre-existing
+# functions and being ignored within a day.
+#
+# Ruff's C901 is not a substitute. It counts decision points; S3776 adds a
+# nesting penalty, and the two diverge by a factor of three on real code.
+printf '\n== Cognitive complexity on changed code (SonarQube S3776) ==\n'
+if python3 scripts/cognitive_complexity.py --changed "$BASE" --max 15; then
+    pass "no function this branch touched is over the Sonar limit of 15"
+else
+    fail "the functions above will be reported by the Code Quality gate"
+fi
+
+printf '\n== Coverage on changed lines ==\n'
+[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
+if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --include-untracked --fail-under="$COVERAGE_FLOOR" >"$OUT/diffcov.out" 2>&1; then
+    pass "$(grep -E '^Coverage: ' "$OUT/diffcov.out" || echo "at or above ${COVERAGE_FLOOR}%")"
+else
+    cat "$OUT/diffcov.out"
+    fail "coverage on changed lines is below ${COVERAGE_FLOOR}%"
+fi
+
 printf '\n== Duplication on changed files ==\n'
 if command -v npx >/dev/null 2>&1; then
     SCAN=$(mktemp -d)
@@ -173,10 +182,10 @@ if command -v npx >/dev/null 2>&1; then
         cp "$f" "$SCAN/$f"
     done
     # Thresholds match Sonar's Python defaults: 10 lines / 100 tokens minimum.
-    npx --yes jscpd@4 "$SCAN" --min-lines 10 --min-tokens 100 \
+    npx --yes jscpd@4.3.0 "$SCAN" --min-lines 10 --min-tokens 100 \
         --formats-exts python:py --reporters console --silent \
-        --threshold "$DUPLICATION_CEILING" >/tmp/jscpd.out 2>&1 && DUP_OK=0 || DUP_OK=1
-    grep -E 'Found .* clones' /tmp/jscpd.out || true
+        --threshold "$DUPLICATION_CEILING" >"$OUT/jscpd.out" 2>&1 && DUP_OK=0 || DUP_OK=1
+    grep -E 'Found .* clones' "$OUT/jscpd.out" || true
     rm -rf "$SCAN"
     [ "$DUP_OK" -eq 0 ] || fail "duplication exceeds ${DUPLICATION_CEILING}%"
     pass "duplication at or below ${DUPLICATION_CEILING}%"

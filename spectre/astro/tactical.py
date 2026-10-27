@@ -19,9 +19,22 @@ live in ``spectre.astro.maneuvers``.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import NamedTuple
 
-from spectre.astro.constants import GEO_RADIUS, J2_EARTH, MU_EARTH, R_EARTH, SIDEREAL_DAY
+from spectre.astro.constants import (
+    _LEO_MAX_ALT,
+    _MEO_MAX_ALT,
+    GEO_RADIUS,
+    J2_EARTH,
+    MU_EARTH,
+    R_EARTH,
+    SIDEREAL_DAY,
+)
+from spectre.astro.cw_geometry import CWState, _cw_propagate
+from spectre.astro.dv_estimation import _wrap180
+from spectre.astro.transfers import hohmann
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. Phasing Orbit
@@ -40,6 +53,20 @@ class PhasingResult:
     delta_v_2: float          # km/s — return to original orbit
     total_delta_v: float      # km/s
     time_to_intercept_s: float  # total wait time
+
+
+#: Largest chaser-target radius difference phasing will plan across, km. The
+#: burns and the return are at the chaser's radius and the closure uses the
+#: target's period, so the plan ends with a radial miss equal to the gap; it is
+#: a rendezvous only while that stays this small. About an eccentricity of
+#: 0.0015 in LEO. Beyond it the altitude has to be matched first, by a Hohmann
+#: or Lambert leg (audit F-025).
+_PHASING_RADIUS_TOLERANCE_KM = 10.0
+
+#: Lowest far apsis, in km above R_EARTH, a phasing orbit may have: the
+#: Karman line, the conventional edge of space. Below it the orbit decays
+#: within the phasing period. It was an unnamed literal (audit F-203).
+MIN_PERIGEE_ALT_KM = 100.0
 
 
 def phasing_orbit(
@@ -61,6 +88,13 @@ def phasing_orbit(
         n_revolutions: Number of phasing revolutions.
         mu: Gravitational parameter.
     """
+    gap_km = abs(r_chaser - r_target)
+    if gap_km > _PHASING_RADIUS_TOLERANCE_KM:
+        raise ValueError(
+            f"phasing needs the chaser and target at the same radius: they are {gap_km:.1f} km "
+            f"apart, beyond the {_PHASING_RADIUS_TOLERANCE_KM:.0f} km a phasing plan can close. "
+            "Match the altitude first with a Hohmann or Lambert transfer."
+        )
     phase_rad = math.radians(phase_angle_deg)
     period_target = 2.0 * math.pi * math.sqrt(r_target**3 / mu)
 
@@ -93,7 +127,7 @@ def phasing_orbit(
     # at 2*a_phase - r_chaser. A deep phasing orbit can put that inside the
     # atmosphere, which is a plan that cannot be flown.
     far_apsis = 2.0 * a_phase - r_chaser
-    if far_apsis <= R_EARTH + 100.0:
+    if far_apsis <= R_EARTH + MIN_PERIGEE_ALT_KM:
         raise ValueError(
             f"the phasing orbit needed to close {phase_angle_deg:.1f} degrees in "
             f"{n_revolutions} revolution(s) has its far apsis at "
@@ -302,11 +336,11 @@ def cw_combined(
 
 @dataclass
 class PlaneChangeResult:
-    """Result of a plane-change manoeuvre."""
+    """Result of a plane-change manoeuvre, priced at each node."""
 
-    delta_v_at_node: float      # km/s — ΔV if performed at equatorial node
-    delta_v_at_apogee: float    # km/s — ΔV if performed at apogee
-    optimal_location: str       # "node" or "apogee"
+    delta_v_at_ascending_node: float   # km/s
+    delta_v_at_descending_node: float  # km/s
+    optimal_location: str       # "node" (circular), "ascending node" or "descending node"
     optimal_delta_v: float      # km/s — cheapest option
     inclination_change_deg: float
     method: str = "plane_change"
@@ -330,40 +364,46 @@ def plane_change(
     inclination_change_deg: float,
     ecc: float = 0.0,
     mu: float = MU_EARTH,
+    argp_deg: float = 0.0,
 ) -> PlaneChangeResult:
-    """Compute ΔV for a pure inclination change.
+    """Compute ΔV for a pure inclination change, flown at a node.
 
-    Evaluates cost at the equatorial node (circular velocity) and at
-    apogee (slower velocity, cheaper plane change).
+    A plane change rotates the velocity about the radius vector, leaving the
+    radial speed alone, so it costs 2 v_t sin(Δi / 2) with v_t = h / r the
+    transverse speed (Curtis eq. 6.20). It can only be flown at a node, which
+    lies at true anomaly -ω (ascending) and 180° - ω (descending); the slower
+    of the two is the cheaper. The previous version priced the circular speed
+    at the semi-major axis and offered "apogee" without checking apogee lies
+    on the line of nodes, and named "apogee" for a circular orbit (audit F-074).
 
     Args:
-        r: Orbit radius or semi-major axis (km).
+        r: Semi-major axis (km); the orbit radius when circular.
         inclination_change_deg: Desired inclination change (degrees).
         ecc: Orbital eccentricity (0 for circular).
         mu: Gravitational parameter.
+        argp_deg: Argument of perigee (degrees), which places the nodes.
     """
-    di = math.radians(inclination_change_deg)
+    sin_half = math.sin(math.radians(inclination_change_deg) / 2.0)
+    p = r * (1.0 - ecc**2)
+    h = math.sqrt(mu * p)
 
-    # At equatorial node (circular or periapsis velocity)
-    v_node = math.sqrt(mu / r)
-    dv_node = 2.0 * v_node * math.sin(di / 2.0)
+    def cost_at(true_anomaly_deg: float) -> float:
+        radius = p / (1.0 + ecc * math.cos(math.radians(true_anomaly_deg)))
+        return 2.0 * (h / radius) * sin_half
 
-    # At apogee (if eccentric)
-    r_apo = r * (1.0 + ecc)
-    a = r if ecc == 0.0 else r  # r is SMA when ecc > 0
-    v_apo = math.sqrt(mu * (2.0 / r_apo - 1.0 / a)) if ecc > 0 else v_node
-    dv_apogee = 2.0 * v_apo * math.sin(di / 2.0)
+    dv_asc = cost_at(-argp_deg)
+    dv_desc = cost_at(180.0 - argp_deg)
 
-    if dv_apogee <= dv_node:
-        optimal = "apogee"
-        optimal_dv = dv_apogee
+    if ecc == 0.0:
+        optimal, optimal_dv = "node", dv_asc
+    elif dv_desc < dv_asc:
+        optimal, optimal_dv = "descending node", dv_desc
     else:
-        optimal = "node"
-        optimal_dv = dv_node
+        optimal, optimal_dv = "ascending node", dv_asc
 
     return PlaneChangeResult(
-        delta_v_at_node=dv_node,
-        delta_v_at_apogee=dv_apogee,
+        delta_v_at_ascending_node=dv_asc,
+        delta_v_at_descending_node=dv_desc,
         optimal_location=optimal,
         optimal_delta_v=optimal_dv,
         inclination_change_deg=inclination_change_deg,
@@ -378,11 +418,13 @@ def combined_altitude_plane_change(
 ) -> CombinedTransferResult:
     """Combined altitude change + plane change in a Hohmann-like transfer.
 
-    The plane change is split across both burns using the cosine rule,
-    which is more efficient than performing them separately.
-
-    Strategy: perform all inclination change at the slower burn point
-    (typically at the higher-altitude burn), combined with the Hohmann impulse.
+    The whole plane change is made at the burn at the higher radius, where
+    the speed is lower, and combined with that burn's Hohmann impulse by the
+    cosine rule; the other burn is a plain Hohmann impulse. This is cheaper
+    than a separate plane change, though not optimal: splitting a small
+    fraction of the plane change onto the lower burn saves a little more
+    (Vallado, combined plane change), and is not implemented. The previous
+    docstring claimed the change was divided between the burns (audit F-075).
 
     Args:
         r1: Initial orbit radius (km).
@@ -425,6 +467,14 @@ def combined_altitude_plane_change(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# J2 drift acceleration search: altitude floor, highest raise considered,
+# bisection steps, and the target used when the planes never converge.
+_J2_FLOOR_ALT_KM = 200.0
+_J2_MAX_RAISE_KM = 2000.0
+_J2_BISECT_STEPS = 100
+_J2_FALLBACK_DAYS = 180.0
+
+
 @dataclass
 class J2DriftResult:
     """Result of a J2 RAAN drift analysis."""
@@ -434,9 +484,9 @@ class J2DriftResult:
     differential_rate_deg_day: float  # deg/day — convergence rate
     delta_raan_deg: float             # current RAAN gap
     convergence_time_days: float      # days to natural alignment (0 if diverging)
-    accel_altitude_change_km: float   # altitude change to double convergence rate
+    accel_altitude_change_km: float   # altitude change to halve convergence time (0 if none reaches it)
     accel_convergence_days: float     # convergence time after altitude change
-    accel_delta_v: float              # km/s — ΔV for the altitude change
+    accel_delta_v: float              # km/s — both Hohmann burns of the altitude change
     method: str = "j2_drift"
 
 
@@ -505,26 +555,10 @@ def j2_drift_plan(
         if conv_days < 0:
             conv_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate)
 
-    # Compute altitude change to double convergence rate
-    # Strategy: lower/raise chaser by Δa to increase differential rate
-    # For prograde orbits (inc < 90°), lower altitude → faster (more negative) RAAN rate
-    delta_a = -50.0 if inc_chaser_deg < 90.0 else 50.0  # km, heuristic step
-    a_new = a_chaser + delta_a
-    rate_c_new = j2_raan_rate(a_new, ecc_chaser, inc_chaser_deg, mu)
-    diff_rate_new = rate_c_new - rate_t
-
-    if abs(diff_rate_new) < 1e-10:
-        accel_days = float("inf")
-    else:
-        accel_days = -delta_raan_deg / diff_rate_new
-        if accel_days < 0:
-            accel_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate_new)
-
-    # ΔV to change altitude by delta_a (Hohmann-like)
-    v_old = math.sqrt(mu / a_chaser)
-    a_transfer = (a_chaser + a_new) / 2.0
-    v_transfer = math.sqrt(mu * (2.0 / a_chaser - 1.0 / a_transfer))
-    accel_dv = abs(v_transfer - v_old)
+    delta_a, accel_days = _j2_acceleration(
+        (a_chaser, ecc_chaser, inc_chaser_deg), rate_t, delta_raan_deg, conv_days, mu,
+    )
+    accel_dv = hohmann(a_chaser, a_chaser + delta_a, mu).total_delta_v if delta_a else 0.0
 
     return J2DriftResult(
         raan_rate_chaser_deg_day=rate_c,
@@ -536,6 +570,47 @@ def j2_drift_plan(
         accel_convergence_days=accel_days,
         accel_delta_v=accel_dv,
     )
+
+
+def _j2_acceleration(
+    chaser: tuple[float, float, float],
+    rate_t: float,
+    delta_raan_deg: float,
+    conv_days: float,
+    mu: float,
+) -> tuple[float, float]:
+    """Altitude change (km) that closes the RAAN gap the short way in half the time.
+
+    *chaser* is its (semi-major axis km, eccentricity, inclination deg).
+
+    The nodal rate is monotonic in semi-major axis, so the change is found by
+    bisection between a floor 200 km above the surface and 2,000 km above the
+    chaser. The direction follows from the differential rate the gap needs,
+    not from the inclination alone (audit F-024). Natural convergence that
+    never happens is given a target of _J2_FALLBACK_DAYS. Returns (0, natural
+    time) when no altitude in that range is fast enough.
+    """
+    a_chaser, ecc_chaser, inc_chaser_deg = chaser
+    if delta_raan_deg == 0.0:
+        return 0.0, conv_days
+    target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS
+    needed = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)
+
+    def excess(a: float) -> float:
+        return j2_raan_rate(a, ecc_chaser, inc_chaser_deg, mu) - rate_t - needed
+
+    lo, hi = R_EARTH + _J2_FLOOR_ALT_KM, a_chaser + _J2_MAX_RAISE_KM
+    f_lo = excess(lo)
+    if f_lo * excess(hi) > 0.0:
+        return 0.0, conv_days
+    for _ in range(_J2_BISECT_STEPS):
+        mid = 0.5 * (lo + hi)
+        f_mid = excess(mid)
+        if (f_mid < 0.0) == (f_lo < 0.0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi) - a_chaser, target_days
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -565,6 +640,16 @@ class CollisionAvoidancePlan:
     total_delta_v: float      # km/s — ΔV of the best strategy
 
 
+def _cw_separation_km(n: float, t: float, dv_radial: float, dv_along: float) -> float:
+    """In-plane CW separation at *t* after radial and in-track impulses from rest."""
+    if not (math.isfinite(dv_radial) and math.isfinite(dv_along)):
+        return math.inf
+    s, c = math.sin(n * t), math.cos(n * t)
+    x = dv_radial / n * s + 2.0 * dv_along / n * (1.0 - c)
+    y = -2.0 * dv_radial / n * (1.0 - c) + dv_along * (4.0 * s - 3.0 * n * t) / n
+    return math.hypot(x, y)
+
+
 def collision_avoidance(
     r_ref: float,
     desired_miss_km: float,
@@ -589,7 +674,6 @@ def collision_avoidance(
     n = math.sqrt(mu / r_ref**3)
     nt = n * time_before_tca_s
     sin_nt = math.sin(nt)
-    _cos_nt = math.cos(nt)
 
     # Radial strategy: pure radial ΔV → radial displacement at TCA
     # x(t) = (Δvx / n) sin(nt)
@@ -613,22 +697,27 @@ def collision_avoidance(
     else:
         dv_oop = float("inf")
 
+    # Each burn is sized to put desired_miss_km on its own axis; the miss
+    # reported is the whole separation it reaches at TCA, which for the
+    # in-plane burns includes the swing on the other in-plane axis. It was
+    # reported as desired_miss_km for all three (audit F-196). This is the
+    # separation in the chief's frame, not projected on the encounter plane.
     radial = CollisionAvoidanceResult(
         strategy="radial",
         delta_v=dv_radial,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=_cw_separation_km(n, time_before_tca_s, dv_radial, 0.0),
         time_before_tca_s=time_before_tca_s,
     )
     along_track = CollisionAvoidanceResult(
         strategy="along_track",
         delta_v=dv_along_track,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=_cw_separation_km(n, time_before_tca_s, 0.0, dv_along_track),
         time_before_tca_s=time_before_tca_s,
     )
     out_of_plane = CollisionAvoidanceResult(
         strategy="out_of_plane",
         delta_v=dv_oop,
-        miss_distance_km=desired_miss_km,
+        miss_distance_km=abs(dv_oop / n * sin_nt) if math.isfinite(dv_oop) else desired_miss_km,
         time_before_tca_s=time_before_tca_s,
     )
 
@@ -737,10 +826,15 @@ def graveyard_transfer(
 ) -> GraveyardTransferResult:
     """Compute ΔV for a GEO → graveyard orbit transfer.
 
-    Standard end-of-life disposal: Hohmann transfer to GEO + 300 km.
+    End-of-life disposal by Hohmann transfer above GEO. The IADC guideline
+    (IADC-02-01, Rev. 3, section 5.3.1) sets the minimum raise as
+    235 km + 1000 C_R A/m (C_R the solar radiation pressure coefficient, A/m
+    in m^2/kg); the 300 km default is that minimum for C_R A/m = 0.065,
+    a typical comsat. It was stated as a standard with no source (audit F-204).
 
     Args:
-        graveyard_altitude_km: Altitude above GEO (km, default 300).
+        graveyard_altitude_km: Altitude above GEO (km, default 300); size it
+            with the IADC formula for the platform's C_R A/m.
         mu: Gravitational parameter.
     """
     r1 = GEO_RADIUS
@@ -783,7 +877,9 @@ class ManoeuvreClassification:
     delta_ecc: float           # change in eccentricity
     delta_inc_deg: float       # change in inclination
     delta_raan_deg: float      # change in RAAN
-    confidence: float          # 0.0–1.0
+    # One of six fixed values chosen by which classification branch fired, on
+    # uncited thresholds: a heuristic score, not a confidence (audit F-021).
+    branch_score: float        # 0.0–1.0
     notes: str = ""
     method: str = "manoeuvre_detect"
 
@@ -803,96 +899,134 @@ def classify_manoeuvre(
     Args:
         a1, ecc1, inc1_deg, raan1_deg: Before-manoeuvre elements.
         a2, ecc2, inc2_deg, raan2_deg: After-manoeuvre elements.
-        dt_s: Time between observations (seconds).
+        dt_s: Time between the epochs the two element sets are taken at
+            (seconds), used only to remove J2 nodal drift; zero when both were
+            propagated to one instant.
         mu: Gravitational parameter.
     """
     da = a2 - a1
     de = ecc2 - ecc1
     di = abs(inc2_deg - inc1_deg)
-    draan = abs(raan2_deg - raan1_deg)
-    if draan > 180.0:
-        draan = 360.0 - draan
 
-    # Estimate ΔV from each element change
-    v1 = math.sqrt(mu / a1)
-    v2 = math.sqrt(mu / a2)
+    # RAAN change, after subtracting the expected J2 drift to isolate the
+    # manoeuvre-induced part (only valid for non-J2 manoeuvres). Signed, then
+    # wrapped: reducing both to magnitudes first cancelled a node moved
+    # AGAINST precession, so +5 deg against a predicted -5 read as nothing
+    # rather than 10 (audit F-023).
+    expected_j2_raan = j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0
+    raan_residual = abs(_wrap180((raan2_deg - raan1_deg) - expected_j2_raan))
 
-    # Altitude change ΔV (vis-viva approximation)
-    dv_altitude = abs(v2 - v1) if abs(da) > 1.0 else 0.0
+    total_dv = _element_change_dv((a1, a2), inc1_deg, (di, raan_residual), mu)
 
-    # Plane change ΔV
-    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > 0.01 else 0.0
-
-    # RAAN change ΔV (approximation — only valid for non-J2 manoeuvres)
-    # Subtract expected J2 drift to isolate manoeuvre-induced RAAN change
-    expected_j2_raan = abs(j2_raan_rate(a1, ecc1, inc1_deg, mu) * dt_s / 86400.0)
-    raan_residual = max(0.0, draan - expected_j2_raan)
-    dv_raan = 2.0 * v1 * math.sin(math.radians(raan_residual) / 2.0) if raan_residual > 0.01 else 0.0
-
-    total_dv = math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
-
-    # Classify
-    has_altitude = abs(da) > 5.0        # > 5 km SMA change
-    has_plane = di > 0.05               # > 0.05° inclination change
-    has_raan = raan_residual > 0.05     # > 0.05° RAAN residual
-    has_ecc = abs(de) > 0.001           # eccentricity change
-
-    # Determine burn direction
-    if has_altitude and not has_plane:
-        direction = "prograde" if da > 0 else "retrograde"
-    elif has_plane and not has_altitude:
-        direction = "normal"
-    elif has_altitude and has_plane:
-        direction = "combined"
-    elif has_ecc:
-        direction = "radial"
-    else:
-        direction = "combined"
-
-    # Determine manoeuvre type
-    if total_dv < 0.001:
-        mtype = "station_keeping"
-        confidence = 0.3
-    elif has_altitude and not has_plane and not has_raan:
-        mtype = "altitude_change"
-        confidence = 0.85
-    elif has_plane and not has_altitude:
-        mtype = "plane_change"
-        confidence = 0.85
-    elif has_raan and not has_altitude and not has_plane:
-        mtype = "raan_change"
-        confidence = 0.7
-    elif has_altitude and has_plane:
-        mtype = "combined"
-        confidence = 0.75
-    elif has_ecc and abs(da) < 5.0:
-        mtype = "phasing"
-        confidence = 0.6
-    else:
-        mtype = "unknown"
-        confidence = 0.3
+    changes = _ElementChanges(
+        altitude=abs(da) > _ALT_CHANGE_KM,
+        plane=di > _INC_CHANGE_DEG,
+        raan=raan_residual > _RAAN_CHANGE_DEG,
+        ecc=abs(de) > _ECC_CHANGE,
+    )
+    mtype, confidence = _manoeuvre_type(total_dv, changes, da)
 
     notes_parts = []
-    if has_altitude:
+    if changes.altitude:
         notes_parts.append(f"Δa={da:+.1f} km")
-    if has_plane:
+    if changes.plane:
         notes_parts.append(f"Δi={di:.3f}°")
-    if has_raan:
+    if changes.raan:
         notes_parts.append(f"ΔRAAN={raan_residual:.3f}° (J2-corrected)")
-    if has_ecc:
+    if changes.ecc:
         notes_parts.append(f"Δe={de:+.5f}")
 
     return ManoeuvreClassification(
         manoeuvre_type=mtype,
         estimated_delta_v=total_dv,
-        burn_direction=direction,
+        burn_direction=_burn_direction(changes, da),
         delta_a_km=da,
         delta_ecc=de,
         delta_inc_deg=inc2_deg - inc1_deg,
         delta_raan_deg=raan2_deg - raan1_deg,
-        confidence=confidence,
+        branch_score=confidence,
         notes="; ".join(notes_parts) if notes_parts else "No significant element changes detected",
     )
+
+
+# Thresholds for classify_manoeuvre. Element changes below these are not
+# counted as deliberate, and below _SK_DV_KM_S the event is station-keeping.
+_ALT_CHANGE_KM = 5.0       # semi-major axis
+_INC_CHANGE_DEG = 0.05     # inclination
+_RAAN_CHANGE_DEG = 0.05    # RAAN residual after J2
+_ECC_CHANGE = 0.001        # eccentricity
+_SK_DV_KM_S = 0.001
+# Changes below these are not priced at all.
+_ALT_COST_KM = 1.0
+_ANGLE_COST_DEG = 0.01
+
+
+class _ElementChanges(NamedTuple):
+    """Which element changes cleared their detection thresholds."""
+
+    altitude: bool
+    plane: bool
+    raan: bool
+    ecc: bool
+
+
+def _element_change_dv(
+    sma: tuple[float, float], inc1_deg: float, angles: tuple[float, float], mu: float,
+) -> float:
+    """Combined ΔV (km/s) of the altitude, inclination and RAAN changes.
+
+    *sma* is (a before, a after) in km; *angles* is (inclination change, RAAN
+    residual) in degrees.
+    """
+    a1, a2 = sma
+    di, raan_residual = angles
+    v1 = math.sqrt(mu / a1)
+    v2 = math.sqrt(mu / a2)
+
+    # Altitude change ΔV (vis-viva approximation)
+    dv_altitude = abs(v2 - v1) if abs(a2 - a1) > _ALT_COST_KM else 0.0
+
+    # Plane change ΔV
+    dv_plane = 2.0 * v1 * math.sin(math.radians(di) / 2.0) if di > _ANGLE_COST_DEG else 0.0
+
+    # Two planes at inclination i differing by dOmega in RAAN are theta apart
+    # with cos theta = cos^2 i + sin^2 i cos dOmega. Pricing dOmega itself
+    # overstated the cost by 1/sin i (audit F-073).
+    i1 = math.radians(inc1_deg)
+    cos_theta = math.cos(i1) ** 2 + math.sin(i1) ** 2 * math.cos(math.radians(raan_residual))
+    theta_raan = math.acos(max(-1.0, min(1.0, cos_theta)))
+    dv_raan = 2.0 * v1 * math.sin(theta_raan / 2.0) if raan_residual > _ANGLE_COST_DEG else 0.0
+
+    return math.sqrt(dv_altitude**2 + dv_plane**2 + dv_raan**2)
+
+
+def _burn_direction(changes: _ElementChanges, da: float) -> str:
+    """The burn direction the element changes imply."""
+    if changes.altitude and not changes.plane:
+        return "prograde" if da > 0 else "retrograde"
+    if changes.plane and not changes.altitude:
+        return "normal"
+    if changes.altitude and changes.plane:
+        return "combined"
+    if changes.ecc:
+        return "radial"
+    return "combined"
+
+
+def _manoeuvre_type(total_dv: float, changes: _ElementChanges, da: float) -> tuple[str, float]:
+    """Manoeuvre type and confidence from the cost and the element changes.
+
+    The first rule that holds decides, in this order.
+    """
+    rules = (
+        (total_dv < _SK_DV_KM_S, "station_keeping", 0.3),
+        (changes.altitude and not changes.plane and not changes.raan, "altitude_change", 0.85),
+        (changes.plane and not changes.altitude, "plane_change", 0.85),
+        (changes.raan and not changes.altitude and not changes.plane, "raan_change", 0.7),
+        (changes.altitude and changes.plane, "combined", 0.75),
+        (changes.ecc and abs(da) < _ALT_CHANGE_KM, "phasing", 0.6),
+    )
+    return next(((name, conf) for holds, name, conf in rules if holds), ("unknown", 0.3))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1011,7 +1145,7 @@ class DetectabilityResult:
     delta_v_km_s: float              # ΔV being assessed
     altitude_km: float               # orbital altitude
     delta_v_category: str            # "micro", "small", "medium", "large"
-    tracking_detection_prob: float   # 0.0–1.0
+    detection_score: float           # 0.0–1.0, heuristic, not a probability (audit F-019)
     time_to_detection_hours: float   # estimated hours until detection
     observability_score: float       # 0.0–1.0 overall
     notes: str = ""
@@ -1023,14 +1157,21 @@ def detectability_metric(
     altitude_km: float,
     manoeuvre_type: str = "unknown",
 ) -> DetectabilityResult:
-    """Estimate detectability of a manoeuvre by space surveillance.
+    """Score how detectable a manoeuvre is likely to be. A heuristic.
 
-    Uses empirical rules based on Space Surveillance Network (SSN)
-    tracking capabilities and orbital mechanics:
-    - Micro-manoeuvres (<1 m/s) are very difficult to detect
-    - LEO manoeuvres are detected faster than GEO (denser tracking)
-    - Plane changes are more detectable than along-track burns
-    - Larger ΔV → faster detection → higher probability
+    Every constant here is hand-set and uncalibrated: the rate k per regime
+    (0.5, 0.2, 0.1 per m/s), the detection times (6, 24, 48 h), the type
+    modifiers (1.3, 0.7) and the composite weights (0.4, 0.3, 0.3). No sensor
+    model or surveillance data stands behind them; an earlier docstring
+    attributed them to the Space Surveillance Network, without a source
+    (audit F-019). The shape encodes four qualitative beliefs:
+    - micro-manoeuvres (<1 m/s) are hard to detect
+    - LEO manoeuvres are seen sooner than GEO ones
+    - plane changes are more visible than along-track burns
+    - a larger ΔV is seen sooner
+
+    The regime is banded as the rest of the package bands it, so an object
+    a kilometre below GEO is scored as GEO rather than MEO.
 
     Args:
         delta_v_km_s: Total ΔV of the manoeuvre (km/s).
@@ -1049,12 +1190,12 @@ def detectability_metric(
     else:
         category = "large"
 
-    # Detection probability (sigmoid-like function of ΔV)
-    # P = 1 - exp(-k * ΔV) where k depends on altitude regime
-    if altitude_km < 2000:  # LEO — dense tracking
+    # Detection score, 1 - exp(-k * ΔV), with k by regime. The GEO band starts
+    # 400 km below GEO (constants._MEO_MAX_ALT), not at exactly 35,786 km.
+    if altitude_km < _LEO_MAX_ALT:  # LEO — dense tracking
         k = 0.5  # per m/s
         base_detection_time = 6.0  # hours
-    elif altitude_km < 35786:  # MEO
+    elif altitude_km < _MEO_MAX_ALT:  # MEO
         k = 0.2
         base_detection_time = 24.0
     else:  # GEO — dedicated tracking but sparse coverage
@@ -1085,7 +1226,7 @@ def detectability_metric(
     notes_parts = [
         f"ΔV={dv_m_s:.1f} m/s ({category})",
         f"altitude={altitude_km:.0f} km",
-        f"detection P={detection_prob:.0%}",
+        f"detection score={detection_prob:.2f} (heuristic)",
         f"~{time_hours:.1f} hr to detection",
     ]
 
@@ -1093,7 +1234,7 @@ def detectability_metric(
         delta_v_km_s=delta_v_km_s,
         altitude_km=altitude_km,
         delta_v_category=category,
-        tracking_detection_prob=detection_prob,
+        detection_score=detection_prob,
         time_to_detection_hours=time_hours,
         observability_score=observability,
         notes="; ".join(notes_parts),
@@ -1132,6 +1273,73 @@ class EvasionPlan:
     time_to_tca_s: float
 
 
+_EVASION_TIME_FRACTIONS = (0.25, 0.5, 0.75, 1.0)
+_DEGENERATE = 1e-12
+
+
+def _evasion_axes(n: float, t_burn: float, desired_miss_km: float) -> list[tuple[str, float, int]]:
+    """(strategy, ΔV for the desired miss, axis 0/1/2 = along/normal/radial).
+
+    Clohessy-Wiltshire displacement per unit impulse: along-track
+    |4 sin nt - 3 nt| / n, normal and radial |sin nt| / n, so the normal and
+    radial costs are equal by construction. The along-track cost is the same
+    for a prograde or a retrograde burn, and is labelled prograde. A
+    combined-axis allocation was computed here and then discarded, and the
+    docstring claimed it was evaluated; it was removed (audit F-076).
+    """
+    nt = n * t_burn
+    sin_nt = math.sin(nt)
+    coeff_y = abs(4.0 * sin_nt - 3.0 * nt) / n
+    along = desired_miss_km / coeff_y if coeff_y > _DEGENERATE else float("inf")
+    across = desired_miss_km * n / abs(sin_nt) if abs(sin_nt) > _DEGENERATE else float("inf")
+    return [("prograde", along, 0), ("normal", across, 1), ("radial", across, 2)]
+
+
+def _evasion_result(
+    burn: tuple[str, float, int], t_burn: float, desired_miss_km: float, fuel_budget_km_s: float,
+) -> EvasionResult:
+    """The burn on one axis, cut to the fuel budget when it exceeds it.
+
+    *burn* is one ``(strategy, ΔV, axis)`` entry from :func:`_evasion_axes`.
+    """
+    name, dv, axis = burn
+    if dv > fuel_budget_km_s:
+        dv_actual = fuel_budget_km_s
+        achieved_miss = desired_miss_km * (dv_actual / dv)
+    else:
+        dv_actual = dv
+        achieved_miss = desired_miss_km
+    components = [0.0, 0.0, 0.0]
+    components[axis] = dv if dv_actual == dv else dv * (dv_actual / dv)
+    fuel_fraction = dv_actual / fuel_budget_km_s if fuel_budget_km_s > 0 else 1.0
+    return EvasionResult(
+        strategy=name,
+        delta_v=dv_actual,
+        resulting_miss_km=achieved_miss,
+        fuel_used_fraction=fuel_fraction,
+        burn_epoch_offset_s=t_burn,
+        prograde_dv=components[0],
+        normal_dv=components[1],
+        radial_dv=components[2],
+        # The fraction, not a second division: a zero budget divided by zero
+        # here while the field above was guarded.
+        notes=f"Burn {t_burn / 60:.0f} min before TCA, "
+              f"miss={achieved_miss:.1f} km, "
+              f"fuel={fuel_fraction * 100:.0f}%",
+    )
+
+
+def _better_evasion(result: EvasionResult, best: EvasionResult | None, desired_miss_km: float) -> bool:
+    """Cheapest burn that achieves the miss, else the largest miss achieved."""
+    if best is None:
+        return True
+    cheaper_and_enough = result.resulting_miss_km >= desired_miss_km and result.delta_v < best.delta_v
+    best_short_and_beaten = (
+        best.resulting_miss_km < desired_miss_km and result.resulting_miss_km > best.resulting_miss_km
+    )
+    return cheaper_and_enough or best_short_and_beaten
+
+
 def optimal_evasion(
     r_ref: float,
     desired_miss_km: float,
@@ -1141,16 +1349,14 @@ def optimal_evasion(
 ) -> EvasionPlan:
     """Compute the optimal defensive evasion manoeuvre.
 
-    Evaluates multiple burn strategies (prograde, retrograde, normal,
-    radial, and combined) at the optimal burn time to maximise miss
-    distance while respecting fuel constraints.
+    Evaluates single-axis burns (along-track, normal and radial) at four
+    burn times to maximise miss distance while respecting the fuel budget.
 
     Unlike COLA (which simply achieves a required miss distance),
     the evasion planner:
     - Respects a fuel budget constraint
     - Optimises burn timing (not just direction)
-    - Evaluates combined multi-axis burns
-    - Reports remaining fuel after the manoeuvre
+    - Reports the fuel used by the manoeuvre
 
     Args:
         r_ref: Reference orbit radius (km).
@@ -1161,92 +1367,17 @@ def optimal_evasion(
     """
     n = math.sqrt(mu / r_ref**3)
     strategies: list[EvasionResult] = []
-
-    # Evaluate burns at multiple timing offsets to find optimal
-    # Test at 25%, 50%, 75%, and 100% of available time
     best_overall: EvasionResult | None = None
 
-    for time_frac in [0.25, 0.5, 0.75, 1.0]:
+    # Burn at 25, 50, 75 and 100 per cent of the time available.
+    for time_frac in _EVASION_TIME_FRACTIONS:
         t_burn = time_to_tca_s * time_frac
-        nt = n * t_burn
-        sin_nt = math.sin(nt)
-        _cos_nt = math.cos(nt)
-
-        # Prograde/retrograde: along-track displacement
-        coeff_y = abs(4.0 * sin_nt - 3.0 * nt) / n
-        if coeff_y > 1e-12:
-            dv_prograde = desired_miss_km / coeff_y
-        else:
-            dv_prograde = float("inf")
-
-        # Normal: cross-track displacement
-        if abs(sin_nt) > 1e-12:
-            dv_normal = desired_miss_km * n / abs(sin_nt)
-        else:
-            dv_normal = float("inf")
-
-        # Radial: radial displacement
-        if abs(sin_nt) > 1e-12:
-            dv_radial = desired_miss_km * n / abs(sin_nt)
-        else:
-            dv_radial = float("inf")
-
-        # Combined: split ΔV optimally across axes
-        # Allocate budget proportionally to effectiveness
-        weights = []
-        if coeff_y > 1e-12:
-            weights.append(("combined", coeff_y))
-        eff_r = abs(sin_nt) / n if abs(sin_nt) > 1e-12 else 0.0
-        if eff_r > 1e-12:
-            weights.append(("combined_r", eff_r))
-
-        if weights:
-            total_eff = sum(w[1] for w in weights)
-            # Combined ΔV needed for desired_miss along best axis
-            _dv_combined = desired_miss_km / total_eff * len(weights)
-        else:
-            _dv_combined = float("inf")
-
-        # Evaluate each strategy at this timing
-        candidates = [
-            ("prograde" if dv_prograde >= 0 else "retrograde",
-             dv_prograde, dv_prograde, 0.0, 0.0),
-            ("normal", dv_normal, 0.0, dv_normal, 0.0),
-            ("radial", dv_radial, 0.0, 0.0, dv_radial),
-        ]
-
-        for name, dv, pro, nor, rad in candidates:
-            if dv > fuel_budget_km_s or dv == float("inf"):
-                # Exceeds budget — use full budget and compute achieved miss
-                if dv == float("inf"):
-                    continue
-                dv_actual = fuel_budget_km_s
-                achieved_miss = desired_miss_km * (dv_actual / dv)
-            else:
-                dv_actual = dv
-                achieved_miss = desired_miss_km
-
-            result = EvasionResult(
-                strategy=name,
-                delta_v=dv_actual,
-                resulting_miss_km=achieved_miss,
-                fuel_used_fraction=dv_actual / fuel_budget_km_s if fuel_budget_km_s > 0 else 1.0,
-                burn_epoch_offset_s=t_burn,
-                prograde_dv=pro if dv_actual == dv else pro * (dv_actual / dv),
-                normal_dv=nor if dv_actual == dv else nor * (dv_actual / dv),
-                radial_dv=rad if dv_actual == dv else rad * (dv_actual / dv),
-                notes=f"Burn {t_burn / 60:.0f} min before TCA, "
-                      f"miss={achieved_miss:.1f} km, "
-                      f"fuel={dv_actual / fuel_budget_km_s * 100:.0f}%",
-            )
+        for burn in _evasion_axes(n, t_burn, desired_miss_km):
+            if burn[1] == float("inf"):
+                continue
+            result = _evasion_result(burn, t_burn, desired_miss_km, fuel_budget_km_s)
             strategies.append(result)
-
-            if best_overall is None or (
-                achieved_miss >= desired_miss_km and dv_actual < best_overall.delta_v
-            ) or (
-                best_overall.resulting_miss_km < desired_miss_km
-                and achieved_miss > best_overall.resulting_miss_km
-            ):
+            if _better_evasion(result, best_overall, desired_miss_km):
                 best_overall = result
 
     if best_overall is None:
@@ -1283,7 +1414,9 @@ class IntentAssessment:
 
     intent_type: str          # co_orbital_intercept, inspection, station_keeping,
                               # repositioning, debris_avoidance, unknown
-    likelihood: float         # 0.0–1.0
+    # An additive score of uncited weights (0.3, 0.25, 0.15, 0.1) over uncited
+    # thresholds. It was named and shown as a likelihood (audit F-018).
+    indicator_score: float    # 0.0–1.0, heuristic
     risk_level: str           # low, medium, high, critical
     predicted_tca_hours: float  # estimated hours to closest approach (0 = already close)
     evidence: str             # human-readable evidence summary
@@ -1317,62 +1450,20 @@ def assess_intercept_intent(
         is_coplanar: Whether objects share approximately the same orbital plane.
         mu: Gravitational parameter.
     """
-    evidence_parts: list[str] = []
-    score = 0.0
-
-    # 1. Closing geometry (most significant indicator)
-    is_closing = range_rate_km_s < -0.001
-    if is_closing:
-        closing_score = min(1.0, abs(range_rate_km_s) / 1.0)  # normalise to 1 km/s
-        score += 0.3 * closing_score
-        evidence_parts.append(f"closing at {abs(range_rate_km_s):.3f} km/s")
-
-    # 2. Range proximity (closer = more concerning)
-    if relative_range_km < 100:
-        score += 0.25
-        evidence_parts.append(f"range {relative_range_km:.0f} km (proximate)")
-    elif relative_range_km < 1000:
-        score += 0.15 * (1.0 - relative_range_km / 1000.0)
-        evidence_parts.append(f"range {relative_range_km:.0f} km (approaching)")
-
-    # 3. Coplanar matching (needed for intercept)
-    if is_coplanar:
-        score += 0.15
-        evidence_parts.append("coplanar geometry")
-
-    # 4. Altitude matching (Δa → matching target orbit)
-    if abs(delta_a_km) > 5.0 and abs(delta_a_km) < 200.0:
-        score += 0.1
-        evidence_parts.append(f"Δa={delta_a_km:+.1f} km (orbit matching)")
-
-    # 5. Plane matching manoeuvres
-    if abs(delta_inc_deg) > 0.05:
-        score += 0.1
-        evidence_parts.append(f"Δi={delta_inc_deg:.3f}° (plane alignment)")
-
-    if abs(delta_raan_deg) > 0.05:
-        score += 0.1
-        evidence_parts.append(f"ΔRAAN={delta_raan_deg:.3f}° (node alignment)")
-
-    # Classify intent
+    score, geo_evidence = _geometry_indicators(relative_range_km, range_rate_km_s)
+    orbit_weights, orbit_evidence = _orbit_matching_indicators(
+        delta_a_km, delta_inc_deg, delta_raan_deg, is_coplanar,
+    )
+    # Added one at a time, in the order the indicators were always summed, so
+    # no score moves in its last bit and lands on the other side of a band.
+    for weight in orbit_weights:
+        score += weight
+    evidence_parts = geo_evidence + orbit_evidence
     score = min(1.0, score)
-    if score > 0.7:
-        if relative_range_km < 50 and abs(range_rate_km_s) < 0.01:
-            intent = "inspection"
-        else:
-            intent = "co_orbital_intercept"
-        risk = "critical" if score > 0.85 else "high"
-    elif score > 0.4:
-        intent = "repositioning"
-        risk = "medium"
-    elif score > 0.15:
-        intent = "station_keeping"
-        risk = "low"
-    else:
-        intent = "unknown"
-        risk = "low"
+    intent, risk = _classify_intent(score, relative_range_km, range_rate_km_s)
 
     # Predict TCA from range and range rate
+    is_closing = range_rate_km_s < _CLOSING_RATE_KM_S
     if is_closing and abs(range_rate_km_s) > 1e-6:
         tca_hours = relative_range_km / abs(range_rate_km_s) / 3600.0
     else:
@@ -1380,11 +1471,69 @@ def assess_intercept_intent(
 
     return IntentAssessment(
         intent_type=intent,
-        likelihood=score,
+        indicator_score=score,
         risk_level=risk,
         predicted_tca_hours=min(tca_hours, 9999.0),
         evidence="; ".join(evidence_parts) if evidence_parts else "No significant indicators",
     )
+
+
+# Intent indicator thresholds. Hand-set and uncited, like the weights beside
+# them (audit F-018, F-079): named so they can be read and, one day, sourced.
+#: Range rate below which the pair counts as closing, km/s (negative = closing).
+_CLOSING_RATE_KM_S = -0.001
+_PROXIMATE_KM = 100.0
+_APPROACHING_KM = 1000.0
+_ORBIT_MATCH_DA_KM = (5.0, 200.0)       # open interval on |Δa|
+_PLANE_MATCH_DEG = 0.05                 # |Δi| and |ΔRAAN| above this
+_INSPECTION_RANGE_KM = 50.0
+_INSPECTION_RATE_KM_S = 0.01
+#: Score bands for the intent label: high (split by inspection geometry and
+#: critical), repositioning, station-keeping.
+_INTENT_HIGH, _INTENT_CRITICAL, _INTENT_REPOSITION, _INTENT_SK = 0.7, 0.85, 0.4, 0.15
+
+
+def _geometry_indicators(relative_range_km: float, range_rate_km_s: float) -> tuple[float, list[str]]:
+    """Closing rate and proximity, the two most significant indicators."""
+    score, evidence = 0.0, []
+    if range_rate_km_s < _CLOSING_RATE_KM_S:
+        score += 0.3 * min(1.0, abs(range_rate_km_s) / 1.0)  # normalise to 1 km/s
+        evidence.append(f"closing at {abs(range_rate_km_s):.3f} km/s")
+    if relative_range_km < _PROXIMATE_KM:
+        score += 0.25
+        evidence.append(f"range {relative_range_km:.0f} km (proximate)")
+    elif relative_range_km < _APPROACHING_KM:
+        score += 0.15 * (1.0 - relative_range_km / _APPROACHING_KM)
+        evidence.append(f"range {relative_range_km:.0f} km (approaching)")
+    return score, evidence
+
+
+def _orbit_matching_indicators(
+    delta_a_km: float, delta_inc_deg: float, delta_raan_deg: float, is_coplanar: bool,
+) -> tuple[list[float], list[str]]:
+    """Coplanarity, altitude matching and plane matching, 0.1 to 0.15 each."""
+    indicators = (
+        (is_coplanar, 0.15, "coplanar geometry"),
+        (_ORBIT_MATCH_DA_KM[0] < abs(delta_a_km) < _ORBIT_MATCH_DA_KM[1], 0.1,
+         f"Δa={delta_a_km:+.1f} km (orbit matching)"),
+        (abs(delta_inc_deg) > _PLANE_MATCH_DEG, 0.1, f"Δi={delta_inc_deg:.3f}° (plane alignment)"),
+        (abs(delta_raan_deg) > _PLANE_MATCH_DEG, 0.1, f"ΔRAAN={delta_raan_deg:.3f}° (node alignment)"),
+    )
+    present = [(weight, note) for hit, weight, note in indicators if hit]
+    return [w for w, _ in present], [n for _, n in present]
+
+
+def _classify_intent(score: float, relative_range_km: float, range_rate_km_s: float) -> tuple[str, str]:
+    """The intent label and risk level for an indicator score."""
+    if score > _INTENT_HIGH:
+        close_and_slow = relative_range_km < _INSPECTION_RANGE_KM and abs(range_rate_km_s) < _INSPECTION_RATE_KM_S
+        risk = "critical" if score > _INTENT_CRITICAL else "high"
+        return ("inspection" if close_and_slow else "co_orbital_intercept"), risk
+    if score > _INTENT_REPOSITION:
+        return "repositioning", "medium"
+    if score > _INTENT_SK:
+        return "station_keeping", "low"
+    return "unknown", "low"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1435,7 +1584,8 @@ def intercept_envelope_analytical(
        degenerates to zero delta-V over half a period, which describes no
        manoeuvre.
 
-       It is retained as a cheap upper-bound sketch for unequal radii. For an
+       Since it underestimates, it is at best a lower-bound sketch for
+       unequal radii (it read "upper-bound", audit F-198). For an
        intercept cost with real geometry use ``lambert_intercept``, which
        ``intercept_envelope_intercept`` now calls.
 
@@ -1523,7 +1673,7 @@ class StabilityResult:
     """Result of CW relative motion stability analysis."""
 
     is_bounded: bool                  # True if motion doesn't drift
-    radial_amplitude_km: float        # max radial oscillation
+    radial_amplitude_km: float        # largest radial distance over an orbit
     along_track_drift_km_per_orbit: float  # secular along-track drift per orbit
     cross_track_amplitude_km: float   # max cross-track oscillation
     stability_score: float            # 0.0–1.0 (1 = perfectly bounded)
@@ -1551,16 +1701,24 @@ def relative_motion_stability(
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_ref**3)
-    _T = 2.0 * math.pi / n  # orbital period
 
     # CW boundedness condition: dvy0 + 2*n*dx0 = 0 for no secular drift
     drift_indicator = dvy0 + 2.0 * n * dx0
-    secular_drift_per_orbit = 3.0 * math.pi * drift_indicator / n  # km per orbit
+    # Secular along-track term of the CW solution is -3 t (ydot0 + 2 n x0)
+    # (Curtis eq. 7.53), so over one orbit, t = 2 pi / n, it is -6 pi D / n.
+    # This read +3 pi D / n, half the size and the wrong sign (audit F-005).
+    secular_drift_per_orbit = -6.0 * math.pi * drift_indicator / n  # km per orbit
 
-    # Radial amplitude: from CW in-plane solution
-    # x(t) = (4-3cos(nt))*dx0 + sin(nt)*dvx0/n + 2*(1-cos(nt))*dvy0/n
-    # Maximum occurs at specific nt values; estimate from initial conditions
-    A_x = math.sqrt(dx0**2 + (dvx0 / n)**2) if n > 0 else abs(dx0)
+    # Radial extent from the CW in-plane solution (Curtis eq. 7.53):
+    #   x(t) = (4 - 3 cos nt) dx0 + (sin nt) dvx0 / n + 2 (1 - cos nt) dvy0 / n
+    #        = c - b cos nt + (dvx0 / n) sin nt,
+    # with offset c = 4 dx0 + 2 dvy0 / n and b = 3 dx0 + 2 dvy0 / n, so the
+    # largest radial distance is |c| + sqrt(b^2 + (dvx0 / n)^2). The previous
+    # sqrt(dx0^2 + (dvx0 / n)^2) ignored dvy0 and the factor 3, and reported 0
+    # for an along-track kick from the origin that reaches 4 v / n (audit F-071).
+    offset = 4.0 * dx0 + 2.0 * dvy0 / n
+    swing = math.hypot(3.0 * dx0 + 2.0 * dvy0 / n, dvx0 / n)
+    radial_extent = abs(offset) + swing
 
     # Cross-track amplitude: z(t) = dz0*cos(nt) + dvz0*sin(nt)/n
     A_z = math.sqrt(dz0**2 + (dvz0 / n)**2) if n > 0 else abs(dz0)
@@ -1583,12 +1741,12 @@ def relative_motion_stability(
         notes_parts.append("bounded (non-drifting) relative motion")
     else:
         notes_parts.append(f"secular drift {secular_drift_per_orbit:.2f} km/orbit")
-    notes_parts.append(f"radial ±{A_x:.2f} km, cross-track ±{A_z:.2f} km")
+    notes_parts.append(f"radial ±{radial_extent:.2f} km, cross-track ±{A_z:.2f} km")
     notes_parts.append(f"drift indicator (Δvy+2nΔx) = {drift_indicator:.4e} km/s")
 
     return StabilityResult(
         is_bounded=is_bounded,
-        radial_amplitude_km=A_x,
+        radial_amplitude_km=radial_extent,
         along_track_drift_km_per_orbit=secular_drift_per_orbit,
         cross_track_amplitude_km=A_z,
         stability_score=stability,
@@ -1608,10 +1766,130 @@ class FingerprintResult:
     primary_classification: str        # "geo_sk", "inspector", "asat_test",
                                        # "debris_avoidance", "orbit_raising",
                                        # "constellation_maintenance", "unknown"
-    probabilities: dict[str, float]    # classification → probability
-    confidence: float                  # 0.0–1.0
+    # Independent additive scores of uncited profile constants, one per
+    # classification. They are not normalised and can sum above 1, so they
+    # are scores, not probabilities (audit F-020).
+    scores: dict[str, float]           # classification → heuristic score
+    match_score: float                 # the primary's score, 0.0–1.0
     signature_summary: str             # human-readable signature
     method: str = "fingerprint"
+
+
+class _Signature(NamedTuple):
+    """An observed manoeuvre, as the fingerprint profiles read it."""
+
+    dv_ms: float
+    direction: str
+    altitude_km: float
+    inclination_deg: float
+    eccentricity: float
+    repeat_days: float
+
+
+# Fingerprint thresholds, all hand-set and uncited (audit F-020, F-079).
+_FP_GEO_BAND_KM = (35000.0, 37000.0)
+_FP_GEO_SK_DV_MS = 5.0
+_FP_GEO_SK_CYCLE_DAYS = (10.0, 20.0)
+_FP_INSPECTOR_DV_MS = 50.0
+_FP_NEAR_CIRCULAR_ECC = 0.01
+_FP_LEO_KM = 2000.0
+_FP_PRECISION_DV_MS = (0.5, 20.0)
+_FP_ASAT_DV_MS = 100.0
+_FP_ASAT_ALT_KM = 1500.0
+_FP_ECCENTRIC = 0.1
+_FP_AVOIDANCE_DV_MS = 10.0
+_FP_AVOIDANCE_ALT_KM = 1000.0
+_FP_RAISE_DV_MS = (10.0, 500.0)
+_FP_RAISE_ECC = 0.05
+_FP_MAINTENANCE_DV_MS = 20.0
+_FP_MAINTENANCE_CYCLE_DAYS = (20.0, 180.0)
+_FP_MAINTENANCE_INC_DEG = (50.0, 100.0)
+
+
+def _inside(value: float, band: tuple[float, float]) -> bool:
+    """Strictly inside an open interval."""
+    return band[0] < value < band[1]
+
+
+def _in_geo_band(altitude_km: float) -> bool:
+    return _inside(altitude_km, _FP_GEO_BAND_KM)
+
+
+def _profile_score(indicators: tuple[tuple[bool, float], ...]) -> float:
+    """Add the weights of the indicators present, in table order."""
+    score = 0.0
+    for present, weight in indicators:
+        if present:
+            score += weight
+    return score
+
+
+def _geo_sk(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    # The other three count only inside the GEO band.
+    in_band = _in_geo_band(s.altitude_km)
+    return (
+        (in_band, 0.4),
+        (in_band and s.dv_ms < _FP_GEO_SK_DV_MS, 0.3),
+        (in_band and s.direction in ("prograde", "retrograde", "normal"), 0.1),
+        (in_band and _inside(s.repeat_days, _FP_GEO_SK_CYCLE_DAYS), 0.2),  # about a 14-day cycle
+    )
+
+
+def _inspector(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_INSPECTOR_DV_MS, 0.2),
+        (s.direction in ("radial", "combined"), 0.2),
+        (s.eccentricity < _FP_NEAR_CIRCULAR_ECC, 0.1),
+        (s.altitude_km < _FP_LEO_KM or _in_geo_band(s.altitude_km), 0.2),
+        (_inside(s.dv_ms, _FP_PRECISION_DV_MS), 0.2),  # precision manoeuvre range
+    )
+
+
+def _asat_test(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms > _FP_ASAT_DV_MS, 0.3),
+        (s.direction == "retrograde", 0.3),
+        (s.altitude_km < _FP_ASAT_ALT_KM, 0.2),
+        (s.eccentricity > _FP_ECCENTRIC, 0.1),
+    )
+
+
+def _debris_avoidance(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_AVOIDANCE_DV_MS, 0.3),
+        (s.direction in ("prograde", "retrograde"), 0.2),
+        (s.altitude_km < _FP_AVOIDANCE_ALT_KM, 0.2),
+    )
+
+
+def _orbit_raising(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.direction == "prograde", 0.3),
+        (_inside(s.dv_ms, _FP_RAISE_DV_MS), 0.2),
+        (s.eccentricity < _FP_RAISE_ECC, 0.1),
+    )
+
+
+def _constellation_maintenance(s: _Signature) -> tuple[tuple[bool, float], ...]:
+    return (
+        (s.dv_ms < _FP_MAINTENANCE_DV_MS, 0.2),
+        (s.direction in ("prograde", "retrograde"), 0.2),
+        (_inside(s.repeat_days, _FP_MAINTENANCE_CYCLE_DAYS), 0.3),
+        (_inside(s.inclination_deg, _FP_MAINTENANCE_INC_DEG), 0.1),
+    )
+
+
+#: Each behaviour profile and the weighted indicators it scores. Every weight
+#: and threshold is hand-set and uncited, so the result is a heuristic score
+#: (audit F-020). Order matters only for ties, where the first profile wins.
+_PROFILES: tuple[tuple[str, Callable[[_Signature], tuple[tuple[bool, float], ...]]], ...] = (
+    ("geo_sk", _geo_sk),
+    ("inspector", _inspector),
+    ("asat_test", _asat_test),
+    ("debris_avoidance", _debris_avoidance),
+    ("orbit_raising", _orbit_raising),
+    ("constellation_maintenance", _constellation_maintenance),
+)
 
 
 def fingerprint_manoeuvre(
@@ -1641,87 +1919,20 @@ def fingerprint_manoeuvre(
         eccentricity: Orbital eccentricity.
         repeat_interval_days: Days since last similar manoeuvre (0 = unknown).
     """
-    dv_ms = delta_v_km_s * 1000.0  # m/s
-    probs: dict[str, float] = {}
-
-    # GEO station-keeping
-    geo_score = 0.0
-    if 35000 < altitude_km < 37000:
-        geo_score += 0.4
-        if dv_ms < 5.0:
-            geo_score += 0.3
-        if burn_direction in ("prograde", "retrograde", "normal"):
-            geo_score += 0.1
-        if repeat_interval_days > 0 and 10 < repeat_interval_days < 20:
-            geo_score += 0.2  # ~14-day SK cycle
-    probs["geo_sk"] = min(1.0, geo_score)
-
-    # Inspector satellite
-    insp_score = 0.0
-    if dv_ms < 50.0:
-        insp_score += 0.2
-    if burn_direction in ("radial", "combined"):
-        insp_score += 0.2
-    if eccentricity < 0.01:
-        insp_score += 0.1
-    if altitude_km < 2000 or 35000 < altitude_km < 37000:
-        insp_score += 0.2
-    if dv_ms > 0.5 and dv_ms < 20.0:
-        insp_score += 0.2  # precision manoeuvre range
-    probs["inspector"] = min(1.0, insp_score)
-
-    # ASAT test
-    asat_score = 0.0
-    if dv_ms > 100.0:
-        asat_score += 0.3
-    if burn_direction == "retrograde":
-        asat_score += 0.3
-    if altitude_km < 1500:
-        asat_score += 0.2
-    if eccentricity > 0.1:
-        asat_score += 0.1
-    probs["asat_test"] = min(1.0, asat_score)
-
-    # Debris avoidance
-    dav_score = 0.0
-    if dv_ms < 10.0:
-        dav_score += 0.3
-    if burn_direction in ("prograde", "retrograde"):
-        dav_score += 0.2
-    if altitude_km < 1000:
-        dav_score += 0.2
-    probs["debris_avoidance"] = min(1.0, dav_score)
-
-    # Orbit raising
-    raise_score = 0.0
-    if burn_direction == "prograde":
-        raise_score += 0.3
-    if 10.0 < dv_ms < 500.0:
-        raise_score += 0.2
-    if eccentricity < 0.05:
-        raise_score += 0.1
-    probs["orbit_raising"] = min(1.0, raise_score)
-
-    # Constellation maintenance
-    const_score = 0.0
-    if dv_ms < 20.0:
-        const_score += 0.2
-    if burn_direction in ("prograde", "retrograde"):
-        const_score += 0.2
-    if repeat_interval_days > 0 and 20 < repeat_interval_days < 180:
-        const_score += 0.3
-    if 50 < inclination_deg < 100:
-        const_score += 0.1
-    probs["constellation_maintenance"] = min(1.0, const_score)
+    sig_in = _Signature(
+        delta_v_km_s * 1000.0, burn_direction, altitude_km, inclination_deg, eccentricity, repeat_interval_days,
+    )
+    dv_ms = sig_in.dv_ms
+    probs = {name: min(1.0, _profile_score(indicators(sig_in))) for name, indicators in _PROFILES}
 
     # Select primary
     primary = max(probs, key=probs.get)  # type: ignore[arg-type]
     confidence = probs[primary]
 
-    # If no strong signal, mark unknown
+    # If no strong signal, mark unknown, but report the top score as it is:
+    # it used to be replaced by the constant 0.1.
     if confidence < 0.3:
         primary = "unknown"
-        confidence = 0.1
 
     sig = (f"ΔV={dv_ms:.1f} m/s {burn_direction}, "
            f"alt={altitude_km:.0f} km, inc={inclination_deg:.1f}°, "
@@ -1729,8 +1940,8 @@ def fingerprint_manoeuvre(
 
     return FingerprintResult(
         primary_classification=primary,
-        probabilities=probs,
-        confidence=confidence,
+        scores=probs,
+        match_score=confidence,
         signature_summary=sig,
     )
 
@@ -1738,6 +1949,26 @@ def fingerprint_manoeuvre(
 # ═══════════════════════════════════════════════════════════════════════════
 #  15. Formation Defence Solver
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+_SLOT_SAMPLES = 2000
+_BURN_AXIS = {"radial": 0, "along_track": 1, "out_of_plane": 2}
+
+
+def _slot_displacement_km(strategy: str, delta_v: float, n: float) -> float:
+    """Largest distance (km) a single impulse moves the asset over one orbit.
+
+    Flown through the Clohessy-Wiltshire solution from the slot, with the
+    impulse along the strategy's axis.
+    """
+    velocity = [0.0, 0.0, 0.0]
+    velocity[_BURN_AXIS[strategy]] = delta_v
+    start = CWState(0.0, 0.0, 0.0, *velocity)
+    period = 2.0 * math.pi / n
+    return max(
+        math.sqrt(p.x**2 + p.y**2 + p.z**2)
+        for p in (_cw_propagate(start, n, period * k / _SLOT_SAMPLES) for k in range(_SLOT_SAMPLES + 1))
+    )
 
 
 @dataclass
@@ -1755,7 +1986,6 @@ class FormationDefenceResult:
 
 def formation_defence_burn(
     r_asset: float,
-    r_threat: float,
     time_to_tca_s: float,
     desired_miss_km: float,
     formation_spacing_km: float = 50.0,
@@ -1769,33 +1999,21 @@ def formation_defence_burn(
 
     Args:
         r_asset: Asset orbit radius (km).
-        r_threat: Threat orbit radius at conjunction (km).
         time_to_tca_s: Warning time before conjunction (seconds).
         desired_miss_km: Required miss distance (km).
         formation_spacing_km: Formation slot tolerance (km).
         mu: Gravitational parameter.
     """
     n = math.sqrt(mu / r_asset**3)
-    nt = n * time_to_tca_s
-    _sin_nt = math.sin(nt)
 
     # Compute cheapest COLA burn
     cola = collision_avoidance(r_asset, desired_miss_km, time_to_tca_s, mu)
     best = cola.best
 
-    # Assess formation impact: how far does the burn displace the asset
-    # after one orbital period?
-    T = 2.0 * math.pi / n
-    if best.strategy == "along_track":
-        # Along-track burn causes secular drift
-        coeff = abs(4.0 * math.sin(n * T) - 3.0 * n * T) / n
-        formation_displacement = best.delta_v * coeff if coeff > 1e-12 else 0.0
-    elif best.strategy == "radial":
-        # Radial burn causes oscillating displacement
-        formation_displacement = best.delta_v / n  # max radial excursion
-    else:
-        # Out-of-plane: oscillating cross-track
-        formation_displacement = best.delta_v / n
+    # Formation impact: the furthest the burn carries the asset from its slot
+    # over one orbit. A radial burn's along-track excursion reaches 4 dv / n,
+    # four times the dv / n reported before (audit F-078).
+    formation_displacement = _slot_displacement_km(best.strategy, best.delta_v, n)
 
     maintains = formation_displacement < formation_spacing_km
 
@@ -1836,6 +2054,79 @@ class TerrainAssessment:
     method: str = "terrain"
 
 
+# Terrain bands, km unless stated, all hand-set and uncited (audit F-022,
+# F-079). Inclusive at both ends unless a comparison below says otherwise.
+_GEO_BELT_KM = (35500.0, 36200.0)
+_DEBRIS_EXTREME_KM = (700.0, 1000.0)
+_DEBRIS_HIGH_LOW_KM = 400.0
+_DEBRIS_HIGH_TOP_KM = 1200.0
+_DEBRIS_MEDIUM_LOW_KM = 200.0
+_DEBRIS_MEDIUM_TOP_KM = 1500.0
+_SSO_INC_DEG = (96.0, 100.0)
+_SSO_ALT_KM = (500.0, 900.0)
+_ISS_CORRIDOR_KM = (400.0, 600.0)
+_ISS_CORRIDOR_INC_DEG = (40.0, 60.0)
+_TERRAIN_LEO_KM = 2000.0
+_INNER_BELT_FLOOR_KM = 1000.0
+
+
+def _within(value: float, band: tuple[float, float]) -> bool:
+    """Inside a closed interval."""
+    return band[0] <= value <= band[1]
+
+
+def _in_geo_belt(altitude_km: float) -> bool:
+    return _within(altitude_km, _GEO_BELT_KM)
+
+
+def _terrain_debris(altitude_km: float, inclination_deg: float) -> tuple[str, float]:
+    """Debris band and score, hand-set and uncited (audit F-022)."""
+    extreme_low, extreme_top = _DEBRIS_EXTREME_KM
+    if _within(altitude_km, _DEBRIS_EXTREME_KM):
+        debris, score = "extreme", 1.0
+    elif _DEBRIS_HIGH_LOW_KM <= altitude_km <= extreme_low or extreme_top < altitude_km <= _DEBRIS_HIGH_TOP_KM:
+        debris, score = "high", 0.7
+    elif (_DEBRIS_MEDIUM_LOW_KM <= altitude_km < _DEBRIS_HIGH_LOW_KM
+          or _DEBRIS_HIGH_TOP_KM < altitude_km <= _DEBRIS_MEDIUM_TOP_KM):
+        debris, score = "medium", 0.4
+    elif _in_geo_belt(altitude_km):
+        debris, score = "medium", 0.3  # GEO debris
+    else:
+        debris, score = "low", 0.1
+    # Sun-synchronous inclination band (97–99°) is heavily congested
+    if _within(inclination_deg, _SSO_INC_DEG) and _within(altitude_km, _SSO_ALT_KM):
+        debris, score = "extreme", max(score, 0.9)
+    return debris, score
+
+
+def _terrain_congestion(altitude_km: float, inclination_deg: float) -> str:
+    if _within(altitude_km, _ISS_CORRIDOR_KM) and _within(inclination_deg, _ISS_CORRIDOR_INC_DEG):
+        return "saturated"  # ISS corridor, Starlink
+    if _within(altitude_km, _SSO_ALT_KM) or _in_geo_belt(altitude_km):
+        return "dense"
+    return "moderate" if altitude_km < _TERRAIN_LEO_KM else "sparse"
+
+
+_CONGESTION_SCORES = {"sparse": 0.1, "moderate": 0.3, "dense": 0.6, "saturated": 0.9}
+
+#: (upper altitude km, band, score), checked in order above 1,000 km. Hand-set:
+#: see orbital_terrain's docstring for how these differ from a belt model.
+_RADIATION_BANDS = (
+    (5000.0, "high", 0.8),       # inner belt
+    (12000.0, "extreme", 1.0),   # slot/outer belt
+    (20000.0, "high", 0.7),      # outer belt
+    (35000.0, "moderate", 0.3),
+)
+
+
+def _terrain_radiation(altitude_km: float) -> tuple[str, float]:
+    if altitude_km >= _INNER_BELT_FLOOR_KM:
+        for upper, band, score in _RADIATION_BANDS:
+            if altitude_km <= upper:
+                return band, score
+    return "minimal", 0.05
+
+
 def orbital_terrain(
     altitude_km: float,
     inclination_deg: float,
@@ -1843,8 +2134,12 @@ def orbital_terrain(
     """Map the risk characteristics of an orbital regime.
 
     Assesses debris density, congestion, radiation, and operational
-    risk based on altitude and inclination. Data derived from publicly
-    available space surveillance statistics and radiation belt models.
+    risk based on altitude and inclination. Indicative only: the bands are
+    hand-set, cite no statistic, and have not been checked against a belt
+    model such as AE8/AP8 or AE9/AP9 (audit F-022). In particular the
+    5,000 to 12,000 km band, which spans the slot between the belts, is
+    marked most severe, while the outer-belt peak near GPS altitude is split
+    between "high" and "moderate". Treat the output as a heuristic.
 
     Risk regions:
     - LEO 200–600 km: moderate debris, high congestion (ISS, constellations)
@@ -1858,59 +2153,10 @@ def orbital_terrain(
         altitude_km: Orbital altitude above Earth surface (km).
         inclination_deg: Orbital inclination (degrees).
     """
-    # Debris risk (based on known debris density bands)
-    if 700 <= altitude_km <= 1000:
-        debris = "extreme"
-        debris_score = 1.0
-    elif 400 <= altitude_km <= 700 or 1000 < altitude_km <= 1200:
-        debris = "high"
-        debris_score = 0.7
-    elif 200 <= altitude_km < 400 or 1200 < altitude_km <= 1500:
-        debris = "medium"
-        debris_score = 0.4
-    elif 35500 <= altitude_km <= 36200:
-        debris = "medium"  # GEO debris
-        debris_score = 0.3
-    else:
-        debris = "low"
-        debris_score = 0.1
-
-    # Sun-synchronous inclination band (97–99°) is heavily congested
-    if 96 <= inclination_deg <= 100 and 500 <= altitude_km <= 900:
-        debris = "extreme"
-        debris_score = max(debris_score, 0.9)
-
-    # Congestion level (based on catalogued objects)
-    if 400 <= altitude_km <= 600 and 40 <= inclination_deg <= 60:
-        congestion = "saturated"  # ISS corridor, Starlink
-    elif 500 <= altitude_km <= 900:
-        congestion = "dense"
-    elif 35500 <= altitude_km <= 36200:
-        congestion = "dense"  # GEO belt
-    elif altitude_km < 2000:
-        congestion = "moderate"
-    else:
-        congestion = "sparse"
-
-    congestion_scores = {"sparse": 0.1, "moderate": 0.3, "dense": 0.6, "saturated": 0.9}
-    cong_score = congestion_scores[congestion]
-
-    # Radiation risk (Van Allen belts)
-    if 1000 <= altitude_km <= 5000:
-        radiation = "high"  # inner belt
-        rad_score = 0.8
-    elif 5000 < altitude_km <= 12000:
-        radiation = "extreme"  # slot/outer belt
-        rad_score = 1.0
-    elif 12000 < altitude_km <= 20000:
-        radiation = "high"  # outer belt
-        rad_score = 0.7
-    elif 20000 < altitude_km <= 35000:
-        radiation = "moderate"
-        rad_score = 0.3
-    else:
-        radiation = "minimal"
-        rad_score = 0.05
+    debris, debris_score = _terrain_debris(altitude_km, inclination_deg)
+    congestion = _terrain_congestion(altitude_km, inclination_deg)
+    cong_score = _CONGESTION_SCORES[congestion]
+    radiation, rad_score = _terrain_radiation(altitude_km)
 
     # Transfer corridor detection
     is_gto = altitude_km > 200 and altitude_km < 36000
@@ -1921,16 +2167,12 @@ def orbital_terrain(
     risk_score = 0.4 * debris_score + 0.3 * cong_score + 0.2 * rad_score + 0.1 * (1.0 if transfer_corridor else 0.0)
     risk_score = min(1.0, risk_score)
 
-    factors: list[str] = []
-    factors.append(f"debris: {debris}")
-    factors.append(f"congestion: {congestion}")
-    factors.append(f"radiation: {radiation}")
-    if transfer_corridor:
-        factors.append("GTO transfer corridor")
-    if 96 <= inclination_deg <= 100:
-        factors.append("sun-synchronous band")
-    if 35500 <= altitude_km <= 36200:
-        factors.append("GEO belt")
+    factors = [f"debris: {debris}", f"congestion: {congestion}", f"radiation: {radiation}"]
+    factors += [note for present, note in (
+        (transfer_corridor, "GTO transfer corridor"),
+        (_within(inclination_deg, _SSO_INC_DEG), "sun-synchronous band"),
+        (_in_geo_belt(altitude_km), "GEO belt"),
+    ) if present]
 
     return TerrainAssessment(
         altitude_km=altitude_km,
@@ -1945,108 +2187,21 @@ def orbital_terrain(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  17. Minimum-Time Intercept (analytical approximation)
+#  17. Minimum-Time Intercept
+#
+#  Removed. The analytic search here could not depend on the time of flight
+#  (audit F-004); see maneuvers.min_time_intercept_wrapper, which solves
+#  Lambert's problem against the target's real position instead.
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class MinTimeResult:
-    """Result of minimum-time intercept search."""
-
-    min_tof_s: float         # minimum feasible TOF (seconds)
-    delta_v_km_s: float      # ΔV at minimum TOF
-    is_feasible: bool        # True if any solution exists within budget
-    max_delta_v_budget: float  # km/s — the ΔV budget used
-    hohmann_tof_s: float     # Hohmann TOF for reference
-    hohmann_dv_km_s: float   # Hohmann ΔV for reference
-    method: str = "min_time"
-
-
-def min_time_intercept_analytical(
-    r1: float,
-    r2: float,
-    max_delta_v: float,
-    mu: float = MU_EARTH,
-) -> MinTimeResult:
-    """Find the minimum transfer time within a ΔV budget (analytical estimate).
-
-    Uses the vis-viva equation to estimate ΔV as a function of transfer
-    SMA, then binary-searches for the smallest TOF that keeps ΔV within
-    budget. The TLE wrapper uses full Lambert for higher accuracy.
-
-    Args:
-        r1: Interceptor orbit radius (km).
-        r2: Target orbit radius (km).
-        max_delta_v: ΔV budget (km/s).
-        mu: Gravitational parameter.
-    """
-    v1 = math.sqrt(mu / r1)
-    v2 = math.sqrt(mu / r2)
-
-    # Hohmann reference
-    a_h = (r1 + r2) / 2.0
-    tof_h = math.pi * math.sqrt(a_h**3 / mu)
-    v_h_dep = math.sqrt(mu * (2.0 / r1 - 1.0 / a_h))
-    v_h_arr = math.sqrt(mu * (2.0 / r2 - 1.0 / a_h))
-    dv_h = abs(v_h_dep - v1) + abs(v2 - v_h_arr)
-
-    # If Hohmann exceeds budget, not feasible at all
-    if dv_h > max_delta_v:
-        return MinTimeResult(
-            min_tof_s=0.0, delta_v_km_s=dv_h,
-            is_feasible=False, max_delta_v_budget=max_delta_v,
-            hohmann_tof_s=tof_h, hohmann_dv_km_s=dv_h,
-        )
-
-    # Binary search: lower TOF requires higher ΔV
-    # Find minimum TOF where ΔV ≤ budget
-    lo, hi = tof_h * 0.01, tof_h  # search between 1% and 100% of Hohmann TOF
-
-    for _ in range(50):  # 50 iterations gives ~10⁻¹⁵ precision
-        mid = (lo + hi) / 2.0
-        # Estimate SMA from TOF (half-orbit approximation)
-        a_est = (mu * (mid / math.pi) ** 2) ** (1.0 / 3.0)
-        a_est = max(a_est, max(r1, r2))  # can't be smaller than larger orbit
-
-        try:
-            v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_est)))
-            v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_est)))
-        except (ValueError, ZeroDivisionError):
-            hi = mid
-            continue
-
-        dv_est = abs(v_dep - v1) + abs(v2 - v_arr)
-
-        if dv_est <= max_delta_v:
-            hi = mid  # can go faster
-        else:
-            lo = mid  # need more time
-
-    # Final estimate at the converged TOF
-    best_tof = hi
-    a_final = (mu * (best_tof / math.pi) ** 2) ** (1.0 / 3.0)
-    a_final = max(a_final, max(r1, r2))
-    try:
-        v_dep = math.sqrt(max(0, mu * (2.0 / r1 - 1.0 / a_final)))
-        v_arr = math.sqrt(max(0, mu * (2.0 / r2 - 1.0 / a_final)))
-    except (ValueError, ZeroDivisionError):
-        v_dep = v1
-        v_arr = v2
-    dv_final = abs(v_dep - v1) + abs(v2 - v_arr)
-
-    return MinTimeResult(
-        min_tof_s=best_tof,
-        delta_v_km_s=dv_final,
-        is_feasible=True,
-        max_delta_v_budget=max_delta_v,
-        hohmann_tof_s=tof_h,
-        hohmann_dv_km_s=dv_h,
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  18. V-Bar Hop Sequence
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+# A hop cadence may differ from a whole number of half orbits by this fraction.
+_HOP_CADENCE_TOL = 1e-6
 
 
 @dataclass
@@ -2082,18 +2237,34 @@ def vbar_hop_sequence(
     stealthy because each individual radial impulse is small and mimics
     natural perturbation-driven drift.
 
+    The radial hop lands back on V-bar only after an odd number of half
+    orbits: after a whole orbit it is back where it started, and at any
+    other time it is off V-bar. Any other cadence was priced as if it were
+    half an orbit; it is now refused.
+
     Args:
         r_ref: Reference orbit radius (km).
         hop_distance_km: Along-track advance per hop (km).
         n_hops: Number of hops in the sequence.
-        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        time_per_hop_s: Hop duration (s); an odd number of half orbits,
+            defaulting to T_orbit / 2.
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: if *time_per_hop_s* is not an odd number of half orbits.
     """
     n = math.sqrt(mu / r_ref ** 3)
     T_orbit = 2.0 * math.pi / n
 
     if time_per_hop_s is None:
         time_per_hop_s = T_orbit / 2.0
+    half_orbits = time_per_hop_s / (T_orbit / 2.0)
+    whole = round(half_orbits)
+    if whole % 2 == 0 or abs(half_orbits - whole) > _HOP_CADENCE_TOL:
+        raise ValueError(
+            f"time_per_hop_s={time_per_hop_s:.0f} s is not an odd number of half orbits "
+            f"({T_orbit / 2.0:.0f} s); a radial hop lands on V-bar only then"
+        )
 
     # Two radial burns per hop: each |Δv_r| = n·d/4, total per hop = n·d/2
     dv_per_hop = n * hop_distance_km / 2.0
@@ -2119,13 +2290,13 @@ def vbar_hop_sequence(
 class HBarHopResult:
     """Result of an H-bar hop sequence in the orbit-normal direction."""
 
-    hop_distance_km: float       # orbit-normal advance per hop (km)
+    hop_distance_km: float       # out-of-plane amplitude added per hop (km)
     n_hops: int
-    total_advance_km: float      # total H-bar advance
+    total_advance_km: float      # peak out-of-plane offset reached, either side of the plane
     delta_v_per_hop: float       # km/s — single normal burn per hop
     total_delta_v: float         # km/s
-    time_per_hop_s: float        # seconds per hop (default T_orbit / 2)
-    total_time_s: float
+    time_per_hop_s: float        # seconds between burns, plane crossing to crossing
+    total_time_s: float          # first burn to the final peak
     method: str = "hbar_hop"
 
 
@@ -2136,12 +2307,18 @@ def hbar_hop_sequence(
     time_per_hop_s: float | None = None,
     mu: float = MU_EARTH,
 ) -> HBarHopResult:
-    """Compute an H-bar hop sequence advancing in the orbit-normal direction.
+    """Compute an H-bar hop sequence that grows an out-of-plane oscillation.
 
-    Each hop is a small incremental plane change (normal burn at a node
-    crossing), exploiting the SHM out-of-plane dynamics::
-
-        ΔV_hop = n · d
+    Out-of-plane CW motion is simple harmonic, z(t) = (ż0 / n) sin nt, so an
+    impulse cannot hold an offset: a normal burn of n·d reaches d a quarter
+    orbit later and is back on the plane at the half orbit. Each hop is a
+    normal burn of n·d at a plane crossing, along the out-of-plane velocity
+    there, which raises the amplitude by d. After k hops the satellite swings
+    k·d either side of the plane, reaching that peak a quarter orbit after
+    the last burn. Holding the offset would need continuous thrust, which is
+    not costed. The previous version claimed n_hops · d of accumulated
+    advance after n_hops half orbits, where the satellite is back on the
+    plane (audit F-077).
 
     H-bar hops cost roughly twice as much as V-bar hops for the same advance
     because out-of-plane burns are more expensive than radial burns.  The
@@ -2150,18 +2327,29 @@ def hbar_hop_sequence(
 
     Args:
         r_ref: Reference orbit radius (km).
-        hop_distance_km: Orbit-normal advance per hop (km).
+        hop_distance_km: Out-of-plane amplitude added per hop (km).
         n_hops: Number of hops.
-        time_per_hop_s: Hop duration (s); defaults to T_orbit / 2.
+        time_per_hop_s: Time between burns (s); must be a whole number of
+            half orbits, since each burn is at a plane crossing. Defaults to
+            T_orbit / 2.
         mu: Gravitational parameter.
+
+    Raises:
+        ValueError: if *time_per_hop_s* is not a whole number of half orbits.
     """
     n = math.sqrt(mu / r_ref ** 3)
     T_orbit = 2.0 * math.pi / n
 
     if time_per_hop_s is None:
         time_per_hop_s = T_orbit / 2.0
+    half_orbits = time_per_hop_s / (T_orbit / 2.0)
+    if round(half_orbits) < 1 or abs(half_orbits - round(half_orbits)) > _HOP_CADENCE_TOL:
+        raise ValueError(
+            f"time_per_hop_s={time_per_hop_s:.0f} s is not a whole number of half orbits "
+            f"({T_orbit / 2.0:.0f} s); each hop burns at a plane crossing"
+        )
 
-    # Single normal burn per hop exploiting SHM quarter-period reach: Δv_n = n·d
+    # A normal burn of n·d at a plane crossing adds d to the amplitude.
     dv_per_hop = n * hop_distance_km
     total_dv = n_hops * dv_per_hop
 
@@ -2172,5 +2360,5 @@ def hbar_hop_sequence(
         delta_v_per_hop=dv_per_hop,
         total_delta_v=total_dv,
         time_per_hop_s=time_per_hop_s,
-        total_time_s=n_hops * time_per_hop_s,
+        total_time_s=(n_hops - 1) * time_per_hop_s + T_orbit / 4.0,
     )

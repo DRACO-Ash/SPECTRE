@@ -1,0 +1,10 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Using Python 3.12.3 environment at: <venv>-declared
+Resolved 1 package in 3ms
+   Building spectre @ file:///home/user/SPECTRE
+      Built spectre @ file:///home/user/SPECTRE
+Prepared 1 package in 520ms
+Installed 1 package in 0.43ms
+ + spectre==0.5.24 (from file:///home/user/SPECTRE)
+warning: The package `spectre @ file:///home/user/SPECTRE` does not have an extra named `dev`
+rc=0

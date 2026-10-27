@@ -48,7 +48,7 @@
         <button class="btn-secondary btn-sm"
                 style="color:#ef4444; border-color:#ef4444"
                 hx-post="/plan/threat/remove-manual-tle"
-                hx-vals='{"manual_name": "{{ m.name | e }}"}'
+                hx-vals='{{ {"manual_name": m.name} | tojson }}'
                 hx-target="#manual-tle-list"
                 hx-swap="outerHTML"
                 title="Remove {{ m.name }}">&#10005;</button>

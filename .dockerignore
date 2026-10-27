@@ -23,11 +23,13 @@ SPECTRE-1/
 # Local environments and caches
 .venv/
 venv/
-.env
-.env.*
+# **/ so nested copies stay out of a plain docker build too; unprefixed, only
+# the root ones were excluded (audit F-292).
+**/.env
+**/.env.*
 !.env.example
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
@@ -48,5 +50,3 @@ logs/
 # Design sources kept in the repo but not needed at runtime
 *.svg
 !spectre/web/static/**/*.svg
-spectre_splash_screen.html
-query_UDL_Data.py

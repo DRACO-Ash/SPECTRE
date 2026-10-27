@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import UTC, datetime
 
 import pytest
 
 from spectre.domain.models import AccessInterval, RunConfig
+
+# The data directory, where the NOTSO cache is seeded on first use (audit
+# F-062), is a scratch directory for the suite rather than ./data in the tree.
+os.environ.setdefault("SPECTRE_DATA_DIR", tempfile.mkdtemp(prefix="spectre-test-data-"))
 
 
 @pytest.fixture()

@@ -244,7 +244,7 @@ class ManoeuvreHypothesis:
     delta_v_direction_cross_track: float   # Cross-track component (C) [km/s]
 
     # Pre-manoeuvre state (from TLE propagation or OD solution)
-    pre_manoeuvre_state_eci_km: np.ndarray  # [x, y, z, vx, vy, vz] in J2000 ECI [km, km/s]
+    pre_manoeuvre_state_eci_km: np.ndarray  # [x, y, z, vx, vy, vz] in TEME (SGP4 native) [km, km/s]
     pre_manoeuvre_epoch_utc: datetime
 
     # Uncertainty model

@@ -105,11 +105,46 @@ async def livez() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def check_database() -> tuple[bool, str | None]:
+    """Return ``(healthy, detail)`` for a bounded ``SELECT 1``.
+
+    Readiness used to test storage only, so a pod whose database had gone
+    away stayed in rotation and failed every login instead (audit F-257).
+    """
+    from sqlalchemy import text  # kept off the liveness import path
+
+    from spectre.web.database import AsyncSessionLocal
+
+    async def _probe() -> None:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+
+    try:
+        await asyncio.wait_for(_probe(), timeout=_STORAGE_PROBE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False, f"database probe stalled for over {_STORAGE_PROBE_TIMEOUT_SECONDS:g} s"
+    except Exception as exc:  # noqa: BLE001 - any driver failure means not ready
+        return False, f"database probe failed: {type(exc).__name__}"
+    return True, None
+
+
 @router.get("/readyz", include_in_schema=False)
 async def readyz() -> JSONResponse:
-    """Readiness probe. 200 only when storage genuinely accepts a write."""
+    """Readiness probe. 200 only when storage accepts a write and the database answers."""
     settings = get_settings()
     healthy, detail = await check_storage(settings.data_dir)
+    if healthy:
+        db_healthy, db_detail = await check_database()
+        if not db_healthy:
+            logger.error("Readiness probe failed, version=%s: %s", __version__, db_detail)
+            return JSONResponse(
+                {
+                    "status": "unavailable",
+                    "detail": db_detail,
+                    "remedy": "Check DATABASE_URL and that the database accepts connections from this pod.",
+                },
+                status_code=503,
+            )
 
     if healthy:
         logger.debug(

@@ -74,6 +74,11 @@ class Cluster:
         Mean RAAN across cluster members, degrees.
     centroid_eccentricity:
         Mean eccentricity across cluster members.
+    span_tolerances:
+        The widest separation between any two members on any element, in
+        tolerances. DBSCAN links neighbours, so a chain of sets each within
+        tolerance of the next is one cluster whose ends can be several
+        tolerances apart (audit F-163).
 
     Notes
     -----
@@ -86,6 +91,12 @@ class Cluster:
     centroid_inclination_deg: float
     centroid_raan_deg: float
     centroid_eccentricity: float
+    span_tolerances: float = 0.0
+
+    @property
+    def exceeds_tolerance(self) -> bool:
+        """Whether some two members differ by more than one tolerance: a chain."""
+        return self.span_tolerances > 1.0
 
     @property
     def size(self) -> int:
