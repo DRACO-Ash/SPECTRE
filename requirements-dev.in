@@ -15,7 +15,7 @@ bandit[toml]>=1.7
 pip-audit>=2.7
 pip-tools>=7.4
 diff-cover>=9.0
-anyio[trio]>=4.0
+anyio[trio]>=4.15.1
 
 # python-docx: only docs/generate_guide.py imports it, so it is documentation
 # tooling and does not belong in the image (audit F-283). hypothesis was

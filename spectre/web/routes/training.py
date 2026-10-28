@@ -23,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,7 +133,7 @@ def _tutorial_locked(progress: TrainingProgress, tutorial_id: str) -> HTMLRespon
     )
 
 
-def _recent_scored(user_id: int, limit: int) -> Any:
+def _recent_scored(user_id: int, limit: int) -> Select[ChallengeResult]:
     """The operator's latest scored attempts.
 
     Exploration runs are not history: they used to show as PASS or FAIL
