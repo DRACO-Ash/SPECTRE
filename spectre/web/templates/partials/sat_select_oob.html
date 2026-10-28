@@ -1,12 +1,15 @@
-<select name="red_sat" id="ie-red-sat" hx-swap-oob="innerHTML">
+{# Each carrier swaps its options into the page's own, labelled select. A
+   carrier that was itself a select element had no label, and its id duplicated the
+   target's; a div addressed by selector has neither problem. #}
+<div hx-swap-oob="innerHTML:#ie-red-sat">
   {% include "partials/red_options.html" %}
-</select>
-<select name="blue_sat" id="ie-blue-sat" hx-swap-oob="innerHTML">
+</div>
+<div hx-swap-oob="innerHTML:#ie-blue-sat">
   {% include "partials/blue_options.html" %}
-</select>
-<select name="red_sat" id="ts-red-sat" hx-swap-oob="innerHTML">
+</div>
+<div hx-swap-oob="innerHTML:#ts-red-sat">
   {% include "partials/red_options.html" %}
-</select>
+</div>
 <div id="ts-target-summary" class="label-dim" hx-swap-oob="outerHTML">
   Targets: <strong>{{ blue_assets|length }}</strong> blue asset{{ 's' if blue_assets|length != 1 else '' }}
 </div>

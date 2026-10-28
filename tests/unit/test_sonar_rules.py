@@ -101,8 +101,12 @@ class TestPythonRules:
         assert _py(route) == ["python:S8410"]
         assert _py(annotated) == []
 
-    def test_a_plain_function_default_is_not_a_route(self) -> None:
-        assert _py("def helper(user = Depends(require_login)):\n    pass\n") == []
+    def test_a_dependency_function_counts_too(self) -> None:
+        """Depends injects wherever it is used, so require_admin's own parameter counts."""
+        assert _py("def require_admin(user: User = Depends(require_login)):\n    pass\n") == ["python:S8410"]
+
+    def test_query_outside_a_route_is_not_a_request_parameter(self) -> None:
+        assert _py('def helper(q: str = Query("")):\n    pass\n') == []
 
     def test_an_exception_and_its_subclass(self) -> None:
         """0.6.0: SignatureExpired is a BadSignature."""
@@ -226,3 +230,15 @@ class TestTheCommandLine:
         result = run()
         assert result.returncode == 1
         assert "Web:InputWithoutLabelCheck  spectre/web/templates/p.html:2" in result.stdout
+
+
+class TestTheTreeStaysClear:
+    def test_no_rule_the_gate_has_raised_is_latent_anywhere(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """0.6.6 cleared all 153 latent issues; any edit would have scored them.
+
+        A finding anywhere in the tree, not just on changed lines, fails here,
+        so a latent issue cannot accumulate again between releases.
+        """
+        monkeypatch.chdir(_ROOT)
+        code = rules.main(["--all", *rules.SOURCE_DIRS])
+        assert code == 0, capsys.readouterr().out

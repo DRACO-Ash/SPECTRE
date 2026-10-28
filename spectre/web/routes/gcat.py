@@ -32,7 +32,7 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 import pandas as pd
@@ -388,7 +388,8 @@ def _fetch_one(key: str, meta: dict[str, str]) -> tuple[str, pd.DataFrame | None
             # mixed encodings. Decoding as UTF-8 with replacement is what the
             # parser below has always been handed.
             raw = body.decode("utf-8", errors="replace")
-    except Exception as exc:   # noqa: BLE001 - one unreachable dataset must not take the others down
+    # BLE001: one unreachable dataset must not take the others down.
+    except Exception as exc:  # noqa: BLE001
         log.error("[GCAT] ✗  FAILED %-20s: %s", label, exc)
         return key, None
 
@@ -615,7 +616,7 @@ def _page_data(
 @router.get("/panel", response_class=HTMLResponse)
 async def gcat_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the GCAT panel skeleton INSTANTLY.
 
@@ -632,12 +633,13 @@ async def gcat_panel(
 @router.get("/table", response_class=HTMLResponse)
 async def gcat_table(
     request: Request,
-    dataset: str = Query("currentcat"),
-    page: int = Query(1, ge=1),
-    q: str = Query("", max_length=_MAX_QUERY),
-    sort: str = Query(""),
-    asc: int = Query(1),
-    current_user: User = Depends(require_login),
+    *,
+    dataset: Annotated[str, Query()] = "currentcat",
+    page: Annotated[int, Query(ge=1)] = 1,
+    q: Annotated[str, Query(max_length=_MAX_QUERY)] = "",
+    sort: Annotated[str, Query()] = "",
+    asc: Annotated[int, Query()] = 1,
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return a paginated, searchable, sortable table for one dataset.
 
@@ -681,7 +683,7 @@ async def gcat_table(
 @router.post("/refresh", response_class=HTMLResponse)
 async def gcat_refresh(
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Re-download all 28 GCAT datasets into the cache every operator shares.
 

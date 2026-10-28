@@ -51,6 +51,7 @@ _VALID_ROLES = {"operator", "admin"}
 # those would stop the application starting rather than merely refuse a form,
 # so letters, digits, dot, underscore, at-sign and hyphen are all accepted.
 _USERNAME_PATTERN = USERNAME_PATTERN
+_USER_NOT_FOUND_ROW = "<tr><td colspan='5'>User not found.</td></tr>"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -123,8 +124,8 @@ async def _lock_admin_rows(db: AsyncSession) -> None:
 @router.get("/users", response_class=HTMLResponse)
 async def list_users(
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Render the full user management page."""
     users = await _all_users(db)
@@ -141,8 +142,8 @@ async def create_user(
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
     role: Annotated[str, Form()],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Create a new user; return the updated tbody rows via HTMX."""
     username = username.strip()
@@ -193,14 +194,14 @@ async def create_user(
 async def edit_user_row(
     request: Request,
     user_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Return the inline edit row for a user (HTMX outerHTML swap)."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
-        return HTMLResponse("<tr><td colspan='5'>User not found.</td></tr>", status_code=404)
+        return HTMLResponse(_USER_NOT_FOUND_ROW, status_code=404)
     tmpl = get_templates()
     html = tmpl.get_template("partials/admin_user_edit_row.html").render({
         "u": user, "current_user": current_user, "request": request,
@@ -212,14 +213,14 @@ async def edit_user_row(
 async def cancel_edit_row(
     request: Request,
     user_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Cancel inline edit — return the display row (HTMX outerHTML swap)."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
-        return HTMLResponse("<tr><td colspan='5'>User not found.</td></tr>", status_code=404)
+        return HTMLResponse(_USER_NOT_FOUND_ROW, status_code=404)
     tmpl = get_templates()
     html = tmpl.get_template("partials/admin_user_row.html").render({
         "u": user, "current_user": current_user, "request": request,
@@ -246,15 +247,16 @@ async def update_user(
     request: Request,
     user_id: int,
     role: Annotated[str, Form()],
+    *,
     new_password: Annotated[str, Form()] = "",
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Save role change and optional password reset (HTMX outerHTML swap)."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
-        return HTMLResponse("<tr><td colspan='5'>User not found.</td></tr>", status_code=404)
+        return HTMLResponse(_USER_NOT_FOUND_ROW, status_code=404)
 
     if role not in _VALID_ROLES:
         return _table_response(
@@ -309,8 +311,8 @@ async def update_user(
 async def delete_user(
     request: Request,
     user_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> HTMLResponse:
     """Delete a user; return the updated tbody rows via HTMX."""
     result = await db.execute(select(User).where(User.id == user_id))

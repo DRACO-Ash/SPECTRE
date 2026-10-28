@@ -175,7 +175,7 @@ def _normalised_weights(*weights: float) -> tuple[float, ...]:
 @router.get("/panel", response_class=HTMLResponse)
 async def decision_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the decision engine scenario builder panel."""
     state = get_session_state(current_user)

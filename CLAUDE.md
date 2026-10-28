@@ -26,18 +26,21 @@ evidence are in `docs/SONAR-RULES.md`.
 ● No ARIA role with a native element (`button`, `heading`, `status` and the
   rest): use the element. `role="note"` is fine.
 ● No `{# #}` Jinja comment inside a tag: put it above.
-● **Editing any line brings what is already on it into scope.** Before
-  touching a template element or a function signature, fix what is wrong on
-  it. `python3 scripts/sonar_rules.py --all <file>` shows what is latent.
+● **Editing any line brings what is already on it into scope**, coverage
+  included: a reworded line in an untested error branch needs a test.
+  `python3 scripts/sonar_rules.py --all` must stay at 0 blocking; a test
+  holds it there.
 
 ## Before an App Store package
 
 Run `/release-preflight`. At minimum:
 
 ```
-python3 scripts/sonar_rules.py master
-sh scripts/check-quality.sh master
+python3 scripts/sonar_rules.py <last release the gate scored>
+sh scripts/check-quality.sh <last release the gate scored>
 ```
+
+Master is the right base only when the last release is merged to it.
 
 `scripts/package-appstore.sh` refuses to build on a `sonar_rules.py` failure.
 Never submit to the App Store; that is the owner's step.

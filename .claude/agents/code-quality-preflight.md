@@ -14,12 +14,13 @@ this project, what triggered it, what fix passed, and how the gate scopes.
 
 ## 1. Run the deterministic checks and report their raw result
 
-From the repository root, against the last release the gate scored (master
-unless told otherwise):
+From the repository root, against `<base>`: the commit of the last release
+the gate scored. That is master only once that release is merged; until then
+it is the release's branch head, and master would understate the change.
 
 ```
-python3 scripts/sonar_rules.py master
-python3 scripts/cognitive_complexity.py --changed master --max 15
+python3 scripts/sonar_rules.py <base>
+python3 scripts/cognitive_complexity.py --changed <base> --max 15
 ```
 
 Every FAIL from `sonar_rules.py` is a rule that has already cost a submission.
@@ -29,7 +30,7 @@ evidence it contradicts.
 
 ## 2. Judge what the scripts cannot see
 
-Work through the diff (`git diff $(git merge-base master HEAD)` plus untracked
+Work through the diff (`git diff $(git merge-base <base> HEAD)` plus untracked
 files under `spectre/` and `tle_clustering/`):
 
 a. **Touched old lines.** For every line the change modified rather than
@@ -68,7 +69,7 @@ e. **Security hotspots.** The gate needs every new hotspot reviewed: new
 
 f. **Coverage.** Changed executable lines need 80% coverage. If
    `coverage.xml` is present and newer than the change, measure it with
-   `diff-cover coverage.xml --compare-branch=master`; otherwise say it is
+   `diff-cover coverage.xml --compare-branch=<base>`; otherwise say it is
    UNKNOWN and name the uncovered new functions you can see.
 
 ## 3. Report

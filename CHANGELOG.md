@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-10-28
+
+A cleanup release: no change to what the console does.
+
+### Fixed
+- Every issue the App Store Code Quality gate would have raised the day its line was edited is cleared: 153 across routes, templates and inline JavaScript. FastAPI parameters use `Annotated`; repeated literals are module constants; float equality tests and a nested conditional are rewritten; inline JavaScript uses `Number.parseFloat`, `Number.isNaN` and `element.dataset`.
+- Every form field has a label tied to it, including the decision panel's first rows, the GCAT, NOTSO, photometry, sweep and training answer fields.
+- The dropdown updates after adding or removing a satellite no longer send a second, unlabelled copy of each select with the same id; they swap options straight into the page's own selects.
+
+### Changed
+- The browser smoke probe finds Playwright's current Chromium layout (`chrome-linux64`).
+
 ## [0.6.5] - 2026-10-28
 
 ### Fixed

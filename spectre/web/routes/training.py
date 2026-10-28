@@ -167,8 +167,8 @@ async def _scored_attempts(db: AsyncSession, user_id: int, scenario_id: str) -> 
 @router.get("/", response_class=HTMLResponse)
 async def training_home(
     request: Request,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Main training hub — opens (or resumes) a training session."""
     progress = await _get_or_create_progress(current_user, db)
@@ -216,9 +216,10 @@ async def training_home(
 @router.post("/leave", response_class=RedirectResponse)
 async def training_leave(
     request: Request,
+    *,
     session_id: Annotated[int, Form()] = 0,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RedirectResponse:
     """Close the training session, remove its scenario objects, return to Operations."""
     _remove_training_objects(current_user)
@@ -260,8 +261,8 @@ def _remove_training_objects(owner: User) -> None:
 async def training_scenario_detail(
     request: Request,
     scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Return scenario briefing and objectives panel."""
     scenario = get_scenario(scenario_id)
@@ -352,8 +353,8 @@ async def _start_scenario(
 async def training_scenario_start(
     request: Request,
     scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Start a scored attempt."""
     return await _start_scenario(scenario_id, current_user, db, scored=True, request=request)
@@ -363,8 +364,8 @@ async def training_scenario_start(
 async def training_scenario_explore(
     request: Request,
     scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Start an unscored free-exploration run.
 
@@ -383,8 +384,8 @@ async def training_scenario_reset(
     request: Request,
     scenario_id: str,
     result_id: Annotated[int, Form()],
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Delete the in-progress ChallengeResult and return a fresh scenario detail.
 
@@ -596,9 +597,10 @@ async def training_scenario_submit(
     request: Request,
     scenario_id: str,
     result_id: Annotated[int, Form()],
+    *,
     objectives_completed: Annotated[str, Form()] = "[]",  # JSON list of obj IDs
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Score a completed scenario attempt and update operator progress."""
     scenario = get_scenario(scenario_id)
@@ -684,8 +686,8 @@ async def training_scenario_submit(
 @router.get("/dashboard", response_class=HTMLResponse)
 async def training_dashboard(
     request: Request,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Return the progress dashboard partial."""
     progress  = await _get_or_create_progress(current_user, db)
@@ -722,8 +724,8 @@ async def training_dashboard(
 async def training_tutorial_view(
     request: Request,
     tutorial_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Return a tutorial reading panel."""
     tutorial = get_tutorial(tutorial_id)
@@ -743,8 +745,8 @@ async def training_tutorial_view(
 async def training_tutorial_complete(
     request: Request,
     tutorial_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Mark a tutorial complete, award points, check for level-up."""
     tutorial = get_tutorial(tutorial_id)

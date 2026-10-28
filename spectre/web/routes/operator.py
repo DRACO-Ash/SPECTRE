@@ -25,6 +25,7 @@ router = APIRouter()
 
 _RED_LIST_TEMPLATE = "partials/red_list.html"
 _BLUE_LIST_TEMPLATE = "partials/blue_list.html"
+_MINUTE_FORMAT = "%Y-%m-%d %H:%M"
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
@@ -153,8 +154,9 @@ async def quick_add_blue_asset(
     request: Request,
     satno: Annotated[int, Form()],
     name: Annotated[str, Form()],
+    *,
     btn_id: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Fetch TLE from UDL and immediately add the satellite as a blue asset.
 
@@ -216,8 +218,9 @@ async def quick_add_red_track(
     request: Request,
     satno: Annotated[int, Form()],
     name: Annotated[str, Form()],
+    *,
     btn_id: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Fetch TLE from UDL and immediately add the satellite as a red track.
 
@@ -279,7 +282,7 @@ async def quick_add_red_track(
 async def remove_blue_asset(
     request: Request,
     name: str,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
     state = get_session_state(current_user)
@@ -329,7 +332,7 @@ async def add_red_track(
 async def remove_red_track(
     request: Request,
     name: str,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Remove a red track by name and return the updated partial."""
     state = get_session_state(current_user)
@@ -347,7 +350,7 @@ async def set_scenario_time(
     request: Request,
     scenario_start: Annotated[str, Form()],
     scenario_stop: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Set the scenario time window for event detection and planning."""
     state = get_session_state(current_user)
@@ -371,13 +374,13 @@ async def set_scenario_time(
     state.scenario_start = start_dt
     state.scenario_stop = stop_dt
     state.append_log(
-        f"[SCENARIO] Time set: {start_dt.strftime('%Y-%m-%d %H:%M')} → "
-        f"{stop_dt.strftime('%Y-%m-%d %H:%M')} UTC"
+        f"[SCENARIO] Time set: {start_dt.strftime(_MINUTE_FORMAT)} → "
+        f"{stop_dt.strftime(_MINUTE_FORMAT)} UTC"
     )
 
     return HTMLResponse(
-        f'<p class="badge-ok">Scenario: {start_dt.strftime("%Y-%m-%d %H:%M")} → '
-        f'{stop_dt.strftime("%Y-%m-%d %H:%M")} UTC</p>'
+        f'<p class="badge-ok">Scenario: {start_dt.strftime(_MINUTE_FORMAT)} → '
+        f'{stop_dt.strftime(_MINUTE_FORMAT)} UTC</p>'
     )
 
 
@@ -387,7 +390,7 @@ async def set_scenario_time(
 @router.get("/log/entries", response_class=HTMLResponse)
 async def log_entries(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the run log partial. The console polls this; nothing streams.
 
@@ -404,7 +407,7 @@ async def log_entries(
 @router.post("/log/clear", response_class=HTMLResponse)
 async def clear_log(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Clear the session run log and return the empty partial."""
     state = get_session_state(current_user)

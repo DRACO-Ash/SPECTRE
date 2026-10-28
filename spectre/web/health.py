@@ -123,7 +123,8 @@ async def check_database() -> tuple[bool, str | None]:
         await asyncio.wait_for(_probe(), timeout=_STORAGE_PROBE_TIMEOUT_SECONDS)
     except TimeoutError:
         return False, f"database probe stalled for over {_STORAGE_PROBE_TIMEOUT_SECONDS:g} s"
-    except Exception as exc:  # noqa: BLE001 - any driver failure means not ready
+    # BLE001: any driver failure means not ready.
+    except Exception as exc:  # noqa: BLE001
         return False, f"database probe failed: {type(exc).__name__}"
     return True, None
 

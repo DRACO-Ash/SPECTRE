@@ -97,6 +97,7 @@ _LOGIN_USERNAME_LIMITER = SlidingWindowLimiter(max_calls=10, window_seconds=300)
 # throwaway secret generated at import and never written down anywhere, so no
 # submitted password can match it.
 _ABSENT_USER_HASH = hash_password(secrets.token_urlsafe(32))
+_LOGIN_PATH = "/login"
 
 
 def _client_address(request: Request) -> str:
@@ -132,7 +133,7 @@ def render_login(request: Request, error: str | None = None, status_code: int = 
         secure=get_settings().session_cookie_secure,
         samesite="strict",
         max_age=_LOGIN_TOKEN_MAX_AGE,
-        path="/login",
+        path=_LOGIN_PATH,
     )
     return response
 
@@ -153,13 +154,13 @@ def _refuse_rate_limited(request: Request, address: str, username: str) -> HTMLR
     )
 
 
-@router.get("/login", response_class=HTMLResponse)
+@router.get(_LOGIN_PATH, response_class=HTMLResponse)
 async def get_login(request: Request) -> HTMLResponse:
     """Render the login page."""
     return render_login(request)
 
 
-@router.post("/login", response_model=None)
+@router.post(_LOGIN_PATH, response_model=None)
 async def post_login(
     request: Request,
     username: Annotated[str, Form()],
@@ -255,6 +256,6 @@ async def post_logout(
             await _revoke_sessions(db, user)
             logger.info("Session state cleared on logout for: %s", log_safe(user.username))
 
-    response = RedirectResponse(url="/login", status_code=302)
+    response = RedirectResponse(url=_LOGIN_PATH, status_code=302)
     response.delete_cookie(key=_COOKIE_NAME)
     return response

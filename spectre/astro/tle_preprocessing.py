@@ -254,7 +254,8 @@ def _reduce_one(
 
     try:
         results = cluster_tle_strings(flat_lines, cfg)
-    except Exception as exc:  # noqa: BLE001 - any clustering failure keeps the cached TLE
+    # BLE001: any clustering failure keeps the cached TLE.
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Clustering failed for satno %s: %s — retaining existing cached TLE",
             satno, exc,

@@ -22,6 +22,16 @@ suite.
 ● **For an element, any changed line counts, and the issue is reported on the
   element's first line.** A rewritten title two lines below `<input` put the
   input in scope at the `<input` line.
+● **Coverage has the same window.** Every changed executable line needs
+  coverage, 80% across the change. Moving a noqa rationale or hoisting a
+  literal marks a never-tested error branch as changed code. 0.6.6 measured
+  82% against master and 68% against 0.6.5, the release the gate would score
+  it against; 18 failure-path tests brought it to 100%.
+● **The baseline is the last release the gate scored, not master.** Until a
+  release is merged, master is behind it, and measuring against master
+  scores the previous release's well-tested lines as part of this one. Pass
+  that release's commit to `scripts/check-quality.sh` and, as `SONAR_BASE`,
+  to the packager.
 ● **Threshold rules fire when the threshold is crossed.** A literal used twice
   on the base and three times now is a new issue, even though the edit added
   only one use. One already over the threshold on the base is an existing
@@ -35,7 +45,7 @@ suite.
 | `python:S1244` | 0.6.0 (5 bugs) | `ecc == 0.0` and similar exact zero tests | Named tolerances (`_CIRCULAR_ECC` and others) | `==` or `!=` with a float literal on either side | FACT: these were bugs, not smells; one named the wrong node on rounding noise. |
 | `python:S3358` | 0.6.0 | A conditional expression nested in another | Statements | Any `x if c else (y if d else z)` shape | |
 | `python:S107` | 0.6.0 (2) | `apply_intercept` and `decision_evaluate` with dozens of `Form()` parameters | Pydantic form models | More than 13 parameters, `self` and `cls` aside, when the signature changed | INFERENCE: 13 is the sonar-python default. |
-| `python:S8410` | 0.6.0 (3) | `user: User = Depends(require_login)` in route signatures | `Annotated[User, Depends(require_login)]` | A route parameter whose default is `Depends`, `Form`, `Query`, `Body`, `Header`, `Cookie`, `File`, `Path` or `Security`, on a changed line | FACT: 88 routes still use the default style; each fires the day its parameter line is edited. |
+| `python:S8410` | 0.6.0 (3) | `user: User = Depends(require_login)` in route signatures | `Annotated[User, Depends(require_login)]` | A route parameter whose default is `Depends`, `Form`, `Query`, `Body`, `Header`, `Cookie`, `File`, `Path` or `Security`, and a `Depends` or `Security` default in any function (dependencies included), on a changed line | FACT: all 94 converted in 0.6.6, with the OpenAPI schema and every route's dependency tree compared before and after and found identical. Where a parameter without a default would follow one with, the rest became keyword-only, which FastAPI binds the same way. |
 | `python:S5713` | 0.6.0 | `except (SignatureExpired, BadSignature)` | Drop the subclass | An except tuple naming a class and its subclass, resolved through builtins and third-party imports | Classes defined in SPECTRE are not resolved, because resolving them would import application code. |
 | `python:S7504` | 0.6.0 | `for task in list(tasks)` | Iterate directly (`cancel()` only schedules the set edit) | `list(x)` as the iterable of a `for` or comprehension | If the loop mutates what it walks, copy with `.copy()` or `[*x]` rather than dropping the copy. UNKNOWN: whether `tuple()` is flagged the same way. |
 | `python:S6353` | 0.6.0 | `[a-zA-Z0-9_]` in the DDL identifier allow-list | `\w` with `re.ASCII`, so the allow-list is no wider | The common spelled-out classes in a literal passed to `re.*` | Without `re.ASCII`, `\w` accepts non-ASCII letters: always add the flag. |
@@ -72,10 +82,22 @@ repository does not record.
 ## Latent issues
 
 `python3 scripts/sonar_rules.py --all` checks every line, not just changed
-ones. On 28 October 2026 it found 209 latent issues: none counts today, and
-each will fail the gate the first time its line is edited. By rule: S8410 88,
-S7773 68, InputWithoutLabelCheck 17, S1192 14, S7761 10, S7632 9, S1244 2,
-S3358 1. Edit a line near one, and fix it in the same change.
+ones. On 28 October 2026 it found 209 issues that counted nowhere yet and
+would each fail the gate the day its line was edited. 56 of them were in the
+vendored, minified libraries (`chart.umd.min.js`, `chartjs-plugin-zoom.min.js`,
+`htmx.min.js`), which are now out of the checker's scope: they are never
+edited here, their versions are pinned in `spectre/web/static/vendored.json`,
+SonarJS skips minified files (INFERENCE), and they enter the new-code window
+only when replaced whole by an upgrade. 0.6.6 cleared the other 153: S8410
+88, InputWithoutLabelCheck 17, S1192 14, S7773 13, S7632 9, S7761 9, S1244 2
+and S3358 1, plus 6 S8410 in dependency functions that the widened check now
+covers and one Jinja comment in a tag. `tests/unit/test_sonar_rules.py` now fails on any blocking finding
+anywhere in `spectre/` and `tle_clustering/`, so none can accumulate again.
+
+What remains are 11 advisories: f-string fragments used three or more times
+in a file. Whether the gate counts f-string fragments is UNKNOWN (no release
+has added a third use of one), so they warn rather than block. If the gate
+ever raises one, that settles it: make them block and clear them.
 
 ## When the gate raises something new
 

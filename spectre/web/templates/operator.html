@@ -763,7 +763,7 @@ function fetchOrbitalEvents() {
 function sbTab(btn) {
   var tabs = document.querySelectorAll('.stab');
   var panels = document.querySelectorAll('.sidebar-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -775,7 +775,7 @@ function sbTab(btn) {
 function assetTab(btn) {
   var tabs = document.querySelectorAll('.atab');
   var panels = document.querySelectorAll('.asset-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -787,7 +787,7 @@ function assetTab(btn) {
 function heroTab(btn) {
   var tabs = document.querySelectorAll('.htab');
   var panels = document.querySelectorAll('.hero-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -814,7 +814,7 @@ function heroTab(btn) {
 function engineTab(btn) {
   var tabs = document.querySelectorAll('.etab');
   var panels = document.querySelectorAll('.engine-tab-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -949,7 +949,7 @@ function switchToTradeSpace() {
     if (layout.classList.contains('sidebar-collapsed')) return;
     e.preventDefault();
     startX = e.clientX;
-    startW = parseInt(getComputedStyle(layout).gridTemplateColumns) || 500;
+    startW = Number.parseInt(getComputedStyle(layout).gridTemplateColumns, 10) || 500;
     handle.classList.add('dragging');
     layout.classList.add('resizing');
     document.addEventListener('mousemove', onMove);
@@ -1336,8 +1336,8 @@ function switchToTradeSpace() {
 
   function spectreSetTheme(theme) {
     if (THEMES.indexOf(theme) === -1) return;        // only allow known themes
-    document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.setAttribute('data-spectre-theme', theme === 'steel' ? 'light' : 'dark');
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.spectreTheme = theme === 'steel' ? 'light' : 'dark';
     try { localStorage.setItem(KEY, theme); } catch (_) {}
     var picker = document.getElementById('theme-picker');
     if (picker && picker.value !== theme) picker.value = theme;
@@ -1348,7 +1348,7 @@ function switchToTradeSpace() {
   /* Sync the dropdown to whatever theme is active (set from localStorage
      by the inline script in <head> before first paint) */
   (function syncPicker() {
-    var current = document.documentElement.getAttribute('data-theme') || 'ops';
+    var current = document.documentElement.dataset.theme || 'ops';
     var picker  = document.getElementById('theme-picker');
     if (picker) picker.value = current;
   })();

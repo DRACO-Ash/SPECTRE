@@ -26,6 +26,7 @@ from spectre.astro.pattern_of_life import TLERecord
 from spectre.config.constants import TLE_FILTER
 
 logger = logging.getLogger(__name__)
+_DATE_FORMAT = "%Y-%m-%d"
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -178,7 +179,7 @@ def quality_flag_sequence(reps: list[TLERecord]) -> list[QualityFlag]:
                 epoch=cur.epoch,
                 flag_type="gap",
                 message=(
-                    f"Gap of {gap_h:.0f}h before {cur.epoch.strftime('%Y-%m-%d')} "
+                    f"Gap of {gap_h:.0f}h before {cur.epoch.strftime(_DATE_FORMAT)} "
                     f"exceeds {stale_h}h staleness threshold — potential hidden manoeuvre"
                 ),
             ))
@@ -191,7 +192,7 @@ def quality_flag_sequence(reps: list[TLERecord]) -> list[QualityFlag]:
                     epoch=cur.epoch,
                     flag_type="bstar",
                     message=(
-                        f"B* discontinuity near {cur.epoch.strftime('%Y-%m-%d')}: "
+                        f"B* discontinuity near {cur.epoch.strftime(_DATE_FORMAT)}: "
                         f"{prev.bstar:.2e} → {cur.bstar:.2e} "
                         f"({ratio:.0%} change) — possible catalogue maintenance"
                     ),
@@ -246,7 +247,7 @@ def filter_tle_history(
                 flag_type="cluster",
                 message=(
                     f"Large cluster of {len(c.tles)} TLEs near "
-                    f"{c.earliest_epoch.strftime('%Y-%m-%d')} — possible tracking campaign "
+                    f"{c.earliest_epoch.strftime(_DATE_FORMAT)} — possible tracking campaign "
                     f"or real-time manoeuvre observation (span {c.span_seconds/60:.0f} min)"
                 ),
             ))

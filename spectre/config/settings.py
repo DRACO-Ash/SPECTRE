@@ -28,6 +28,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+_ASYNCPG_SCHEME = "postgresql+asyncpg://"
 
 # The one UDL endpoint root. udl.py and pol.py each kept a copy, and udl.py a
 # second one inside a function that shadowed its own (audit F-252).
@@ -149,13 +150,13 @@ def _normalise_database_url(url: str) -> str:
     driver is filled in here rather than requiring the operator to hand-edit a
     value the platform generated.
     """
-    for prefix in ("postgresql+asyncpg://", "sqlite+aiosqlite://"):
+    for prefix in (_ASYNCPG_SCHEME, "sqlite+aiosqlite://"):
         if url.startswith(prefix):
             return url
     if url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return _ASYNCPG_SCHEME + url[len("postgresql://"):]
     if url.startswith("postgres://"):
-        return "postgresql+asyncpg://" + url[len("postgres://"):]
+        return _ASYNCPG_SCHEME + url[len("postgres://"):]
     if url.startswith("sqlite://"):
         return "sqlite+aiosqlite://" + url[len("sqlite://"):]
     return url
@@ -223,7 +224,7 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
     anything resembling a configuration error. The TLS intent is preserved by
     translating it into asyncpg's ``ssl`` argument.
     """
-    if not url.startswith("postgresql+asyncpg://"):
+    if not url.startswith(_ASYNCPG_SCHEME):
         return url, {}
 
     parts = urlsplit(url)

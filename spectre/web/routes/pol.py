@@ -46,6 +46,7 @@ _UDL_MAX_RESULTS = 5000
 # name the same one, or a failed analysis returns a fragment the tab cannot
 # swap in.
 _POL_PANEL_TEMPLATE = "partials/pol_panel.html"
+_DATE_FORMAT = "%Y-%m-%d"
 
 # Returned by every drill-down that is asked about a SATNO the session has no
 # analysis for. Held here so the three exits stay byte-identical: the operator
@@ -182,7 +183,7 @@ async def _fetch_udl_latest(
 @router.get("/panel", response_class=HTMLResponse)
 async def pol_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the PoL panel — credential form + results placeholder.
 
@@ -342,7 +343,8 @@ async def pol_analyse(
                 source=state.udl_tle_source,
             )
             logger.info("PoL: %s chars from UDL (direct) for %s", log_safe(len(archive_text)), log_safe(satno))
-        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
+        # BLE001: a multi-step UDL fetch; any failure is reported to the operator.
+        except Exception as exc:  # noqa: BLE001
             logger.warning("PoL: UDL direct failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
@@ -360,7 +362,8 @@ async def pol_analyse(
                 source=state.udl_tle_source,
             )
             logger.info("PoL: %s chars from UDL (session) for %s", log_safe(len(archive_text)), log_safe(satno))
-        except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
+        # BLE001: a multi-step UDL fetch; any failure is reported to the operator.
+        except Exception as exc:  # noqa: BLE001
             logger.warning("PoL: UDL session failed: %s", exc)
             return _panel_error(request, state, f"UDL fetch failed: {exc}")
 
@@ -753,7 +756,7 @@ async def pol_reserve_reset(
         resets.pop(satno, None)
     else:
         try:
-            parsed = datetime.strptime(reset_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=UTC)
+            parsed = datetime.strptime(reset_date.strip()[:10], _DATE_FORMAT).replace(tzinfo=UTC)
         except ValueError:
             return HTMLResponse(
                 f'<p class="error-msg">Could not read "{html.escape(reset_date)}" as a '
@@ -894,7 +897,7 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
 async def pol_chart_data(
     satno: int,
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> JSONResponse:
     """Return Chart.js-ready JSON for the most recent PoL analysis."""
     state = get_session_state(current_user)
@@ -911,8 +914,8 @@ async def pol_chart_data(
 
     drift_phase_data = [
         {
-            "start": ph.start_epoch.strftime("%Y-%m-%d"),
-            "end": ph.end_epoch.strftime("%Y-%m-%d"),
+            "start": ph.start_epoch.strftime(_DATE_FORMAT),
+            "end": ph.end_epoch.strftime(_DATE_FORMAT),
             "direction": ph.direction,
             "rate": ph.rate_deg_day,
             "start_lon": ph.start_lon,
@@ -967,7 +970,7 @@ async def pol_chart_data(
 @router.get("/notso-panel", response_class=HTMLResponse)
 async def pol_notso_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the NOTSO correlation input panel."""
     from spectre.data.notso_cache import get_notso_cache
@@ -1078,7 +1081,7 @@ def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list
 @router.post("/notso-correlate", response_class=HTMLResponse)
 async def pol_notso_correlate(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Correlate NOTSOs with the last PoL analysis.
 
@@ -1158,7 +1161,7 @@ async def pol_notso_correlate(
 @router.get("/photometry-panel", response_class=HTMLResponse)
 async def pol_photometry_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the photometry analysis input panel."""
     state = get_session_state(current_user)

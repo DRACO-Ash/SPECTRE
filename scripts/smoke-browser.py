@@ -91,9 +91,11 @@ def _find_chromium() -> str | None:
     for root in (Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")),):
         if not root.is_dir():
             continue
-        for candidate in sorted(root.glob("chromium-*/chrome-linux/chrome")):
-            if candidate.is_file():
-                return str(candidate)
+        # Playwright renamed chrome-linux to chrome-linux64; accept both.
+        for pattern in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome"):
+            for candidate in sorted(root.glob(pattern)):
+                if candidate.is_file():
+                    return str(candidate)
     return None
 
 

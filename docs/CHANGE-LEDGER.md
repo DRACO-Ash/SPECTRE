@@ -1069,3 +1069,33 @@ the `/release-preflight` command cover what a script cannot judge, and
 `CLAUDE.md` carries the rules to the point where code is written. Both
 `scripts/check-quality.sh` and the checker now use `origin/master` when the
 local master is behind it: a stale local base turned 0 findings into 14.
+
+### 0.6.5 outcome
+
+● **Every gate passed first time, Code Quality included, and the app
+  deployed.** The two literals hoisted before submission were the only
+  findings the local checks raised.
+
+## 0.6.6
+
+A cleanup release, at the owner's direction: clear every latent issue
+`scripts/sonar_rules.py --all` reported, so that no future edit inherits one.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | 153 latent issues cleared, of 14 rules the gate has raised here; 56 more in vendored minified libraries left untouched and taken out of scope | The checker reports 0 blocking over every line of `spectre/` and `tle_clustering/`, and a test now holds that. The 94 `Annotated` conversions changed no binding: the OpenAPI schema and every route's dependency tree were dumped before and after and are identical. The JavaScript changes are exact equivalents (each `isNaN` takes a `parseFloat` result; each `dataset` read is used only with `||` or `getElementById`), and a Chromium probe drove the out-of-band select swap, the theme switch and the panel tabs. | Then the gate raised a rule on a touched line that no check covers: this release touched several hundred old lines, the widest window yet. The `code-quality-preflight` agent reviewed them; its findings are recorded below. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**Not cleared, by decision.** 11 f-string fragments used three or more times
+in a file still warn. Whether the gate counts fragments is UNKNOWN, and
+restructuring messages on a guess would widen the window further.
+
+**Coverage, found before submission.** The local gate measured changed-line
+coverage against master and read 82%. Against 0.6.5, the release the gate
+will score this one against, it was 68%, under the floor of 80: moving noqa
+rationales and hoisting literals had marked 18 never-tested error branches as
+changed code. `tests/integration/test_untested_failure_paths.py` covers each
+(an admin acting on a deleted user, UDL failing mid-fetch, a mistyped
+refuelling date, an empty sweep group), and coverage against 0.6.5 is now
+100%. The release command, the agent and `CLAUDE.md` now name the last
+scored release as the base rather than master.

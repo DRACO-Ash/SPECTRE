@@ -92,13 +92,14 @@ async def intercept_geometry(
     red_sat:          Annotated[str,   Form()],
     blue_sat:         Annotated[str,   Form()],
     burn_epoch_str:   Annotated[str,   Form()],
+    *,
     dv_prograde_m_s:  Annotated[float, Form(alias="dv_prograde")] = 0.0,
     dv_normal_m_s:    Annotated[float, Form(alias="dv_normal")] = 0.0,
     dv_radial_m_s:    Annotated[float, Form(alias="dv_radial")] = 0.0,
     tof_hours:        Annotated[float, Form()] = 1.0,
     coast_hours:      Annotated[float, Form()] = 0.0,
     method:           Annotated[str,   Form()] = "unknown",
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the relative geometry Chart.js partial for an intercept solution.
 

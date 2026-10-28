@@ -144,8 +144,8 @@
 
           {% elif has_answer %}
           <div style="margin-top:0.3rem; margin-left:1.4rem; display:flex; align-items:center; gap:0.4rem">
-            <span style="font-size:0.58rem; color:var(--text-dim)">Your answer:</span>
-            <input type="text" name="answer_{{ obj.id }}"
+            <label for="answer-{{ obj.id }}" style="font-size:0.58rem; color:var(--text-dim)">Your answer:</label>
+            <input type="text" id="answer-{{ obj.id }}" name="answer_{{ obj.id }}"
                    placeholder="{% if obj.unit %}value in {{ obj.unit }}{% else %}enter answer{% endif %}"
                    style="background:var(--panel-bg); border:1px solid var(--border); border-radius:3px;
                           padding:0.2rem 0.45rem; font-size:0.62rem; color:var(--text-primary);

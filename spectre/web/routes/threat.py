@@ -76,13 +76,16 @@ _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 #: executor thread for its whole length, so unbounded sweeps starved every
 #: other feature that uses the executor (audit F-235).
 _SWEEP_SLOTS = asyncio.Semaphore(2)
+_SWEEP_MANUAL_TLES_TEMPLATE = "partials/sweep_manual_tles.html"
+_SWEEP_FETCH_STATUS_TEMPLATE = "partials/sweep_fetch_status.html"
 
 
 @router.get("/red-orbit-info", response_model=None)
 async def red_orbit_info(
     request: Request,
-    red_sat: str = Query("", description="Red satellite name"),
-    current_user: User = Depends(require_login),
+    *,
+    red_sat: Annotated[str, Query(description="Red satellite name")] = "",
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Compute orbital parameters for a red satellite and return a compact info card."""
     state = get_session_state(current_user)
@@ -273,7 +276,7 @@ def _manual_target_error(existing: list[dict[str, str]], name: str, tle: str, co
 @router.post("/add-manual-tle", response_model=None)
 async def add_manual_tle(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Add a manually provided TLE to the session's manual sweep target list."""
     state = get_session_state(current_user)
@@ -284,7 +287,7 @@ async def add_manual_tle(
 
     error = _manual_target_error(state.manual_sweep_tles, name, tle, confidence)
     if error:
-        return render(request, "partials/sweep_manual_tles.html", {
+        return render(request, _SWEEP_MANUAL_TLES_TEMPLATE, {
             "manual_tles": state.manual_sweep_tles,
             "error": error,
         })
@@ -294,7 +297,7 @@ async def add_manual_tle(
     state.manual_sweep_tles.append({"name": name, "tle": tle, "confidence": confidence})
     state.append_log(f"[THREAT] Manual TLE added: {name} ({confidence})")
 
-    return render(request, "partials/sweep_manual_tles.html", {
+    return render(request, _SWEEP_MANUAL_TLES_TEMPLATE, {
         "manual_tles": state.manual_sweep_tles,
         "error": None,
     })
@@ -303,14 +306,14 @@ async def add_manual_tle(
 @router.post("/remove-manual-tle", response_model=None)
 async def remove_manual_tle(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Remove a manual TLE entry from the session."""
     state = get_session_state(current_user)
     form = await request.form()
     name = str(form.get("manual_name") or "").strip()
     state.manual_sweep_tles = [e for e in state.manual_sweep_tles if e["name"] != name]
-    return render(request, "partials/sweep_manual_tles.html", {
+    return render(request, _SWEEP_MANUAL_TLES_TEMPLATE, {
         "manual_tles": state.manual_sweep_tles,
         "error": None,
     })
@@ -319,8 +322,9 @@ async def remove_manual_tle(
 @router.get("/target-config", response_model=None)
 async def target_config(
     request: Request,
-    red_sat: str = Query("", description="Selected interceptor stk_name — used to filter by regime"),
-    current_user: User = Depends(require_login),
+    *,
+    red_sat: Annotated[str, Query(description="Selected interceptor stk_name — used to filter by regime")] = "",
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
     state = get_session_state(current_user)
@@ -383,7 +387,7 @@ async def _prefetch_group_tle(
 @router.post("/fetch-targets", response_model=None)
 async def fetch_targets(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Pre-fetch TLEs for a selected HRR target group (side:rank)."""
     state = get_session_state(current_user)
@@ -408,19 +412,19 @@ async def fetch_targets(
         try:
             rank = int(rank_str)
         except ValueError:
-            return render(request, "partials/sweep_fetch_status.html", {
+            return render(request, _SWEEP_FETCH_STATUS_TEMPLATE, {
                 "error": f"Invalid rank: {rank_str}", "fetched": None, "total": 0, "failed": 0,
             })
         objects = _objects_for_group(state, side, rank)
 
     if not objects:
-        return render(request, "partials/sweep_fetch_status.html", {
+        return render(request, _SWEEP_FETCH_STATUS_TEMPLATE, {
             "error": "No HRR objects found for selected group.",
             "fetched": None, "total": 0, "failed": 0,
         })
 
     if not state.udl_username or not state.udl_password:
-        return render(request, "partials/sweep_fetch_status.html", {
+        return render(request, _SWEEP_FETCH_STATUS_TEMPLATE, {
             "error": "Not connected to UDL — cannot fetch TLEs.",
             "fetched": None, "total": 0, "failed": 0,
         })
@@ -451,7 +455,7 @@ async def fetch_targets(
         f"{fetched}/{total} TLEs ({failed} failed)"
     )
 
-    return render(request, "partials/sweep_fetch_status.html", {
+    return render(request, _SWEEP_FETCH_STATUS_TEMPLATE, {
         "error": None, "fetched": fetched, "total": total, "failed": failed,
     })
 
@@ -1378,8 +1382,9 @@ def _provenance_warnings(subjects: list[tuple[str, str]]) -> list[str]:
 async def threat_sweep(
     request: Request,
     red_sat: Annotated[str, Form()],
+    *,
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Run a threat sweep for a red satellite against the selected target group."""
     t0 = time.monotonic()
@@ -1907,8 +1912,9 @@ def _target_tle(state: object, target: ThreatTarget) -> str | None:
 async def refine_entry(
     request: Request,
     entry_index: Annotated[int, Form(ge=0)],
+    *,
     group_idx: Annotated[int, Form(ge=0)] = 0,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Refine a single threat sweep entry with Lambert solver.
 

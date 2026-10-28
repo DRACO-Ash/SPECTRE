@@ -146,11 +146,12 @@ def _results_for_export(state: Any, run_id: str | None) -> list[Any]:
 @router.get("/export", response_model=None)
 async def export_intercepts(
     request: Request,
+    *,
     run_id: Annotated[
         str | None,
         Query(description="option_id of a specific run to export; omit for full session history"),
     ] = None,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> StreamingResponse:
     """Return the operator's intercept history as a downloadable CSV.
 

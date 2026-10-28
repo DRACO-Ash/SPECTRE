@@ -16,15 +16,19 @@ verdict, mark FACT, INFERENCE and UNKNOWN.
    entry for it, and `docs/CHANGE-LEDGER.md` has a `## <version>` section with
    the previous release's outcome recorded.
 2. **Rules the gate has raised before.** `python3 scripts/sonar_rules.py
-   master`. Any FAIL stops the release; see `docs/SONAR-RULES.md` for the fix
+   <base>`, where `<base>` is the commit of the last release the gate scored
+   (master once that release is merged; its branch head until then). Use the
+   same base in every step below; master understates the change when the
+   last release is not on it yet, and 0.6.6 read 82% coverage there against
+   68% on the true base. Any FAIL stops the release; see `docs/SONAR-RULES.md` for the fix
    that passed last time.
 3. **The rest of the gate, reproduced.** `pytest tests/ -q --cov
-   --cov-report=xml:coverage.xml`, then `sh scripts/check-quality.sh master`.
+   --cov-report=xml:coverage.xml`, then `sh scripts/check-quality.sh <base>`.
 4. **Judgement.** Launch the `code-quality-preflight` agent on the change. It
    reviews touched old lines, JavaScript complexity, rules not yet met here,
    security hotspots and coverage. FIX FIRST or NEW RULE SUSPECTED stops the
    release until the author has dealt with each finding.
-5. **Package and verify.** `sh scripts/package-appstore.sh <out-dir>` (it
+5. **Package and verify.** `SONAR_BASE=<base> sh scripts/package-appstore.sh <out-dir>` (it
    runs step 2 again and refuses to build on a FAIL), then
    `sh scripts/simulate-pipeline.sh <zip>` and
    `sh scripts/verify-container.sh <zip>`. Behind a TLS-intercepting proxy,

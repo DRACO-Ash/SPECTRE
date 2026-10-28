@@ -79,6 +79,7 @@ _MAX_PARAMS = 13
 
 _ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options", "api_route", "websocket"})
 _FASTAPI_PARAMS = frozenset({"Depends", "Form", "Query", "Body", "Header", "Cookie", "File", "Path", "Security"})
+_INJECTORS = frozenset({"Depends", "Security"})
 _REGEX_FUNCS = frozenset({"compile", "match", "search", "fullmatch", "sub", "subn", "findall", "finditer", "split"})
 _SHORTHAND_CLASSES = re.compile(r"\[\^?(?:0-9|a-zA-Z0-9_|A-Za-z0-9_|a-zA-Z_0-9|A-Za-z_0-9|_a-zA-Z0-9|0-9a-zA-Z_)\]")
 _NOQA = re.compile(r"#\s*noqa\b(.*)$")
@@ -301,11 +302,13 @@ def _function_findings(
     count = len(named) + bool(args.vararg) + bool(args.kwarg)
     if count > _MAX_PARAMS:
         yield Finding("python:S107", path, node.lineno, f"{node.name} takes {count} parameters (limit {_MAX_PARAMS}): bind a model")
-    if not _route_function(node):
-        return
+    # Depends and Security inject wherever they appear, so any function using
+    # them as a default counts; the request parameters only mean anything on a
+    # route.
+    kinds = _FASTAPI_PARAMS if _route_function(node) else _INJECTORS
     defaults = [*([None] * (len(args.posonlyargs) + len(args.args) - len(args.defaults))), *args.defaults, *args.kw_defaults]
     for arg, default in zip([*args.posonlyargs, *args.args, *args.kwonlyargs], defaults, strict=False):
-        if default is not None and _callee_name(default) in _FASTAPI_PARAMS and arg.lineno in changed:
+        if default is not None and _callee_name(default) in kinds and arg.lineno in changed:
             yield Finding(
                 "python:S8410", path, arg.lineno,
                 f"{arg.arg} = {_callee_name(default)}(...): use Annotated[type, {_callee_name(default)}(...)]",
@@ -458,8 +461,19 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout  # noqa: S603, S607
 
 
+#: Vendored, minified third-party libraries. They are never edited here (their
+#: versions are pinned in spectre/web/static/vendored.json), SonarJS skips
+#: minified files (INFERENCE, docs/SONAR-RULES.md), and they enter the new-code
+#: window only when replaced whole by an upgrade.
+_VENDORED = ".min.js"
+
+
 def _in_scope(path: str) -> bool:
-    return path.startswith(tuple(f"{d}/" for d in SOURCE_DIRS)) and path.endswith((".py", *TEMPLATE_SUFFIXES))
+    return (
+        path.startswith(tuple(f"{d}/" for d in SOURCE_DIRS))
+        and path.endswith((".py", *TEMPLATE_SUFFIXES))
+        and not path.endswith(_VENDORED)
+    )
 
 
 def resolve_base(base: str) -> str:
@@ -520,7 +534,7 @@ def check_file(path: str, changed: set[int], base_source: str | None) -> list[Fi
 def _all_lines(paths: Iterable[str]) -> dict[str, set[int]]:
     files = [p for root in paths for p in ([root] if Path(root).is_file() else map(str, Path(root).rglob("*")))]
     return {f: set(range(1, len(Path(f).read_text(encoding="utf-8").splitlines()) + 2))
-            for f in files if f.endswith((".py", *TEMPLATE_SUFFIXES)) and Path(f).is_file()}
+            for f in files if _in_scope(f) and Path(f).is_file()}
 
 
 def main(argv: list[str]) -> int:

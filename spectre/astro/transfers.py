@@ -24,7 +24,8 @@ class TransferResult:
     method: str = ""
 
     def __post_init__(self) -> None:
-        if self.total_delta_v == 0.0:
+        # Zero is "not given": every transfer here spends some delta-V.
+        if not self.total_delta_v:
             self.total_delta_v = self.delta_v_1 + self.delta_v_2 + self.delta_v_3
 
 

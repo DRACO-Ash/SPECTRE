@@ -82,6 +82,8 @@ router = APIRouter(prefix="/plan/maneuver")
 _INTERCEPT_RESULT_TEMPLATE = "partials/intercept_result.html"
 _ALL_INTERCEPTS_TEMPLATE = "partials/all_intercepts_result.html"
 _HOP_TYPE_LABEL = "Hop Type"
+_LOW_THREAT_COLOUR = "#22c55e"
+_UTC_MINUTE_FORMAT = "%Y-%m-%d %H:%M UTC"
 
 # Human-readable altitude hint for each orbit regime — used in error messages.
 _REGIME_ALT_HINT: dict[str, str] = {
@@ -141,7 +143,7 @@ _BEYOND_PLATFORM_M_S: float = 3000.0
 #: How each posture is presented on the intercept panel. An AGGRESSIVE profile
 #: is the alarming one: it is the manoeuvre an actor would only make for effect.
 _POSTURE_PRESENTATION: dict[Posture, tuple[str, str, str]] = {
-    Posture.BENIGN: ("LOW", "#22c55e", "rgba(34,197,94,0.04)"),
+    Posture.BENIGN: ("LOW", _LOW_THREAT_COLOUR, "rgba(34,197,94,0.04)"),
     Posture.ANNOYANCE: ("MEDIUM", "#3b8beb", "rgba(59,139,235,0.04)"),
     Posture.AGGRESSIVE: ("HIGH", "#f59e0b", "rgba(245,158,11,0.04)"),
     Posture.BEYOND_PLATFORM: ("CRITICAL", "#ef4444", "rgba(239,68,68,0.04)"),
@@ -212,7 +214,7 @@ def _observability(dv: float) -> tuple[str, str, str]:
         return ("MEDIUM", "#f59e0b",
                 "Moderate ΔV — detectable by tasked sensors, may evade routine surveillance")
     if dv > _CAM_SCALE_M_S:
-        return ("LOW", "#22c55e",
+        return ("LOW", _LOW_THREAT_COLOUR,
                 "Small ΔV — may fall below SSN detection threshold for routine cataloguing")
     return ("VERY LOW", "#6b7280",
             "Micro-manoeuvre — consistent with propellant settling or thermal cycling")
@@ -268,7 +270,7 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
 
         burn_intel.append({
             "number": burn.burn_number,
-            "epoch": burn.burn_epoch.strftime("%Y-%m-%d %H:%M UTC"),
+            "epoch": burn.burn_epoch.strftime(_UTC_MINUTE_FORMAT),
             "dv_ms": round(b_dv_ms, 2),
             "direction": direction,
             "direction_detail": direction_detail,
@@ -601,7 +603,7 @@ def _summary_text(
     intent_label: str, tof_label: str,
 ) -> str:
     """One sentence describing what this intercept would do."""
-    arrival = result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC")
+    arrival = result.arrival_epoch.strftime(_UTC_MINUTE_FORMAT)
     builder = _METHOD_SUMMARY_BUILDERS.get(result.method)
     if builder is None:
         return (
@@ -636,7 +638,7 @@ def _compute_intercept_intel(
     elif method in _DEFENSIVE_METHODS:
         manoeuvre_type = "DEFENSIVE"
         threat_level = "LOW"
-        threat_color = "#22c55e"
+        threat_color = _LOW_THREAT_COLOUR
         threat_bg = "rgba(34,197,94,0.04)"
     else:
         manoeuvre_type = (
@@ -705,9 +707,10 @@ _INTERCEPT_METHOD_MAP: dict[str, InterceptMethod] = {m.value: m for m in Interce
 @router.get("/orbital-events", response_model=None)
 async def orbital_events(
     request: Request,
+    *,
     red_sat: Annotated[str, Query()] = "",
     blue_sat: Annotated[str, Query()] = "",
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Compute upcoming orbital events for both red and blue satellites.
 
@@ -889,7 +892,7 @@ async def apply_intercept(
         f"[INTERCEPT] {method} applied: "
         f"total ΔV={result.total_delta_v_m_s:.0f} m/s, "
         f"{len(result.burns)} burn(s) [{burn_summary}], "
-        f"arrival={result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC')}, "
+        f"arrival={result.arrival_epoch.strftime(_UTC_MINUTE_FORMAT)}, "
         f"miss={result.intercept_range_km:.1f} km"
     )
     logger.info(
@@ -1095,6 +1098,7 @@ async def apply_all_intercepts(
     request: Request,
     red_sat: Annotated[str, Form()],
     blue_sat: Annotated[str, Form()],
+    *,
     manoeuvre_start: Annotated[str, Form()] = "",
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
@@ -1104,7 +1108,7 @@ async def apply_all_intercepts(
     drift_days: Annotated[str, Form()] = "",
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
 
@@ -1209,7 +1213,7 @@ async def apply_all_intercepts(
 
 @router.get("/trade-space-data", response_model=None)
 async def trade_space_data(
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> JSONResponse:
     """Return JSON array of trade-space points from intercept history."""
     state = get_session_state(current_user)
@@ -1239,7 +1243,7 @@ async def trade_space_data(
 @router.post("/clear-history", response_model=None)
 async def clear_history(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Clear intercept history and last result."""
     state = get_session_state(current_user)

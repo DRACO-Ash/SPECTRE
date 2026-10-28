@@ -201,8 +201,9 @@ def _bound_to(user: User, claims: SessionClaims) -> bool:
 
 async def require_login(
     request: Request,
+    *,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """FastAPI dependency that validates the session cookie.
 
@@ -249,7 +250,7 @@ async def require_login(
 
 
 async def require_admin(
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> User:
     """FastAPI dependency that requires admin role.
 

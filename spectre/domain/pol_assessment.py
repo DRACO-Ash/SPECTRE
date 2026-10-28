@@ -946,7 +946,9 @@ def _drift_direction(drift: float | None) -> str:
 def wrap_longitude(deg: float) -> float:
     """*deg* in (-180, 180], the interval the longitudes arrive in."""
     wrapped = (deg + 180.0) % 360.0 - 180.0
-    return 180.0 if wrapped == -180.0 else wrapped  # noqa: PLR2004
+    # The modulo never goes below -180, so <= is the boundary test without an
+    # exact float comparison.
+    return 180.0 if wrapped <= -180.0 else wrapped  # noqa: PLR2004
 
 
 def circular_span_deg(lons: list[float]) -> float:

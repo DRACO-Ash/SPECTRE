@@ -44,17 +44,21 @@
       <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
                                    gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="adv_id" value="A1">
-        <input type="text"   name="adv_name" placeholder="Name (e.g. Proximity approach)"
+        <label for="adv-name-1" class="visually-hidden">Adversary action name</label>
+        <input type="text"   id="adv-name-1" name="adv_name" placeholder="Name (e.g. Proximity approach)"
                style="font-size:0.63rem">
-        <select name="adv_type" style="font-size:0.63rem">
+        <label for="adv-type-1" class="visually-hidden">Adversary action type</label>
+        <select id="adv-type-1" name="adv_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
           <option value="sensor_retask">Sensor Retask</option>
           <option value="posture_change">Posture Change</option>
           <option value="no_action">No Action</option>
         </select>
-        <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
+        <label for="adv-prob-1" class="visually-hidden">Adversary action probability, 0 to 1</label>
+        <input type="number" id="adv-prob-1" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
                placeholder="P" style="font-size:0.63rem" title="Probability [0,1]">
-        <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
+        <label for="adv-conf-1" class="visually-hidden">Intelligence confidence, 0 to 1</label>
+        <input type="number" id="adv-conf-1" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
                placeholder="Conf" style="font-size:0.63rem" title="Intel confidence [0,1]">
         <span style="font-size:0.6rem; color:var(--text-dim)">P · Conf</span>
         {# The glyph is the whole of the button, so without aria-label a screen
@@ -82,19 +86,24 @@
       <div class="fr-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;
                                   gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="fr_id" value="R1">
-        <input type="text"   name="fr_name" placeholder="Name (e.g. Collision avoidance)"
+        <label for="fr-name-1" class="visually-hidden">Friendly response name</label>
+        <input type="text"   id="fr-name-1" name="fr_name" placeholder="Name (e.g. Collision avoidance)"
                style="font-size:0.63rem">
-        <select name="fr_type" style="font-size:0.63rem">
+        <label for="fr-type-1" class="visually-hidden">Friendly response type</label>
+        <select id="fr-type-1" name="fr_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
           <option value="sensor_retask">Sensor Retask</option>
           <option value="posture_change">Posture Change</option>
           <option value="no_action">No Action</option>
         </select>
-        <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05"
+        <label for="fr-cost-1" class="visually-hidden">Normalised cost, 0 to 1</label>
+        <input type="number" id="fr-cost-1" name="fr_cost" value="0.3" min="0" max="1" step="0.05"
                placeholder="Cost" style="font-size:0.63rem" title="Normalised cost [0,1]">
-        <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
+        <label for="fr-rev-1" class="visually-hidden">Reversibility, 0 to 1</label>
+        <input type="number" id="fr-rev-1" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
-        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5"
+        <label for="fr-time-1" class="visually-hidden">Time to execute, hours</label>
+        <input type="number" id="fr-time-1" name="fr_time" value="6" min="0.1" max="720" step="0.5"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
         <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);

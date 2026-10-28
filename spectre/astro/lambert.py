@@ -88,7 +88,8 @@ def solve_lambert(
     return _solution(problem, z, mu, (v1_initial, v2_target), 0)
 
 
-def solve_lambert_all(  # noqa: PLR0913, PLR0917 - mirrors solve_lambert's signature
+# PLR0913, PLR0917: mirrors solve_lambert's signature.
+def solve_lambert_all(  # noqa: PLR0913, PLR0917
     r1: np.ndarray,
     r2: np.ndarray,
     tof: float,
@@ -123,7 +124,8 @@ def solve_lambert_all(  # noqa: PLR0913, PLR0917 - mirrors solve_lambert's signa
     return found
 
 
-def cheapest_lambert(  # noqa: PLR0913, PLR0917 - mirrors solve_lambert's signature
+# PLR0913, PLR0917: mirrors solve_lambert's signature.
+def cheapest_lambert(  # noqa: PLR0913, PLR0917
     r1: np.ndarray,
     r2: np.ndarray,
     tof: float,
