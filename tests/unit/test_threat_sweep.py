@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,27 @@ _TIANGONG_TLE = (
     "2 48274  41.4700 120.0000 0005000  30.0000 330.0000 15.60000000100000"
 )
 
+
+
+_MU, _R_EARTH = 398600.4418, 6378.137
+
+
+def _circular(alt_km: float, anomaly_deg: float = 0.0) -> str:
+    """A circular 51.64 degree orbit at *alt_km*, at mean anomaly *anomaly_deg*."""
+    rev_per_day = math.sqrt(_MU / (_R_EARTH + alt_km) ** 3) * 86400.0 / (2.0 * math.pi)
+    return ("1 99001U 24001A   24001.00000000  .00000000  00000-0  00000-0 0  9990\n"
+            f"2 99001  51.6400 100.0000 0000001   0.0000 {anomaly_deg:8.4f} {rev_per_day:11.8f}    10")
+
+
+def _hohmann_lead_deg(alt1_km: float, alt2_km: float) -> float:
+    """How far the target must lead for a Hohmann from *alt1_km* to arrive where it is.
+
+    180 degrees less the target's own motion during the transfer: the phasing
+    a Hohmann rendezvous needs, and the only geometry in which it is one.
+    """
+    r1, r2 = _R_EARTH + alt1_km, _R_EARTH + alt2_km
+    transfer_s = math.pi * math.sqrt(((r1 + r2) / 2.0) ** 3 / _MU)
+    return 180.0 - math.degrees(math.sqrt(_MU / r2**3) * transfer_s)
 
 class TestThreatTarget:
     """ThreatTarget model instantiation."""
@@ -198,22 +220,41 @@ class TestSweepHelpers:
         now = datetime(2024, 1, 1, tzinfo=UTC)
         epochs = [("now", now)]
 
-        # Deliberately wider than any real platform's reserve: this case
-        # exercises the eight-method fan-out, not the budget filter. The
-        # ISS-to-Tiangong plane change alone is about 10 degrees, which costs
-        # thousands of m/s and no object on orbit could fly.
+        # Coplanar circular orbits phased for a Hohmann rendezvous, so at least
+        # one method reaches the target; the budget is wide so this exercises
+        # the eight-method fan-out, not the budget filter. ISS to Tiangong used
+        # to serve here, but 10 degrees out of plane nothing reaches it, and it
+        # only produced rows because results were not checked for arrival.
         entries = _sweep_all_methods(
             _SweepRequest(
-                red_tle=_ISS_TLE, target_tle=_TIANGONG_TLE, target=target,
-                max_dv_m_s=10_000.0, regime="LEO",
+                red_tle=_circular(400.0), target_tle=_circular(600.0, _hohmann_lead_deg(400.0, 600.0)),
+                target=target, max_dv_m_s=10_000.0, regime="LEO",
             ),
             epochs,
         )
         assert len(entries) >= 1
-        methods_seen = {e.method for e in entries}
-        assert "hohmann" in methods_seen
         assert entries[0].burn_location == "now"
         assert entries[0].delta_v_m_s > 0
+
+    def test_a_method_that_does_not_reach_the_target_is_refused_not_ranked(self) -> None:
+        """An in-plane Hohmann cannot reach a station 10 degrees out of plane.
+
+        Every method's burns used to be priced whether or not they reached the
+        target, so the sweep ranked transfers ending hundreds of km away.
+        """
+        from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
+
+        refusals: dict[str, str] = {}
+        entries = _sweep_all_methods(
+            _SweepRequest(
+                red_tle=_ISS_TLE, target_tle=_TIANGONG_TLE, target=ThreatTarget("B_SAT_T", "", "blue", None),
+                max_dv_m_s=10_000.0, regime="LEO",
+            ),
+            [("now", datetime(2024, 1, 1, tzinfo=UTC))],
+            refusals,
+        )
+        assert "hohmann" not in {e.method for e in entries}
+        assert "not an approach" in refusals["hohmann"]
 
     def test_the_sweep_hohmann_matches_the_textbook_value(self) -> None:
         """Coplanar circular orbits at 400 and 600 km: the two-burn Hohmann
@@ -224,14 +265,8 @@ class TestSweepHelpers:
 
         from spectre.web.routes.threat import _sweep_all_methods, _SweepRequest
 
-        mu, r_earth = 398600.4418, 6378.137
-
-        def circular(alt_km: float) -> str:
-            rev_per_day = math.sqrt(mu / (r_earth + alt_km) ** 3) * 86400.0 / (2.0 * math.pi)
-            return ("1 99001U 24001A   24001.00000000  .00000000  00000-0  00000-0 0  9990\n"
-                    f"2 99001  51.6400 100.0000 0000001   0.0000   0.0000 {rev_per_day:11.8f}    10")
-
-        r1, r2 = r_earth + 400.0, r_earth + 600.0
+        mu = _MU
+        r1, r2 = _R_EARTH + 400.0, _R_EARTH + 600.0
         a_t = (r1 + r2) / 2.0
         textbook_m_s = 1000.0 * (
             (math.sqrt(mu * (2 / r1 - 1 / a_t)) - math.sqrt(mu / r1))
@@ -241,7 +276,7 @@ class TestSweepHelpers:
 
         entries = _sweep_all_methods(
             _SweepRequest(
-                red_tle=circular(400.0), target_tle=circular(600.0),
+                red_tle=_circular(400.0), target_tle=_circular(600.0, _hohmann_lead_deg(400.0, 600.0)),
                 target=ThreatTarget("T", "", "blue", None), max_dv_m_s=10_000.0, regime="LEO",
             ),
             [("now", datetime(2024, 1, 1, tzinfo=UTC))],

@@ -1110,3 +1110,52 @@ the string it tests. Nothing else on a touched line would be raised: unused
 `_rl` parameters passed in 0.6.1 on the same shape, and no hotspot is new.
 `childSort` sits at cognitive complexity 15, the limit; both are on the watch
 list in `docs/SONAR-RULES.md`.
+
+### 0.6.6 outcome
+
+● Not yet known when 0.6.7 was built: 0.6.6 had not been reported back
+  from the App Store. If 0.6.6 is not submitted, 0.6.7 carries it, and the
+  gate scores both against 0.6.5.
+
+## 0.6.7
+
+From operator review of the 0.6.6 threat sweep, which listed plane changes
+"at perigee", "at apogee" and "now", each about 89 m/s and graded ANNOYANCE.
+The owner's objection, that no satellite would fly a plane change at an
+apsis for that effect, was right, for a reason deeper than the labels.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the sweep's close-approach rule, real burn times and places, honest miss distances for plane change, phasing and the hops | `scripts/sonar_rules.py` reports nothing on the changed lines, against 0.6.6 or 0.6.5; changed-line coverage is 100% against either. | Then the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**What was wrong, measured.** The GEO pair from the test suite, with the
+target tilted 1.66 degrees (the angle 89 m/s buys at 3.074 km/s):
+
+● The plane change waited, correctly, for the next crossing of the target's
+  plane, the only place a single burn can rotate one plane into another, but
+  the row kept the search point's name and time: "now 22:00" for a burn at
+  09:54 the next morning. "now" and "perigee" were the same burn, listed twice.
+● Its miss was hard-coded to 0 km. Coplanar, the red object stayed 610 km
+  from the target, because aligning planes does nothing to the along-track gap.
+● No method's result was checked for arrival. A 0 m/s Hohmann ending 607 km
+  away was ranked a benign approach. Phasing reported only the radial gap
+  (0.3 km against a real 18 km). The H-bar and V-bar hops reported their total
+  travel as their miss, so an H-bar sequence read 3 km from a target it left
+  600 km away along-track. The Intercept Engine showed the same figures as
+  "Miss Dist".
+
+**What changed.** A result is listed only if it ends within 50 km of the
+target (an ASSUMPTION stated on the page for the analyst to confirm);
+anything further is listed among the methods that produced no approach, with
+the distance. Rows give the burn's real time, and `rel_node` where a plane
+change has to wait for the node; one row per distinct burn. The plane change
+reports its closest approach over the next revolution, phasing its simulated
+arrival miss, and the hops what their own axis leaves uncovered.
+
+**Not fixed, recorded.** The hop solvers record 2 burns for a sequence of
+n hops (2 per hop), so their burn list cannot be replayed; their miss now
+comes from their own linear model (INFERENCE, reasonable while the separation
+is small against the orbit radius, about 1.4% at 600 km in GEO). Pricing a
+plane change together with the phasing that closes the gap is not done: a
+plane change on its own is now refused, with the distance it leaves.

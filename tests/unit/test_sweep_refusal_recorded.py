@@ -36,7 +36,7 @@ def test_the_refusal_reaches_the_rendered_panel(monkeypatch: pytest.MonkeyPatch)
     assert refusals == {"lambert": "at now: Transfer angle within 0.5 degrees of 180"}
     rows = [("SKYNET-5A", method, reason) for method, reason in refusals.items()]
     html = sweep._render(sweep._context(method_refusals=rows))
-    assert "1 method(s) produced no solution for a target" in " ".join(html.split())
+    assert "1 method(s) produced no approach to a target" in " ".join(html.split())
     assert "Transfer angle within 0.5 degrees of 180" in html
 
 

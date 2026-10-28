@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-10-28
+
+### Fixed
+- The threat sweep lists only manoeuvres that reach the target, within 50 km (an assumption stated on the page). Every method's burns used to be priced whether or not they arrived, so transfers ending hundreds of kilometres away were ranked as approaches; they are now listed among the methods that produced no approach, with the distance.
+- A plane change is shown where and when it is flown: at the crossing of the target's plane (`rel_node`), not at the "now", "perigee" or "apogee" point the search began from. Search points that lead to the same burn give one row.
+- Miss distances are real: a plane change reports how close it then comes (it was 0 km, while the target stayed 610 km away), phasing its simulated arrival miss, and the V-bar and H-bar hops what their sequence leaves uncovered rather than how far they travel. The Intercept Engine's "Miss Dist" shows the same corrected figures.
+
 ## [0.6.6] - 2026-10-28
 
 A cleanup release: no change to what the console does.

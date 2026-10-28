@@ -118,14 +118,14 @@ class TestEveryNameTheTemplateUsesIsSupplied:
 class TestTheRefusalsPanelIsVisible:
     def test_each_refused_method_and_its_reason_appear(self) -> None:
         html = _render(_context())
-        assert "2 method(s) produced no solution for a target" in html
+        assert "2 method(s) produced no approach to a target" in html
         assert "BIELLIPTIC" in html
         assert "exceeds the 500 m/s budget" in html
         assert "transfer angle within 0.5 degrees of 180" in html
 
     def test_no_panel_when_nothing_was_refused(self) -> None:
         html = _render(_context(method_refusals=[]))
-        assert "produced no solution" not in html
+        assert "produced no approach" not in html
 
 
 class TestTheTwoFindingsStaySeparatelyVisible:

@@ -25,12 +25,12 @@ def _lambert(*, blue_tle: str, manoeuvre_start: datetime, **_kwargs: Any) -> Any
     """Refuses EASY at the first epoch only, and HARD at every epoch."""
     if blue_tle == "HARD" or manoeuvre_start == _EPOCHS[0][1]:
         raise ValueError("degenerate Lambert geometry")
-    return SimpleNamespace(total_delta_v=0.01)
+    return SimpleNamespace(total_delta_v=0.01, miss_distance_km=0.0)
 
 
 def _sweep(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str]]:
     monkeypatch.setattr(threat, "_SWEEP_METHODS", (("lambert", _lambert, {}),))
-    monkeypatch.setattr(threat, "_sol_to_entry", lambda *a, **_k: SimpleNamespace(target=a[1], method=a[4]))
+    monkeypatch.setattr(threat, "_sol_to_entry", lambda *a, **_k: SimpleNamespace(target=a[1], method=a[4], burn_epoch=a[2]))
     targets = [ThreatTarget("EASY", "1", "hrr", 1), ThreatTarget("HARD", "2", "hrr", 1)]
     state = SimpleNamespace(hrr_tle_cache={"1": "EASY", "2": "HARD"})
     monkeypatch.setattr(threat, "regime_from_tle", lambda _t: "GEO")
@@ -48,6 +48,6 @@ def test_only_the_target_that_refused_is_listed(monkeypatch: pytest.MonkeyPatch)
 def test_the_panel_names_the_target(monkeypatch: pytest.MonkeyPatch) -> None:
     html = sweep._render(sweep._context(method_refusals=_sweep(monkeypatch)))
     flat = " ".join(html.split())
-    assert "1 method(s) produced no solution for a target" in flat
+    assert "1 method(s) produced no approach to a target" in flat
     assert "HARD" in flat
     assert "at now: degenerate Lambert geometry" in flat

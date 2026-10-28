@@ -154,7 +154,7 @@
   {% if method_refusals %}
   <details style="margin:0.4rem 0">
     <summary style="font-size:0.75rem; color:var(--text-muted); cursor:pointer">
-      {{ method_refusals | length }} method(s) produced no solution for an actor
+      {{ method_refusals | length }} method(s) produced no approach for an actor: refused, over budget, or ending too far away
     </summary>
     <div style="padding:0.4rem 0.6rem">
       {% for subject, method, reason in method_refusals %}

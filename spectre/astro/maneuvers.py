@@ -348,8 +348,10 @@ def phasing_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        # The closure is at the chaser's radius, so the radial gap remains.
-        miss_distance_km=abs(r_red - r_blue),
+        # Where the phasing orbit actually brings the chaser, against the
+        # target. It was the radial gap alone, which says nothing of the
+        # along-track or out-of-plane error at arrival.
+        miss_distance_km=_separation(_coast(sv_red, dv1_vec, t_arrival, mu), blue_orbit),
     )
 
 
@@ -463,6 +465,20 @@ def cw_drift_intercept(
     )
 
 
+def _hop_residual_km(separation: np.ndarray, axis: np.ndarray, advance_km: float) -> float:
+    """The separation a hop sequence along *axis* leaves, in its own linear model.
+
+    Hops advance along one axis only: V-bar hops along-track, H-bar hops
+    cross-track. What is left is the shortfall on that axis plus the whole of
+    the separation on the other two. The miss was the hop sequence's total
+    advance, which is the distance it travels, not how close it ends: an H-bar
+    sequence reported 3 km from a target it left 600 km away along-track.
+    """
+    on_axis = float(np.dot(separation, axis))
+    off_axis = separation - on_axis * axis
+    return math.hypot(abs(on_axis) - advance_km, float(np.linalg.norm(off_axis)))
+
+
 def vbar_hop_intercept(
     red_tle: str,
     blue_tle: str,
@@ -496,9 +512,9 @@ def vbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    v_hat_d = sv_red.v / sv_red.v_mag
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        v_hat_d = sv_red.v / sv_red.v_mag
         along_track_sep = abs(float(np.dot(dr, v_hat_d)))
         hop_distance_km = max(along_track_sep / n_hops, 1.0)
 
@@ -529,7 +545,7 @@ def vbar_hop_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_hop_residual_km(dr, v_hat_d, result.total_advance_km),
     )
 
 
@@ -566,11 +582,11 @@ def hbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    h_vec0 = np.cross(sv_red.r, sv_red.v)
+    h_mag0 = float(np.linalg.norm(h_vec0))
+    n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        h_vec0 = np.cross(sv_red.r, sv_red.v)
-        h_mag0 = float(np.linalg.norm(h_vec0))
-        n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
         cross_track_sep = abs(float(np.dot(dr, n_hat0)))
         hop_distance_km = max(cross_track_sep / n_hops, 1.0)
 
@@ -596,7 +612,7 @@ def hbar_hop_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_hop_residual_km(dr, n_hat0, result.total_advance_km),
     )
 
 
@@ -699,13 +715,17 @@ def plane_change_intercept(
         burn1 = _make_burn(1, t_burn, dv_vec, sv_burn)
         dv_mag = float(np.linalg.norm(dv_vec))
 
+        # Aligning the planes does nothing to the along-track gap, so the miss
+        # is how close the red object then comes, not zero. It was hard-coded
+        # to 0.0, and the sweep read an 89 m/s plane change at GEO as an
+        # approach to a target that stayed 610 km away.
         return InterceptSolution(
             method="plane_change",
             burns=[burn1],
             total_delta_v=dv_mag,
             departure_epoch=t_burn,
             arrival_epoch=t_burn,
-            miss_distance_km=0.0,
+            miss_distance_km=_closest_approach_km(sv_burn, dv_vec, blue_orbit, period_s, mu),
         )
     # Different altitudes: a Hohmann-like transfer with the plane change on
     # the slower burn, as combined_altitude_plane_change prices it.
@@ -1712,6 +1732,23 @@ def _coast(sv: StateVector, dv: np.ndarray, until: datetime, mu: float) -> State
 def _separation(sv: StateVector, target: TLEOrbit) -> float:
     """Distance (km) from *sv* to *target* at the same epoch."""
     return float(np.linalg.norm(sv.r - target.propagate(sv.epoch).r))
+
+
+#: Samples per revolution when searching for the closest approach. At GEO
+#: that is one every 15 minutes, about 2,800 km of arc, against relative
+#: motion that after a pure plane change varies over the whole revolution.
+_APPROACH_SAMPLES = 96
+
+
+def _closest_approach_km(
+    sv: StateVector, dv: np.ndarray, target: TLEOrbit, period_s: float, mu: float,
+) -> float:
+    """The least separation from *target* over the revolution after burning *dv* at *sv*."""
+    step = period_s / _APPROACH_SAMPLES
+    return min(
+        _separation(_coast(sv, dv, sv.epoch + timedelta(seconds=k * step), mu), target)
+        for k in range(_APPROACH_SAMPLES + 1)
+    )
 
 def _make_burn(
     number: int,

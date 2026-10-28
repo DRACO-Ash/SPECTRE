@@ -199,7 +199,7 @@ class TestNothingIsHiddenFromTheOperator:
 
     def test_refused_methods_are_listed(self) -> None:
         html = _render(_context())
-        assert "1 method(s) produced no solution for an actor" in html
+        assert "1 method(s) produced no approach for an actor" in html
         assert "exceeds the 500 m/s budget" in html
 
 

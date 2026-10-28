@@ -535,6 +535,12 @@ def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
     return epochs
 
 
+#: A first burn later than this after the search point is a different burn.
+_SAME_BURN_POINT_S = 60.0
+#: Where a method burns when it does not burn at the search point.
+_DEFERRED_BURN_POINT = {"plane_change": "rel_node"}
+
+
 # PLR0913, PLR0917: one parameter per column of the row it builds.
 def _sol_to_entry(  # noqa: PLR0913, PLR0917
     sol: InterceptSolution,
@@ -558,6 +564,7 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
     dv_pro = 0.0
     dv_nor = 0.0
     dv_rad = 0.0
+    burn_epoch, burn_location = epoch, location
     if sol.burns:
         tof_s = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds()
         tof_hours = tof_s / 3600.0
@@ -565,10 +572,17 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
             dv_pro += b.dv_prograde
             dv_nor += b.dv_normal
             dv_rad += b.dv_radial
+        # The row names the burn, not the point the search began from. A pure
+        # plane change can only be flown where the orbit crosses the target's
+        # plane, so it waits for that node; labelled with the search point it
+        # read as a plane change at perigee or apogee, hours from the real burn.
+        burn_epoch = sol.burns[0].epoch
+        if abs((burn_epoch - epoch).total_seconds()) > _SAME_BURN_POINT_S:
+            burn_location = _DEFERRED_BURN_POINT.get(method_name, location)
     return ThreatSweepEntry(
         target=target,
-        burn_epoch=epoch,
-        burn_location=location,
+        burn_epoch=burn_epoch,
+        burn_location=burn_location,
         delta_v_m_s=from_km_s(abs(sol.total_delta_v)),
         tof_hours=tof_hours,
         dv_prograde=from_km_s(dv_pro),
@@ -658,6 +672,51 @@ _SWEEP_METHODS: tuple[tuple[str, Any, dict[str, Any]], ...] = (
 )
 
 
+#: A result counts as an approach only if it ends within this distance of the
+#: target. ASSUMPTION, for the analyst to confirm: 50 km is a common GEO
+#: close-approach radius, and closer work is the proximity operations the
+#: sweep prices on their own (V-bar and H-bar hops). Every method's burns were
+#: priced whether or not they reached the target, so a 0 m/s Hohmann ending
+#: 607 km away was ranked as a benign approach.
+_CLOSE_APPROACH_KM = 50.0
+
+
+def _not_an_approach(sol: InterceptSolution, budget_m_s: float) -> str | None:
+    """Why *sol* is not an approach within *budget_m_s*, or None if it is."""
+    # plane_change can report a signed figure; cost is a magnitude.
+    cost_m_s = from_km_s(abs(sol.total_delta_v))
+    if cost_m_s > budget_m_s:
+        return f"exceeds the {budget_m_s:g} m/s budget"
+    # Written so that a NaN miss is refused rather than ranked.
+    if not sol.miss_distance_km <= _CLOSE_APPROACH_KM:
+        return (
+            f"ends {sol.miss_distance_km:,.0f} km from the target, beyond the "
+            f"{_CLOSE_APPROACH_KM:g} km close-approach radius, so it is not an approach"
+        )
+    return None
+
+
+def _try_method(
+    request: _SweepRequest, method: tuple[str, Any, dict[str, Any]], epoch: datetime,
+) -> InterceptSolution | str:
+    """Solve one method from *epoch*: the solution if it is an approach, else why not."""
+    name, solver, extra = method
+    kwargs = dict(extra)
+    if name == "min_time":
+        kwargs["max_delta_v"] = to_km_s(request.max_dv_m_s)  # astro takes km/s
+    try:
+        sol = solver(
+            red_tle=request.red_tle,
+            blue_tle=request.target_tle,
+            manoeuvre_start=epoch,
+            **kwargs,
+        )
+    # BLE001: one refusal is recorded and the sweep continues.
+    except Exception as exc:  # noqa: BLE001
+        return _refusal_reason(exc)
+    return _not_an_approach(sol, request.max_dv_m_s) or sol
+
+
 def _sweep_all_methods(
     request: _SweepRequest,
     epochs: list[tuple[str, datetime]],
@@ -678,31 +737,22 @@ def _sweep_all_methods(
     """
     entries: list[ThreatSweepEntry] = []
     notes: dict[str, str] = refusals if refusals is not None else {}
-    budget = request.max_dv_m_s
+    # Several search points can lead a method to the same burn: a plane change
+    # from "now", "perigee" or "apogee" waits for the same node. One row each.
+    seen: set[tuple[str, datetime]] = set()
 
     for location, epoch in epochs:
-        for name, solver, extra in _SWEEP_METHODS:
-            kwargs = dict(extra)
-            if name == "min_time":
-                kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
-            try:
-                sol = solver(
-                    red_tle=request.red_tle,
-                    blue_tle=request.target_tle,
-                    manoeuvre_start=epoch,
-                    **kwargs,
-                )
-                # plane_change can report a signed figure; cost is a magnitude.
-                cost_m_s = from_km_s(abs(sol.total_delta_v))
-                if cost_m_s <= budget:
-                    entries.append(_sol_to_entry(
-                        sol, request.target, epoch, location, name, request.regime,
-                    ))
-                else:
-                    notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
-            # BLE001: one refusal is recorded and the sweep continues.
-            except Exception as exc:  # noqa: BLE001
-                notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
+        for method in _SWEEP_METHODS:
+            name = method[0]
+            outcome = _try_method(request, method, epoch)
+            if isinstance(outcome, str):
+                notes.setdefault(name, f"at {location}: {outcome}")
+                continue
+            entry = _sol_to_entry(outcome, request.target, epoch, location, name, request.regime)
+            key = (name, entry.burn_epoch.replace(second=0, microsecond=0))
+            if key not in seen:
+                seen.add(key)
+                entries.append(entry)
 
     # A method that solved at any epoch did produce a solution for this
     # target; listing it as refused contradicted the table beside it (F-125).
@@ -1538,6 +1588,7 @@ async def threat_sweep(
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
         "red_elset_source": _red_track_source(state, red_sat),
+        "close_approach_km": _CLOSE_APPROACH_KM,
         "error": None,
     })
 
