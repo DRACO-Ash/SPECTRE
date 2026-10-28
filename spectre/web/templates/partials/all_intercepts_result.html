@@ -74,13 +74,13 @@
   {% for item in items %}
   {% if item.result %}
   {# ── Parent (summary) row ── #}
+  {# No role="button": it would override the implicit row role and take
+     this row out of the table. ai-detail-N IS a real id, so aria-controls
+     resolves here, unlike in the sweep. #}
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
       onclick="aiToggle({{ loop.index0 }})"
       tabindex="0" onkeydown="spectreActivate(event)"
-      {# No role="button": it would override the implicit row role and take
-         this row out of the table. ai-detail-N IS a real id, so aria-controls
-         resolves here, unlike in the sweep. #}
       aria-expanded="false"
       aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
@@ -406,58 +406,69 @@ function aiSort(col, type) {
   if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
   else { _aiSortCol = col; _aiSortAsc = true; }
 
-  /* Update sort indicators in header.
-     The glyph and aria-sort are the same fact for two different operators, so
-     they are written together and can never drift apart. */
-  table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
-  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
-  var th = table.querySelectorAll('thead th')[col];
-  if (th) {
-    var ind = th.querySelector('.hrr-sort-ind');
-    if (ind) ind.textContent = _aiSortAsc ? ' \u25b2' : ' \u25bc';
-    th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
-  }
-
-  /* Collect parent+detail pairs; non-parent rows (failed) go to the bottom */
-  var pairs = [];
-  var orphans = [];
-  var rows = Array.from(tbody.rows);
-  var i = 0;
-  while (i < rows.length) {
-    var row = rows[i];
-    if (row.classList.contains('threat-parent')) {
-      /* The very next row is always the paired detail row */
-      var detail = (rows[i + 1] && !rows[i + 1].classList.contains('threat-parent'))
-                   ? rows[i + 1] : null;
-      pairs.push([row, detail]);
-      i += detail ? 2 : 1;
-    } else {
-      orphans.push(row);
-      i++;
-    }
-  }
-
-  /* Sort pairs by the data attribute of the parent row */
-  pairs.sort(function(a, b) {
-    var av = a[0].getAttribute('data-sort-' + col) || '';
-    var bv = b[0].getAttribute('data-sort-' + col) || '';
-    if (type === 'num') {
-      av = parseFloat(av);
-      bv = parseFloat(bv);
-      if (isNaN(av)) av = Infinity;
-      if (isNaN(bv)) bv = Infinity;
-    }
-    if (av < bv) return _aiSortAsc ? -1 : 1;
-    if (av > bv) return _aiSortAsc ?  1 : -1;
-    return 0;
-  });
+  _aiMarkSortHeader(table, col);
+  var grouped = _aiPairRows(Array.from(tbody.rows));
+  grouped.pairs.sort(_aiCompare(col, type));
 
   /* Re-insert: sorted pairs first, failed rows last */
-  pairs.forEach(function(pair) {
+  grouped.pairs.forEach(function(pair) {
     tbody.appendChild(pair[0]);
     if (pair[1]) tbody.appendChild(pair[1]);
   });
-  orphans.forEach(function(r) { tbody.appendChild(r); });
+  grouped.orphans.forEach(function(r) { tbody.appendChild(r); });
+}
+
+/* Sort indicators in the header. The glyph and aria-sort are the same fact
+   for two different operators, so they are written together and can never
+   drift apart. */
+function _aiMarkSortHeader(table, col) {
+  table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
+  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
+  var th = table.querySelectorAll('thead th')[col];
+  if (!th) return;
+  var ind = th.querySelector('.hrr-sort-ind');
+  if (ind) ind.textContent = _aiSortAsc ? ' ▲' : ' ▼';
+  th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
+}
+
+/* Parent rows paired with the detail row that follows each; rows that are
+   neither (failed methods) are kept apart to go last. */
+function _aiPairRows(rows) {
+  var pairs = [];
+  var orphans = [];
+  var i = 0;
+  while (i < rows.length) {
+    var row = rows[i];
+    if (!row.classList.contains('threat-parent')) {
+      orphans.push(row);
+      i++;
+      continue;
+    }
+    var next = rows[i + 1];
+    var detail = (next && !next.classList.contains('threat-parent')) ? next : null;
+    pairs.push([row, detail]);
+    i += detail ? 2 : 1;
+  }
+  return { pairs: pairs, orphans: orphans };
+}
+
+/* Orders pairs by the parent row's data-sort-<col>; a numeric column reads an
+   unparseable value as Infinity, so it sorts last ascending. */
+function _aiSortKey(row, col, type) {
+  var v = row.getAttribute('data-sort-' + col) || '';
+  if (type !== 'num') return v;
+  var n = parseFloat(v);
+  return isNaN(n) ? Infinity : n;
+}
+
+function _aiCompare(col, type) {
+  return function(a, b) {
+    var av = _aiSortKey(a[0], col, type);
+    var bv = _aiSortKey(b[0], col, type);
+    if (av < bv) return _aiSortAsc ? -1 : 1;
+    if (av > bv) return _aiSortAsc ?  1 : -1;
+    return 0;
+  };
 }
 </script>
 

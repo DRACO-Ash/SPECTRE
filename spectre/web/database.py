@@ -126,7 +126,7 @@ def _existing_columns(sync_conn: Any, table: str) -> set[str]:
 # unexamined, and the statement runs as the application's own database user.
 # Anything that is not a bare identifier, or a type clause drawn from a narrow
 # vocabulary, stops here rather than at the database.
-_SQL_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
+_SQL_IDENTIFIER = re.compile(r"[A-Za-z_]\w{0,62}", re.ASCII)
 
 # Uppercase keywords, digits, spaces, brackets and quotes: enough for the
 # column types this project declares and nothing that can end a statement or

@@ -19,6 +19,7 @@ from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
 
 from spectre.astro.constants import regimes_compatible
 from spectre.astro.events import EventType, find_orbital_events
@@ -77,6 +78,10 @@ from spectre.web.planning_state import get_session_state
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/maneuver")
+
+_INTERCEPT_RESULT_TEMPLATE = "partials/intercept_result.html"
+_ALL_INTERCEPTS_TEMPLATE = "partials/all_intercepts_result.html"
+_HOP_TYPE_LABEL = "Hop Type"
 
 # Human-readable altitude hint for each orbit regime — used in error messages.
 _REGIME_ALT_HINT: dict[str, str] = {
@@ -249,9 +254,8 @@ def _burn_breakdown(result: InterceptResult) -> list[dict[str, Any]]:
         pro = burn.dv_prograde
         nor = burn.dv_normal
         rad = burn.dv_radial
-        dv_total = math.sqrt(pro ** 2 + nor ** 2 + rad ** 2)
-        if dv_total == 0.0:
-            dv_total = 1e-12  # guard against division by zero
+        # Floored so a zero burn divides safely and reads 0% on every axis.
+        dv_total = max(math.sqrt(pro ** 2 + nor ** 2 + rad ** 2), 1e-12)
 
         pro_pct = min(100.0, abs(pro) / dv_total * 100.0)
         nor_pct = min(100.0, abs(nor) / dv_total * 100.0)
@@ -332,7 +336,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.RBAR_HOP:
         lambda result, dv, miss: (
             [
-                {"label": "Hop Type", "value": "R-Bar (radial)"},
+                {"label": _HOP_TYPE_LABEL, "value": "R-Bar (radial)"},
                 {"label": "Separation", "value": f"{miss:.2f} km"},
                 {"label": "Burns", "value": "1 radial impulse"},
             ]
@@ -340,7 +344,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.VBAR_HOP:
         lambda result, dv, miss: (
             [
-                {"label": "Hop Type", "value": "V-Bar (along-track)"},
+                {"label": _HOP_TYPE_LABEL, "value": "V-Bar (along-track)"},
                 {"label": "Total Advance", "value": f"{miss:.1f} km"},
                 {"label": "Burns", "value": "2 radial (entry + correction)"},
                 {"label": "Signature", "value": "Low — mimics perturbation drift"},
@@ -349,7 +353,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.HBAR_HOP:
         lambda result, dv, miss: (
             [
-                {"label": "Hop Type", "value": "H-Bar (orbit-normal)"},
+                {"label": _HOP_TYPE_LABEL, "value": "H-Bar (orbit-normal)"},
                 {"label": "Total Advance", "value": f"{miss:.1f} km"},
                 {"label": "Burns", "value": "Normal burns at node crossings"},
                 {"label": "Signature", "value": "Low — ACS/propellant settling cover"},
@@ -758,22 +762,33 @@ async def orbital_events(
     })
 
 
+class _InterceptForm(BaseModel):
+    """The intercept panel's fields, bound from the form by name.
+
+    One model rather than thirteen route parameters (python:S107). FastAPI
+    binds and validates it exactly as it did the separate ``Form()`` fields:
+    a blank field takes its default, and an out-of-range one is a 422.
+    """
+
+    red_sat: str
+    blue_sat: str
+    method: str
+    manoeuvre_start: str = ""
+    coast_hours: float = 1.0
+    intercept_hours: float = 6.0
+    target_distance_m: float = 0.0
+    revolutions: int = Field(default=1, ge=1, le=50)
+    hops: int = Field(default=3, ge=1, le=20)
+    drift_days: str = ""
+    max_dv_m_s: float = Field(default=DEFAULT_SWEEP_BUDGET_M_S, ge=0.0, le=100000.0)
+    intercept_data_mode: str = ""
+
+
 @router.post("/apply-intercept", response_model=None)
 async def apply_intercept(
     request: Request,
-    red_sat: Annotated[str, Form()],
-    blue_sat: Annotated[str, Form()],
-    method: Annotated[str, Form()],
-    manoeuvre_start: Annotated[str, Form()] = "",
-    coast_hours: Annotated[float, Form()] = 1.0,
-    intercept_hours: Annotated[float, Form()] = 6.0,
-    target_distance_m: Annotated[float, Form()] = 0.0,
-    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
-    hops: Annotated[int, Form(ge=1, le=20)] = 3,
-    drift_days: Annotated[str, Form()] = "",
-    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
-    intercept_data_mode: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
+    form: Annotated[_InterceptForm, Form()],
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Calculate an intercept trajectory using spectre.astro solvers.
 
@@ -782,17 +797,18 @@ async def apply_intercept(
 
     Returns the intercept result partial with per-burn breakdown.
     """
+    red_sat, blue_sat, method = form.red_sat, form.blue_sat, form.method
     state = get_session_state(current_user)
 
     if method not in _INTERCEPT_METHOD_MAP:
-        return render(request, "partials/intercept_result.html", {
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
             "result": None, "error": f"Unknown intercept method: {method!r}",
         })
 
-    manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
+    manoeuvre_start_dt = _manoeuvre_start(form.manoeuvre_start)
     if manoeuvre_start_dt is None:
-        return render(request, "partials/intercept_result.html", {
-            "result": None, "error": _BAD_START.format(manoeuvre_start.strip()),
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
+            "result": None, "error": _BAD_START.format(form.manoeuvre_start.strip()),
         })
 
     # Look up TLEs.
@@ -805,25 +821,25 @@ async def apply_intercept(
             missing.append(f"red ({red_sat})")
         if not blue_tle:
             missing.append(f"blue ({blue_sat})")
-        return render(request, "partials/intercept_result.html", {
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
             "result": None, "error": f"No TLE found for: {', '.join(missing)}",
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
     red_tle, blue_tle, effective_dm = await _resolve_provenance(
-        red_tle, blue_tle, intercept_data_mode, state,
+        red_tle, blue_tle, form.intercept_data_mode, state,
     )
 
     # Regime compatibility check — block cross-belt intercepts.
     regimes = _pair_regimes(red_tle, blue_tle)
     if isinstance(regimes, str):
-        return render(request, "partials/intercept_result.html", {
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
             "result": None, "intercept_data_mode": effective_dm, "error": regimes,
         })
     red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
-        return render(request, "partials/intercept_result.html", {
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
             "result": None,
             "intercept_data_mode": effective_dm,
             "error": (
@@ -836,9 +852,9 @@ async def apply_intercept(
         })
 
     intercept_method = _INTERCEPT_METHOD_MAP[method]
-    coast_s = coast_hours * 3600.0
-    tof_s = intercept_hours * 3600.0
-    target_km = target_distance_m / 1000.0
+    coast_s = form.coast_hours * 3600.0
+    tof_s = form.intercept_hours * 3600.0
+    target_km = form.target_distance_m / 1000.0
 
     loop = asyncio.get_running_loop()
     try:
@@ -846,8 +862,8 @@ async def apply_intercept(
             None,
             lambda: _run_intercept(
                 intercept_method, red_tle, blue_tle,
-                manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
-                shaping=_shaping_from_form(revolutions, hops, drift_days),
+                manoeuvre_start_dt, coast_s, tof_s, target_km, form.max_dv_m_s,
+                shaping=_shaping_from_form(form.revolutions, form.hops, form.drift_days),
             ),
         )
     # BLE001: any solver failure is reported to the operator, not raised.
@@ -857,7 +873,7 @@ async def apply_intercept(
             log_safe(current_user.username), log_safe(exc),
         )
         state.append_log(f"[INTERCEPT] {method} failed: {log_safe(exc)}")
-        return render(request, "partials/intercept_result.html", {
+        return render(request, _INTERCEPT_RESULT_TEMPLATE, {
             "result": None, "error": f"Intercept calculation failed: {exc}",
         })
 
@@ -882,10 +898,10 @@ async def apply_intercept(
         log_safe(format(result.total_delta_v_m_s, ".0f")), log_safe(len(result.burns)),
     )
 
-    intel = _compute_intercept_intel(result, red_regime, max_dv_m_s)
+    intel = _compute_intercept_intel(result, red_regime, form.max_dv_m_s)
     pair = get_intel(satno_from_tle(red_tle))
 
-    return render(request, "partials/intercept_result.html", {
+    return render(request, _INTERCEPT_RESULT_TEMPLATE, {
         "result": result, "error": None,
         "intercept_history": state.intercept_history,
         "intel": intel,
@@ -1099,7 +1115,7 @@ async def apply_all_intercepts(
 
     manoeuvre_start_dt = _manoeuvre_start(manoeuvre_start)
     if manoeuvre_start_dt is None:
-        return render(request, "partials/all_intercepts_result.html", {
+        return render(request, _ALL_INTERCEPTS_TEMPLATE, {
             "items": [], "error": _BAD_START.format(manoeuvre_start.strip()),
             "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
             "intercept_history": state.intercept_history,
@@ -1110,7 +1126,7 @@ async def apply_all_intercepts(
 
     if not red_tle or not blue_tle:
         missing = _missing_tle_labels(red_tle, red_sat, blue_tle, blue_sat)
-        return render(request, "partials/all_intercepts_result.html", {
+        return render(request, _ALL_INTERCEPTS_TEMPLATE, {
             "items": [], "error": f"No TLE found for: {', '.join(missing)}",
             "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
             "intercept_history": state.intercept_history,
@@ -1124,7 +1140,7 @@ async def apply_all_intercepts(
     # Regime compatibility check — block cross-belt intercepts.
     regimes = _pair_regimes(red_tle, blue_tle)
     if isinstance(regimes, str):
-        return render(request, "partials/all_intercepts_result.html", {
+        return render(request, _ALL_INTERCEPTS_TEMPLATE, {
             "items": [], "error": regimes,
             "red_name": red_sat.strip(), "blue_name": blue_sat.strip(),
             "intercept_history": state.intercept_history,
@@ -1132,7 +1148,7 @@ async def apply_all_intercepts(
     red_regime, blue_regime = regimes
 
     if not regimes_compatible(red_regime, blue_regime):
-        return render(request, "partials/all_intercepts_result.html", {
+        return render(request, _ALL_INTERCEPTS_TEMPLATE, {
             "items": [], "error": (
                 f"Regime mismatch — {red_sat} is {red_regime} "
                 f"({_REGIME_ALT_HINT.get(red_regime, red_regime)}) but "
@@ -1180,7 +1196,7 @@ async def apply_all_intercepts(
         log_safe(n_ok), log_safe(len(_ALL_METHODS_SEQUENCE)), log_safe(current_user.username),
     )
 
-    return render(request, "partials/all_intercepts_result.html", {
+    return render(request, _ALL_INTERCEPTS_TEMPLATE, {
         "items": items,
         "error": None,
         "red_name": red_sat.strip(),
@@ -1229,7 +1245,7 @@ async def clear_history(
     state.intercept_history.clear()
     state.last_intercept_result = None
     state.append_log("[INTERCEPT] Trade-space history cleared")
-    return render(request, "partials/intercept_result.html", {
+    return render(request, _INTERCEPT_RESULT_TEMPLATE, {
         "result": None, "error": None,
         "intercept_history": [],
         "intel": None,

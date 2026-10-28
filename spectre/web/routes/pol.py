@@ -313,13 +313,13 @@ def _filter_note(apply_filter: bool, quality_flags: list[Any]) -> str:
 async def pol_analyse(
     request: Request,
     satno: Annotated[int, Form()],
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
     pol_source: Annotated[str, Form()] = "udl",
     udl_user: Annotated[str, Form()] = "",
     udl_pass: Annotated[str, Form()] = "",
     dv_threshold_ms: Annotated[float, Form()] = 2.0,
     cadence_filter: Annotated[str, Form()] = "",
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch historical TLEs from UDL and run PoL analysis.
 
@@ -823,11 +823,11 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     request: Request,
     satno: Annotated[int, Form()],
     manoeuvre_epoch: Annotated[str, Form()],
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(pol_compute_rate_limit)],
     manoeuvre_type: Annotated[str, Form()] = "orbit_raise",
     n_samples: Annotated[int, Form()] = 500,
     horizon_h: Annotated[float, Form()] = 48.0,
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Run Monte Carlo simulation for a specific detected manoeuvre."""
     import asyncio
@@ -1171,12 +1171,12 @@ async def pol_photometry_panel(
 @router.post("/photometry-analyse", response_class=HTMLResponse)
 async def pol_photometry_analyse(
     request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(pol_compute_rate_limit)],
     csv_text: Annotated[str, Form()] = "",
     recent_window_days: Annotated[float, Form()] = 30.0,
     baseline_window_days: Annotated[float, Form()] = 90.0,
     extinction_coeff: Annotated[float, Form()] = 0.12,
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(pol_compute_rate_limit),
 ) -> HTMLResponse:
     """Parse photometry CSV and run change-detection analysis."""
     from spectre.astro.photometry import assess_photometry, parse_photometry_csv

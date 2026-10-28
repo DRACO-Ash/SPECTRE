@@ -497,6 +497,10 @@ _BSTAR_TO_CDA_OVER_M = 12.741621
 # Floor on m / (Cd A), kg/m^2, and the smallest |B*| taken at face value.
 _MIN_BALLISTIC_KG_M2 = 5.0
 _MIN_BSTAR = 1e-8
+# A span shorter than this, in seconds, leaves the state where it is.
+_ZERO_SPAN_S = 1e-9
+# A ΔV breakdown smaller than this, km/s (1 nm/s), carries no direction.
+_ZERO_DV_KM_S = 1e-12
 
 
 def _ballistic_coefficient_kg_m2(bstar: float) -> float:
@@ -562,7 +566,7 @@ def propagate_single_sample(
 
 def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | None:
     """Integrate *state* for *span_s* seconds (negative runs backwards)."""
-    if span_s == 0.0:
+    if abs(span_s) < _ZERO_SPAN_S:
         return state.copy()
     sol = solve_ivp(
         _j2_drag_ode,
@@ -811,7 +815,7 @@ def _ric_split(breakdown: Any) -> tuple[np.ndarray, str]:
         channels["cross_track"].dv_km_s if "cross_track" in channels else 0.0,
     ])
     norm = float(np.linalg.norm(ric))
-    if norm == 0.0:
+    if norm < _ZERO_DV_KM_S:
         return np.array([0.0, 1.0, 0.0]), "assumed in-track: no element breakdown"
     return ric / norm, (
         "split from the detection's element breakdown; "

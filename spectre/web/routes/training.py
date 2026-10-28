@@ -49,6 +49,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/training", tags=["training"])
 
+_SCENARIO_NOT_FOUND = '<p class="error-msg">Scenario not found.</p>'
+
 
 # ── Helper: get-or-create TrainingProgress ───────────────────────────────────
 
@@ -264,7 +266,7 @@ async def training_scenario_detail(
     """Return scenario briefing and objectives panel."""
     scenario = get_scenario(scenario_id)
     if scenario is None:
-        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+        return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
 
     progress = await _get_or_create_progress(current_user, db)
     locked = _scenario_locked(progress, scenario)
@@ -312,7 +314,7 @@ async def _start_scenario(
     """Shared logic for scored and explore-mode scenario starts."""
     scenario = get_scenario(scenario_id)
     if scenario is None:
-        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+        return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
 
     progress = await _get_or_create_progress(owner, db)
     locked = _scenario_locked(progress, scenario)
@@ -409,7 +411,7 @@ async def training_scenario_reset(
     # Return the scenario detail panel (pre-start state)
     scenario = get_scenario(scenario_id)
     if scenario is None:
-        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+        return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
 
     progress = await _get_or_create_progress(current_user, db)
     return render(request, "partials/training_scenario_detail.html", {
@@ -601,7 +603,7 @@ async def training_scenario_submit(
     """Score a completed scenario attempt and update operator progress."""
     scenario = get_scenario(scenario_id)
     if scenario is None:
-        return HTMLResponse('<p class="error-msg">Scenario not found.</p>', status_code=404)
+        return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
 
     cr = await _open_attempt(db, current_user, scenario, result_id)
     if isinstance(cr, HTMLResponse):

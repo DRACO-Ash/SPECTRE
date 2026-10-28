@@ -230,41 +230,41 @@
            deliberately inverts, so a BENIGN badge sat in a high-threat gold
            row. Two correct answers to different questions, rendered in one
            colour channel with opposite polarity. #}
+        {# aria-expanded, and deliberately NO role="button".
+           role="button" on a <tr> overrides the implicit row role, which
+           takes the parent rows out of the table: with every group open
+           the accessibility tree reported two buttons and six rows, the
+           six being the children, so the rows carrying the target name
+           and the summary figures were no longer reachable by table
+           navigation. An unannounced row was traded for a row outside the
+           grid. aria-expanded on its own keeps both.
+
+           No aria-controls either: threat-children-N is a class on three
+           sibling <tr> elements and never an id, so the reference did not
+           resolve. The children are not one node, so there is nothing
+           honest to point at. #}
+        {# The profile count used to sit in a title attribute worded for a
+           mouse, on a row that answers to Enter and Space, and a title on
+           a <tr> is not reliably announced by anything in the first place.
+           It now names the chevron, which is the symbol actually
+           carrying the meaning, so it is spoken with the row instead of
+           hovered. The wording is device-neutral and stays true in both
+           states, because aria-expanded on the row already says which state
+           it is in. It is an aria-label rather than visually hidden text
+           so the row's textContent is unchanged: threatFilter() searches
+           that text, and a hidden "manoeuvre profiles" on every parent row
+           would make a search for "manoeuvre" match all of them. #}
         <tr class="threat-parent"
             data-posture-band="{{ posture_bands.get(group.best_posture, 'unknown') }}"
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
             onclick="threatToggle({{ loop.index0 }})"
             tabindex="0" onkeydown="spectreActivate(event)"
-            {# aria-expanded, and deliberately NO role="button".
-               role="button" on a <tr> overrides the implicit row role, which
-               takes the parent rows out of the table: with every group open
-               the accessibility tree reported two buttons and six rows, the
-               six being the children, so the rows carrying the target name
-               and the summary figures were no longer reachable by table
-               navigation. An unannounced row was traded for a row outside the
-               grid. aria-expanded on its own keeps both.
-
-               No aria-controls either: threat-children-N is a class on three
-               sibling <tr> elements and never an id, so the reference did not
-               resolve. The children are not one node, so there is nothing
-               honest to point at. #}
-            {# The profile count used to sit in a title attribute worded for a
-               mouse, on a row that answers to Enter and Space, and a title on
-               a <tr> is not reliably announced by anything in the first place.
-               It now names the chevron, which is the symbol actually
-               carrying the meaning, so it is spoken with the row instead of
-               hovered. The wording is device-neutral and stays true in both
-               states, because aria-expanded above already says which state the
-               row is in. It is an aria-label rather than visually hidden text
-               so the row's textContent is unchanged: threatFilter() searches
-               that text, and a hidden "manoeuvre profiles" on every parent row
-               would make a search for "manoeuvre" match all of them. #}
             aria-expanded="false">
           <td class="threat-chevron-cell">
-            <span class="threat-chevron" id="chevron-{{ loop.index0 }}"
-                  role="img"
-                  aria-label="{{ group.profile_count }} manoeuvre profile{{ 's' if group.profile_count != 1 else '' }}">&#9654;</span>
+            <svg class="threat-chevron" id="chevron-{{ loop.index0 }}" role="img"
+                 aria-label="{{ group.profile_count }} manoeuvre profile{{ 's' if group.profile_count != 1 else '' }}"
+                 viewBox="0 0 10 10" width="1em" height="1em" focusable="false"><path d="M2 1 L9 5 L2 9 Z" fill="currentColor"/></svg>
           </td>
           <td class="col-name" title="{{ group.target.target_name }}{% if group.target.target_satno %} [{{ group.target.target_satno }}]{% endif %}">
             {{ group.target.target_name }}{% if group.target.target_satno %} <span style="opacity:0.6; font-size:0.75em">[{{ group.target.target_satno }}]</span>{% endif %}
@@ -381,8 +381,8 @@
     var chevron = document.getElementById('chevron-' + gIdx);
     var visible = rows.length > 0 && rows[0].style.display !== 'none';
     rows.forEach(function(r) { r.style.display = visible ? 'none' : ''; });
-    if (chevron) chevron.innerHTML = visible ? '&#9654;' : '&#9660;';
-    /* The chevron is a glyph, so it carries the state for sighted operators
+    if (chevron) chevron.classList.toggle('is-open', !visible);
+    /* The chevron's rotation carries the state for sighted operators
        only. aria-expanded is the same fact for everyone else, and it has to
        move with the rows rather than being set once in the markup. */
     var parent = document.getElementById('threat-group-' + gIdx);
@@ -392,12 +392,12 @@
   /* ── Expand / Collapse all ── */
   function threatExpandAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = ''; });
-    document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9660;'; });
+    document.querySelectorAll('svg.threat-chevron').forEach(function(c) { c.classList.add('is-open'); });
     _threatSetAllExpanded(true);
   }
   function threatCollapseAll() {
     document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = 'none'; });
-    document.querySelectorAll('.threat-chevron').forEach(function(c) { c.innerHTML = '&#9654;'; });
+    document.querySelectorAll('svg.threat-chevron').forEach(function(c) { c.classList.remove('is-open'); });
     _threatSetAllExpanded(false);
   }
   /* Expand-all and collapse-all move every row, so they have to move every

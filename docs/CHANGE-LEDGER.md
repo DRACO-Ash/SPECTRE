@@ -883,3 +883,42 @@ on this base image or on the Code Quality window to build on. No probe ships.
 | Container Scan: OpenSSL CVE-2026-84782 | **NO HYPOTHESIS** | None | Trivy 0.67.2 on the image built from this package: `libssl3` and `openssl` 3.0.22-1~deb12u1, fixed in deb12u2. The prep stage's `apt-get upgrade` takes it when the Debian security repository is reachable; the local build logged `OS PATCH: applied`. | Then the platform builder could not reach the repository, and its build log will say `OS PATCH: SKIPPED`. The remedy is a base digest that already carries deb12u2. |
 | Container Scan: Debian base CVEs | **NO HYPOTHESIS** | None. Owner decision, 28 October: ship as is | Base digest unchanged since 0.5.23. Trivy reports 61 High or Critical findings with no Debian 12 fix: util-linux and its libraries, ncurses, perl-base, gzip, libsqlite3-0, zlib1g and the systemd libraries. Debian 13 (`python:3.12-slim-trixie`) was measured at 44, the same families, so it is not a remedy on its own. | Then the policy stops on unfixable Highs, not only fixable ones. The evidenced remedy is to remove the packages the runtime never uses (util-linux, mount, ncurses, perl-base, gzip, login, the systemd libraries) from the prep stage with dpkg, keeping sqlite and zlib, which Python needs. |
 | Secret Detection, SAST | **HYGIENE** | CodeQL workflow and SBOM generation in `.github/` | Neither file ships: `scripts/` and `.github/` are excluded from the package since 0.5.2. gitleaks clean on every commit of the release. | n/a. |
+
+### 0.6.0 outcome
+
+● **Ten of eleven gates passed**: Dependencies, SAST Scan, SAST Findings,
+  Dependency Scanning, Test, Dockerfile Lint, Container Build, DAST Scan and
+  Container Scan.
+● **Container Scan passed with the Debian base CVEs present.** Trivy counted
+  61 High or Critical findings with no Debian 12 fix in this image. The policy
+  therefore does not stop on unfixable Highs. The 0.6.0 row's "if it still
+  fails" branch is closed, and no base image change is needed.
+● **Code Quality failed: "New issues: 36 (max allowed: 0)"**, 31 code smells
+  and 5 bugs, listed in full by the gate. This settles the question the 0.6.0
+  entry left open: the gate counts new issues, not the overall code.
+● **What "new" means here, measured rather than assumed.** 21 of the 34
+  flagged lines were last changed after 0.5.24. Of the other 13, ten carry
+  threshold rules (seven S1192 literal counts, two S107 parameter counts, one
+  S3776 score), where the flagged line is the first occurrence and a later
+  occurrence or parameter crossed the threshold. Two are multi-line tags with
+  lines changed on 22 and 23 October inside them. One, the S1244 at
+  `maneuver.py:253`, is not explained from here.
+
+## 0.6.1
+
+All 36 issues the 0.6.0 gate reported, and nothing else. Every edit is the
+smallest that clears its rule, because each changed line joins the window.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality: S1244 (5 bugs) | **EVIDENCED** | Exact `== 0.0` guards become named tolerances (`_CIRCULAR_ECC`, `_RAAN_CLOSED_DEG`, `_ZERO_SPAN_S`, `_ZERO_DV_KM_S`); the burn split's guard becomes a `max()` floor | Each site named by the gate. Test-first: three of six new tests failed before the fix, including a real defect: an eccentricity of 1e-15 was named "descending node" on rounding noise. | Then the rule also reads `<` against a small constant as an equality check, which its documentation does not describe. |
+| Code Quality: S1192 (11) | **EVIDENCED** | One module constant per literal; every occurrence replaced, each literal now appears once per file | Counted after the change, file by file. | Then a literal occurs elsewhere under a different quoting the count missed. |
+| Code Quality: S107 (2) | **EVIDENCED** | `apply_intercept` and `decision_evaluate` bind their fields through Pydantic form models | Probed on the pinned FastAPI 0.162 before the refactor: aliased lists, blank-as-absent, 422 on a bad or out-of-range value and extra fields all behave identically to separate `Form()` parameters. New tests pin the form contract of both routes. | Then the rule counts the model's fields, which it does not for a single parameter. |
+| Code Quality: S3358, S7632, S5713, S8410, S7504, S6353 (9) | **EVIDENCED** | Nested conditionals to statements; the noqa rationale moved above its line; `SignatureExpired` dropped as a subclass of `BadSignature`; three dependency pairs to `Annotated`; a redundant `list()` removed (`cancel()` only schedules the set edit); `\w` with `re.ASCII` | The `\w` change is the one that could have widened a control: without `re.ASCII` it accepts `usér_id`. A test proves the ASCII form refuses it, and the old and new patterns agree on every edge case tried. | Then the rule wants `\w` without the flag, which would be the wrong fix; the answer is a recorded exception, not a weaker allow-list. |
+| Code Quality: Web S6819, S6793 (7) | **EVIDENCED** | Jinja comments moved out of two `<tr>` tags; the sweep chevron an SVG rotated by CSS; the geometry panel a `<section>` and its heading an `<h3>` | Three of the seven were artefacts: Sonar's HTML parser read words inside `{# #}` comments within a tag (`role="button"`, `aria-controls`, `aria-label`) as attributes. The `<h3>` renders identically to the span it replaces, measured in Chromium against the shipped stylesheets: same box and font, and the method line beside it stays at x=212.61. | Then the parser also reads a Jinja comment between tags, and the remaining comments need moving out of the template body. |
+| Code Quality: JS S3776, S7761 (2) | **EVIDENCED** | `aiSort` split into four helpers; `setAttribute('data-idx')` to `dataset.idx` | Old and new `aiSort` run side by side in Chromium over seven clicks on the same table: row order, `aria-sort` and indicators identical at every step. | Then a helper scores above 15, which none can: the largest has one loop and two conditions. |
+
+**Recorded, not changed:** one more `<button>` in `all_intercepts_result.html`
+holds a Jinja comment inside its tag. It was not flagged, because its comment
+contains no attribute-like words, and moving it would put its lines in the
+window for nothing.

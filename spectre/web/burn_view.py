@@ -30,10 +30,12 @@ def dominant_axis(pro: float, nor: float, rad: float, threshold: float) -> str:
     return "Combined"
 
 
+_CLOSE_PROXIMITY_INTENT = "Close-Proximity Operation"
+
 INTENT_LABELS: dict[InterceptMethod, str] = {
-    InterceptMethod.LAMBERT: "Close-Proximity Operation",
-    InterceptMethod.PROXIMITY: "Close-Proximity Operation",
-    InterceptMethod.RENDEZVOUS: "Close-Proximity Operation",
+    InterceptMethod.LAMBERT: _CLOSE_PROXIMITY_INTENT,
+    InterceptMethod.PROXIMITY: _CLOSE_PROXIMITY_INTENT,
+    InterceptMethod.RENDEZVOUS: _CLOSE_PROXIMITY_INTENT,
     InterceptMethod.HOHMANN: "Orbital Transfer — Energy Change",
     InterceptMethod.BIELLIPTIC: "Orbital Transfer — Energy Change",
     InterceptMethod.PHASING: "Phasing Rendezvous",

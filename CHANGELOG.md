@@ -9,6 +9,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-28
+
+Clears the 36 issues the App Store Code Quality gate reported against 0.6.0.
+Every other gate passed, the container scan included. The detail is in
+`docs/CHANGE-LEDGER.md`.
+
+### Fixed
+- Five exact floating-point zero checks are now tolerances. One mattered: a near-circular orbit could name the descending node cheapest on rounding noise.
+- The intercept and decision routes bind their fields through form models. The form fields, bounds and errors are unchanged.
+- Accessibility: the geometry panel heading is a real `<h3>` and the panel a `<section>`; the sweep chevron is an SVG.
+
+### Changed
+- Duplicated literals, nested conditionals, a redundant exception class, three dependencies not using `Annotated`, and an over-complex sort function cleared for the gate.
+
 ## [0.6.0] - 2026-10-28
 
 Remediation of the whole-repository audit of 23 October 2026: all four steps,

@@ -1461,6 +1461,8 @@ button[disabled] {
   color: var(--text-dim);
   transition: transform 0.15s;
 }
+/* The sweep's chevron is an SVG pointing right; open, it points down. */
+.threat-chevron.is-open { transform: rotate(90deg); }
 .threat-profile-badge {
   display: inline-block;
   background: var(--ops-blue-a15);
