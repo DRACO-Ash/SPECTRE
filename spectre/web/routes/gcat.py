@@ -84,7 +84,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "Current Catalog",
         "url": f"{BASE_URL}/tsv/derived/currentcat.tsv",
         "category": "derived",
-        "desc": "Current status of every tracked object — the primary operational reference for disposition, type, and state.",
+        "desc": "Current status of every tracked object: the primary operational reference for disposition, type and state.",
     },
     "launchlog": {
         "label": "Launch Log",
@@ -96,7 +96,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "Active Catalog",
         "url": f"{BASE_URL}/tsv/derived/active.tsv",
         "category": "derived",
-        "desc": "Currently operational payloads — confirmed active or presumed active.",
+        "desc": "Currently operational payloads, confirmed or presumed active.",
     },
     "geotab": {
         "label": "Geosync Catalog",
@@ -115,7 +115,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "SatCat",
         "url": f"{BASE_URL}/tsv/cat/satcat.tsv",
         "category": "object",
-        "desc": "Standard satellite catalog — US Space Force–tracked objects with NORAD designations.",
+        "desc": "Standard satellite catalog: US Space Force tracked objects with NORAD designations.",
     },
     "auxcat": {
         "label": "AuxCat",
@@ -127,13 +127,13 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "FtoCat",
         "url": f"{BASE_URL}/tsv/cat/ftocat.tsv",
         "category": "object",
-        "desc": "Failed-to-orbit objects — payloads that did not achieve intended orbit.",
+        "desc": "Failed-to-orbit catalogue: objects from launches that did not reach orbit.",
     },
     "ecat": {
         "label": "EventCat",
         "url": f"{BASE_URL}/tsv/cat/ecat.tsv",
         "category": "object",
-        "desc": "Event catalog — phase changes including dockings, manoeuvres, and reentries.",
+        "desc": "Event catalog: phase changes including dockings, manoeuvres and reentries.",
     },
     "deepcat": {
         "label": "DeepCat",
@@ -145,7 +145,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "HelioCat",
         "url": f"{BASE_URL}/tsv/cat/hcocat.tsv",
         "category": "object",
-        "desc": "Heliocentric orbit register — objects orbiting the Sun.",
+        "desc": "Heliocentric orbit register: objects orbiting the Sun.",
     },
     "lprcat": {
         "label": "LunarPlanetCat",
@@ -163,7 +163,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "TmpCat",
         "url": f"{BASE_URL}/tsv/cat/tmpcat.tsv",
         "category": "object",
-        "desc": "Temporary catalog — objects pending permanent assignment.",
+        "desc": "Temporary catalog: objects pending permanent assignment.",
     },
     # Payload catalogs
     "psatcat": {
@@ -213,7 +213,7 @@ DATASETS: dict[str, dict[str, str]] = {
         "label": "Platforms",
         "url": f"{BASE_URL}/tsv/tables/platforms.tsv",
         "category": "supporting",
-        "desc": "Mobile launch platforms — ships, aircraft, and mobile erector-launchers.",
+        "desc": "Mobile launch platforms: ships, aircraft and mobile erector-launchers.",
     },
     "family": {
         "label": "LV Families",
@@ -258,13 +258,13 @@ CATEGORIES: dict[str, dict[str, str]] = {
         "label": "Derived",
         "color": "gold",
         "title": "Derived Catalogs",
-        "desc": "Operationally-derived views of the complete tracked-object catalog",
+        "desc": "Derived views of the object catalogue, plus launch logs",
     },
     "object": {
         "label": "Objects",
         "color": "blue",
         "title": "Object Catalogs",
-        "desc": "Raw tracked-object records organised by orbital regime",
+        "desc": "Object catalogues split by catalogue status and destination, including untracked and failed-to-orbit objects",
     },
     "payload": {
         "label": "Payloads",

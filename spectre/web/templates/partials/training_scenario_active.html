@@ -175,13 +175,13 @@
               hx-post="/training/scenario/{{ scenario.id }}/reset"
               hx-target="#scenario-detail"
               hx-swap="innerHTML"
-              title="Return to briefing — this attempt is cancelled with no side effects">
+              title="Cancel this attempt and return to the briefing. Scenario objects stay loaded until you leave training">
         &#8635; Reset
       </button>
       <button type="button" class="btn-secondary"
               style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
               onclick="document.getElementById('scenario-detail').innerHTML=''"
-              title="Abandon this attempt">
+              title="Close this panel without submitting. A scored attempt stays on record as started; use Reset to cancel it">
         Abandon
       </button>
     </div>

@@ -3,7 +3,7 @@
       hx-swap="innerHTML"
       style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
   <select name="tle_source" style="width:auto; flex:1"
-          title="Filter TLE fetches to a specific tracking source — leave as UDL Default to use the best available elset">
+          title="Limit TLE fetches to one tracking source once you press Set. Epoch-mode fetches ignore it; UDL Default applies no source filter">
     <option value="">UDL Default (all sources)</option>
     {% for src in available %}
     <option value="{{ src }}"{% if src == tle_source %} selected{% endif %}>{{ src }}</option>

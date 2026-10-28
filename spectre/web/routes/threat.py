@@ -58,6 +58,7 @@ from spectre.domain.threat_assessment import (
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis, intent_label_for
 from spectre.web.deps import render
+from spectre.web.elsets import elset_age
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -141,6 +142,8 @@ async def red_orbit_info(
         return render(request, "partials/red_orbit_info.html", {
             "name": track.name,
             "epoch_str": epoch_str,
+            "age": elset_age(track.tle, datetime.now(tz=UTC)),
+            "data_mode": track.data_mode,
             "lon_deg": lon_deg,
             "inc_deg": inc_deg,
             "period_min": period_min,
@@ -1317,6 +1320,36 @@ def _attach_data_mode(state: object, grouped: list[dict[str, Any]]) -> None:
 _DECLARED_MODES = frozenset({"REAL", "MANUAL"})
 
 
+def _red_track_mode(state: object, red_sat: str, red_satno: str | None) -> str:
+    """The provenance of the red track's own element set.
+
+    A track records where its set came from. The sweep used to look the red
+    object up in the target cache instead, so a hand-entered red set read as
+    REAL whenever the same object was also an HRR target.
+    """
+    for track in state.red_tracks:  # type: ignore[attr-defined]
+        if track.stk_name == red_sat:
+            return str(track.data_mode)
+    return str(state.hrr_tle_data_mode.get(red_satno or "", "REAL"))  # type: ignore[attr-defined]
+
+
+def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
+    """The interceptor's element set age and the swept targets', stale ones named."""
+    targets = []
+    for group in grouped:
+        tle = _target_tle(state, group["target"])
+        age = elset_age(tle, now) if tle else None
+        if age is not None:
+            targets.append((group["target"].target_name, age))
+    return {
+        "red": elset_age(red_tle, now),
+        "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
+        "oldest": max(targets, key=lambda t: t[1].hours)[1] if targets else None,
+        "stale": [name for name, age in targets if age.stale],
+        "count": len(targets),
+    }
+
+
 def _provenance_warnings(subjects: list[tuple[str, str]]) -> list[str]:
     """Name what in a result rests on element sets that are not live tracking.
 
@@ -1454,7 +1487,7 @@ async def threat_sweep(
     grouped = _group_entries(entries)
     # Attach UDL dataMode provenance to each group for the display-time filter.
     _attach_data_mode(state, grouped)
-    red_mode = "MANUAL" if manual_red_tle else state.hrr_tle_data_mode.get(red_satno or "", "REAL")
+    red_mode = "MANUAL" if manual_red_tle else _red_track_mode(state, red_sat.strip(), red_satno)
     provenance = _provenance_warnings(
         [(f"red {red_sat.strip()}", red_mode)]
         + [(f"target {g['target'].target_name}", g["data_mode"]) for g in grouped],
@@ -1488,6 +1521,7 @@ async def threat_sweep(
         "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
+        "elset_ages": _elset_ages(state, red_tle, grouped, now),
         "error": None,
     })
 

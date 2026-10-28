@@ -2,7 +2,12 @@
   <div class="red-orbit-name">{{ name }}</div>
   <div class="red-orbit-params">
     <span title="TLE epoch"><strong>Epoch:</strong> {{ epoch_str }}</span>
-    <span title="Sub-satellite longitude (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
+    {% if age %}
+    <span class="{{ 'badge-warn' if age.stale else 'badge-ok' }}"
+          title="Age now. STALE is past {{ '%.0f' | format(age.limit_hours) }} hours, the limit for this regime">{{ age.label }} old{% if age.stale %} STALE{% endif %}</span>
+    {% endif %}
+    <span title="Where this element set came from: a UDL data mode, or MANUAL for one entered by hand"><strong>Source:</strong> {{ data_mode }}</span>
+    <span title="Sub-satellite longitude at TLE epoch (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
     <span title="Orbital inclination"><strong>Inc [<em>i</em>]:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
     <span title="Orbital period"><strong>Period:</strong> {{ "%.1f"|format(period_min) }} min</span>
     <span title="Altitude at epoch"><strong>Alt:</strong> {{ "%.0f"|format(alt_km) }} km</span>

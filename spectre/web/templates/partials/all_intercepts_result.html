@@ -139,7 +139,7 @@
                  epoch goes in, not the arrival (audit F-242). #}
               data-epoch="{{ (item.result.burns[0].burn_epoch if item.result.burns else item.result.arrival_epoch).strftime('%Y-%m-%dT%H:%M') }}"
               onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch)"
-              title="Pre-fill intercept engine with this result">Load</button>
+              title="Pre-fill the intercept engine with these objects and start epoch (method and TOF are not set)">Load</button>
     </td>
   </tr>
 
@@ -245,9 +245,9 @@
           </div>
           <div style="height:7px; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06);
                       display:flex; margin-bottom:0.22rem">
-            {% if b.pro_pct > 0 %}<div style="width:{{ b.pro_pct }}%; background:var(--ops-blue)" title="Prograde {{ b.pro_pct }}%"></div>{% endif %}
-            {% if b.nor_pct > 0 %}<div style="width:{{ b.nor_pct }}%; background:var(--gold)" title="Normal {{ b.nor_pct }}%"></div>{% endif %}
-            {% if b.rad_pct > 0 %}<div style="width:{{ b.rad_pct }}%; background:var(--text-dim)" title="Radial {{ b.rad_pct }}%"></div>{% endif %}
+            {% if b.pro_pct > 0 %}<div style="width:{{ b.pro_pct }}%; background:var(--ops-blue)" title="Prograde {{ b.pro_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>{% endif %}
+            {% if b.nor_pct > 0 %}<div style="width:{{ b.nor_pct }}%; background:var(--gold)" title="Normal {{ b.nor_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>{% endif %}
+            {% if b.rad_pct > 0 %}<div style="width:{{ b.rad_pct }}%; background:var(--text-dim)" title="Radial {{ b.rad_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>{% endif %}
           </div>
           <div style="display:flex; gap:0.7rem; font-size:0.57rem; color:var(--text-dim)">
             <span><span style="color:var(--ops-blue)">&#9646;</span> Pro {{ b.pro_pct }}%</span>

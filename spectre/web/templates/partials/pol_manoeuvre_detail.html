@@ -248,7 +248,7 @@
         <td class="col-dim">Mean anomaly <span style="font-size:0.56rem">(°)</span></td>
         <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.5f"|format(before.ma_deg) }}</td>
         <td style="text-align:right; font-variant-numeric:tabular-nums">{{ "%.5f"|format(after.ma_deg) }}</td>
-        <td style="text-align:right" class="col-dim" title="Phase carries no ΔV information and is never read by the estimator.">not used</td>
+        <td style="text-align:right" class="col-dim" title="Mean element differencing never reads phase; the epoch-swept estimator propagates it only to find where the two orbits meet.">not used</td>
       </tr>
       <tr>
         <td class="col-dim">B*</td>

@@ -125,7 +125,9 @@ def test_f230_a_5_m_s_floor_names_the_smallest_event_it_catches() -> None:
     noise = SimpleNamespace(floor_km_s=0.005, median_km_s=0.001, mad_km_s=0.0005, samples=40)
     limits = _assess_detection(noise, "GEO")
     assert limits is not None
-    assert "The smallest event on open record that this would catch is 9 m/s" in limits.narrative
+    # 0.6.3: a reference event, and Table 3 gives about 11 m/s for a 300 km
+    # graveyard raise (10.94 computed), not the 9 m/s the label carried.
+    assert "The smallest reference event that this would catch is 11 m/s" in limits.narrative
 
 
 class TestManoeuvreRouteInputs:

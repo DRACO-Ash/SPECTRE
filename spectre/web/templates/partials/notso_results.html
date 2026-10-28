@@ -142,7 +142,7 @@
       {{ correlations | length }} record(s) ·
       <span style="color:#22c55e">{{ correlations | selectattr('correlation_type','eq','matched') | list | length }} matched</span> ·
       <span style="color:#f59e0b">{{ correlations | selectattr('correlation_type','eq','notso_only') | list | length }} NOTSO-only</span> ·
-      <span style="color:var(--text-dim)" title="A detection with no notice is the EXPECTED case for a routine burn: notices are deliberately withheld for small manoeuvres so the channel is not flooded. It is not evidence of concealment.">{{ correlations | selectattr('correlation_type','eq','manoeuvre_only') | list | length }} detected, no notice expected or filed</span>
+      <span style="color:var(--text-dim)" title="Detections with no matching notice. Below this regime's routine per-burn ceiling none is expected; above it, a missing notice lowers the notification rate. Neither alone is evidence of concealment.">{{ correlations | selectattr('correlation_type','eq','manoeuvre_only') | list | length }} detected, no notice expected or filed</span>
     </span>
   </div>
 

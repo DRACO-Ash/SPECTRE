@@ -6,24 +6,25 @@ The sweep reported a delta-v figure and banded it on four global constants:
 
     dv < 200 m/s -> CRITICAL, < 500 -> HIGH, < 1000 -> MEDIUM, else LOW
 
-Measured against what satellites actually do, that band is saturated. Every
-real counterspace manoeuvre on open record sits below 200 m/s:
+Measured against the assessment's figures, that band is saturated. Every
+counterspace manoeuvre the assessment records as observed sits below 200 m/s,
+and so does its most aggressive worked example:
 
     GEO relocation, 62 deg in 30 days (Luch/Olymp-K 2, 2025)      11 m/s
     GEO graveyard raise, >400 km (Luch/Olymp-K 1, 2025)           15 m/s
     LEO inspector campaign (Cosmos 2576 vs USA 314, 2024-25)   25-30 m/s
     GEO dock and tow (SJ-21 / Beidou-2 G2, 2022)                 ~60 m/s
     GEO dock and tow, round trip                                ~120 m/s
-    Rapid GEO relocation, 90 deg in 3 days                      ~170 m/s
+    Rapid GEO relocation, 90 deg in 3 days (Table 4, computed)  ~170 m/s
 
 So the old thresholds scored a routine commercial repositioning and a hostile
 rapid closure identically: both CRITICAL. A band that returns the same answer
 for everything is not a measurement.
 
-Worse, the sweep's default budget was 3,000 m/s. That is larger than the entire
-discretionary reserve of every flown platform class except a hybrid servicer at
-its upper bound, so the sweep was accepting as feasible intercepts that no real
-object could fly.
+Worse, the sweep's default budget was 3,000 m/s. That is larger than any
+discretionary reserve Table 2 gives, and equals only the hybrid servicer's upper
+TOTAL, which Table 2 calls plausible rather than published, so the sweep was
+accepting as feasible intercepts that no real object could fly.
 
 What this module does
 ---------------------
@@ -130,8 +131,9 @@ class Posture(Enum):
     BENIGN = "BENIGN"
     ANNOYANCE = "ANNOYANCE"
     AGGRESSIVE = "AGGRESSIVE"
-    #: Above any flown platform's discretionary reserve. Needs a tug, an
-    #: orbital transfer vehicle, a kick stage, or refuelling.
+    #: At or above the largest platform total in Table 2 (3,000 m/s, an
+    #: indicative figure). Needs a tug, an orbital transfer vehicle, a kick
+    #: stage, or refuelling.
     BEYOND_PLATFORM = "BEYOND PLATFORM"
 
     @property
@@ -479,20 +481,24 @@ PLATFORM_CLASSES: tuple[PlatformClass, ...] = (
     ),
 )
 
-#: The most capable flown platform's upper reserve. Above this, no object on
-#: open record could perform the manoeuvre without a tug or refuelling.
-#: Excludes the cryogenic kick stage (3,000-9,000 m/s), which has not flown.
+#: The upper TOTAL of the MEV-class hybrid servicer, which Table 2 gives as
+#: plausible rather than published; it is not a discretionary reserve. Above
+#: it, no platform class in Table 2 could perform the manoeuvre without a tug
+#: or refuelling. Excludes the cryogenic kick stage (3,000-9,000 m/s), which
+#: has not flown.
 _BEYOND_ANY_FLOWN_PLATFORM_M_S: float = 3000.0
 
 #: Below a tenth of a year, "0.0 years of station-keeping" says nothing useful,
 #: so the sentence is suppressed rather than printed as noise.
 _WORTH_STATING_IN_YEARS: float = 0.1
 
-#: Default sweep budget, m/s. The assessment's bottom line is that any inferred
-#: on-station delta-v of 500 m/s or more, outside orbit raising, is a strong
-#: anomaly flag. That makes 500 the right outer edge of the realistic envelope:
-#: it sits above every manoeuvre on open record (the largest is about 170 m/s)
-#: and at the lower bound of what an orbital transfer vehicle offers.
+#: Default sweep budget, m/s: the delta-v an interceptor is assumed able to
+#: spend, a judgement and not an alert threshold. It shares the 500 m/s figure
+#: of ON_STATION_ANOMALY_M_S but is a different quantity, and lowering it would
+#: shrink the intercepts the sweep considers (R7). It sits above every observed
+#: manoeuvre in the assessment (the largest, the SJ-21 tow round trip, is about
+#: 120 m/s) and matches the 500 m/s Impulse Space Mira is specified for with a
+#: 300 kg payload, one vehicle's figure rather than a floor for the class.
 DEFAULT_SWEEP_BUDGET_M_S: float = 500.0
 
 
@@ -582,9 +588,9 @@ def classify_posture(
             "short-notice manoeuvre chosen for effect rather than economy"
         ),
         Posture.BEYOND_PLATFORM: (
-            "beyond the discretionary reserve of every platform class on open "
-            "record, so it implies a tug, an orbital transfer vehicle, a kick "
-            "stage, or in-orbit refuelling"
+            "beyond the largest platform total in the assessment's Table 2, so "
+            "it implies a tug, an orbital transfer vehicle, a kick stage, or "
+            "in-orbit refuelling"
         ),
     }[posture]
 

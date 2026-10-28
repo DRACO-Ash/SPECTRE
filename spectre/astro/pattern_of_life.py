@@ -135,11 +135,11 @@ _STATUS_MIN_PRIOR       = 3     # earlier manoeuvres needed to score the latest
 # nothing in this module replaces them, because neither was a measurement.
 #
 # _SK_DV_LIMIT applied Table 3's ANNUAL station-keeping budgets as PER-EVENT
-# limits: 50 m/s for GEO, against a real single north-south burn of about
-# 1.8 m/s. Four of the open-source assessment's own named counterspace events
-# classified as routine station-keeping as a result, including both
-# Luch/Olymp-K relocations. _GEO_SK_BASELINE implied 209 m/s/yr against the
-# cited 44 to 55.
+# limits: 50 m/s for GEO, against a single north-south burn of about 1.8 m/s.
+# Four of the open-source assessment's own named events classified as routine
+# station-keeping as a result: both observed Luch/Olymp-K moves, a Table 3
+# graveyard raise and Table 4's worked 180 degree relocation. _GEO_SK_BASELINE
+# implied 209 m/s/yr against the cited 44 to 55.
 #
 # Those judgements now live in spectre/domain/pol_assessment.py, built on
 # spectre/domain/manoeuvre_calibration.py, where the figures are cited and

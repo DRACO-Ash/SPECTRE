@@ -16,6 +16,13 @@
 <p class="field-error">{{ error }}</p>
 {% endif %}
 <input name="name" placeholder="Name (e.g. Alpha)" value="{{ name }}" required
-       title="Short name for this satellite — used as the object identifier in all panels" />
+       title="Short name for this satellite, used as the object identifier in all panels" />
+{% if elset_mode is defined and elset_mode %}
+{# The UDL data mode this set was fetched in, so the add records it as a UDL
+   set that the connect-time refresh may update. Editing the text makes it
+   the operator's own, so the tag is dropped. #}
+<input type="hidden" name="elset_mode" value="{{ elset_mode }}" />
+{% endif %}
 <textarea name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required
-          title="Two-line element set — paste lines 1 and 2 exactly as provided by UDL or Space-Track">{{ tle }}</textarea>
+          oninput="var m = this.form ? this.form.querySelector('[name=elset_mode]') : null; if (m) { m.remove(); }"
+          title="Two-line element set: paste lines 1 and 2 exactly as provided by UDL or Space-Track. Editing a fetched set makes it a manual one">{{ tle }}</textarea>

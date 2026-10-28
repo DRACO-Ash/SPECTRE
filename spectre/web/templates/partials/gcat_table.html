@@ -99,7 +99,7 @@
                   hx-target="#gcat-table-area"
                   hx-swap="innerHTML"
                   hx-indicator="#gcat-load-ind"
-                  title="Sort by {{ col }}{% if col == sort %} — currently {{ 'A→Z' if asc else 'Z→A' }}{% endif %}">
+                  title="Sort by {{ col }}{% if col == sort %}, currently {{ 'A→Z' if asc else 'Z→A' }}{% endif %}">
             {{ col }}
             {%- if col == sort -%}
               <span class="gcat-sort-arrow">{{ '▲' if asc else '▼' }}</span>

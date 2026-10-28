@@ -152,16 +152,14 @@ class TestProvenance:
     def test_a_synthetic_red_set_is_flagged_in_the_result(
         self, client: Any, auth_cookie: str, sweep_state: Any,
     ) -> None:
-        from spectre.data.intel import satno_from_tle
+        from spectre.domain.models import RedTrack
 
-        red_satno = str(satno_from_tle(_RED_GEO))
-        saved = dict(sweep_state.hrr_tle_data_mode)
-        sweep_state.hrr_tle_data_mode[red_satno] = "SYNTHETIC"
-        try:
-            _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
-            resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
-        finally:
-            sweep_state.hrr_tle_data_mode = saved
+        # The red set's provenance is the track's own (0.6.3). It used to be
+        # read from the target cache by catalogue number, where a hand-entered
+        # red set took whatever mode the same object's target set carried.
+        sweep_state.red_tracks = [RedTrack(name="RED-GEO", tle=_RED_GEO, data_mode="SYNTHETIC")]
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
         flat = " ".join(resp.text.split())
         assert "not from live tracking" in flat
         assert "SYNTHETIC: red RED-GEO" in flat

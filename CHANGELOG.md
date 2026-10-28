@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-28
+
+### Fixed
+- Element sets fetched from UDL are the newest it holds. The per-object fetch behind "→ Red", "→ Blue", the sweep's target fetch and the screen kept the first record `/elset/current` returned, which can be a source that last updated days ago; in service that put a 13-day-old set on the red card with UDL connected.
+- The sweep's red provenance is the red track's own, so a hand-entered red set no longer reads as REAL when the same object is also a target. Training objects are recorded as SYNTHETIC.
+- The Max ΔV inputs accept their own default: `min="1" step="10"` made 500 an invalid step.
+- Corrected tooltips and messages: the Max ΔV fields describe a sweep budget, not an alert threshold, and no longer call 170 m/s (a worked example) the largest manoeuvre on record; the detection-floor narrative gives the source's 207,152 collision avoidance manoeuvres in six months; and about 60 tooltips across the console now match what their controls do.
+
+### Added
+- Connecting to UDL refreshes every held element set that came from UDL or the bundled bootstrap, in the background, and the sweep panel says what was refreshed and when. Sets entered by hand are never overwritten.
+- Element set age on the red card and in the sweep, flagged STALE past the regime's limit (72 hours for GEO and deep space, 24 hours otherwise), with the red card naming the set's source.
+
 ## [0.6.2] - 2026-10-28
 
 ### Changed

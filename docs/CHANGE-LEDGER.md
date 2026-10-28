@@ -939,3 +939,43 @@ window for nothing.
 | Gate | Class | Change | Evidence | If it still fails |
 |---|---|---|---|---|
 | Code Quality: javascript:S7773 (2) | **EVIDENCED** | `Number.parseFloat` and `Number.isNaN` in `_aiSortKey` | Both lines named by the gate. `Number.isNaN` does not coerce where `isNaN` does, but the value is always the number `parseFloat` returned, so the two agree. Re-proved in Chromium: the original `aiSort` and this one, seven clicks on the same table, identical row order, `aria-sort` and indicators. Every other line 0.6.1 added to a template was checked for `parseFloat`, `parseInt`, `isNaN` and `isFinite`; these were the only two. | Then the rule also wants `Number.POSITIVE_INFINITY` for `Infinity`, which it does not describe. |
+
+### 0.6.2 outcome
+
+● **Every gate passed, Code Quality included, and the app deployed.** The
+  two S7773 issues were the last, and nothing new was raised on the lines
+  0.6.2 changed.
+
+## 0.6.3
+
+The first release after deployment, from operator use. With UDL connected and
+the HRR list refreshed, the threat sweep's red card showed SY-12 02 at an
+epoch of 15 October on 28 October, with no sign of its age.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the newest-epoch fetch, the connect-time refresh (`spectre/web/elsets.py`), element set ages on the red card and in the sweep, and corrected tooltips and comments | Written against what the gate reported in 0.6.0 to 0.6.2: no nested conditionals, `Annotated` dependencies on every route touched, no new literal repeated three times in a file, complexity 840 functions and 0 over 15, no Jinja comment inside a tag, and `aria-live` rather than `role="status"`, which has a native element (`<output>`) and so is the kind of role S6819 refuses. | Then the window caught a rule the local proxies cannot run, as S7773 did at 0.6.1, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**The defect, measured.** `fetch_tle_for_satno` asked `/elset/current`, which
+answers with one current element set per source and in no order, and kept the
+first record. Reproduced: offered a 28 October set behind a lagging 15 October
+one, it returned 15 October. `_select_latest_elset` existed for exactly this,
+with a comment saying so, and only the TLE panel used it. Every red track
+added with "→ Red", every sweep target fetch and every screen went through the
+other path. Nothing refreshed a held set either: once a session held a REAL
+set it was never fetched again.
+
+**The tooltip and comment audit.** 180 tooltips across 38 templates and every
+comment in `spectre/` and `tle_clustering/` were checked against the code and
+`docs/DELTA-V-RESEARCH-ASSIMILATION.md`. About 60 corrections, chief among
+them: 170 m/s is Table 4's worked example of a 90° GEO relocation in 3 days,
+not the largest manoeuvre on record (the largest observed is the SJ-21 tow,
+about 120 m/s round trip); the Max ΔV field is a sweep budget, not an alert
+threshold (R7); and the detection-floor narrative's "355,000 collision
+avoidance manoeuvres in twelve months", which the source does not support, is
+its 207,152 in six months. The 300 km graveyard raise reference event carried
+9 m/s against the cited 11. Not verified: the "62 degree GEO relocation over
+30 days, about 11 m/s" attributed to Table 4 in `monte_carlo.py`, which the
+assimilation doc gives only as the observed Luch/Olymp-K 2 move; it needs the
+Space Watch report itself.

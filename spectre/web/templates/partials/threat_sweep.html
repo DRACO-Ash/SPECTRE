@@ -19,6 +19,23 @@
     </span>
   </div>
 
+  {% if elset_ages is defined %}
+  {# How old the orbits behind these figures are. STALE is past the regime's
+     limit: 72 hours for GEO and deep space, 24 hours otherwise. #}
+  <div class="field-meta" role="note" style="margin:0.3rem 0; font-size:0.75rem">
+    <strong>Element set ages</strong> at sweep time:
+    {% if elset_ages.red %}
+    Interceptor <span class="{{ 'badge-warn' if elset_ages.red.stale else 'badge-ok' }}"
+      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>.
+    {% endif %}
+    {% if elset_ages.count %}
+    Targets {{ elset_ages.newest.label }} to {{ elset_ages.oldest.label }} old{% if elset_ages.stale %},
+    <span class="badge-warn" title="Past the regime limit: {{ elset_ages.stale | join(', ') }}">{{ elset_ages.stale | length }} stale</span>:
+    {{ elset_ages.stale | join(', ') }}{% endif %}.
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if manual_red_confidence %}
   {# The confidence scale borrows the band palette rather than carrying hex of
      its own: hex here did not swap on the light theme, where every one of
@@ -65,7 +82,7 @@
     {# What the cost says about how the actor would have to behave.
        A delta-v figure on its own means nothing to an operator: 50 m/s is one
        routine year at GEO and fifty years of it at MEO. The posture reads it
-       against what satellites actually do. #}
+       against cited regime figures and judgement bands between them. #}
     {% set _posture_band = posture_bands.get(worst_coa.posture_label, 'unknown') %}
     <div style="display:flex; align-items:flex-start; gap:0.5rem; margin-bottom:0.5rem; font-size:0.72rem">
       <span style="background:rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.13); color:var(--spectre-status-{{ _posture_band }}); border:1px solid rgba(var(--spectre-status-{{ _posture_band }}-rgb), 0.40);
@@ -188,7 +205,7 @@
            oninput="threatFilter(this.value)"
            style="flex:1; min-width:140px; padding:0.35rem 0.5rem; font-size:0.8rem">
     <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); white-space:nowrap; display:flex; align-items:center; gap:0.3rem"
-           title="Show only target rows whose TLE was fetched with the selected UDL data mode">
+           title="Show only targets whose element set has the selected provenance: a UDL data mode, SYNTHETIC (bundled bootstrap) or MANUAL (entered by hand)">
       Data Mode
       <select id="sweep-dm-filter" onchange="sweepDmFilter(this.value)"
               style="font-size:0.72rem; padding:0.15rem 0.3rem; border-radius:3px">
@@ -365,7 +382,7 @@
                     data-red="{{ assessment.red_name }}" data-blue="{{ child.entry.target.target_name }}"
                     data-epoch="{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ child.entry.method }}"
                     onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
-                    title="Pre-fill the intercept engine with this solution">Load</button>
+                    title="Pre-fill the intercept engine with this row's objects, burn epoch and method (TOF is not carried)">Load</button>
           </td>
         </tr>
         {% endfor %}

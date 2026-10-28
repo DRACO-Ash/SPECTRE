@@ -27,8 +27,8 @@
     </select>
   </label>
   <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
-         title="Budget in metres per second. 500 m/s is the point at which an on-station manoeuvre becomes a strong anomaly: every counterspace manoeuvre on open record costs less, the largest measured about 170 m/s.">Max &#916;V (m/s)
-    <input type="number" name="max_dv_m_s" value="500" step="10" min="1" />
+         title="Delta-V the red object is assumed able to spend, in m/s: a sweep budget, not an alert threshold. The 500 m/s default is above every observed manoeuvre in the reference assessment; the largest, the SJ-21 tow of Beidou-2 G2, is about 120 m/s round trip.">Max &#916;V (m/s)
+    <input type="number" name="max_dv_m_s" value="500" step="10" min="0" />
   </label>
 </div>
 <p style="margin:0.3rem 0 0; font-size:0.66rem; color:var(--text-dim)">

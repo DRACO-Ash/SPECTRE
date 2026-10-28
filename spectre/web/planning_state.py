@@ -32,6 +32,24 @@ _MAX_LOG_ENTRIES = 200
 
 
 @dataclass
+class ElsetRefresh:
+    """The refresh of every held element set made when UDL connects.
+
+    *updated*, *failed* name each object ("red SY-12 02"); *current* counts
+    the ones UDL had nothing newer for. *announced* is set once the page has
+    been told the refresh finished, so it is told once.
+    """
+
+    started_at: datetime
+    finished_at: datetime | None = None
+    running: bool = True
+    updated: list[str] = field(default_factory=list)
+    current: int = 0
+    failed: list[str] = field(default_factory=list)
+    announced: bool = False
+
+
+@dataclass
 class SessionState:
     """Mutable state for one operator session.
 
@@ -85,6 +103,8 @@ class SessionState:
     # clustering step at sweep time. A satno absent from this dict means only
     # one TLE was returned by UDL (nothing to cluster).
     hrr_tle_multiset: dict[str, list[str]] = field(default_factory=dict)
+    # The element set refresh started at UDL connect, while it runs and after.
+    elset_refresh: ElsetRefresh | None = None
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""

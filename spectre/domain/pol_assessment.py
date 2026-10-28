@@ -16,10 +16,10 @@ for the threat sweep. Pattern of Life carried its own separate copies, uncited,
 and they were wrong in a specific and costly way:
 
 ● ``_SK_DV_LIMIT`` applied Table 3's **annual** station-keeping budgets as
-  **per-event** limits. Its GEO value was 50 m/s against a real single
-  north-south burn of about 1.8 m/s. Four of the assessment's own named
-  counterspace events classified as routine station-keeping, including both
-  Luch/Olymp-K relocations.
+  **per-event** limits. Its GEO value was 50 m/s against a single north-south
+  burn of about 1.8 m/s. Four of the assessment's own named events classified
+  as routine station-keeping: both observed Luch/Olymp-K moves, a Table 3
+  graveyard raise and Table 4's worked 180 degree relocation.
 ● ``_GEO_SK_BASELINE`` implied 209 m/s/yr against Table 3's 44 to 55, so every
   GEO object was scored against a baseline four times its real budget.
 ● The anomaly score awarded a full budget term at 200 m/s/yr for every regime,
@@ -143,8 +143,8 @@ _RISK_ORDER: tuple[str, ...] = (
 #: (description, ΔV in m/s, whether it is routine traffic management)
 _REFERENCE_EVENTS: tuple[tuple[str, float, bool], ...] = (
     ("Collision avoidance, any regime (Table 4)",            1.0,   True),
-    ("GEO north-south station-keeping, per burn (Table 3)",  1.8,   True),
-    ("GEO graveyard raise, 300 km (Table 3)",                9.0,   False),
+    ("GEO north-south station-keeping, per burn (from Table 3)", 1.8, True),
+    ("GEO graveyard raise, 300 km (Table 3)",                11.0,  False),
     ("Luch/Olymp-K 2, 62° relocation (observed 2025)",       11.0,  False),
     ("Luch/Olymp-K 1, raise above GEO (observed 2025)",      15.0,  False),
     ("Cosmos 2576 inspector campaign (observed 2024-25)",    27.5,  False),
@@ -222,10 +222,11 @@ class ManoeuvreView:
     confirmed:        bool
 
     #: True when this single manoeuvre is above what an object already on
-    #: station in this regime spends: the assessment's on-station anomaly line.
+    #: station in this regime spends: the assessment's on-station anomaly line,
+    #: its second watchlist recommendation (0.5 km/s or more on station).
     exceeds_on_station_anomaly: bool
     #: True when this single manoeuvre exceeds what any platform in this regime
-    #: could hold in total. The assessment's second watchlist recommendation.
+    #: could hold in total, Table 2's lifetime budget.
     #: The comment sat on the field above (audit F-229).
     exceeds_platform_ceiling:   bool
     escalation:                 str
@@ -639,8 +640,8 @@ def _assess_anomaly(
     routine = station_keeping_m_s_per_year(regime)
     sk_ceiling = views[0].sk_ceiling_m_s
 
-    # ΔV magnitude, against a real single station-keeping burn rather than a
-    # flat 8 m/s. Full score at ten times a routine burn.
+    # ΔV magnitude, against a derived single station-keeping burn rather than
+    # a flat 8 m/s. Full score at ten times a routine burn.
     mean_dv = sum(v.delta_v_m_s for v in views) / len(views)
     dv_score = _clamp01((mean_dv - sk_ceiling) / max(sk_ceiling * 9.0, 1e-6)) * 100
 
@@ -695,20 +696,22 @@ def _assess_anomaly(
 # What the detector can and cannot see
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: One GEO north-south station-keeping burn, m/s, from Table 3 and listed among
-#: the reference events above. A detection floor at or below it is the floor
-#: that separates "this object is quiet" from "this method cannot see routine
-#: housekeeping", which is the distinction the panel exists to make.
+#: One GEO north-south station-keeping burn, m/s, derived from Table 3's annual
+#: budget at an assumed fortnightly cadence and listed among the reference
+#: events above. A detection floor at or below it is the floor that separates
+#: "this object is quiet" from "this method cannot see routine housekeeping",
+#: which is the distinction the panel exists to make.
 _GEO_NS_STATION_KEEPING_M_S: float = 1.8
 
 
 @dataclass(frozen=True)
 class DetectionLimits:
-    """The measured floor, stated in terms of real manoeuvres.
+    """The measured floor, stated against the assessment's reference events.
 
     "No manoeuvres detected" is a materially misleading thing to tell an
-    operator about a Starlink-class object that flew more than forty collision
-    avoidance manoeuvres last year. Those burns are centimetres per second to
+    operator about a Starlink-class object, which on the assessment's rate
+    flies more than forty collision avoidance manoeuvres a year. Those burns
+    are centimetres per second to
     about one metre per second (Table 4), and no element-set differencing
     method will ever see them. That is a limit of the technique, not a defect,
     and the panel has to say so rather than leave the operator to infer that a
@@ -751,15 +754,15 @@ def _assess_detection(noise: Any, _regime: str) -> DetectionLimits | None:
             " That puts routine traffic management below the floor: "
             + ", ".join(missed_routine)
             + ". A quiet result here means no manoeuvre LARGE ENOUGH TO SEE, not a "
-            "passive object. Starlink alone flew more than 355,000 collision "
-            "avoidance manoeuvres in twelve months, none of which any element-set "
-            "method could resolve."
+            "passive object. Starlink alone flew 207,152 collision avoidance "
+            "manoeuvres in six months, none of which any element-set method "
+            "could resolve."
         )
     # It was guarded by "invisible and not missed_routine", which cannot
     # both hold since the smallest reference event is routine (audit F-230).
     if visible:
         narrative += (
-            " The smallest event on open record that this would catch is "
+            " The smallest reference event that this would catch is "
             f"{visible[0][1]:.0f} m/s ({visible[0][0]})."
         )
     return DetectionLimits(
