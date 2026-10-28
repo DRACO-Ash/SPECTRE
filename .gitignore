@@ -71,7 +71,10 @@ $RECYCLE.BIN/
 .DS_Store
 .Python
 .cache/
-.claude/
+# .claude/ holds local session state; the shared skills and commands are tracked.
+.claude/*
+!.claude/skills/
+!.claude/commands/
 .coverage
 .coverage.*
 .dmypy.json

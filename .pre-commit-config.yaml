@@ -20,12 +20,14 @@ repos:
         entry: ruff check --fix
         language: system
         types: [python]
+        # The Backlog Brain pack is vendored as shipped, like the static JS.
+        exclude: ^\.claude/skills/
       - id: bandit
         name: bandit (locked version)
         entry: bandit -c pyproject.toml -ll
         language: system
         types: [python]
-        exclude: ^tests/
+        exclude: ^(tests/|\.claude/skills/)
       - id: mypy
         name: mypy (locked version, as CI runs it)
         entry: mypy spectre/ --ignore-missing-imports

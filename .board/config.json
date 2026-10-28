@@ -1,0 +1,40 @@
+{
+ "schema": 1,
+ "project": {"name": "SPECTRE", "ref_prefix": "SPC-"},
+ "releases": {
+  "naming": "V{major}.{minor}", "start": "V0.7",
+  "floor_min": 720, "cap_min": 840,
+  "overhead_min": 0, "pace": 1.0, "gate_savings": true, "fill_to_floor": true
+ },
+ "gates": [
+  {"key": "lint", "label": "ruff and mypy strict (CI lint job)", "minutes": 0,
+   "triggers": ["spectre/*", "tests/*", "tle_clustering/*"]},
+  {"key": "tests", "label": "pytest with the coverage ratchet (CI test job)", "minutes": 0,
+   "triggers": ["spectre/*", "tests/*", "tle_clustering/*", "pyproject.toml"]},
+  {"key": "sast", "label": "bandit and CodeQL", "minutes": 0,
+   "triggers": ["spectre/*", "tle_clustering/*", "scripts/*"]},
+  {"key": "sca", "label": "pip-audit, SBOM and the App Store dependency scan", "minutes": 0,
+   "triggers": ["requirements*.txt", "requirements*.in", "pyproject.toml"]},
+  {"key": "container", "label": "container build, scan and probe", "minutes": 0,
+   "triggers": ["Dockerfile*", "spectre/*", "tle_clustering/*", "requirements-runtime.txt", ".dockerignore"]},
+  {"key": "quality", "label": "check-quality.sh and the App Store Code Quality stage", "minutes": 0,
+   "triggers": ["spectre/*", "tle_clustering/*"]},
+  {"key": "browser", "label": "browser smoke probe (scripts/smoke-browser.py)", "minutes": 0,
+   "triggers": ["spectre/web/*"]}
+ ],
+ "people": [{"id": "ash", "name": "Ash Higgins", "hours_per_week": 10}],
+ "agents": {"max_concurrent": 2},
+ "working": {"hours_per_day": 8, "days_per_week": 5},
+ "risk_paths": [
+  "spectre/web/auth.py", "spectre/web/csrf.py", "spectre/web/database.py", "spectre/web/planning_state.py",
+  "spectre/web/routes/login.py", "spectre/web/routes/admin.py", "spectre/web/routes/udl.py",
+  "spectre/astro/lambert.py", "spectre/astro/maneuvers.py", "spectre/astro/propagator.py",
+  "Dockerfile", "Dockerfile.docker-only", "scripts/package-appstore.sh"
+ ],
+ "_notes": [
+  "Every gate's minutes are 0 until measured from this project's own runs (TBC, re-verify). The local suite took the time recorded in .board/README.md.",
+  "floor_min and cap_min are the pack's defaults (12 to 14 hours a release), not a SPECTRE measurement. SPECTRE has shipped patch releases daily; the owner sets the real budget.",
+  "overhead_min is 0 until the App Store submission cost (packaging, upload, pipeline, refusal rounds) is measured.",
+  "Ash's hours_per_week is a placeholder (TBC). Release V0.7 maps to SPECTRE 0.7.x."
+ ]
+}
