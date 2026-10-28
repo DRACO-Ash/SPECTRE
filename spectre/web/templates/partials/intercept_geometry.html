@@ -13,8 +13,7 @@
   #geom-panel-heading:focus { outline: 2px solid currentColor; }
 </style>
 
-<div id="geom-panel"
-     role="region"
+<section id="geom-panel"
      aria-labelledby="geom-panel-heading"
      style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;
             padding:0.85rem 1rem; margin-top:0.7rem">
@@ -28,16 +27,16 @@
          currentColor, the same --ops-blue this text already paints in, so the
          indicator cannot be weaker than the heading it marks.
 
-         role="heading" on the existing span rather than an <h3>: the theme
-         sets h1-h6 to the JetBrains Mono display face, and a real h3 here
-         measured 9.13px wider in Chromium and pushed the method line beside it
-         from x=487 to x=496. This is a panel label, set in the body face like
-         the labels either side of it, and it has no business changing typeface
-         to gain a role it can carry as an attribute. #}
-      <span id="geom-panel-heading" role="heading" aria-level="3" tabindex="-1"
-            style="font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em; outline-offset:3px">
+         A real <h3>, since SonarQube refuses role="heading" on a span
+         (Web:S6819), set back to the body face and inline: the theme gives
+         h1-h6 the JetBrains Mono display face, which on its own measured
+         9.13px wider and pushed the method line beside it from x=487 to x=496.
+         This is a panel label and keeps the typeface of the labels either
+         side of it. #}
+      <h3 id="geom-panel-heading" tabindex="-1"
+          style="display:inline; margin:0; font-family:inherit; line-height:inherit; font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em; outline-offset:3px">
         Relative Geometry — Hill Frame
-      </span>
+      </h3>
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.6rem">
         {{ geom.method | upper }} · {{ geom.red_name }} → {{ geom.blue_name }}
       </span>
@@ -159,7 +158,7 @@
     </div>
   </details>
 
-</div>
+</section>
 
 <script>
 (function () {

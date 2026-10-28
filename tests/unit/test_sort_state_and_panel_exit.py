@@ -134,8 +134,8 @@ class TestTheGeometryPanelEscapeIsScopedToThePanel:
 class TestTheGeometryPanelManagesFocus:
     def test_the_panel_has_a_heading_to_send_focus_to(self) -> None:
         source = _source("intercept_geometry.html")
-        assert 'id="geom-panel-heading"' in source
-        assert 'role="heading"' in source
+        assert '<h3 id="geom-panel-heading"' in source, "a native heading, not a role on a span (Web:S6819)"
+        assert not re.search(r'<span[^>]*role="heading"', source)
         assert 'tabindex="-1"' in source, "the heading must be focusable, not tabbable"
         assert 'aria-labelledby="geom-panel-heading"' in source, "the panel is named by it"
 

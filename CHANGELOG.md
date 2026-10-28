@@ -9,6 +9,42 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-28
+
+Clears the 36 issues the App Store Code Quality gate reported against 0.6.0.
+Every other gate passed, the container scan included. The detail is in
+`docs/CHANGE-LEDGER.md`.
+
+### Fixed
+- Five exact floating-point zero checks are now tolerances. One mattered: a near-circular orbit could name the descending node cheapest on rounding noise.
+- The intercept and decision routes bind their fields through form models. The form fields, bounds and errors are unchanged.
+- Accessibility: the geometry panel heading is a real `<h3>` and the panel a `<section>`; the sweep chevron is an SVG.
+
+### Changed
+- Duplicated literals, nested conditionals, a redundant exception class, three dependencies not using `Annotated`, and an over-complex sort function cleared for the gate.
+
+## [0.6.0] - 2026-10-28
+
+Remediation of the whole-repository audit of 23 October 2026: all four steps,
+Blockers through Low, each landed test-first. The finding-to-commit map is
+`audit/REMEDIATION-LOG.md`. This is the first App Store submission since 0.5.24.
+
+### Security (supply chain)
+- msgpack 1.2.2 to 1.2.4 in the developer lock, for CVE-2026-114613 (pulled in by pip-audit through CacheControl; never in the image).
+- Dependency updates: asyncpg 0.32.0, fastapi 0.162.0, anyio 4.15.1, sqlalchemy 2.1.6, scikit-learn 1.9.1; CI actions upload-artifact 7.0.2 and setup-node 7.1.0. fastapi 0.162 adds opentelemetry-api. All locks recompiled for Python 3.11, the dependency scanner's interpreter.
+- CodeQL code scanning on every pull request and weekly, Python, `security-extended`; all alerts it raised are fixed, including log injection and exception text reaching responses.
+- A CycloneDX SBOM of the runtime lock is generated in CI, checked complete against the lock, and kept as a build artefact (SEC-04).
+
+### Security (identity)
+- Training progress, attempts and sessions are keyed on the account id and deleted with the account, so a namesake created later no longer inherits a deleted account's history. Existing databases are migrated on boot.
+
+### Fixed (audit step 4, Low)
+- The 112 Low findings, F-185 to F-296, across astro, pattern of life, tactical, web, training, build and documentation. Each is listed with its commit in `audit/REMEDIATION-LOG.md`.
+
+### Changed
+- SQLAlchemy 2.1 typing: the recent-attempts query helper returns `Select[ChallengeResult]`.
+- The `test_should_` naming convention is dropped (F-188).
+
 ### Fixed (audit step 3, solvers and screening)
 - Hohmann and bi-elliptic intercepts sign each burn correctly for raising and lowering, and report the propagated miss instead of 0 km (F-011, F-012, F-013).
 - Evasion is planned against the threat's predicted position; the reported miss is the separation achieved (F-014).

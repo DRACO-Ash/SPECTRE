@@ -15,6 +15,7 @@ from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from spectre.domain.decision import (
     ActionType,
@@ -184,50 +185,67 @@ async def decision_panel(
     })
 
 
+class _ScenarioForm(BaseModel):
+    """The decision panel's fields, bound from the form by name.
+
+    One model rather than twenty route parameters (python:S107). Each table
+    column arrives as a parallel form array under its singular field name,
+    which the alias keeps.
+    """
+
+    scenario_name: str = "Unnamed Scenario"
+    # No default: FastAPI reads a blank field as absent, and a default would
+    # turn a cleared horizon into a silent 72 h.
+    horizon_hours: str | None = None
+    # Adversary actions (up to 4)
+    adv_ids: list[str] | None = Field(default=None, alias="adv_id")
+    adv_names: list[str] | None = Field(default=None, alias="adv_name")
+    adv_types: list[str] | None = Field(default=None, alias="adv_type")
+    adv_probs: list[str] | None = Field(default=None, alias="adv_prob")
+    adv_confs: list[str] | None = Field(default=None, alias="adv_conf")
+    # Friendly responses (up to 4)
+    fr_ids: list[str] | None = Field(default=None, alias="fr_id")
+    fr_names: list[str] | None = Field(default=None, alias="fr_name")
+    fr_types: list[str] | None = Field(default=None, alias="fr_type")
+    fr_costs: list[str] | None = Field(default=None, alias="fr_cost")
+    fr_revs: list[str] | None = Field(default=None, alias="fr_rev")
+    fr_times: list[str] | None = Field(default=None, alias="fr_time")
+    # Scoring weights
+    w_custody: str = "0.35"
+    w_ca: str = "0.25"
+    w_dv: str = "0.20"
+    w_time: str = "0.10"
+    w_rev: str = "0.10"
+    strategy: str = "minimax"
+
+
 @router.post("/evaluate", response_class=HTMLResponse)
 async def decision_evaluate(
     request: Request,
-    scenario_name: Annotated[str, Form()] = "Unnamed Scenario",
-    # No default: FastAPI reads a blank field as absent, and a default would
-    # turn a cleared horizon into a silent 72 h.
-    horizon_hours: Annotated[str | None, Form()] = None,
-    # Adversary actions (up to 4, passed as parallel form arrays)
-    adv_ids:    Annotated[list[str] | None, Form(alias="adv_id")] = None,
-    adv_names:  Annotated[list[str] | None, Form(alias="adv_name")] = None,
-    adv_types:  Annotated[list[str] | None, Form(alias="adv_type")] = None,
-    adv_probs:  Annotated[list[str] | None, Form(alias="adv_prob")] = None,
-    adv_confs:  Annotated[list[str] | None, Form(alias="adv_conf")] = None,
-    # Friendly responses (up to 4)
-    fr_ids:    Annotated[list[str] | None, Form(alias="fr_id")] = None,
-    fr_names:  Annotated[list[str] | None, Form(alias="fr_name")] = None,
-    fr_types:  Annotated[list[str] | None, Form(alias="fr_type")] = None,
-    fr_costs:  Annotated[list[str] | None, Form(alias="fr_cost")] = None,
-    fr_revs:   Annotated[list[str] | None, Form(alias="fr_rev")] = None,
-    fr_times:  Annotated[list[str] | None, Form(alias="fr_time")] = None,
-    # Scoring weights
-    w_custody:  Annotated[str, Form()] = "0.35",
-    w_ca:       Annotated[str, Form()] = "0.25",
-    w_dv:       Annotated[str, Form()] = "0.20",
-    w_time:     Annotated[str, Form()] = "0.10",
-    w_rev:      Annotated[str, Form()] = "0.10",
-    strategy:   Annotated[str, Form()] = "minimax",
-    current_user: User = Depends(require_login),
+    form: Annotated[_ScenarioForm, Form()],
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Evaluate a decision scenario and return the ranked results partial."""
+    scenario_name = form.scenario_name
     inputs = _Inputs()
-    inputs.rows(adv_ids, fr_ids)
-    horizon = inputs.number(horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
-    weights = [inputs.number(w, "each scoring weight") for w in (w_custody, w_ca, w_dv, w_time, w_rev)]
-    adv_columns = (inputs.column(adv_probs, "probability"), inputs.column(adv_confs, "confidence"))
+    inputs.rows(form.adv_ids, form.fr_ids)
+    horizon = inputs.number(form.horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
+    weights = [
+        inputs.number(w, "each scoring weight")
+        for w in (form.w_custody, form.w_ca, form.w_dv, form.w_time, form.w_rev)
+    ]
+    adv_columns = (inputs.column(form.adv_probs, "probability"), inputs.column(form.adv_confs, "confidence"))
     fr_columns = _ResponseColumns(
-        inputs.column(fr_costs, "cost"), inputs.column(fr_revs, "reversibility"),
-        inputs.column(fr_times, "time to execute (hours)", _MAX_HORIZON_H),
+        inputs.column(form.fr_costs, "cost"), inputs.column(form.fr_revs, "reversibility"),
+        inputs.column(form.fr_times, "time to execute (hours)", _MAX_HORIZON_H),
     )
     if inputs.problem is not None:
         return _err(inputs.problem)
-    adversary_actions = _adversary_rows(adv_ids or [], adv_names or [], adv_types or [], *adv_columns)
-    friendly_responses = _friendly_rows(fr_ids or [], fr_names or [], fr_types or [], fr_columns)
-    strat = _strategy(strategy)
+    adversary_actions = _adversary_rows(
+        form.adv_ids or [], form.adv_names or [], form.adv_types or [], *adv_columns,
+    )
+    friendly_responses = _friendly_rows(form.fr_ids or [], form.fr_names or [], form.fr_types or [], fr_columns)
+    strat = _strategy(form.strategy)
     w_custody_n, w_ca_n, w_dv_n, w_time_n, w_rev_n = _normalised_weights(*weights)
 
     scenario = Scenario(

@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_RED_LIST_TEMPLATE = "partials/red_list.html"
+_BLUE_LIST_TEMPLATE = "partials/blue_list.html"
+
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -121,18 +124,18 @@ async def add_blue_asset(
     refusal = _add_refusal(name, tle)
     if refusal is not None:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
-        return _list_response(request, "partials/blue_list.html", ctx)
+        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
     asset = BlueAsset(name=name, tle=tle)
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": f"{asset.stk_name} is already in the session."}
-        return _list_response(request, "partials/blue_list.html", ctx)
+        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Added asset: {asset.stk_name}")
 
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
-    return _list_response(request, "partials/blue_list.html", ctx)
+    return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
 
 @router.post("/assets/blue/quick-add", response_class=HTMLResponse)
@@ -156,13 +159,13 @@ async def quick_add_blue_asset(
     if any(a.stk_name == prospective_stk for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"{prospective_stk} is already in the session."}
-        return _list_response(request, "partials/blue_list.html", ctx)
+        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     # Fetch TLE from UDL.
     if not state.udl_username or not state.udl_password:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": "Not connected to UDL — cannot fetch TLE."}
-        return _list_response(request, "partials/blue_list.html", ctx)
+        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -175,14 +178,14 @@ async def quick_add_blue_asset(
     if not tle:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
-        return _list_response(request, "partials/blue_list.html", ctx)
+        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     asset = BlueAsset(name=clean_name, tle=tle)
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
 
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
-    resp_html = _list_response(request, "partials/blue_list.html", ctx)
+    resp_html = _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     oob_badge = ""
     if btn_id:
@@ -218,12 +221,12 @@ async def quick_add_red_track(
     if any(t.stk_name == prospective_stk for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"{prospective_stk} is already in the session."}
-        return _list_response(request, "partials/red_list.html", ctx)
+        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     if not state.udl_username or not state.udl_password:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": "Not connected to UDL — cannot fetch TLE."}
-        return _list_response(request, "partials/red_list.html", ctx)
+        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -236,14 +239,14 @@ async def quick_add_red_track(
     if not tle:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
-        return _list_response(request, "partials/red_list.html", ctx)
+        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     track = RedTrack(name=clean_name, tle=tle)
     state.red_tracks.append(track)
     state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
 
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
-    resp_html = _list_response(request, "partials/red_list.html", ctx)
+    resp_html = _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     oob_badge = ""
     if btn_id:
@@ -271,7 +274,7 @@ async def remove_blue_asset(
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
-    return _list_response(request, "partials/blue_list.html", ctx)
+    return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
 
 @router.post("/assets/red", response_class=HTMLResponse)
@@ -289,18 +292,18 @@ async def add_red_track(
     refusal = _add_refusal(name, tle)
     if refusal is not None:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
-        return _list_response(request, "partials/red_list.html", ctx)
+        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
     track = RedTrack(name=name, tle=tle)
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": f"{track.stk_name} is already in the session."}
-        return _list_response(request, "partials/red_list.html", ctx)
+        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     state.red_tracks.append(track)
     state.append_log(f"[RED] Added track: {track.stk_name}")
 
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
-    return _list_response(request, "partials/red_list.html", ctx)
+    return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
 
 @router.delete("/assets/red/{name:path}", response_class=HTMLResponse)
@@ -314,7 +317,7 @@ async def remove_red_track(
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
-    return _list_response(request, "partials/red_list.html", ctx)
+    return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
 
 # ── Scenario time ────────────────────────────────────────────────────────────

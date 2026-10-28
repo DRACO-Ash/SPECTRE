@@ -1226,7 +1226,7 @@ function switchToTradeSpace() {
       var item = document.createElement('div');
       item.className = 'hrr-dd-item '
                      + (e.side === 'red' ? 'hrr-dd-side-red' : 'hrr-dd-side-blue');
-      item.setAttribute('data-idx', String(i));
+      item.dataset.idx = String(i);
       /* A listener rather than an onmousedown attribute: the attribute had to
          be assembled as markup, which is the habit this change removes. */
       item.addEventListener('mousedown', function() { window._hrrSelect(i); });

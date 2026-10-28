@@ -63,6 +63,13 @@ class PhasingResult:
 #: or Lambert leg (audit F-025).
 _PHASING_RADIUS_TOLERANCE_KM = 10.0
 
+#: Below this an eccentricity is circular and the two nodes cost the same,
+#: so neither is named cheaper on rounding noise.
+_CIRCULAR_ECC = 1e-12
+
+#: A RAAN gap below this, in degrees, is already closed.
+_RAAN_CLOSED_DEG = 1e-9
+
 #: Lowest far apsis, in km above R_EARTH, a phasing orbit may have: the
 #: Karman line, the conventional edge of space. Below it the orbit decays
 #: within the phasing period. It was an unnamed literal (audit F-203).
@@ -394,7 +401,7 @@ def plane_change(
     dv_asc = cost_at(-argp_deg)
     dv_desc = cost_at(180.0 - argp_deg)
 
-    if ecc == 0.0:
+    if abs(ecc) < _CIRCULAR_ECC:
         optimal, optimal_dv = "node", dv_asc
     elif dv_desc < dv_asc:
         optimal, optimal_dv = "descending node", dv_desc
@@ -591,7 +598,7 @@ def _j2_acceleration(
     time) when no altitude in that range is fast enough.
     """
     a_chaser, ecc_chaser, inc_chaser_deg = chaser
-    if delta_raan_deg == 0.0:
+    if abs(delta_raan_deg) < _RAAN_CLOSED_DEG:
         return 0.0, conv_days
     target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS
     needed = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)

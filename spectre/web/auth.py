@@ -9,7 +9,7 @@ from typing import Annotated
 
 import bcrypt
 from fastapi import Cookie, Depends, HTTPException, Request, status
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Session cookie expires after 8 hours (28 800 seconds).
 _SESSION_MAX_AGE = 28_800
 _COOKIE_NAME = "spectre_session"
+_LOGIN_PATH = "/login"
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -129,7 +130,8 @@ def _decode_session(token: str) -> SessionClaims | None:
             nonce=str(data.get("non", "")),
             session_id=str(data.get("sid", "")),
         )
-    except (SignatureExpired, BadSignature, KeyError, TypeError, ValueError, AttributeError):
+    # BadSignature covers SignatureExpired, its subclass.
+    except (BadSignature, KeyError, TypeError, ValueError, AttributeError):
         return None
 
 
@@ -211,14 +213,14 @@ async def require_login(
     if not spectre_session:
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/login"},
+            headers={"Location": _LOGIN_PATH},
         )
 
     claims = _decode_session(spectre_session)
     if claims is None:
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/login"},
+            headers={"Location": _LOGIN_PATH},
         )
     username = claims.username
 
@@ -228,7 +230,7 @@ async def require_login(
         logger.warning("Session for unknown user: %s", log_safe(username))
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/login"},
+            headers={"Location": _LOGIN_PATH},
         )
 
     if not _bound_to(user, claims):
@@ -238,7 +240,7 @@ async def require_login(
         )
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/login"},
+            headers={"Location": _LOGIN_PATH},
         )
 
     user.session_key = claims.key

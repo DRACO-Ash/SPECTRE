@@ -67,6 +67,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/threat")
 
+_THREAT_SWEEP_TEMPLATE = "partials/threat_sweep.html"
+
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
 #: Sweeps that may run at once across every operator. Each holds a default
@@ -1353,7 +1355,7 @@ async def threat_sweep(
 
     parsed = _parse_target_group(tgt_group)
     if parsed.error:
-        return render(request, "partials/threat_sweep.html", {
+        return render(request, _THREAT_SWEEP_TEMPLATE, {
             "assessment": None,
             "error": parsed.error,
         })
@@ -1362,7 +1364,7 @@ async def threat_sweep(
     # Find red TLE — manual override takes precedence over the registered track.
     red_tle: str | None = manual_red_tle or state.tle_of(red_sat.strip())
     if not red_tle:
-        return render(request, "partials/threat_sweep.html", {
+        return render(request, _THREAT_SWEEP_TEMPLATE, {
             "assessment": None,
             "error": f"No TLE found for red satellite: {red_sat}",
         })
@@ -1379,7 +1381,7 @@ async def threat_sweep(
     _manual_tle_by_name = _append_manual_targets(state, targets)
 
     if not targets:
-        return render(request, "partials/threat_sweep.html", {
+        return render(request, _THREAT_SWEEP_TEMPLATE, {
             "assessment": None,
             "error": "No targets available — select an HRR group or add manual TLEs.",
         })
@@ -1390,7 +1392,7 @@ async def threat_sweep(
     try:
         red_regime = regime_from_tle(red_tle)
     except TLE_ERRORS as exc:
-        return render(request, "partials/threat_sweep.html", {
+        return render(request, _THREAT_SWEEP_TEMPLATE, {
             "assessment": None,
             "error": f"The red TLE could not be propagated to classify its orbit: {exc}",
         })
@@ -1474,7 +1476,7 @@ async def threat_sweep(
         log_safe(current_user.username),
     )
 
-    return render(request, "partials/threat_sweep.html", {
+    return render(request, _THREAT_SWEEP_TEMPLATE, {
         "assessment": assessment,
         "grouped": grouped,
         "hrr_count": hrr_count,

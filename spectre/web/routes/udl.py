@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/udl")
 
+_TLE_FIELDS_TEMPLATE = "partials/tle_fields.html"
+_STATEVECTOR_FIELDS_TEMPLATE = "partials/statevector_fields.html"
+
 
 def _parse_tle_epoch(line1: str) -> datetime | None:
     """Parse TLE line 1 epoch field (0-indexed cols 18-31, format YYDDD.FFFFFFFF) to UTC datetime.
@@ -234,7 +237,9 @@ def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio
 
 def _cancel_session_tasks(owner: SessionKey | None) -> None:
     """Cancel the background tasks still using *owner*'s UDL password."""
-    for task in list(_SESSION_TASKS.get(owner, ())):
+    # cancel() only schedules the done callback that edits the set, so it is
+    # safe to iterate directly.
+    for task in _SESSION_TASKS.get(owner, ()):
         task.cancel()
 
 
@@ -646,7 +651,7 @@ async def fetch_tle(
     precheck_error = _tle_precheck_error(state, mode)
     if precheck_error is not None:
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": precheck_error},
         )
 
@@ -673,18 +678,18 @@ async def fetch_tle(
         # the record verbatim (pythonsecurity:S5145).
         logger.warning("%s", log_safe(error))
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": error},
         )
     except httpx.TimeoutException:
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": f"UDL unreachable: {exc}"},
         )
 
@@ -693,7 +698,7 @@ async def fetch_tle(
 
     if not records:
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": f"No elset found for SATNO {satno}."},
         )
 
@@ -710,7 +715,7 @@ async def fetch_tle(
         rec = _select_elset_by_epoch(records, state.scenario_start)  # type: ignore[arg-type]
         if rec is None:
             return render(request,
-                "partials/tle_fields.html",
+                _TLE_FIELDS_TEMPLATE,
                 {**_empty, "error": (
                     f"No elset found for SATNO {satno} with epoch ≤ "
                     f"{state.scenario_start.strftime('%Y-%m-%d %H:%M UTC')}."  # type: ignore[union-attr]
@@ -725,7 +730,7 @@ async def fetch_tle(
     if not line1 or not _elset_line(rec, 2):
         # Rendered as success with a TLE of "\n" before (audit F-140).
         return render(request,
-            "partials/tle_fields.html",
+            _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
         )
 
@@ -742,7 +747,7 @@ async def fetch_tle(
     )
 
     return render(request,
-        "partials/tle_fields.html",
+        _TLE_FIELDS_TEMPLATE,
         {
 
             "name": name,
@@ -774,7 +779,11 @@ def _sv_window_start() -> str:
 
 def _newest_state_vector(data: object) -> dict[str, Any] | None:
     """The record with the latest epoch, from a list or a single-object payload."""
-    records = [data] if isinstance(data, dict) else data if isinstance(data, list) else []
+    records: list[Any] = []
+    if isinstance(data, dict):
+        records = [data]
+    elif isinstance(data, list):
+        records = data
     dated = [r for r in records if isinstance(r, dict) and isinstance(r.get("epoch"), str)]
     if not dated:
         return None
@@ -798,7 +807,7 @@ async def fetch_statevector(
 
     if not state.udl_username or not state.udl_password:
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {
     
                 "sv": None,
@@ -822,25 +831,25 @@ async def fetch_statevector(
         error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
         logger.warning("%s", log_safe(error))
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {"sv": None, "error": error},
         )
     except httpx.TimeoutException:
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {"sv": None, "error": "UDL request timed out."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {"sv": None, "error": f"UDL unreachable: {exc}"},
         )
 
     rec = _newest_state_vector(data)
     if rec is None:
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {
                 "sv": None,
                 "error": f"No state vector found for SATNO {satno} in the last {_SV_WINDOW_DAYS} days.",
@@ -850,7 +859,7 @@ async def fetch_statevector(
     # TEME or ECEF record puts the satellite kilometres away (audit F-248).
     if not rec.get("referenceFrame"):
         return render(request,
-            "partials/statevector_fields.html",
+            _STATEVECTOR_FIELDS_TEMPLATE,
             {"sv": None, "error": f"UDL state vector for SATNO {satno} has no referenceFrame; refused."},
         )
     sv = {
@@ -876,7 +885,7 @@ async def fetch_statevector(
     )
 
     return render(request,
-        "partials/statevector_fields.html",
+        _STATEVECTOR_FIELDS_TEMPLATE,
         {"sv": sv, "error": None},
     )
 
@@ -1223,7 +1232,9 @@ def _notso_page_records(resp: Any, page: int) -> tuple[list[Any] | None, str | N
     # BLE001: any undecodable body ends paging with a reason, not a 500.
     except Exception:  # noqa: BLE001
         return None, f"Non-JSON response on page {page}"
-    return (data if isinstance(data, list) else ([data] if data else [])), None
+    if isinstance(data, list):
+        return data, None
+    return ([data] if data else []), None
 
 
 async def _pull_notso_pages(
