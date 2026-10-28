@@ -202,3 +202,75 @@ class TestAFailedRefreshIsShown:
             state.hrr_tle_data_mode.pop("41838", None)
         flat = " ".join(resp.text.split())  # type: ignore[attr-defined]
         assert "SJ-17 (41838): live element set not fetched; screened on the set already held" in flat
+
+
+class TestOnlyPayloadsThatCanActAreScreened:
+    """0.6.6 named a CZ-3B rocket body the most dangerous actor against AEHF-1."""
+
+    def test_a_rocket_body_and_an_old_payload_are_left_out_and_named(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        state = session_state(auth_cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
+        old_payload = _RED_TLE.replace("16065A  ", "04042A  ", 1)
+        state.hrr_objects = [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "28451", "name": "FENGYUN 2C", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ]
+        state.hrr_tle_cache.update({"41838": _RED_TLE, "100141": _RED_TLE, "28451": old_payload, "30793": _ASSET_TLE})
+        try:
+            resp = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000)
+            text = " ".join(resp.text.split())
+            assert resp.status_code == 200
+            assert "SJ-17" in text
+            assert "Not screened, as not able to act" in text
+            assert "CZ-3B R/B (named as a stage or fragment)" in text
+            assert "FENGYUN 2C (launched 2004)" in text
+            assert "1 candidate actor" in text or "1 candidate" in text
+        finally:
+            state.hrr_objects = saved_objects
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
+
+    def test_the_catalogue_type_is_read_once_it_has_loaded(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stage named like a payload is caught by the UDL catalogue's objectType."""
+        monkeypatch.setattr(
+            "spectre.web.planning_state.get_onorbit_catalog",
+            lambda: [{"satNo": 99001, "objectType": "ROCKET BODY", "launchDate": "2024-01-01"}],
+        )
+        state = session_state(auth_cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
+        state.hrr_objects = [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "99001", "name": "SHIJIAN STAGE", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ]
+        state.hrr_tle_cache.update({"41838": _RED_TLE, "99001": _RED_TLE, "30793": _ASSET_TLE})
+        try:
+            text = " ".join(_screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000).text.split())
+            assert "SHIJIAN STAGE (catalogued as rocket body)" in text
+        finally:
+            state.hrr_objects = saved_objects
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
+
+    def test_a_watchlist_of_nothing_that_can_act_says_so(self, client: object, auth_cookie: str) -> None:
+        state = session_state(auth_cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
+        state.hrr_objects = [
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ]
+        state.hrr_tle_cache.update({"30793": _ASSET_TLE})
+        try:
+            text = " ".join(_screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000).text.split())
+            assert "No red HRR object in a regime compatible with GEO can act" in text
+            assert "CZ-3B R/B" in text
+        finally:
+            state.hrr_objects = saved_objects
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)

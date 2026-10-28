@@ -1168,3 +1168,36 @@ window, a shape not scored since 0.6.0; the tooltip is gone and its text is in
 the sweep note instead. The local gate also caught a moved line carrying a
 bare `1e-10`; it uses `_DEGENERATE_ANGULAR_MOMENTUM` now. Both rules are on
 the watch list in `docs/SONAR-RULES.md`.
+
+### 0.6.7 outcome
+
+● Not yet known when 0.6.8 was built.
+
+## 0.6.8
+
+From operator use of asset screening. An AEHF-1 screen named a CZ-3B rocket
+body its most dangerous actor, with a Fengyun 2C apogee kick motor and
+payloads launched twenty years ago ranked beside it. The owner: keep the list
+to payloads with capability, which means dropping the really old ones too.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/actor_eligibility.py` and the screen's candidate filter | `scripts/sonar_rules.py` reports nothing on the changed lines; changed-line coverage measured below. | Then the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**What changed.** Candidates were every red-country object on the HRR
+watchlist in a compatible regime. Now only payloads that can act are
+screened. Rocket bodies, debris and decayed objects are left out, by the UDL
+on-orbit catalogue's `objectType` and `category` (already downloaded at
+login, never read by the screen) or, before it loads, by name (R/B, AKM, PKM,
+DEB). Payloads launched more than 15 years ago are left out as past their
+working life, by the catalogue's launch date or the TLE's international
+designator; 15 years is an ASSUMPTION stated on the page, the design life of a
+GEO communications satellite. An intelligence record holding an object as
+Operational or Degraded keeps it whatever the catalogue or its age says. The
+screen names everything it left out and why.
+
+**Deliberately kept.** A young payload nothing has assessed, such as "Object
+A (possible TJS-26A)", is still screened: an unknown new object is the one
+most worth looking at. Screening ranks those by geometry and delta-V, with
+capability shown as UNASSESSED, as before.

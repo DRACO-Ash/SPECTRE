@@ -35,6 +35,7 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain.actor_eligibility import WORKING_LIFE_YEARS, Exclusion, why_not_an_actor
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
@@ -997,15 +998,36 @@ def _regime_of_tle(tle: str) -> str:
         return ""
 
 
-def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
-    """Candidate threat actors for an asset in *asset_regime*.
+def _catalogue_index() -> dict[str, dict[str, Any]]:
+    """The UDL on-orbit catalogue keyed by catalogue number; empty before it loads."""
+    from spectre.web.planning_state import get_onorbit_catalog
+
+    index: dict[str, dict[str, Any]] = {}
+    for rec in get_onorbit_catalog():
+        satno = str(rec.get("satNo") or rec.get("satno") or "").strip()
+        if satno:
+            index[satno] = rec
+    return index
+
+
+def _build_actor_list(
+    state: object, asset_regime: str,
+) -> tuple[list[ThreatActor], list[tuple[str, Exclusion]]]:
+    """Candidate threat actors for an asset in *asset_regime*, and who was left out.
 
     Red HRR objects whose regime could physically reach the asset's. The filter
     is ``regimes_compatible`` rather than equality on purpose: a GTO or HEO
     object crosses both the LEO and GEO belts, so excluding it would be a false
     negative on exactly the case worth catching.
+
+    Of those, only payloads that can still act are actors
+    (``spectre.domain.actor_eligibility``): rocket bodies, debris and payloads
+    past their working life are returned as exclusions, each with its reason.
     """
     actors: list[ThreatActor] = []
+    excluded: list[tuple[str, Exclusion]] = []
+    catalogue = _catalogue_index()
+    this_year = datetime.now(tz=UTC).year
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
         country = str(obj.get("country") or "").strip().upper()
         if country not in _RED_COUNTRIES:
@@ -1016,14 +1038,34 @@ def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
         obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
         if asset_regime and obj_regime and not regimes_compatible(asset_regime, obj_regime):
             continue
+        name = str(obj.get("name") or satno).strip()
+        reason = why_not_an_actor(
+            name, catalogue.get(satno), _resolve_hrr_tle(state, satno), get_intel(satno), this_year,
+        )
+        if reason:
+            excluded.append((name, reason))
+            continue
         actors.append(ThreatActor(
-            actor_name=str(obj.get("name") or satno).strip(),
+            actor_name=name,
             actor_satno=satno,
             country=country,
             hrr_rank=obj.get("rank"),
             regime=obj_regime,
         ))
-    return actors
+    return actors, excluded
+
+
+def _exclusion_note(excluded: list[tuple[str, Exclusion]]) -> str:
+    """One sentence naming who was left out of the screen and why."""
+    by_kind: dict[str, list[str]] = {}
+    for name, reason in excluded:
+        by_kind.setdefault(reason.kind, []).append(f"{name} ({reason.detail})")
+    parts = [f"{len(names)} {kind}: {', '.join(names)}" for kind, names in sorted(by_kind.items())]
+    return (
+        f"Not screened, as not able to act: {'; '.join(parts)}. Payloads are taken to be past "
+        f"their working life {WORKING_LIFE_YEARS} years after launch (an assumption) unless the "
+        "intelligence record holds them as operational."
+    )
 
 
 # PLR0913, PLR0917: the inputs of one actor's assessment.
@@ -1734,7 +1776,12 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
         1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
-    actors = _build_actor_list(state, asset_regime)
+    actors, excluded = _build_actor_list(state, asset_regime)
+    if not actors and excluded:
+        return _Candidates(error=(
+            f"No red HRR object in a regime compatible with {asset_regime or 'this asset'} "
+            f"can act. {_exclusion_note(excluded)}"
+        ))
     if not actors:
         return _Candidates(error=(
             f"No red HRR objects are in a regime compatible with "
@@ -1742,7 +1789,7 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
             "were considered and all were excluded by regime."
         ))
 
-    notes: list[str] = []
+    notes: list[str] = [_exclusion_note(excluded)] if excluded else []
     if len(actors) > _MAX_SCREEN_ACTORS:
         notes.append(
             f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors)} "

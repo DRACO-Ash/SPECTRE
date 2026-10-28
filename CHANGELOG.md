@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-10-28
+
+### Fixed
+- Asset screening screens only payloads that can act. Rocket bodies, debris and decayed objects are left out, using the UDL on-orbit catalogue's object type, or the name (R/B, AKM, PKM, DEB) before the catalogue loads; a CZ-3B rocket body had been named the most dangerous actor against AEHF-1. Payloads launched more than 15 years ago are left out as past their working life (an assumption stated on the page), unless the intelligence record holds them as operational. The screen lists everything it left out and why.
+
 ## [0.6.7] - 2026-10-28
 
 ### Fixed
