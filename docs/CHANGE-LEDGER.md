@@ -1201,3 +1201,10 @@ screen names everything it left out and why.
 A (possible TJS-26A)", is still screened: an unknown new object is the one
 most worth looking at. Screening ranks those by geometry and delta-V, with
 capability shown as UNASSESSED, as before.
+
+**The review agent's findings.** CLEAR for the gate. Two defects outside it,
+both fixed: a name-matched fragment ("FENGYUN 1C DEB") was reported as a
+rocket body, and a screening test asserted a looser count than it meant.
+`_build_actor_list` scores 14 for cognitive complexity, one under the limit.
+The name regex reads external text; it is fixed alternatives with no
+quantifiers, so it cannot backtrack (hotspot reviewed).

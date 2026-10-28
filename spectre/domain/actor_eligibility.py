@@ -23,9 +23,12 @@ from typing import Any
 #: UDL on-orbit ``objectType`` values that are never an actor.
 _NON_ACTOR_TYPES = {"ROCKET BODY": "rocket body", "DEBRIS": "debris"}
 
-#: Names that mark a stage or fragment when the catalogue has no record:
-#: rocket body, apogee and perigee kick motors, debris.
-_NON_ACTOR_NAME = re.compile(r"(?:^|[\s(])(?:R/B|AKM|PKM|DEB)(?:$|[\s)])", re.IGNORECASE)
+#: Names that mark a stage or a fragment when the catalogue has no record:
+#: rocket bodies and apogee and perigee kick motors, then debris.
+_NAME_MARKERS = (
+    (re.compile(r"(?:^|[\s(])(?:R/B|AKM|PKM)(?:$|[\s)])", re.IGNORECASE), "rocket body"),
+    (re.compile(r"(?:^|[\s(])DEB(?:$|[\s)])", re.IGNORECASE), "debris"),
+)
 
 #: ASSUMPTION, for the analyst to confirm: a payload launched more than this
 #: many years ago, and not held as operational by the intelligence record, is
@@ -72,9 +75,10 @@ def _type_exclusion(name: str, record: dict[str, Any] | None) -> Exclusion | Non
         if str(record.get("category") or "").strip().lower() == "decayed" or record.get("decayDate"):
             return Exclusion("decayed", "catalogued as decayed")
         return None
-    if _NON_ACTOR_NAME.search(name):
-        return Exclusion("rocket body", "named as a stage or fragment")
-    return None
+    return next(
+        (Exclusion(kind, f"named as {kind}") for marker, kind in _NAME_MARKERS if marker.search(name)),
+        None,
+    )
 
 
 def why_not_an_actor(

@@ -33,9 +33,12 @@ class TestStagesAndFragmentsAreNotActors:
     def test_a_decayed_object(self) -> None:
         assert _why("X", {"objectType": "PAYLOAD", "category": "Decayed"}) == "decayed"
 
-    @pytest.mark.parametrize("name", ["CZ-3B R/B", "FENGYUN 2C AKM", "SL-12 PKM", "FENGYUN 1C DEB", "ATLAS 5 CENTAUR (R/B)"])
-    def test_by_name_when_the_catalogue_has_no_record(self, name: str) -> None:
-        assert _why(name) == "rocket body"
+    @pytest.mark.parametrize(("name", "kind"), [
+        ("CZ-3B R/B", "rocket body"), ("FENGYUN 2C AKM", "rocket body"), ("SL-12 PKM", "rocket body"),
+        ("ATLAS 5 CENTAUR (R/B)", "rocket body"), ("FENGYUN 1C DEB", "debris"),
+    ])
+    def test_by_name_when_the_catalogue_has_no_record(self, name: str, kind: str) -> None:
+        assert _why(name) == kind
 
     @pytest.mark.parametrize("name", ["SJ-21", "TJS-3", "Object A (possible TJS-26A)", "DEBUT-SAT", "SHIYAN 12 01 (SY-12 01)"])
     def test_a_payload_name_is_not_mistaken_for_one(self, name: str) -> None:

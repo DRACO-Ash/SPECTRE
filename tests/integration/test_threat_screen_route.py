@@ -226,9 +226,9 @@ class TestOnlyPayloadsThatCanActAreScreened:
             assert resp.status_code == 200
             assert "SJ-17" in text
             assert "Not screened, as not able to act" in text
-            assert "CZ-3B R/B (named as a stage or fragment)" in text
+            assert "CZ-3B R/B (named as rocket body)" in text
             assert "FENGYUN 2C (launched 2004)" in text
-            assert "1 candidate actor" in text or "1 candidate" in text
+            assert "1 candidate actor(s) in GEO" in text, "only SJ-17 is screened"
         finally:
             state.hrr_objects = saved_objects
             state.hrr_tle_cache.clear()
