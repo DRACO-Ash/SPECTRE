@@ -866,3 +866,20 @@ the other half of the same point.
 the window; 104 `Depends(...)` defaults remain unconverted; 33 ruff findings
 land on changed lines, all magic-value and argument-count debt from 0.5.19 to
 0.5.22 and none corresponding to a rule in the Sonar report.
+
+## 0.6.0
+
+The audit release: Blockers through Low remediated since 0.5.24, plus the
+dependency updates of 27 October. No change in this entry was made for a gate.
+The audit fixes are what change what the gates see, and they are large: 65 of
+the 70 Python files in `spectre/` and `tle_clustering/` changed, 9924 lines in
+and 5497 out. No outcome was recorded for 0.5.24, so there is no prior verdict
+on this base image or on the Code Quality window to build on. No probe ships.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Dependency Scanning | **EVIDENCED** | All three locks recompiled for Python 3.11 with asyncpg 0.32.0, fastapi 0.162.0, anyio 4.15.1, sqlalchemy 2.1.6 and scikit-learn 1.9.1; fastapi adds opentelemetry-api 1.45.1 | `scripts/preflight-gate.py` against the built package: 0 blocking, both shipped locks compiled for 3.11, every pin hashed, runtime lock a version-identical subset. `pip-audit` on 28 October: no known vulnerabilities in `requirements.txt`, `requirements-runtime.txt` or `requirements-dev.txt`. The msgpack fix for CVE-2026-114613 is in the developer lock only, which does not ship. | Then the analyser's advisory database carries an advisory the PyPI and OSV feeds behind pip-audit do not, and the report names the package. A bare `exit status 1` would instead mean a resolution failure under 3.11, which the preflight checks for and the 3.11 compile rules out. |
+| Code Quality | **NO HYPOTHESIS** | None made for this gate | Local proxies, all clean on the release commit: ruff, mypy, bandit medium and above, CodeQL (security-extended, zero open alerts), and `scripts/cognitive_complexity.py` reporting 825 functions measured and 0 over 15 tree-wide (0.5.24 recorded 23 over). Line coverage 92% over the Sonar scope, `coverage.xml` produced inside the unzipped package. | Then the findings sit in remediation code, and the report names file and line. This release also settles an open question: the App Store guidance says the gate scores overall code, this ledger has assumed the new-code window. A finding on a line untouched since 0.5.24 would mean overall. |
+| Container Scan: OpenSSL CVE-2026-84782 | **NO HYPOTHESIS** | None | Trivy 0.67.2 on the image built from this package: `libssl3` and `openssl` 3.0.22-1~deb12u1, fixed in deb12u2. The prep stage's `apt-get upgrade` takes it when the Debian security repository is reachable; the local build logged `OS PATCH: applied`. | Then the platform builder could not reach the repository, and its build log will say `OS PATCH: SKIPPED`. The remedy is a base digest that already carries deb12u2. |
+| Container Scan: Debian base CVEs | **NO HYPOTHESIS** | None. Owner decision, 28 October: ship as is | Base digest unchanged since 0.5.23. Trivy reports 61 High or Critical findings with no Debian 12 fix: util-linux and its libraries, ncurses, perl-base, gzip, libsqlite3-0, zlib1g and the systemd libraries. Debian 13 (`python:3.12-slim-trixie`) was measured at 44, the same families, so it is not a remedy on its own. | Then the policy stops on unfixable Highs, not only fixable ones. The evidenced remedy is to remove the packages the runtime never uses (util-linux, mount, ncurses, perl-base, gzip, login, the systemd libraries) from the prep stage with dpkg, keeping sqlite and zlib, which Python needs. |
+| Secret Detection, SAST | **HYGIENE** | CodeQL workflow and SBOM generation in `.github/` | Neither file ships: `scripts/` and `.github/` are excluded from the package since 0.5.2. gitleaks clean on every commit of the release. | n/a. |
