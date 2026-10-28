@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="stylesheet" href="/static/themes.css" />
   <!-- Apply saved theme before first paint to prevent flash -->
-  <script>(function(){var t=localStorage.getItem('spectre-theme');var valid=['ops','steel'];if(t&&valid.indexOf(t)!==-1){document.documentElement.dataset.theme=t;document.documentElement.dataset.spectreTheme=t==='steel'?'light':'dark';}else if(t){localStorage.removeItem('spectre-theme');}})();</script>
+  <script>(function(){var t=localStorage.getItem('spectre-theme');var valid=['ops','steel'];if(t&&valid.includes(t)){document.documentElement.dataset.theme=t;document.documentElement.dataset.spectreTheme=t==='steel'?'light':'dark';}else if(t){localStorage.removeItem('spectre-theme');}})();</script>
   {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}" />{% endif %}
   <script src="/static/htmx.min.js"></script>
   {# chart.js 4.4.7, hammerjs 2.0.8 and chartjs-plugin-zoom 2.0.1 load from the vendored

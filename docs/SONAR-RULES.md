@@ -79,6 +79,13 @@ with what the gate reported (28 October 2026):
 0.6.0 cannot be replayed: its 36 issues were scored against a baseline this
 repository does not record.
 
+## Watch list: rules suspected, never raised
+
+| Rule | Why it is suspected | Where it would fire | Status |
+|---|---|---|---|
+| `javascript:S7765` (`includes` over `indexOf(...) !== -1`) | The 0.6.6 review ran ESLint's `unicorn/prefer-includes`, which SonarJS ports, on every touched line; the same replay reproduces the gate's 0.6.1 verdict exactly. No passing release has touched an `indexOf` existence test, so whether the gate runs it is UNKNOWN. | Fixed where 0.6.6 touched it (`base.html` 13). Untouched: `operator.html` (3) and `threat_sweep.html` (1). | If the gate raises it, encode it by the four steps below and clear the rest. |
+| `javascript:S3776` headroom | `childSort` in `threat_sweep.html` scores exactly 15 (eslint-plugin-sonarjs 4.2.2); the rule fires above 15. | Any added branch in `childSort`. | Split it before adding to it. |
+
 ## Latent issues
 
 `python3 scripts/sonar_rules.py --all` checks every line, not just changed

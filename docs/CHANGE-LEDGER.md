@@ -1099,3 +1099,14 @@ changed code. `tests/integration/test_untested_failure_paths.py` covers each
 refuelling date, an empty sweep group), and coverage against 0.6.5 is now
 100%. The release command, the agent and `CLAUDE.md` now name the last
 scored release as the base rather than master.
+
+**The review agent's findings.** The `code-quality-preflight` agent read
+every touched line against the gate's wider rule set, with ESLint and
+eslint-plugin-sonarjs calibrated by replaying 0.6.1 (it reproduced the gate's
+2 lines exactly). One finding: the `dataset` change to `base.html` line 13
+brought its `indexOf(t)!==-1` into scope, which SonarJS's S7765 would raise if
+the gate runs it (UNKNOWN). It is now `includes(t)`, an exact equivalent for
+the string it tests. Nothing else on a touched line would be raised: unused
+`_rl` parameters passed in 0.6.1 on the same shape, and no hotspot is new.
+`childSort` sits at cognitive complexity 15, the limit; both are on the watch
+list in `docs/SONAR-RULES.md`.
