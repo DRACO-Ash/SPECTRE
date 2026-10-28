@@ -1043,6 +1043,15 @@ wins; the current catalogue answers only when the window is empty. Usable
 means both lines, not uncorrelated (`uct`), and ephemType 0: the `sgp4`
 package reads an SGP4-XP set (type 4) without complaint and propagates it
 wrongly. Each skipped set is logged by type and provider, which is the
-measurement the SGP4-XP roadmap item starts from. Not verified against live
-UDL from here: the providers that file element sets for TJS-3, and their
-ephemType.
+measurement the SGP4-XP roadmap item starts from. The owner's UDL element
+set chart for the day confirms the shape of the defect: 18th SPCS filed
+heavily until about midnight and almost nothing after, while EXO, KBR, KRTL,
+LeoLabs and NorthStar filed throughout, and it confirms "18th SPCS" as the
+source name. Not verified against live UDL from here: which of those file
+for TJS-3, and in which ephemType.
+
+**Gate preparation.** Two literals this change took to three or more uses in
+`udl.py` (the UDL timestamp format and the `/elset` path) are now module
+constants. `'epoch'` was already at 12 uses on master and through five
+gates, so its two new uses add to an existing issue rather than create one.
+Coverage of the changed executable lines: 107 of 113 (94.7%).

@@ -66,6 +66,10 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
         return None
 
 _UDL_BASE = UDL_BASE_URL
+_ELSET_URL = f"{_UDL_BASE}/elset"
+_ELSET_CURRENT_URL = f"{_UDL_BASE}/elset/current"
+#: The timestamp format UDL's epoch and createdAt filters take (UTC, microseconds).
+_UDL_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 _DAYS_IN_LEAP_YEAR = 366
 # TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
 # than this cannot hold one and is logged whole rather than sliced to nothing.
@@ -116,7 +120,7 @@ async def fetch_tle_history_for_satno(
     from datetime import timedelta
 
     since = datetime.now(UTC) - timedelta(hours=window_hours)
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    since_str = since.strftime(_UDL_TIME_FORMAT) + "Z"
 
     params: dict[str, Any] = {
         "satNo":  satno,
@@ -130,7 +134,7 @@ async def fetch_tle_history_for_satno(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
+                _ELSET_URL,
                 params=params,
                 auth=(username, password),
                 timeout=15.0,
@@ -169,7 +173,7 @@ _TLE_EPHEM_TYPE_COLUMN = 62
 def _epoch_after(hours: float) -> str:
     """A UDL epoch filter for element sets newer than *hours* ago."""
     since = datetime.now(UTC) - timedelta(hours=hours)
-    return f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z"
+    return f">{since.strftime(_UDL_TIME_FORMAT)}Z"
 
 
 class FetchedElset(NamedTuple):
@@ -232,14 +236,14 @@ async def _newest_candidates(
     if source:
         base["source"] = source
     window = {**base, "epoch": _epoch_after(_NEWEST_WINDOW_H)}
-    resp = await client.get(f"{_UDL_BASE}/elset", params=window, auth=auth, timeout=20.0)
+    resp = await client.get(_ELSET_URL, params=window, auth=auth, timeout=20.0)
     resp.raise_for_status()
     records = _normalise_elset_records(resp.json())
     usable = _usable_records(records)
     _log_skipped(satno, records, usable)
     if usable:
         return usable
-    resp = await client.get(f"{_UDL_BASE}/elset/current", params=base, auth=auth, timeout=15.0)
+    resp = await client.get(_ELSET_CURRENT_URL, params=base, auth=auth, timeout=15.0)
     resp.raise_for_status()
     return _usable_records(resp.json())
 
@@ -370,7 +374,7 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
+                _ELSET_URL,
                 params={"satNo": 25544, "epoch": _epoch_after(24.0)},
                 auth=(username, password),
                 timeout=15.0,
@@ -404,7 +408,7 @@ async def udl_login(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
+                _ELSET_CURRENT_URL,
                 params={"satNo": 25544},
                 auth=(username, password),
                 timeout=10.0,
@@ -593,7 +597,7 @@ async def _panel_records(state: SessionState, satno: int, mode: str, data_mode: 
         if mode != "epoch":
             return await _newest_candidates(client, satno, auth, data_mode, state.udl_tle_source)
         resp = await client.get(
-            f"{_UDL_BASE}/elset", params=_epoch_request_params(state, satno, data_mode),
+            _ELSET_URL, params=_epoch_request_params(state, satno, data_mode),
             auth=auth, timeout=10.0,
         )
         resp.raise_for_status()
@@ -1314,7 +1318,7 @@ def _notso_query(latest: datetime | None) -> dict[str, str | int]:
 
     since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
     return {
-        "createdAt":  f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z",
+        "createdAt":  f">{since.strftime(_UDL_TIME_FORMAT)}Z",
         "dataMode":   "REAL",
         "msgType":    "TACREP_NOTSO",
         "source":     "JCO",

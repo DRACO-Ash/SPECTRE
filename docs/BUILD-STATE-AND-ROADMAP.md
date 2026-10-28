@@ -195,12 +195,13 @@ than any new calculation.
 
 **Why it is on the list.** From 0.6.5 the newest element set is taken from
 UDL's archive across every provider, and only ephemType 0 (SGP4) sets are
-candidates. The providers active on UDL for the Joint Commercial Operations
-(JCO) cell include 15SPSS, ESTM-OB, ExoAnalytic (EXO), KRTL, LeoLabs, NSFCTC,
-PPEC, SAFRAN, TransAstra and a.i. solutions; the owner's chart of these is of
-observation counts, so which of them also file element sets, and in which
-ephemType, is not yet known. Any newer set they file as SGP4-XP is passed
-over today, and the deployment log now records each one
+candidates. FACT (the owner's UDL element set epoch chart, 28 October
+2026): the element set providers on UDL are 18th SPCS, ExoAnalytic (EXO),
+KBR, KRTL, LeoLabs and NorthStar. 18th SPCS filed several hundred an hour
+until about midnight and almost none after; the five commercial providers
+filed through the whole day, EXO, KBR and NorthStar at around 100 an hour.
+UNKNOWN: the ephemType each provider files in. Any newer set filed as
+SGP4-XP is passed over today, and the deployment log now records each one
 ("archive sets skipped: type 4 from ..."). That log is the evidence this item
 waits on.
 
