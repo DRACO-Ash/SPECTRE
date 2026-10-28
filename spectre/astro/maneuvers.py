@@ -585,7 +585,7 @@ def hbar_hop_intercept(
     dr = np.array(sv_blue.r) - np.array(sv_red.r)
     h_vec0 = np.cross(sv_red.r, sv_red.v)
     h_mag0 = float(np.linalg.norm(h_vec0))
-    n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
+    n_hat0 = h_vec0 / h_mag0 if h_mag0 > _DEGENERATE_ANGULAR_MOMENTUM else np.array([0.0, 0.0, 1.0])
     if hop_distance_km is None:
         cross_track_sep = abs(float(np.dot(dr, n_hat0)))
         hop_distance_km = max(cross_track_sep / n_hops, 1.0)
@@ -1749,6 +1749,7 @@ def _closest_approach_km(
         _separation(_coast(sv, dv, sv.epoch + timedelta(seconds=k * step), mu), target)
         for k in range(_APPROACH_SAMPLES + 1)
     )
+
 
 def _make_burn(
     number: int,

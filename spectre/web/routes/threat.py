@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -687,8 +688,8 @@ def _not_an_approach(sol: InterceptSolution, budget_m_s: float) -> str | None:
     cost_m_s = from_km_s(abs(sol.total_delta_v))
     if cost_m_s > budget_m_s:
         return f"exceeds the {budget_m_s:g} m/s budget"
-    # Written so that a NaN miss is refused rather than ranked.
-    if not sol.miss_distance_km <= _CLOSE_APPROACH_KM:
+    # A NaN miss is refused rather than ranked.
+    if math.isnan(sol.miss_distance_km) or sol.miss_distance_km > _CLOSE_APPROACH_KM:
         return (
             f"ends {sol.miss_distance_km:,.0f} km from the target, beyond the "
             f"{_CLOSE_APPROACH_KM:g} km close-approach radius, so it is not an approach"

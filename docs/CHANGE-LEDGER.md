@@ -1159,3 +1159,12 @@ comes from their own linear model (INFERENCE, reasonable while the separation
 is small against the orbit radius, about 1.4% at 600 km in GEO). Pricing a
 plane change together with the phasing that closes the gap is not done: a
 plane change on its own is now refused, with the distance it leaves.
+
+**The review agent's findings.** Two, both acted on before packaging. The
+NaN-safe test `if not miss <= limit` is the shape `python:S1940` raises; it
+is now `math.isnan(miss) or miss > limit`. A tooltip added to the sweep's
+Location header put the whole `<th onclick tabindex onkeydown>` in the
+window, a shape not scored since 0.6.0; the tooltip is gone and its text is in
+the sweep note instead. The local gate also caught a moved line carrying a
+bare `1e-10`; it uses `_DEGENERATE_ANGULAR_MOMENTUM` now. Both rules are on
+the watch list in `docs/SONAR-RULES.md`.
