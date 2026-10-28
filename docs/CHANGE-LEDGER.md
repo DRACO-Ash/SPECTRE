@@ -922,3 +922,20 @@ smallest that clears its rule, because each changed line joins the window.
 holds a Jinja comment inside its tag. It was not flagged, because its comment
 contains no attribute-like words, and moving it would put its lines in the
 window for nothing.
+
+### 0.6.1 outcome
+
+● **Code Quality reported two issues, both javascript:S7773**, at
+  `all_intercepts_result.html:460` and `:461`: `parseFloat` and `isNaN`
+  where the rule wants `Number.parseFloat` and `Number.isNaN`. None of the
+  36 from 0.6.0 was listed again.
+● **Both are lines 0.6.1 added**, in the `_aiSortKey` helper split out of
+  `aiSort`. The window caught the fix, as the entry warned it could. The
+  local proxies have no JavaScript rule set, so this class of finding is
+  only visible to the gate.
+
+## 0.6.2
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality: javascript:S7773 (2) | **EVIDENCED** | `Number.parseFloat` and `Number.isNaN` in `_aiSortKey` | Both lines named by the gate. `Number.isNaN` does not coerce where `isNaN` does, but the value is always the number `parseFloat` returned, so the two agree. Re-proved in Chromium: the original `aiSort` and this one, seven clicks on the same table, identical row order, `aria-sort` and indicators. Every other line 0.6.1 added to a template was checked for `parseFloat`, `parseInt`, `isNaN` and `isFinite`; these were the only two. | Then the rule also wants `Number.POSITIVE_INFINITY` for `Infinity`, which it does not describe. |

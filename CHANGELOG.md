@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-28
+
+### Changed
+- The intercept table's numeric sort uses `Number.parseFloat` and `Number.isNaN`, the two Code Quality issues reported against 0.6.1. Sorting is unchanged.
+
 ## [0.6.1] - 2026-10-28
 
 Clears the 36 issues the App Store Code Quality gate reported against 0.6.0.
