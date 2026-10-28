@@ -7,10 +7,12 @@
           hx-target="#udl-status"
           hx-swap="innerHTML"
           class="udl-login-form">
-      <input name="username" placeholder="UDL Username" required autocomplete="off"
+      <label for="udl-user-retry" class="visually-hidden">UDL username</label>
+      <input id="udl-user-retry" name="username" placeholder="UDL Username" required autocomplete="off"
              title="Your UDL account username" />
-      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off"
-             title="Your UDL account password — stored in memory only, never written to disk" />
+      <label for="udl-pass-retry" class="visually-hidden">UDL password</label>
+      <input id="udl-pass-retry" name="password" type="password" placeholder="UDL Password" required autocomplete="off"
+             title="Your UDL account password, held in memory for this session only and never written to disk" />
       <div class="submit-row">
         <button type="submit" class="btn-primary btn-sm"
                 hx-disabled-elt="this"
@@ -37,12 +39,22 @@
           hx-post="/udl/logout"
           hx-target="#udl-status"
           hx-swap="innerHTML"
-          title="End the UDL session — credentials are cleared from memory">Disconnect</button>
+          title="End the UDL session: credentials are cleared from memory and background fetches stop">Disconnect</button>
 </div>
-{# OOB: replace the TLE Source panel with the live dropdown #}
+{% if elset_refresh_started is defined and elset_refresh_started %}
+{# OOB: start the element set refresh note polling in the sweep panel #}
+<div id="elset-refresh-note" hx-swap-oob="outerHTML" class="field-meta" aria-live="polite"
+     hx-get="/udl/elset-refresh" hx-trigger="load delay:1s" hx-swap="outerHTML">
+  Refreshing held element sets from UDL&hellip;
+</div>
+{% endif %}
+{% if available is defined %}
+{# OOB, login responses only: replace the TLE Source panel with the live
+   dropdown. The full page renders that panel itself. #}
 <div id="tle-source-panel" hx-swap-oob="innerHTML">
   {% include "partials/tle_source_panel.html" %}
 </div>
+{% endif %}
 <script>
 (function(){
   var d = document.getElementById('udl-dropdown');
@@ -63,10 +75,12 @@
           hx-target="#udl-status"
           hx-swap="innerHTML"
           class="udl-login-form">
-      <input name="username" placeholder="UDL Username" required autocomplete="off"
+      <label for="udl-user" class="visually-hidden">UDL username</label>
+      <input id="udl-user" name="username" placeholder="UDL Username" required autocomplete="off"
              title="Your UDL account username" />
-      <input name="password" type="password" placeholder="UDL Password" required autocomplete="off"
-             title="Your UDL account password — stored in memory only, never written to disk" />
+      <label for="udl-pass" class="visually-hidden">UDL password</label>
+      <input id="udl-pass" name="password" type="password" placeholder="UDL Password" required autocomplete="off"
+             title="Your UDL account password, held in memory for this session only and never written to disk" />
       <div class="submit-row">
         <button type="submit" class="btn-primary btn-sm"
                 hx-disabled-elt="this"

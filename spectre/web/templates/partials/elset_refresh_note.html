@@ -1,0 +1,23 @@
+{#- The connect-time element set refresh (spectre/web/elsets.py). One element,
+    always present, so the login response can swap it and it can replace
+    itself: it polls while the refresh runs and stops once it has finished. -#}
+{% if refresh is none %}
+<div id="elset-refresh-note"></div>
+{% elif refresh.running %}
+<div id="elset-refresh-note" class="field-meta" aria-live="polite"
+     hx-get="/udl/elset-refresh" hx-trigger="load delay:2s" hx-swap="outerHTML">
+  Refreshing held element sets from UDL&hellip;
+</div>
+{% else %}
+<div id="elset-refresh-note" class="field-meta" aria-live="polite">
+  Element sets refreshed from UDL at <strong>{{ refresh.finished_at.strftime('%H:%M UTC') }}</strong>:
+  {{ refresh.updated | length }} updated, {{ refresh.current }} already current{% if refresh.failed %},
+  <span class="badge-warn" title="Kept as held: {{ refresh.failed | join(', ') }}">{{ refresh.failed | length }} not refreshed</span>{% endif %}.
+  Sets entered by hand are never overwritten.
+</div>
+{% if announce and refresh.updated %}
+<script>
+if (typeof window.spectreRereadRedCard === 'function') { window.spectreRereadRedCard(); }
+</script>
+{% endif %}
+{% endif %}

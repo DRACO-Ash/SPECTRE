@@ -16,7 +16,7 @@
         {{ mc.prediction_horizon_hours | int }}h horizon ·
         {{ "%.1f"|format(mc.wall_time_seconds) }}s ·
         {% if mc.converged %}<span style="color:#22c55e">converged</span>{% else %}<span style="color:#f59e0b">not converged (increase samples)</span>{% endif %}
-        <span title="95 % bootstrap half-width of the SMA 5th, 50th and 95th percentiles; converged means 1 km or less">
+        <span title="Widest 95 % bootstrap half-width of the SMA 5th, 50th and 95th percentiles; converged means 1 km or less, from at least 50 samples">
           {%- if mc.percentile_half_width_km < 1e9 %} · percentiles ±{{ "%.1f"|format(mc.percentile_half_width_km) }} km{% endif -%}
         </span>
       </span>

@@ -166,8 +166,8 @@ MANOEUVRE_ARCHETYPES: dict[str, ManoeuvreType] = {
     ),
     "intercept_approach": ManoeuvreType(
         name="Intercept / Approach",
-        # Table 4: the most aggressive observed GEO repositioning, 90 degrees
-        # in 3 days, cost about 170 m/s. 200 m/s sits just above it.
+        # Table 4 worked example: a 90 degree GEO relocation in 3 days costs
+        # about 170 m/s (computed, not observed). 200 m/s sits just above it.
         description="Co-orbital approach towards a target",
         typical_delta_v_km_s=0.200,
         delta_v_1sigma_fraction=0.03,

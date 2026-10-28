@@ -939,3 +939,67 @@ window for nothing.
 | Gate | Class | Change | Evidence | If it still fails |
 |---|---|---|---|---|
 | Code Quality: javascript:S7773 (2) | **EVIDENCED** | `Number.parseFloat` and `Number.isNaN` in `_aiSortKey` | Both lines named by the gate. `Number.isNaN` does not coerce where `isNaN` does, but the value is always the number `parseFloat` returned, so the two agree. Re-proved in Chromium: the original `aiSort` and this one, seven clicks on the same table, identical row order, `aria-sort` and indicators. Every other line 0.6.1 added to a template was checked for `parseFloat`, `parseInt`, `isNaN` and `isFinite`; these were the only two. | Then the rule also wants `Number.POSITIVE_INFINITY` for `Infinity`, which it does not describe. |
+
+### 0.6.2 outcome
+
+● **Every gate passed, Code Quality included, and the app deployed.** The
+  two S7773 issues were the last, and nothing new was raised on the lines
+  0.6.2 changed.
+
+## 0.6.3
+
+The first release after deployment, from operator use. With UDL connected and
+the HRR list refreshed, the threat sweep's red card showed SY-12 02 at an
+epoch of 15 October on 28 October, with no sign of its age.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the newest-epoch fetch, the connect-time refresh (`spectre/web/elsets.py`), element set ages on the red card and in the sweep, and corrected tooltips and comments | Written against what the gate reported in 0.6.0 to 0.6.2: no nested conditionals, `Annotated` dependencies on every route touched, no new literal repeated three times in a file, complexity 840 functions and 0 over 15, no Jinja comment inside a tag, and `aria-live` rather than `role="status"`, which has a native element (`<output>`) and so is the kind of role S6819 refuses. | Then the window caught a rule the local proxies cannot run, as S7773 did at 0.6.1, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**The defect, measured.** `fetch_tle_for_satno` asked `/elset/current`, which
+answers with one current element set per source and in no order, and kept the
+first record. Reproduced: offered a 28 October set behind a lagging 15 October
+one, it returned 15 October. `_select_latest_elset` existed for exactly this,
+with a comment saying so, and only the TLE panel used it. Every red track
+added with "→ Red", every sweep target fetch and every screen went through the
+other path. Nothing refreshed a held set either: once a session held a REAL
+set it was never fetched again.
+
+**The tooltip and comment audit.** 180 tooltips across 38 templates and every
+comment in `spectre/` and `tle_clustering/` were checked against the code and
+`docs/DELTA-V-RESEARCH-ASSIMILATION.md`. About 60 corrections, chief among
+them: 170 m/s is Table 4's worked example of a 90° GEO relocation in 3 days,
+not the largest manoeuvre on record (the largest observed is the SJ-21 tow,
+about 120 m/s round trip); the Max ΔV field is a sweep budget, not an alert
+threshold (R7); and the detection-floor narrative's "355,000 collision
+avoidance manoeuvres in twelve months", which the source does not support, is
+its 207,152 in six months. The 300 km graveyard raise reference event carried
+9 m/s against the cited 11. Not verified: the "62 degree GEO relocation over
+30 days, about 11 m/s" attributed to Table 4 in `monte_carlo.py`, which the
+assimilation doc gives only as the observed Luch/Olymp-K 2 move; it needs the
+Space Watch report itself.
+
+### 0.6.3 outcome
+
+● **Code Quality failed on 10 new issues, all on lines 0.6.3 touched and
+  none in its new logic.** 9 were Web:InputWithoutLabelCheck: the tooltip
+  corrections rewrote `title` attributes on fields that had a placeholder
+  and no label, which put them in the new-code window. The tenth was
+  Web:S6819 on the training banner's `role="status"`, which predates 0.6.3;
+  correcting its `aria-label` brought it in. The 0.6.3 entry checked the
+  lines it added for `role="status"` and not the attributes beside the
+  lines it edited.
+
+## 0.6.4
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality: Web:InputWithoutLabelCheck (9) | **EVIDENCED** | Each field named gets an `id` and a `<label for>`, hidden on screen (`.visually-hidden`) where the layout already shows its purpose: the red and blue SATNO boxes, the HRR search, the data mode and TLE source selects, both UDL login forms, and the TLE name and text fields | All 9 lines named by the gate. The TLE fields are included in the red and the blue form, so their ids carry the side (`red-tle-name`, `blue-tle-name`), set by the include and, on a fetch, from the `HX-Target` header. The 0.6.3 report did not flag the Max ΔV inputs it also touched, which sit inside a `<label>`, so a wrapping label passes too. The two remaining unwrapped fields on the page, the theme picker and the catalog search, are labelled as well. `tests/integration/test_form_labels.py` renders the page before and after UDL connects and finds no field without a label and no id twice. | Then the rule wants the label visible, which it does not describe; the fix is the same markup without the class. |
+| Code Quality: Web:S6819 (1) | **EVIDENCED** | The training banner's `role="status"` becomes `role="note"` | The line named by the gate. The banner is rendered once with the page and never updates, so it is not a live region; `role="note"` passed the 0.6.0 to 0.6.3 scans elsewhere. | Then the rule refuses `note` too, and the banner drops the role and keeps its `aria-label`. |
+| Other gates | **HYGIENE** | None | Templates, one CSS class and one route helper. No dependency, Dockerfile or image change. | n/a. |
+
+**Found on the way.** On a full page load with UDL connected, the status
+partial also rendered its out-of-band TLE source panel, so the page held
+`#tle-source-panel` twice and a stray source dropdown inside the UDL menu.
+It now renders only on the login response that needs it.

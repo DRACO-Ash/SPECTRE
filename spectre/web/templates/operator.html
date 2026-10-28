@@ -14,7 +14,7 @@
   <div class="nav-connections">
     <!-- UDL connection chip + dropdown -->
     <details class="nav-dropdown" id="udl-dropdown">
-      <summary class="nav-chip" title="Unified Data Library — click to manage connection">
+      <summary class="nav-chip" title="Unified Data Library: click to manage the connection">
         <span class="chip-dot {% if udl_user %}dot-green{% else %}dot-grey{% endif %}"></span>
         <span class="chip-label">UDL{% if udl_user %} &#10003;{% endif %}</span>
         <span class="chip-caret">&#9660;</span>
@@ -30,6 +30,7 @@
   <div class="nav-user-group">
 
     <!-- Theme selector -->
+    <label for="theme-picker" class="visually-hidden">Interface theme</label>
     <select id="theme-picker"
             title="Change interface theme"
             onchange="spectreSetTheme(this.value)"
@@ -44,7 +45,7 @@
        style="font-size:0.72rem; font-weight:700; padding:0.25rem 0.65rem;
               background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5);
               border-radius:4px; color:#f59e0b; text-decoration:none; white-space:nowrap"
-       title="Enter the sandboxed training environment — no operational data is affected">
+       title="Enter the training environment. Scenario objects are synthetic and stay in your red and blue lists until you leave training">
       ⚡ Training
     </a>
     <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
@@ -99,9 +100,10 @@
               </div>
               <div id="red-fetch-controls">
                 <div class="satno-row">
+                  <label for="red-satno" class="visually-hidden">Red track NORAD catalog number</label>
                   <input id="red-satno" name="satno"
                          placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
-                         title="NORAD catalog number — press Enter or click Fetch TLE"
+                         title="NORAD catalog number: press Enter or click Fetch TLE"
                          hx-get="/udl/tle"
                          hx-trigger="keyup[key=='Enter']"
                          hx-include="#red-fetch-controls [name]"
@@ -115,14 +117,14 @@
                           hx-swap="innerHTML"
                           hx-indicator="#red-tle-indicator"
                           hx-disabled-elt="this"
-                          title="Query UDL for the latest TLE for this catalog number"
+                          title="Query UDL for a TLE for this catalog number, using the Latest or Epoch option"
                           class="btn-secondary btn-sm">Fetch TLE</button>
                   <span id="red-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
                 </div>
                 <div class="tle-mode-row">
                   <span class="tle-mode-select">
                     <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="red-track-form"> Latest</label>
-                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
+                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable: no scenario time set{% endif %}">
                       <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
                       Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
                     </label>
@@ -137,7 +139,7 @@
                     hx-on::after-settle="if(event.detail.elt===this){document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
                     class="asset-form">
                   <div id="red-tle-fields">
-                    {% include "partials/tle_fields.html" %}
+                    {% with fields_side = "red" %}{% include "partials/tle_fields.html" %}{% endwith %}
                   </div>
                   <div class="submit-row">
                     <button type="submit" class="btn-primary" title="Add this satellite as a Red Force track">Add Red Track</button>
@@ -156,9 +158,10 @@
               </div>
               <div id="blue-fetch-controls">
                 <div class="satno-row">
+                  <label for="blue-satno" class="visually-hidden">Blue asset NORAD catalog number</label>
                   <input id="blue-satno" name="satno"
                          placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
-                         title="NORAD catalog number — press Enter or click Fetch TLE"
+                         title="NORAD catalog number: press Enter or click Fetch TLE"
                          hx-get="/udl/tle"
                          hx-trigger="keyup[key=='Enter']"
                          hx-include="#blue-fetch-controls [name]"
@@ -172,14 +175,14 @@
                           hx-swap="innerHTML"
                           hx-indicator="#blue-tle-indicator"
                           hx-disabled-elt="this"
-                          title="Query UDL for the latest TLE for this catalog number"
+                          title="Query UDL for a TLE for this catalog number, using the Latest or Epoch option"
                           class="btn-secondary btn-sm">Fetch TLE</button>
                   <span id="blue-tle-indicator" class="htmx-indicator"><span class="spinner"></span>Fetching&hellip;</span>
                 </div>
                 <div class="tle-mode-row">
                   <span class="tle-mode-select">
                     <label class="radio-label" title="Fetch the most recent TLE available in UDL"><input type="radio" name="mode" value="latest" checked form="blue-asset-form"> Latest</label>
-                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable — no scenario time set{% endif %}">
+                    <label class="radio-label{% if not scenario_start %} radio-disabled{% endif %}" title="{% if scenario_start %}Fetch the TLE whose epoch is closest to and before the scenario start time{% else %}Unavailable: no scenario time set{% endif %}">
                       <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
                       Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
                     </label>
@@ -194,7 +197,7 @@
                     hx-on::after-settle="if(event.detail.elt===this){document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
                     class="asset-form">
                   <div id="blue-tle-fields">
-                    {% include "partials/tle_fields.html" %}
+                    {% with fields_side = "blue" %}{% include "partials/tle_fields.html" %}{% endwith %}
                   </div>
                   <div class="submit-row">
                     <button type="submit" class="btn-primary" title="Add this satellite as a Blue Force asset">Add Blue Asset</button>
@@ -221,13 +224,14 @@
                 </div>
               </div>
               <div class="hrr-search-wrap" id="hrr-search-wrap">
+                <label for="hrr-search-input" class="visually-hidden">Search the HRR watchlist</label>
                 <input type="search" id="hrr-search-input"
                        placeholder="Search HRR by name, SATNO, country&hellip;"
                        autocomplete="off"
                        class="catalog-search-input"
                        oninput="_hrrSearch(this.value)"
                        onfocus="_hrrSearch(this.value)"
-                       title="Type to filter the HRR watchlist — select from the dropdown" />
+                       title="Type to filter the HRR watchlist, then select from the dropdown" />
                 <div id="hrr-search-dropdown" class="hrr-search-dropdown"></div>
               </div>
               <h3 style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.05em; margin:0.4rem 0 0.2rem">Blue HRR</h3>
@@ -255,8 +259,9 @@
                 hx-target="#data-mode-status"
                 hx-swap="innerHTML"
                 style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
-            <select name="data_mode" style="width:auto; flex:1"
-                    title="Select the UDL data classification — determines which data products are returned">
+            <label for="udl-data-mode-select" class="visually-hidden">UDL data classification</label>
+            <select id="udl-data-mode-select" name="data_mode" style="width:auto; flex:1"
+                    title="Select the UDL data classification, which determines the data products returned">
               <option value="REAL"{% if udl_data_mode == 'REAL' %} selected{% endif %}>REAL</option>
               <option value="SIMULATED"{% if udl_data_mode == 'SIMULATED' %} selected{% endif %}>SIMULATED</option>
               <option value="TEST"{% if udl_data_mode == 'TEST' %} selected{% endif %}>TEST</option>
@@ -320,7 +325,8 @@
                   hx-target="#catalog-results"
                   hx-swap="innerHTML"></span>
           </div>
-          <input type="search"
+          <label for="catalog-search-input" class="visually-hidden">Search the on-orbit catalog</label>
+          <input type="search" id="catalog-search-input"
                  name="q"
                  placeholder="Search by name or SATNO&hellip;"
                  autocomplete="off"
@@ -379,7 +385,7 @@
         <span class="htab-icon htab-icon-red"></span>Threat Sweep
       </button>
       <button class="htab" data-panel="hero-screen" onclick="heroTab(this)"
-              title="Asset Screening — select a blue HRR object and rank every red object that could reach it">
+              title="Asset Screening: select a blue HRR object and rank every red object that could reach it">
         <span class="htab-icon htab-icon-blue"></span>Asset Screening
       </button>
       <button class="htab" data-panel="hero-engine" onclick="heroTab(this)">
@@ -389,11 +395,11 @@
         <span class="htab-icon htab-icon-gold"></span>Historical PoL
       </button>
       <button class="htab" data-panel="hero-decision" onclick="heroTab(this)"
-              title="Decision Engine — What-If scenario evaluation, adversary action vs friendly response matrix">
+              title="Decision Engine: what-if scenario evaluation, adversary actions against friendly responses">
         <span class="htab-icon htab-icon-blue"></span>Decision Engine
       </button>
       <button class="htab" data-panel="hero-gcat" onclick="heroTab(this)"
-              title="GCAT — General Catalog of Artificial Space Objects (McDowell / planet4589.org, CC-BY)">
+              title="GCAT: General Catalog of Artificial Space Objects (McDowell / planet4589.org, CC-BY)">
         <span class="htab-icon htab-icon-blue"></span>GCAT
       </button>
     </div>
@@ -438,7 +444,7 @@
                   </select>
                 </label>
 
-                <label title="Re-fetch red and blue TLEs from UDL using this classification before computing — overrides the session-wide data mode for this calculation only">Intercept Data Mode
+                <label title="Re-fetch red and blue TLEs from UDL in this classification for this calculation only. If UDL is not connected or a fetch fails, the held TLEs are used and the result badge says so. Session default uses the held TLEs without re-fetching.">Intercept Data Mode
                   <select name="intercept_data_mode">
                     <option value="">Session default ({{ udl_data_mode or 'REAL' }})</option>
                     <option value="REAL">REAL</option>
@@ -448,7 +454,7 @@
                   </select>
                 </label>
 
-                <label title="When to start the intercept sequence — click Events to query orbital events">Manoeuvre Start (UTC)
+                <label title="When to start the intercept sequence; click Events to query orbital events">Manoeuvre Start (UTC)
                   <div style="display:flex; gap:0.3rem; align-items:center">
                     <input type="datetime-local" name="manoeuvre_start" step="1"
                            value="{{ scenario_start.strftime('%Y-%m-%dT%H:%M:%S') if scenario_start else '' }}"
@@ -470,26 +476,26 @@
                 <label id="ie-tof-row" title="Post-burn time-of-flight in hours, for the methods that take one">Intercept TOF (hr)
                   <input type="number" name="intercept_hours" value="6.000" min="0.001" step="any" />
                 </label>
-                <label id="ie-dist-row" title="Desired miss distance in metres — sets the target range">Target Dist (m)
+                <label id="ie-dist-row" title="Standoff distance in metres. Lambert uses it as the miss distance; the other proximity and defensive methods raise it to their own floor of 1 to 10 km, and V-bar and H-bar hops use it as hop spacing (0 lets them choose).">Target Dist (m)
                   <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
                 </label>
-                <label title="Revolutions of the phasing orbit before arrival — Phasing">Revolutions
+                <label title="Revolutions of the phasing orbit before arrival (Phasing)">Revolutions
                   <input type="number" name="revolutions" value="1" min="1" max="50" step="1" />
                 </label>
-                <label title="Number of hops along the V-bar or H-bar — V-bar and H-bar hop">Hops
+                <label title="Number of hops along the V-bar or H-bar (V-bar and H-bar hop)">Hops
                   <input type="number" name="hops" value="3" min="1" max="20" step="1" />
                 </label>
-                <label title="Drift duration in days; leave blank for the solver's own — GEO drift">Drift (days)
+                <label title="Drift duration in days; leave blank for the solver's own (GEO drift)">Drift (days)
                   <input type="number" name="drift_days" value="" min="0" step="any" />
                 </label>
-                <label title="Maximum delta-V budget in metres per second. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
-                  <input type="number" name="max_dv_m_s" value="500" min="1" step="10" />
+                <label title="Delta-V budget in m/s, used by the minimum-time, evasion and envelope methods and as the reference for each result's budget share; results above it are still listed. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
+                  <input type="number" name="max_dv_m_s" value="500" min="0" step="10" />
                 </label>
               </div>
 
               <div class="mnv-actions" style="margin-top:0.6rem">
                 <button type="submit" class="btn-gold"
-                        title="Run all 23 intercept methods and return a ranked comparison table">
+                        title="Run all 23 methods (16 transfer and proximity solvers and 7 assessments) and return a table ranked by threat level, then delta-V">
                   Calculate All Intercepts
                 </button>
                 <span id="intercept-indicator" class="htmx-indicator">
@@ -561,10 +567,11 @@
                 </select>
               </label>
               <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
-                     title="Budget in metres per second. 500 m/s is the point at which an on-station manoeuvre becomes a strong anomaly: every counterspace manoeuvre on open record costs less (the largest measured about 170 m/s), and 500 m/s is the lower bound of what an orbital transfer vehicle offers.">Max &#916;V (m/s)
-                <input type="number" name="max_dv_m_s" value="500" step="10" min="1" />
+                     title="Sweep budget in m/s: the delta-V the red satellite is assumed able to spend. Targets it cannot reach within it are excluded. It is not an alert threshold. The 500 m/s default is above every observed manoeuvre in the reference assessment; the largest, the SJ-21 tow of Beidou-2 G2, is about 120 m/s round trip.">Max &#916;V (m/s)
+                <input type="number" name="max_dv_m_s" value="500" step="10" min="0" />
               </label>
             </div>
+            <div id="elset-refresh-note" hx-get="/udl/elset-refresh" hx-trigger="load" hx-swap="outerHTML"></div>
             <div id="ts-red-orbit-info" style="margin-bottom:0.3rem"></div>
 
             {# ── Manual Red TLE override ── #}
@@ -868,6 +875,13 @@ function switchToTradeSpace() {
 <script>
 (function() {
   var _lastRedSat = '';
+
+  /* Called by the element set refresh note once UDL has replaced held sets,
+     so the card shows the new epoch rather than the one it was drawn with. */
+  window.spectreRereadRedCard = function() {
+    _lastRedSat = '';
+    document.body.dispatchEvent(new Event('htmx:afterSettle'));
+  };
 
   document.body.addEventListener('htmx:afterSettle', function() {
     var sel = document.getElementById('ts-red-sat');

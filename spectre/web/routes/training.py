@@ -298,7 +298,7 @@ def _preload_training_objects(scenario: Any, owner: User) -> None:
             if any(obj.satno == getattr(h, "satno", None) or obj.name == h.name for h in held):
                 continue
             model = BlueAsset if obj.side == "blue" else RedTrack
-            held.append(model(name=obj.name, tle=obj.tle, training=True))
+            held.append(model(name=obj.name, tle=obj.tle, training=True, data_mode="SYNTHETIC"))
     # BLE001: a preload failure must not stop the scenario starting.
     except Exception as _tl_exc:  # noqa: BLE001
         logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)

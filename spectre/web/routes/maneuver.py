@@ -122,9 +122,9 @@ _ASSESSMENT_METHODS = {
 #:
 #: 1 m/s      the top of a collision avoidance burn (Table 4)
 #: 50 m/s     one year of GEO north-south station-keeping (Table 3)
-#: 170 m/s    the most aggressive GEO relocation on record, 90 deg in 3 days
+#: 170 m/s    Table 4 worked example, a 90 deg GEO relocation in 3 days
 #: 500 m/s    the point at which an on-station manoeuvre is a strong anomaly
-#: 3,000 m/s  beyond the reserve of every flown platform class (Table 2)
+#: 3,000 m/s  the largest platform total in Table 2 (hybrid servicer, indicative)
 _CAM_SCALE_M_S: float = 1.0
 #: One routine station-keeping burn, derived from Table 3's annual budget and a
 #: fortnightly GEO cadence rather than asserted. The band below used to run
@@ -133,7 +133,7 @@ _CAM_SCALE_M_S: float = 1.0
 #: the cost of a 180 degree GEO relocation — read as routine housekeeping.
 _SINGLE_SK_BURN_M_S: float = per_event_station_keeping_m_s("GEO")[0]
 _ANNUAL_STATION_KEEPING_M_S: float = 50.0
-_MOST_AGGRESSIVE_OBSERVED_M_S: float = 170.0
+_RAPID_RELOCATION_EXAMPLE_M_S: float = 170.0
 _ANOMALY_M_S: float = 500.0
 _BEYOND_PLATFORM_M_S: float = 3000.0
 
@@ -168,7 +168,7 @@ _DV_BANDS: tuple[tuple[float, str], ...] = (
     (_CAM_SCALE_M_S, "Micro-manoeuvre"),
     (_SINGLE_SK_BURN_M_S, "Station-keeping scale"),
     (_ANNUAL_STATION_KEEPING_M_S, "Within a year's station-keeping budget"),
-    (_MOST_AGGRESSIVE_OBSERVED_M_S, "Minor Transfer"),
+    (_RAPID_RELOCATION_EXAMPLE_M_S, "Minor Transfer"),
     (_ANOMALY_M_S, "Moderate Transfer"),
     (_BEYOND_PLATFORM_M_S, "Major Transfer"),
 )
@@ -179,11 +179,12 @@ _DV_BAND_ABOVE_ALL: str = "High-Energy Transfer"
 def _dv_classification(dv: float) -> str:
     """Name the scale of a burn, given its magnitude in m/s.
 
-    The boundaries come from observed behaviour, not round numbers: 1 m/s is
-    the top of a collision-avoidance burn, about 2 m/s one ROUTINE station-
-    keeping burn, 50 m/s a whole YEAR of GEO north-south station-keeping,
-    170 m/s the most aggressive GEO relocation on record, and 500 m/s the point
-    at which an on-station manoeuvre is a strong anomaly.
+    The boundaries are cited or derived figures, not round numbers: 1 m/s is
+    the top of a collision-avoidance burn (Table 4), about 2 m/s one ROUTINE
+    station-keeping burn (derived from Table 3), 50 m/s a whole YEAR of GEO
+    north-south station-keeping (Table 3), 170 m/s Table 4's worked example
+    of a 90 deg GEO relocation in 3 days, and 500 m/s the point at which an
+    on-station manoeuvre is a strong anomaly.
 
     The distinction between the second and the third matters. Spending a year's
     budget in one burn is what a relocation costs, and calling that
@@ -203,7 +204,7 @@ def _observability(dv: float) -> tuple[str, str, str]:
     every burn above 1 m/s read HIGH. A manoeuvre at station-keeping scale is
     the one that hides in routine traffic, which is the point of this panel.
     """
-    if dv > _MOST_AGGRESSIVE_OBSERVED_M_S:
+    if dv > _RAPID_RELOCATION_EXAMPLE_M_S:
         return ("HIGH", "#ef4444",
                 "Large ΔV signature — routine surveillance would very likely see it "
                 "(heuristic band from ΔV alone; no sensor model)")

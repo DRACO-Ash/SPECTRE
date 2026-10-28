@@ -203,7 +203,7 @@ Observability:{{ intel.obs_level }}
      style="font-size:0.65rem; font-weight:700; padding:0.25rem 0.6rem;
             border-color:var(--text-dim); color:var(--text-dim);
             text-decoration:none; display:inline-flex; align-items:center; gap:0.3rem"
-     title="Download all session intercept results as CSV">
+     title="Download the intercept history as CSV: up to the last 200 runs, since the most recent all-methods run">
     &#8659; Export CSV
   </a>
 
@@ -240,7 +240,7 @@ Observability:{{ intel.obs_level }}
   <div style="display:flex; align-items:center; gap:0.5rem">
     <button type="submit" class="btn-secondary"
             style="font-size:0.68rem; font-weight:700; border-color:var(--ops-blue); color:var(--ops-blue)"
-            title="Visualise the relative trajectory in the Hill (CW) frame">
+            title="Visualise the first burn's relative trajectory in the Hill frame (linearised CW model)">
       &#9654; Relative Geometry
     </button>
     <span id="geom-indicator" class="htmx-indicator" style="font-size:0.68rem">
@@ -283,15 +283,15 @@ Observability:{{ intel.obs_level }}
                 display:flex; margin-bottom:0.3rem" title="Prograde / Normal / Radial">
       {% if b.pro_pct > 0 %}
       <div style="width:{{ b.pro_pct }}%; background:var(--ops-blue); transition:width 0.5s ease"
-           title="Prograde {{ b.pro_pct }}%"></div>
+           title="Prograde {{ b.pro_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>
       {% endif %}
       {% if b.nor_pct > 0 %}
       <div style="width:{{ b.nor_pct }}%; background:var(--gold); transition:width 0.5s ease"
-           title="Normal {{ b.nor_pct }}%"></div>
+           title="Normal {{ b.nor_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>
       {% endif %}
       {% if b.rad_pct > 0 %}
       <div style="width:{{ b.rad_pct }}%; background:var(--text-dim); transition:width 0.5s ease"
-           title="Radial {{ b.rad_pct }}%"></div>
+           title="Radial {{ b.rad_pct }}% of burn magnitude (axes add in quadrature, not to 100%)"></div>
       {% endif %}
     </div>
 
@@ -408,7 +408,7 @@ Observability:{{ intel.obs_level }}
           <th title="Total delta-V magnitude for this burn">&Delta;V m/s</th>
           <th title="Prograde (velocity direction) component">Prograde</th>
           <th title="Normal (orbit-normal) component">Normal</th>
-          <th title="Radial (co-normal / radial) component">Radial</th>
+          <th title="Co-normal component: in the orbit plane, perpendicular to velocity (radial only on a circular orbit)">Radial</th>
         </tr>
       </thead>
       <tbody>

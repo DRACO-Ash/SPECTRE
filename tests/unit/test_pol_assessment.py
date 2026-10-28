@@ -289,7 +289,9 @@ class TestDetectionLimits:
         limits = _assess_detection(noisy, "LEO")
         assert limits is not None
         assert any("Collision avoidance" in label for label, _ in limits.invisible)
-        assert "355,000" in limits.narrative
+        # The assessment's figure: 207,152 in six months (0.6.3; it read
+        # 355,000 in twelve, which nothing in the source supports).
+        assert "207,152 collision avoidance manoeuvres in six months" in limits.narrative
 
     def test_a_quiet_result_is_never_reported_as_passive(self) -> None:
         """The old narrative asserted "Object appears passive"."""

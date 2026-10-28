@@ -178,7 +178,7 @@
     </div>
     {% endmacro %}
     {{ score_bar("ΔV Magnitude", anoms.dv_magnitude, "How large are the burns vs normal SK?") }}
-    {{ score_bar("Longitude Coverage", anoms.lon_coverage, "Total GEO belt traversed — >60° = full score") }}
+    {{ score_bar("Longitude Coverage", anoms.lon_coverage, "Shortest arc holding every post-burn longitude of the confirmed manoeuvres; full score at 60° or more") }}
     {{ score_bar("Drift Rate", anoms.drift_rate, "Max drift rate vs ±0.05°/day SK tolerance") }}
     {{ score_bar("SK Irregularity", anoms.sk_regularity, "Coefficient of variation of manoeuvre intervals") }}
     {{ score_bar("Annual ΔV Budget", anoms.budget_rate, "Annual ΔV against this regime's own routine budget; see the basis below") }}
@@ -694,7 +694,7 @@
             <span style="color:{{ pcol }}; font-weight:700" title="{{ v.posture.rationale }}">
               {{ v.posture_label }}</span>
             {% if v.burn_is_slow %}
-            <span style="color:#a855f7; font-size:0.56rem" title="Delivering this ΔV on a {{ v.burn_platform }} takes {{ v.burn_days | round(1) }} days of continuous thrust, so it cannot have been executed at short notice.">
+            <span style="color:#a855f7; font-size:0.56rem" title="At the typical thrust of the assumed platform class ({{ v.burn_platform }}), this ΔV needs about {{ v.burn_days | round(1) }} days of continuous thrust, so it was not a short-notice move if that class is right.">
               &#9201; {{ v.burn_days | round(1) }} d
             </span>
             {% endif %}

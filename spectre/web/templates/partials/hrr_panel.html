@@ -56,7 +56,7 @@ function hrrSort(th) {
                   hx-target="#blue-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
-                  title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
+                  title="Fetch the newest UDL elset and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset. Ignores Epoch mode"
                   class="btn-primary btn-xs">&rarr; Blue</button>
           <button id="hrr-br-{{ sat.satno }}"
                   hx-post="/assets/red/quick-add"
@@ -64,7 +64,7 @@ function hrrSort(th) {
                   hx-target="#red-list"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
-                  title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
+                  title="Fetch the newest UDL elset and add {{ sat.name }} ({{ sat.satno }}) as a Red Track. Ignores Epoch mode"
                   class="btn-danger btn-xs">&rarr; Red</button>
           {% endif %}
         </td>
@@ -107,7 +107,7 @@ function hrrSort(th) {
                     hx-target="#red-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
-                    title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Red Track"
+                    title="Fetch the newest UDL elset and add {{ sat.name }} ({{ sat.satno }}) as a Red Track. Ignores Epoch mode"
                     class="btn-danger btn-xs">&rarr; Red</button>
             <button id="hrr-rb-{{ sat.satno }}"
                     hx-post="/assets/blue/quick-add"
@@ -115,7 +115,7 @@ function hrrSort(th) {
                     hx-target="#blue-list"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this"
-                    title="Fetch TLE and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset"
+                    title="Fetch the newest UDL elset and add {{ sat.name }} ({{ sat.satno }}) as a Blue Asset. Ignores Epoch mode"
                     class="btn-primary btn-xs">&rarr; Blue</button>
             {% endif %}
           </td>

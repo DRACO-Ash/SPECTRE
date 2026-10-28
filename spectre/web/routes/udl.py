@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.elsets import refresh_held_elsets
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import (
@@ -41,6 +42,7 @@ router = APIRouter(prefix="/udl")
 
 _TLE_FIELDS_TEMPLATE = "partials/tle_fields.html"
 _STATEVECTOR_FIELDS_TEMPLATE = "partials/statevector_fields.html"
+_ELSET_REFRESH_TEMPLATE = "partials/elset_refresh_note.html"
 
 
 def _parse_tle_epoch(line1: str) -> datetime | None:
@@ -159,8 +161,9 @@ async def fetch_tle_for_satno(
     """Fetch current TLE for a SATNO from UDL.
 
     Returns ``('line1\\nline2', 'DATA_MODE_TAG')`` or ``None`` on failure.
-    The second element is the UDL ``dataMode`` field from the first returned record
-    (normalised to upper-case), enabling callers to preserve data-provenance metadata.
+    The element set is the newest complete one UDL returns, and the second
+    element is that record's ``dataMode`` (upper-cased), so callers can keep
+    the provenance of the set they hold.
     """
     try:
         async with httpx.AsyncClient() as client:
@@ -181,23 +184,17 @@ async def fetch_tle_for_satno(
         logger.warning("fetch_tle_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc))
         return None
 
-    if isinstance(data, dict):
-        records = [data]
-    elif isinstance(data, list):
-        records = data
-    else:
-        records = []
-
-    if not records:
+    # /elset/current keeps one current element set per source and answers in
+    # no order, so the first record can be a source that last updated days
+    # ago. Only complete records are candidates, and the newest of them wins.
+    records: list[Any] = data if isinstance(data, list) else [data]
+    complete = [r for r in records if isinstance(r, dict) and _elset_line(r, 1) and _elset_line(r, 2)]
+    if not complete:
         return None
 
-    rec = records[0]
-    line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
-    line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
-    if not line1 or not line2:
-        return None
+    rec = _select_latest_elset(complete)
     data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
-    return (f"{line1}\n{line2}", data_mode_tag)
+    return (f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}", data_mode_tag)
 
 
 #: Background tasks started at UDL login. The loop holds only weak references
@@ -368,9 +365,12 @@ async def udl_login(
     state.append_log(f"[UDL] Connected as {username}")
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
-    # Kick off background tasks (no-op for catalog if already loaded).
+    # Kick off background tasks (no-op for catalog if already loaded). The
+    # element set refresh replaces every held UDL or bootstrap set with UDL's
+    # newest, so nothing on screen predates the connection.
     _spawn(_fetch_onorbit_background(username, password), current_user.session_key)
     _spawn(_discover_tle_sources(username, password, state), current_user.session_key)
+    _spawn(refresh_held_elsets(state, username, password), current_user.session_key)
 
     return render(request,
         "partials/udl_status.html",
@@ -379,8 +379,27 @@ async def udl_login(
             "error": None,
             "tle_source": state.udl_tle_source,
             "available": state.udl_available_sources,
+            "elset_refresh_started": True,
         },
     )
+
+
+@router.get("/elset-refresh", response_model=None)
+async def elset_refresh_status(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+) -> HTMLResponse:
+    """The connect-time element set refresh: running, finished, or not started.
+
+    The note polls this while the refresh runs. The first response after it
+    finishes is the one that announces it, so the red card is re-read once.
+    """
+    state = get_session_state(current_user)
+    refresh = state.elset_refresh
+    announce = refresh is not None and not refresh.running and not refresh.announced
+    if announce and refresh is not None:
+        refresh.announced = True
+    return render(request, _ELSET_REFRESH_TEMPLATE, {"refresh": refresh, "announce": announce})
 
 
 _VALID_DATA_MODES = {"REAL", "TEST", "EXERCISE", "SIMULATED"}
@@ -439,6 +458,7 @@ async def udl_logout(
     state = get_session_state(current_user)
     state.udl_username = None
     state.udl_password = None
+    state.elset_refresh = None
     # The login's background tasks hold the password; stop them too (F-143).
     _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
@@ -581,11 +601,13 @@ def _select_latest_elset(records: list[Any]) -> Any:
     """Return the record with the newest TLE epoch.
 
     /elset/current can answer with several records and does not order them,
-    so the newest is chosen here rather than taken on trust.
+    so the newest is chosen here rather than taken on trust. A record missing
+    a line cannot be used, so a complete one is preferred whenever any is.
     """
-    best_rec = records[0]
+    candidates = [r for r in records if _elset_line(r, 1) and _elset_line(r, 2)] or records
+    best_rec = candidates[0]
     best_epoch = _parse_tle_epoch(_elset_line(best_rec, 1))
-    for candidate in records[1:]:
+    for candidate in candidates[1:]:
         ep = _parse_tle_epoch(_elset_line(candidate, 1))
         if ep is not None and (best_epoch is None or ep > best_epoch):
             best_epoch = ep
@@ -624,6 +646,16 @@ def _tle_epoch_metadata(line1: str, scenario_start: datetime | None) -> tuple[st
     return tle_epoch_str, abs((scenario_start - tle_epoch_dt).total_seconds()) / 86400.0
 
 
+#: The red and blue forms each hold a copy of the TLE fields, so their ids
+#: carry the side the fetch is swapping into.
+_FIELDS_SIDES = {"red-tle-fields": "red", "blue-tle-fields": "blue"}
+
+
+def _fields_side(request: Request) -> str:
+    """The form side a TLE fetch fills, from its htmx target; "tle" when unknown."""
+    return _FIELDS_SIDES.get(request.headers.get("HX-Target", ""), "tle")
+
+
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
@@ -646,7 +678,8 @@ async def fetch_tle(
     state = get_session_state(current_user)
 
     _empty = {"name": "", "tle": "", "tle_epoch_str": None,
-               "tle_age_days": None, "mode": mode, "error": None}
+               "tle_age_days": None, "mode": mode, "error": None,
+               "fields_side": _fields_side(request)}
 
     precheck_error = _tle_precheck_error(state, mode)
     if precheck_error is not None:
@@ -755,7 +788,9 @@ async def fetch_tle(
             "tle_epoch_str": tle_epoch_str,
             "tle_age_days": tle_age_days,
             "mode": mode,
+            "elset_mode": str(rec.get("dataMode") or state.udl_data_mode or "REAL").strip().upper(),
             "error": None,
+            "fields_side": _empty["fields_side"],
         },
     )
 

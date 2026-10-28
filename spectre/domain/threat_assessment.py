@@ -84,11 +84,13 @@ class Band(IntEnum):
 # an object in that regime rather than from four global numbers.
 #
 # The old thresholds were 200, 500 and 1,000 m/s. Every counterspace manoeuvre
-# on open record sits below the lowest of them: the Luch/Olymp-K 2 relocation
-# cost 11 m/s, the SJ-21 tow of Beidou-2 G2 about 60 m/s, the most aggressive
-# GEO repositioning measured about 170 m/s. So the band returned CRITICAL for
-# a routine commercial move and CRITICAL for a hostile closure alike, and a
-# measurement that returns one answer for every input is not a measurement.
+# the assessment records as observed sits below the lowest of them: the
+# Luch/Olymp-K 2 relocation cost 11 m/s and the SJ-21 tow of Beidou-2 G2, the
+# largest, about 60 m/s one way and 120 m/s round trip. Table 4's worked example
+# of a 90 degree GEO relocation in 3 days, about 170 m/s, is below it too. So
+# the band returned CRITICAL for a routine commercial move and CRITICAL for a
+# hostile closure alike, and a measurement that returns one answer for every
+# input is not a measurement.
 #
 # Posture answers the question the thresholds were trying to ask. A manoeuvre
 # the object could make inside its routine operating budget is the MOST
@@ -186,8 +188,8 @@ class AccessEvidence:
             return (True, "")
         if hours == float("inf"):
             return (False, (
-                f"{self.best_delta_v_m_s:.0f} m/s is beyond the discretionary "
-                "reserve of every platform class on open record"
+                f"{self.best_delta_v_m_s:.0f} m/s is beyond the largest platform "
+                "total in the assessment's Table 2"
             ))
         return (False, (
             f"no flown platform could deliver {self.best_delta_v_m_s:.0f} m/s "
@@ -443,8 +445,8 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
     deliverable, undeliverable_reason = access.is_physically_deliverable()
 
     # The posture sentence is the part an analyst can act on: it says what the
-    # number means against what satellites actually do, rather than against a
-    # threshold somebody picked.
+    # number means against cited regime figures and judgement bands placed
+    # between them, rather than against one global threshold.
     rationale = f"{rationale} {posture.rationale}"
     if not deliverable:
         rationale = (

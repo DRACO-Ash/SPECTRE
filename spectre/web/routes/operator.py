@@ -15,6 +15,7 @@ from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
+from spectre.web.elsets import provenance
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -114,9 +115,14 @@ async def add_blue_asset(
     request: Request,
     name: Annotated[str, Form()],
     tle: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
+    elset_mode: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
-    """Add a blue asset and return the updated blue list partial."""
+    """Add a blue asset and return the updated blue list partial.
+
+    *elset_mode* is the UDL data mode the TLE panel tags a fetched set with;
+    a set typed or edited by hand arrives without it and is MANUAL.
+    """
     state = get_session_state(current_user)
 
     name = name.strip()
@@ -125,7 +131,7 @@ async def add_blue_asset(
     if refusal is not None:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
         return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
-    asset = BlueAsset(name=name, tle=tle)
+    asset = BlueAsset(name=name, tle=tle, data_mode=provenance(elset_mode))
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": f"{asset.stk_name} is already in the session."}
@@ -180,7 +186,7 @@ async def quick_add_blue_asset(
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
         return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
-    asset = BlueAsset(name=clean_name, tle=tle)
+    asset = BlueAsset(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
 
@@ -241,7 +247,7 @@ async def quick_add_red_track(
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
         return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
-    track = RedTrack(name=clean_name, tle=tle)
+    track = RedTrack(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
     state.red_tracks.append(track)
     state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
 
@@ -282,9 +288,13 @@ async def add_red_track(
     request: Request,
     name: Annotated[str, Form()],
     tle: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
+    elset_mode: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
-    """Add a red track and return the updated red list partial."""
+    """Add a red track and return the updated red list partial.
+
+    *elset_mode* is as for :func:`add_blue_asset`.
+    """
     state = get_session_state(current_user)
 
     name = name.strip()
@@ -293,7 +303,7 @@ async def add_red_track(
     if refusal is not None:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
         return _list_response(request, _RED_LIST_TEMPLATE, ctx)
-    track = RedTrack(name=name, tle=tle)
+    track = RedTrack(name=name, tle=tle, data_mode=provenance(elset_mode))
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": f"{track.stk_name} is already in the session."}

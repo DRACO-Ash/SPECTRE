@@ -27,6 +27,10 @@ class BlueAsset:
     #: Added by a training scenario and removed when the operator leaves
     #: training (audit F-051).
     training: bool = False
+    #: Where the element set came from: the UDL dataMode it was fetched in
+    #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
+    #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
+    data_mode: str = "MANUAL"
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -49,6 +53,10 @@ class RedTrack:
     #: Added by a training scenario and removed when the operator leaves
     #: training (audit F-051).
     training: bool = False
+    #: Where the element set came from: the UDL dataMode it was fetched in
+    #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
+    #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
+    data_mode: str = "MANUAL"
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:

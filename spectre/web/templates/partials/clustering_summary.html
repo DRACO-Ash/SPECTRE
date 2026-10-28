@@ -73,8 +73,8 @@
           {% if obj.skipped or obj.fallback %}—{% else %}{{ "%.0f"|format(obj.reduction_pct) }}%{% endif %}
         </td>
         <td style="text-align:center; padding:0.12rem 0 0.12rem 0.4rem; font-size:0.65rem; white-space:nowrap">
-          {% if obj.multi_cluster %}<span style="color:#ef4444; font-weight:700" title="Multiple clusters — elevated orbit uncertainty">&#9651;</span>{% endif %}
-          {% if obj.fallback %}<span style="color:var(--amber); font-weight:700" title="Fallback: existing cached TLE used (all TLEs were noise)">FB</span>{% endif %}
+          {% if obj.multi_cluster %}<span style="color:#ef4444; font-weight:700" title="Multiple clusters: possible manoeuvre or poor tracking; the most recent cluster's representative was used">&#9651;</span>{% endif %}
+          {% if obj.fallback %}<span style="color:var(--amber); font-weight:700" title="Fallback: clustering gave no representative (all noise or a clustering error); the cached TLE was kept where one existed">FB</span>{% endif %}
           {% if not obj.multi_cluster and not obj.fallback and not obj.skipped %}<span style="color:#22c55e">&#10003;</span>{% endif %}
         </td>
       </tr>
