@@ -1055,3 +1055,17 @@ for TJS-3, and in which ephemType.
 constants. `'epoch'` was already at 12 uses on master and through five
 gates, so its two new uses add to an existing issue rather than create one.
 Coverage of the changed executable lines: 107 of 113 (94.7%).
+
+**Gate tooling added with 0.6.5.** Every Code Quality rule the gate has
+raised here is now a check in `scripts/sonar_rules.py`, run by
+`scripts/check-quality.sh` (so in CI) and by the packager, which refuses to
+build on a failure. Replayed on each release against its predecessor, it
+reports exactly the lines the gate reported for 0.6.1 (2) and 0.6.3 (10),
+nothing for 0.6.2, 0.6.4 and 0.6.5 as shipped, and the one issue fixed by
+hand before 0.6.5 shipped. The rules, their evidence and that table are in
+`docs/SONAR-RULES.md`. Run over every line, it finds 209 latent issues that
+count the day their line is edited. The `code-quality-preflight` agent and
+the `/release-preflight` command cover what a script cannot judge, and
+`CLAUDE.md` carries the rules to the point where code is written. Both
+`scripts/check-quality.sh` and the checker now use `origin/master` when the
+local master is behind it: a stale local base turned 0 findings into 14.

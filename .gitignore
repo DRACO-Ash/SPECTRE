@@ -71,7 +71,11 @@ $RECYCLE.BIN/
 .DS_Store
 .Python
 .cache/
-.claude/
+# Claude Code's local state stays out; the shared agents and commands, which
+# carry release discipline (docs/SONAR-RULES.md), are tracked.
+.claude/*
+!.claude/agents/
+!.claude/commands/
 .coverage
 .coverage.*
 .dmypy.json

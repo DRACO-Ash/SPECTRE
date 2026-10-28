@@ -14,6 +14,13 @@
 set -eu
 
 BASE="${1:-master}"
+# A stale local base makes every commit released since it was last pulled read
+# as this branch's work. Use the remote-tracking branch when the local one is
+# behind it; CI fetches the base fresh, a developer's checkout often has not.
+if git rev-parse --verify --quiet "origin/$BASE" >/dev/null 2>&1 \
+        && git merge-base --is-ancestor "$BASE" "origin/$BASE" 2>/dev/null; then
+    BASE="origin/$BASE"
+fi
 COVERAGE_XML="coverage.xml"
 COVERAGE_FLOOR=80
 DUPLICATION_CEILING=3
@@ -163,6 +170,20 @@ if python3 scripts/cognitive_complexity.py --changed "$BASE" --max 15; then
     pass "no function this branch touched is over the Sonar limit of 15"
 else
     fail "the functions above will be reported by the Code Quality gate"
+fi
+
+# ── Rules the gate has raised on this project ───────────────────────────────
+# Every failed Code Quality submission from 0.6.0 to 0.6.3 was a rule ruff does
+# not approximate: duplicated literals, form labels, ARIA roles, the Number
+# globals and five others. scripts/sonar_rules.py encodes each, scoped the way
+# the gate scopes, and is calibrated against every release since 0.6.1 (the
+# table is in docs/SONAR-RULES.md). It also reads templates, which no other leg
+# here does.
+printf '\n== Rules the gate has raised on this project (docs/SONAR-RULES.md) ==\n'
+if python3 scripts/sonar_rules.py "$BASE"; then
+    pass "no rule the gate has raised before lands on changed code"
+else
+    fail "the findings above are rules the gate has already failed a submission on"
 fi
 
 printf '\n== Coverage on changed lines ==\n'
