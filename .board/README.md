@@ -3,6 +3,34 @@
 The working backlog for SPECTRE, planned by the Backlog Brain pack in `.claude/skills/backlog-brain` (standard library Python, no
 install). Seeded on 2026-10-28 from the planning trail, with every item checked against the code at `77a1088` (release 0.6.4).
 
+## The operator's question: the acceptance test for every release
+
+Confirmed by an operator on 2026-10-28 as precisely what they want a tool to help with:
+
+> **Something moved. Can it reach one of mine, how long have I got, does it mean anything, and what do I need to decide, by when?**
+
+The case that showed it: an overnight notification says an adversary satellite burned. At handover the operator sees "that burn
+cut your warning on asset X from 14 hours to 3, it is unlike its last 200 days, and you need to decide by 0900Z", not "this object
+could reach that one for 190 m/s".
+
+The 4 outputs, in the operator's order:
+
+| Rank | Output | What the operator reads | Items |
+|---|---|---|---|
+| 1 | Is this normal | This burn is routine for this object, or unlike anything in its history | SPC-001, SPC-009, SPC-003 |
+| 2 | Warning-time change | The burn moved my warning from this to that, and these assets are now in reach | SPC-002, SPC-006, SPC-007 |
+| 2 | Decide-by time | The latest time I can act, from the fastest credible arrival minus my response latency | SPC-008 |
+| 4 | Recommended response | What to do, and what each option costs | SPC-100 to SPC-152 |
+
+**Custody**, in the operator's words: having timely and actionable information to determine outputs 1 and 2. When it is lost, the
+screen says so and why, and never shows a confident answer it lacks the information for (SPC-018).
+
+Every release is checked against this before it ships:
+1. Its changelog names which of the 4 outputs it advances, or why it advances none.
+2. Each output it touches answers in the operator's words, as in the table, with its basis on screen (computed, sampled or lookup).
+3. Where custody is not held, the output says so rather than guessing.
+4. Higher-ranked outputs come first: nothing for output 4 displaces open work for outputs 1 to 3 without the owner's say.
+
 ## Files
 
 ● `config.json`: the settings record. Release budget, gates, people, agents and the files that carry extra risk.
@@ -45,16 +73,17 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-10-28 | Self-service password change | Covered by the platform's single sign-on; nothing to build |
 | 2026-10-28 | Decision Engine | Invest in every phase: SPC-100 to SPC-152 |
 | 2026-10-28 | Analyst session before the Phase 3 capabilities | Deferred; SPC-080 stays open |
+| 2026-10-28 | The operator's question, output ranking and custody definition | Confirmed with an operator; see the acceptance test above |
 
 ## Decision Engine plan
 
-24 items, 6060 priced minutes, in dependency order. The phase numbers are the ones in `docs/decision_engine_phases.md`.
+23 items, 5820 priced minutes, in dependency order, after outputs 1 to 3 (the operator ranks it 4th). The phase numbers are the ones in `docs/decision_engine_phases.md`.
 
 | Stage | Items | What it delivers |
 |---|---|---|
 | Foundation | SPC-100, 101, 102 | Scenarios bound to real element sets; a basis on every figure; reference cases every phase must pass |
 | Phase 2, Monte Carlo | SPC-110 to 115 | Sampled closest approach against the blue trajectory, scored on P5, with bands in the matrix |
-| Phase 3, physics | SPC-120 to 125 | SGP4 closest approach and TCA, computed friendly burns, a custody model, lookup constants retired |
+| Phase 3, physics | SPC-120, 121, 123 to 125 | SGP4 closest approach and TCA, computed friendly burns, custody from the operator's definition, lookup constants retired |
 | Phase 5, NOTSO priors | SPC-130 to 132 | Adversary probabilities seeded from NOTSO history, with an interval and a sensitivity check |
 | Phase 4, multi-turn | SPC-140 to 142 | Two and three turn trees, selectors over the tree, a server-rendered tree view |
 | Joins and upkeep | SPC-150, 151, 152 | Open a scenario from the sweep; cited default weights; the guide kept current |
@@ -70,7 +99,7 @@ Phase 4 waits on computed responses and custody, because turn 2 starts from the 
 ## A limit of the planner
 
 An item that depends on a tooling or research item is never placed: the planner keeps those tracks apart and never marks them
-ready. Keep a dependency's target on the release track, as SPC-102 and SPC-122 are.
+ready. Keep a dependency's target on the release track, as SPC-102 is.
 
 ## Where the seed came from
 

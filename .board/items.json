@@ -6,7 +6,7 @@
   "group": "warning",
   "minutes": 240,
   "task": "Fetch element-set history for each sweep target so capability evidence has an input",
-  "note": "Roadmap Phase 1 item 3 and Phase 2 first step (docs/BUILD-STATE-AND-ROADMAP.md). Capability evidence is the assessed record alone because the sweep fetches no history.",
+  "note": "Feeds operator outputs 1 and 2 (ranking 2026-10-28). Capability evidence is the assessed record alone because the sweep fetches no history. Source: docs/BUILD-STATE-AND-ROADMAP.md Phase 1 item 3.",
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/web/elsets.py",
@@ -16,14 +16,14 @@
  {
   "ref": "SPC-002",
   "priority": "high",
-  "order": 2,
+  "order": 5,
   "group": "warning",
   "minutes": 240,
   "deps": [
    "SPC-001"
   ],
   "task": "Feed propellant budget, anomaly score and observed manoeuvre count into the composite verdict",
-  "note": "spectre/domain/threat_assessment.py reports these as unavailable today. Closes the capability half of red-team finding 1.",
+  "note": "Supports output 2: an arrival only counts as credible if the object can fly it. spectre/domain/threat_assessment.py reports propellant, anomaly and manoeuvre count as unavailable today.",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/web/routes/threat.py",
@@ -33,14 +33,14 @@
  {
   "ref": "SPC-003",
   "priority": "high",
-  "order": 3,
+  "order": 4,
   "group": "warning",
   "minutes": 180,
   "deps": [
-   "SPC-001"
+   "SPC-009"
   ],
-  "task": "Write sweep intent from the manoeuvre classifier, not the solver name",
-  "note": "Red-team finding 4. intent_label_for in spectre/web/burn_view.py still maps method to prose.",
+  "task": "Show the is-this-normal verdict on the sweep in place of the solver-name intent label",
+  "note": "Red-team finding 4. intent_label_for in spectre/web/burn_view.py maps method to prose; SPC-009 supplies the verdict.",
   "files": [
    "spectre/web/burn_view.py",
    "spectre/web/routes/threat.py",
@@ -50,7 +50,7 @@
  {
   "ref": "SPC-004",
   "priority": "med",
-  "order": 4,
+  "order": 20,
   "group": "warning",
   "minutes": 120,
   "task": "Name the phase angle on the sweep and qualify apsis labels in near-circular regimes",
@@ -64,7 +64,7 @@
  {
   "ref": "SPC-005",
   "priority": "med",
-  "order": 5,
+  "order": 21,
   "group": "warning",
   "minutes": 180,
   "task": "Report sweep delta-V with a band derived from element-set age",
@@ -82,10 +82,11 @@
   "group": "trigger",
   "minutes": 360,
   "deps": [
-   "SPC-002"
+   "SPC-002",
+   "SPC-018"
   ],
   "task": "Manoeuvre trigger: re-run the sweep for an object when a manoeuvre is detected",
-  "note": "Roadmap Phase 2. Sources: UDL manoeuvre endpoint, NOTSO arrival, own element-set differencing.",
+  "note": "Operator ranking 2026-10-28, output 2 of 4 (joint second). Re-runs the sweep for an object when a manoeuvre is detected: UDL manoeuvre endpoint, NOTSO arrival or own element-set differencing.",
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/astro/notso.py",
@@ -103,7 +104,7 @@
    "SPC-006"
   ],
   "task": "Show the differential after a burn: warning time before and after, and assets newly in reach",
-  "note": "Roadmap Phase 2 output. The differential, not the state.",
+  "note": "Operator ranking 2026-10-28, output 2. The differential, not the state: warning time before and after the burn, and assets newly in reach, with the is-this-normal verdict beside it.",
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep.html"
@@ -111,16 +112,19 @@
  },
  {
   "ref": "SPC-008",
-  "priority": "med",
+  "priority": "high",
   "order": 8,
   "group": "warning",
   "minutes": 240,
   "task": "Decision clock: a decide-by time on every assessment from fastest credible approach minus response latency",
-  "note": "Roadmap Phase 3, ranked cheapest for its effect. warning_time_rank already exists; needs a response-latency setting.",
+  "note": "Operator ranking 2026-10-28, output 3 (joint second). Decide-by is the fastest credible arrival minus our response latency. Response latency per blue asset is an operator setting; the default needs a ruling before release.",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "deps": [
+   "SPC-007"
   ]
  },
  {
@@ -325,7 +329,7 @@
   "needs_owner": true,
   "human_minutes": 240,
   "task": "One afternoon with a practising analyst to rank the Phase 3 capabilities",
-  "note": "Deferred by the owner on 2026-10-28: revisit later. The Phase 3 capability items wait on it. Source: docs/BUILD-STATE-AND-ROADMAP.md 'honest caveat'."
+  "note": "Deferred by the owner on 2026-10-28. An operator has since confirmed the core question and ranked the outputs (see .board/README.md), so this session is now only about the Phase 3 capability items."
  },
  {
   "ref": "SPC-081",
@@ -349,7 +353,8 @@
   "deps": [
    "SPC-080"
   ],
-  "task": "Behavioural fingerprinting across the GEO belt"
+  "task": "Behavioural fingerprinting across the GEO belt",
+  "note": "Population baseline for output 1: anomaly is easier to see against a population than one history. The strongest candidate to promote once SPC-080 is held."
  },
  {
   "ref": "SPC-083",
@@ -394,7 +399,7 @@
   "group": "decision",
   "minutes": 240,
   "task": "Decision Engine foundation: bind a scenario to a real red track and blue asset",
-  "note": "Owner ruling 2026-10-28: invest in every phase. Scenarios carry no orbit today; this takes the element sets, epochs and data mode from the session. Unbound scenarios keep the lookup path.",
+  "note": "Owner ruling 2026-10-28: invest in every phase. Operator ranks recommended response 4th of 4, so the engine follows the outputs 1 to 3 work. Scenarios carry no orbit today; this takes the element sets, epochs and data mode from the session.",
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py",
@@ -557,36 +562,20 @@
   ]
  },
  {
-  "ref": "SPC-122",
-  "priority": "high",
-  "order": 122,
-  "group": "decision",
-  "minutes": 240,
-  "task": "Phase 3: custody model without a sensor model, agreed and pinned by a test",
-  "note": "SPECTRE models no sensor network, so the spec's line-of-sight check has nothing to look from. Proposal to test: custody lost until a post-burn element set is expected, from the detection floor and the object's measured element-set cadence.",
-  "deps": [
-   "SPC-100"
-  ],
-  "files": [
-   "spectre/domain/decision.py"
-  ]
- },
- {
   "ref": "SPC-123",
   "priority": "high",
   "order": 123,
   "group": "decision",
   "minutes": 300,
-  "task": "Phase 3: custody computed from the agreed model",
-  "note": "Replaces the rule of thumb in compute_outcome_metrics.",
+  "task": "Phase 3: custody in outcomes from the operator's definition",
+  "note": "Custody is lost while information is not timely and actionable enough to judge normality and warning time (operator, 2026-10-28). Uses SPC-018's status; replaces the rule of thumb in compute_outcome_metrics.",
   "deps": [
-   "SPC-122",
+   "SPC-018",
    "SPC-120"
   ],
   "files": [
    "spectre/domain/decision.py"
-  ],
-  "relatesTo": "SPC-122"
+  ]
  },
  {
   "ref": "SPC-124",
@@ -768,5 +757,40 @@
    "docs/generate_guide.py"
   ],
   "track": "tooling"
+ },
+ {
+  "ref": "SPC-009",
+  "priority": "high",
+  "order": 2,
+  "group": "normal",
+  "minutes": 300,
+  "deps": [
+   "SPC-001"
+  ],
+  "task": "Is this normal: judge each detected burn against the object's own history and say so in one sentence",
+  "note": "Operator ranking 2026-10-28, output 1 of 4. Pattern of life already classifies a burn against per-regime budgets and scores the object; this adds the comparison with its own past burns (size, kind, direction, cadence), e.g. routine for this object, or unlike anything in its last 200 days, with the history length it rests on.",
+  "files": [
+   "spectre/astro/pattern_of_life.py",
+   "spectre/domain/pol_assessment.py",
+   "spectre/web/templates/partials/pol_manoeuvre_detail.html"
+  ]
+ },
+ {
+  "ref": "SPC-018",
+  "priority": "high",
+  "order": 3,
+  "group": "custody",
+  "minutes": 240,
+  "deps": [
+   "SPC-001"
+  ],
+  "task": "Custody status per red object: is our information timely and actionable enough to judge normality and warning time",
+  "note": "Operator definition 2026-10-28: custody is having timely and actionable information to determine outputs 1 and 2. Built from element-set age (the 0.6.3 STALE limits), measured cadence, history length and the detection floor. Held, degraded or lost, with the reason, shown on the sweep and pattern of life.",
+  "files": [
+   "spectre/web/elsets.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html",
+   "spectre/astro/pattern_of_life.py"
+  ]
  }
 ]
