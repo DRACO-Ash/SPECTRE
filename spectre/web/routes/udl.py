@@ -646,6 +646,16 @@ def _tle_epoch_metadata(line1: str, scenario_start: datetime | None) -> tuple[st
     return tle_epoch_str, abs((scenario_start - tle_epoch_dt).total_seconds()) / 86400.0
 
 
+#: The red and blue forms each hold a copy of the TLE fields, so their ids
+#: carry the side the fetch is swapping into.
+_FIELDS_SIDES = {"red-tle-fields": "red", "blue-tle-fields": "blue"}
+
+
+def _fields_side(request: Request) -> str:
+    """The form side a TLE fetch fills, from its htmx target; "tle" when unknown."""
+    return _FIELDS_SIDES.get(request.headers.get("HX-Target", ""), "tle")
+
+
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
@@ -668,7 +678,8 @@ async def fetch_tle(
     state = get_session_state(current_user)
 
     _empty = {"name": "", "tle": "", "tle_epoch_str": None,
-               "tle_age_days": None, "mode": mode, "error": None}
+               "tle_age_days": None, "mode": mode, "error": None,
+               "fields_side": _fields_side(request)}
 
     precheck_error = _tle_precheck_error(state, mode)
     if precheck_error is not None:
@@ -779,6 +790,7 @@ async def fetch_tle(
             "mode": mode,
             "elset_mode": str(rec.get("dataMode") or state.udl_data_mode or "REAL").strip().upper(),
             "error": None,
+            "fields_side": _empty["fields_side"],
         },
     )
 

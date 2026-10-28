@@ -979,3 +979,27 @@ its 207,152 in six months. The 300 km graveyard raise reference event carried
 30 days, about 11 m/s" attributed to Table 4 in `monte_carlo.py`, which the
 assimilation doc gives only as the observed Luch/Olymp-K 2 move; it needs the
 Space Watch report itself.
+
+### 0.6.3 outcome
+
+● **Code Quality failed on 10 new issues, all on lines 0.6.3 touched and
+  none in its new logic.** 9 were Web:InputWithoutLabelCheck: the tooltip
+  corrections rewrote `title` attributes on fields that had a placeholder
+  and no label, which put them in the new-code window. The tenth was
+  Web:S6819 on the training banner's `role="status"`, which predates 0.6.3;
+  correcting its `aria-label` brought it in. The 0.6.3 entry checked the
+  lines it added for `role="status"` and not the attributes beside the
+  lines it edited.
+
+## 0.6.4
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality: Web:InputWithoutLabelCheck (9) | **EVIDENCED** | Each field named gets an `id` and a `<label for>`, hidden on screen (`.visually-hidden`) where the layout already shows its purpose: the red and blue SATNO boxes, the HRR search, the data mode and TLE source selects, both UDL login forms, and the TLE name and text fields | All 9 lines named by the gate. The TLE fields are included in the red and the blue form, so their ids carry the side (`red-tle-name`, `blue-tle-name`), set by the include and, on a fetch, from the `HX-Target` header. The 0.6.3 report did not flag the Max ΔV inputs it also touched, which sit inside a `<label>`, so a wrapping label passes too. The two remaining unwrapped fields on the page, the theme picker and the catalog search, are labelled as well. `tests/integration/test_form_labels.py` renders the page before and after UDL connects and finds no field without a label and no id twice. | Then the rule wants the label visible, which it does not describe; the fix is the same markup without the class. |
+| Code Quality: Web:S6819 (1) | **EVIDENCED** | The training banner's `role="status"` becomes `role="note"` | The line named by the gate. The banner is rendered once with the page and never updates, so it is not a live region; `role="note"` passed the 0.6.0 to 0.6.3 scans elsewhere. | Then the rule refuses `note` too, and the banner drops the role and keeps its `aria-label`. |
+| Other gates | **HYGIENE** | None | Templates, one CSS class and one route helper. No dependency, Dockerfile or image change. | n/a. |
+
+**Found on the way.** On a full page load with UDL connected, the status
+partial also rendered its out-of-band TLE source panel, so the page held
+`#tle-source-panel` twice and a stray source dropdown inside the UDL menu.
+It now renders only on the login response that needs it.

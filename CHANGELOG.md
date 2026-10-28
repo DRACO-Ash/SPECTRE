@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-28
+
+### Fixed
+- Every form field on the console has a label tied to it, so a screen reader names it: the SATNO boxes, the HRR and catalog searches, the data mode, TLE source and theme selects, the UDL login, and the TLE name and text fields. The red and blue TLE fields no longer share ids.
+- The training banner is a note rather than a live status region; it never changes once shown.
+- With UDL connected, a full page load no longer shows a second TLE source dropdown inside the UDL menu.
+
 ## [0.6.3] - 2026-10-28
 
 ### Fixed

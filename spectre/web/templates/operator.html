@@ -30,6 +30,7 @@
   <div class="nav-user-group">
 
     <!-- Theme selector -->
+    <label for="theme-picker" class="visually-hidden">Interface theme</label>
     <select id="theme-picker"
             title="Change interface theme"
             onchange="spectreSetTheme(this.value)"
@@ -99,6 +100,7 @@
               </div>
               <div id="red-fetch-controls">
                 <div class="satno-row">
+                  <label for="red-satno" class="visually-hidden">Red track NORAD catalog number</label>
                   <input id="red-satno" name="satno"
                          placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
                          title="NORAD catalog number: press Enter or click Fetch TLE"
@@ -137,7 +139,7 @@
                     hx-on::after-settle="if(event.detail.elt===this){document.getElementById('red-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
                     class="asset-form">
                   <div id="red-tle-fields">
-                    {% include "partials/tle_fields.html" %}
+                    {% with fields_side = "red" %}{% include "partials/tle_fields.html" %}{% endwith %}
                   </div>
                   <div class="submit-row">
                     <button type="submit" class="btn-primary" title="Add this satellite as a Red Force track">Add Red Track</button>
@@ -156,6 +158,7 @@
               </div>
               <div id="blue-fetch-controls">
                 <div class="satno-row">
+                  <label for="blue-satno" class="visually-hidden">Blue asset NORAD catalog number</label>
                   <input id="blue-satno" name="satno"
                          placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
                          title="NORAD catalog number: press Enter or click Fetch TLE"
@@ -194,7 +197,7 @@
                     hx-on::after-settle="if(event.detail.elt===this){document.getElementById('blue-satno').value=''; this.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function(el){el.value='';});}"
                     class="asset-form">
                   <div id="blue-tle-fields">
-                    {% include "partials/tle_fields.html" %}
+                    {% with fields_side = "blue" %}{% include "partials/tle_fields.html" %}{% endwith %}
                   </div>
                   <div class="submit-row">
                     <button type="submit" class="btn-primary" title="Add this satellite as a Blue Force asset">Add Blue Asset</button>
@@ -221,6 +224,7 @@
                 </div>
               </div>
               <div class="hrr-search-wrap" id="hrr-search-wrap">
+                <label for="hrr-search-input" class="visually-hidden">Search the HRR watchlist</label>
                 <input type="search" id="hrr-search-input"
                        placeholder="Search HRR by name, SATNO, country&hellip;"
                        autocomplete="off"
@@ -255,7 +259,8 @@
                 hx-target="#data-mode-status"
                 hx-swap="innerHTML"
                 style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
-            <select name="data_mode" style="width:auto; flex:1"
+            <label for="udl-data-mode-select" class="visually-hidden">UDL data classification</label>
+            <select id="udl-data-mode-select" name="data_mode" style="width:auto; flex:1"
                     title="Select the UDL data classification, which determines the data products returned">
               <option value="REAL"{% if udl_data_mode == 'REAL' %} selected{% endif %}>REAL</option>
               <option value="SIMULATED"{% if udl_data_mode == 'SIMULATED' %} selected{% endif %}>SIMULATED</option>
@@ -320,7 +325,8 @@
                   hx-target="#catalog-results"
                   hx-swap="innerHTML"></span>
           </div>
-          <input type="search"
+          <label for="catalog-search-input" class="visually-hidden">Search the on-orbit catalog</label>
+          <input type="search" id="catalog-search-input"
                  name="q"
                  placeholder="Search by name or SATNO&hellip;"
                  autocomplete="off"
