@@ -457,8 +457,8 @@ function _aiPairRows(rows) {
 function _aiSortKey(row, col, type) {
   var v = row.getAttribute('data-sort-' + col) || '';
   if (type !== 'num') return v;
-  var n = parseFloat(v);
-  return isNaN(n) ? Infinity : n;
+  var n = Number.parseFloat(v);
+  return Number.isNaN(n) ? Infinity : n;
 }
 
 function _aiCompare(col, type) {
