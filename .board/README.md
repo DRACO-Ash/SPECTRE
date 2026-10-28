@@ -34,6 +34,44 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 4. Mark it done in `items.json` with `"state": "done"`, `"est"` (its minutes) and `"actual"` (the minutes it took). Pace is
    measured from those rows; until there are some, every forecast reads from settings and says so.
 
+## Owner rulings
+
+| Date | Question | Ruling |
+|---|---|---|
+| 2026-10-24 | NOTSO cache marking, repository and image | Acceptable to hold, a public repository included (`audit/REMEDIATION-LOG.md`) |
+| 2026-10-24 | UDL- and HRR-sourced object names | Treated as untrusted; fix shipped (F-038) |
+| 2026-10-28 | NOTSO cache in the repository, its history and the image | Confirmed: it stays |
+| 2026-10-28 | UDL and HRR name threat model | Confirmed: accepted as is |
+| 2026-10-28 | Self-service password change | Covered by the platform's single sign-on; nothing to build |
+| 2026-10-28 | Decision Engine | Invest in every phase: SPC-100 to SPC-152 |
+| 2026-10-28 | Analyst session before the Phase 3 capabilities | Deferred; SPC-080 stays open |
+
+## Decision Engine plan
+
+24 items, 6060 priced minutes, in dependency order. The phase numbers are the ones in `docs/decision_engine_phases.md`.
+
+| Stage | Items | What it delivers |
+|---|---|---|
+| Foundation | SPC-100, 101, 102 | Scenarios bound to real element sets; a basis on every figure; reference cases every phase must pass |
+| Phase 2, Monte Carlo | SPC-110 to 115 | Sampled closest approach against the blue trajectory, scored on P5, with bands in the matrix |
+| Phase 3, physics | SPC-120 to 125 | SGP4 closest approach and TCA, computed friendly burns, a custody model, lookup constants retired |
+| Phase 5, NOTSO priors | SPC-130 to 132 | Adversary probabilities seeded from NOTSO history, with an interval and a sensitivity check |
+| Phase 4, multi-turn | SPC-140 to 142 | Two and three turn trees, selectors over the tree, a server-rendered tree view |
+| Joins and upkeep | SPC-150, 151, 152 | Open a scenario from the sweep; cited default weights; the guide kept current |
+
+Three corrections to the April spec are built into the plan:
+● Phase 2 needs the blue element set. `MonteCarloResult` holds element statistics at the horizon, not trajectories, so closest
+  approach needs a separation series (SPC-110).
+● Score on P5 separation, not P95. For a miss distance, P95 is the optimistic tail (SPC-112).
+● No D3. The tree view is server-rendered, so no new third-party library to track and scan (SPC-142).
+
+Phase 4 waits on computed responses and custody, because turn 2 starts from the states turn 1 leaves.
+
+## A limit of the planner
+
+An item that depends on a tooling or research item is never placed: the planner keeps those tracks apart and never marks them
+ready. Keep a dependency's target on the release track, as SPC-102 and SPC-122 are.
+
 ## Where the seed came from
 
 | Source | What was still open |
@@ -41,9 +79,9 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | `docs/BUILD-STATE-AND-ROADMAP.md` | Phase 1 item 3 (intent from behaviour), Phase 2 (manoeuvre trigger), Phase 3 |
 | Coverage run, 2026-10-28 | 92.05% total against a ratchet of 74; lowest are `routes/pol.py` 59.9%, `routes/udl.py` 66.5%, `routes/threat.py` 85.0%. The roadmap's 74.3% and its module table are stale |
 | `docs/RED-TEAM-THREAT-SWEEP.md` | findings 3 and 6 (phase angle, delta-V band); findings 1, 2, 4 and 5 shipped in 0.5.14 |
-| `RETROSPECTIVE.md` | case-sensitive usernames, no self-service password change |
-| `docs/TODO list.txt` | P1-B, P2-A, P2-B, P2-D, P3-A, P3-C, SEC-05 |
-| `audit/GAPS.md` | the human decisions, PostgreSQL path, mutation run, unproven candidates, load test |
+| `RETROSPECTIVE.md` | case-sensitive usernames |
+| `docs/TODO list.txt` | P1-B, P2-B, P2-D, SEC-05; the Decision Engine phases are planned above |
+| `audit/GAPS.md` | PostgreSQL path, mutation run, unproven candidates, load test |
 | `docs/CODE-QUALITY-GATE.md` | `fetch_tle` at complexity 67 and the next two worst |
 
 Left out because the code shows them done: the audit's 296 findings (closed in `audit/REMEDIATION-LOG.md`), session state eviction

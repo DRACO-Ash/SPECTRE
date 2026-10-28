@@ -32,24 +32,76 @@ V0.10: 3 items, 780 priced min, gates browser, container, lint, quality, sast, t
   lane 1 (540m): SPC-060, SPC-031
   lane 2 (240m): SPC-061
 
-tooling: 9 items, 1710 priced min, 28h30 of build; ships no store artefact, so carries no release overhead
+V0.11: 4 items, 840 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-100       240m  priority high; anchors the release
+    SPC-101       180m  priority high
+    SPC-102       240m  priority high
+    SPC-111       180m  fills the release to its floor
+  lane 1 (600m): SPC-100, SPC-101, SPC-111
+  lane 2 (240m): SPC-102
+
+V0.12: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-110       360m  priority high; anchors the release
+    SPC-112       240m  priority high
+    SPC-113       180m  priority high, adds gate browser
+  lane 1 (420m): SPC-112, SPC-113
+  lane 2 (360m): SPC-110
+
+V0.13: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-120       300m  priority high
+    SPC-114       240m  priority high; anchors the release
+    SPC-115       240m  priority high
+  lane 1 (300m): SPC-120
+  lane 2 (480m): SPC-114, SPC-115
+
+V0.14: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-122       240m  priority high
+    SPC-121       360m  priority high; anchors the release
+    SPC-150       180m  fills the release to its floor
+  lane 1 (600m): SPC-122, SPC-121
+  lane 2 (180m): SPC-150
+
+V0.15: 3 items, 720 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-123       300m  priority high; anchors the release
+    SPC-125       120m  rider: priority med, adds no gate
+    SPC-124       300m  priority med, adds gate browser
+  lane 1 (420m): SPC-123, SPC-125
+  lane 2 (300m): SPC-124
+
+V0.16: 3 items, 660 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 11h00 to 11h00 (middle 11h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-130       240m  priority med; anchors the release
+    SPC-131       240m  priority med, adds gate browser
+    SPC-132       180m  priority med
+  lane 1 (660m): SPC-130, SPC-131, SPC-132
+
+V0.17: 2 items, 840 priced min, gates container, lint, quality, sast, tests
+  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-140       480m  priority med; anchors the release
+    SPC-141       360m  fills the release to its floor
+  lane 1 (840m): SPC-140, SPC-141
+
+V0.18: 1 items, 300 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 5h00 to 5h00 (middle 5h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-142       300m  priority med; anchors the release
+  lane 1 (300m): SPC-142
+
+tooling: 10 items, 1830 priced min, 30h30 of build; ships no store artefact, so carries no release overhead
     SPC-014        30m
     SPC-011       240m
     SPC-012       240m
     SPC-013       180m
     SPC-070       180m
     SPC-071       240m
+    SPC-152       120m
     SPC-010       240m
     SPC-073       240m
     SPC-074       120m
-
-waiting: SPC-021 - needs an owner answer
-
-waiting: SPC-040 - needs an owner answer
-
-waiting: SPC-050 - needs an owner answer
-
-waiting: SPC-051 - needs an owner answer
 
 waiting: SPC-080 - needs an owner answer
 
@@ -64,6 +116,5 @@ off path: SPC-083 - research: no release gate
 off path: SPC-084 - research: no release gate
 
 off path: SPC-085 - research: no release gate
-WARNING SPC-041: cannot be placed, its dependencies never become ready
-WARNING SPC-042: cannot be placed, its dependencies never become ready
-WARNING SPC-043: cannot be placed, its dependencies never become ready
+
+off path: SPC-151 - research: no release gate

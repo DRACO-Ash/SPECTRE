@@ -1,6 +1,14 @@
 # Decision Engine — Phase Roadmap
 
-*Last updated: 2026-04-08*
+*Last updated: 2026-04-08. Plan status 2026-10-28 below.*
+
+**Plan status, 2026-10-28.** The owner ruled to invest in every phase. The build plan is `.board/items.json`, SPC-100 to
+SPC-152, summarised in `.board/README.md`. It corrects three points in the phases below:
+● Phase 2 needs the blue element set: `MonteCarloResult` holds element statistics at the horizon, not trajectories, so
+  closest approach needs a separation series.
+● Score on the P5 closest approach, not P95: for a miss distance the conservative figure is the smallest one.
+● The Phase 4 tree is server-rendered rather than D3.js, which is not vendored.
+Foundation work comes first: scenarios bound to real element sets, a basis on every figure, and reference cases.
 
 ---
 
