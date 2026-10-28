@@ -144,6 +144,7 @@ async def red_orbit_info(
             "epoch_str": epoch_str,
             "age": elset_age(track.tle, datetime.now(tz=UTC)),
             "data_mode": track.data_mode,
+            "elset_source": track.elset_source,
             "lon_deg": lon_deg,
             "inc_deg": inc_deg,
             "period_min": period_min,
@@ -365,9 +366,8 @@ async def _prefetch_group_tle(
         )
         if not result:
             return False
-        tle, dm = result
-        state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
-        state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
+        state.hrr_tle_cache[satno_str] = result.tle  # type: ignore[attr-defined]
+        state.hrr_tle_data_mode[satno_str] = result.data_mode  # type: ignore[attr-defined]
         # Also fetch multi-provider history for clustering.
         history = await fetch_tle_history_for_satno(
             int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
@@ -1186,9 +1186,8 @@ async def _fetch_missing_target_tles(
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
             if _result:
-                tle, dm = _result
-                state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
-                state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
+                state.hrr_tle_cache[t.target_satno] = _result.tle  # type: ignore[attr-defined]
+                state.hrr_tle_data_mode[t.target_satno] = _result.data_mode  # type: ignore[attr-defined]
             else:
                 errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
@@ -1320,6 +1319,11 @@ def _attach_data_mode(state: object, grouped: list[dict[str, Any]]) -> None:
 _DECLARED_MODES = frozenset({"REAL", "MANUAL"})
 
 
+def _red_track(state: object, red_sat: str) -> Any | None:
+    """The session's red track called *red_sat*, or None."""
+    return next((t for t in state.red_tracks if t.stk_name == red_sat), None)  # type: ignore[attr-defined]
+
+
 def _red_track_mode(state: object, red_sat: str, red_satno: str | None) -> str:
     """The provenance of the red track's own element set.
 
@@ -1327,10 +1331,16 @@ def _red_track_mode(state: object, red_sat: str, red_satno: str | None) -> str:
     object up in the target cache instead, so a hand-entered red set read as
     REAL whenever the same object was also an HRR target.
     """
-    for track in state.red_tracks:  # type: ignore[attr-defined]
-        if track.stk_name == red_sat:
-            return str(track.data_mode)
+    track = _red_track(state, red_sat)
+    if track is not None:
+        return str(track.data_mode)
     return str(state.hrr_tle_data_mode.get(red_satno or "", "REAL"))  # type: ignore[attr-defined]
+
+
+def _red_track_source(state: object, red_sat: str) -> str:
+    """The UDL provider of the red track's element set, or empty when not recorded."""
+    track = _red_track(state, red_sat)
+    return str(track.elset_source) if track is not None else ""
 
 
 def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
@@ -1522,6 +1532,7 @@ async def threat_sweep(
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
+        "red_elset_source": _red_track_source(state, red_sat),
         "error": None,
     })
 
@@ -1557,9 +1568,8 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
             )
             if not got:
                 return False
-            tle, mode = got
-            state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
-            state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+            state.hrr_tle_cache[actor.actor_satno] = got.tle  # type: ignore[attr-defined]
+            state.hrr_tle_data_mode[actor.actor_satno] = got.data_mode  # type: ignore[attr-defined]
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)

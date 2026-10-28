@@ -7,6 +7,7 @@ UDL connection.  All tests run offline.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -116,43 +117,63 @@ def _make_user():
 
 
 class TestFetchTleLatestMode:
-    """Tests for mode='latest' (GET /udl/elset/current per UDL API spec)."""
+    """mode='latest': the archive window first, every provider, then /elset/current.
 
-    @pytest.mark.asyncio
-    async def test_latest_calls_elset_current(self, mock_state) -> None:
-        """latest mode must use /elset/current (UDL spec: no epoch required)."""
-        record = _make_udl_record(39034)
+    UDL's /elset/current answers for one source and, given none, for 18th
+    SPCS alone, so asking it first returned a 3-day-old set for an object
+    commercial providers had tracked that day.
+    """
+
+    @staticmethod
+    def _client(*payloads: object) -> AsyncMock:
+        responses = []
+        for payload in payloads:
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = payload
+            responses.append(resp)
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get = AsyncMock(side_effect=responses)
+        return client
+
+    async def _fetch(self, mock_state: Any, client: AsyncMock) -> Any:
+        from spectre.web.routes.udl import fetch_tle
 
         with (
             patch("spectre.web.routes.udl.get_session_state", return_value=mock_state),
             patch("spectre.web.routes.udl.render") as render_mock,
-            patch("httpx.AsyncClient") as mock_client_cls,
+            patch("httpx.AsyncClient", return_value=client),
         ):
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = [record]
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-
             render_mock.return_value = MagicMock()
+            await fetch_tle(request=_make_request(), satno=39034, mode="latest", current_user=_make_user())
+        return render_mock.call_args[0][2]
 
-            from spectre.web.routes.udl import fetch_tle
-            await fetch_tle(
-                request=_make_request(),
-                satno=39034,
-                mode="latest",
-                current_user=_make_user(),
-            )
+    @pytest.mark.asyncio
+    async def test_latest_asks_the_archive_window_first(self, mock_state) -> None:
+        client = self._client([_make_udl_record(39034)])
+        ctx = await self._fetch(mock_state, client)
+        url, params = client.get.call_args.args[0], client.get.call_args.kwargs["params"]
+        assert url.endswith("/elset")
+        assert str(params["epoch"]).startswith(">")
+        assert client.get.await_count == 1
+        assert ctx["error"] is None
 
-            call_args = mock_client.get.call_args
-            url = call_args[0][0]
-            assert "/elset/current" in url
-            # Confirm no epoch query parameter is sent
-            params = call_args[1].get("params", {})
-            assert "epoch" not in params
+    @pytest.mark.asyncio
+    async def test_latest_falls_back_to_the_current_catalogue(self, mock_state) -> None:
+        client = self._client([], [_make_udl_record(39034)])
+        ctx = await self._fetch(mock_state, client)
+        url, params = client.get.call_args.args[0], client.get.call_args.kwargs["params"]
+        assert url.endswith("/elset/current")
+        assert "epoch" not in params
+        assert ctx["error"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_sgp4_xp_only_answer_is_refused_with_the_reason(self, mock_state) -> None:
+        xp = {**_make_udl_record(39034), "ephemType": 4}
+        ctx = await self._fetch(mock_state, self._client([xp], [xp]))
+        assert "SGP4-XP" in ctx["error"]
 
     @pytest.mark.asyncio
     async def test_latest_no_udl_creds_returns_error(self, mock_state) -> None:

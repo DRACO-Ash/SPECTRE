@@ -2,11 +2,16 @@
 
 0.6.2 in service: with UDL connected and the HRR list refreshed, the threat
 sweep's red card showed SY-12 02 at an epoch of 15 October on 28 October.
-``fetch_tle_for_satno`` asked ``/elset/current``, which answers with one
-current element set per source and in no order, and kept the first record.
-``_select_latest_elset`` already existed for exactly that reason, and only the
-TLE panel used it. Nothing refreshed a held element set either, and no panel
-but the TLE panel said how old one was.
+Nothing refreshed a held element set, and no panel but the TLE panel said
+how old one was.
+
+0.6.4 in service: TJS-3 (43874) showed a 3-day-old set while commercial
+providers had filed sets that day. Every "latest" fetch asked
+``/elset/current``, which answers for one source and, without one, for 18th
+SPCS alone (UDL's own API description). The archive holds every provider's
+sets, so it is asked first now, and only sets the sgp4 package propagates
+correctly (ephemType 0, correlated) are candidates: an SGP4-XP set run
+through SGP4 gives a wrong orbit and no error.
 """
 
 from __future__ import annotations
@@ -43,20 +48,108 @@ def _tle(epoch: datetime, *, leo: bool = False, satno: int = 50322) -> str:
     return f"{_checksummed(line1)}\n{_checksummed(line2)}"
 
 
-def _record(epoch: datetime, *, source: str = "18SDS", mode: str = "REAL") -> dict[str, Any]:
+def _record(
+    epoch: datetime, *, source: str = "18th SPCS", mode: str = "REAL", **extra: Any,
+) -> dict[str, Any]:
     line1, line2 = _tle(epoch).split("\n")
-    return {"line1": line1, "line2": line2, "source": source, "dataMode": mode}
+    return {"line1": line1, "line2": line2, "source": source, "dataMode": mode, **extra}
 
 
-def _udl_answering(payload: object) -> Any:
-    resp = MagicMock()
-    resp.raise_for_status = MagicMock()
-    resp.json.return_value = payload
+def _udl_client(*payloads: object) -> AsyncMock:
+    """A UDL client answering each GET with the next payload in turn."""
+    responses = []
+    for payload in payloads:
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = payload
+        responses.append(resp)
     client = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    client.get = AsyncMock(return_value=resp)
-    return patch("httpx.AsyncClient", return_value=client)
+    client.get = AsyncMock(side_effect=responses)
+    return client
+
+
+def _udl_answering(*payloads: object) -> Any:
+    return patch("httpx.AsyncClient", return_value=_udl_client(*payloads))
+
+
+class TestTheArchiveIsAskedFirst:
+    @pytest.mark.asyncio
+    async def test_a_commercial_set_from_today_beats_the_18th_spcs_current_set(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        spcs, exo = _NOW - timedelta(days=3), _NOW - timedelta(hours=2)
+        client = _udl_client([_record(spcs), _record(exo, source="EXO")])
+        with patch("httpx.AsyncClient", return_value=client):
+            got = await fetch_tle_for_satno(43874, "u", "p")
+        assert got is not None
+        assert got.tle == _tle(exo) and got.source == "EXO"
+        url, kwargs = client.get.call_args.args[0], client.get.call_args.kwargs
+        assert url.endswith("/elset") and kwargs["params"]["epoch"].startswith(">")
+        assert "source" not in kwargs["params"], "no source means every provider"
+        assert client.get.await_count == 1, "the current catalogue is not needed"
+
+    @pytest.mark.asyncio
+    async def test_the_current_catalogue_answers_when_the_window_is_empty(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        old = _record(_NOW - timedelta(days=9))
+        client = _udl_client([], [old])
+        with patch("httpx.AsyncClient", return_value=client):
+            got = await fetch_tle_for_satno(43874, "u", "p")
+        assert got is not None and got.tle == f"{old['line1']}\n{old['line2']}"
+        assert client.get.call_args_list[1].args[0].endswith("/elset/current")
+
+    @pytest.mark.asyncio
+    async def test_a_chosen_source_narrows_both_queries(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        client = _udl_client([], [_record(_NOW)])
+        with patch("httpx.AsyncClient", return_value=client):
+            await fetch_tle_for_satno(43874, "u", "p", source="LeoLabs")
+        assert [c.kwargs["params"]["source"] for c in client.get.call_args_list] == ["LeoLabs", "LeoLabs"]
+
+
+class TestOnlySgp4SetsAreCandidates:
+    @pytest.mark.asyncio
+    async def test_a_newer_sgp4_xp_set_is_skipped(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        sgp4 = _record(_NOW - timedelta(days=1), ephemType=0)
+        xp = _record(_NOW - timedelta(hours=1), source="EXO", ephemType=4)
+        with _udl_answering([xp, sgp4]):
+            got = await fetch_tle_for_satno(43874, "u", "p")
+        assert got is not None and got.source == "18th SPCS"
+
+    @pytest.mark.asyncio
+    async def test_the_type_is_read_from_line_1_when_the_field_is_absent(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        sgp4 = _record(_NOW - timedelta(days=1))
+        xp = _record(_NOW - timedelta(hours=1), source="EXO")
+        xp["line1"] = xp["line1"][:62] + "4" + xp["line1"][63:]
+        with _udl_answering([xp, sgp4]):
+            got = await fetch_tle_for_satno(43874, "u", "p")
+        assert got is not None and got.source == "18th SPCS"
+
+    @pytest.mark.asyncio
+    async def test_an_uncorrelated_set_is_skipped(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        good = _record(_NOW - timedelta(days=1))
+        uct = _record(_NOW - timedelta(hours=1), source="UCT-FEED", uct=True)
+        with _udl_answering([uct, good]):
+            got = await fetch_tle_for_satno(43874, "u", "p")
+        assert got is not None and got.source == "18th SPCS"
+
+    @pytest.mark.asyncio
+    async def test_nothing_usable_anywhere_is_none(self) -> None:
+        from spectre.web.routes.udl import fetch_tle_for_satno
+
+        xp = _record(_NOW, ephemType=4)
+        with _udl_answering([xp], [xp]):
+            assert await fetch_tle_for_satno(43874, "u", "p") is None
 
 
 class TestTheNewestEpochIsTaken:
@@ -68,7 +161,7 @@ class TestTheNewestEpochIsTaken:
         with _udl_answering([_record(stale, source="LAGGING"), _record(fresh)]):
             got = await fetch_tle_for_satno(50322, "u", "p")
         assert got is not None
-        assert got[0] == _tle(fresh), "the first record was taken, not the newest"
+        assert got.tle == _tle(fresh), "the first record was taken, not the newest"
 
     @pytest.mark.asyncio
     async def test_the_newest_complete_record_wins_over_a_newer_empty_one(self) -> None:
@@ -79,7 +172,7 @@ class TestTheNewestEpochIsTaken:
         with _udl_answering([empty, good]):
             got = await fetch_tle_for_satno(50322, "u", "p")
         assert got is not None
-        assert got[0] == f"{good['line1']}\n{good['line2']}"
+        assert got.tle == f"{good['line1']}\n{good['line2']}"
 
     @pytest.mark.asyncio
     async def test_the_mode_is_the_chosen_records_own(self) -> None:
@@ -90,7 +183,7 @@ class TestTheNewestEpochIsTaken:
         with _udl_answering([older, newer]):
             got = await fetch_tle_for_satno(50322, "u", "p")
         assert got is not None
-        assert got[1] == "TEST"
+        assert got.data_mode == "TEST"
 
 
 class TestElementSetAge:
@@ -125,8 +218,11 @@ def _state_holding(*tracks: RedTrack, blue: tuple[BlueAsset, ...] = ()) -> Sessi
 
 
 def _fetch_returning(by_satno: dict[int, tuple[str, str] | None]) -> Any:
-    async def fake(satno: int, *_args: object, **_kwargs: object) -> tuple[str, str] | None:
-        return by_satno.get(satno)
+    from spectre.web.routes.udl import FetchedElset
+
+    async def fake(satno: int, *_args: object, **_kwargs: object) -> FetchedElset | None:
+        got = by_satno.get(satno)
+        return FetchedElset(*got, "18th SPCS") if got else None
 
     return patch("spectre.web.routes.udl.fetch_tle_for_satno", side_effect=fake)
 
@@ -140,6 +236,8 @@ class TestRefreshAtConnect:
         with _fetch_returning({50322: (fresh, "REAL")}):
             await refresh_held_elsets(state, "u", "p")
         assert track.tle == fresh
+        assert track.elset_source == "18th SPCS", "the provider is kept with the set"
+        assert state.udl_available_sources == ["18th SPCS"], "and offered in the TLE Source panel"
         refresh = state.elset_refresh
         assert refresh is not None and not refresh.running
         assert refresh.updated == ["red SY-12 02"]

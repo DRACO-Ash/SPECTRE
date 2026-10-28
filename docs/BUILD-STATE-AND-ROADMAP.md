@@ -191,6 +191,107 @@ from the adversary's fastest credible approach minus your own response latency.
 That single number, on every screen, would change how the tool is used more
 than any new calculation.
 
+## SGP4-XP element sets: research and plan (added 0.6.5)
+
+**Why it is on the list.** From 0.6.5 the newest element set is taken from
+UDL's archive across every provider, and only ephemType 0 (SGP4) sets are
+candidates. The providers active on UDL for the Joint Commercial Operations
+(JCO) cell include 15SPSS, ESTM-OB, ExoAnalytic (EXO), KRTL, LeoLabs, NSFCTC,
+PPEC, SAFRAN, TransAstra and a.i. solutions; the owner's chart of these is of
+observation counts, so which of them also file element sets, and in which
+ephemType, is not yet known. Any newer set they file as SGP4-XP is passed
+over today, and the deployment log now records each one
+("archive sets skipped: type 4 from ..."). That log is the evidence this item
+waits on.
+
+Labels: FACT is sourced, INFERENCE is reasoned, UNKNOWN is open. Sources were
+read in October 2026; the list is at the end of this section.
+
+**What SGP4-XP is**
+● FACT: USSF released SGP4-XP in December 2020 in version 8 of the SGP4
+  library in the Astrodynamics Standards (AstroStds) package [2][3]. It adds
+  better third-body and resonance terms, solar radiation pressure (SRP) for
+  high area-to-mass objects, J5, EGM-96 in place of WGS-72, Jacchia-70 drag and
+  a cislunar branch [2][3].
+● FACT: accuracy is reported as significantly better than SGP4 in MEO and GEO,
+  comparable in LEO, at a 15 to 35% runtime cost [3]. UNKNOWN: the paper's own
+  GEO error figures (its Tables 5 to 9 would settle it).
+
+**Why SPECTRE cannot use an XP set today**
+● FACT: line 1 column 63 holds the ephemeris type; 4 is XP [4][8]. In an XP
+  set, columns 45-52 carry AGOM (area x Cr / mass) in place of n-double-dot,
+  and columns 54-61 carry BTERM, a ballistic term that is not B* [7][8][9].
+● FACT: the `sgp4` package (2.27) parses the type and never acts on it, so it
+  would propagate an XP set silently, reading BTERM as B* and ignoring AGOM
+  [10]. Commercial libraries refuse the type instead [11]. Orekit does not
+  support XP; the algorithm is not public [14].
+● INFERENCE: the error from propagating XP as SGP4 is kilometre-class or worse
+  at GEO and for high area-to-mass objects. UNKNOWN: no published figure; step 1
+  below measures it.
+
+**How a propagator can be obtained**
+● FACT: the official route is a Space-Track.org account, which gives the
+  `Sgp4Prop` library as binaries only [5][6]. AstroStds was export controlled
+  until version 8, which is labelled non-restricted access [3].
+● FACT: `pysaal` 1.3.3 (MIT) ships the USSF libraries (SAAL 9.6) as Linux
+  x86_64 and aarch64 wheels needing glibc 2.17 or later, so the current
+  python:3.12-slim image can take it; it exposes the XP functions [7][12].
+  `keplemon` 3.7.0 (MIT) bundles the same libraries [13].
+● FACT: the bundled "SpOC Open Source Agreement for SGP4" grants worldwide,
+  royalty-free use and binary redistribution, provided the agreement and the
+  US Government notice travel with it [7]. It also says SGP4 "is to be used
+  solely for the purpose of propagating 18 SDS created TLEs" and that US export
+  licences may be needed and are not granted by it [7].
+● INFERENCE: the "18 SDS created TLEs" clause may not cover commercial
+  providers' XP sets, which is the whole reason for wanting XP. UNKNOWN: the
+  current export classification and foreign-release position for a UK
+  sovereign company; AFSPCI 17-105 governs SAAL distribution and cites ITAR
+  [1]. A written USSF/SpOC confirmation would settle both.
+● INFERENCE: SAAL keeps global state, so calls must be serialised inside the
+  FastAPI process.
+
+**Plan**
+
+1. **Measure before building (no code change beyond 0.6.5).** Read the
+   0.6.5 skip log over two weeks of operator use: how many held objects have a
+   newer XP set than their newest SGP4 set, from which providers, and by how
+   many hours. If XP sets are rare or never newer, stop here.
+2. **Legal and export review (Bluestaq, not code).** Put the SpOC agreement,
+   the "18 SDS created TLEs" clause and the export question to Bluestaq's
+   export control lead, and to USSF/SpOC through the UDL programme if needed.
+   Nothing is bundled until this clears in writing.
+3. **A propagator seam.** Put every SGP4 call behind one interface chosen by
+   ephemType (0 to the `sgp4` package, 4 to an XP backend), so the rest of the
+   code never sees the difference. This step is worth doing even if XP is
+   never added: it is where a refusal of unsupported types belongs.
+4. **An XP backend on `pysaal`.** Behind the seam, serialised, with the
+   licence and notice carried in the image as the agreement requires.
+   Accepting XP in `_usable_records` is then a one-line change.
+5. **Golden cases.** No published XP test vectors were found. Generate them
+   with the official `Sgp4Prop` driver from real UDL type 4 sets, and pin
+   `pysaal` to them. Also record the SGP4-versus-XP difference on the same sets,
+   which answers the open error question.
+6. **Show it.** The red card and sweep already name the provider; they would
+   add the propagator used.
+
+**Where it sits.** After the review in step 2. It does not block Phase 2.
+
+**Alternative if the review says no.** Provider state vectors or ephemerides
+from UDL, fed to a numerical propagator, avoid SAAL entirely. UNKNOWN: whether
+each provider files those alongside its element sets, and whether UDL offers
+a propagation service; the UDL Storefront documentation would settle it.
+
+Sources: [1] static.e-publishing.af.mil AFSPCI 17-105; [2] AMOS 2022, Payne et
+al., SGP4-XP; [3] a.i. solutions AMOS 2022 SGP4-XP paper and Conkey poster;
+[4][8][9] a.i. solutions FreeFlyer help on ephemeris type and TLE format;
+[5] pkg.go.dev xpropagation/xpropagator; [6] celestrak.org SGP4 tutorial;
+[7] pypi.org/project/pysaal/1.3.3 (wheel and licence inspected, not run);
+[10] pypi.org/project/sgp4/2.27 (source inspected); [11] AGI Components
+UsafGeneralPerturbationElements; [12] pypi.org/project/pysaal;
+[13] pypi.org/project/keplemon/3.7.0; [14] forum.orekit.org SGP4-XP thread.
+Several of these were read as search excerpts rather than in full; the legal
+points rest on the licence file itself.
+
 ## What I would do in what order
 
 1. Phase 1 wiring. Largest gain, least risk, uses only what is built.
@@ -201,6 +302,8 @@ than any new calculation.
    three thinnest and three most important.
 4. Phase 2, the manoeuvre trigger.
 5. Phase 3, chosen by which customer conversation lands first.
+6. SGP4-XP element sets, once the measurement and the legal and export review
+   in that section have cleared.
 
 ## The honest caveat
 

@@ -1003,3 +1003,46 @@ Space Watch report itself.
 partial also rendered its out-of-band TLE source panel, so the page held
 `#tle-source-panel` twice and a stray source dropdown inside the UDL menu.
 It now renders only on the login response that needs it.
+
+### 0.6.4 outcome
+
+● **Every gate passed, Code Quality included, and the app deployed.** The
+  10 issues from 0.6.3 cleared and none were raised on the lines 0.6.4
+  changed.
+
+## 0.6.5
+
+From operator use of 0.6.4. With UDL connected and the refresh run, the
+threat sweep's red card showed TJS-3 (43874) with a set from 25 October, 3
+days old and flagged STALE, while commercial providers had filed sets for it
+that day.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the archive-first newest-set fetch with an SGP4-only filter, the provider on the red card and in the sweep, source discovery from the archive, and the SGP4-XP roadmap section | Written against what the gate reported in 0.6.0 to 0.6.4: no form field without a label, no `role="status"`, no Jinja comment inside a tag, no new literal repeated three times in a file (the epoch filter is one helper), `Annotated` form parameters, and no touched function over complexity 15. | Then the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**The defect, measured against the spec.** UDL's own description of
+`/elset/current` (in `docs/openapi.json`): "Current elsets are tracked by
+source ... If source is not provided, it will be defaulted to '18th SPCS'."
+Every "latest" fetch asked it without a source, so every red track, target,
+screen, manoeuvre and refresh received the 18th SPCS set and nothing newer
+from any other provider. The archive (`/elset`) was used only for clustering.
+
+**0.6.3 was wrong about this, in part.** Its entry said `/elset/current`
+answers with one current set per source in no order, and its fix chose the
+newest of the records returned. Without a source there is one record, so
+that fix had nothing to choose between; its test offered two sources, which
+the live endpoint does not. The connect-time refresh did work, and is why
+the card showed 3 days rather than 13.
+
+**What changed.** The archive over the last 72 hours (the longest staleness
+limit, so anything older is STALE in every regime) is asked first, across
+every provider or the one chosen in TLE Source, and the newest usable set
+wins; the current catalogue answers only when the window is empty. Usable
+means both lines, not uncorrelated (`uct`), and ephemType 0: the `sgp4`
+package reads an SGP4-XP set (type 4) without complaint and propagates it
+wrongly. Each skipped set is logged by type and provider, which is the
+measurement the SGP4-XP roadmap item starts from. Not verified against live
+UDL from here: the providers that file element sets for TJS-3, and their
+ephemType.

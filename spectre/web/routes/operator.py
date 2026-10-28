@@ -15,7 +15,7 @@ from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
-from spectre.web.elsets import provenance
+from spectre.web.elsets import provenance, provider
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -117,11 +117,13 @@ async def add_blue_asset(
     tle: Annotated[str, Form()],
     current_user: Annotated[User, Depends(require_login)],
     elset_mode: Annotated[str, Form()] = "",
+    elset_source: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     """Add a blue asset and return the updated blue list partial.
 
-    *elset_mode* is the UDL data mode the TLE panel tags a fetched set with;
-    a set typed or edited by hand arrives without it and is MANUAL.
+    *elset_mode* and *elset_source* are the UDL data mode and provider the
+    TLE panel tags a fetched set with; a set typed or edited by hand arrives
+    without them and is MANUAL, with no provider.
     """
     state = get_session_state(current_user)
 
@@ -131,7 +133,9 @@ async def add_blue_asset(
     if refusal is not None:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
         return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
-    asset = BlueAsset(name=name, tle=tle, data_mode=provenance(elset_mode))
+    asset = BlueAsset(
+        name=name, tle=tle, data_mode=provenance(elset_mode), elset_source=provider(elset_mode, elset_source),
+    )
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": f"{asset.stk_name} is already in the session."}
@@ -180,13 +184,14 @@ async def quick_add_blue_asset(
         data_mode=state.udl_data_mode or "REAL",
         source=state.udl_tle_source,
     )
-    tle = _result[0] if _result else None
-    if not tle:
+    if _result is None:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
         return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
-    asset = BlueAsset(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
+    asset = BlueAsset(
+        name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source,
+    )
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
 
@@ -241,13 +246,14 @@ async def quick_add_red_track(
         data_mode=state.udl_data_mode or "REAL",
         source=state.udl_tle_source,
     )
-    tle = _result[0] if _result else None
-    if not tle:
+    if _result is None:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"TLE fetch failed for {clean_name} ({satno})."}
         return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
-    track = RedTrack(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
+    track = RedTrack(
+        name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source,
+    )
     state.red_tracks.append(track)
     state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
 
@@ -290,10 +296,11 @@ async def add_red_track(
     tle: Annotated[str, Form()],
     current_user: Annotated[User, Depends(require_login)],
     elset_mode: Annotated[str, Form()] = "",
+    elset_source: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     """Add a red track and return the updated red list partial.
 
-    *elset_mode* is as for :func:`add_blue_asset`.
+    *elset_mode* and *elset_source* are as for :func:`add_blue_asset`.
     """
     state = get_session_state(current_user)
 
@@ -303,7 +310,9 @@ async def add_red_track(
     if refusal is not None:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
         return _list_response(request, _RED_LIST_TEMPLATE, ctx)
-    track = RedTrack(name=name, tle=tle, data_mode=provenance(elset_mode))
+    track = RedTrack(
+        name=name, tle=tle, data_mode=provenance(elset_mode), elset_source=provider(elset_mode, elset_source),
+    )
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": f"{track.stk_name} is already in the session."}

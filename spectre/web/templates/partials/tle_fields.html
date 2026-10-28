@@ -25,6 +25,9 @@
    set that the connect-time refresh may update. Editing the text makes it
    the operator's own, so the tag is dropped. #}
 <input type="hidden" name="elset_mode" value="{{ elset_mode }}" />
+{% if elset_source is defined and elset_source %}
+<input type="hidden" name="elset_source" value="{{ elset_source }}" />
+{% endif %}
 {% endif %}
 <label for="{{ _side }}-tle-text" class="visually-hidden">Two-line element set</label>
 <textarea id="{{ _side }}-tle-text" name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required

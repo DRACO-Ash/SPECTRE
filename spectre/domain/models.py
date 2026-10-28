@@ -31,6 +31,9 @@ class BlueAsset:
     #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
     #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
     data_mode: str = "MANUAL"
+    #: The UDL provider that produced the set (its ``source``, e.g. 18th SPCS),
+    #: or empty for one entered by hand or not recorded.
+    elset_source: str = ""
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -57,6 +60,9 @@ class RedTrack:
     #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
     #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
     data_mode: str = "MANUAL"
+    #: The UDL provider that produced the set (its ``source``, e.g. 18th SPCS),
+    #: or empty for one entered by hand or not recorded.
+    elset_source: str = ""
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:

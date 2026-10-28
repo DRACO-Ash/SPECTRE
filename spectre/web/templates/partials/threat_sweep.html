@@ -26,7 +26,7 @@
     <strong>Element set ages</strong> at sweep time:
     {% if elset_ages.red %}
     Interceptor <span class="{{ 'badge-warn' if elset_ages.red.stale else 'badge-ok' }}"
-      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>.
+      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>{% if red_elset_source is defined and red_elset_source %}, from {{ red_elset_source }}{% endif %}.
     {% endif %}
     {% if elset_ages.count %}
     Targets {{ elset_ages.newest.label }} to {{ elset_ages.oldest.label }} old{% if elset_ages.stale %},

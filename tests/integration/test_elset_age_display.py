@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -52,7 +53,23 @@ class TestTheRedCard:
         card = _card(client, auth_cookie, "NEW")
         assert "5.0 h old" in card
         assert "old STALE" not in card
-        assert "REAL" in card, "the card says where the set came from"
+        assert "Provider:</strong> not recorded" in card and "REAL" in card
+
+    def test_the_provider_and_mode_are_stated_apart(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        """REAL is a data mode. The card called it the source and never named the provider."""
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="TJS3", tle=_tle(datetime.now(tz=UTC)), data_mode="REAL", elset_source="EXO"),
+        ]
+        card = _card(client, auth_cookie, "TJS3")
+        assert "Provider:</strong> EXO" in card and "REAL" in card
+
+    def test_a_hand_entered_set_says_so(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [RedTrack(name="HAND", tle=_tle(datetime.now(tz=UTC)))]
+        assert "Source:</strong> entered by hand" in _card(client, auth_cookie, "HAND")
 
 
 class TestTheSweep:
@@ -60,7 +77,10 @@ class TestTheSweep:
         from spectre.domain.models import RedTrack
 
         red_state.red_tracks = [
-            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL"),
+            RedTrack(
+                name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)),
+                data_mode="REAL", elset_source="18th SPCS",
+            ),
         ]
         _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
         resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
@@ -68,6 +88,7 @@ class TestTheSweep:
         text = " ".join(resp.text.split())
         assert "Element set ages" in text
         assert "2.0 h" in text, "the interceptor's age"
+        assert "from 18th SPCS" in text, "and its provider"
         assert "1 stale" in text and "BLUE-GEO" in text, "the stale target is named"
 
     def test_a_stale_interceptor_is_flagged(self, client: Any, auth_cookie: str, red_state: Any) -> None:
@@ -122,8 +143,17 @@ class TestProvenanceIsRecorded:
         self, client: Any, auth_cookie: str, red_state: Any,
     ) -> None:
         red_state.red_tracks = []
-        self._add(client, auth_cookie, {"name": "FETCHED", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "real"})
+        self._add(client, auth_cookie, {
+            "name": "FETCHED", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "real", "elset_source": "LeoLabs",
+        })
         assert red_state.red_tracks[-1].data_mode == "REAL"
+        assert red_state.red_tracks[-1].elset_source == "LeoLabs"
+
+    def test_a_provider_without_a_udl_mode_is_dropped(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        """Editing a fetched set drops its mode tag; the provider must not outlive it."""
+        red_state.red_tracks = []
+        self._add(client, auth_cookie, {"name": "EDITED", "tle": _tle(datetime.now(tz=UTC)), "elset_source": "EXO"})
+        assert red_state.red_tracks[-1].elset_source == ""
 
     @pytest.mark.parametrize("claimed", ["", "SYNTHETIC", "made up"])
     def test_anything_else_is_manual(self, client: Any, auth_cookie: str, red_state: Any, claimed: str) -> None:
@@ -158,3 +188,28 @@ class TestConnectStartsTheRefresh:
         assert resp.status_code == 200
         assert "refresh_held_elsets" in spawned
         assert 'id="elset-refresh-note" hx-swap-oob="outerHTML"' in resp.text, "the note starts polling"
+
+
+class TestProvidersAreDiscoveredFromTheArchive:
+    @pytest.mark.asyncio
+    async def test_every_provider_on_the_iss_archive_is_offered(self) -> None:
+        from spectre.web.planning_state import SessionState
+        from spectre.web.routes.udl import _discover_tle_sources
+        from tests.unit.test_elset_freshness import _record, _udl_client
+
+        now = datetime.now(tz=UTC)
+        client = _udl_client([_record(now, source="18th SPCS"), _record(now, source="LeoLabs"), _record(now, source="")])
+        state = SessionState()
+        state.udl_available_sources = ["EXO"]
+        with patch("httpx.AsyncClient", return_value=client):
+            await _discover_tle_sources("u", "p", state)
+        assert state.udl_available_sources == ["18th SPCS", "EXO", "LeoLabs"]
+        assert client.get.call_args.args[0].endswith("/elset"), "the archive, not the 18th SPCS current catalogue"
+
+    def test_logout_forgets_them(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        from tests.conftest import csrf_headers
+
+        red_state.udl_available_sources = ["EXO"]
+        resp = client.post("/udl/logout", cookies={"spectre_session": auth_cookie}, headers=csrf_headers(auth_cookie))
+        assert resp.status_code == 200
+        assert red_state.udl_available_sources == []

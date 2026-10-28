@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-10-28
+
+### Fixed
+- The newest element set is taken from every provider on UDL, not only 18th SPCS. Every latest fetch asked UDL's current catalogue, which answers for 18th SPCS alone when no source is given; in service that put a 3-day-old set on the red card for an object commercial providers had tracked that day. The archive over the last 72 hours is asked first, and the current catalogue only when it has nothing.
+- SGP4-XP and uncorrelated element sets are never used: the propagator would read an XP set without complaint and give a wrong orbit. Each one passed over is logged by provider.
+- The red card names the provider that produced the set and gives the data mode beside it; it used to label the data mode as the source. A hand-entered set says so. The sweep names the interceptor's provider.
+- The TLE Source list is built from the archive and grows with every provider a fetch sees, rather than holding 18th SPCS alone.
+
+### Added
+- The SGP4-XP research and plan in `docs/BUILD-STATE-AND-ROADMAP.md`: what it is, why SPECTRE cannot use it yet, how a propagator could be obtained, the licence and export questions, and a six-step plan that starts with measuring how often XP sets are passed over.
+
 ## [0.6.4] - 2026-10-28
 
 ### Fixed

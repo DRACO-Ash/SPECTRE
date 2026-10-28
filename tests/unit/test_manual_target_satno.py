@@ -17,6 +17,7 @@ import pytest
 
 from spectre.domain.models import ThreatTarget
 from spectre.web.routes import threat
+from spectre.web.routes.udl import FetchedElset
 from tests.integration.test_all_intercepts_ranking import _BLUE_GEO
 
 _ALPHA5 = "\n".join(
@@ -51,7 +52,7 @@ async def test_manual_targets_are_not_fetched_and_a_failed_fetch_is_recorded(
         asked.append(satno)
         if satno == 2:
             raise ConnectionError("UDL timed out")
-        return ("TLE", "REAL")
+        return FetchedElset("TLE", "REAL", "18th SPCS")
 
     monkeypatch.setattr(udl, "fetch_tle_for_satno", _fetch)
     targets = [

@@ -16,11 +16,15 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.config.constants import TLE_FILTER
 from spectre.data.intel import satno_from_tle
 from spectre.web.planning_state import ElsetRefresh, SessionState
+
+if TYPE_CHECKING:
+    from spectre.web.routes.udl import FetchedElset
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,17 @@ def provenance(claimed: str) -> str:
     """The data mode to record for a set added through a form: a UDL mode, or MANUAL."""
     mode = claimed.strip().upper()
     return mode if mode in UDL_MODES else "MANUAL"
+
+
+#: A provider name arrives in a form field, so it is bounded before it is kept.
+_PROVIDER_MAX_LEN = 64
+
+
+def provider(claimed_mode: str, claimed_source: str) -> str:
+    """The provider to record for a set added through a form: only a UDL set has one."""
+    if provenance(claimed_mode) == "MANUAL":
+        return ""
+    return claimed_source.strip()[:_PROVIDER_MAX_LEN]
 
 
 @dataclass(frozen=True)
@@ -126,24 +141,24 @@ def _held_sets(state: SessionState) -> list[_Held]:
     return held
 
 
-def _write_back(state: SessionState, item: _Held, tle: str, mode: str) -> None:
-    """Put *tle* wherever *item* came from."""
+def _write_back(state: SessionState, item: _Held, got: FetchedElset) -> None:
+    """Put the fetched set wherever *item* came from."""
     side, _, name = item.label.partition(" ")
     if side == "target":
-        state.hrr_tle_cache[name] = tle
-        state.hrr_tle_data_mode[name] = mode
+        state.hrr_tle_cache[name] = got.tle
+        state.hrr_tle_data_mode[name] = got.data_mode
         return
     objects = state.red_tracks if side == "red" else state.blue_assets
     for obj in objects:
         if obj.name == name and obj.tle == item.tle:
-            obj.tle, obj.data_mode = tle, mode
+            obj.tle, obj.data_mode, obj.elset_source = got.tle, got.data_mode, got.source
 
 
 async def _refresh_one(
     state: SessionState, item: _Held, credentials: tuple[str, str], sem: asyncio.Semaphore,
 ) -> str:
     """Fetch the newest set for *item* and keep it if it is newer: 'updated', 'current' or 'failed'."""
-    from spectre.web.routes.udl import fetch_tle_for_satno
+    from spectre.web.routes.udl import fetch_tle_for_satno, remember_sources
 
     async with sem:
         got = await fetch_tle_for_satno(
@@ -152,9 +167,9 @@ async def _refresh_one(
         )
     if got is None:
         return "failed"
-    tle, mode = got
-    if item.mode == _SYNTHETIC or _is_newer(tle, item.tle):
-        _write_back(state, item, tle, mode)
+    remember_sources(state, [got.source])
+    if item.mode == _SYNTHETIC or _is_newer(got.tle, item.tle):
+        _write_back(state, item, got)
         return "updated"
     return "current"
 

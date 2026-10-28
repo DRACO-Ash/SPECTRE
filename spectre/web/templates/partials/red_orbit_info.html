@@ -6,7 +6,11 @@
     <span class="{{ 'badge-warn' if age.stale else 'badge-ok' }}"
           title="Age now. STALE is past {{ '%.0f' | format(age.limit_hours) }} hours, the limit for this regime">{{ age.label }} old{% if age.stale %} STALE{% endif %}</span>
     {% endif %}
-    <span title="Where this element set came from: a UDL data mode, or MANUAL for one entered by hand"><strong>Source:</strong> {{ data_mode }}</span>
+    {% if data_mode == "MANUAL" %}
+    <span title="This element set was entered by hand, not fetched from UDL"><strong>Source:</strong> entered by hand</span>
+    {% else %}
+    <span title="The UDL provider that produced this element set, and the data mode it was fetched in"><strong>Provider:</strong> {{ elset_source or "not recorded" }} &middot; {{ data_mode }}</span>
+    {% endif %}
     <span title="Sub-satellite longitude at TLE epoch (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
     <span title="Orbital inclination"><strong>Inc [<em>i</em>]:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
     <span title="Orbital period"><strong>Period:</strong> {{ "%.1f"|format(period_min) }} min</span>

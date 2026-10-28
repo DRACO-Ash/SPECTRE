@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from spectre.web.routes.udl import FetchedElset
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
 
@@ -102,9 +103,9 @@ def udl_connected(monkeypatch: pytest.MonkeyPatch, auth_cookie: str) -> Iterator
     saved_blue, saved_red = list(state.blue_assets), list(state.red_tracks)
     state.udl_username, state.udl_password = "udl-user", "udl-pass"
 
-    async def _stub_fetch(*args: object, **kwargs: object) -> tuple[str, str]:
-        """Stand in for the UDL round trip: ``(tle_text, data_mode)``."""
-        return (_STUB_TLE, "REAL")
+    async def _stub_fetch(*args: object, **kwargs: object) -> FetchedElset:
+        """Stand in for the UDL round trip."""
+        return FetchedElset(_STUB_TLE, "REAL", "18th SPCS")
 
     monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", _stub_fetch)
     yield state

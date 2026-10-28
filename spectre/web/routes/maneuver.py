@@ -1304,7 +1304,7 @@ async def _refetch_tles(
             data_mode=data_mode,
             source=getattr(state, "udl_tle_source", ""),
         )
-        return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
+        return _Fetched(result.tle, result.data_mode) if result else _Fetched(tle, _held_mode(state, tle))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue
