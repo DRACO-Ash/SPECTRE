@@ -188,6 +188,7 @@ async def _apply_migrations(conn: Any) -> None:
         if column not in existing:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
     await _key_training_on_account(conn)
+    await _username_unique(conn)
 
 
 # Whole statements, one set per table, so no SQL is assembled from strings at
@@ -265,6 +266,36 @@ async def _key_training_on_account(conn: Any) -> None:
 
 
 
+async def _username_unique(conn: Any) -> None:
+    """Make a username unique whatever its letter case, if the accounts allow it.
+
+    A database from before SPC-020 may hold names that differ only in case.
+    The index cannot be built over them, and choosing which account to keep is
+    not this function's call, so it says so and leaves them: each still signs
+    in by its exact spelling, and no other spelling reaches either. Safe to
+    re-run.
+    """
+    from sqlalchemy import text
+
+    if not await conn.run_sync(_existing_columns, "users"):
+        return
+    clashes = await conn.execute(text(
+        "SELECT lower(username) FROM users GROUP BY lower(username) HAVING COUNT(*) > 1"
+    ))
+    clashing = len(clashes.scalars().all())
+    if clashing:
+        logger.error(
+            "%d username(s) are held by more than one account that differ only in letter case. "
+            "Each signs in only by its exact spelling until an admin deletes the duplicate; "
+            "the next boot then makes usernames unique whatever their case.",
+            clashing,
+        )
+        return
+    await conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username_lower ON users (lower(username))"
+    ))
+
+
 def _admin_password_refused(password: str) -> bool:
     """Whether SPECTRE_ADMIN_PASS is too long for bcrypt; logged if so.
 
@@ -306,10 +337,12 @@ async def _break_glass(
     session: AsyncSession, existing: list[Any], username: str, password: str, promote: bool,
 ) -> None:
     """Reset *username*'s password, creating the admin account if it has gone."""
-    from spectre.web.auth import hash_password
+    from spectre.web.auth import account_named, hash_password
     from spectre.web.models import User
 
-    target = next((u for u in existing if u.username == username), None)
+    # The same matching as sign-in, so SPECTRE_ADMIN_USER=Admin resets "admin"
+    # rather than creating a second account beside it (SPC-020).
+    target = account_named(existing, username)
     if target is not None and target.role != "admin" and not promote:
         logger.error(
             "ADMIN RESET REFUSED for %r: the account exists and is not an admin. "

@@ -6,7 +6,7 @@ import secrets
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import DateTime, Integer, String, event
+from sqlalchemy import DateTime, Index, Integer, String, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
@@ -90,6 +90,13 @@ class User(Base):
 
     # Set by require_login from the token that authenticated this request.
     session_key: SessionKey | None = None
+
+
+# One account per name whatever its letter case (SPC-020). A fresh database
+# gets this from create_all; an existing one gets it at boot, unless it
+# already holds names that differ only in case (database._username_unique).
+USERNAME_LOWER_INDEX = "ux_users_username_lower"
+Index(USERNAME_LOWER_INDEX, func.lower(User.username), unique=True)
 
 
 # A password change has to end the sessions that were opened with the old

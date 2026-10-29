@@ -17,6 +17,7 @@ from spectre.web.auth import (
     hash_password,
     password_too_long,
     require_admin,
+    username_taken,
 )
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
@@ -163,10 +164,8 @@ async def create_user(
         error = "Password is required."
     elif password_too_long(password):
         error = PASSWORD_TOO_LONG
-    else:
-        existing = await db.execute(select(User).where(User.username == username))
-        if existing.scalar_one_or_none():
-            error = f"Username '{username}' is already taken."
+    elif await username_taken(db, username):
+        error = f"Username '{username}' is already taken. Usernames ignore letter case."
 
     users = await _all_users(db)
     if error:
