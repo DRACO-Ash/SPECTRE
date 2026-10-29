@@ -36,12 +36,25 @@
   </div>
   {% endif %}
 
+  {% if epoch_note is defined and epoch_note %}
+  <div class="field-meta" role="note" style="margin:0.3rem 0; font-size:0.75rem">{{ epoch_note }}</div>
+  {% endif %}
+
   {% if red_history is defined and red_history %}
   {# Is this normal? The operator's first question, for the interceptor's
      latest burn against its own history (SPC-009). Band tokens, not hex, so
      the light theme keeps its contrast. #}
   {% set rn = red_history.normality %}
   {% set rn_band = {"unprecedented":"critical","unusual":"high","routine":"minimal"}.get(rn.verdict.value, "unknown") if rn else "unknown" %}
+  {% set rc = red_history.custody %}
+  {% set rc_band = {"held":"minimal","degraded":"high","lost":"critical"}.get(rc.state.value, "unknown") %}
+  {# Custody first: it says whether the lines after it can be trusted (SPC-018). #}
+  <section class="sweep-custody" aria-label="Custody of the interceptor"
+           style="border-left:4px solid var(--spectre-status-{{ rc_band }}); background:rgba(var(--spectre-status-{{ rc_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
+    <strong>{{ rc.sentence }}</strong>
+    <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.15rem">{{ rc.basis }}</div>
+  </section>
   <section class="sweep-normality" aria-label="Is the interceptor's latest burn normal for it"
            style="border-left:4px solid var(--spectre-status-{{ rn_band }}); background:rgba(var(--spectre-status-{{ rn_band }}-rgb), 0.06);
                   border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
@@ -81,7 +94,7 @@
          clears 4.5:1 in both themes. #}
       <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
       <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
-      <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
+      {% if worst_coa.behaviour_label is defined %}<span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.behaviour_label }}</span>{% endif %}
     </div>
 
     {# The two findings the single word used to conflate. Geometric access and
@@ -148,6 +161,12 @@
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.burn_location }}</div>
         <div class="stat-lbl">Burn Location</div>
       </div>
+      {% if worst_coa.phase_label is defined and worst_coa.phase_label %}
+      <div class="stat-card" title="The target's position relative to the interceptor at the burn, in the interceptor's orbital plane. In a co-orbital intercept this drives the cost more than where on the orbit the burn falls.">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.phase_label }}</div>
+        <div class="stat-lbl">Target Phase at Burn</div>
+      </div>
+      {% endif %}
       <div class="stat-card">
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.direction }}</div>
         <div class="stat-lbl">Burn Direction</div>

@@ -24,11 +24,13 @@ from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_his
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
+from spectre.domain.custody import CustodyStatus, assess_custody
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
 from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
-from spectre.domain.pol_assessment import assess_pattern_of_life
+from spectre.domain.pol_assessment import PolAssessment, assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.elsets import limit_hours_for_regime
 from spectre.web.format_units import to_m_s
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -206,7 +208,7 @@ async def pol_panel(
         "error": None,
     }
     if pol is not None:
-        context.update(_pol_view(pol, _reserve_reset_for(state, pol.satno)))
+        context.update(_pol_view(pol, reserve_reset_for(state, pol.satno)))
         context.setdefault("source", "UDL")
         context.setdefault("pair", get_intel(pol.satno))
     return render(request, _POL_PANEL_TEMPLATE, context)
@@ -428,10 +430,17 @@ async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
     return analysed[0], ""
 
 
-def latest_burn_normality(pol: Any) -> BurnNormality | None:
-    """Is the object's latest confirmed burn normal for it? ``None`` if it has none."""
-    views = assess_pattern_of_life(pol).manoeuvres
-    return max(_burn_normality(pol, views), key=lambda n: n.burn.epoch, default=None)
+def history_evidence(
+    pol: Any, reserve_reset: datetime | None = None,
+) -> tuple[PolAssessment, BurnNormality | None]:
+    """The history's interpretation, and the verdict on its latest burn.
+
+    One assessment for both, so the sweep reads its capability evidence and
+    its is-this-normal verdict from the same reading of the history.
+    """
+    assessment = assess_pattern_of_life(pol, reserve_reset)
+    latest = max(_burn_normality(pol, assessment.manoeuvres), key=lambda n: n.burn.epoch, default=None)
+    return assessment, latest
 
 
 @router.post("/analyse", response_class=HTMLResponse)
@@ -524,7 +533,7 @@ async def pol_analyse(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol, _reserve_reset_for(state, satno)),
+        **_pol_view(pol, reserve_reset_for(state, satno)),
     })
 
 
@@ -545,7 +554,7 @@ def _all_detections(pol: object) -> list[Any]:
     )
 
 
-def _reserve_reset_for(state: object, satno: int) -> datetime | None:
+def reserve_reset_for(state: object, satno: int) -> datetime | None:
     """The operator-recorded refuelling date for *satno*, if any.
 
     The assessment's fourth watchlist recommendation is to track refuelling as
@@ -575,6 +584,23 @@ def _burn_normality(pol: object, views: list[Any]) -> list[BurnNormality]:
     return [judge_burn(b, burns, start) for b in burns]
 
 
+def _pol_custody(pol: Any, latest_burn: BurnNormality | None, now: datetime) -> CustodyStatus | None:
+    """Custody of the analysed object at *now* (SPC-018), or ``None`` with no element sets."""
+    records = getattr(pol, "records", None) or []
+    if not records:
+        return None
+    hours = max((now - records[-1].epoch).total_seconds() / 3600.0, 0.0)
+    return assess_custody(
+        elset_hours=hours,
+        limit_hours=limit_hours_for_regime(str(getattr(pol, "regime", "") or "")),
+        elset_count=int(getattr(pol, "tle_count", len(records))),
+        history_days=float(getattr(pol, "span_days", 0.0) or 0.0),
+        normality=latest_burn.verdict if latest_burn else None,
+        history_problem="",
+        truncated_at=getattr(pol, "history_truncated_at", None),
+    )
+
+
 def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
@@ -596,6 +622,7 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
     stats = getattr(pol, "dv_stats", None)
     assessment = assess_pattern_of_life(pol, reserve_reset)
     normality = _burn_normality(pol, assessment.manoeuvres)
+    latest_burn = max(normality, key=lambda n: n.burn.epoch, default=None)
 
     return {
         "assessment": assessment,
@@ -619,7 +646,8 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
         "budget_annual_dv_m_s": assessment.propellant.annual_rate_m_s,
         "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s, "normal": n}
                            for v, n in zip(assessment.manoeuvres, normality, strict=True)],
-        "latest_burn": max(normality, key=lambda n: n.burn.epoch, default=None),
+        "latest_burn": latest_burn,
+        "custody": _pol_custody(pol, latest_burn, datetime.now(tz=UTC)),
         "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
                            for v in assessment.candidates],
         "detection": _detection_view(pol),
@@ -933,7 +961,7 @@ async def pol_manoeuvre_detail(
     m = matching[0]
     # The interpretation comes from the same assessment the results panel uses,
     # so the drill-down cannot disagree with the row it was opened from.
-    assessment = assess_pattern_of_life(pol, _reserve_reset_for(state, satno))
+    assessment = assess_pattern_of_life(pol, reserve_reset_for(state, satno))
     view = next((v for v in (*assessment.manoeuvres, *assessment.candidates)
                  if v.manoeuvre is m), None)
     return render(request, "partials/pol_manoeuvre_detail.html", {

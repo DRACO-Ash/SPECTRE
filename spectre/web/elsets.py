@@ -74,14 +74,19 @@ def _epoch_of(tle: str) -> datetime | None:
     return _parse_tle_epoch(line1) if line1 else None
 
 
+def limit_hours_for_regime(regime: str) -> float:
+    """The staleness limit for a regime; the stricter one for any regime not known to be slow."""
+    key = "staleness_warn_geo_h" if regime.strip().upper() in _SLOW_REGIMES else "staleness_warn_leo_h"
+    return float(TLE_FILTER[key])
+
+
 def _limit_hours(tle: str) -> float:
     """The staleness limit for *tle*'s regime; the stricter one if it cannot be read."""
     try:
         regime = regime_from_tle(tle)
     except TLE_ERRORS:
         regime = ""
-    key = "staleness_warn_geo_h" if regime in _SLOW_REGIMES else "staleness_warn_leo_h"
-    return float(TLE_FILTER[key])
+    return limit_hours_for_regime(regime)
 
 
 def elset_age(tle: str, now: datetime) -> ElsetAge | None:

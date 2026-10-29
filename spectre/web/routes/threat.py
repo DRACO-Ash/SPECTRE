@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
 
@@ -32,8 +33,10 @@ from spectre.astro.maneuvers import (
     plane_change_intercept,
     vbar_hop_intercept,
 )
+from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain.custody import CustodyStatus, assess_custody
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
@@ -47,6 +50,8 @@ from spectre.domain.models import (
     ThreatSweepEntry,
     ThreatTarget,
 )
+from spectre.domain.normality import BurnNormality
+from spectre.domain.pol_assessment import PolAssessment
 from spectre.domain.threat_assessment import (
     AccessEvidence,
     ActorVerdict,
@@ -56,14 +61,14 @@ from spectre.domain.threat_assessment import (
     warning_time_rank,
 )
 from spectre.web.auth import require_login
-from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis, intent_label_for
+from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.deps import render
 from spectre.web.elsets import elset_age
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
-from spectre.web.routes.pol import HeldHistory, held_history, latest_burn_normality
+from spectre.web.routes.pol import HeldHistory, held_history, history_evidence, reserve_reset_for
 
 logger = logging.getLogger(__name__)
 
@@ -519,17 +524,85 @@ def _build_target_list(
     return targets
 
 
+# Apogee, perigee and the nodes are named only where they mean something (red
+# team finding 3). Speed at perigee exceeds speed at apogee by about twice the
+# eccentricity, so below 0.005 the difference is under 1 per cent; on a
+# station-kept GEO object (e = 0.00016) the two apsides are 13 km apart on a
+# 42,164 km orbit. A station-kept GEO object also holds its inclination to a
+# few hundredths of a degree, where the equatorial nodes move with the noise
+# in the element set. Below either bar the epoch is a time sample across the
+# next day, and is labelled as one. Both bars are tuned, not sourced.
+_APSIDES_NAMED_FROM_ECC: float = 0.005
+_NODES_NAMED_FROM_INC_DEG: float = 0.5
+_APSIDES = frozenset({"apogee", "perigee"})
+_NODES = frozenset({"asc_node", "desc_node"})
+
+
+def _shape_of(tle: str) -> tuple[float, float]:
+    """Eccentricity and inclination (degrees) of *tle*."""
+    sat = TLEOrbit(tle)._sat  # noqa: SLF001 - the parsed record already held, not a second parse
+    return float(sat.ecco), math.degrees(float(sat.inclo))
+
+
+def _sample_label(epoch: datetime, now: datetime) -> str:
+    return f"now +{(epoch - now).total_seconds() / 3600.0:.1f} h"
+
+
 def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
-    """Compute the sweep epochs for the red satellite."""
+    """Compute the sweep epochs for the red satellite.
+
+    Each is labelled by the event it was found at only where that event means
+    something for this orbit; otherwise by its time after now.
+    """
     epochs: list[tuple[str, datetime]] = [("now", now)]
+    ecc, inc_deg = _shape_of(red_tle)
 
     events = find_orbital_events(red_tle, now, now + timedelta(hours=24), max_per_type=1)
     for ev in events:
         loc = _EVENT_TO_LOCATION.get(ev.event_type)
-        if loc:
-            epochs.append((loc, ev.epoch))
+        if not loc:
+            continue
+        unnamed = (loc in _APSIDES and ecc < _APSIDES_NAMED_FROM_ECC) or (
+            loc in _NODES and inc_deg < _NODES_NAMED_FROM_INC_DEG)
+        epochs.append((_sample_label(ev.epoch, now) if unnamed else loc, ev.epoch))
 
     return epochs
+
+
+def _epoch_note(red_tle: str) -> str:
+    """Why some burn times carry no apsis or node name, or empty when all do."""
+    ecc, inc_deg = _shape_of(red_tle)
+    unnamed = []
+    if ecc < _APSIDES_NAMED_FROM_ECC:
+        unnamed.append(f"its eccentricity ({ecc:.4f}) is too small for apogee and perigee to differ meaningfully")
+    if inc_deg < _NODES_NAMED_FROM_INC_DEG:
+        unnamed.append(f"its inclination ({inc_deg:.2f}\u00b0) is too small for its nodes to be well defined")
+    if not unnamed:
+        return ""
+    return (
+        "Burn times are samples across the next day, not chosen points on the orbit: "
+        + " and ".join(unnamed) + ". The phase angle to the target is what differs between them."
+    )
+
+
+def _swept_target_tle(state: object, target: ThreatTarget) -> str | None:
+    """The element set a swept target was flown with, blue assets included."""
+    return _target_tle(state, target) or state.tle_of(target.target_name)  # type: ignore[attr-defined]
+
+
+def _phase_label(red_tle: str, target_tle: str | None, epoch: datetime) -> str:
+    """Where the target sits relative to the interceptor at the burn (SPC-004)."""
+    if not target_tle:
+        return ""
+    try:
+        red = TLEOrbit(red_tle).propagate(epoch)
+        target = TLEOrbit(target_tle).propagate(epoch)
+        angle = phase_angle_deg(red.r, red.v, target.r)
+    except TLE_ERRORS as exc:  # ValueError among them, which phase_angle_deg raises
+        logger.info("Phase angle not computed: %s", log_safe(exc))
+        return ""
+    side = "ahead of" if angle >= 0 else "behind"
+    return f"{abs(angle):.1f}\u00b0 {side} the interceptor"
 
 
 # PLR0913, PLR0917: one parameter per column of the row it builds.
@@ -708,24 +781,33 @@ def _sweep_all_methods(
     return entries
 
 
-def _red_capability(red_satno: str | None) -> CapabilityEvidence:
+def _red_capability(
+    red_satno: str | None, history: PolAssessment | None = None, span_days: float | None = None,
+) -> CapabilityEvidence:
     """Assemble what is known about the red object's ability to act.
 
-    Reads the assessed intelligence record, which is already loaded and was
-    already being joined for display. Behavioural evidence (propellant budget,
-    anomaly score, manoeuvre count) comes from pattern-of-life analysis, which
-    needs an element-set history rather than the single current TLE the sweep
-    holds; those fields stay None here and the verdict reports them as missing
-    rather than assuming either way.
+    The assessed intelligence record, and, when the object's element-set
+    history is held, what its behaviour shows: propellant used, discretionary
+    reserve left, the behavioural anomaly score and the burns observed
+    (SPC-002). Without a history those stay None and the verdict lists them
+    as missing rather than assuming either way.
     """
-    if not red_satno:
-        return CapabilityEvidence()
-    record = get_intel(red_satno)
-    if not record:
-        return CapabilityEvidence()
-    return CapabilityEvidence(
+    record = get_intel(red_satno) if red_satno else None
+    base = CapabilityEvidence(
         intel_threat_level=record.get("threat_level"),
         operational_status=record.get("status"),
+    ) if record else CapabilityEvidence()
+    if history is None:
+        return base
+    propellant = history.propellant
+    return replace(
+        base,
+        propellant_used_pct=propellant.propellant_used_pct,
+        discretionary_remaining_m_s=propellant.discretionary_remaining_m_s,
+        discretionary_max_m_s=propellant.discretionary_max_m_s,
+        anomaly_score=history.anomaly.overall if history.anomaly else None,
+        manoeuvres_observed=len(history.manoeuvres),
+        history_span_days=span_days,
     )
 
 
@@ -798,9 +880,6 @@ def _compute_worst_coa(
         ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)"),
     )
 
-    # One table of intent labels, shared with the intercept panel (audit F-241).
-    intent_label = intent_label_for(worst.method, "Intercept Manoeuvre")
-
     # Burn direction breakdown
     pro_pct, nor_pct, rad_pct, direction = _burn_direction_breakdown(
         worst.dv_prograde, worst.dv_normal, worst.dv_radial,
@@ -841,7 +920,6 @@ def _compute_worst_coa(
         "target_name": worst.target.target_name,
         "target_satno": worst.target.target_satno or "",
         "method": worst.method,
-        "intent_label": intent_label,
         "dv": round(dv, 4),
         "tof_label": tof_label,
         "tof_hours": round(worst.tof_hours, 2),
@@ -1386,25 +1464,78 @@ def _start_red_history(state: object, red_satno: str | None, now: datetime) -> a
     return task
 
 
-async def _red_history_view(task: asyncio.Task[HeldHistory] | None) -> dict[str, Any] | None:
-    """Is the red object's latest burn normal for it, or why that cannot be said."""
-    if task is None:
-        return None
+class _RedHistory(NamedTuple):
+    """What the red object's history said, or why it said nothing."""
+
+    pol: Any | None
+    assessment: PolAssessment | None
+    normality: BurnNormality | None
+    problem: str
+    fetched_at: datetime | None
+
+
+async def _settle_red_history(
+    state: object, task: asyncio.Task[HeldHistory] | None, red_satno: str | None,
+) -> _RedHistory:
+    """Wait a bounded time for the red object's history, then interpret it."""
+    if task is None or red_satno is None:
+        return _RedHistory(None, None, None, "The interceptor has no catalogue number to fetch a history for.", None)
     try:
         held = await asyncio.wait_for(asyncio.shield(task), timeout=_HISTORY_WAIT_S)
     except TimeoutError:
-        return {"normality": None,
-                "problem": "Its element-set history is still loading from UDL; the next sweep will use it."}
+        return _RedHistory(
+            None, None, None, "Its element-set history is still loading from UDL; the next sweep will use it.", None,
+        )
     if held.pol is None:
-        return {"normality": None, "problem": held.problem}
+        return _RedHistory(None, None, None, held.problem, held.fetched_at)
     loop = asyncio.get_running_loop()
-    normality = await loop.run_in_executor(None, latest_burn_normality, held.pol)
+    reset = reserve_reset_for(state, int(red_satno))
+    assessment, normality = await loop.run_in_executor(None, history_evidence, held.pol, reset)
+    return _RedHistory(held.pol, assessment, normality, "", held.fetched_at)
+
+
+def _red_custody(red_tle: str, history: _RedHistory, now: datetime) -> CustodyStatus:
+    """Whether the interceptor is in custody: its orbit's age and its history (SPC-018)."""
+    age = elset_age(red_tle, now)
+    pol = history.pol
+    return assess_custody(
+        elset_hours=age.hours if age else None,
+        limit_hours=age.limit_hours if age else 0.0,
+        elset_count=pol.tle_count if pol else 0,
+        history_days=pol.span_days if pol else 0.0,
+        normality=history.normality.verdict if history.normality else None,
+        history_problem=history.problem,
+        truncated_at=pol.history_truncated_at if pol else None,
+    )
+
+
+def _behaviour_label(history: _RedHistory) -> str:
+    """What the worst case card says about behaviour, in place of the solver's name.
+
+    It said "Close-Proximity Operation" whenever Lambert won the delta-V
+    comparison: the solver's name in different words, read as an inference
+    about the adversary (red team finding 4). Behaviour comes from the
+    object's own history now, or the card says it is not judged (SPC-003).
+    """
+    if history.normality is not None:
+        return f"Behaviour: {history.normality.verdict.value} for this object"
+    if history.pol is not None:
+        return "Behaviour: no confirmed burns in its history"
+    return "Behaviour not judged: no element-set history"
+
+
+def _red_history_view(history: _RedHistory, custody: CustodyStatus) -> dict[str, Any]:
+    """The sweep's custody and is-this-normal section."""
+    problem = history.problem
+    if not problem and history.normality is None:
+        problem = "No confirmed burns in its element-set history."
     return {
-        "normality": normality,
-        "problem": "" if normality else "No confirmed burns in its element-set history.",
-        "elsets": held.pol.tle_count,
-        "span_days": held.pol.span_days,
-        "fetched_at": held.fetched_at,
+        "custody": custody,
+        "normality": history.normality,
+        "problem": problem,
+        "elsets": history.pol.tle_count if history.pol else 0,
+        "span_days": history.pol.span_days if history.pol else 0.0,
+        "fetched_at": history.fetched_at,
     }
 
 
@@ -1487,14 +1618,6 @@ async def threat_sweep(
     # off the event loop like the sweep itself (audit F-235).
     clustering_summary = await loop.run_in_executor(None, _reduce_tle_clusters, state)
 
-    # What is known about the RED object's ability to act.
-    #
-    # Capability is a property of the threatening object, not of the things it
-    # might reach, and red is a single object, so this is one lookup rather
-    # than one per target. The sweep previously looked up intelligence for the
-    # TARGET and used it for display only, while the verdict consulted nothing.
-    red_capability = _red_capability(red_satno)
-
     # Compute epochs for red satellite.
     epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, now)
 
@@ -1540,9 +1663,23 @@ async def threat_sweep(
         + [(f"target {g['target'].target_name}", g["data_mode"]) for g in grouped],
     )
 
+    # What is known about the RED object's ability to act: its assessed record
+    # and, when its history arrived, its behaviour (SPC-002). Capability is a
+    # property of the threatening object, not of the things it might reach.
+    history = await _settle_red_history(state, history_task, red_satno)
+    red_capability = _red_capability(
+        red_satno, history.assessment, history.pol.span_days if history.pol else None,
+    )
+
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
-    red_history = await _red_history_view(history_task)
+    if worst_coa is not None:
+        worst_coa["behaviour_label"] = _behaviour_label(history)
+        # entries is sorted on the same warning-time key, so its first is the worst.
+        worst_coa["phase_label"] = _phase_label(
+            red_tle, _swept_target_tle(state, entries[0].target), entries[0].burn_epoch,
+        )
+    red_history = _red_history_view(history, _red_custody(red_tle, history, now))
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -1571,6 +1708,7 @@ async def threat_sweep(
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
         "red_history": red_history,
+        "epoch_note": _epoch_note(red_tle),
         "error": None,
     })
 

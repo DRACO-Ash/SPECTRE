@@ -79,3 +79,39 @@ def test_every_row_in_the_catalogue_carries_its_own_verdict(analysed: Any) -> No
     assert "Normal?" in page
     assert ">unprecedented<" in page
     assert ">not enough history<" in page
+
+
+def test_custody_leads_the_panel(analysed: Any) -> None:
+    # The fixture history ends months before today, so against the real clock
+    # its newest element set is far past the limit.
+    page = analysed([25.0] * 8)
+    assert "Custody lost: its newest element set is" in page
+    assert page.index("Custody lost") < page.index("Is this normal? Latest burn")
+
+
+class TestPanelCustodyAtAGivenMoment:
+    """The same rule as the sweep, read from the analysed history (SPC-018)."""
+
+    @staticmethod
+    def _custody(hours_after_last_set: float) -> Any:
+        from datetime import timedelta
+
+        from spectre.astro.pattern_of_life import analyse_pattern_of_life
+        from spectre.domain.pol_assessment import assess_pattern_of_life
+
+        history = analyse_pattern_of_life(_history([25.0] * 8), satno=1, name="T")
+        normality = pol._burn_normality(history, assess_pattern_of_life(history).manoeuvres)
+        latest = max(normality, key=lambda n: n.burn.epoch)
+        now = history.records[-1].epoch + timedelta(hours=hours_after_last_set)
+        return pol._pol_custody(history, latest, now)
+
+    def test_soon_after_the_last_set_it_is_held(self) -> None:
+        from spectre.domain.custody import Custody
+
+        assert self._custody(5.0).state is Custody.HELD
+
+    def test_past_the_regime_limit_it_is_lost(self) -> None:
+        from spectre.domain.custody import Custody
+
+        # The fixture is LEO, so the limit is 24 hours.
+        assert self._custody(30.0).state is Custody.LOST
