@@ -1023,3 +1023,7 @@ Feature work from the backlog: custody, behaviour into the verdict, the behaviou
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/custody.py`, `spectre/astro/phase_angle.py`, the history evidence and custody in `routes/pol.py`, the capability, custody, behaviour, epoch label and phase helpers in `routes/threat.py`, a regime limit in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.7.0 before upload: see the outcome below. Sections carry `aria-label`, no `role`; the sweep's colours come from the band tokens; every new template value is guarded with `is defined`; no route signature changed. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+**Local check before upload.** `scripts/check-quality.sh` against 0.7.0
+first failed one leg: `threat_sweep` at cognitive complexity 16. Split, it
+passed all five, with 93 per cent coverage on changed lines and no finding
+on a changed line. The full suite is green on the same tree.
