@@ -2,7 +2,7 @@
  "schema": 1,
  "project": {"name": "SPECTRE", "ref_prefix": "SPC-"},
  "releases": {
-  "naming": "V{major}.{minor}", "start": "V0.7",
+  "naming": "V{major}.{minor}", "start": "V0.8",
   "floor_min": 720, "cap_min": 840,
   "overhead_min": 0, "pace": 1.0, "gate_savings": true, "fill_to_floor": true
  },
@@ -35,6 +35,6 @@
   "Every gate's minutes are 0 until measured from this project's own runs (TBC, re-verify). The local suite took the time recorded in .board/README.md.",
   "floor_min and cap_min are the pack's defaults (12 to 14 hours a release), not a SPECTRE measurement. SPECTRE has shipped patch releases daily; the owner sets the real budget.",
   "overhead_min is 0 until the App Store submission cost (packaging, upload, pipeline, refusal rounds) is measured.",
-  "Ash's hours_per_week is a placeholder (TBC). Release V0.7 maps to SPECTRE 0.7.x."
+  "Ash's hours_per_week is a placeholder (TBC). Release V0.N maps to SPECTRE 0.N.x; V0.7 is built as 0.7.0, not yet through the App Store."
  ]
 }

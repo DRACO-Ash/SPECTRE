@@ -1003,3 +1003,13 @@ Space Watch report itself.
 partial also rendered its out-of-band TLE source panel, so the page held
 `#tle-source-panel` twice and a stray source dropdown inside the UDL menu.
 It now renders only on the login response that needs it.
+
+## 0.7.0
+
+Feature work from the backlog, not a gate fix: the first of the operator's four
+outputs ("is this normal"), and case-blind usernames.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/normality.py`, the held history and shared analyse step in `routes/pol.py`, the sweep's history fetch in `routes/threat.py`, case-blind matching in `auth.py`, `login.py`, `admin.py` and `database.py`, and two template sections | Written against what the gate reported in 0.6.0 to 0.6.4: `scripts/cognitive_complexity.py --changed` finds no touched function above 15; no new form field; sections carry `aria-label`, no `role`; colours in the sweep come from the band tokens; no Jinja comment inside a tag; no route signature changed, so no new `Depends` default enters the window. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One new unique index, `ux_users_username_lower`, built at boot when no names clash. | n/a. |

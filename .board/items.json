@@ -11,7 +11,11 @@
    "spectre/web/routes/threat.py",
    "spectre/web/elsets.py",
    "spectre/web/routes/udl.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-002",
@@ -207,7 +211,11 @@
    "spectre/web/routes/login.py",
    "spectre/web/routes/admin.py",
    "spectre/web/database.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-030",
@@ -773,7 +781,11 @@
    "spectre/astro/pattern_of_life.py",
    "spectre/domain/pol_assessment.py",
    "spectre/web/templates/partials/pol_manoeuvre_detail.html"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-018",

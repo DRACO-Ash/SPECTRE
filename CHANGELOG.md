@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29
+
+The first release planned from the backlog in `.board/`, and the first measured
+against the operator's question: "Something moved. Can it reach one of mine, how
+long have I got, does it mean anything, and what do I need to decide, by when?"
+
+**Operator output advanced: 1 of 4, "is this normal".** Outputs 2 to 4 are untouched.
+
+### Added
+- Is this normal? Each confirmed burn is judged against the object's own earlier burns: routine, unusual, unlike anything in its history, or too little history to say, in one sentence that names the figures it rests on (for example "Unlike anything in its last 80 days: this 78 m/s altitude change. The largest of its 7 earlier burns was 14 m/s."). The Pattern of Life panel leads with the latest burn's verdict and the manoeuvre catalogue gains a Normal? column. Every verdict states its basis: this object's history only, burns below the detection floor unseen, thresholds tuned rather than sourced (SPC-009).
+- The threat sweep says whether the interceptor's latest burn is normal for it. With UDL connected it fetches the interceptor's element-set history while the sweep computes, and holds it for 30 minutes so a repeat sweep does not fetch again. Without UDL, or when the fetch fails or is still running, it says so rather than guessing (SPC-001).
+
+### Security (identity)
+- Usernames ignore letter case: "Ash" and "ash" sign in to the same account, and an admin can no longer create a second account that differs only in case. The sign-in rate limit is keyed on the name as matched, so changing the case of a name does not buy more guesses. A database that already holds names differing only in case keeps each signing in by its exact spelling and refuses any other, and says so in the log; once the duplicate is deleted, the next boot makes usernames unique whatever their case (SPC-020).
+
 ## [0.6.4] - 2026-10-28
 
 ### Fixed
