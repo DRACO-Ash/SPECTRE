@@ -1440,14 +1440,19 @@ def _red_track_source(state: object, red_sat: str) -> str:
     return str(track.elset_source) if track is not None else ""
 
 
-def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
-    """The interceptor's element set age and the swept targets', stale ones named."""
+def _elset_ages(state: object, red_tle: str, swept: list[ThreatTarget], now: datetime) -> dict[str, Any]:
+    """The interceptor's element set age and every swept target's, stale ones named.
+
+    Every target swept, not only those that produced an approach: a stale set
+    can be why nothing reached a target, and listing ages only beside
+    solutions hid it exactly then.
+    """
     targets = []
-    for group in grouped:
-        tle = _target_tle(state, group["target"])
+    for target in swept:
+        tle = _target_tle(state, target)
         age = elset_age(tle, now) if tle else None
         if age is not None:
-            targets.append((group["target"].target_name, age))
+            targets.append((target.target_name, age))
     return {
         "red": elset_age(red_tle, now),
         "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
@@ -1629,7 +1634,7 @@ async def threat_sweep(
         "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
-        "elset_ages": _elset_ages(state, red_tle, grouped, now),
+        "elset_ages": _elset_ages(state, red_tle, targets, now),
         "red_elset_source": _red_track_source(state, red_sat),
         "close_approach_km": _CLOSE_APPROACH_KM,
         "error": None,

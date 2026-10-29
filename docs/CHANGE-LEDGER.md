@@ -1208,3 +1208,27 @@ rocket body, and a screening test asserted a looser count than it meant.
 `_build_actor_list` scores 14 for cognitive complexity, one under the limit.
 The name regex reads external text; it is fixed alternatives with no
 quantifiers, so it cannot backtrack (hotspot reviewed).
+
+### 0.6.8 outcome
+
+● **Test failed, 1 of 2,760; Code Quality was skipped.** At 12:07 UTC
+  `test_the_interceptor_and_target_ages_are_stated` found no stale target
+  named. The sweep's element set ages were taken from the targets that
+  produced a solution, and since 0.6.7 a solution must reach the target. With
+  that test's element sets, built from the clock, the sweep reaches the target
+  only from 20:00 to 04:00 UTC (measured hour by hour). Every local run, and
+  the packager's run inside the package, was between 20:00 and midnight.
+  0.6.6, 0.6.7 and 0.6.8 have therefore not been scored by Code Quality: the
+  last release it scored is 0.6.5.
+
+## 0.6.9
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Test | **EVIDENCED** | The sweep states the age of every target swept, not only of those that produced a solution | The failing test named by the stage, reproduced as a fault of the hour, not the platform; a new test with a 1 mm/s budget (no approach at any hour) fails before the change and passes after. The original test no longer asserts on anything the clock moves. | Then another test depends on the hour. The suite's only other wall-clock uses age element sets relative to now, which is deterministic (checked file by file). |
+| Code Quality | **HYGIENE** | First scoring since 0.6.5, so 0.6.6 to 0.6.9 are in its window together | Measured against 0.6.5: see the release record below. | Then the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**Product effect.** A stale target set can be why nothing reaches a target,
+and listing ages only beside solutions hid it exactly then. The ages line now
+names every stale target swept.

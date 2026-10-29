@@ -31,6 +31,15 @@ evidence are in `docs/SONAR-RULES.md`.
   `python3 scripts/sonar_rules.py --all` must stay at 0 blocking; a test
   holds it there.
 
+## While writing tests
+
+● No test asserts on an orbital outcome (a solution, a ranking, a miss)
+  computed from `datetime.now()`. Geometry changes with the hour: 0.6.8 failed
+  the App Store's Test stage at 12:07 UTC on a test that only passed from
+  20:00 to 04:00. Fix the epoch, or make the outcome hold at every hour (a
+  budget nothing fits, a target nothing reaches). Ages relative to now are
+  fine.
+
 ## Before an App Store package
 
 Run `/release-preflight`. At minimum:

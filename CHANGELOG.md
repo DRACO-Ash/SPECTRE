@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-10-29
+
+### Fixed
+- The threat sweep's element set ages cover every target swept, not only those with a solution, so a stale target is named even when nothing reaches it, which is when its age matters most.
+- A test that passed only between 20:00 and 04:00 UTC, because its orbits were built from the clock, no longer depends on the hour; 0.6.8 failed the App Store Test stage on it.
+
 ## [0.6.8] - 2026-10-28
 
 ### Fixed

@@ -91,6 +91,28 @@ class TestTheSweep:
         assert "from 18th SPCS" in text, "and its provider"
         assert "1 stale" in text and "BLUE-GEO" in text, "the stale target is named"
 
+    def test_ages_are_stated_even_when_nothing_reaches_the_target(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        """0.6.8 failed the App Store's Test stage at 12:07 UTC on exactly this.
+
+        Target ages were taken from the solutions, so with no approach there
+        were none, and the test above passed only when the clock put the two
+        objects in reach (20:00 to 04:00 UTC for its element sets). A stale
+        target set can be why nothing reaches it, so it is named regardless;
+        a 1 mm/s budget makes "nothing reaches it" hold at any hour.
+        """
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL"),
+        ]
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "max_dv_m_s": "0.001"})
+        text = " ".join(resp.text.split())
+        assert "No intercept solutions found" in text
+        assert "1 stale" in text and "BLUE-GEO" in text
+
     def test_a_stale_interceptor_is_flagged(self, client: Any, auth_cookie: str, red_state: Any) -> None:
         from spectre.domain.models import RedTrack
 
