@@ -32,7 +32,11 @@
    "spectre/domain/threat_assessment.py",
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep.html"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-003",
@@ -49,7 +53,11 @@
    "spectre/web/burn_view.py",
    "spectre/web/routes/threat.py",
    "spectre/astro/pattern_of_life.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-004",
@@ -63,7 +71,11 @@
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep.html",
    "spectre/web/templates/partials/threat_sweep_row.html"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
  },
  {
   "ref": "SPC-005",
@@ -803,6 +815,10 @@
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep.html",
    "spectre/astro/pattern_of_life.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
  }
 ]

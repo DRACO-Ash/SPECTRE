@@ -1013,3 +1013,13 @@ outputs ("is this normal"), and case-blind usernames.
 |---|---|---|---|---|
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/normality.py`, the held history and shared analyse step in `routes/pol.py`, the sweep's history fetch in `routes/threat.py`, case-blind matching in `auth.py`, `login.py`, `admin.py` and `database.py`, and two template sections | Written against what the gate reported in 0.6.0 to 0.6.4: `scripts/cognitive_complexity.py --changed` finds no touched function above 15; no new form field; sections carry `aria-label`, no `role`; colours in the sweep come from the band tokens; no Jinja comment inside a tag; no route signature changed, so no new `Depends` default enters the window. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One new unique index, `ux_users_username_lower`, built at boot when no names clash. | n/a. |
+
+## 0.8.0
+
+Feature work from the backlog: custody, behaviour into the verdict, the behaviour label and the phase angle.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/custody.py`, `spectre/astro/phase_angle.py`, the history evidence and custody in `routes/pol.py`, the capability, custody, behaviour, epoch label and phase helpers in `routes/threat.py`, a regime limit in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.7.0 before upload: see the outcome below. Sections carry `aria-label`, no `role`; the sweep's colours come from the band tokens; every new template value is guarded with `is defined`; no route signature changed. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

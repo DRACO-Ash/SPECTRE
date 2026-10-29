@@ -1,17 +1,9 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.8: 4 items, 780 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-002       240m  priority high
-    SPC-003       180m  priority high
-    SPC-018       240m  priority high; anchors the release
-    SPC-004       120m  rider: priority med, adds no gate
-  lane 1 (780m): SPC-002, SPC-003, SPC-018, SPC-004
-
 V0.9: 3 items, 840 priced min, gates browser, container, lint, quality, sast, tests
   forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-101       180m  fills the release to its floor
     SPC-006       360m  priority high; anchors the release
+    SPC-101       180m  fills the release to its floor
     SPC-007       300m  priority high
   lane 1 (660m): SPC-006, SPC-007
   lane 2 (180m): SPC-101

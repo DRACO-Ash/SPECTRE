@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-29
+
+**Operator outputs advanced: 1, "is this normal", and the custody both 1 and 2 rest on.** Output 2's warning-time change, the decide-by time and the recommended response are untouched.
+
+### Added
+- Custody of the interceptor, first on the sweep and on the Pattern of Life panel, in the operator's terms: timely and actionable information to judge whether a burn is normal and how the warning time changed. Held when the orbit is inside its regime's limit and the history can judge its burns; degraded when the orbit is current but the history is missing, too short or cut by UDL's record cap; lost when the newest element set is past the limit, because its warning time is out of date and a burn since then would not be seen. Each line says which and why (SPC-018).
+- The worst case on the sweep names the target's phase angle at the burn, "1.0° ahead of the interceptor", which drives a co-orbital intercept's cost more than where on the orbit the burn falls (SPC-004).
+
+### Changed
+- The interceptor's behaviour now reaches the threat verdict. With its history held, the propellant used, discretionary reserve, behavioural anomaly score and burns observed join the capability evidence, and drop off the "unavailable" list; the operator's refuelling date applies, as on the Pattern of Life panel (SPC-002).
+- The worst case card no longer calls the winning solver an intent: "Close-Proximity Operation" whenever Lambert won read as an inference about the adversary. It shows the behaviour verdict from the object's own history, or says behaviour is not judged (SPC-003).
+- Burn times are named apogee, perigee or a node only where that means something: an eccentricity of 0.005 or more for the apsides, an inclination of 0.5° or more for the nodes. Below either, as on a station-kept GEO orbit, the burn time reads "now +4.6 h" and a note says why (SPC-004).
+
 ## [0.7.0] - 2026-10-29
 
 The first release planned from the backlog in `.board/`, and the first measured
