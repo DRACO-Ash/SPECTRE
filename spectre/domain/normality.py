@@ -97,9 +97,14 @@ class BurnNormality:
         return self.verdict in (Normality.UNUSUAL, Normality.UNPRECEDENTED)
 
 
+# Below this a tenth of a m/s is the difference between one station-keeping
+# burn and the next; above it, tenths are noise presented as precision.
+_WHOLE_M_S_FROM: float = 10.0
+
+
 def _m_s(value: float) -> str:
     """Delta-V as an operator reads it: tenths below 10 m/s, whole above."""
-    return f"{value:.1f}" if value < 10.0 else f"{value:.0f}"
+    return f"{value:.1f}" if value < _WHOLE_M_S_FROM else f"{value:.0f}"
 
 
 def _days(value: float) -> str:

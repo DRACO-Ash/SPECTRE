@@ -398,6 +398,14 @@ async def held_history(state: Any, satno: int, now: datetime) -> HeldHistory:
         return held  # type: ignore[no-any-return]
     if not state.udl_username or not state.udl_password:
         return HeldHistory(satno, now, problem="UDL is not connected, so no element-set history is held.")
+    pol, problem = await _fetch_and_analyse(state, satno)
+    if pol is None:
+        return HeldHistory(satno, now, problem=problem)
+    return _hold(state, HeldHistory(satno, now, pol=pol))
+
+
+async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
+    """The analysed history from UDL, or ``None`` and the problem to show."""
     try:
         fetched = _MergedHistory(*await _fetch_merged_history(
             satno, state.udl_username, state.udl_password,
@@ -405,19 +413,19 @@ async def held_history(state: Any, satno: int, now: datetime) -> HeldHistory:
         ))
     except Exception as exc:  # noqa: BLE001 - any UDL failure becomes a stated problem
         logger.warning("Held history: UDL fetch failed for %s: %s", log_safe(satno), log_safe(exc))
-        return HeldHistory(satno, now, problem="The element-set history could not be fetched from UDL.")
+        return None, "The element-set history could not be fetched from UDL."
     if not fetched.merged_text.strip():
-        return HeldHistory(satno, now, problem="UDL returned no element sets for this object.")
+        return None, "UDL returned no element sets for this object."
     try:
         analysed = await run_in_threadpool(
             _analyse_merged, fetched, satno, _HELD_DV_THRESHOLD_KM_S, False,
         )
     except Exception:  # a failed analysis becomes a stated problem, logged in full
         logger.exception("Held history: analysis failed for %s", log_safe(satno))
-        return HeldHistory(satno, now, problem="The element-set history could not be analysed.")
+        return None, "The element-set history could not be analysed."
     if analysed is None:
-        return HeldHistory(satno, now, problem="No usable element sets were in the UDL history.")
-    return _hold(state, HeldHistory(satno, now, pol=analysed[0]))
+        return None, "No usable element sets were in the UDL history."
+    return analysed[0], ""
 
 
 def latest_burn_normality(pol: Any) -> BurnNormality | None:
