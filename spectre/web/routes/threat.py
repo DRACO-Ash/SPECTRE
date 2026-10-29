@@ -1524,6 +1524,32 @@ def _behaviour_label(history: _RedHistory) -> str:
     return "Behaviour not judged: no element-set history"
 
 
+def _red_capability_from(red_satno: str | None, history: _RedHistory) -> CapabilityEvidence:
+    """The capability evidence, with the behaviour the held history shows."""
+    return _red_capability(red_satno, history.assessment, history.pol.span_days if history.pol else None)
+
+
+def _worst_coa_in_context(
+    state: object, entries: list[ThreatSweepEntry], capability: CapabilityEvidence,
+    max_dv_m_s: float, red: tuple[_RedHistory, str],
+) -> dict[str, Any] | None:
+    """The worst course of action, with its behaviour label and phase angle.
+
+    *red* is the interceptor's history and element set. *entries* is sorted
+    on the same warning-time key the worst case is chosen by, so its first
+    entry is the worst.
+    """
+    worst = _compute_worst_coa(entries, capability, max_dv_m_s)
+    if worst is None:
+        return None
+    history, red_tle = red
+    worst["behaviour_label"] = _behaviour_label(history)
+    worst["phase_label"] = _phase_label(
+        red_tle, _swept_target_tle(state, entries[0].target), entries[0].burn_epoch,
+    )
+    return worst
+
+
 def _red_history_view(history: _RedHistory, custody: CustodyStatus) -> dict[str, Any]:
     """The sweep's custody and is-this-normal section."""
     problem = history.problem
@@ -1667,18 +1693,10 @@ async def threat_sweep(
     # and, when its history arrived, its behaviour (SPC-002). Capability is a
     # property of the threatening object, not of the things it might reach.
     history = await _settle_red_history(state, history_task, red_satno)
-    red_capability = _red_capability(
-        red_satno, history.assessment, history.pol.span_days if history.pol else None,
-    )
+    red_capability = _red_capability_from(red_satno, history)
 
     # Identify the most dangerous course of action.
-    worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
-    if worst_coa is not None:
-        worst_coa["behaviour_label"] = _behaviour_label(history)
-        # entries is sorted on the same warning-time key, so its first is the worst.
-        worst_coa["phase_label"] = _phase_label(
-            red_tle, _swept_target_tle(state, entries[0].target), entries[0].burn_epoch,
-        )
+    worst_coa = _worst_coa_in_context(state, entries, red_capability, max_dv_m_s, (history, red_tle))
     red_history = _red_history_view(history, _red_custody(red_tle, history, now))
 
     state.last_threat_assessment = assessment
