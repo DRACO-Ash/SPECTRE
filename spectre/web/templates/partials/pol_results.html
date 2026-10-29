@@ -30,6 +30,27 @@
 {% endif %}
 
 {# ══════════════════════════════════════════════════════════════════════════════
+   § 0 — IS THIS NORMAL? The operator's first question (SPC-009): the latest
+   burn judged against this object's own earlier burns.
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% set NORMAL_COLOR = {"routine":"#22c55e","unusual":"#f59e0b","unprecedented":"#ef4444","not enough history":"var(--text-dim)"} %}
+{% if latest_burn %}
+{% set nc = NORMAL_COLOR.get(latest_burn.verdict.value, "var(--text-dim)") %}
+<section class="pol-normality" aria-label="Is the latest burn normal for this object"
+         style="border:1px solid {{ nc }}; border-left:4px solid {{ nc }}; border-radius:5px;
+                background:var(--panel-bg); padding:0.6rem 0.8rem; margin-bottom:0.7rem">
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">
+    Is this normal? Latest burn, {{ latest_burn.burn.epoch.strftime("%Y-%m-%d %H:%M UTC") }}
+  </div>
+  <div style="font-size:0.85rem; font-weight:700; color:{{ nc }}; margin-top:0.2rem">{{ latest_burn.sentence }}</div>
+  {% for caveat in latest_burn.caveats %}
+  <div style="font-size:0.66rem; color:#f59e0b; margin-top:0.2rem">&#9888; Caveat: {{ caveat }}.</div>
+  {% endfor %}
+  <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem">{{ latest_burn.basis }}</div>
+</section>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
    ══════════════════════════════════════════════════════════════════════════════ #}
 <div style="border:2px solid {{ rc }}; border-radius:7px; background:{{ rb }};
@@ -664,6 +685,7 @@
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Normal?<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
           <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
@@ -689,6 +711,10 @@
           <td style="white-space:nowrap">
             {{ v.classification }}
             {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <span style="color:{{ NORMAL_COLOR.get(row.normal.verdict.value, 'var(--text-dim)') }}; font-weight:700"
+                  title="{{ row.normal.sentence }}">{{ row.normal.verdict.value }}</span>
           </td>
           <td style="white-space:nowrap">
             <span style="color:{{ pcol }}; font-weight:700" title="{{ v.posture.rationale }}">

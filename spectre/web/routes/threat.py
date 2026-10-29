@@ -63,6 +63,7 @@ from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.routes.pol import HeldHistory, held_history, latest_burn_normality
 
 logger = logging.getLogger(__name__)
 
@@ -1364,6 +1365,49 @@ def _provenance_warnings(subjects: list[tuple[str, str]]) -> list[str]:
     return [f"{mode}: {', '.join(labels)}" for mode, labels in sorted(by_mode.items())]
 
 
+# ── The red object's own history (SPC-001, SPC-009) ─────────────────────────
+
+#: How long the sweep waits for the red object's history once its own work is
+#: done. A first fetch of a long-lived object can take longer; it carries on
+#: in the background and is held for the next sweep.
+_HISTORY_WAIT_S: float = 20.0
+# Fetches still running after a sweep answered. Held here so the event loop
+# keeps a reference to each until it finishes.
+_HISTORY_TASKS: set[asyncio.Task[HeldHistory]] = set()
+
+
+def _start_red_history(state: object, red_satno: str | None, now: datetime) -> asyncio.Task[HeldHistory] | None:
+    """Start fetching the red object's history, to run alongside the sweep."""
+    if not red_satno:
+        return None
+    task = asyncio.create_task(held_history(state, int(red_satno), now))
+    _HISTORY_TASKS.add(task)
+    task.add_done_callback(_HISTORY_TASKS.discard)
+    return task
+
+
+async def _red_history_view(task: asyncio.Task[HeldHistory] | None) -> dict[str, Any] | None:
+    """Is the red object's latest burn normal for it, or why that cannot be said."""
+    if task is None:
+        return None
+    try:
+        held = await asyncio.wait_for(asyncio.shield(task), timeout=_HISTORY_WAIT_S)
+    except TimeoutError:
+        return {"normality": None,
+                "problem": "Its element-set history is still loading from UDL; the next sweep will use it."}
+    if held.pol is None:
+        return {"normality": None, "problem": held.problem}
+    loop = asyncio.get_running_loop()
+    normality = await loop.run_in_executor(None, latest_burn_normality, held.pol)
+    return {
+        "normality": normality,
+        "problem": "" if normality else "No confirmed burns in its element-set history.",
+        "elsets": held.pol.tle_count,
+        "span_days": held.pol.span_days,
+        "fetched_at": held.fetched_at,
+    }
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1432,6 +1476,9 @@ async def threat_sweep(
 
     targets = _cap_targets(state, targets, _manual_tle_by_name, red_regime, errors)
 
+    # Its own history comes from UDL while the sweep computes.
+    history_task = _start_red_history(state, red_satno, now)
+
     # Any targets without a cached TLE get a last-chance fetch now.
     await _fetch_missing_target_tles(state, targets, errors)
 
@@ -1495,6 +1542,7 @@ async def threat_sweep(
 
     # Identify the most dangerous course of action.
     worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
+    red_history = await _red_history_view(history_task)
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -1522,6 +1570,7 @@ async def threat_sweep(
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
+        "red_history": red_history,
         "error": None,
     })
 

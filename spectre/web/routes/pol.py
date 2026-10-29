@@ -9,8 +9,9 @@ from __future__ import annotations
 import contextlib
 import html
 import logging
-from datetime import UTC, datetime
-from typing import Annotated, Any
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
@@ -24,6 +25,7 @@ from spectre.astro.tle_filter import filter_tle_history
 from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
+from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
@@ -309,6 +311,121 @@ def _filter_note(apply_filter: bool, quality_flags: list[Any]) -> str:
     return f" [cadence-filtered, {len(quality_flags)} flags]"
 
 
+class _MergedHistory(NamedTuple):
+    """What :func:`_fetch_merged_history` returns, named."""
+
+    archive_text: str
+    merged_text: str
+    metadata: dict[str, tuple[str, str]]
+    rms_metadata: dict[str, float | None]
+    name: str
+
+
+def _analyse_merged(
+    history: _MergedHistory, satno: int, threshold_km_s: float, apply_filter: bool,
+) -> tuple[Any, list[Any]] | None:
+    """Parse a merged UDL history and run Pattern of Life over it.
+
+    Returns ``(analysis, quality_flags)``, or ``None`` when nothing parsed.
+    One copy for the panel and for the history held for the sweep (SPC-001).
+    """
+    records, dropped = parse_tle_history_counted(
+        history.merged_text, satno=satno,
+        metadata=history.metadata, rms_metadata=history.rms_metadata,
+    )
+    if not records:
+        return None
+    records, quality_flags = _cadence_filtered(records, apply_filter, satno)
+    pol = analyse_pattern_of_life(
+        records,
+        satno=satno,
+        name=history.name,
+        dv_threshold=threshold_km_s,
+        quality_flags=quality_flags,
+    )
+    pol.malformed_element_sets = dropped.malformed
+    pol.duplicate_epoch_sets = dropped.duplicate_epoch
+    pol.bad_provenance_sets = dropped.bad_provenance
+    pol.other_object_sets = dropped.other_object
+    pol.history_truncated_at = _archive_end_if_capped(history.archive_text)
+    return pol, quality_flags
+
+
+# ── The history held for other panels (SPC-001) ──────────────────────────────
+
+#: How long a held history answers before it is fetched again. A burn shows in
+#: the next element set, hours after it happens, so a history much older than
+#: this can miss the very burn the operator is asking about.
+HELD_HISTORY_MAX_AGE = timedelta(minutes=30)
+#: The threshold the panel offers by default, so the sweep and an untouched
+#: panel see the same burns.
+_HELD_DV_THRESHOLD_KM_S = 0.002
+#: Histories held per sign-in. Each holds up to 5,000 element sets; the
+#: oldest goes first.
+_MAX_HELD_HISTORIES = 20
+
+
+@dataclass(frozen=True)
+class HeldHistory:
+    """One object's element-set history as analysed, or why there is none."""
+
+    satno: int
+    fetched_at: datetime
+    pol: Any | None = None
+    problem: str = ""
+
+
+def _hold(state: Any, held: HeldHistory) -> HeldHistory:
+    histories = state.elset_histories
+    histories.pop(held.satno, None)
+    histories[held.satno] = held
+    while len(histories) > _MAX_HELD_HISTORIES:
+        histories.pop(next(iter(histories)))
+    return held
+
+
+async def held_history(state: Any, satno: int, now: datetime) -> HeldHistory:
+    """The object's analysed element-set history, fetched from UDL if not held.
+
+    The sweep, the is-this-normal verdict and custody all read this one copy,
+    so no panel fetches the same history again. Never raises: a failure comes
+    back as a ``problem`` the panel shows in place of a verdict, with the
+    detail in the log, never the browser. Failures are not held, so the next
+    request tries again.
+    """
+    held = state.elset_histories.get(satno)
+    if held is not None and now - held.fetched_at < HELD_HISTORY_MAX_AGE:
+        return held  # type: ignore[no-any-return]
+    if not state.udl_username or not state.udl_password:
+        return HeldHistory(satno, now, problem="UDL is not connected, so no element-set history is held.")
+    try:
+        fetched = _MergedHistory(*await _fetch_merged_history(
+            satno, state.udl_username, state.udl_password,
+            state.udl_data_mode, source=state.udl_tle_source,
+        ))
+    except Exception as exc:  # noqa: BLE001 - any UDL failure becomes a stated problem
+        logger.warning("Held history: UDL fetch failed for %s: %s", log_safe(satno), log_safe(exc))
+        return HeldHistory(satno, now, problem="The element-set history could not be fetched from UDL.")
+    if not fetched.merged_text.strip():
+        return HeldHistory(satno, now, problem="UDL returned no element sets for this object.")
+    try:
+        analysed = await run_in_threadpool(
+            _analyse_merged, fetched, satno, _HELD_DV_THRESHOLD_KM_S, False,
+        )
+    except Exception:  # a failed analysis becomes a stated problem, logged in full
+        logger.exception("Held history: analysis failed for %s", log_safe(satno))
+        return HeldHistory(satno, now, problem="The element-set history could not be analysed.")
+    if analysed is None:
+        return HeldHistory(satno, now, problem="No usable element sets were in the UDL history.")
+    return _hold(state, HeldHistory(satno, now, pol=analysed[0]))
+
+
+def latest_burn_normality(pol: Any) -> BurnNormality | None:
+    """Is the object's latest confirmed burn normal for it? ``None`` if it has none."""
+    views = assess_pattern_of_life(pol).manoeuvres
+    return max(_burn_normality(pol, views), key=lambda n: n.burn.epoch, default=None)
+
+
 @router.post("/analyse", response_class=HTMLResponse)
 async def pol_analyse(
     request: Request,
@@ -373,32 +490,17 @@ async def pol_analyse(
 
     # ── Parse + analyse ───────────────────────────────────────────────────────
     try:
-        threshold_km_s = dv_threshold_ms / 1000.0
         apply_filter = bool(cadence_filter)
-        records, dropped = parse_tle_history_counted(
-            merged_text, satno=satno,
-            metadata=merged_meta, rms_metadata=merged_rms,
+        analysed = _analyse_merged(
+            _MergedHistory(archive_text, merged_text, merged_meta, merged_rms, name),
+            satno, dv_threshold_ms / 1000.0, apply_filter,
         )
-        if not records:
+        if analysed is None:
             return _panel_error(
                 request, state,
                 f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             )
-
-        records, quality_flags = _cadence_filtered(records, apply_filter, satno)
-
-        pol = analyse_pattern_of_life(
-            records,
-            satno=satno,
-            name=name,
-            dv_threshold=threshold_km_s,
-            quality_flags=quality_flags,
-        )
-        pol.malformed_element_sets = dropped.malformed
-        pol.duplicate_epoch_sets = dropped.duplicate_epoch
-        pol.bad_provenance_sets = dropped.bad_provenance
-        pol.other_object_sets = dropped.other_object
-        pol.history_truncated_at = _archive_end_if_capped(archive_text)
+        pol, quality_flags = analysed
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
@@ -449,6 +551,21 @@ def _reserve_reset_for(state: object, satno: int) -> datetime | None:
     return resets.get(satno)
 
 
+def _burn_normality(pol: object, views: list[Any]) -> list[BurnNormality]:
+    """Each confirmed burn judged against the object's own earlier burns (SPC-009).
+
+    In the order of *views*, so the manoeuvre table can pair them row by row.
+    The history starts at the first element set held, not the first burn, so
+    a long quiet stretch still counts as time the object was watched.
+    """
+    burns = burns_from_views(views)
+    if not burns:
+        return []
+    records = getattr(pol, "records", None) or []
+    start = records[0].epoch if records else min(b.epoch for b in burns)
+    return [judge_burn(b, burns, start) for b in burns]
+
+
 def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
@@ -469,6 +586,7 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
     """
     stats = getattr(pol, "dv_stats", None)
     assessment = assess_pattern_of_life(pol, reserve_reset)
+    normality = _burn_normality(pol, assessment.manoeuvres)
 
     return {
         "assessment": assessment,
@@ -490,8 +608,9 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
         # the charts at 1,000,000x in 0.5.16.
         "budget_total_dv_m_s": assessment.propellant.spent_m_s,
         "budget_annual_dv_m_s": assessment.propellant.annual_rate_m_s,
-        "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
-                           for v in assessment.manoeuvres],
+        "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s, "normal": n}
+                           for v, n in zip(assessment.manoeuvres, normality, strict=True)],
+        "latest_burn": max(normality, key=lambda n: n.burn.epoch, default=None),
         "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
                            for v in assessment.candidates],
         "detection": _detection_view(pol),

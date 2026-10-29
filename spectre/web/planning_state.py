@@ -105,6 +105,9 @@ class SessionState:
     hrr_tle_multiset: dict[str, list[str]] = field(default_factory=dict)
     # The element set refresh started at UDL connect, while it runs and after.
     elset_refresh: ElsetRefresh | None = None
+    # Analysed element-set histories by SATNO, oldest first, for the sweep and
+    # the is-this-normal verdict (routes.pol.held_history, SPC-001).
+    elset_histories: dict[int, Any] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""

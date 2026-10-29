@@ -36,6 +36,29 @@
   </div>
   {% endif %}
 
+  {% if red_history %}
+  {# Is this normal? The operator's first question, for the interceptor's
+     latest burn against its own history (SPC-009). Band tokens, not hex, so
+     the light theme keeps its contrast. #}
+  {% set rn = red_history.normality %}
+  {% set rn_band = {"unprecedented":"critical","unusual":"high","routine":"minimal"}.get(rn.verdict.value, "unknown") if rn else "unknown" %}
+  <section class="sweep-normality" aria-label="Is the interceptor's latest burn normal for it"
+           style="border-left:4px solid var(--spectre-status-{{ rn_band }}); background:rgba(var(--spectre-status-{{ rn_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
+    {% if rn %}
+    <strong>Is this normal?</strong> Latest burn {{ rn.burn.epoch.strftime("%Y-%m-%d %H:%M UTC") }}:
+    <strong>{{ rn.sentence }}</strong>
+    {% for caveat in rn.caveats %}<span style="color:var(--text-muted)"> Caveat: {{ caveat }}.</span>{% endfor %}
+    <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.15rem">
+      From {{ red_history.elsets }} element sets over {{ red_history.span_days | round(0) | int }} days,
+      fetched {{ red_history.fetched_at.strftime("%H:%M UTC") }}. {{ rn.basis }}
+    </div>
+    {% else %}
+    <strong>Is this normal?</strong> Cannot say: {{ red_history.problem }}
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if manual_red_confidence %}
   {# The confidence scale borrows the band palette rather than carrying hex of
      its own: hex here did not swap on the light theme, where every one of
