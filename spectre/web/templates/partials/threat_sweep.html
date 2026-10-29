@@ -36,7 +36,7 @@
   </div>
   {% endif %}
 
-  {% if red_history %}
+  {% if red_history is defined and red_history %}
   {# Is this normal? The operator's first question, for the interceptor's
      latest burn against its own history (SPC-009). Band tokens, not hex, so
      the light theme keeps its contrast. #}

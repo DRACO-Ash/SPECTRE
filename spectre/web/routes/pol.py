@@ -491,9 +491,10 @@ async def pol_analyse(
     # ── Parse + analyse ───────────────────────────────────────────────────────
     try:
         apply_filter = bool(cadence_filter)
+        threshold_km_s = dv_threshold_ms / 1000.0
         analysed = _analyse_merged(
             _MergedHistory(archive_text, merged_text, merged_meta, merged_rms, name),
-            satno, dv_threshold_ms / 1000.0, apply_filter,
+            satno, threshold_km_s, apply_filter,
         )
         if analysed is None:
             return _panel_error(
