@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-10-30
+
+### Security
+- Base image moved to the current `python:3.12-slim-bookworm` digest, which carries Python 3.12.16. 0.6.10 failed the App Store Container Scan on Python 3.12.15 (CVE-2026-115557, fixed in 3.12.16). No application change: 0.6.10's Target Group fix ships in this release.
+
 ## [0.6.10] - 2026-10-30
 
 ### Fixed

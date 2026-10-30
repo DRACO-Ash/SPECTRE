@@ -1264,3 +1264,26 @@ Found on the way, FACT: `spectreRereadRedCard`, run when the UDL element set
 refresh finishes, dispatches a bare `htmx:afterSettle` event, and the target
 panel's handler read `e.detail.target` from it and threw on every refresh. It
 now reads it null-safely.
+
+### 0.6.10 outcome
+
+● **Container Scan failed.** The report lists Debian 12 base packages with no
+  fix (util-linux and its libraries, libc6, ncurses, perl-base, krb5,
+  libsqlite3-0, zlib1g, gzip and others) and one component with a fix:
+  `python-3.12.15`, CVE-2026-115557 among the Highs, "upgrade to 3.12.16 or
+  later". FACT from 0.6.0: the policy passed with the unfixable Debian
+  findings present, so the fixable interpreter finding is the stop
+  (INFERENCE, the only new item with a fix since 0.6.5 passed).
+● The platform's own build had already patched OpenSSL to deb12u2; the
+  report lists it among the Lows only.
+
+## 0.6.11
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Container Scan | **EVIDENCED** | Base digest `6a0e06f5...` to `e697c818...`, the current `python:3.12-slim-bookworm` index (built 28 October), in both Dockerfiles | Pulled and run: Python 3.12.16 on Debian 12.15, the version the scan names as the fix. Trivy 0.67.2 on the built image, High and Critical: 0.6.10 image 63 with 2 fixable (OpenSSL deb12u1, which the platform build patches anyway); 0.6.11 image 61 with 0 fixable. Trivy's database does not yet carry CVE-2026-115557, so it cannot show that one clearing; the interpreter version can. | Then the policy now stops on unfixable Highs too, which 0.6.0 showed it did not. The remedy recorded at 0.6.0 stands: remove the Debian packages the runtime never uses in the prep stage. |
+| Code Quality | **HYGIENE** | The digest line in both Dockerfiles, version strings | `sonar_rules.py` against 0.6.5: see the release record. | Then the report names the line. |
+| Other gates | **HYGIENE** | None | Container contract passes on the new image (`verify-container.sh`). | n/a. |
+
+**Product effect.** None beyond 0.6.10, which never deployed: its Target
+Group fix reaches service with this release.
