@@ -15,6 +15,13 @@
 # the proxy's CA and the script trusts it for the build only; the shipped
 # Dockerfile is never modified.
 #   PROXY_CA_BUNDLE=/path/to/ca.crt scripts/verify-container.sh
+#
+# The image is scanned with Grype for High and Critical findings that have a
+# fix. Grype reads the CPython interpreter in /usr/local, which Trivy does not,
+# and on 0.6.10 it reported the same nine Python CVEs as the App Store's
+# Container Scan. Its database comes from grype.anchore.io; if that cannot be
+# reached the scan is reported SKIPPED, never passed. SKIP_IMAGE_SCAN=1 skips
+# it on purpose.
 
 set -eu
 
@@ -159,5 +166,35 @@ while [ "$i" -lt 45 ]; do
 done
 [ "$i" -lt 45 ] || { docker logs "$CONTAINER"; fail "injected PORT was not honoured"; }
 pass "honours an injected PORT"
+
+printf '\n== Fixable High and Critical findings (Grype) ==\n'
+GRYPE_IMAGE="${GRYPE_IMAGE:-anchore/grype:v0.104.0}"
+if [ "${SKIP_IMAGE_SCAN:-0}" = "1" ]; then
+    printf '  SKIPPED  SKIP_IMAGE_SCAN=1\n'
+else
+    # The database is kept in a named volume, so only the first run downloads it.
+    set -- --rm -v /var/run/docker.sock:/var/run/docker.sock -v spectre-grype-db:/db \
+        -e GRYPE_DB_CACHE_DIR=/db -e GRYPE_CHECK_FOR_APP_UPDATE=false
+    if [ -n "${PROXY_CA_BUNDLE:-}" ]; then
+        set -- "$@" --network host -v "$PROXY_CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
+            -e HTTPS_PROXY="${HTTPS_PROXY:-}" -e HTTP_PROXY="${HTTP_PROXY:-}" -e NO_PROXY="${NO_PROXY:-}"
+    fi
+    if ! docker run "$@" "$GRYPE_IMAGE" db update >/dev/null 2>&1; then
+        printf '  SKIPPED  no Grype database: grype.anchore.io unreachable from here\n'
+    else
+        findings="$(docker run -i "$@" -e GRYPE_DB_AUTO_UPDATE=false "$GRYPE_IMAGE" "docker:$IMAGE" --only-fixed -q \
+            -o template -t /dev/stdin <<'TEMPLATE'
+{{- range .Matches }}{{ if or (eq .Vulnerability.Severity "High") (eq .Vulnerability.Severity "Critical") }}
+    {{ .Vulnerability.Severity }} {{ .Vulnerability.ID }} {{ .Artifact.Name }} {{ .Artifact.Version }} -> {{ join "," .Vulnerability.Fix.Versions }}
+{{- end }}{{ end }}
+TEMPLATE
+)" || fail "Grype scan did not run"
+        if [ -n "$findings" ]; then
+            printf '  findings with a fix available:%s\n' "$findings"
+            fail "the Container Scan stops on these: take the fix, usually by bumping the base digest"
+        fi
+        pass "no High or Critical finding has a fix available"
+    fi
+fi
 
 printf '\nAll container contract checks passed.\n\n'

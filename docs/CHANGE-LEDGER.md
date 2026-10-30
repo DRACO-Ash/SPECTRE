@@ -1281,9 +1281,16 @@ now reads it null-safely.
 
 | Gate | Class | Change | Evidence | If it still fails |
 |---|---|---|---|---|
-| Container Scan | **EVIDENCED** | Base digest `6a0e06f5...` to `e697c818...`, the current `python:3.12-slim-bookworm` index (built 28 October), in both Dockerfiles | Pulled and run: Python 3.12.16 on Debian 12.15, the version the scan names as the fix. Trivy 0.67.2 on the built image, High and Critical: 0.6.10 image 63 with 2 fixable (OpenSSL deb12u1, which the platform build patches anyway); 0.6.11 image 61 with 0 fixable. Trivy's database does not yet carry CVE-2026-115557, so it cannot show that one clearing; the interpreter version can. | Then the policy now stops on unfixable Highs too, which 0.6.0 showed it did not. The remedy recorded at 0.6.0 stands: remove the Debian packages the runtime never uses in the prep stage. |
+| Container Scan | **EVIDENCED** | Base digest `6a0e06f5...` to `e697c818...`, the current `python:3.12-slim-bookworm` index (built 28 October), in both Dockerfiles | Pulled and run: Python 3.12.16 on Debian 12.15, the version the scan names as the fix. Trivy 0.67.2 on the built image, High and Critical: 0.6.10 image 63 with 2 fixable (OpenSSL deb12u1, which the platform build patches anyway); 0.6.11 image 61 with 0 fixable. Trivy's database does not yet carry CVE-2026-115557, and Trivy does not read the interpreter in `/usr/local`. Grype v0.104.0 (database built 30 October 06:23 UTC) does: on the 0.6.10 image it reports the same nine Python CVEs as the App Store scan, CVE-2026-115557 rated Critical with the same fix list, and on the 0.6.11 image that CVE and CVE-2026-114583 are gone and no High or Critical finding has a fix. | Then the policy now stops on unfixable Highs too, which 0.6.0 showed it did not. The remedy recorded at 0.6.0 stands: remove the Debian packages the runtime never uses in the prep stage. |
 | Code Quality | **HYGIENE** | The digest line in both Dockerfiles, version strings | `sonar_rules.py` against 0.6.5: see the release record. | Then the report names the line. |
 | Other gates | **HYGIENE** | None | Container contract passes on the new image (`verify-container.sh`). | n/a. |
 
 **Product effect.** None beyond 0.6.10, which never deployed: its Target
 Group fix reaches service with this release.
+
+**Tooling.** `scripts/verify-container.sh` now runs Grype on the built image
+and fails on any High or Critical finding with a fix available, which is
+what the Container Scan stops on. Run against the 0.6.10 image it fails on
+CVE-2026-115557 and OpenSSL CVE-2026-84782; against 0.6.11 it passes. If
+grype.anchore.io cannot be reached it reports SKIPPED rather than a pass.
+The package does not ship `scripts/`, so the 0.6.11 package is unchanged.

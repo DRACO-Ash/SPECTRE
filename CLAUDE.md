@@ -51,6 +51,10 @@ sh scripts/check-quality.sh <last release the gate scored>
 
 Master is the right base only when the last release is merged to it.
 
+`scripts/verify-container.sh` fails on a High or Critical finding with a fix
+(Grype), which is what the Container Scan stops on; a SKIPPED scan is not a
+pass. Usually the fix is a base digest bump.
+
 `scripts/package-appstore.sh` refuses to build on a `sonar_rules.py` failure.
 Never submit to the App Store; that is the owner's step.
 
