@@ -1232,3 +1232,35 @@ quantifiers, so it cannot backtrack (hotspot reviewed).
 **Product effect.** A stale target set can be why nothing reaches a target,
 and listing ages only beside solutions hid it exactly then. The ages line now
 names every stale target swept.
+
+### 0.6.9 outcome
+
+Not yet reported at the time of 0.6.10.
+
+## 0.6.10
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | CSS rule for `option` and `optgroup`; two inline script edits in `operator.html` | `sonar_rules.py` and `check-quality.sh` against 0.6.5 and 0.6.9: see the release record. No Python changed, so the coverage window is unchanged. | Then the report names the line. |
+| Test, other gates | **HYGIENE** | None | No Python, dependency, Dockerfile or image change. | n/a. |
+
+**Product effect.** In service the Target Group dropdown opened as a list of
+blank rows sized for every option, so no target group could be chosen. The
+options were present (FACT: the user's screenshot shows a list sized for
+them). It does not reproduce in Chromium on Linux in either theme, with the
+UDL refresh note polling, or with the panel replaced while the list is open
+(FACT, screenshots under a virtual display). Two changes cover the likely
+causes on Windows (INFERENCE, unconfirmed until seen in service):
+
+● The options and group labels now carry `background-color` and `color`
+  from the theme. Chromium on Windows paints a dark-scheme list from the
+  options' own colours.
+● The target panel is not replaced while the Target Group select has focus;
+  the refresh runs when it loses focus. Before, a refresh could swap the
+  select out from under its own open list (FACT: measured, 24 node changes
+  while focused before, 0 after).
+
+Found on the way, FACT: `spectreRereadRedCard`, run when the UDL element set
+refresh finishes, dispatches a bare `htmx:afterSettle` event, and the target
+panel's handler read `e.detail.target` from it and threw on every refresh. It
+now reads it null-safely.

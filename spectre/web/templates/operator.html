@@ -909,6 +909,13 @@ function switchToTradeSpace() {
   var _lastConfigSat = '';
 
   function _refreshTargetConfig() {
+    /* Replacing the Target Group select while its list is open can leave the
+       browser showing the list with nothing in it. Wait until it closes. */
+    const focused = document.activeElement;
+    if (focused?.id === 'ts-tgt-group') {
+      focused.addEventListener('blur', _refreshTargetConfig, {once: true});
+      return;
+    }
     var sel = document.getElementById('ts-red-sat');
     var val = sel ? (sel.value || '') : '';
     if (val === _lastConfigSat) return;           /* no change — skip */
@@ -918,7 +925,8 @@ function switchToTradeSpace() {
   }
 
   document.body.addEventListener('htmx:afterSettle', function(e) {
-    var id = (e.detail.target || {}).id || '';
+    /* spectreRereadRedCard dispatches this event bare, with no detail. */
+    const id = e.detail?.target?.id || '';
     /* Always re-check after events that could change the select list or session state */
     if (id === 'udl-status' || id === 'blue-hrr-list' ||
         id === 'blue-list'  || id === 'red-list') {

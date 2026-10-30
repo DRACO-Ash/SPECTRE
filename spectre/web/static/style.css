@@ -661,6 +661,14 @@ input:focus, textarea:focus, select:focus {
 }
 textarea { resize: vertical; }
 
+/* Chromium on Windows draws a dark-scheme select's open list from the
+   options' own colours, not the select's. Left to the user agent they can
+   paint text the same colour as the list. */
+option, optgroup {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
 /* ── Keyboard focus on the non-input controls ─────────────────────
    Everything that opts into keyboard operation with
    tabindex="0" onkeydown="spectreActivate(event)" — the expandable sweep,

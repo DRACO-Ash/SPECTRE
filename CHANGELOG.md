@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-10-30
+
+### Fixed
+- The Target Group list in the threat sweep opened empty in service (Chromium on Windows, UDL connected). The options and their group labels now carry the theme's colours themselves, and the target panel is no longer replaced while that list has focus: a refresh waits until it closes.
+- Re-reading the red card after the UDL element set refresh threw a script error on every refresh; the target panel's refresh handler now accepts the bare event it sends.
+
 ## [0.6.9] - 2026-10-29
 
 ### Fixed
