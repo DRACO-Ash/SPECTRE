@@ -188,6 +188,16 @@ fi
 
 printf '\n== Coverage on changed lines ==\n'
 [ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
+# A report older than the code it scores is not evidence: diff-cover skips
+# every file the report does not hold, so four modules new in 0.7.0 went
+# unmeasured against a 29 October report and the step passed at 89%.
+for changed in $(git diff --name-only "$BASE" -- spectre tle_clustering) \
+               $(git ls-files --others --exclude-standard -- spectre tle_clustering); do
+    case "$changed" in *.py) ;; *) continue ;; esac
+    if [ -f "$changed" ] && [ "$changed" -nt "$COVERAGE_XML" ]; then
+        fail "$COVERAGE_XML is older than $changed; rerun pytest --cov --cov-report=xml:$COVERAGE_XML"
+    fi
+done
 if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --include-untracked --fail-under="$COVERAGE_FLOOR" >"$OUT/diffcov.out" 2>&1; then
     pass "$(grep -E '^Coverage: ' "$OUT/diffcov.out" || echo "at or above ${COVERAGE_FLOOR}%")"
 else

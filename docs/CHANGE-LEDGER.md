@@ -1294,3 +1294,50 @@ what the Container Scan stops on. Run against the 0.6.10 image it fails on
 CVE-2026-115557 and OpenSSL CVE-2026-84782; against 0.6.11 it passes. If
 grype.anchore.io cannot be reached it reports SKIPPED rather than a pass.
 The package does not ship `scripts/`, so the 0.6.11 package is unchanged.
+
+### 0.6.11 outcome
+
+● **Passed every gate** (owner's report, 30 October). The Container Scan
+  cleared on Python 3.12.16, as the 0.6.11 row predicted; the Code Quality
+  gate scored it, so 0.6.11 (59a6612) is the base for 0.7.0.
+
+## 0.7.0
+
+Plan, in plain language: `docs/plans/0.7.0-REALISM-PLAN.md`.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | Four new modules, the batch runner and ranking in `maneuver.py`, the intercept form and result templates | `sonar_rules.py` against 59a6612: 0 blocking, 0 advisory. Cognitive complexity: no touched function above 15. The route's signature moved revolutions, hops and drift into a `Depends` form dependency, so it has 11 parameters, not 14. The sortable headers and the clickable row (watch list S6847/S6845) were not edited. Full record below. | Then the report names the line. |
+| Test | **HYGIENE** | 4 new test files; one existing test extended to follow the new form dependency | Every new test runs at a fixed epoch (CLAUDE.md). | Then a test depends on the clock, which the new ones do not touch. |
+| Container Scan | **HYGIENE** | None | No dependency or Dockerfile change. Grype in `verify-container.sh`. | n/a. |
+
+**Product effect.** The intercept engine now:
+
+● measures every red approach's closest approach by flying its burns (R-bar
+  hop, CW drift, COLA and Formation reported the standoff they were asked
+  for, and GEO drift reported 0 km, with the target 600 km away: FACT, GEO
+  test pair);
+● searches each red approach's burn point, time of flight, revolutions and
+  hops for the cheapest plan that arrives (Lambert on the test pair: 59.1
+  m/s typed, 8.8 m/s searched);
+● bands each against JCO's NOTSO record: 959 on-station burns by 129
+  satellites, April 2022 to March 2026, largest 14-day total 171.8 m/s
+  (Cosmos 2589, checked by hand), launch-phase climbs to GEO kept apart;
+● gives minimum-time a realistic budget (36.8 m/s, or the satellite's own
+  if more) instead of the panel's maximum, which it always spent;
+● groups COLA, Evasion and Formation as avoidance and defence, not red
+  threats, and J2 drift (a RAAN-gap score) as an assessment;
+● defaults Max ΔV to 171.8 m/s, not 500.
+
+**Data.** The NOTSO export the owner supplied
+(`notification_2026-03-27T09-25-52-305039808Z_0.zip`, 3,124 messages,
+marked U//DS-JCO-NOTIF) sits at the repository root as committed by the
+owner. The owner confirmed the marking and its personal data are acceptable.
+The shipped evidence file holds catalogue numbers, satellite names and
+figures only; the packager drops every zip, so the export does not ship.
+
+**Known, not changed:** J2 drift refuses on GEO pairs with "date value out
+of range" (its convergence time overflows the date range), as it did before;
+the V-bar and H-bar hop solvers list only the first and last burn of a
+multi-hop plan, so those two rows keep the solver's own miss estimate and
+say they were not flown.

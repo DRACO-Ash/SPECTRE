@@ -35,11 +35,22 @@ def _names_read(fn: object) -> set[str]:
 
 
 def test_every_input_is_a_parameter_the_route_reads() -> None:
+    """Read by the route itself or by the form dependency it declares.
+
+    0.7.0 moved the counts and the targeting choice into ``_shaping_form``,
+    because the route was at the Code Quality gate's 13-parameter limit.
+    """
     route = maneuver.apply_all_intercepts
-    declared = set(inspect.signature(route).parameters)
+    readers = (route, maneuver._shaping_form)
+    declared = set().union(*(inspect.signature(f).parameters for f in readers))
     inputs = _form_inputs()
     assert inputs - declared == set(), "the route does not declare these form inputs"
-    assert inputs - _names_read(route) == set(), "the route declares but never reads these"
+    assert inputs - set().union(*(_names_read(f) for f in readers)) == set(), "declared but never read"
+
+
+def test_the_route_takes_the_form_dependency() -> None:
+    shaping = inspect.signature(maneuver.apply_all_intercepts).parameters["shaping"]
+    assert "_shaping_form" in str(shaping.annotation)
 
 
 def test_the_single_method_route_reads_what_it_declares() -> None:

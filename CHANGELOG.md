@@ -9,6 +9,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-31
+
+### Added
+- Realism for the intercept engine, from JCO's NOTSO reporting: 959 on-station burns by 129 satellites, April 2022 to March 2026, summarised in `spectre/data/manoeuvre_evidence.json` by `scripts/build-manoeuvre-evidence.py`. Each red approach is banded Seen before (within the satellite's own busiest 14 days), Possible (within the most any satellite spent in 14 days, 171.8 m/s) or Unrealistic. Launch-phase climbs to GEO, up to 999.6 m/s, are kept apart: they are not operations against a satellite.
+- Targeting search: for each red approach the engine tries burning now and at the red satellite's next apogee, perigee and nodes, with a range of times of flight, revolutions and hops, and keeps the cheapest plan that reaches the target. Each row shows its burn point, coast, time of flight, revolutions or hops, closest approach and how many options were compared. "Use the values typed below" runs exactly the typed values, as before.
+- A most-likely course of action headline: the cheapest red approach that reaches the target and is within the NOTSO record.
+
+### Changed
+- The Max ΔV default is the NOTSO record's 171.8 m/s, not 500 m/s.
+- "Target Dist" is "Approach within": how close a red approach must come to count, 50 km when left at 0.
+- Minimum-time is given a realistic budget when searching: 36.8 m/s (what nine in ten satellites stay within over 14 days), or the satellite's own busiest 14 days if more. It always spends its whole budget, so at 500 m/s it reported the panel, not the satellite.
+- COLA, Evasion and Formation are grouped as avoidance and defence and never ranked as red threats; J2 drift, a RAAN-gap score, is an assessment.
+
+### Fixed
+- Every red approach's closest approach is measured by flying its burns. R-bar hop, CW drift, COLA and Formation reported the standoff they were asked for, and GEO drift reported 0 km, with the target 600 km away.
+- Rows that never reach the target, or cost more than anything in the NOTSO record, no longer set the worst case.
+
 ## [0.6.11] - 2026-10-30
 
 ### Security

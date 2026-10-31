@@ -24,6 +24,7 @@ from spectre.config.settings import (
     validate_secret_key,
     validate_sqlite_support,
 )
+from spectre.domain.manoeuvre_evidence import shipped_evidence
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.format_units import format_m_s, format_tof_label
@@ -76,6 +77,9 @@ def banner_class(marking: str) -> str:
 templates.env.globals["spectre_version"] = __version__
 templates.env.globals["classification_marking"] = get_settings().classification_marking
 templates.env.globals["classification_class"] = banner_class(get_settings().classification_marking)
+# The most any satellite in the NOTSO record spent on station in 14 days:
+# the intercept engine's default budget, in place of 500 m/s (0.7.0).
+templates.env.globals["record_window_m_s"] = shipped_evidence().fleet.largest_window_m_s
 
 
 logger = logging.getLogger(__name__)

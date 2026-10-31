@@ -3,7 +3,10 @@
 {% else %}
 
 {% set ok_items = items | selectattr('result') | list %}
-{% set best = ok_items | first %}
+{# The worst case is the first red approach that counts: it reaches the
+   target and is not beyond the NOTSO record. A plan nothing has ever spent,
+   or one that never arrives, no longer sets it. #}
+{% set best = items | selectattr('counts') | first %}
 
 {# ── Summary header ── #}
 <div class="threat-sweep-summary" style="margin-bottom:0.5rem">
@@ -17,6 +20,8 @@
     Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
     &mdash; {{ best.result.total_delta_v_m_s | m_s }} m/s
   </span>
+  {% elif ok_items %}
+  <span class="intercept-detail">No red approach both reaches the target and is within the NOTSO record.</span>
   {% endif %}
   <span class="intercept-detail">
     <span style="color:var(--red)">{{ red_name }}</span>
@@ -36,6 +41,26 @@
   {% endif %}
 </div>
 
+{% if most_likely %}
+{% set ml = most_likely.targeting %}
+<p class="callout callout-gold" role="note" style="margin:0 0 0.5rem; font-size:0.7rem">
+  <strong>Most likely course of action:</strong>
+  {{ most_likely.result.method.value | upper }}, burning at {{ ml.burn_point | lower }}
+  ({{ ml.burn_at.strftime('%d %b %H:%M UTC') }}),
+  {{ most_likely.result.total_delta_v_m_s | m_s }} m/s, closest approach
+  {{ "%.1f" | format(ml.closest_km) }} km {{ ml.closest_after }} after the burn.
+  {{ most_likely.realism.band }}: {{ most_likely.realism.reason }}
+</p>
+{% endif %}
+{% if evidence %}
+<p class="label-dim" style="margin:0 0 0.5rem; font-size:0.62rem">
+  {% if searched %}Each red approach was searched for its cheapest plan that comes within {{ "%g" | format(approach_km) }} km and flown to measure its closest approach.{% else %}Each red approach was solved once with the typed values and flown to measure its closest approach.{% endif %}
+  Realism is judged against {{ evidence.burns }} on-station burns by {{ evidence.satellites }} satellites in JCO NOTSOs,
+  {{ evidence.first_report }} to {{ evidence.last_report }}.
+  {% if searched and fastest_budget %}Minimum-time was given {{ fastest_budget[0] | m_s }} m/s, {{ fastest_budget[1] }}.{% endif %}
+</p>
+{% endif %}
+
 {# ── Results table ── #}
 <div class="mnv-scroll" style="max-height:72vh; overflow-y:auto">
 <table class="hrr-table threat-table" id="all-intercepts-table" style="table-layout:fixed; width:100%">
@@ -49,6 +74,7 @@
     <col style="width:7rem">
     <col style="width:6rem">
     <col style="width:5rem">
+    <col style="width:7rem">
   </colgroup>
   <thead>
     <tr>
@@ -64,6 +90,7 @@
       <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
       <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th scope="col">Realism</th>
       <th>Action</th>
     </tr>
   </thead>
@@ -94,7 +121,8 @@
     <td class="threat-chevron-cell">
       <span class="threat-chevron" id="ai-chevron-{{ loop.index0 }}">&#9654;</span>
     </td>
-    <td>
+    {% set _dim = item.realism and not item.counts %}
+    <td style="{{ 'opacity:0.55' if _dim else '' }}" title="{{ 'Discounted: see Realism' if _dim else '' }}">
       <div style="font-size:0.73rem; font-weight:700; color:var(--text-bright); white-space:nowrap">
         {{ item.result.method.value | upper }}
       </div>
@@ -124,6 +152,15 @@
         {{ item.intel.obs_level }}
       </span>
     </td>
+    <td style="font-size:0.62rem">
+      {% if item.realism and not item.targeting.approach %}
+      <span style="color:var(--text-dim); font-weight:700">No approach</span>
+      {% elif item.realism %}
+      <span class="{{ 'badge-ok' if item.realism.band == 'Seen before' else ('badge-warn' if item.realism.band == 'Possible' else 'badge-red') }}">{{ item.realism.band }}</span>
+      {% else %}
+      <span style="color:var(--text-dim)">{{ item.group }}</span>
+      {% endif %}
+    </td>
     <td class="col-actions">
       {# The row above opts into spectreActivate, which calls preventDefault()
          on Enter and Space. keydown bubbles, so without this guard a key press
@@ -145,7 +182,7 @@
   {# ── Expandable detail row ── #}
   <tr id="ai-detail-{{ loop.index0 }}" style="display:none">
     <td></td>
-    <td colspan="8" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
+    <td colspan="9" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
                             background:{{ item.intel.threat_bg }};
                             border-bottom:2px solid {{ item.intel.threat_color }}">
 
@@ -169,6 +206,29 @@
           {{ item.intel.summary }}
         </p>
       </div>
+
+      {# §A2 — Targeting: the choice the search kept and how it was measured #}
+      {% if item.targeting %}
+      {% set t = item.targeting %}
+      <div style="border:1px solid var(--border); border-radius:5px; padding:0.45rem 0.7rem; margin-bottom:0.55rem">
+        <div style="font-size:0.55rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem">
+          Targeting{% if t.tried > 1 %}: cheapest of {{ t.tried }} options{% if t.refused %}, {{ t.refused }} refused{% endif %}{% endif %}
+        </div>
+        <dl style="display:grid; grid-template-columns:max-content 1fr max-content 1fr; gap:0.15rem 0.8rem; margin:0; font-size:0.66rem">
+          <dt>Burn point</dt><dd style="margin:0">{{ t.burn_point }}, {{ t.burn_at.strftime('%d %b %H:%M UTC') }}</dd>
+          <dt>Coast</dt><dd style="margin:0">{{ t.coast }}</dd>
+          {% if t.tof %}<dt>Time of flight</dt><dd style="margin:0">{{ t.tof }}</dd>{% endif %}
+          {% if t.revolutions %}<dt>Revolutions</dt><dd style="margin:0">{{ t.revolutions }}</dd>{% endif %}
+          {% if t.hops %}<dt>Hops</dt><dd style="margin:0">{{ t.hops }}</dd>{% endif %}
+          <dt>Closest approach</dt>
+          <dd style="margin:0">{{ "%.1f" | format(t.closest_km) }} km{% if t.flown %}, {{ t.closest_after }} after the burn{% else %} (the solver's estimate: its burn list holds the first and last of the hops, so it was not flown){% endif %}</dd>
+        </dl>
+        <p style="margin:0.35rem 0 0; font-size:0.64rem; color:var(--text-dim)">
+          {% if not t.approach %}Not an approach: it never comes within {{ "%g" | format(approach_km) }} km of the target.{% endif %}
+          {{ item.realism.band }}: {{ item.realism.reason }}
+        </p>
+      </div>
+      {% endif %}
 
       {# §B — Stat cards #}
       <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.35rem; margin-bottom:0.55rem">
@@ -358,7 +418,7 @@
     <td></td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.method.value | upper }}</td>
     <td><span style="font-size:0.58rem; color:var(--text-dim)">FAILED</span></td>
-    <td colspan="6" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
+    <td colspan="7" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
   </tr>
   {% endif %}
   {% endfor %}

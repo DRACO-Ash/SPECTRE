@@ -470,13 +470,19 @@
               <div id="orbital-events" style="margin:0.3rem 0"></div>
 
               <div class="mnv-search-grid">
-                <label title="Pre-burn coast duration in hours">Coast (hr)
+                <label title="Search: for every red approach, try burning now and at the red satellite's next apogee, perigee and nodes, with a range of times of flight, revolutions and hops, and keep the cheapest plan that comes within the approach distance. Typed: solve each method once with the coast, time of flight, revolutions and hops below.">Targeting
+                  <select name="targeting_mode">
+                    <option value="search" selected>Search for the cheapest approach</option>
+                    <option value="typed">Use the values typed below</option>
+                  </select>
+                </label>
+                <label title="Pre-burn coast duration in hours. Used as typed when Targeting is set to the typed values; a search picks its own burn point.">Coast (hr)
                   <input type="number" name="coast_hours" value="1.000" min="0.001" step="any" />
                 </label>
                 <label id="ie-tof-row" title="Post-burn time-of-flight in hours, for the methods that take one">Intercept TOF (hr)
                   <input type="number" name="intercept_hours" value="6.000" min="0.001" step="any" />
                 </label>
-                <label id="ie-dist-row" title="Standoff distance in metres. Lambert uses it as the miss distance; the other proximity and defensive methods raise it to their own floor of 1 to 10 km, and V-bar and H-bar hops use it as hop spacing (0 lets them choose).">Target Dist (m)
+                <label id="ie-dist-row" title="How close, in metres, a red approach must come to the target to count; 0 means 50 km. Every red approach is flown and its closest approach reported. The proximity and defensive methods also aim for this standoff, raised to their own floor of 1 to 10 km, and V-bar and H-bar hops use it as hop spacing (0 lets them choose).">Approach within (m, 0 = 50 km)
                   <input type="number" name="target_distance_m" value="0.0" min="0" step="any" />
                 </label>
                 <label title="Revolutions of the phasing orbit before arrival (Phasing)">Revolutions
@@ -488,8 +494,8 @@
                 <label title="Drift duration in days; leave blank for the solver's own (GEO drift)">Drift (days)
                   <input type="number" name="drift_days" value="" min="0" step="any" />
                 </label>
-                <label title="Delta-V budget in m/s, used by the minimum-time, evasion and envelope methods and as the reference for each result's budget share; results above it are still listed. A chemical GEO comsat on station holds 50-200 m/s discretionary; a dedicated inspector 800-1,600 m/s total.">Max &#916;V (m/s)
-                  <input type="number" name="max_dv_m_s" value="500" min="0" step="10" />
+                <label title="Delta-V budget in m/s, used by the evasion and envelope methods, by minimum-time when Targeting is set to the typed values, and as the reference for each result's budget share. The default is the most any satellite in the NOTSO record spent on station in 14 days. Each red approach is judged for realism against that record whatever is typed here.">Max &#916;V (m/s)
+                  <input type="number" name="max_dv_m_s" value="{{ record_window_m_s }}" min="0" step="any" />
                 </label>
               </div>
 

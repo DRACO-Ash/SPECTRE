@@ -10,6 +10,7 @@ CW, tactical and assessment methods. Orbital event detection uses SGP4 via
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import math
 from collections.abc import Callable
@@ -21,8 +22,10 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from spectre.astro import targeting
 from spectre.astro.constants import regimes_compatible
 from spectre.astro.events import EventType, find_orbital_events
+from spectre.astro.flight import fly
 from spectre.astro.maneuvers import (
     InterceptSolution,
     bielliptic_intercept,
@@ -51,6 +54,7 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain import realism
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     Posture,
@@ -60,6 +64,7 @@ from spectre.domain.manoeuvre_calibration import (
     per_event_station_keeping_m_s,
     to_km_s,
 )
+from spectre.domain.manoeuvre_evidence import Evidence, current_evidence
 from spectre.domain.models import (
     BurnLocation,
     BurnResult,
@@ -963,6 +968,25 @@ class _Shaping(NamedTuple):
     revolutions: int = 1
     hops: int = 3
     drift_days: float | None = None
+    #: Search the burn point, time of flight, revolutions and hops for the
+    #: cheapest approach, rather than solving once with the typed values.
+    search: bool = False
+
+
+def _shaping_form(
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
+    targeting_mode: Annotated[str, Form()] = "search",
+) -> _Shaping:
+    """The panel's counts and its targeting choice, read as one dependency.
+
+    The route was at the Code Quality gate's limit of 13 parameters, so the
+    targeting choice joins these here rather than becoming a fourteenth.
+    A form that does not say searches, which is what the panel offers first.
+    """
+    shaping = _shaping_from_form(revolutions, hops, drift_days)
+    return shaping._replace(search=targeting_mode.strip().lower() != "typed")
 
 
 class _InterceptArgs(NamedTuple):
@@ -1035,62 +1059,250 @@ def _missing_tle_labels(
     return missing
 
 
+#: Where a method's row belongs. Only a red approach is a red course of
+#: action: it is searched, flown, banded for realism and can set the worst
+#: case. COLA, Evasion and Formation are burns that move away (Formation and
+#: Evasion are blue's own, by their solvers' documentation), and were ranked
+#: as red threats beside the approaches. The rest are scored assessments.
+_RED_APPROACH = "Red approach"
+_BLUE_DEFENCE = "Avoidance and defence"
+_ASSESSMENT = "Assessment"
+_GROUP_ORDER: dict[str, int] = {_RED_APPROACH: 0, _BLUE_DEFENCE: 1, _ASSESSMENT: 2}
+
+#: Each red approach, with the choices the targeting search tries for it.
+#: J2 drift is not one: it reports the RAAN gap natural precession closes,
+#: a score in degrees, often over years.
+_SEARCH_AXES: dict[InterceptMethod, tuple[str, ...]] = {
+    InterceptMethod.LAMBERT: (targeting.BURN, targeting.TOF),
+    InterceptMethod.RBAR_HOP: (targeting.BURN, targeting.TOF),
+    InterceptMethod.CW_DRIFT: (targeting.BURN, targeting.TOF),
+    InterceptMethod.PHASING: (targeting.BURN, targeting.REVS),
+    InterceptMethod.VBAR_HOP: (targeting.BURN, targeting.HOP),
+    InterceptMethod.HBAR_HOP: (targeting.BURN, targeting.HOP),
+    InterceptMethod.HOHMANN: (targeting.BURN,),
+    InterceptMethod.BIELLIPTIC: (targeting.BURN,),
+    InterceptMethod.PLANE_CHANGE: (targeting.BURN,),
+    InterceptMethod.NMC: (targeting.BURN,),
+    InterceptMethod.GEO_DRIFT: (targeting.BURN,),
+    InterceptMethod.MIN_TIME: (targeting.BURN,),
+}
+_DEFENCE_METHODS = frozenset({InterceptMethod.COLA, InterceptMethod.EVASION, InterceptMethod.FORMATION})
+
+#: The hop solvers list the first and last burn of a multi-hop plan, so
+#: flying those two burns alone misplaces the red satellite. Their own
+#: residual (0.6.7) stands, and the row says it was not flown.
+_NOT_FLOWN = frozenset({InterceptMethod.VBAR_HOP, InterceptMethod.HBAR_HOP})
+
+#: The burn point name for a plan solved with the typed values.
+_TYPED = "Typed coast"
+
+
+def _group_of(method: InterceptMethod) -> str:
+    if method in _SEARCH_AXES:
+        return _RED_APPROACH
+    return _BLUE_DEFENCE if method in _DEFENCE_METHODS else _ASSESSMENT
+
+
+@dataclasses.dataclass(frozen=True)
+class _Outcome:
+    """One method's row before assessment: its result or its failure."""
+
+    method: InterceptMethod
+    result: InterceptResult | None
+    error: str | None
+    targeted: targeting.Targeted | None = None
+
+
+class _Plan(NamedTuple):
+    """What every red approach in one batch shares."""
+
+    points: list[tuple[str, datetime]]
+    period_s: float
+    fastest_budget_m_s: float
+    approach_km: float
+
+
+def approach_radius_km(target_km: float) -> float:
+    """How close a plan must come to count: the operator's standoff, or the default radius."""
+    return target_km if target_km > 0 else realism.CLOSE_APPROACH_KM
+
+
+def _batch_plan(args: _InterceptArgs, red_satno: str | None, evidence: Evidence) -> _Plan:
+    """The red satellite's burn points and revolution, and the fastest-arrival budget."""
+    period_s = targeting.revolution_s(args.red_tle, args.start)
+    points = targeting.burn_points(args.red_tle, args.start, period_s) if args.shaping.search else []
+    budget_m_s, _why = realism.realistic_budget_m_s(red_satno, evidence)
+    return _Plan(points, period_s, budget_m_s, approach_radius_km(args.target_km))
+
+
+def _solver_for(method: InterceptMethod, args: _InterceptArgs, budget_m_s: float) -> targeting.Solve:
+    """Solve *method* for one targeting choice, the typed values filling the rest."""
+    def solve(choice: targeting.Choice) -> InterceptSolution:
+        shaping = args.shaping._replace(
+            revolutions=choice.revolutions or args.shaping.revolutions,
+            hops=choice.hops or args.shaping.hops,
+        )
+        return _run_intercept(
+            method, args.red_tle, args.blue_tle, args.start, choice.coast_s,
+            args.tof_s if choice.tof_s is None else choice.tof_s,
+            args.target_km, budget_m_s, shaping=shaping,
+        )
+    return solve
+
+
+def _measure_for(method: InterceptMethod, args: _InterceptArgs) -> targeting.Measure:
+    """How *method*'s closest approach is measured: flown, or its own residual."""
+    if method in _NOT_FLOWN:
+        return lambda sol: (sol.miss_distance_km, sol.arrival_epoch)
+
+    def flown(sol: InterceptSolution) -> tuple[float, datetime]:
+        flight = fly(sol, args.red_tle, args.blue_tle)
+        return flight.closest_km, flight.closest_at
+    return flown
+
+
+def _candidates_for(method: InterceptMethod, args: _InterceptArgs, plan: _Plan) -> list[targeting.Choice]:
+    """The choices to compare: the search's, or the one the operator typed."""
+    if args.shaping.search:
+        return targeting.choices(_SEARCH_AXES[method], plan.points, args.start, plan.period_s)
+    burn_at = args.start + _timedelta(seconds=args.coast_s)
+    return [targeting.Choice(
+        _TYPED, burn_at, args.coast_s, args.tof_s, args.shaping.revolutions, args.shaping.hops,
+    )]
+
+
+def _target(method: InterceptMethod, args: _InterceptArgs, plan: _Plan) -> targeting.Targeted:
+    """The best plan for one red approach, with its miss as measured.
+
+    A minimum-time plan spends its whole budget, so when searching it is
+    given a realistic one; the operator's typed maximum would make it report
+    that maximum and nothing about the satellite.
+    """
+    fastest = method is InterceptMethod.MIN_TIME and args.shaping.search
+    budget_m_s = plan.fastest_budget_m_s if fastest else args.max_dv_m_s
+    found = targeting.search(
+        _solver_for(method, args, budget_m_s), _measure_for(method, args),
+        _candidates_for(method, args, plan), plan.approach_km,
+    )
+    measured = dataclasses.replace(found.solution, miss_distance_km=found.closest_km)
+    return dataclasses.replace(found, solution=measured)
+
+
 def _run_all_methods(
     args: _InterceptArgs,
     red_name: str,
     blue_name: str,
-) -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
+    plan: _Plan,
+) -> list[_Outcome]:
     """Run every method of the batch, keeping each one's failure beside it.
 
-    A closure would have carried the route's nesting into its own branching and
-    charged the route for it, which is how the batch came to be reported by the
-    Code Quality gate in the first place.
+    A red approach is searched and flown (see ``_target``); every other
+    method is solved once with the panel's values, as before.
     """
-    out: list[tuple[InterceptMethod, InterceptResult | None, str | None]] = []
+    out: list[_Outcome] = []
     for method in _ALL_METHODS_SEQUENCE:
         try:
-            sol = _run_intercept(
+            targeted = _target(method, args, plan) if method in _SEARCH_AXES else None
+            sol = targeted.solution if targeted else _run_intercept(
                 method, args.red_tle, args.blue_tle,
                 args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
                 shaping=args.shaping,
             )
             result = _solution_to_result(sol, red_name, blue_name, method)
-            out.append((method, result, None))
+            out.append(_Outcome(method, result, None, targeted))
         # BLE001: any solver failure is reported per method, not raised.
         except Exception as exc:  # noqa: BLE001
-            out.append((method, None, str(exc)))
+            out.append(_Outcome(method, None, str(exc)))
     return out
 
 
-def _items_from_solutions(
-    raw: list[tuple[InterceptMethod, InterceptResult | None, str | None]],
-    red_regime: str,
-    budget_m_s: float,
-) -> list[dict[str, Any]]:
+def _duration(seconds: float | None) -> str:
+    return format_tof_label(seconds / _SECONDS_PER_HOUR) if seconds is not None else ""
+
+
+def _targeting_view(method: InterceptMethod, t: targeting.Targeted) -> dict[str, Any]:
+    """What the row shows of the choice the search kept and how it was measured."""
+    axes = _SEARCH_AXES[method]
+    choice = t.choice
+    return {
+        "burn_point": choice.burn_point,
+        "burn_at": choice.burn_at,
+        "coast": _duration(choice.coast_s),
+        "tof": _duration(choice.tof_s) if targeting.TOF in axes else "",
+        "revolutions": choice.revolutions if targeting.REVS in axes else None,
+        "hops": choice.hops if targeting.HOP in axes else None,
+        "closest_km": t.closest_km,
+        "closest_after": _duration((t.closest_at - choice.burn_at).total_seconds()),
+        "approach": t.approach,
+        "flown": method not in _NOT_FLOWN,
+        "tried": t.tried,
+        "refused": t.refused,
+    }
+
+
+class _Assessing(NamedTuple):
+    """What each row is judged against."""
+
+    red_regime: str
+    budget_m_s: float
+    red_satno: str | None
+    red_name: str
+    evidence: Evidence
+
+
+def _items_from_solutions(raw: list[_Outcome], judged: _Assessing) -> list[dict[str, Any]]:
     """Turn each method's outcome into one row of the comparison table.
 
     A method that failed keeps its row and carries its error, so the panel
     accounts for all twenty-three rather than quietly listing fewer than it ran.
+    A red approach also carries its targeting and its realism band; it
+    counts towards the worst case only if it is an approach and is not
+    beyond the NOTSO record.
     """
     items: list[dict[str, Any]] = []
-    for method, result, error in raw:
-        if result is not None:
-            intel = _compute_intercept_intel(result, red_regime, budget_m_s)
-            items.append({"method": method, "result": result, "intel": intel, "error": None})
-        else:
-            items.append({"method": method, "result": None, "intel": None, "error": error})
+    for o in raw:
+        item: dict[str, Any] = {
+            "method": o.method, "result": o.result, "error": o.error, "intel": None,
+            "group": _group_of(o.method), "targeting": None, "realism": None, "counts": False,
+        }
+        if o.result is not None:
+            item["intel"] = _compute_intercept_intel(o.result, judged.red_regime, judged.budget_m_s)
+        if o.result is not None and o.targeted is not None:
+            band = realism.assess(o.result.total_delta_v_m_s, judged.red_satno, judged.red_name, judged.evidence)
+            item["targeting"] = _targeting_view(o.method, o.targeted)
+            item["realism"] = band
+            item["counts"] = o.targeted.approach and not band.discounted
+        items.append(item)
     return items
 
 
-def _sort_key(item: dict[str, Any]) -> tuple[int, float]:
-    """Rank one row by threat level, then by the delta-v it costs.
+def _sort_key(item: dict[str, Any]) -> tuple[int, int, int, float]:
+    """Rank one row: red approaches that count, then by threat, then by delta-v.
 
-    A method whose solver failed sorts behind every assessment.
+    A red approach that never comes within the approach radius, or costs more
+    than anything in the NOTSO record, follows those that count; avoidance,
+    defence and the assessments follow the red approaches. A method whose
+    solver failed sorts behind every row that solved.
     """
     if item["result"] is None:
-        return (99, 0.0)
+        return (99, 0, 0, 0.0)
     level = item["intel"]["threat_level"]
-    return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_m_s)
+    return (
+        _GROUP_ORDER[item["group"]],
+        0 if item["counts"] else 1,
+        _THREAT_SORT_ORDER.get(level, 5),
+        item["result"].total_delta_v_m_s,
+    )
+
+
+def _most_likely(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The cheapest red approach that counts, a satellite's own record first."""
+    counted = [i for i in items if i["counts"]]
+    return min(
+        counted,
+        key=lambda i: (realism.BAND_ORDER[i["realism"].band], i["result"].total_delta_v_m_s),
+        default=None,
+    )
 
 
 @router.post("/apply-all-intercepts", response_model=None)
@@ -1103,9 +1315,7 @@ async def apply_all_intercepts(
     coast_hours: Annotated[float, Form()] = 1.0,
     intercept_hours: Annotated[float, Form()] = 6.0,
     target_distance_m: Annotated[float, Form()] = 0.0,
-    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
-    hops: Annotated[int, Form(ge=1, le=20)] = 3,
-    drift_days: Annotated[str, Form()] = "",
+    shaping: Annotated[_Shaping, Depends(_shaping_form)],
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: Annotated[User, Depends(require_login)],
@@ -1115,6 +1325,9 @@ async def apply_all_intercepts(
     Runs every method in turn, in one executor job, using shared parameters,
     computes intelligence assessments for each successful result, and returns
     a sortable table where every row can expand to show the full analysis.
+    Each red approach is searched for its cheapest plan that reaches the
+    target, flown to measure its closest approach, and banded against what
+    NOTSOs record satellites spending on station.
     """
     state = get_session_state(current_user)
 
@@ -1171,16 +1384,20 @@ async def apply_all_intercepts(
     target_km = target_distance_m / 1000.0
 
     args = _InterceptArgs(
-        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
-        _shaping_from_form(revolutions, hops, drift_days),
+        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s, shaping,
     )
+    evidence = current_evidence()
+    red_satno = str(satno_from_tle(red_tle) or "") or None
+
+    def batch() -> list[_Outcome]:
+        plan = _batch_plan(args, red_satno, evidence)
+        return _run_all_methods(args, red_sat.strip(), blue_sat.strip(), plan)
 
     loop = asyncio.get_running_loop()
-    raw = await loop.run_in_executor(
-        None, lambda: _run_all_methods(args, red_sat.strip(), blue_sat.strip())
-    )
+    raw = await loop.run_in_executor(None, batch)
 
-    items = _items_from_solutions(raw, red_regime, max_dv_m_s)
+    judged = _Assessing(red_regime, max_dv_m_s, red_satno, red_sat.strip(), evidence)
+    items = _items_from_solutions(raw, judged)
     items.sort(key=_sort_key)
 
     # Replace history with current batch so trade-space shows the full comparison
@@ -1208,6 +1425,11 @@ async def apply_all_intercepts(
         "blue_name": blue_sat.strip(),
         "intercept_history": state.intercept_history,
         "intercept_data_mode": effective_dm,
+        "most_likely": _most_likely(items),
+        "searched": shaping.search,
+        "evidence": evidence.fleet,
+        "approach_km": approach_radius_km(target_km),
+        "fastest_budget": realism.realistic_budget_m_s(red_satno, evidence),
     })
 
 
