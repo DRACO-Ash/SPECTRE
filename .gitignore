@@ -138,3 +138,8 @@ share/python-wheels/
 /var/
 venv/
 wheels/
+
+# Written and removed by scripts/verify-container.sh; a run that dies leaves them.
+# The CA file is the build host's proxy certificate and must never be committed.
+.Dockerfile.verify
+.verify-proxy-ca.crt
