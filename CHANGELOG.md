@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-02
+
+**Operator outputs advanced: 2, the warning-time change, with output 1 beside it; and lays the foundation for output 4, recommended response: every Decision Engine figure now states its own basis (lookup, sampled or computed), so later releases can show computed figures beside lookups honestly.** The decide-by time is not shown yet, and the sweep says so.
+
+### Added
+- What the burn changed. When the interceptor has a confirmed burn inside its element-set age limit (72 h for GEO and deep space, 24 h otherwise), the sweep says what it did to the warning you have: "That burn cut your warning on BLUE-1 from 14h to 3h, and put BLUE-7 in reach with 9h 30m warning", with a table of every target that changed and each burn's own is-this-normal verdict beside it. Before is flown from the element set just before the burn, after is the sweep's own, against the same targets and their same element sets at the same moment, so no earlier sweep is needed. A basis line says what the figures rest on, including that part of a change can be timing rather than reach (SPC-007).
+- It shows no figures it cannot stand behind, and says why: without a history, with custody lost, when the sweep's own element set predates the burn, or when the last set before the burn is past its regime's limit. An earlier sweep of the pre-burn orbit is cited, never used as the before figure. A newer unconfirmed detection, or a newer manoeuvre NOTSO from the synced cache, is named and never turned into a figure (SPC-007).
+- The burn watch. After a sweep with UDL connected, SPECTRE keeps checking that object while you are signed in: it asks UDL for the newest element set every 10 minutes, fetches the history again only when that set moved, and announces a new confirmed burn once, with what it changed, on the sweep and in the session log. It stops when UDL disconnects, within 30 seconds of the sign-in ending, or when a newer sweep replaces it, and says which. A failed check says so and tries again (SPC-006).
+
+### Changed
+- Every Decision Engine figure carries its own basis, shown in each cell and in a basis line per figure on the banner. All are lookups today, so no number changes; the score stays a lookup whatever its figures are, because its weights and normalisations are rules of thumb, so the modelled badge cannot drop. "(model)" in each cell reads "(lookup)" (SPC-101).
+
+### Out of scope, named
+- A UDL manoeuvre endpoint, NOTSO as a trigger, flying the post-burn set when the sweep's own predates the burn, watching more than one object or past the sign-in, and decide-by. Exception text in six UDL route error paths is logged as SPC-019.
+
 ## [0.8.0] - 2026-10-29
 
 **Operator outputs advanced: 1, "is this normal", and the custody both 1 and 2 rest on.** Output 2's warning-time change, the decide-by time and the recommended response are untouched.
