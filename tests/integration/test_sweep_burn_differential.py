@@ -369,18 +369,66 @@ class TestTheNotsoCue:
         assert "Photometric Change" not in page
 
 
-class TestDecideByIsNamedAsMissing:
-    @pytest.mark.parametrize("udl", [True, False])
-    def test_every_state_says_decide_by_is_not_shown(self, client: Any, auth_cookie: str, leo: Any,
-                                                     monkeypatch: pytest.MonkeyPatch, udl: bool) -> None:
-        """I15."""
+class TestDecideBy:
+    """SPC-008: the soonest credible arrival minus the operator's response time."""
+
+    @staticmethod
+    def _sweep_with(client: Any, cookie: str, response: str) -> str:
+        resp = client.post("/plan/threat/sweep",
+                           data={"red_sat": "RED-LEO", "tgt_group": "none", "max_dv_m_s": _BUDGET,
+                                 "response_time_h": response},
+                           cookies={"spectre_session": cookie}, headers=csrf_headers(cookie))
+        assert resp.status_code == 200
+        return " ".join(resp.text.split())
+
+    def test_the_default_is_named_as_the_default(self, client: Any, auth_cookie: str, leo: Any,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
         records = _events_history(_RECENT_RAISE)
-        before = _confirmed(records)[-1].tle_before.tle
         _arrange(leo, monkeypatch, records)
-        if not udl:
-            leo.udl_username = leo.udl_password = None
-        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
-        assert "Decide-by time is not shown yet" in _sweep(client, auth_cookie)
+        leo.response_time_h = None
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        # Arrival 3 h after the burn at now, inside the 12 h default.
+        assert "Decide-by has passed for BLUE-LEO" in page
+        assert "the default response time of 12 h, which you have not set" in page
+
+    def test_the_operator_sets_their_own(self, client: Any, auth_cookie: str, leo: Any,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        now = _arrange(leo, monkeypatch, records)
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_with(client, auth_cookie, "1")
+        decide = now + timedelta(hours=2)
+        assert f"Decide by {decide:%H:%M} UTC on {decide.day} {decide:%b} for BLUE-LEO" in page
+        assert "your response time of 1 h" in page
+        assert leo.response_time_h == 1.0
+        assert "your response time of 1 h" in _sweep(client, auth_cookie), "a blank field kept the time set"
+        leo.response_time_h = None
+
+    def test_a_bad_response_time_is_refused_and_the_set_one_kept(self, client: Any, auth_cookie: str, leo: Any,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        leo.response_time_h = 6.0
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_with(client, auth_cookie, "500")
+        assert "Response time must be more than 0 and at most 168 hours." in page
+        assert leo.response_time_h == 6.0
+        leo.response_time_h = None
+
+    def test_custody_lost_withholds_it(self, client: Any, auth_cookie: str, leo: Any,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records, now=records[-1].epoch + timedelta(days=4))
+        _spy(monkeypatch, {records[-1].tle: 3.0})
+        assert "No decide-by: custody is lost" in _sweep(client, auth_cookie)
+
+    def test_nothing_in_reach(self, client: Any, auth_cookie: str, leo: Any,
+                              monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        _spy(monkeypatch, {})
+        assert "No decide-by: no target is in reach within 500 m/s." in _sweep(client, auth_cookie)
 
 
 class TestTheSnapshot:

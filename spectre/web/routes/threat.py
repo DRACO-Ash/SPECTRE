@@ -20,6 +20,7 @@ from typing import Annotated, Any, NamedTuple
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.along_track import position_error_km, shift_along_track
 from spectre.astro.constants import normalise_regime, regimes_compatible
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
@@ -37,6 +38,14 @@ from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain.custody import Custody, CustodyStatus, age_text, assess_custody
+from spectre.domain.decide_by import (
+    DEFAULT_RESPONSE_H,
+    DecideBy,
+    decide_by,
+    earliest_arrival,
+    parse_response_hours,
+    withheld,
+)
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
@@ -56,6 +65,7 @@ from spectre.domain.threat_assessment import (
     AccessEvidence,
     ActorVerdict,
     CapabilityEvidence,
+    arrives_at_target,
     assess_threat,
     rank_actors,
     warning_time_rank,
@@ -664,6 +674,7 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
         posture_label=classify_posture(
             from_km_s(abs(sol.total_delta_v)), regime, kind_for_method(method_name),
         ).posture_label,
+        arrives=arrives_at_target(method_name),
     )
 
 
@@ -870,12 +881,14 @@ def _compute_worst_coa(
 
     Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
     """
-    if not entries:
+    # Only a solution that reaches the target leaves a warning time to rank.
+    arriving = [e for e in entries if e.arrives]
+    if not arriving:
         return None
 
     # The entry that leaves the least warning time among the feasible ones.
     worst = min(
-        entries,
+        arriving,
         key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s),
     )
     dv = worst.delta_v_m_s
@@ -968,7 +981,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
 
     groups: list[dict[str, Any]] = []
     for items in buckets.values():
-        items.sort(key=lambda t: (t[1].tof_hours, t[1].delta_v_m_s))
+        items.sort(key=lambda t: (not t[1].arrives, t[1].tof_hours, t[1].delta_v_m_s))
         best = items[0][1]
         groups.append({
             "target": best.target,
@@ -977,6 +990,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
             "best_method": best.method,
             "best_location": best.burn_location,
             "best_tof": best.tof_hours,
+            "best_arrives": best.arrives,
             "profile_count": len(items),
             "children": [{"flat_idx": idx, "entry": e} for idx, e in items],
             "osint": get_intel(best.target.target_satno or None),  # key stays 'osint' — threat_sweep.html reads group.osint
@@ -1101,8 +1115,11 @@ def _screen_one_actor(  # noqa: PLR0913, PLR0917
     if not entries:
         return (None, [])
 
+    arriving = [e for e in entries if e.arrives]
+    if not arriving:
+        return (None, entries)
     best = min(
-        entries,
+        arriving,
         key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, budget_m_s),
     )
     assessment = assess_threat(
@@ -1665,7 +1682,6 @@ def _hours_ago(now: datetime, moment: datetime) -> str:
     return format_tof_label(max((now - moment).total_seconds(), 0.0) / 3600.0)
 
 
-_DECIDE_BY_NOTE = "Decide-by time is not shown yet: it needs your response time, which is not set."
 _DETECTION_NOTE = (
     "A burn counts once 2 independent estimators agree on it at 10 times its own element-set scatter; "
     "screening starts at 2 m/s, so small burns can go unseen."
@@ -1782,7 +1798,7 @@ def _last_shown(prior: ThreatAssessment | None, red_satno: str | None, first_bur
 
 
 def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: datetime) -> tuple[str, ...]:
-    """The lines shown only when they apply, and the decide-by line, always."""
+    """The lines shown only when they apply."""
     pol: Any = context.history.pol
     notes = [_last_shown(context.prior, context.red_satno, burns[0], top)]
     newer = newest_unconfirmed(pol.candidate_manoeuvres, burns[-1].tle_after.epoch)
@@ -1790,7 +1806,6 @@ def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: date
         notes.append(f"An unconfirmed detection at {_when(newer.burn_epoch)} is newer and is not counted, "
                      "because it is not confirmed.")
     notes.append(_notso_cue(context.red_name, context.red_satno, burns[-1].tle_after.epoch, now))
-    notes.append(_DECIDE_BY_NOTE)
     return tuple(n for n in notes if n)
 
 
@@ -1937,6 +1952,105 @@ async def burn_watch_note(
     return render(request, _BURN_WATCH_TEMPLATE, watch_view(state, current_user.session_key, _utc_now()))
 
 
+def _band_runs(worst: ThreatSweepEntry, red_tle: str, target_tle: str, errors_km: tuple[float, float],
+               max_dv_m_s: float) -> list[tuple[float, float]]:
+    """The worst case re-solved with each orbit moved ahead and behind along track: ``(m/s, hours)`` each."""
+    method = next((m for m in _SWEEP_METHODS if m[0] == worst.method), None)
+    if method is None:
+        return []
+    name, solver, extra = method
+    kwargs = dict(extra)
+    if name == "min_time":
+        kwargs["max_delta_v"] = to_km_s(max_dv_m_s)  # astro takes km/s
+    red_km, target_km = errors_km
+    values: list[tuple[float, float]] = []
+    for red_sign, target_sign in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+        try:
+            sol = solver(red_tle=shift_along_track(red_tle, red_sign * red_km),
+                         blue_tle=shift_along_track(target_tle, target_sign * target_km),
+                         manoeuvre_start=worst.burn_epoch, **kwargs)
+        # BLE001: a solver refusing a shifted geometry narrows the band; it is not a sweep failure.
+        except Exception:  # noqa: BLE001
+            continue
+        tof_h = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds() / 3600.0 if sol.burns else 0.0
+        values.append((from_km_s(abs(sol.total_delta_v)), tof_h))
+    return values
+
+
+def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis: _SweepBasis) -> dict[str, str]:
+    """The worst case's delta-V band from element-set age (SPC-005, red team finding 6), or nothing.
+
+    A sensitivity, not a confidence interval: how far the figure moves when
+    each orbit sits where its element set's age says it could be. Needs at
+    least two re-solves to say anything.
+    """
+    if not entries:
+        return {}
+    worst = entries[0]
+    target_tle = _swept_target_tle(state, worst.target)
+    if not target_tle:
+        return {}
+    ages = [elset_age(tle, basis.now) for tle in (red_tle, target_tle)]
+    red_km, target_km = (position_error_km(a.days if a else 0.0, basis.red_regime) for a in ages)
+    values = _band_runs(worst, red_tle, target_tle, (red_km, target_km), basis.max_dv_m_s)
+    if len(values) < 2:
+        return {}
+    dv_spread = max(abs(dv - worst.delta_v_m_s) for dv, _ in values)
+    tof_minutes = max(abs(tof - worst.tof_hours) for _, tof in values) * 60.0
+    red_age, target_age = (age_text(a.hours) if a else "unknown" for a in ages)
+    how = (f"re-solved with the interceptor's orbit moved {red_km:.0f} km and the target's {target_km:.0f} km along "
+           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} old (1 km plus "
+           "2 km a day of age in LEO and MEO, 2 km plus 1 km a day at GEO; tuned, not sourced). A sensitivity, not a "
+           "confidence interval.")
+    if worst.method == "min_time":
+        # The minimum-time solver spends the whole budget by construction, so
+        # its delta-V cannot move; its flight time, the warning, is what does.
+        return {
+            "dv_band": "(the budget)",
+            "dv_band_basis": (f"This intercept spends the whole budget by construction, so its delta-V does not "
+                              f"move; its flight time moves by \u00b1 {tof_minutes:.0f} min when {how}"),
+        }
+    band = f"\u00b1 {dv_spread:.1f}" if dv_spread < 1.0 else f"\u00b1 {dv_spread:.0f}"
+    return {
+        "dv_band": band,
+        "dv_band_basis": (f"Delta-V band {band} m/s, and flight time \u00b1 {tof_minutes:.0f} min: the figure {how}"),
+    }
+
+
+def _with_band(worst_coa: dict[str, Any] | None, band: dict[str, str]) -> dict[str, Any] | None:
+    if worst_coa is not None:
+        worst_coa.update(band)
+    return worst_coa
+
+
+def _sweep_decide_by(
+    state: object, entries: list[ThreatSweepEntry], custody: CustodyStatus, worst_coa: dict[str, Any] | None,
+    basis: _SweepBasis,
+) -> DecideBy:
+    """Decide-by for this sweep (SPC-008), or why it is withheld.
+
+    Withheld where custody is lost, because the arrival would rest on an
+    out-of-date orbit, and where the interceptor is assessed unable to fly the
+    intercept, because a deadline for something it cannot do would alarm.
+    """
+    if custody.state is Custody.LOST:
+        return withheld("custody is lost, so the soonest arrival would rest on an out-of-date orbit")
+    if worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
+        return withheld("the interceptor is assessed unable to fly the intercept (capability MINIMAL)")
+    set_hours = state.response_time_h  # type: ignore[attr-defined]
+    hours = DEFAULT_RESPONSE_H if set_hours is None else float(set_hours)
+    return decide_by(earliest_arrival(entries, basis.max_dv_m_s), hours, set_hours is None, basis.now, basis.max_dv_m_s)
+
+
+def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
+    """Hold the response time the sweep form carries; blank keeps the last one set."""
+    hours, problem = parse_response_hours(raw)
+    if problem:
+        errors.append(f"{problem} Decide-by uses the response time already set.")
+    elif hours is not None:
+        state.response_time_h = hours  # type: ignore[attr-defined]
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1960,6 +2074,7 @@ async def threat_sweep(
     manual_red_tle_raw = str(form.get("manual_red_tle") or "").strip()
     manual_red_confidence = str(form.get("manual_red_confidence") or "MEDIUM").strip().upper()
     manual_red_tle: str | None = _validate_manual_red_tle(manual_red_tle_raw, errors)
+    _take_response_time(state, str(form.get("response_time_h") or ""), errors)
 
     parsed = _parse_target_group(tgt_group)
     if parsed.error:
@@ -2032,7 +2147,7 @@ async def threat_sweep(
     # role as the feasibility filter it already was, but it is not the ranking:
     # an intercept arriving in 35 minutes is a harder problem than a cheaper
     # one arriving in 40 hours, and sorting on cost called the second worse.
-    entries.sort(key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s))
+    entries.sort(key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s, e.arrives))
 
     elapsed = time.monotonic() - t0
 
@@ -2072,6 +2187,8 @@ async def threat_sweep(
     )
     _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno),
                        history=history, history_task=history_task)
+    decide = _sweep_decide_by(state, entries, custody, worst_coa, basis)
+    worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -2101,6 +2218,7 @@ async def threat_sweep(
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
         "red_history": red_history,
         "warning_change": warning_change,
+        "decide_by": decide,
         **watch_view(state, current_user.session_key, now),
         "epoch_note": _epoch_note(red_tle),
         "error": None,
@@ -2216,7 +2334,7 @@ def _profiles_by_actor(
             continue
         grouped.setdefault(entry.actor.actor_satno, []).append(entry)
     for rows in grouped.values():
-        rows.sort(key=lambda e: (e.tof_hours, e.delta_v_m_s))
+        rows.sort(key=lambda e: (not e.arrives, e.tof_hours, e.delta_v_m_s))
     return grouped
 
 

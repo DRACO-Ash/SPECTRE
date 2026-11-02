@@ -115,7 +115,7 @@ def least_warning_by_target(entries: Iterable[Any], budget_m_s: float) -> dict[s
     """
     best: dict[str, float] = {}
     for e in entries:
-        if e.delta_v_m_s > budget_m_s:
+        if e.delta_v_m_s > budget_m_s or not getattr(e, "arrives", True):
             continue
         name = e.target.target_name
         if name not in best or e.tof_hours < best[name]:

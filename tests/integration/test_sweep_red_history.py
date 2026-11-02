@@ -219,3 +219,23 @@ class TestPhaseAngle:
     ) -> None:
         page = _sweep(client, auth_cookie)
         assert "Burn times are samples across the next day" in page
+
+
+class TestThePlaneChangeIsNotTheWorstCase:
+    """Found building SPC-005: on the GEO fixture a 0 m/s plane change ranked worst, "arriving" in under a minute."""
+
+    def test_the_worst_case_is_an_intercept_that_arrives(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:  # noqa: F811
+        page = _sweep(client, auth_cookie)
+        assert "Least warning: PLANE_CHANGE" not in page
+        assert "aligns planes only" in page
+
+
+class TestTheDeltaVBand:
+    """SPC-005: the worst case's delta-V shows its band and what the band rests on."""
+
+    def test_the_band_and_its_basis_are_on_screen(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:  # noqa: F811
+        page = _sweep(client, auth_cookie)
+        # The fixture's worst case is the minimum-time intercept, which spends the
+        # whole budget, so its band is on flight time; others band the delta-V.
+        assert "Delta-V band ±" in page or "spends the whole budget by construction" in page
+        assert "A sensitivity, not a confidence interval." in page

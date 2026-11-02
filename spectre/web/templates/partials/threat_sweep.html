@@ -110,10 +110,17 @@
     {% for note in wc.notes %}
     <div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">{{ note }}</div>
     {% endfor %}
-    {% if wc.status.value != "figures" %}
-    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">Decide-by time is not shown yet: it needs your response time, which is not set.</div>
-    {% endif %}
     {% if wc.basis %}<div style="font-size:0.62rem; color:var(--text-muted); margin-top:0.25rem">{{ wc.basis }}</div>{% endif %}
+  </section>
+  {% endif %}
+
+  {% if decide_by is defined and decide_by %}
+  {# Decide-by (SPC-008): the soonest credible arrival minus the response time. #}
+  {% set db_band = {"passed":"critical","set":"high"}.get(decide_by.due.value, "unknown") %}
+  <section class="sweep-decide-by" aria-label="Decide-by time"
+           style="border-left:4px solid var(--spectre-status-{{ db_band }}); background:rgba(var(--spectre-status-{{ db_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.78rem">
+    <strong>{{ decide_by.sentence }}</strong>
   </section>
   {% endif %}
 
@@ -195,7 +202,7 @@
         <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ worst_coa.dv | m_s }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
+        <div class="stat-val">{{ worst_coa.dv | m_s }}{% if worst_coa.dv_band is defined %} <span style="font-size:0.75rem; font-weight:600" title="{{ worst_coa.dv_band_basis }}">{{ worst_coa.dv_band }}</span>{% endif %} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
         <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
@@ -217,6 +224,7 @@
         <div class="stat-lbl">Burn Direction</div>
       </div>
     </div>
+    {% if worst_coa.dv_band_basis is defined %}<div class="field-meta" style="font-size:0.65rem; margin-top:0.2rem">{{ worst_coa.dv_band_basis }}</div>{% endif %}
 
     {# ── ΔV budget bar ── #}
     <div style="margin-bottom:0.5rem">
@@ -439,7 +447,7 @@
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ child.entry.burn_location }}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ child.entry.delta_v_m_s | m_s }}</td>
-          <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{% if child.entry.arrives is defined and not child.entry.arrives %}aligns planes only{% else %}{{ "%.2f" | format(child.entry.tof_hours) }} hr{% endif %}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ child.entry.dv_prograde | m_s }} m/s  Nor {{ child.entry.dv_normal | m_s }} m/s  Rad {{ child.entry.dv_radial | m_s }} m/s">
             {{ child.entry.method }}
           </td>

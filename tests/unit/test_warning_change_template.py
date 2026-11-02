@@ -26,7 +26,7 @@ _FIGURES = WarningChange(
              TargetWarning("BLUE-7", True, None, 9.5, Change.NEWLY_IN_REACH)),
     footer="12 other targets unchanged.",
     burns=(BurnLine("RED-X burned at 03:12 UTC on 2 Nov, 6h 48m ago.", "Is this normal? Routine for this object."),),
-    notes=("Decide-by time is not shown yet: it needs your response time, which is not set.",),
+    notes=("An unconfirmed detection at 08:10 UTC on 2 Nov is newer and is not counted, because it is not confirmed.",),
     basis="Computed at 10:00 UTC.",
     worst=Change.NEWLY_IN_REACH,
 )
@@ -51,7 +51,6 @@ def test_the_section_renders_in_every_state(change: WarningChange | None) -> Non
     html = _render(_context(**({} if change is None else {"warning_change": change})))
     if change is not None:
         assert change.headline in html
-        assert "Decide-by time is not shown yet" in html
 
 
 def test_the_table_shows_only_what_changed() -> None:
@@ -79,3 +78,13 @@ def test_new_colours_come_from_the_band_tokens() -> None:
         block = html[start:html.index("</section>" if "section" in marker else "</div>\n", start)]
         assert not re.search(r"#[0-9a-fA-F]{3,6}\b", block), marker
         assert not re.search(r"(?<!var\(--spectre-status-)(?<![-\w])rgba?\((?!var\()", block), marker
+
+
+@pytest.mark.parametrize(("due", "band"), [("set", "high"), ("passed", "critical"), ("none", "unknown")])
+def test_the_decide_by_line_renders_in_every_state(due: str, band: str) -> None:
+    from spectre.domain.decide_by import DecideBy, Due
+
+    html = _render(_context(decide_by=DecideBy(Due(due), f"Decide-by sentence for {due}.")))
+    assert f"Decide-by sentence for {due}." in html
+    section = html[html.index("sweep-decide-by"):html.index("</section>", html.index("sweep-decide-by"))]
+    assert f"--spectre-status-{band}" in section

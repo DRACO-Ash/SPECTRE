@@ -112,6 +112,9 @@ class SessionState:
     # (spectre.web.burn_watch, SPC-006).
     burn_watch: Any | None = None
     burn_alert: Any | None = None
+    # The operator's response time in hours, for decide-by (SPC-008); None
+    # until they set it, when the default is used and said to be the default.
+    response_time_h: float | None = None
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""
