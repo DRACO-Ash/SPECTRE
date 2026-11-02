@@ -12,7 +12,7 @@
     <div>
       <span style="font-size:0.68rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.06em">
         Heuristic ranking
-      </span>{{ modelled.badge(result.basis) }}
+      </span>{% if result.modelled is not defined or result.modelled %}{{ modelled.badge(result.basis if result.basis is defined else "") }}{% endif %}
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
         {{ result.robust_strategy.value | replace('_',' ') | title }} strategy ·
         {{ result.computation_time_s }}s
@@ -23,10 +23,26 @@
     </span>
   </div>
 
+  {# Fails closed: a result that cannot say whether it is modelled is shown as modelled. #}
+  {% if result.modelled is not defined or result.modelled %}
   <div role="note" style="margin-top:0.35rem; font-size:0.64rem; font-weight:700; color:var(--ops-gold)">
     Modelled estimate, not a computed solution.
   </div>
+  {% endif %}
+  {% if result.basis is defined %}
   <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.1rem">{{ result.basis }}</div>
+  {% endif %}
+  {# What each figure rests on, on screen rather than only in a hover (SPC-101). #}
+  <div role="note" class="figure-bases" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+    {% if result.basis_lines is defined %}
+      {% for line in result.basis_lines %}<div>Basis: {{ line }}</div>{% endfor %}
+    {% else %}
+      <div>Basis not recorded; read every figure as a lookup.</div>
+    {% endif %}
+    {% if result.custody_rule_of_thumb is not defined or result.custody_rule_of_thumb %}
+    <div>Custody here is a rule of thumb, not the held, degraded or lost custody shown on the sweep.</div>
+    {% endif %}
+  </div>
 
   <div style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
     {{ result.robust_best_response.name }}
@@ -81,6 +97,8 @@
         {% for j in range(fr | length) %}
           {% set om = result.outcome_matrix[i][j] %}
           {% set is_best = (fr[j].id == result.robust_best_response.id) %}
+          {# Guarded here: StrictUndefined raises on an attribute of an undefined value before a macro runs. #}
+          {% set fbs = om.figure_bases if om.figure_bases is defined else none %}
           {# Colour: green < 0.25, amber < 0.50, red >= 0.50 #}
           {% if om.composite_score < 0.25 %}
             {% set score_color = "#22c55e" %}
@@ -91,13 +109,20 @@
           {% endif %}
           <td style="text-align:center; padding:0.25rem 0.35rem;
                      background:{% if is_best %}rgba(59,139,235,0.06){% else %}transparent{% endif %}">
-            <div style="font-family:monospace; font-weight:700; color:{{ score_color }}">
+            <div class="figure" data-figure="composite_score"
+                 data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.composite_score) }}{% else %}lookup{% endif %}"
+                 title="{% if fbs is not none and fbs.composite_score is defined and fbs.composite_score.note is defined %}{{ fbs.composite_score.note }}{% else %}Basis not recorded; read as a lookup{% endif %}"
+                 style="font-family:monospace; font-weight:700; color:{{ score_color }}">
               {{ "%.3f" | format(om.composite_score) }}
             </div>
             <div style="font-size:0.57rem; color:var(--text-dim)">
-              <span title="{{ om.basis }}">{{ "%.0f" | format(om.closest_approach_km) }} km{% if om.modelled %} (model){% endif %} ·
-              {% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
-              custody{% if om.modelled %} (model){% endif %}</span>
+              <span{% if om.basis is defined %} title="{{ om.basis }}"{% endif %}>
+              <span class="figure" data-figure="closest_approach_km"
+                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ "%.0f" | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
+              <span class="figure" data-figure="custody_maintained"
+                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
+              custody {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
+              </span>
             </div>
           </td>
         {% endfor %}
@@ -142,7 +167,7 @@
 
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim);
               border-top:1px solid var(--border); padding-top:0.3rem">
-    Phase 1 · deterministic analytic model · {{ result.scenario.name }}
+    Phase 1 · {{ result.scenario.name }}
     · {{ result.scenario.horizon_hours | int }}h horizon
   </div>
 

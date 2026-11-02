@@ -22,12 +22,20 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 - Operator enters N adversary actions (type, probability, confidence) and M friendly responses (type, cost, reversibility, time-to-execute)
 - Engine computes an N × M outcome matrix; each cell contains:
-  - `composite_score` (weighted sum, lower = better for friendly)
-  - `custody_maintained` (bool — can friendly satellite keep track?)
-  - `closest_approach_km` (minimum separation during horizon — analytic SMA-difference approximation)
-  - `time_to_intercept_h`, `delta_v_cost_km_s` (analytic estimates from orbital mechanics rules of thumb)
+  - `composite_score` (weighted sum of custody, closest approach and our delta-V with the response's time to execute
+    and reversibility; lower = better for friendly)
+  - `custody_maintained` and `custody_gap_hours` (a rule of thumb, not the held, degraded or lost custody on the sweep)
+  - `closest_approach_km` (a fixed 200, 3,000, 5,000 or 10,000 km per adversary action type, raised by response cost;
+    no orbit propagated)
+  - `time_to_closest_hours` (0.4 of the horizon) and `delta_v_cost_km_s` (response cost x 0.05 km/s for a manoeuvre)
+- Every figure states its own basis (SPC-101): `OutcomeMetrics.figure_bases` holds a `FigureBasis` per figure, of kind
+  lookup, sampled or computed, with the rule behind it. In Phase 1 every figure is a lookup. The score's basis is
+  derived from the figures its formula uses and is held at lookup by its scoring rule, so the modelled badge stays
+  while the ranking is a weighted heuristic. Later releases set a figure's kind through `outcome_bases()` and the page
+  marks it in its own cell.
 - Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
-- Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") + full outcome matrix + per-adversary ranked response cards
+- Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") with a basis line per figure,
+  a "(lookup)" mark on each closest approach and custody in the outcome matrix, and per-adversary ranked response cards
 
 ### Key files
 
@@ -40,7 +48,7 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 ### Known Phase 1 limitations
 
-- Outcome metrics are **analytic estimates**, not SGP4 propagations (closest approach via SMA difference approximation)
+- Outcome metrics are **lookup estimates**, not SGP4 propagations (closest approach is a constant per action type)
 - Adversary actions have no manoeuvre hypothesis — all actions are treated as constant-SMA from a propagation standpoint
 - No uncertainty — single deterministic outcome per (adversary, response) pair
 - ΔV cost is estimated from orbital mechanics rules of thumb, not simulated

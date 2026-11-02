@@ -7,6 +7,10 @@ constants per action type, scaled by the operator's inputs, and they are
 uncalibrated against any observed outcome. A selector (minimax by default)
 picks the friendly response with the least worst-case cost.
 
+Every figure in a cell states its own basis (lookup, sampled or computed),
+and the score's basis is derived from the figures it uses, never stronger
+than lookup while its weights are rules of thumb (SPC-101).
+
 An earlier "TLE refinement" took one instant's separation, could only lower
 the estimate, hid every error behind a bare except, and never ran because the
 route passed no red element set; it was removed (audit F-111).
@@ -31,11 +35,12 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
 
-from spectre.domain.provenance import Provenance, provenance, value_input
+from spectre.domain.provenance import Basis, FigureBasis, Provenance, provenance, value_input, weakest
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,141 @@ MODELLED_BASIS = (
     "time to approach is a fixed fraction of the horizon, and custody follows a "
     "rule of thumb. Use it to compare trade-offs, not as an operational answer."
 )
+
+
+# ── Figure bases ──────────────────────────────────────────────────────────────
+
+#: The figures composite_score is built from, read off its formula: norm_custody uses custody_maintained and
+#: custody_gap_hours, norm_ca closest_approach_km, norm_dv delta_v_cost_km_s. time_to_closest_hours is not used.
+_SCORE_INPUTS: tuple[str, ...] = ("custody_maintained", "custody_gap_hours", "closest_approach_km", "delta_v_cost_km_s")
+#: The weights and the normalisations (50,000 km; 0.1 km/s, i.e. 100 m/s) are rules of thumb, so the score
+#: is never stronger than lookup, whatever its figures are. Citing the weights (SPC-151) does not change this.
+_SCORING_RULE_KIND: Basis = Basis.LOOKUP
+
+
+@dataclass(frozen=True)
+class OutcomeBases:
+    """What each figure of one cell rests on, one :class:`FigureBasis` per OutcomeMetrics figure."""
+
+    custody_maintained:    FigureBasis
+    custody_gap_hours:     FigureBasis
+    closest_approach_km:   FigureBasis
+    time_to_closest_hours: FigureBasis
+    delta_v_cost_km_s:     FigureBasis
+    composite_score:       FigureBasis
+
+    def __post_init__(self) -> None:
+        ceiling = weakest(_SCORING_RULE_KIND, *(getattr(self, name).kind for name in _SCORE_INPUTS))
+        if self.composite_score.kind != weakest(self.composite_score.kind, ceiling):
+            raise ValueError(
+                f"composite_score cannot claim {self.composite_score.kind.value}: "
+                f"its scoring rule and figures support at most {ceiling.value}"
+            )
+
+    def items(self) -> tuple[tuple[str, FigureBasis], ...]:
+        """Each figure's name and basis, in field order."""
+        return tuple((f.name, getattr(self, f.name)) for f in fields(self))
+
+
+_SCORE_NOTE = (
+    "weighted sum of custody, closest approach and our delta-V with the response's time to execute and "
+    "reversibility; weights as set on the panel, scaled to sum to one, defaults not yet cited (SPC-151); closest approach normalised "
+    "to 50,000 km and delta-V to 0.1 km/s (100 m/s); never stronger than lookup"
+)
+
+
+def outcome_bases(
+    *,
+    custody_maintained: FigureBasis,
+    custody_gap_hours: FigureBasis,
+    closest_approach_km: FigureBasis,
+    time_to_closest_hours: FigureBasis,
+    delta_v_cost_km_s: FigureBasis,
+) -> OutcomeBases:
+    """The bases of one cell, with the score's derived from the figures it uses.
+
+    The only builder for OutcomeBases: a later release sets one figure's
+    kind (SPC-120: closest approach computed) and the score follows.
+    """
+    inputs = {
+        "custody_maintained": custody_maintained,
+        "custody_gap_hours": custody_gap_hours,
+        "closest_approach_km": closest_approach_km,
+        "delta_v_cost_km_s": delta_v_cost_km_s,
+    }
+    score_kind = weakest(_SCORING_RULE_KIND, *(inputs[name].kind for name in _SCORE_INPUTS))
+    return OutcomeBases(
+        time_to_closest_hours=time_to_closest_hours,
+        composite_score=FigureBasis(score_kind, _SCORE_NOTE),
+        **inputs,
+    )
+
+
+#: Each figure's name as the operator reads it.
+FIGURE_LABELS: dict[str, str] = {
+    "custody_maintained": "custody",
+    "custody_gap_hours": "custody gap",
+    "closest_approach_km": "closest approach",
+    "time_to_closest_hours": "time to closest approach",
+    "delta_v_cost_km_s": "our delta-V",
+    "composite_score": "score",
+}
+
+#: Phase 1: every figure is a lookup, and each note matches compute_outcome_metrics as written.
+LOOKUP_BASES: OutcomeBases = outcome_bases(
+    custody_maintained=FigureBasis(
+        Basis.LOOKUP,
+        "rule of thumb: lost when the adversary manoeuvres and the response neither manoeuvres nor retasks "
+        "a sensor; not the held, degraded or lost custody on the sweep",
+    ),
+    custody_gap_hours=FigureBasis(
+        Basis.LOOKUP,
+        "when custody is lost, the horizon x adversary confidence; against a sensor retask, half its time "
+        "to execute; detection is not modelled",
+    ),
+    closest_approach_km=FigureBasis(
+        Basis.LOOKUP,
+        "a fixed 200, 3,000, 5,000 or 10,000 km per adversary action type, raised by response cost for a "
+        "manoeuvre or posture change; no orbit propagated",
+    ),
+    time_to_closest_hours=FigureBasis(Basis.LOOKUP, "0.4 of the horizon"),
+    delta_v_cost_km_s=FigureBasis(
+        Basis.LOOKUP, "response cost x 0.05 km/s (0 to 50 m/s) for a manoeuvre response, else 0",
+    ),
+)
+
+#: The result's basis once its figures rest on more than one kind; the lines list them.
+MIXED_BASIS = (
+    "Figures rest on mixed bases, listed below and marked in each cell. "
+    "The ranking is still a weighted heuristic."
+)
+
+_ALL_LOOKUP_LINE = "Every figure in every cell is a lookup."
+
+
+def _cell_bases(cell: object) -> OutcomeBases:
+    """A cell's bases. An unrecorded basis reads as a lookup, never as computed."""
+    bases = getattr(cell, "figure_bases", None)
+    return bases if isinstance(bases, OutcomeBases) else LOOKUP_BASES
+
+
+def _is_modelled(bases: OutcomeBases) -> bool:
+    return any(fb.kind is not Basis.COMPUTED for _, fb in bases.items())
+
+
+def _all_lookup(bases: OutcomeBases) -> bool:
+    return all(fb.kind is Basis.LOOKUP for _, fb in bases.items())
+
+
+def _figure_line(label: str, counts: Counter[Basis], total: int) -> str:
+    """One banner line, kinds weakest first: "Closest approach: lookup in 1 of 2 cells, computed in 1." """
+    present = [(kind, counts[kind]) for kind in Basis if counts[kind]]   # Basis is declared weakest first
+    head = label[:1].upper() + label[1:]
+    if len(present) == 1:
+        return f"{head}: {present[0][0].value} in every cell."
+    (first, n_first), *rest = present
+    parts = [f"{first.value} in {n_first} of {total} cells", *(f"{kind.value} in {n}" for kind, n in rest)]
+    return f"{head}: {', '.join(parts)}."
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -123,10 +263,21 @@ class OutcomeMetrics:
     time_to_closest_hours: float
     delta_v_cost_km_s:    float    # Friendly ΔV expended
     composite_score:      float    # Higher = worse for friendly
-    # Every figure above is a Phase 1 lookup or weighting, not a propagated
-    # result. Carried on the data so no consumer can present it as computed.
-    modelled:             bool = True
-    basis:                str = MODELLED_BASIS
+    # What each figure above rests on, carried on the data so no consumer can
+    # present a lookup as computed. The default is the weakest basis, so a
+    # path that forgets to set it under-claims rather than over-claims.
+    figure_bases:         OutcomeBases = LOOKUP_BASES
+
+    @property
+    def modelled(self) -> bool:
+        """True while any figure is not computed: always in Phase 1, since the score is a lookup."""
+        return _is_modelled(self.figure_bases)
+
+    @property
+    def basis(self) -> str:
+        if _all_lookup(self.figure_bases):
+            return MODELLED_BASIS
+        return "; ".join(f"{FIGURE_LABELS[name]}: {fb.kind.value}, {fb.note}" for name, fb in self.figure_bases.items())
 
     def __str__(self) -> str:
         cust = "✓" if self.custody_maintained else "✗"
@@ -175,13 +326,41 @@ class ScenarioResult:
     robust_best_response:   FriendlyResponse
     robust_strategy:        SelectorStrategy
     computation_time_s:     float
-    # Phase 1 outcomes come from lookup constants, not propagation. The flag
-    # and basis travel with the result so the page can say so (audit
-    # F-S05-02, and the "modelled estimate" banner agreed in July 2026).
-    modelled:               bool = True
-    basis:                  str = MODELLED_BASIS
     # The code, calibration and scenario behind this result (audit F-121).
     provenance:             Provenance | None = None
+
+    # The flag and basis are worked out from the cells, so the page says what
+    # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
+    # agreed in July 2026) and cannot claim more than the cells do.
+
+    def _bases(self) -> list[OutcomeBases]:
+        return [_cell_bases(cell) for row in self.outcome_matrix for cell in row]
+
+    @property
+    def modelled(self) -> bool:
+        bases = self._bases()
+        return not bases or any(_is_modelled(b) for b in bases)
+
+    @property
+    def basis(self) -> str:
+        """MODELLED_BASIS while every figure is a lookup, else MIXED_BASIS; never the lines repeated."""
+        return MODELLED_BASIS if all(_all_lookup(b) for b in self._bases()) else MIXED_BASIS
+
+    @property
+    def custody_rule_of_thumb(self) -> bool:
+        """Whether any cell's custody is still the rule of thumb, so the page says so only then."""
+        return any(b.custody_maintained.kind is Basis.LOOKUP for b in self._bases())
+
+    @property
+    def basis_lines(self) -> tuple[str, ...]:
+        """One line per figure saying which kinds it rests on and in how many cells."""
+        bases = self._bases()
+        if all(_all_lookup(b) for b in bases):
+            return (_ALL_LOOKUP_LINE,)
+        return tuple(
+            _figure_line(label, Counter(getattr(b, name).kind for b in bases), len(bases))
+            for name, label in FIGURE_LABELS.items()
+        )
 
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
@@ -283,6 +462,7 @@ def compute_outcome_metrics(
         time_to_closest_hours=round(time_to_ca, 2),
         delta_v_cost_km_s=round(dv_km_s, 5),
         composite_score=round(composite, 6),
+        figure_bases=LOOKUP_BASES,
     )
 
 
