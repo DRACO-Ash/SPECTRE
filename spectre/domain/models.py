@@ -436,6 +436,10 @@ class ThreatSweepEntry:
     #: blue asset against many candidate actors. Defaulted last so every
     #: existing construction site stays valid.
     actor: ThreatActor | None = None
+    #: Whether this method brings the object to the target. A plane change
+    #: only aligns the planes: its single burn "arrives" the moment it fires,
+    #: so its flight time is not a warning and it never ranks as one.
+    arrives: bool = True
 
 
 @dataclass

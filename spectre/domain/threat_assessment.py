@@ -63,6 +63,8 @@ __all__ = [
     "assess_threat",
     "rank_actors",
     "warning_time_rank",
+    "NON_ARRIVING_METHODS",
+    "arrives_at_target",
 ]
 
 
@@ -470,7 +472,21 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
     )
 
 
-def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: float) -> tuple[float, float]:
+#: Methods whose solution aligns orbits without bringing the object to the
+#: target. A plane change "arrives" the moment it burns, so its zero flight
+#: time once ranked it the most dangerous course of action, arriving in under
+#: a minute, whenever it fitted the budget.
+NON_ARRIVING_METHODS: frozenset[str] = frozenset({"plane_change"})
+
+
+def arrives_at_target(method: str) -> bool:
+    """Whether a solution by *method* brings the object to the target."""
+    return method not in NON_ARRIVING_METHODS
+
+
+def warning_time_rank(
+    entry_delta_v_m_s: float, tof_hours: float, budget_m_s: float, arrives: bool = True,
+) -> tuple[float, float]:
     """Sort key that ranks on warning time, with feasibility as the filter.
 
     The sweep ranked on delta-V alone, so an intercept costing 120 m/s and
@@ -480,9 +496,10 @@ def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: fl
 
     Delta-V keeps its role as the feasibility filter it already was. Anything
     outside the budget sorts last regardless of how quickly it would arrive,
-    because an intercept that cannot be flown buys no warning at all.
+    because an intercept that cannot be flown buys no warning at all. A
+    solution that never reaches the target sorts last for the same reason.
     """
-    feasible = 0 if entry_delta_v_m_s <= budget_m_s else 1
+    feasible = 0 if entry_delta_v_m_s <= budget_m_s and arrives else 1
     return (feasible, tof_hours)
 
 
