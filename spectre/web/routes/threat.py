@@ -1970,11 +1970,16 @@ def _band_runs(worst: ThreatSweepEntry, red_tle: str, target_tle: str, errors_km
                          blue_tle=shift_along_track(target_tle, target_sign * target_km),
                          manoeuvre_start=worst.burn_epoch, **kwargs)
         # BLE001: a solver refusing a shifted geometry narrows the band; it is not a sweep failure.
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Band re-solve refused for %s: %s", log_safe(worst.method), log_safe(exc))
             continue
         tof_h = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds() / 3600.0 if sol.burns else 0.0
         values.append((from_km_s(abs(sol.total_delta_v)), tof_h))
     return values
+
+
+#: Re-solves needed before a spread says anything: one alone has nothing to differ from.
+_MIN_BAND_RUNS: int = 2
 
 
 def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis: _SweepBasis) -> dict[str, str]:
@@ -1993,7 +1998,7 @@ def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis
     ages = [elset_age(tle, basis.now) for tle in (red_tle, target_tle)]
     red_km, target_km = (position_error_km(a.days if a else 0.0, basis.red_regime) for a in ages)
     values = _band_runs(worst, red_tle, target_tle, (red_km, target_km), basis.max_dv_m_s)
-    if len(values) < 2:
+    if len(values) < _MIN_BAND_RUNS:
         return {}
     dv_spread = max(abs(dv - worst.delta_v_m_s) for dv, _ in values)
     tof_minutes = max(abs(tof - worst.tof_hours) for _, tof in values) * 60.0

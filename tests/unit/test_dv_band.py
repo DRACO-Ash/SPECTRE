@@ -61,10 +61,11 @@ def test_older_element_sets_widen_the_band() -> None:
 def test_a_minimum_time_intercept_bands_its_flight_time_not_its_budget() -> None:
     """It spends the whole budget by construction: a delta-V band would read a misleading 0."""
     band, worst = _band(_EPOCH + timedelta(hours=6))
+    stale, _ = _band(_EPOCH + timedelta(days=5))
     assert worst.method == "min_time"
     assert band["dv_band"] == "(the budget)"
     assert "spends the whole budget by construction" in band["dv_band_basis"]
-    assert _spread(band["dv_band_basis"], "min") >= 0.0
+    assert _spread(stale["dv_band_basis"], "min") > _spread(band["dv_band_basis"], "min")
 
 
 def test_no_band_without_the_target_element_set() -> None:
