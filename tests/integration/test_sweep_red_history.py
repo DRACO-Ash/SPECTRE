@@ -34,6 +34,14 @@ def udl(sweep_state: Any) -> Iterator[Any]:  # noqa: F811
     sweep_state.elset_histories.update(saved[2])
 
 
+@pytest.fixture(autouse=True)
+def _no_live_watch(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """The burn watch is tested on its own (test_burn_watch); here it records and does not start."""
+    started: list[Any] = []
+    monkeypatch.setattr(threat, "start_watch", lambda *a, **_k: started.append(a))
+    return started
+
+
 def _sweep(client: Any, cookie: str) -> str:
     _add_manual(client, cookie, "BLUE-GEO", _BLUE_GEO)
     resp = _post(client, cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})

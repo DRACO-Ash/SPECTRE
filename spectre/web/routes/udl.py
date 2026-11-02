@@ -214,6 +214,14 @@ class _CatalogClock:
 _CATALOG_CLOCK = _CatalogClock()
 
 
+def spawn_session_task(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
+    """Start *coro* as a task UDL logout cancels, for other modules (the burn watch).
+
+    Calls ``_spawn`` by name at call time, so tests that patch it still see it.
+    """
+    return _spawn(coro, owner)
+
+
 def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
     """Start *coro* as a task held until it finishes, filed under *owner*."""
     task = asyncio.create_task(coro)

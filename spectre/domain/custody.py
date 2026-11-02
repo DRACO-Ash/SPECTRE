@@ -28,7 +28,7 @@ from enum import Enum
 
 from spectre.domain.normality import Normality
 
-__all__ = ["BASIS", "Custody", "CustodyStatus", "assess_custody"]
+__all__ = ["BASIS", "Custody", "CustodyStatus", "age_text", "assess_custody"]
 
 _HOURS_PER_DAY = 24.0
 
@@ -54,9 +54,12 @@ class CustodyStatus:
     basis: str = field(default=BASIS)
 
 
-def _age(hours: float) -> str:
+def age_text(hours: float) -> str:
     """Hours under a day, days beyond it, as the element set ages are shown."""
     return f"{hours:.1f} h" if hours < _HOURS_PER_DAY else f"{hours / _HOURS_PER_DAY:.1f} d"
+
+
+_age = age_text
 
 
 def assess_custody(  # noqa: PLR0913 - one argument per fact the rule reads, all named at the call

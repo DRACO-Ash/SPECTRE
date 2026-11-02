@@ -36,7 +36,7 @@ from spectre.astro.maneuvers import (
 from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
-from spectre.domain.custody import CustodyStatus, assess_custody
+from spectre.domain.custody import Custody, CustodyStatus, age_text, assess_custody
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
@@ -60,21 +60,36 @@ from spectre.domain.threat_assessment import (
     rank_actors,
     warning_time_rank,
 )
+from spectre.domain.warning_change import (
+    BurnLine,
+    Status,
+    WarningChange,
+    burns_in_window,
+    compare,
+    footer,
+    headline,
+    least_warning_by_target,
+    newest_unconfirmed,
+    worst_change,
+)
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
+from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
 from spectre.web.deps import render
-from spectre.web.elsets import elset_age
+from spectre.web.elsets import elset_age, limit_hours_for_regime
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
-from spectre.web.routes.pol import HeldHistory, held_history, history_evidence, reserve_reset_for
+from spectre.web.routes.pol import HeldHistory, burn_verdicts, held_history, history_evidence, reserve_reset_for
+from spectre.web.routes.udl import spawn_session_task
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/threat")
 
 _THREAT_SWEEP_TEMPLATE = "partials/threat_sweep.html"
+_BURN_WATCH_TEMPLATE = "partials/burn_watch_note.html"
 
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
@@ -1565,6 +1580,360 @@ def _red_history_view(history: _RedHistory, custody: CustodyStatus) -> dict[str,
     }
 
 
+# ── What the burn changed (SPC-006, SPC-007) ─────────────────────────────────
+#
+# The operator's second question: how long have I got, and how did that burn
+# change it? Warning before and after is flown, not remembered: the orbit just
+# before the burn and the orbit the sweep flew, against the same targets and
+# their same element sets, at the same moment. So the change needs no earlier
+# sweep, and the after figure is the worst case card's own.
+
+
+def _utc_now() -> datetime:
+    """The sweep's clock, a seam so tests can stand at a chosen moment."""
+    return datetime.now(tz=UTC)
+
+
+class _FrozenTargets(NamedTuple):
+    """The swept targets' element sets, copied once after clustering.
+
+    Every run of one sweep flies these, so a set refreshed mid-sweep cannot
+    make the before and after figures fly different targets. It stands in for
+    the session state in ``_run_target_sweep``, which reads only this cache.
+    """
+
+    hrr_tle_cache: dict[str, str]
+
+
+class _SweepBasis(NamedTuple):
+    """What every run of one sweep holds constant."""
+
+    targets: list[ThreatTarget]
+    manual_tle_by_name: dict[str, str]
+    frozen: _FrozenTargets
+    red_regime: str
+    max_dv_m_s: float
+    blue_satnos: frozenset[str]
+    now: datetime
+
+
+def _sweep_basis(  # noqa: PLR0913 - one argument per thing the runs hold constant, all named at the call
+    state: object, targets: list[ThreatTarget], manual: dict[str, str], red_regime: str,
+    max_dv_m_s: float, now: datetime,
+) -> _SweepBasis:
+    """Freeze the swept targets' element sets and the rest of what every run holds constant."""
+    cache = state.hrr_tle_cache  # type: ignore[attr-defined]
+    hrr_objects = state.hrr_objects  # type: ignore[attr-defined]
+    return _SweepBasis(
+        targets=list(targets),
+        manual_tle_by_name=dict(manual),
+        frozen=_FrozenTargets({t.target_satno: cache[t.target_satno] for t in targets if t.target_satno in cache}),
+        red_regime=red_regime,
+        max_dv_m_s=max_dv_m_s,
+        blue_satnos=frozenset(str(o.get("satno") or "").strip() for o in hrr_objects if _hrr_side(o) == "blue"),
+        now=now,
+    )
+
+
+async def _fly(
+    basis: _SweepBasis, red_tle: str,
+) -> tuple[list[ThreatSweepEntry], list[str], list[tuple[str, str, str]]]:
+    """Fly one red orbit against the frozen targets: the sweep, the before run and the watch.
+
+    Epochs and the sweep run off the event loop, the sweep a bounded number at
+    once across all operators: each holds an executor thread for its whole
+    length (audit F-235).
+    """
+    loop = asyncio.get_running_loop()
+    epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, basis.now)
+    async with _SWEEP_SLOTS:
+        return await loop.run_in_executor(
+            None,
+            lambda: _run_target_sweep(
+                basis.frozen, basis.targets, basis.manual_tle_by_name, red_tle,
+                basis.red_regime, epochs, basis.max_dv_m_s,
+            ),
+        )
+
+
+def _when(moment: datetime) -> str:
+    """A moment as the operator reads it: "03:12 UTC on 2 Nov"."""
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def _hours_ago(now: datetime, moment: datetime) -> str:
+    return format_tof_label(max((now - moment).total_seconds(), 0.0) / 3600.0)
+
+
+_DECIDE_BY_NOTE = "Decide-by time is not shown yet: it needs your response time, which is not set."
+_DETECTION_NOTE = (
+    "A burn counts once 2 independent estimators agree on it at 10 times its own element-set scatter; "
+    "screening starts at 2 m/s, so small burns can go unseen."
+)
+
+
+class _ChangeContext(NamedTuple):
+    """The facts the change is worded from, beyond the two runs."""
+
+    red_name: str
+    red_satno: str | None
+    red_epoch: datetime | None
+    history: _RedHistory
+    prior: ThreatAssessment | None
+
+
+def _custody_refusal(history: _RedHistory, custody: CustodyStatus) -> WarningChange | None:
+    """No figures without a history, or with custody lost."""
+    if history.pol is None:
+        return WarningChange(Status.CANNOT_SAY, f"What the burn changed: cannot say. {history.problem}")
+    if custody.state is Custody.LOST:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            "What the burn changed is not shown: custody is lost, so any figure would rest on an out-of-date orbit.",
+        )
+    return None
+
+
+def _no_burn(pol: Any, now: datetime, limit_hours: float) -> WarningChange:
+    """The window held no confirmed burn: say what was looked at, never "nothing moved"."""
+    newest = pol.records[-1].epoch if pol.records else now
+    confirmed = sorted(pol.manoeuvres, key=lambda m: m.burn_epoch)
+    last = (f"Its last confirmed burn was {_hours_ago(now, confirmed[-1].burn_epoch)} ago."
+            if confirmed else "It has no confirmed burn in its history.")
+    window_start = now - timedelta(hours=limit_hours)
+    return WarningChange(
+        Status.NO_BURN,
+        f"No confirmed burn in its element sets from {_when(window_start)} to its newest, {_when(newest)}: "
+        f"the last {limit_hours:.0f} h, its element-set age limit. There is no burn to compare. {last}",
+    )
+
+
+def _burn_selection(
+    history: _RedHistory, red_epoch: datetime | None, custody: CustodyStatus, basis: _SweepBasis,
+) -> WarningChange | list[Any]:
+    """The burns to compare across, or the sentence saying why there are none to compare."""
+    refusal = _custody_refusal(history, custody)
+    if refusal is not None:
+        return refusal
+    pol: Any = history.pol  # a history is held: _custody_refusal answered for none
+    limit = limit_hours_for_regime(basis.red_regime)
+    burns = sorted(burns_in_window(pol.manoeuvres, basis.now, limit), key=lambda m: m.burn_window[0])
+    if not burns:
+        return _no_burn(pol, basis.now, limit)
+    latest = burns[-1]
+    if red_epoch is not None and red_epoch < latest.burn_window[1]:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            f"The sweep above flies its element set of {_when(red_epoch)}, from before its burn at "
+            f"{_when(latest.burn_epoch)}, so its figures do not include the burn and the change is not computed. "
+            f"UDL holds a set from after it ({_when(latest.tle_after.epoch)}); reconnect to UDL to refresh "
+            "held element sets (sets entered by hand are not refreshed), then sweep again.",
+        )
+    before = burns[0].tle_before
+    before_age = (basis.now - before.epoch).total_seconds() / 3600.0
+    if before_age > limit:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            f"That burn's warning change is not computed: its last element set before the burn is "
+            f"{age_text(before_age)} old against a {limit:.0f} h limit, too old to fly to now.",
+        )
+    return burns
+
+
+def _burn_line(m: Any, red_name: str, verdicts: dict[datetime, Any], now: datetime) -> BurnLine:
+    """One burn in the window, with its own is-this-normal verdict."""
+    start, end = m.burn_window
+    when = (f"{red_name} burned at {_when(m.burn_epoch)}, {_hours_ago(now, m.burn_epoch)} ago."
+            if start == end else f"{red_name} burned between {_when(start)} and {_when(end)}.")
+    verdict = verdicts.get(m.burn_epoch)
+    caveat = (f"Caveat: the element sets either side of that burn were {m.gap_days:.0f} days apart, "
+              "so the before orbit may already include other burns.") if m.long_gap else ""
+    return BurnLine(when, f"Is this normal? {verdict.sentence}" if verdict else "", caveat)
+
+
+def _basis_line(basis: _SweepBasis, before: Any, red_epoch: datetime | None) -> str:
+    """What the figures rest on, in small text under the section."""
+    after = f"(epoch {_when(red_epoch)})" if red_epoch else ""
+    return (
+        f"Computed at {basis.now:%H:%M} UTC. Before: its last element set before the burn "
+        f"(epoch {_when(before.epoch)}), flown as if it had not burned. After: the element set this sweep "
+        f"flew {after}. Both against the same {len(basis.targets)} targets and their same element sets, the same "
+        f"{len(_SWEEP_METHODS)} transfer methods and the {basis.max_dv_m_s:g} m/s budget. Each orbit is offered "
+        "its own burn times (now, and its apsides and nodes over the next 24 hours), so part of a change can be "
+        "timing rather than reach. Warning time runs from the moment it burns to arrival, for its fastest "
+        "intercept, as on the worst case. A change within 15 minutes reads as unchanged; that tolerance is "
+        f"tuned, not sourced. {_DETECTION_NOTE}"
+    )
+
+
+def _last_shown(prior: ThreatAssessment | None, red_satno: str | None, first_burn: Any, top: Any) -> str:
+    """The figure the operator last saw before the burn, cited and never used as "before"."""
+    if prior is None or top is None or not prior.red_tle or not red_satno:
+        return ""
+    prior_number = satno_from_tle(prior.red_tle)
+    prior_age = elset_age(prior.red_tle, first_burn.burn_window[0])
+    if str(prior_number) != red_satno or prior_age is None or prior_age.epoch > first_burn.burn_window[0]:
+        return ""
+    shown = least_warning_by_target(prior.entries, float("inf")).get(top.name)
+    if shown is None:
+        return ""
+    return (f"Last shown before the burn: {format_tof_label(shown)} on {top.name}, "
+            f"in your sweep at {prior.sweep_epoch:%H:%M} UTC.")
+
+
+def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: datetime) -> tuple[str, ...]:
+    """The lines shown only when they apply, and the decide-by line, always."""
+    pol: Any = context.history.pol
+    notes = [_last_shown(context.prior, context.red_satno, burns[0], top)]
+    newer = newest_unconfirmed(pol.candidate_manoeuvres, burns[-1].tle_after.epoch)
+    if newer is not None:
+        notes.append(f"An unconfirmed detection at {_when(newer.burn_epoch)} is newer and is not counted, "
+                     "because it is not confirmed.")
+    notes.append(_notso_cue(context.red_name, context.red_satno, burns[-1].tle_after.epoch, now))
+    notes.append(_DECIDE_BY_NOTE)
+    return tuple(n for n in notes if n)
+
+
+def _build_change(
+    basis: _SweepBasis, burns: list[Any], before: list[ThreatSweepEntry], after: list[ThreatSweepEntry],
+    context: _ChangeContext,
+) -> WarningChange:
+    """The rows, the headline, each burn's line, the notes and the basis."""
+    rows = compare(
+        [(t.target_name, t.target_source == "blue" or t.target_satno in basis.blue_satnos) for t in basis.targets],
+        least_warning_by_target(before, basis.max_dv_m_s),
+        least_warning_by_target(after, basis.max_dv_m_s),
+    )
+    changed = tuple(r for r in rows if r.change.name != "UNCHANGED")
+    top = next((r for r in rows if r.change.name in ("CUT", "NEWLY_IN_REACH")), None)
+    verdicts = burn_verdicts(context.history.pol, context.history.assessment) if context.history.assessment else {}
+    return WarningChange(
+        status=Status.FIGURES,
+        headline=headline(rows, len(burns), basis.max_dv_m_s, format_tof_label),
+        rows=tuple(rows),
+        footer=footer(rows),
+        burns=tuple(_burn_line(m, context.red_name, verdicts, basis.now) for m in burns),
+        notes=_change_notes(context, burns, top, basis.now),
+        basis=_basis_line(basis, burns[0].tle_before, context.red_epoch),
+        worst=worst_change(rows),
+        changed=changed,
+    )
+
+
+async def _warning_change(
+    basis: _SweepBasis, red: tuple[str, str | None, str], history: _RedHistory,
+    entries: list[ThreatSweepEntry], context: tuple[CustodyStatus, ThreatAssessment | None],
+) -> WarningChange:
+    """What the burn changed: the one call the sweep makes for it.
+
+    *red* is the interceptor's name, catalogue number and the element set the
+    sweep flew; *entries* are the sweep's own, so the after figure is the one
+    the worst case card shows. *context* is its custody and the operator's
+    previous sweep, cited when it flew the orbit from before the burn.
+    """
+    red_name, red_satno, red_tle = red
+    custody, prior = context
+    age = elset_age(red_tle, basis.now)
+    red_epoch = age.epoch if age else None
+    selection = _burn_selection(history, red_epoch, custody, basis)
+    if isinstance(selection, WarningChange):
+        return selection
+    before, _, _ = await _fly(basis, selection[0].tle_before.tle)
+    return _build_change(
+        basis, selection, before, entries, _ChangeContext(red_name, red_satno, red_epoch, history, prior),
+    )
+
+
+def _notso_cue(red_name: str, red_satno: str | None, latest_after: datetime | None, now: datetime) -> str:
+    """A manoeuvre NOTSO newer than any confirmed burn: named, never turned into a figure.
+
+    Read from the cache the operator syncs; nothing is pulled from UDL here.
+    """
+    if not red_satno:
+        return ""
+    from spectre.data.notso_cache import event_class, get_notso_cache, is_manoeuvre_notice, notice_time
+
+    cache = get_notso_cache()
+    newer: list[tuple[datetime, dict[str, Any]]] = []
+    for rec in cache.get_for_satno(red_satno):
+        when = notice_time(rec)
+        if is_manoeuvre_notice(rec) and when is not None and when <= now and (
+                latest_after is None or when > latest_after):
+            newer.append((when, rec))
+    if not newer:
+        return ""
+    when, rec = max(newer, key=lambda pair: pair[0])
+    synced = cache.last_sync_utc() or "never"
+    return (f"NOTSO at {_when(when)} reports a {event_class(rec)} by {red_name}. No element set since shows "
+            "a confirmed burn yet, so its effect on your warning cannot be computed. "
+            f"NOTSO cache last synced {synced}.")
+
+
+async def _watch_change(
+    state: object, watch: BurnWatch, pol: Any, assessment: PolAssessment, burns: list[Any], now: datetime,
+) -> WarningChange:
+    """What the burns the watch found changed, flown from the newest held orbit at check time.
+
+    The same selection and wording as the sweep. After is the history's newest
+    element set, refused as custody lost past its regime's limit, and the
+    targets' element sets are frozen afresh from the session at this moment.
+    """
+    basis = _sweep_basis(state, watch.targets, watch.manual_tle_by_name, watch.red_regime, watch.max_dv_m_s, now)
+    red_tle = pol.records[-1].tle
+    verdicts = burn_verdicts(pol, assessment)
+    latest = verdicts.get(max(burns, key=lambda m: m.burn_epoch).burn_epoch)
+    history = _RedHistory(pol, assessment, latest, "", now)
+    custody = _red_custody(red_tle, history, now)
+    age = elset_age(red_tle, now)
+    red_epoch = age.epoch if age else None
+    selection = _burn_selection(history, red_epoch, custody, basis)
+    if isinstance(selection, WarningChange):
+        return selection
+    after, _, _ = await _fly(basis, red_tle)
+    before, _, _ = await _fly(basis, selection[0].tle_before.tle)
+    context = _ChangeContext(watch.red_name, str(watch.red_satno), red_epoch, history, None)
+    return _build_change(basis, selection, before, after, context)
+
+
+def _watch_after_sweep(  # noqa: PLR0913 - one argument per thing the watch starts from, all named at the call
+    state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None],
+    history: _RedHistory, history_task: asyncio.Task[HeldHistory] | None,
+) -> None:
+    """Start, or replace, the burn watch on the object just swept (SPC-006).
+
+    Only with UDL connected and a catalogue number to ask UDL about. The burns
+    the history already held are accounted for, because the sweep has just
+    shown them; with the history still loading, none is, so the first check
+    announces any burn in the window.
+    """
+    red_name, red_satno = red
+    if not red_satno or not state.udl_username or user.session_key is None:  # type: ignore[attr-defined]
+        return
+    pol = history.pol
+    confirmed = pol.manoeuvres if pol is not None else []
+    watch = BurnWatch(
+        red_name=red_name, red_satno=int(red_satno), red_regime=basis.red_regime,
+        targets=list(basis.targets), manual_tle_by_name=dict(basis.manual_tle_by_name),
+        max_dv_m_s=basis.max_dv_m_s,
+        accounted_until=max((m.tle_after.epoch for m in confirmed), default=None) if pol is not None else None,
+        started_at=basis.now, next_check_at=basis.now + CHECK_EVERY,
+        newest_epoch=pol.records[-1].epoch if pol is not None and pol.records else None,
+    )
+    if pol is None:
+        watch.next_check_at = basis.now
+    start_watch(state, user.session_key, watch, history_task, _watch_change, spawn_session_task)  # type: ignore[arg-type]
+
+
+@router.get("/burn-watch", response_model=None)
+async def burn_watch_note(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+) -> HTMLResponse:
+    """The burn watch note: watching, an alert, or why it is not watching. Makes no UDL call."""
+    state = get_session_state(current_user)
+    return render(request, _BURN_WATCH_TEMPLATE, watch_view(state, current_user.session_key, _utc_now()))
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1575,8 +1944,10 @@ async def threat_sweep(
     """Run a threat sweep for a red satellite against the selected target group."""
     t0 = time.monotonic()
     state = get_session_state(current_user)
-    now = datetime.now(tz=UTC)
+    now = _utc_now()
     errors: list[str] = []
+    # The operator's previous sweep, cited if it flew this object's pre-burn orbit.
+    prior = state.last_threat_assessment
 
     # Parse target group selection (e.g. "blue:1", "red:3", "all").
     form = await request.form()
@@ -1644,21 +2015,13 @@ async def threat_sweep(
     # off the event loop like the sweep itself (audit F-235).
     clustering_summary = await loop.run_in_executor(None, _reduce_tle_clusters, state)
 
-    # Compute epochs for red satellite.
-    epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, now)
-
     # Count total targets (HRR + manual).
     hrr_count = len(targets)
 
-    # Run sweep in executor, a bounded number at once across all operators:
-    # each holds an executor thread for its whole length (audit F-235).
-    async with _SWEEP_SLOTS:
-        entries, sweep_errors, method_refusals = await loop.run_in_executor(
-            None,
-            lambda: _run_target_sweep(
-                state, targets, _manual_tle_by_name, red_tle, red_regime, epochs, max_dv_m_s,
-            ),
-        )
+    # The targets' element sets are frozen here, after the last-chance fetch
+    # and clustering, so the sweep and the before-burn run fly the same ones.
+    basis = _sweep_basis(state, targets, _manual_tle_by_name, red_regime, max_dv_m_s, now)
+    entries, sweep_errors, method_refusals = await _fly(basis, red_tle)
     errors.extend(sweep_errors)
 
     # Rank on warning time among the feasible intercepts. Delta-V keeps its
@@ -1697,7 +2060,13 @@ async def threat_sweep(
 
     # Identify the most dangerous course of action.
     worst_coa = _worst_coa_in_context(state, entries, red_capability, max_dv_m_s, (history, red_tle))
-    red_history = _red_history_view(history, _red_custody(red_tle, history, now))
+    custody = _red_custody(red_tle, history, now)
+    red_history = _red_history_view(history, custody)
+    # What the burn changed, from the orbit before it and the one just flown.
+    warning_change = await _warning_change(
+        basis, (red_sat.strip(), red_satno, red_tle), history, entries, (custody, prior),
+    )
+    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history, history_task)
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -1726,6 +2095,8 @@ async def threat_sweep(
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),
         "red_history": red_history,
+        "warning_change": warning_change,
+        **watch_view(state, current_user.session_key, now),
         "epoch_note": _epoch_note(red_tle),
         "error": None,
     })

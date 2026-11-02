@@ -146,6 +146,26 @@ def message_text(rec: dict[str, Any], satno: int | str) -> str:
     return "\n".join(lines)
 
 
+def event_class(rec: dict[str, Any]) -> str:
+    """The notice's kind: the head of ``Event_Class`` before " / ", or the legacy ``msgType``."""
+    body = rec.get("msgBody") or {}
+    full = " ".join(str(body.get("Event_Class") or rec.get("msgType") or "").split())
+    return full.split(" / ")[0].strip()
+
+
+def is_manoeuvre_notice(rec: dict[str, Any]) -> bool:
+    """Whether the notice reports a manoeuvre, in either spelling; not an RPO or a photometric change alone."""
+    kind = event_class(rec).lower()
+    return "maneuver" in kind or "manoeuvre" in kind
+
+
+def notice_time(rec: dict[str, Any]) -> datetime | None:
+    """When the notice says the event began, else when the record was created."""
+    created = _parse_iso(rec.get("createdAt"))
+    body = rec.get("msgBody") or {}
+    return _event_start(str(body.get("Event_Description") or ""), created) or created
+
+
 def _parse_iso(s: str | None) -> datetime | None:
     if not s:
         return None

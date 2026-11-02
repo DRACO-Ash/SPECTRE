@@ -1372,10 +1372,13 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         # The child data row in the parent table is the one carrying the burn
         # location cell, which is unique to it.
         # The header row names burn_location too, in its headers= wiring, so
-        # require actual data cells rather than just the mention.
+        # require actual data cells rather than just the mention. "entry."
+        # because the worst case card above the table shows
+        # worst_coa.burn_location, and a table placed before that card (the
+        # 0.9.0 warning-change table) would otherwise run on into it.
         child_rows = [
             block for block in re.split(r"<tr\b", table)
-            if "burn_location" in block and block.count("<td") > 0
+            if "entry.burn_location" in block and block.count("<td") > 0
         ]
         assert child_rows, "the sweep table no longer has a child row to compare against"
         table_cells = child_rows[0].count("<td")
@@ -1392,7 +1395,7 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
         child_rows = [
             b for b in re.split(r"<tr\b", table)
-            if "burn_location" in b and b.count("<td") > 0
+            if "entry.burn_location" in b and b.count("<td") > 0
         ]
         assert child_rows
         width = child_rows[0].count("<td")
@@ -1485,7 +1488,7 @@ class TestHtmxSwapFragmentsMatchTheirTable:
     def _child_row_of_table(cls, table: str) -> str:
         rows = [
             b for b in re.split(r"<tr\b", table)
-            if "burn_location" in b and b.count("<td") > 0
+            if "entry.burn_location" in b and b.count("<td") > 0
         ]
         assert rows, "the sweep table no longer has a child row to compare against"
         return rows[0]

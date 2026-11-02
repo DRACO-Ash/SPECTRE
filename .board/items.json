@@ -820,5 +820,17 @@
   "est": 240,
   "version": "0.8.0",
   "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-019",
+  "priority": "med",
+  "order": 19,
+  "group": "hygiene",
+  "minutes": 90,
+  "task": "UDL routes put exception text into the browser at six sites",
+  "note": "Found by the V0.9 design review. udl.py returns f-strings carrying {exc} at the UDL login, TLE, state vector, catalogue, NOTSO page fetch and NOTSO sync error paths. The fix CodeQL drove for pol.py applies: a fixed sentence to the browser, the detail through log_safe to the log.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ]
  }
 ]

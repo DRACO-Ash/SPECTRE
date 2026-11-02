@@ -430,6 +430,14 @@ async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
     return analysed[0], ""
 
 
+def burn_verdicts(pol: Any, assessment: PolAssessment) -> dict[datetime, BurnNormality]:
+    """Each confirmed burn's is-this-normal verdict, keyed by its burn epoch.
+
+    So every burn in a window reads its own verdict, not the latest one's.
+    """
+    return {n.burn.epoch: n for n in _burn_normality(pol, assessment.manoeuvres)}
+
+
 def history_evidence(
     pol: Any, reserve_reset: datetime | None = None,
 ) -> tuple[PolAssessment, BurnNormality | None]:

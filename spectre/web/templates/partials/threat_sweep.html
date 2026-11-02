@@ -19,6 +19,8 @@
     </span>
   </div>
 
+  {% if burn_watch is defined %}{% include "partials/burn_watch_note.html" %}{% endif %}
+
   {% if elset_ages is defined %}
   {# How old the orbits behind these figures are. STALE is past the regime's
      limit: 72 hours for GEO and deep space, 24 hours otherwise. #}
@@ -55,6 +57,7 @@
     <strong>{{ rc.sentence }}</strong>
     <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.15rem">{{ rc.basis }}</div>
   </section>
+  {% if not (warning_change is defined and warning_change and warning_change.status.value == "figures") %}
   <section class="sweep-normality" aria-label="Is the interceptor's latest burn normal for it"
            style="border-left:4px solid var(--spectre-status-{{ rn_band }}); background:rgba(var(--spectre-status-{{ rn_band }}-rgb), 0.06);
                   border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
@@ -69,6 +72,48 @@
     {% else %}
     <strong>Is this normal?</strong> Cannot say: {{ red_history.problem }}
     {% endif %}
+  </section>
+  {% endif %}
+  {% endif %}
+
+  {% if warning_change is defined and warning_change %}
+  {# What the burn changed (SPC-007): the differential, not the state. Figures
+     only with a current orbit and a history; otherwise it says why. #}
+  {% set wc = warning_change %}
+  {% set wc_band = {"newly in reach":"critical","cut":"high","lengthened":"minimal","no longer in reach":"minimal"}.get(wc.worst.value, "unknown") if wc.worst else "unknown" %}
+  <section class="sweep-warning-change" aria-label="What the burn changed"
+           style="border-left:4px solid var(--spectre-status-{{ wc_band }}); background:rgba(var(--spectre-status-{{ wc_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.5rem 0.7rem; margin:0.3rem 0; font-size:0.78rem">
+    <div style="font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted)">What the burn changed</div>
+    <div style="font-weight:700; margin-top:0.15rem">{{ wc.headline }}</div>
+    {% for line in wc.burns %}
+    <div style="margin-top:0.25rem">{{ line.when }} {{ line.verdict }}{% if line.caveat %} <span style="color:var(--text-muted)">{{ line.caveat }}</span>{% endif %}</div>
+    {% endfor %}
+    {% if wc.changed %}
+    <table class="hrr-table" style="font-size:0.7rem; margin-top:0.35rem">
+      <caption class="visually-hidden">Warning before and after the burn, for each target that changed</caption>
+      <thead><tr><th scope="col">Asset</th><th scope="col">Warning before</th><th scope="col">Warning after</th><th scope="col">Change</th></tr></thead>
+      <tbody>
+        {% for row in wc.changed %}
+        {% set row_band = {"newly in reach":"critical","cut":"high"}.get(row.change.value, "minimal") %}
+        <tr>
+          <td>{{ row.name }}</td>
+          <td>{{ (row.before_h | tof) if row.before_h is not none else "not in reach" }}</td>
+          <td>{{ (row.after_h | tof) if row.after_h is not none else "not in reach" }}</td>
+          <td style="color:var(--spectre-status-{{ row_band }}); font-weight:700">{% if row.change.value == "cut" and row.before_h is not none and row.after_h is not none %}cut by {{ (row.before_h - row.after_h) | tof }}{% else %}{{ row.change.value }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if wc.footer %}<div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">{{ wc.footer }}</div>{% endif %}
+    {% for note in wc.notes %}
+    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">{{ note }}</div>
+    {% endfor %}
+    {% if wc.status.value != "figures" %}
+    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">Decide-by time is not shown yet: it needs your response time, which is not set.</div>
+    {% endif %}
+    {% if wc.basis %}<div style="font-size:0.62rem; color:var(--text-muted); margin-top:0.25rem">{{ wc.basis }}</div>{% endif %}
   </section>
   {% endif %}
 

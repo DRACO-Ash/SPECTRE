@@ -11,7 +11,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from spectre.domain.models import (
@@ -108,6 +108,10 @@ class SessionState:
     # Analysed element-set histories by SATNO, oldest first, for the sweep and
     # the is-this-normal verdict (routes.pol.held_history, SPC-001).
     elset_histories: dict[int, Any] = field(default_factory=dict)
+    # The burn watch on the red object last swept, and its latest alert
+    # (spectre.web.burn_watch, SPC-006).
+    burn_watch: Any | None = None
+    burn_alert: Any | None = None
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""
@@ -196,6 +200,26 @@ def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
         _store[key] = (now, state)
         logger.debug("Created new session state for account %d", key.user_id)
     return _store[key][1]
+
+
+def session_alive(key: SessionKey, state: SessionState) -> bool:
+    """Whether this sign-in still holds *state* and has not outlived its 8 hours.
+
+    For a background task holding the state: ``has_session_state`` alone does
+    not prune, so an expired sign-in still answered True until the next
+    request pruned it, and a replaced state would be mistaken for this one.
+    """
+    held = _store.get(key)
+    return held is not None and held[1] is state and time.monotonic() - held[0] <= _STATE_MAX_AGE_S
+
+
+def sign_in_expires_at(key: SessionKey, now: datetime) -> datetime | None:
+    """When this sign-in's planning state expires, on the wall clock, or ``None`` if not held."""
+    held = _store.get(key)
+    if held is None:
+        return None
+    remaining = _STATE_MAX_AGE_S - (time.monotonic() - held[0])
+    return now + timedelta(seconds=max(remaining, 0.0))
 
 
 def has_session_state(key: SessionKey) -> bool:
