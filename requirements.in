@@ -4,6 +4,6 @@
 # requirements-runtime.in, so the gate scans at least what the image ships.
 -r requirements-runtime.in
 
-pytest>=8.3
+pytest>=9.2.0
 pytest-asyncio>=0.23
 pytest-cov>=6.0
