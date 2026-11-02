@@ -33,9 +33,9 @@ _FIGURES = WarningChange(
 
 
 def _watch(**kw: Any) -> BurnWatch:
-    args: dict[str, Any] = dict(red_name="RED-X", red_satno=1, red_regime="GEO", targets=[], manual_tle_by_name={},
-                                max_dv_m_s=500.0, accounted_until=None, started_at=_NOW,
-                                next_check_at=_NOW + timedelta(minutes=10))
+    args: dict[str, Any] = {"red_name": "RED-X", "red_satno": 1, "red_regime": "GEO", "targets": [],
+                            "manual_tle_by_name": {}, "max_dv_m_s": 500.0, "accounted_until": None,
+                            "started_at": _NOW, "next_check_at": _NOW + timedelta(minutes=10)}
     args.update(kw)
     return BurnWatch(**args)
 

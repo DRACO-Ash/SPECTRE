@@ -180,7 +180,7 @@ class TestItStops:
         watch = _watch(state)
         watch.next_check_at = _NOW + timedelta(days=1)
         state.burn_watch = None
-        start_watch(state, key, watch, None, _compute, udl.spawn_session_task)
+        start_watch(state, key, watch, first_history=None, compute=_compute, spawn=udl.spawn_session_task)
         await asyncio.sleep(0.05)
         state.udl_username = state.udl_password = None
         udl._cancel_session_tasks(key)
@@ -197,9 +197,9 @@ class TestItStops:
         for w in (first, second):
             w.next_check_at = _NOW + timedelta(days=1)
         state.burn_watch = None
-        start_watch(state, key, first, None, _compute, udl.spawn_session_task)
+        start_watch(state, key, first, first_history=None, compute=_compute, spawn=udl.spawn_session_task)
         await asyncio.sleep(0.05)  # the first loop is now asleep in its tick
-        start_watch(state, key, second, None, _compute, udl.spawn_session_task)
+        start_watch(state, key, second, first_history=None, compute=_compute, spawn=udl.spawn_session_task)
         await asyncio.sleep(0.05)
         assert first.task is not None and first.task.done()
         assert second.task is not None and not second.task.done()

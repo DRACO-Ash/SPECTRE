@@ -110,8 +110,10 @@ def _spy(monkeypatch: pytest.MonkeyPatch, tof_by_red: dict[str, float]) -> list[
     """Stand in for the sweep runner: one entry per target, flight time chosen by the red set flown."""
     calls: list[dict[str, Any]] = []
 
-    def run(state: Any, targets: list[ThreatTarget], manual: dict[str, str], red_tle: str, red_regime: str,
-            epochs: list[tuple[str, datetime]], max_dv_m_s: float) -> tuple[list[Any], list[str], list[Any]]:
+    def run(  # noqa: PLR0913, PLR0917 - mirrors _run_target_sweep's signature, which it stands in for
+        state: Any, targets: list[ThreatTarget], manual: dict[str, str], red_tle: str, red_regime: str,
+        epochs: list[tuple[str, datetime]], max_dv_m_s: float,
+    ) -> tuple[list[Any], list[str], list[Any]]:
         calls.append({"red_tle": red_tle, "epochs": epochs, "targets": list(targets), "manual": dict(manual),
                       "budget": max_dv_m_s, "state": state})
         tof = tof_by_red.get(red_tle)
@@ -360,7 +362,7 @@ class TestTheNotsoCue:
             def last_sync_utc(self) -> str:
                 return "2026-11-02T05:00:00Z"
 
-        monkeypatch.setattr("spectre.data.notso_cache.get_notso_cache", lambda: _Cache())
+        monkeypatch.setattr("spectre.data.notso_cache.get_notso_cache", _Cache)
         _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
         page = _sweep(client, auth_cookie)
         assert "reports a Verified Maneuver by RED-LEO" in page
@@ -388,8 +390,8 @@ class TestTheSnapshot:
         from types import SimpleNamespace
 
         state = SimpleNamespace(hrr_tle_cache={"1": "set-one"}, hrr_objects=[])
-        basis = threat._sweep_basis(state, [ThreatTarget("T", "1", "hrr", 1)], {}, "LEO", _BUDGET,
-                                    datetime(2026, 11, 2, tzinfo=UTC))
+        basis = threat._sweep_basis(state, [ThreatTarget("T", "1", "hrr", 1)], manual={}, red_regime="LEO",
+                                    max_dv_m_s=_BUDGET, now=datetime(2026, 11, 2, tzinfo=UTC))
         state.hrr_tle_cache["1"] = "changed"
         assert basis.frozen.hrr_tle_cache == {"1": "set-one"}
 

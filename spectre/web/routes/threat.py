@@ -1618,7 +1618,7 @@ class _SweepBasis(NamedTuple):
 
 
 def _sweep_basis(  # noqa: PLR0913 - one argument per thing the runs hold constant, all named at the call
-    state: object, targets: list[ThreatTarget], manual: dict[str, str], red_regime: str,
+    state: object, targets: list[ThreatTarget], *, manual: dict[str, str], red_regime: str,
     max_dv_m_s: float, now: datetime,
 ) -> _SweepBasis:
     """Freeze the swept targets' element sets and the rest of what every run holds constant."""
@@ -1870,7 +1870,7 @@ def _notso_cue(red_name: str, red_satno: str | None, latest_after: datetime | No
 
 
 async def _watch_change(
-    state: object, watch: BurnWatch, pol: Any, assessment: PolAssessment, burns: list[Any], now: datetime,
+    state: object, watch: BurnWatch, found: tuple[Any, PolAssessment, list[Any]], now: datetime,
 ) -> WarningChange:
     """What the burns the watch found changed, flown from the newest held orbit at check time.
 
@@ -1878,7 +1878,9 @@ async def _watch_change(
     element set, refused as custody lost past its regime's limit, and the
     targets' element sets are frozen afresh from the session at this moment.
     """
-    basis = _sweep_basis(state, watch.targets, watch.manual_tle_by_name, watch.red_regime, watch.max_dv_m_s, now)
+    pol, assessment, burns = found
+    basis = _sweep_basis(state, watch.targets, manual=watch.manual_tle_by_name, red_regime=watch.red_regime,
+                         max_dv_m_s=watch.max_dv_m_s, now=now)
     red_tle = pol.records[-1].tle
     verdicts = burn_verdicts(pol, assessment)
     latest = verdicts.get(max(burns, key=lambda m: m.burn_epoch).burn_epoch)
@@ -1896,7 +1898,7 @@ async def _watch_change(
 
 
 def _watch_after_sweep(  # noqa: PLR0913 - one argument per thing the watch starts from, all named at the call
-    state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None],
+    state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None], *,
     history: _RedHistory, history_task: asyncio.Task[HeldHistory] | None,
 ) -> None:
     """Start, or replace, the burn watch on the object just swept (SPC-006).
@@ -1921,7 +1923,8 @@ def _watch_after_sweep(  # noqa: PLR0913 - one argument per thing the watch star
     )
     if pol is None:
         watch.next_check_at = basis.now
-    start_watch(state, user.session_key, watch, history_task, _watch_change, spawn_session_task)  # type: ignore[arg-type]
+    start_watch(state, user.session_key, watch, first_history=history_task,  # type: ignore[arg-type]
+                compute=_watch_change, spawn=spawn_session_task)
 
 
 @router.get("/burn-watch", response_model=None)
@@ -2020,7 +2023,8 @@ async def threat_sweep(
 
     # The targets' element sets are frozen here, after the last-chance fetch
     # and clustering, so the sweep and the before-burn run fly the same ones.
-    basis = _sweep_basis(state, targets, _manual_tle_by_name, red_regime, max_dv_m_s, now)
+    basis = _sweep_basis(state, targets, manual=_manual_tle_by_name, red_regime=red_regime,
+                         max_dv_m_s=max_dv_m_s, now=now)
     entries, sweep_errors, method_refusals = await _fly(basis, red_tle)
     errors.extend(sweep_errors)
 
@@ -2066,7 +2070,8 @@ async def threat_sweep(
     warning_change = await _warning_change(
         basis, (red_sat.strip(), red_satno, red_tle), history, entries, (custody, prior),
     )
-    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history, history_task)
+    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno),
+                       history=history, history_task=history_task)
 
     state.last_threat_assessment = assessment
     state.append_log(

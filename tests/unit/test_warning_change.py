@@ -82,7 +82,7 @@ class TestHeadline:
 
     def test_at_most_three_are_named_and_the_rest_counted(self) -> None:
         names = [f"B{i}" for i in range(5)]
-        rows = compare([(n, True) for n in names], {n: 20.0 for n in names}, {n: float(i + 1) for i, n in enumerate(names)})
+        rows = compare([(n, True) for n in names], dict.fromkeys(names, 20.0), {n: float(i + 1) for i, n in enumerate(names)})
         line = headline(rows, 1, 500.0, _hours)
         assert line.count("cut your warning on") == 3
         assert line.endswith(" 2 more changed: see the table.")

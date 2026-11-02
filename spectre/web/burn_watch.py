@@ -44,7 +44,8 @@ CHECK_EVERY: timedelta = timedelta(minutes=10)
 FIRST_WAIT_S: float = 150.0
 
 #: The computation the sweep route supplies: what the burns changed.
-Compute = Callable[[SessionState, "BurnWatch", Any, Any, list[Any], datetime], Awaitable[WarningChange]]
+#: It takes ``(state, watch, (pol, assessment, new burns), now)``.
+Compute = Callable[[SessionState, "BurnWatch", tuple[Any, Any, list[Any]], datetime], Awaitable[WarningChange]]
 
 
 def _utc_now() -> datetime:
@@ -172,9 +173,8 @@ async def check_once(state: SessionState, watch: BurnWatch, now: datetime, compu
         watch.last_good_at, watch.problem = now, ""
         if found is None or not found[2]:
             return None
-        pol, assessment, burns = found
-        change = await compute(state, watch, pol, assessment, burns, now)
-        return _record(state, watch, burns, change, now)
+        change = await compute(state, watch, found, now)
+        return _record(state, watch, found[2], change, now)
     except Exception as exc:  # noqa: BLE001 - one failed check must not end the watch; it says so and retries
         logger.warning("Burn watch check failed for %s: %s", log_safe(watch.red_satno), log_safe(exc))
         since = f" Burns since {_hm(watch.last_good_at)}, the last good check, are not yet seen." if watch.last_good_at else ""
@@ -183,7 +183,7 @@ async def check_once(state: SessionState, watch: BurnWatch, now: datetime, compu
         return None
 
 
-async def watch_loop(  # noqa: PLR0913 - the watch, its owner and the injected pieces, all named at the call
+async def watch_loop(
     state: SessionState, key: SessionKey, watch: BurnWatch,
     first_history: asyncio.Task[Any] | None, compute: Compute,
 ) -> None:
@@ -202,8 +202,8 @@ async def watch_loop(  # noqa: PLR0913 - the watch, its owner and the injected p
         await asyncio.sleep(TICK_S)
 
 
-def start_watch(  # noqa: PLR0913 - the watch, its owner and the injected pieces, all named at the call
-    state: SessionState, key: SessionKey, watch: BurnWatch,
+def start_watch(  # noqa: PLR0913 - the watch, its owner and the injected pieces, the last three named at the call
+    state: SessionState, key: SessionKey, watch: BurnWatch, *,
     first_history: asyncio.Task[Any] | None, compute: Compute,
     spawn: Callable[[Any, SessionKey | None], asyncio.Task[None]],
 ) -> None:
