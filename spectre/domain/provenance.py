@@ -97,9 +97,15 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _json_default(value: Any) -> Any:
+    """An array by its values at full precision, so two states that print alike hash apart (SPC-111); else its text."""
+    tolist = getattr(value, "tolist", None)
+    return tolist() if callable(tolist) else str(value)
+
+
 def value_input(label: str, value: Any) -> InputRef:
     """Any other input, hashed on its JSON with keys sorted."""
-    return InputRef(label=label, sha256=_digest(json.dumps(_plain(value), sort_keys=True, default=str)))
+    return InputRef(label=label, sha256=_digest(json.dumps(_plain(value), sort_keys=True, default=_json_default)))
 
 
 def provenance(inputs: Iterable[InputRef]) -> Provenance:

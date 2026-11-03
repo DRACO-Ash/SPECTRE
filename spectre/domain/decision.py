@@ -21,8 +21,14 @@ sets, their epochs and their ages at evaluation. It is shown with the result
 and goes into its provenance, but changes no figure: no function here reads
 it until a later phase computes from the orbits.
 
-Phase 2 (future sprint) will attach a ``ManoeuvreHypothesis`` to
-``AdversaryAction`` and wire in the Monte Carlo engine for probabilistic scoring.
+An adversary action may carry a manoeuvre hypothesis (SPC-111): how the
+adversary might move, taken from an archetype in the Monte Carlo table, a
+delta-V and RIC direction the operator entered, or a manoeuvre detected in the
+object's element-set history. It travels with its source, the archetype's name
+and the direction's frame and basis, so a reader can tell an assumed direction
+from a measured one (audit F-104), and it is checked when it is built. It goes
+into the result's provenance and the scenario's recorded value, but changes no
+figure: no function here reads it until a later phase samples from it (SPC-112).
 
 Typical use::
 
@@ -38,16 +44,29 @@ Typical use::
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 import math
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
+import numpy as np
+
+from spectre.astro.monte_carlo import (
+    MANOEUVRE_ARCHETYPES,
+    ManoeuvreHypothesis,
+    ManoeuvreType,
+    _ric_split,
+    hypothesis_from_tle_record,
+)
 from spectre.domain.custody import age_text
+from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.domain.provenance import (
     Basis,
     FigureBasis,
@@ -58,6 +77,9 @@ from spectre.domain.provenance import (
     value_input,
     weakest,
 )
+
+if TYPE_CHECKING:
+    from spectre.astro.pattern_of_life import Manoeuvre, TLERecord
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +253,322 @@ def _require_fraction(owner: str, field_name: str, value: float) -> None:
         raise ValueError(f"{owner}.{field_name} must be in [0, 1]; got {value!r}")
 
 
+# ── Manoeuvre hypothesis (SPC-111) ────────────────────────────────────────────
+
+#: Shown with every hypothesis once the panel carries one (SPC-114).
+HYPOTHESIS_NOTE: str = (
+    "A manoeuvre hypothesis records how the adversary might move and where that came from. It changes no "
+    "figure yet: closest approach, custody and every other figure are still lookups, not sampled from it."
+)
+
+
+class HypothesisSource(StrEnum):
+    """Where an adversary action's manoeuvre hypothesis came from."""
+
+    ARCHETYPE = "archetype"     # a row of MANOEUVRE_ARCHETYPES
+    ENTERED = "entered"         # a delta-V and direction the operator gave
+    DETECTED = "detected"       # a manoeuvre detected in the object's element-set history
+
+
+#: The frames a hypothesis's direction may be read in. ManoeuvreHypothesis holds radial, in-track and
+#: cross-track parts, so RIC is the only one until a later release adds another.
+_FRAMES = frozenset({"RIC"})
+#: Radial, in-track and cross-track.
+_RIC_AXES = 3
+#: Below this norm, or above any finite one, generate_samples cannot read the direction and quietly points the
+#: burn in-track, so parts outside that range are stored at unit length instead.
+_MIN_DIRECTION_NORM = 1e-15
+#: The spreads a sampler draws from, each with how a refusal names it.
+_DISPERSIONS: tuple[tuple[str, str], ...] = (
+    ("delta_v_magnitude_1sigma_km_s", "delta-V spread"),
+    ("delta_v_pointing_1sigma_deg", "pointing spread"),
+    ("epoch_1sigma_seconds", "timing spread"),
+    ("bstar_1sigma", "B* spread"),
+)
+_ARCHETYPE_DIRECTION = "assumed in-track: an archetype names no direction"
+_ENTERED_DIRECTION = "entered by the operator"
+_SOURCE_LEADS: dict[HypothesisSource, str] = {
+    HypothesisSource.ARCHETYPE: "Archetype {archetype}",
+    HypothesisSource.ENTERED: "Entered by the operator",
+    HypothesisSource.DETECTED: "Detected manoeuvre",
+}
+
+
+class PreManoeuvreState(NamedTuple):
+    """Where and when the adversary is just before the hypothesised burn."""
+
+    epoch_utc:    datetime
+    state_eci_km: Sequence[float]     # [x, y, z, vx, vy, vz]: km, and km per second
+
+
+def _known_archetype(key: str) -> ManoeuvreType:
+    archetype = MANOEUVRE_ARCHETYPES.get(key)
+    if archetype is None:
+        raise ValueError(
+            f"{key!r} is not a known manoeuvre archetype; choose one of {', '.join(MANOEUVRE_ARCHETYPES)}."
+        )
+    return archetype
+
+
+def _unit_ric(direction: Sequence[float]) -> tuple[float, float, float]:
+    """*direction* scaled to unit length, refused when it has no length to scale.
+
+    The parts are divided by the largest first, so a direction of any finite
+    size normalises without its squares underflowing or overflowing.
+    """
+    parts = tuple(float(c) for c in direction)
+    if len(parts) != _RIC_AXES or not all(math.isfinite(c) for c in parts):
+        raise ValueError(
+            f"A direction is three finite parts, radial, in-track and cross-track; got {tuple(direction)!r}."
+        )
+    peak = max(abs(c) for c in parts)
+    if peak == 0.0:
+        raise ValueError("A direction of zero cannot be normalised, and no direction is assumed in its place.")
+    scaled = tuple(c / peak for c in parts)
+    norm = math.hypot(*scaled)
+    return (scaled[0] / norm, scaled[1] / norm, scaled[2] / norm)
+
+
+def _parts(hypothesis: ManoeuvreHypothesis) -> tuple[float, float, float]:
+    return (hypothesis.delta_v_radial, hypothesis.delta_v_in_track, hypothesis.delta_v_cross_track)
+
+
+def _sampler_reads(parts: Sequence[float]) -> bool:
+    """Whether generate_samples can read *parts* as a direction rather than quietly assume in-track."""
+    norm = float(np.linalg.norm(np.asarray(parts, dtype=float)))
+    return math.isfinite(norm) and norm >= _MIN_DIRECTION_NORM
+
+
+def _pointed(hypothesis: ManoeuvreHypothesis, unit: tuple[float, float, float]) -> ManoeuvreHypothesis:
+    """*hypothesis* along *unit*, scaled by its delta-V where the sampler can read that, else at unit length.
+
+    The parts only point, so a zero or tiny burn keeps its direction this way.
+    """
+    scaled = tuple(hypothesis.delta_v_magnitude_km_s * c for c in unit)
+    parts = scaled if _sampler_reads(scaled) else unit
+    return dataclasses.replace(
+        hypothesis, delta_v_radial=parts[0], delta_v_in_track=parts[1], delta_v_cross_track=parts[2],
+    )
+
+
+def _nominal(dv_km_s: float, unit: tuple[float, float, float], at: PreManoeuvreState, basis: str) -> ManoeuvreHypothesis:
+    """The burn along *unit*."""
+    return _pointed(
+        ManoeuvreHypothesis(
+            epoch_utc=at.epoch_utc,
+            delta_v_magnitude_km_s=dv_km_s,
+            delta_v_radial=unit[0],
+            delta_v_in_track=unit[1],
+            delta_v_cross_track=unit[2],
+            pre_manoeuvre_state_eci_km=np.array(at.state_eci_km, dtype=float),
+            direction_basis=basis,
+        ),
+        unit,
+    )
+
+
+def _dispersed(hypothesis: ManoeuvreHypothesis, archetype: ManoeuvreType | None, n_samples: int) -> ManoeuvreHypothesis:
+    """*hypothesis* with *archetype*'s dispersions and name; the ManoeuvreHypothesis defaults when there is none."""
+    if archetype is None:
+        return dataclasses.replace(hypothesis, n_samples=n_samples)
+    return dataclasses.replace(
+        hypothesis,
+        delta_v_magnitude_1sigma_km_s=hypothesis.delta_v_magnitude_km_s * archetype.delta_v_1sigma_fraction,
+        delta_v_pointing_1sigma_deg=archetype.pointing_1sigma_deg,
+        epoch_1sigma_seconds=archetype.timing_1sigma_seconds,
+        archetype=archetype.name,
+        n_samples=n_samples,
+    )
+
+
+def _require_origin(carried: AdversaryHypothesis) -> None:
+    """The source, frame, direction basis and archetype say how the hypothesis was made, and agree."""
+    if not isinstance(carried.source, HypothesisSource):
+        raise ValueError(f"A hypothesis's source is archetype, entered or detected; got {carried.source!r}.")
+    if carried.frame not in _FRAMES:
+        raise ValueError(f"A hypothesis's direction is read in the RIC frame; got frame {carried.frame!r}.")
+    if not carried.hypothesis.direction_basis.strip():
+        raise ValueError("A hypothesis states its direction basis, so a reader can tell an assumed direction.")
+    named = carried.hypothesis.archetype
+    if carried.archetype_key is None:
+        if carried.source is not HypothesisSource.ENTERED:
+            raise ValueError(f"A {carried.source.value} hypothesis names its archetype.")
+        if named:
+            raise ValueError(f"A hypothesis with no archetype key names no archetype; it names {named}.")
+        return
+    expected = _known_archetype(carried.archetype_key).name
+    if named != expected:
+        raise ValueError(f"Archetype {carried.archetype_key!r} names {expected}, not {named or 'nothing'}.")
+
+
+def _require_burn(hypothesis: ManoeuvreHypothesis) -> None:
+    """The burn is finite and not negative, points somewhere, starts from a real state and is sampled at least once."""
+    dv = hypothesis.delta_v_magnitude_km_s
+    if not (math.isfinite(dv) and dv >= 0.0):
+        raise ValueError(f"A hypothesis's delta-V must be finite and not negative; got {from_km_s(dv)!r} m/s.")
+    _unit_ric(_parts(hypothesis))
+    _require_dispersions(hypothesis)
+    state = np.asarray(hypothesis.pre_manoeuvre_state_eci_km, dtype=float)
+    if state.shape != (6,) or not bool(np.all(np.isfinite(state))):
+        raise ValueError("The pre-manoeuvre state is six finite numbers: position in km, then velocity.")
+    if hypothesis.n_samples < 1:
+        raise ValueError(f"A hypothesis's sample count must be at least 1; got {hypothesis.n_samples!r}.")
+
+
+def _require_dispersions(hypothesis: ManoeuvreHypothesis) -> None:
+    """Every spread the sampler draws from is finite and not negative; zero means none."""
+    for name, label in _DISPERSIONS:
+        value = getattr(hypothesis, name)
+        if not (math.isfinite(value) and value >= 0.0):
+            shown = f"{from_km_s(value)!r} m/s" if name.endswith("_km_s") else repr(value)
+            raise ValueError(f"A hypothesis's {label} must be finite and not negative; got {shown}.")
+
+
+class _SealedHypothesis(ManoeuvreHypothesis):
+    """A ManoeuvreHypothesis no field of which can be written or deleted once it is built.
+
+    A frozen dataclass cannot inherit from a plain one, so the seal is set at
+    the end of construction. ``dataclasses.replace`` still works, and gives
+    another sealed copy.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        object.__setattr__(self, "_sealed", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_sealed", False):
+            raise dataclasses.FrozenInstanceError(f"cannot assign to field {name!r}: a carried hypothesis is sealed")
+        super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        raise dataclasses.FrozenInstanceError(f"cannot delete field {name!r}: a carried hypothesis is sealed")
+
+
+def _sealed_copy(hypothesis: ManoeuvreHypothesis) -> _SealedHypothesis:
+    """A sealed copy, so the checks made at construction keep holding whatever the caller does later.
+
+    Its direction is put where the sampler can read it, and its state is held
+    in memory that cannot be made writeable again.
+    """
+    if not _sampler_reads(_parts(hypothesis)):
+        hypothesis = _pointed(hypothesis, _unit_ric(_parts(hypothesis)))
+    state = np.frombuffer(np.asarray(hypothesis.pre_manoeuvre_state_eci_km, dtype=float).tobytes(), dtype=float)
+    values = {f.name: getattr(hypothesis, f.name) for f in dataclasses.fields(hypothesis)}
+    return _SealedHypothesis(**{**values, "pre_manoeuvre_state_eci_km": state})
+
+
+@dataclass(frozen=True, eq=False)
+class AdversaryHypothesis:
+    """A manoeuvre hypothesis for one adversary action, with where it came from.
+
+    Build one with :meth:`from_archetype`, :meth:`from_entered` or
+    :meth:`from_detection`. It carries the source, the archetype's key and name
+    and the direction's frame and basis, so a reader can always tell how it
+    was made (audit F-104). It is checked here, whoever builds it, and the
+    hypothesis is held as a sealed copy, so no later change, to the caller's
+    object or to the one carried, can undo the check.
+    """
+
+    hypothesis:    ManoeuvreHypothesis
+    source:        HypothesisSource
+    archetype_key: str | None = None
+    frame:         str = "RIC"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.hypothesis, ManoeuvreHypothesis):
+            raise TypeError(f"AdversaryHypothesis holds a ManoeuvreHypothesis; got {type(self.hypothesis).__name__}")
+        _require_origin(self)
+        _require_burn(self.hypothesis)
+        object.__setattr__(self, "hypothesis", _sealed_copy(self.hypothesis))
+
+    @classmethod
+    def from_archetype(
+        cls, archetype: str, at: PreManoeuvreState, *, direction_ric: Sequence[float] | None = None,
+        n_samples: int = 500,
+    ) -> AdversaryHypothesis:
+        """An archetype's typical burn and dispersions, in-track unless a direction is entered."""
+        row = _known_archetype(archetype)
+        unit, basis = (0.0, 1.0, 0.0), _ARCHETYPE_DIRECTION
+        if direction_ric is not None:
+            unit, basis = _unit_ric(direction_ric), _ENTERED_DIRECTION
+        nominal = _nominal(row.typical_delta_v_km_s, unit, at, basis)
+        return cls(_dispersed(nominal, row, n_samples), HypothesisSource.ARCHETYPE, archetype_key=archetype)
+
+    @classmethod
+    def from_entered(
+        cls, delta_v_m_s: float, direction_ric: Sequence[float], at: PreManoeuvreState, *,
+        archetype: str | None = None, n_samples: int = 500,
+    ) -> AdversaryHypothesis:
+        """A delta-V the operator entered, in m/s, along a RIC direction, with an archetype's dispersions if named."""
+        row = None if archetype is None else _known_archetype(archetype)
+        nominal = _nominal(to_km_s(delta_v_m_s), _unit_ric(direction_ric), at, _ENTERED_DIRECTION)
+        return cls(_dispersed(nominal, row, n_samples), HypothesisSource.ENTERED, archetype_key=archetype)
+
+    @classmethod
+    def from_detection(
+        cls, tle_record: TLERecord, manoeuvre: Manoeuvre, *, archetype: str, n_samples: int = 500,
+    ) -> AdversaryHypothesis:
+        """A detected manoeuvre's burn and direction, with *archetype*'s dispersions.
+
+        The archetype is checked first: hypothesis_from_tle_record would read
+        an unknown one as an orbit raise and say nothing. A detection of no or
+        almost no delta-V keeps the detection's direction at unit length,
+        where the split would have scaled it to nothing.
+        """
+        _known_archetype(archetype)
+        built = hypothesis_from_tle_record(tle_record, manoeuvre, n_samples=n_samples, archetype_override=archetype)
+        if not _sampler_reads(_parts(built)):
+            unit, _basis = _ric_split(getattr(manoeuvre, "breakdown", None))
+            built = _pointed(built, _unit_ric(unit.tolist()))
+        return cls(built, HypothesisSource.DETECTED, archetype_key=archetype)
+
+    @property
+    def archetype(self) -> str:
+        """The archetype's name, or empty when the dispersions are the defaults."""
+        return self.hypothesis.archetype
+
+    @property
+    def direction_basis(self) -> str:
+        return self.hypothesis.direction_basis
+
+    @property
+    def delta_v_m_s(self) -> float:
+        return from_km_s(self.hypothesis.delta_v_magnitude_km_s)
+
+    @property
+    def direction_ric(self) -> tuple[float, float, float]:
+        h = self.hypothesis
+        return _unit_ric((h.delta_v_radial, h.delta_v_in_track, h.delta_v_cross_track))
+
+    @property
+    def sentence(self) -> str:
+        """How the hypothesis was made, in one sentence."""
+        lead = _SOURCE_LEADS[self.source].format(archetype=self.archetype)
+        spread = f"dispersions from the {self.archetype} archetype" if self.archetype else "default dispersions, no archetype"
+        return f"{lead}: {self.delta_v_m_s:.1f} m/s; direction ({self.frame}) {self.direction_basis}; {spread}."
+
+    @property
+    def note(self) -> str:
+        """HYPOTHESIS_NOTE, here for a template whose only context is the result."""
+        return HYPOTHESIS_NOTE
+
+    def recorded(self) -> dict[str, object]:
+        """The hypothesis as plain values, for provenance: every figure at full precision."""
+        inner = dataclasses.asdict(self.hypothesis)
+        inner["epoch_utc"] = self.hypothesis.epoch_utc.isoformat()
+        inner["pre_manoeuvre_state_eci_km"] = [float(x) for x in self.hypothesis.pre_manoeuvre_state_eci_km]
+        return {"source": self.source.value, "archetype_key": self.archetype_key, "frame": self.frame, "hypothesis": inner}
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AdversaryHypothesis):
+            return NotImplemented
+        return self.recorded() == other.recorded()
+
+    def __hash__(self) -> int:
+        return hash(json.dumps(self.recorded(), sort_keys=True))
+
+
 @dataclass
 class AdversaryAction:
     """A single adversary COA to evaluate."""
@@ -241,11 +579,18 @@ class AdversaryAction:
     probability: float            # [0, 1] — operator assessment
     confidence:  float            # [0, 1] — intelligence confidence
     description: str = ""
-    # Phase 2: hypothesis: ManoeuvreHypothesis | None = None
+    # How the adversary might move, and where that came from (SPC-111). Carried
+    # and put in provenance; no figure reads it until SPC-112 samples from it.
+    hypothesis:  AdversaryHypothesis | None = None
 
     def __post_init__(self) -> None:
         _require_fraction("AdversaryAction", "probability", self.probability)
         _require_fraction("AdversaryAction", "confidence", self.confidence)
+        if self.hypothesis is not None and not isinstance(self.hypothesis, AdversaryHypothesis):
+            raise TypeError(
+                "AdversaryAction.hypothesis takes an AdversaryHypothesis, which says where the hypothesis came "
+                f"from; got {type(self.hypothesis).__name__}"
+            )
 
 
 @dataclass
@@ -683,6 +1028,18 @@ def _binding_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
     return tuple(tle_input(f"{b.side} {b.stk_name}", b.tle, b.epoch) for b in scenario.binding.bound)
 
 
+def _hypothesis_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
+    """Each adversary action's hypothesis as a provenance input, dated at its burn (SPC-111)."""
+    return tuple(
+        dataclasses.replace(
+            value_input(f"hypothesis {a.id} ({a.hypothesis.source.value})", a.hypothesis.recorded()),
+            epoch=a.hypothesis.hypothesis.epoch_utc,
+        )
+        for a in scenario.adversary_actions
+        if a.hypothesis is not None
+    )
+
+
 def evaluate_scenario(
     scenario: Scenario,
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
@@ -735,5 +1092,7 @@ def evaluate_scenario(
         robust_best_response=robust_response,
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
-        provenance=provenance([value_input("scenario", scenario), *_binding_inputs(scenario)]),
+        provenance=provenance(
+            [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario)],
+        ),
     )

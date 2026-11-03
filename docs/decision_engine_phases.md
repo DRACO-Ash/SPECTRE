@@ -56,7 +56,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 ### Known Phase 1 limitations
 
 - Outcome metrics are **lookup estimates**, not SGP4 propagations (closest approach is a constant per action type)
-- Adversary actions have no manoeuvre hypothesis — all actions are treated as constant-SMA from a propagation standpoint
+- An adversary action may carry a manoeuvre hypothesis (SPC-111, Phase 2 step 1), but no figure reads it yet: all
+  actions are still treated as constant-SMA from a propagation standpoint
 - No uncertainty — single deterministic outcome per (adversary, response) pair
 - ΔV cost is estimated from orbital mechanics rules of thumb, not simulated
 
@@ -90,7 +91,11 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 ### Implementation steps
 
-1. Add `hypothesis: ManoeuvreHypothesis | None = None` to `AdversaryAction`
+1. Add `hypothesis: ManoeuvreHypothesis | None = None` to `AdversaryAction`. Done in SPC-111 as
+   `hypothesis: AdversaryHypothesis | None = None`, a frozen carrier holding the `ManoeuvreHypothesis` with its
+   source (archetype, entered or detected), archetype name and direction frame and basis. It is checked when built
+   and recorded in the result's provenance; `compute_outcome_metrics` and `find_robust_response` do not read it,
+   and a tripwire test pins that until SPC-112 scores from it.
 2. Update `compute_outcome_metrics()` to branch on `hypothesis` presence
 3. Add `ca_percentiles` / `ca_std_km` to `OutcomeMetrics`
 4. Update `decision_panel.html` with per-row hypothesis accordion
