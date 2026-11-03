@@ -1046,3 +1046,8 @@ Feature work from the backlog: decide-by, the delta-V band, a data mode per fetc
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/decide_by.py`, `spectre/astro/along_track.py`, the band and decide-by helpers in `routes/threat.py`, the per-fetch data mode and error sentences in `routes/udl.py`, the refresh mode in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.9.0 before upload: see the outcome below. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+**Local check before upload.** `scripts/check-quality.sh` against 0.9.0
+first failed on a bare 500 in the UDL error sentence and, earlier, on a
+silent except and a bare 2 in the delta-V band; each was named or logged.
+It then passed all five legs, with 97 per cent coverage on changed lines.
+The full suite is green on the same tree.
