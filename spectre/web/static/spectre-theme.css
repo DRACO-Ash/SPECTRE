@@ -64,6 +64,13 @@
   --spectre-color-threat-red-dim:   #A32D2D;
   --spectre-color-threat-red-glow:  rgba(226, 75, 74, 0.15);
   --spectre-color-threat-red-bg:    rgba(226, 75, 74, 0.08);
+  /* TEXT on a .spectre-card-threat wash, the twin of nominal-green-text.
+     Here it is the red itself: 4.69:1 on its own 8% wash over console
+     black. Steel's #c0392b is 4.41:1 on its wash over #F3F4F6 and 4.39:1
+     over #f0f4f8, so the light blocks below restate it (SPC-035). The red
+     above is not darkened instead: it is the fill under .spectre-btn-threat's
+     white label. */
+  --spectre-color-threat-red-text:  #E24B4A;
 
   --spectre-color-caution-amber:    #EF9F27;
   --spectre-color-caution-amber-dim:#BA7517;
@@ -330,6 +337,10 @@
   /* On the nominal card's wash over either Steel page surface: 5.83:1 over
      #F3F4F6 and 5.80:1 over themes.css's #f0f4f8. */
   --spectre-color-nominal-green-text: #166534;
+  /* On the threat card's wash over either Steel page surface: 5.24:1 over
+     #F3F4F6 and 5.22:1 over themes.css's #f0f4f8. The light critical band's
+     red, so an error and a CRITICAL verdict read as one colour. */
+  --spectre-color-threat-red-text:  #B91C1C;
   --spectre-surface-input:          #FFFFFF;
   --spectre-surface-input-hover:    #F9FAFB;
   --spectre-surface-input-focus:    #FFFFFF;
@@ -427,6 +438,7 @@
     /* 5.59:1 against #F3F4F6 and 6.11:1 against #FFFFFF, both clear of AA. */
     --spectre-color-caution-amber-text: #8A5600;
     --spectre-color-nominal-green-text: #166534;
+    --spectre-color-threat-red-text:  #B91C1C;
     --spectre-surface-input:          #FFFFFF;
     --spectre-surface-input-hover:    #F9FAFB;
     --spectre-surface-input-focus:    #FFFFFF;

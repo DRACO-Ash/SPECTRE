@@ -1110,3 +1110,299 @@ class TestTheAdminPageNamesOnlyStyledClasses:
         assert ratio >= _AA_NORMAL, (
             f"the {theme} success flash in {template} is {ratio:.2f}:1, {ink} on {fill}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SPC-035: the error flash, the Steel Logout hover, and the Steel bar's focus ring
+# ══════════════════════════════════════════════════════════════════════════
+
+_FLASH_TEMPLATES = ["admin/users.html", "partials/admin_flash.html"]
+
+
+def _error_flash(template: str) -> tuple[str, str]:
+    """The error branch's card class and text colour in *template*."""
+    text = (_TEMPLATES / template).read_text(encoding="utf-8")
+    card = re.search(r"\{% if flash\.type == 'error' %\}(spectre-card-[\w-]+)\{% else %\}", text)
+    colour = re.search(r"\{% if flash\.type == 'error' %\}(var\(--[\w-]+\))\{% else %\}", text)
+    assert card and colour, f"the error flash in {template} has moved"
+    return card.group(1), colour.group(1)
+
+
+class TestTheErrorFlash:
+    """SPC-035: the error branch of the admin flash, the twin of SPC-034's success.
+
+    It painted the shared --spectre-color-threat-red on the threat card's 8%
+    wash. Steel's #c0392b measured 4.41:1 over #F3F4F6 and 4.39:1 over
+    #f0f4f8, the two Steel page surfaces, at 12px/400 against a 4.5 floor.
+    The shared red cannot simply be darkened: it is also the fill under the
+    white label of .spectre-btn-threat, so the text gets a token of its own,
+    as --spectre-color-nominal-green-text did for the success branch.
+    """
+
+    @pytest.mark.parametrize("template", _FLASH_TEMPLATES)
+    def test_the_error_flash_names_its_own_text_token(self, template: str) -> None:
+        card, colour = _error_flash(template)
+        assert card == "spectre-card-threat"
+        assert colour == "var(--spectre-color-threat-red-text)", (
+            f"the error flash in {template} paints {colour}; the shared threat red "
+            "is a fill as well, so the text needs its own token"
+        )
+
+    @pytest.mark.parametrize("template", _FLASH_TEMPLATES)
+    def test_the_message_is_the_measured_paragraph_s_own_text(self, template: str) -> None:
+        """The colour measured below is the one the message is painted in.
+
+        Markup between the paragraph and the message could paint it another
+        colour, out of sight of the measurement.
+        """
+        text = (_TEMPLATES / template).read_text(encoding="utf-8")
+        paragraph = re.search(r"<p style=\"[^\"]*flash\.type == 'error'[^\"]*\">(.*?)</p>", text, re.S)
+        assert paragraph, f"the flash paragraph in {template} has moved"
+        assert paragraph.group(1).strip() == "{{ flash.message }}", (
+            f"the flash message in {template} is wrapped in {paragraph.group(1).strip()!r}, "
+            "so the colour measured is not necessarily the colour it is painted in"
+        )
+
+    @pytest.mark.parametrize("block", [".spectre-light,", _MEDIA_LIGHT])
+    def test_every_light_block_restates_the_error_text_token(self, block: str) -> None:
+        """Both light paths, for the reason given for the neutral badge above."""
+        assert "--spectre-color-threat-red-text" in _tokens("spectre-theme.css", block), (
+            f"the light block at {block!r} does not restate "
+            "--spectre-color-threat-red-text, so it inherits the dark theme's red"
+        )
+
+    @pytest.mark.parametrize("template", _FLASH_TEMPLATES)
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES)
+    def test_the_error_flash_text_clears_the_floor_on_its_own_card(
+        self, theme: str, raw: dict[str, str], template: str
+    ) -> None:
+        card, colour = _error_flash(template)
+        page = _paint(_follow(_declared("style.css", "html, body", "background"), raw), "#000000")
+        wash = _first_declared([("spectre-theme.css", f".{card}")], "background")
+        fill = _paint(_follow(wash, raw), page)
+        ink = _paint(_follow(colour, raw), fill)
+        ratio = _ratio(ink, fill)
+        assert ratio >= _AA_NORMAL, (
+            f"the {theme} error flash in {template} is {ratio:.2f}:1, {ink} on {fill}"
+        )
+
+
+def _load_order() -> list[str]:
+    """The stylesheets base.html links, in the order the browser applies them."""
+    base = (_TEMPLATES / "base.html").read_text(encoding="utf-8")
+    links = re.findall(r'<link rel="stylesheet" href="([^"]+)"', base)
+    return [href.removeprefix("/static/") for href in links]
+
+
+#: Every rule that paints the console's Logout: (stylesheet, selector, Steel
+#: only, hover only).
+_LOGOUT_CASCADE = [
+    ("themes.css", '[data-theme="steel"] .btn-logout:hover', True, True),
+    ("themes.css", '[data-theme="steel"] .btn-logout', True, False),
+    ("style.css", ".btn-logout:hover", False, True),
+    ("style.css", ".btn-logout", False, False),
+]
+
+
+def _logout_rules(theme: str, hover: bool) -> list[tuple[str, str]]:
+    """The rules that reach Logout, most specific first, ties to the later sheet.
+
+    This is the tie _ghost_rules refuses to settle, and here it decides the
+    answer: ``[data-theme="steel"] .btn-logout`` and ``.btn-logout:hover`` are
+    both (0,2,0), and base.html loads themes.css after style.css, so under
+    the pointer the Steel resting rule still wins and Logout does not change.
+    """
+    order = _load_order()
+    rules = [
+        (filename, selector)
+        for filename, selector, steel_only, hover_only in _LOGOUT_CASCADE
+        if (theme.startswith("steel") or not steel_only) and (hover or not hover_only)
+    ]
+    return sorted(rules, key=lambda rule: (_specificity(rule[1]), order.index(rule[0])), reverse=True)
+
+
+def _on_the_bar(rules: list[tuple[str, str]], theme: str, raw: dict[str, str]) -> tuple[str, str]:
+    """(ink, surface) that *rules* paint on the nav bar."""
+    surface = _paint(_follow(_first_declared(rules, "background"), raw), _nav_bar(theme, raw))
+    return _paint(_follow(_first_declared(rules, "color"), raw), surface), surface
+
+
+class TestTheSteelLogoutHover:
+    """SPC-035: the console's Logout, 10.08px/500 on the nav bar Steel keeps dark.
+
+    Measured, Steel's hovered Logout read 7.12:1, #a0b8cc on #1a2a3a, but
+    only because it was the resting state: the Steel rule ties
+    ``.btn-logout:hover`` on specificity and loads later, so the pointer
+    changed nothing. The admin page's Sign Out on the same bar answers the
+    pointer with white on #243548, 12.52:1, and Logout now does the same.
+    """
+
+    def test_logout_sits_on_the_nav_bar(self) -> None:
+        """What is measured below is where the console renders it."""
+        page = (_TEMPLATES / "operator.html").read_text(encoding="utf-8")
+        start = page.index("{% block nav_actions %}")
+        actions = page[start:page.index("{% endblock %}", start)]
+        assert 'class="btn-logout"' in actions
+
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES)
+    def test_the_hovered_logout_clears_the_floor_and_answers_the_pointer(
+        self, theme: str, raw: dict[str, str]
+    ) -> None:
+        ink, surface = _on_the_bar(_logout_rules(theme, hover=True), theme, raw)
+        ratio = _ratio(ink, surface)
+        assert ratio >= _AA_NORMAL, (
+            f"the {theme} hovered Logout is {ratio:.2f}:1, {ink} on {surface}, at 10.08px/500"
+        )
+        assert (ink, surface) != _on_the_bar(_logout_rules(theme, hover=False), theme, raw), (
+            f"the {theme} Logout paints {ink} on {surface} at rest and under the "
+            "pointer alike; its hover rule is outranked and shows nothing"
+        )
+
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES[1:])
+    def test_steel_logout_hovers_like_sign_out_on_the_same_bar(
+        self, theme: str, raw: dict[str, str]
+    ) -> None:
+        """One control on one bar in two pages, pinned as the sidebar and hero tabs are."""
+        logout = _on_the_bar(_logout_rules(theme, hover=True), theme, raw)
+        sign_out = _on_the_bar(_ghost_rules(theme, True, "button"), theme, raw)
+        assert logout == sign_out, (
+            f"the {theme} hovered Logout paints {logout[0]} on {logout[1]} but "
+            f"Sign Out on the same bar paints {sign_out[0]} on {sign_out[1]}"
+        )
+
+
+#: A focus ring is a non-text indicator with a 3:1 floor. Every ring the
+#: console draws on its own surfaces clears 4.91:1 (see the ring comments in
+#: spectre-theme.css), so one that clears 3:1 by a few hundredths has no room
+#: for a retuned bar or an antialiased edge. The bar's ring is held to 4.5.
+_RING_COMFORT = 4.5
+
+
+def _rule_custom_properties(filename: str, selector: str) -> dict[str, str]:
+    """The ``--token: value;`` declarations of every rule that lists *selector*.
+
+    Every rule, not one: style.css styles ``.nav-bar`` twice, the second time
+    inside a narrow-screen media query, and a token set in either reaches a
+    control on the bar at some width.
+    """
+    return {
+        name: value.strip()
+        for head, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _on_screen(filename))
+        if selector in (member.strip() for member in head.split(","))
+        for name, value in re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", body)
+    }
+
+
+def _nav_bar_scope(theme: str, raw: dict[str, str]) -> dict[str, str]:
+    """*raw* as a control on the nav bar inherits it: the bar's own tokens on top."""
+    if theme == "dark":
+        return {**raw, **_rule_custom_properties("style.css", ".nav-bar")}
+    return {**raw, **_rule_custom_properties("themes.css", '[data-theme="steel"] .nav-bar')}
+
+
+#: The controls whose focus ring lands on the nav bar, as (the classes any of
+#: which names it, the elements it can be). Console and Sign Out are the
+#: admin page's; Logout is the console's own, on the same bar.
+_BAR_CONTROLS = {
+    "admin Console and Sign Out": ({".spectre-btn", ".spectre-btn-ghost"}, {"a", "button"}),
+    "console Logout": ({".btn-logout"}, {"button"}),
+}
+_FOCUS = {":focus", ":focus-visible"}
+#: What a control on the bar sits inside, on either page.
+_BAR_ANCESTORS = {"html", ":root", "body", "nav", ".nav-bar", "div", ".nav-user-group", "form", ".inline-form"}
+_THEME_ROOTS = {
+    "dark": {'[data-theme="ops"]', '[data-spectre-theme="dark"]'},
+    "steel": {'[data-theme="steel"]', '[data-spectre-theme="light"]'},
+}
+
+
+def _compounds(selector: str) -> list[set[str]]:
+    """*selector*'s compound selectors, outermost first, each as its simple parts."""
+    return [
+        set(re.findall(r"\[[^\]]*\]|::?[\w-]+(?:\([^)]*\))?|[.#]?[\w-]+", compound))
+        for compound in re.split(r"\s*[>+~]\s*|\s+", selector.strip())
+        if compound
+    ]
+
+
+def _rings_on_the_bar(selector: str, control: str, theme: str) -> bool:
+    """Whether *selector* reaches *control*, focused, where it sits on the bar."""
+    *ancestors, last = _compounds(selector)
+    classes, elements = _BAR_CONTROLS[control]
+    around = _BAR_ANCESTORS | _THEME_ROOTS["dark" if theme == "dark" else "steel"]
+    return (
+        bool(last & classes)
+        and bool(last & _FOCUS)
+        and last <= classes | elements | _FOCUS
+        and all(compound <= around for compound in ancestors)
+    )
+
+
+def _focus_shadow_rules(control: str, theme: str) -> list[tuple[str, str, str]]:
+    """(stylesheet, selector, box-shadow) of every rule that rings *control* on the bar.
+
+    Every loaded sheet is read, not one named rule, and the list is put in
+    cascade order, winner first: specificity, then the later sheet, then the
+    later rule in it. Reading only ``.spectre-btn:focus-visible`` let a more
+    specific bar rule put the 3.14:1 ring back unseen.
+    """
+    order = [name for name in _load_order() if (_STATIC / name).exists()]
+    found = [
+        (_specificity(member), order.index(filename), position, filename, member.strip(), shadow.group(1).strip())
+        for filename in order
+        for position, (head, body) in enumerate(re.findall(r"([^{}]+)\{([^{}]*)\}", _on_screen(filename)))
+        for member in head.split(",")
+        if _rings_on_the_bar(member, control, theme)
+        and (shadow := re.search(r"(?<![-\w])box-shadow\s*:\s*([^;}]+)", body))
+    ]
+    return [rule[3:] for rule in sorted(found, reverse=True)]
+
+
+class TestTheFocusRingOnTheSteelNavBar:
+    """SPC-035: the focus ring on whatever sits on the nav bar.
+
+    ``.spectre-btn:focus-visible`` draws var(--spectre-shadow-focus), a 2px
+    ring of the intel blue outside the button, so on the admin page's Console
+    and Sign Out it lands on the nav bar. Steel's #0077cc on #1a2a3a measured
+    3.14:1. Steel keeps that bar dark, so the bar re-points the ring token to
+    --spectre-focus-ring-on-dark, the ring the engine tab bar already uses for
+    the same reason.
+
+    The console's Logout, on the same bar, had no focus rule at all and drew
+    the browser's own ring. Under Steel's ``color-scheme: light`` that is the
+    light-mode ring style.css records at 1.03:1 to 1.07:1 on dark surfaces.
+    It now draws the same token, so the bar's override reaches it too.
+    """
+
+    def test_a_more_specific_bar_rule_outranks_the_shared_one(self) -> None:
+        """The cascade order the measurement below relies on."""
+        shared = _specificity(".spectre-btn:focus-visible")
+        on_the_bar = _specificity('[data-theme="steel"] .nav-bar .spectre-btn:focus-visible')
+        assert on_the_bar > shared
+        assert _rings_on_the_bar('[data-theme="steel"] .nav-bar .spectre-btn:focus-visible', "admin Console and Sign Out", "steel")
+        assert not _rings_on_the_bar('[data-theme="steel"] .nav-bar .spectre-btn:focus-visible', "admin Console and Sign Out", "dark")
+        assert not _rings_on_the_bar(".spectre-btn-threat:focus-visible", "admin Console and Sign Out", "steel")
+        assert not _rings_on_the_bar(".panel .spectre-btn:focus-visible", "admin Console and Sign Out", "steel")
+
+    @pytest.mark.parametrize("control", list(_BAR_CONTROLS))
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES)
+    def test_the_ring_clears_a_comfortable_margin_on_the_bar(
+        self, theme: str, raw: dict[str, str], control: str
+    ) -> None:
+        rules = _focus_shadow_rules(control, theme)
+        assert rules, (
+            f"no rule rings the {theme} {control} on the nav bar, so it draws the "
+            "browser's own ring, measured as low as 1.03:1 on dark chrome"
+        )
+        filename, selector, value = rules[0]
+        scope = _nav_bar_scope(theme, raw)
+        shadow = _follow(value, scope)
+        spread = re.fullmatch(r"(?:-?[\d.]+(?:px)?\s+){4}(.+)", shadow)
+        assert spread, f"cannot read a colour from {selector} in {filename}: {shadow!r}"
+        bar = _nav_bar(theme, raw)
+        ring = _paint(_follow(spread.group(1), scope), bar)
+        ratio = _ratio(ring, bar)
+        assert ratio >= _RING_COMFORT, (
+            f"the {theme} focus ring on the {control}, from {selector} in {filename}, "
+            f"is {ratio:.2f}:1, {ring} on {bar}: over the 3:1 floor by too little to hold"
+        )

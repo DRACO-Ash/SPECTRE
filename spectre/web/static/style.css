@@ -806,6 +806,12 @@ th[tabindex="0"]:focus-visible,
   transition: color 0.15s, border-color 0.15s;
 }
 .btn-logout:hover { color: var(--text); border-color: var(--text-dim); }
+/* Logout had no focus rule, so it drew the browser's own ring, and under
+   Steel's color-scheme: light that is the light-mode ring measured at 1.03:1
+   to 1.07:1 on dark surfaces (see the ring note above). It now draws the
+   console's ring, as .spectre-btn does: 4.95:1 on the dark bar, and 5.85:1
+   on Steel's bar, which re-points the token for everything on it (SPC-035). */
+.btn-logout:focus-visible { outline: none; box-shadow: var(--spectre-shadow-focus); }
 
 .btn-sm { padding: 0.22rem 0.5rem; font-size: 0.7rem; }
 .btn-xs { padding: 0.1rem 0.35rem; font-size: 0.62rem; }

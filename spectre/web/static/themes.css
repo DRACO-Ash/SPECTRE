@@ -152,11 +152,22 @@
 
 /* ── Component overrides that can't be expressed via tokens alone ── */
 
-/* Nav stays dark even in steel theme (Bluestaq identity requirement) */
-[data-theme="steel"] .nav-bar            { background: #1a2a3a; border-bottom-color: #243548; }
+/* Nav stays dark even in steel theme (Bluestaq identity requirement).
+   The bar re-points the focus shadow for everything on it (SPC-035).
+   .spectre-btn:focus-visible draws a 2px ring of the intel blue outside the
+   button, onto this bar: Steel's #0077cc on #1a2a3a is 3.14:1, over the 3:1
+   floor by too little to hold. --spectre-focus-ring-on-dark, the ring the
+   engine tab bar keeps for the same reason, is 5.85:1 here. */
+[data-theme="steel"] .nav-bar            { background: #1a2a3a; border-bottom-color: #243548;
+                                           --spectre-shadow-focus: 0 0 0 2px var(--spectre-focus-ring-on-dark); }
 [data-theme="steel"] .nav-user           { color: #a0b8cc; }
 [data-theme="steel"] .nav-dropdown-panel { background: #1a2a3a; border-color: #243548; }
 [data-theme="steel"] .btn-logout         { background: transparent; border-color: #c2cede; color: #a0b8cc; }
+/* The rule above ties .btn-logout:hover in style.css at (0,2,0) and loads
+   later, so under the pointer Logout stayed #a0b8cc on #1a2a3a (7.12:1) and
+   showed nothing (SPC-035). It now answers as Sign Out does on the admin
+   page's copy of this bar: white on #243548 at 12.52:1. */
+[data-theme="steel"] .btn-logout:hover   { background: #243548; color: #ffffff; border-color: #c2cede; }
 /* The rest of what paints on that dark chrome. Keeping a surface dark in a
    light theme is only half a decision: every foreground on it has to be
    re-pointed as well, and .nav-user and .btn-logout were the only two that
