@@ -40,7 +40,9 @@ def test_the_gap_is_scaled_by_adversary_confidence() -> None:
 
 def test_no_tle_path_remains() -> None:
     """No figure takes an element set. A bound scenario carries its element sets on
-    Scenario.binding (SPC-100), deliberately unread until a later phase computes from them."""
+    Scenario.binding (SPC-100), read only to sample the closest approach of a row
+    whose action carries a hypothesis (SPC-112), through the Monte Carlo engine's
+    elset_state, never a propagator named here."""
     for fn in (decision.compute_outcome_metrics, decision.evaluate_scenario):
         params = inspect.signature(fn).parameters
         assert "blue_tle" not in params and "red_tle" not in params
@@ -53,6 +55,9 @@ def test_the_docstrings_describe_the_lookup_model() -> None:
     module = " ".join((decision.__doc__ or "").split())
     assert "SGP4" not in module
     assert "lookup" in module and "uncalibrated" in module
+    # SPC-112: the one figure that can be sampled, and on what it scores.
+    assert "No orbit is propagated" not in module
+    assert "sampled" in module and "P5" in module
     rules = " ".join((decision.compute_outcome_metrics.__doc__ or "").split())
     assert "POSTURE_CHANGE" in rules
     assert "confidence" in rules

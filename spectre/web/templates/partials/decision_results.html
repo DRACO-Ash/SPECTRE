@@ -1,5 +1,7 @@
 {# Decision Engine Results — rendered into #decision-results #}
-{# Context: result (ScenarioResult); result.scenario.binding is optional (SPC-100) #}
+{# Context: result (ScenarioResult); result.scenario.binding is optional (SPC-100). A sampled cell's band,
+   refusal and caveat, the row notes and the sampled caveat (SPC-112) are each guarded with "is defined", so an
+   older result renders under StrictUndefined. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -71,6 +73,9 @@
     {% if result.custody_rule_of_thumb is not defined or result.custody_rule_of_thumb %}
     <div>Custody here is a rule of thumb, not the held, degraded or lost custody shown on the sweep.</div>
     {% endif %}
+    {% if result.sampled_caveat is defined and result.sampled_caveat is not none %}
+    <div class="sampled-caveat" style="color:var(--gold)">{{ result.sampled_caveat }}</div>
+    {% endif %}
   </div>
 
   <div style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
@@ -122,12 +127,19 @@
             {{ a.action_type.value | replace('_',' ') | title }} ·
             P={{ a.probability }} · Conf={{ a.confidence }}
           </div>
+          {% if a.hypothesis is defined and a.hypothesis is not none %}
+          <div class="row-hypothesis" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.sentence }}</div>
+          {% endif %}
+          {% if result.row_notes is defined and result.row_notes | length > i and result.row_notes[i] is not none %}
+          <div class="row-note" style="font-size:0.56rem; color:var(--gold)">{{ result.row_notes[i] }}</div>
+          {% endif %}
         </td>
         {% for j in range(fr | length) %}
           {% set om = result.outcome_matrix[i][j] %}
           {% set is_best = (fr[j].id == result.robust_best_response.id) %}
           {# Guarded here: StrictUndefined raises on an attribute of an undefined value before a macro runs. #}
           {% set fbs = om.figure_bases if om.figure_bases is defined else none %}
+          {% set band = om.ca_percentiles if om.ca_percentiles is defined else none %}
           {# Colour: green < 0.25, amber < 0.50, red >= 0.50 #}
           {% if om.composite_score < 0.25 %}
             {% set score_color = "#22c55e" %}
@@ -147,12 +159,21 @@
             <div style="font-size:0.57rem; color:var(--text-dim)">
               <span{% if om.basis is defined %} title="{{ om.basis }}"{% endif %}>
               <span class="figure" data-figure="closest_approach_km"
-                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ "%.0f" | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
+                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ ("%.1f" if band is not none else "%.0f") | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
               <span class="figure" data-figure="custody_maintained"
                     data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
               custody {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
               </span>
             </div>
+            {% if band is not none and om.ca_band is defined %}
+            <div class="sampled-band" style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_band }}</div>
+            {% endif %}
+            {% if om.ca_caveat is defined and om.ca_caveat is not none %}
+            <div class="sampled-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_caveat }}</div>
+            {% endif %}
+            {% if om.ca_refusal is defined and om.ca_refusal is not none %}
+            <div class="sampling-refused" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_refusal }}</div>
+            {% endif %}
           </td>
         {% endfor %}
       </tr>
@@ -196,7 +217,7 @@
 
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim);
               border-top:1px solid var(--border); padding-top:0.3rem">
-    Phase 1 · {{ result.scenario.name }}
+    Phase {% if result.n_sampled_cells is defined and result.n_sampled_cells %}2 · sampled closest approach in {{ result.n_sampled_cells }} cells{% else %}1{% endif %} · {{ result.scenario.name }}
     · {{ result.scenario.horizon_hours | int }}h horizon
   </div>
 

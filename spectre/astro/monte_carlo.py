@@ -9,6 +9,12 @@ this module:
 - Aggregates the ensemble into a MonteCarloResult with regime probabilities,
   orbital element percentiles, and the 99.7th percentile distance of the
   position cloud from its centroid.
+- Separately, builds a separation series against a blue track
+  (run_separation_series, SPC-110): each sample's closest approach to the
+  blue object over a window, with P5, P50 and P95 of the misses. Blue is
+  propagated with the same RK45 model as red, from its SGP4 state at the
+  window start; with blue left on SGP4 the GEO reference case missed its TCA
+  by 1,951 s.
 
 Design notes
 ------------
@@ -22,6 +28,7 @@ Design notes
   function, so the integrator holds the GIL for most of each step and threads
   give little speed-up; they were described as releasing it (audit F-221).
   A process pool or a vectorised ensemble would be the way to go faster.
+  The separation series runs serially for that reason.
 """
 
 from __future__ import annotations
@@ -29,14 +36,16 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from spectre.astro.closest_approach import MAX_SAMPLES, ClosestApproach, closest_approach
 from spectre.astro.constants import J2_EARTH, MU_EARTH, R_EARTH, classify_orbit_regime
 
 logger = logging.getLogger(__name__)
@@ -501,6 +510,10 @@ _MIN_BSTAR = 1e-8
 _ZERO_SPAN_S = 1e-9
 # A ΔV breakdown smaller than this, km/s (1 nm/s), carries no direction.
 _ZERO_DV_KM_S = 1e-12
+#: The RK45 tolerances every propagation in this module uses, the horizon
+#: samples and the separation series alike (relative, and absolute in km and km/s).
+RK45_RTOL = 1e-8
+RK45_ATOL = 1e-10
 
 
 def _ballistic_coefficient_kg_m2(bstar: float) -> float:
@@ -573,8 +586,8 @@ def _integrate(state: np.ndarray, span_s: float, bstar: float) -> np.ndarray | N
         (0.0, span_s),
         state,
         method="RK45",
-        rtol=1e-8,
-        atol=1e-10,
+        rtol=RK45_RTOL,
+        atol=RK45_ATOL,
         args=(_ballistic_coefficient_kg_m2(bstar),),
         dense_output=False,
     )
@@ -821,3 +834,329 @@ def _ric_split(breakdown: Any) -> tuple[np.ndarray, str]:
         "split from the detection's element breakdown; "
         "sense of radial and cross-track parts not resolved"
     )
+
+
+# ── Separation series against a blue track (SPC-110) ─────────────────────────
+
+
+class BlueTrack(NamedTuple):
+    """An object's state from its element set, the instant it holds at, and the element set's drag term.
+
+    ``state_eci_km`` is SGP4's TEME state [x, y, z, vx, vy, vz] (km, km/s) at
+    ``epoch_utc``; ``bstar`` is the element set's B*, for the drag in the
+    RK45 propagation. A separation series refuses a track whose epoch is not
+    its window start.
+    """
+
+    state_eci_km: np.ndarray
+    bstar: float
+    epoch_utc: datetime
+
+
+def elset_state(tle: str, at: datetime) -> BlueTrack | None:
+    """The SGP4 TEME state of *tle* at *at*, with its B*; None when it cannot be had.
+
+    None covers an element set that does not parse and one SGP4 cannot
+    propagate to *at* (TLE_ERRORS). It lives here so the Decision Engine never
+    names the propagator.
+    """
+    from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
+
+    try:
+        orbit = TLEOrbit(tle)
+        sv = orbit.propagate(at)
+    except TLE_ERRORS:
+        return None
+    return BlueTrack(state_eci_km=np.concatenate([sv.r, sv.v]), bstar=orbit.bstar, epoch_utc=at)
+
+
+#: What every separation series propagates with, stated on the series.
+SEPARATION_PROPAGATOR = "RK45 with J2 and exponential drag, red and blue alike"
+
+#: The altitude, km, below which a separation series stops an arc: the
+#: conventional edge of space (the Karman line). Below it the object is
+#: minutes from re-entry, and the exponential atmosphere is no guide to
+#: where it goes; a miss computed past it would be one the series has not earned.
+REENTRY_FLOOR_KM = 100.0
+
+#: A trajectory: the state [x, y, z, vx, vy, vz] at t seconds after the window start.
+_Trajectory = Callable[[float], np.ndarray]
+
+
+class SeparationWindow(NamedTuple):
+    """The window a separation series searches: its start, its span and the helper's grid step, in seconds."""
+
+    start_utc: datetime
+    span_s: float
+    step_s: float = 60.0
+
+
+@dataclass(frozen=True)
+class SeparationSeries:
+    """Each sample's closest approach to the blue track in one window, and their statistics.
+
+    ``approaches`` holds one ClosestApproach per sample that propagated, in
+    sample order; ``n_failed`` counts the rest, and ``n_reentered`` those of
+    them whose red arc went below REENTRY_FLOOR_KM. The percentiles and
+    standard deviation are numpy's over the approaches' misses, NaN when there
+    are none. ``converged`` is the engine's own check
+    (percentile_half_width_km within CONVERGENCE_TOLERANCE_KM), never true
+    below 50 samples. ``integration_s`` is what the series cost: the seconds of
+    trajectory it integrated (separation_integration_s).
+    """
+
+    window: SeparationWindow
+    approaches: tuple[ClosestApproach, ...]
+    n_samples_run: int
+    n_failed: int
+    n_reentered: int
+    miss_km_p5: float
+    miss_km_p50: float
+    miss_km_p95: float
+    miss_km_std: float
+    percentile_half_width_km: float
+    converged: bool
+    random_seed: int
+    integration_s: float
+    wall_time_seconds: float
+    propagator: str = SEPARATION_PROPAGATOR
+
+    @property
+    def percentiles(self) -> dict[int, float]:
+        """P5, P50 and P95 of the misses, in km, keyed 5, 50 and 95."""
+        return {5: self.miss_km_p5, 50: self.miss_km_p50, 95: self.miss_km_p95}
+
+    @property
+    def closest_sample_km(self) -> float:
+        """The smallest miss of any sample, in km; NaN with no samples."""
+        return min((a.miss_km for a in self.approaches), default=math.nan)
+
+    @property
+    def n_at_window_edge(self) -> int:
+        """Samples whose smallest separation is at the window's start or end, not an encounter."""
+        return sum(a.at_window_edge for a in self.approaches)
+
+    @property
+    def earliest_tca_at_or_below_p5_s(self) -> float:
+        """The earliest TCA, in seconds after the window start, of the samples whose miss is at or below P5."""
+        return min((a.tca_s for a in self.approaches if a.miss_km <= self.miss_km_p5), default=math.nan)
+
+
+class _Arcs(NamedTuple):
+    """What every sample shares: the blue arc, red's unburnt arc and its nominal burn time (s after the start)."""
+
+    blue: _Trajectory
+    unburnt: _Trajectory
+    burn_s: float
+
+
+class _ReenteredError(Exception):
+    """An arc went below REENTRY_FLOOR_KM."""
+
+
+#: What a sample gives when it has no closest approach.
+_FAILED = "failed"
+_REENTERED = "re-entered"
+
+
+def run_separation_series(
+    hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow,
+) -> SeparationSeries:
+    """Each sample's closest approach to *blue* in *window*, with P5, P50 and P95 of the misses.
+
+    *blue* must hold at the window start; the hypothesis's pre-manoeuvre state
+    holds at its epoch. Red's unburnt arc is integrated once, back and forward
+    from that epoch, at ``bstar_post``; blue's is integrated once over the
+    window at its own B*. Each sample burns at the epoch plus its timing
+    offset: its delta-V is applied in the RIC frame to the unburnt state there,
+    and the burnt arc is integrated to the window end at ``bstar_post`` plus
+    its B* offset. Red is the unburnt arc before the burn and the burnt arc
+    after it, so a burn before the window is applied and a burn at or after
+    its end leaves the unburnt approach; neither is dropped. Each sample's
+    closest approach comes from the shared helper, closest_approach.
+
+    Every arc stops at REENTRY_FLOOR_KM. A sample whose burnt arc crosses it
+    is counted failed and re-entered; a shared arc that crosses it (blue's, or
+    red's before any burn) fails every sample, since no sample's approach can
+    then be had.
+
+    Runs serially: threads were measured about four times slower than one
+    here, because the equations of motion hold the GIL. Raises ValueError,
+    before anything is integrated, when the window is one the helper would
+    refuse or *blue* holds at another instant.
+    """
+    _check_window(window, blue)
+    t_start = time.monotonic()
+    samples = generate_samples(hypothesis)
+    burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
+    outcomes = _approaches(hypothesis, samples, blue, window)
+    found = tuple(a for a in outcomes if isinstance(a, ClosestApproach))
+    misses = np.array([a.miss_km for a in found])
+    half_width = percentile_half_width_km(misses.tolist(), seed=hypothesis.random_seed or 0)
+    p5, p50, p95 = (
+        (float(p) for p in np.percentile(misses, _SHOWN_PERCENTILES)) if misses.size else (math.nan,) * 3
+    )
+    series = SeparationSeries(
+        window=window,
+        approaches=found,
+        n_samples_run=hypothesis.n_samples,
+        n_failed=hypothesis.n_samples - len(found),
+        n_reentered=outcomes.count(_REENTERED),
+        miss_km_p5=p5,
+        miss_km_p50=p50,
+        miss_km_p95=p95,
+        miss_km_std=float(np.std(misses)) if misses.size else math.nan,
+        percentile_half_width_km=half_width,
+        converged=half_width <= CONVERGENCE_TOLERANCE_KM,
+        random_seed=hypothesis.random_seed,
+        integration_s=_integration_s(burn_s + samples[:, 3], burn_s, window.span_s),
+        wall_time_seconds=time.monotonic() - t_start,
+    )
+    logger.info(
+        "Separation series: %d/%d samples in %.1fs over %.0f s",
+        len(found), hypothesis.n_samples, series.wall_time_seconds, window.span_s,
+    )
+    return series
+
+
+def separation_integration_s(hypothesis: ManoeuvreHypothesis, window: SeparationWindow) -> float:
+    """The seconds of trajectory run_separation_series would integrate, known before it runs.
+
+    Blue over the window, red's unburnt arc from the earliest of the window
+    start and the sample burns to the later of the window end and the nominal
+    burn, and each sample from its burn to the window end. A series costs in
+    proportion to this, not to the window alone: a burn a day before a 1 h
+    window integrates 25 h per sample.
+    """
+    burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
+    return _integration_s(burn_s + generate_samples(hypothesis)[:, 3], burn_s, window.span_s)
+
+
+def _integration_s(burns_s: np.ndarray, burn_s: float, span_s: float) -> float:
+    """Seconds integrated for sample burns *burns_s* and nominal burn *burn_s* (s after the start) over *span_s*."""
+    unburnt = max(span_s, burn_s) - min(_earliest_s(burns_s), burn_s)
+    burnt = float(np.sum(np.clip(span_s - burns_s, 0.0, None)))
+    return span_s + unburnt + burnt
+
+
+def _earliest_s(burns_s: np.ndarray) -> float:
+    """Where red's unburnt arc must start: the window start or the earliest sample burn before it."""
+    return min(0.0, float(np.min(burns_s, initial=math.inf)))
+
+
+def _check_window(window: SeparationWindow, blue: BlueTrack) -> None:
+    """Raise ValueError for a window closest_approach would refuse, or a blue track from another instant."""
+    span, step = window.span_s, window.step_s
+    if not (math.isfinite(span) and span > 0.0 and math.isfinite(step) and step > 0.0):
+        raise ValueError(f"separation window: span {span!r} s and step {step!r} s must be finite and > 0")
+    if span / step > MAX_SAMPLES - 1:
+        raise ValueError(
+            f"separation window: {span:,.0f} s at {step:g} s steps needs more than the "
+            f"{MAX_SAMPLES:,} samples the closest-approach helper takes"
+        )
+    if blue.epoch_utc != window.start_utc:
+        raise ValueError(
+            f"separation window: the blue track holds at {blue.epoch_utc.isoformat()}, "
+            f"not at the window start {window.start_utc.isoformat()}"
+        )
+
+
+def _approaches(
+    hypothesis: ManoeuvreHypothesis, samples: np.ndarray, blue: BlueTrack, window: SeparationWindow,
+) -> list[ClosestApproach | str]:
+    """One closest approach per sample, in sample order, _FAILED or _REENTERED where there is none."""
+    burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
+    earliest = _earliest_s(burn_s + samples[:, 3])
+    try:
+        blue_arc = _dense_arc(blue.state_eci_km, 0.0, window.span_s, blue.bstar)
+        unburnt = _unburnt_arc(hypothesis, earliest, window.span_s, burn_s)
+    except (ArithmeticError, ValueError, _ReenteredError):   # numpy's LinAlgError is a ValueError
+        blue_arc = unburnt = None
+    if blue_arc is None or unburnt is None:
+        return [_FAILED] * len(samples)
+    arcs = _Arcs(blue=blue_arc, unburnt=unburnt, burn_s=burn_s)
+    return [_try_sample(sample, arcs, hypothesis.bstar_post, window) for sample in samples]
+
+
+def _altitude_km(_t: float, state: np.ndarray, *_: float) -> float:
+    """Height above REENTRY_FLOOR_KM, km: solve_ivp's event, zero at the floor."""
+    return float(np.linalg.norm(state[:3])) - _R_E - REENTRY_FLOOR_KM
+
+
+_altitude_km.terminal = True   # type: ignore[attr-defined]  # solve_ivp reads these off the event
+
+
+def _dense_arc(state: np.ndarray, t0_s: float, t1_s: float, bstar: float) -> _Trajectory | None:
+    """*state* at *t0_s* integrated densely to *t1_s*, either way; None when the solve fails.
+
+    Raises _ReenteredError when the arc starts or goes below REENTRY_FLOOR_KM.
+    """
+    if _altitude_km(t0_s, state) < 0.0:
+        raise _ReenteredError(f"the arc starts {-_altitude_km(t0_s, state):.1f} km below the floor")
+    if abs(t1_s - t0_s) < _ZERO_SPAN_S:
+        return lambda _t: state.copy()
+    sol = solve_ivp(
+        _j2_drag_ode,
+        (t0_s, t1_s),
+        state,
+        method="RK45",
+        rtol=RK45_RTOL,
+        atol=RK45_ATOL,
+        args=(_ballistic_coefficient_kg_m2(bstar),),
+        dense_output=True,
+        events=_altitude_km,
+    )
+    if sol.status == 1:
+        raise _ReenteredError(f"the arc reaches the floor at {float(sol.t_events[0][0]):.0f} s")
+    return sol.sol if sol.success else None
+
+
+def _unburnt_arc(
+    hypothesis: ManoeuvreHypothesis, earliest_s: float, end_s: float, burn_s: float,
+) -> _Trajectory | None:
+    """Red without the burn over [*earliest_s*, *end_s*], integrated back and forward from *burn_s*."""
+    pre = hypothesis.pre_manoeuvre_state_eci_km
+    back = _dense_arc(pre, burn_s, min(earliest_s, burn_s), hypothesis.bstar_post)
+    ahead = _dense_arc(pre, burn_s, max(end_s, burn_s), hypothesis.bstar_post)
+    if back is None or ahead is None:
+        return None
+    return _spliced(back, ahead, burn_s)
+
+
+def _spliced(before: _Trajectory, after: _Trajectory, at_s: float) -> _Trajectory:
+    """*before* up to *at_s* seconds and *after* from it."""
+    return lambda t: before(t) if t < at_s else after(t)
+
+
+def _try_sample(
+    sample: np.ndarray, arcs: _Arcs, bstar_post: float, window: SeparationWindow,
+) -> ClosestApproach | str:
+    """One sample's closest approach, or why there is none."""
+    try:
+        approach = _sample_approach(sample, arcs, bstar_post, window)
+    except _ReenteredError:
+        return _REENTERED
+    except (ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
+        return _FAILED
+    return _FAILED if approach is None else approach
+
+
+def _sample_approach(
+    sample: np.ndarray, arcs: _Arcs, bstar_post: float, window: SeparationWindow,
+) -> ClosestApproach | None:
+    """The closest approach of red, burnt as *sample* says, to blue in *window*."""
+    burn_s = arcs.burn_s + float(sample[3])
+    red = arcs.unburnt
+    if burn_s < window.span_s:
+        state = arcs.unburnt(burn_s).copy()
+        state[3:] += _ric_to_eci_rotation(state[:3], state[3:]) @ sample[:3]
+        burnt = _dense_arc(state, burn_s, window.span_s, bstar_post + float(sample[4]))
+        if burnt is None:
+            return None
+        red = _spliced(arcs.unburnt, burnt, burn_s)
+    blue = arcs.blue
+
+    def separation(t: float) -> float:
+        return float(np.linalg.norm(blue(t)[:3] - red(t)[:3]))
+
+    return closest_approach(separation, window.span_s, step_s=window.step_s)

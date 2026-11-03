@@ -109,7 +109,10 @@ def _tags(html: str, figure: str) -> list[str]:
 
 class TestTheBasesAreTyped:
     def test_every_outcome_figure_has_its_own_basis(self) -> None:
-        figures = {f.name for f in fields(OutcomeMetrics)} - {"figure_bases"}
+        """The sampled band, its spread, refusal and caveat qualify closest approach (SPC-112); they are not figures."""
+        about_closest_approach = {"ca_percentiles", "ca_std_km", "ca_samples", "ca_refusal", "ca_caveat"}
+        assert about_closest_approach <= {f.name for f in fields(OutcomeMetrics)}
+        figures = {f.name for f in fields(OutcomeMetrics)} - {"figure_bases"} - about_closest_approach
         assert figures == {f.name for f in fields(OutcomeBases)}
 
     def test_every_figure_has_an_operator_label(self) -> None:

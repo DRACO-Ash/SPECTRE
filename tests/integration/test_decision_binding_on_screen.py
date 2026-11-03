@@ -1,8 +1,10 @@
 """The decision panel offers the held objects to bind, and the result says what it is bound to (SPC-100).
 
 Binding records which real objects a scenario is about and how old their
-orbits are. It changes no figure: the page after the "Bound to" block is the
-same as the unbound page, computation time aside.
+orbits are. Without a hypothesis it changes no figure: the page after the
+"Bound to" block is the same as the unbound page, computation time aside.
+No form field attaches a hypothesis yet (SPC-114), so a sampled closest
+approach (SPC-112) cannot reach this page through the route.
 """
 
 from __future__ import annotations

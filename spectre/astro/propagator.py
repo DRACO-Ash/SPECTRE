@@ -111,6 +111,11 @@ class TLEOrbit:
         self.line2 = lines[-1]
         self._sat = Satrec.twoline2rv(self.line1, self.line2)
 
+    @property
+    def bstar(self) -> float:
+        """The element set's SGP4 drag term B*, in inverse Earth radii."""
+        return float(self._sat.bstar)
+
     def propagate(self, epoch: datetime) -> StateVector:
         """Propagate to *epoch* and return the TEME state vector."""
         jd, fr = _datetime_to_jd(epoch)

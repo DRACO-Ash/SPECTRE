@@ -38,7 +38,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 - A scenario may be bound to one held red track and one held blue asset (SPC-100). The binding records which real
   objects the scenario is about, puts their element sets in the result's provenance and shows each orbit's epoch and
   age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) in a "Bound to" block.
-  It changes no figure: `compute_outcome_metrics` and `find_robust_response` never read it, and a test pins that.
+  On its own it changes no figure: `compute_outcome_metrics` and `find_robust_response` never read it, and a test
+  pins that. Only `plan_sampling` reads it, for a row whose action carries a hypothesis (SPC-112, below).
 - Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
 - Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") with a basis line per figure,
   a "(lookup)" mark on each closest approach and custody in the outcome matrix, and per-adversary ranked response cards
@@ -56,8 +57,9 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 ### Known Phase 1 limitations
 
 - Outcome metrics are **lookup estimates**, not SGP4 propagations (closest approach is a constant per action type)
-- An adversary action may carry a manoeuvre hypothesis (SPC-111, Phase 2 step 1), but no figure reads it yet: all
-  actions are still treated as constant-SMA from a propagation standpoint
+- An adversary action may carry a manoeuvre hypothesis (SPC-111, Phase 2 step 1). On its own it changes no figure;
+  in a scenario bound on both sides its row's closest approach and time to closest approach are sampled (SPC-112),
+  and every other figure, custody included, is still a lookup
 - No uncertainty — single deterministic outcome per (adversary, response) pair
 - ΔV cost is estimated from orbital mechanics rules of thumb, not simulated
 
@@ -78,7 +80,7 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
   - Computes closest approach for each realisation → distribution
   - Returns `closest_approach_km_p5`, `closest_approach_km_p50`, `closest_approach_km_p95`
 - `OutcomeMetrics` gains `ca_percentiles: dict[int, float]` and `ca_std_km: float`
-- Scoring uses the P95 closest approach (conservative) instead of the point estimate
+- Scoring uses the P5 closest approach (conservative: the smallest-miss tail) instead of the point estimate
 - `ScenarioResult` gains `monte_carlo_runs: int`, `mc_wall_time_s: float`
 
 ### UI additions
@@ -95,13 +97,46 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
    `hypothesis: AdversaryHypothesis | None = None`, a frozen carrier holding the `ManoeuvreHypothesis` with its
    source (archetype, entered or detected), archetype name and direction frame and basis. It is checked when built
    and recorded in the result's provenance; `compute_outcome_metrics` and `find_robust_response` do not read it,
-   and a tripwire test pins that until SPC-112 scores from it.
-2. Update `compute_outcome_metrics()` to branch on `hypothesis` presence
-3. Add `ca_percentiles` / `ca_std_km` to `OutcomeMetrics`
+   and a tripwire test pins that the lookup path never does.
+2. Update `compute_outcome_metrics()` to branch on `hypothesis` presence. Done in SPC-112 beside it instead:
+   `compute_outcome_metrics` stays lookup-only, and `evaluate_scenario` fills a row from `plan_sampling` when its
+   action carries a hypothesis and the scenario is bound to a red track and a blue asset. Each such row runs one
+   separation series (shared by all its response cells) and scores on its P5, with its time to closest approach the
+   earliest TCA at or below P5; both figures say they are sampled, naming samples, horizon and propagator, and the
+   score's basis stays lookup. A row is refused, with a sentence in each of its cells ending "This cell's figures are
+   lookups.", for fewer than 50 samples, an orbit not current, a red element set newer than the burn (it may already
+   include the burn, which would then be applied twice; the start check cannot see this, because an impulsive burn
+   leaves position continuous), an element set that cannot be propagated, a hypothesis starting more than 10 km from
+   the bound red track, a failed sample or an unconverged series. The cost is capped before anything runs at
+   `MAX_SAMPLE_HOURS` (600): a row costs the larger of its samples times the horizon and the hours its series
+   integrates, which counts a burn before the window, plus 9 minutes (`SET_UP_S_PER_SAMPLE`) for each sample's
+   solve_ivp set-up and closest-approach search. Without that term 20,000 samples over 0.028 h counted 560 and ran
+   for 49 s. A row whose floor (samples times horizon and set-up) is already over the cap is refused without drawing
+   its samples, and an over-cap refusal names the longest horizon, in tenths of an hour, that would fit. The largest
+   allowed evaluation measured 6.3 to 9.0 s on one idle thread, from 50 samples over 11.3 h to 3,500 over 0.02 h
+   (the cases are listed in `_cost`). Until SPC-113 the async route calls the evaluation directly, so it blocks the
+   event loop and every session waits with the operator. Sampling converges only in a narrow band under the cap: in
+   the LEO 300 km measurements, 1,000 samples over 0.44 h and more over shorter horizons converged, while every case
+   with the burn in or before a window of 1 h or more (50 to 500 samples) was refused as not converged after the
+   full wait, so the unconverged refusal says to take more samples with a shorter horizon. Our response is not
+   applied to the blue orbit yet, and the 50,000 km normalisation lets the sampled spread move a score by at most
+   w_ca x (P95 - P5) / 50,000, which the page states.
+3. Add `ca_percentiles` / `ca_std_km` to `OutcomeMetrics`. Done in SPC-112, with `ca_samples`, `ca_refusal` and
+   `ca_caveat`; an invariant sets the band exactly when the closest approach is sampled and pins it to P5.
 4. Update `decision_panel.html` with per-row hypothesis accordion
-5. Update `decision_results.html` to show P5/P50/P95 bands in cells
+5. Update `decision_results.html` to show P5/P50/P95 bands in cells. Done minimally in SPC-112: a sampled cell
+   says sampled, prints closest approach to 0.1 km and shows P5 to P95 with the median; a refused cell shows its
+   sentence; the full UI is SPC-115.
 6. Add `hypothesis_*` form fields to `decision_evaluate` route
 7. Gate: tests/unit/test_decision_reference_cases.py passes with this phase's path added to PATHS, at both window starts (SPC-102).
+   Passed by SPC-110's `monte_carlo_nominal`: `run_separation_series` in `spectre/astro/monte_carlo.py` gives each
+   sample's closest approach to the blue track through the shared helper, with P5, P50 and P95 of the misses and the
+   engine's convergence check. Blue is propagated with the same RK45, J2 and drag model as red, from its SGP4 state at
+   the window start; with blue on SGP4 the GEO case missed its TCA by 1,951 s against a 60 s tolerance. Every arc stops
+   at `REENTRY_FLOOR_KM` (100 km): a sample that crosses it is counted failed and re-entered, never given a miss from
+   inside the Earth. A series costs what it integrates, not its window: `separation_integration_s` counts each
+   sample's look-back from its burn, so SPC-112's cap counts integrated hours as well as samples times the horizon.
+   SPC-112 scores a bound row with a hypothesis from the series (step 2 above).
 
 ---
 

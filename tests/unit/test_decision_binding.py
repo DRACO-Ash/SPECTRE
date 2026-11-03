@@ -1,11 +1,12 @@
-"""A scenario may be bound to the real objects it is about, and no figure reads it yet (SPC-100).
+"""A scenario may be bound to the real objects it is about; only a row with a hypothesis reads it (SPC-100).
 
 The Decision Engine's figures are lookups. Binding a scenario to a held red
 track and blue asset records which objects it is about, carries their element
-sets into the result's provenance and shows how old they are, but changes no
-figure until a later phase computes from the orbits (SPC-110, SPC-120). These
-tests pin both halves: the binding is carried and checked, and the lookup
-path never reads it.
+sets into the result's provenance and shows how old they are. On its own it
+changes no figure: only a row whose adversary action carries a hypothesis
+reads it, to sample that row's closest approach (SPC-112). These tests pin
+both halves: the binding is carried and checked, and the lookup path never
+reads it.
 """
 
 from __future__ import annotations
@@ -102,8 +103,8 @@ def _four_by_four(binding: ScenarioBinding | None = None) -> Scenario:
     )
 
 
-class TestNoFigureReadsTheBinding:
-    def test_no_figure_or_selector_reads_the_binding(self) -> None:
+class TestTheLookupPathNeverReadsTheBinding:
+    def test_the_lookup_path_never_reads_the_binding(self) -> None:
         scenario = _four_by_four()
         scenario.binding = _Tripwire()  # type: ignore[assignment]
         matrix = [
@@ -125,7 +126,7 @@ class TestNoFigureReadsTheBinding:
         with pytest.raises(AssertionError):
             _ = _Tripwire() == None  # noqa: E711 - the comparison is what must trip
 
-    def test_binding_changes_no_figure(self) -> None:
+    def test_binding_without_a_hypothesis_changes_no_figure(self) -> None:
         """A regression pin: bound and unbound agree on every figure, mark and choice."""
         for strategy in SelectorStrategy:
             bound = evaluate_scenario(_four_by_four(_binding()), strategy)
@@ -226,9 +227,12 @@ class TestSides:
 
 
 class TestWhatTheBindingSays:
-    def test_the_note_says_no_figure_is_computed_from_the_orbits(self) -> None:
-        assert "changes no figure yet" in BINDING_NOTE
-        assert "not computed from these orbits" in BINDING_NOTE
+    def test_the_note_says_only_a_row_with_a_hypothesis_is_sampled_from_the_orbits(self) -> None:
+        """SPC-112: the note no longer says no figure is computed from the orbits; one row's can be sampled."""
+        assert "changes no figure yet" not in BINDING_NOTE
+        assert "changes no figure unless an adversary action carries a hypothesis and both sides are bound" in BINDING_NOTE
+        assert "closest approach of that row and its time are sampled from these orbits" in BINDING_NOTE
+        assert "every other figure is still a lookup" in BINDING_NOTE
         assert "km (lookup)" not in BINDING_NOTE and "custody (lookup)" not in BINDING_NOTE
         assert ScenarioBinding(red=_elset()).note is BINDING_NOTE
 

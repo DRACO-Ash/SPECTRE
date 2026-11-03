@@ -1,13 +1,14 @@
-"""An adversary action may carry a manoeuvre hypothesis, and no figure reads it yet (SPC-111).
+"""An adversary action may carry a manoeuvre hypothesis; only a bound row samples from it (SPC-111).
 
 The hypothesis says how the adversary might move: an archetype from the
 Monte Carlo table, a delta-V and direction the operator entered, or a
 manoeuvre detected in the object's element-set history. It travels with the
 direction's basis and the archetype's name, so a reader can always tell how
-it was made (audit F-104). It is checked when it is built, recorded in the
-result's provenance and in the scenario's recorded value, and changes no
-figure until a later phase samples from it (SPC-112). These tests pin each
-half: the hypothesis is carried and checked, and the lookup path never reads it.
+it was made (audit F-104). It is checked when it is built and recorded in the
+result's provenance and in the scenario's recorded value. On its own it
+changes no figure: only in a scenario bound on both sides is its row's
+closest approach sampled from it (SPC-112). These tests pin each half: the
+hypothesis is carried and checked, and the lookup path never reads it.
 """
 
 from __future__ import annotations
@@ -38,8 +39,10 @@ from spectre.domain.decision import (
     compute_outcome_metrics,
     evaluate_scenario,
     find_robust_response,
+    plan_sampling,
 )
 from spectre.domain.provenance import value_input
+from tests.unit.test_decision_binding import _binding
 from tests.unit.test_pol_status_ladder import _make_record, _manoeuvre
 
 _NOW = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
@@ -70,6 +73,10 @@ class _Tripwire:
 
     def __iter__(self) -> NoReturn:
         raise AssertionError("the lookup path iterated the hypothesis")
+
+
+def _never(*_: Any) -> NoReturn:
+    raise AssertionError("the sampler ran")
 
 
 def _raw(**overrides: Any) -> ManoeuvreHypothesis:
@@ -110,8 +117,8 @@ def _four_by_four(hypotheses: bool | Sequence[bool] = False) -> Scenario:
     )
 
 
-class TestNoFigureReadsTheHypothesis:
-    def test_no_figure_or_selector_reads_the_hypothesis(self) -> None:
+class TestTheLookupPathNeverReadsTheHypothesis:
+    def test_the_lookup_path_never_reads_the_hypothesis(self) -> None:
         scenario = _four_by_four(hypotheses=True)
         for adversary in scenario.adversary_actions:
             adversary.hypothesis = _Tripwire()  # type: ignore[assignment]
@@ -135,7 +142,21 @@ class TestNoFigureReadsTheHypothesis:
         with pytest.raises(AssertionError):
             _ = _Tripwire() == None  # noqa: E711 - the comparison is what must trip
 
-    def test_a_hypothesis_changes_no_figure(self) -> None:
+    def test_the_lookup_path_never_reads_the_hypothesis_of_a_bound_scenario(self) -> None:
+        """D19's mirror: binding the scenario does not make the lookup path read a hypothesis; sampling does."""
+        scenario = _four_by_four(hypotheses=True)
+        scenario.binding = _binding()
+        for adversary in scenario.adversary_actions:
+            adversary.hypothesis = _Tripwire()  # type: ignore[assignment]
+        matrix = [
+            [compute_outcome_metrics(a, f, scenario) for f in scenario.friendly_responses]
+            for a in scenario.adversary_actions
+        ]
+        assert all(find_robust_response(scenario, matrix, s) in scenario.friendly_responses for s in SelectorStrategy)
+        with pytest.raises(AssertionError, match="the lookup path read hypothesis.hypothesis"):
+            plan_sampling(scenario, _never)
+
+    def test_a_hypothesis_without_a_binding_changes_no_figure(self) -> None:
         """A regression pin: with and without agree on every figure, mark and choice.
 
         Every mix of rows with and without a hypothesis is run, not only all or
@@ -227,8 +248,11 @@ class TestEachSourceSaysHowItWasMade:
         with pytest.raises(ValueError, match="'loiter' is not a known manoeuvre archetype"):
             AdversaryHypothesis.from_detection(_make_record(), _manoeuvre(0.013), archetype="loiter")
 
-    def test_the_carrier_says_it_changes_no_figure(self) -> None:
-        assert "changes no figure yet" in HYPOTHESIS_NOTE
+    def test_the_carrier_says_it_changes_no_figure_unless_both_sides_are_bound(self) -> None:
+        assert "changes no figure yet" not in HYPOTHESIS_NOTE
+        assert "changes no figure unless both sides are bound" in HYPOTHESIS_NOTE
+        assert "closest approach of its row and its time are sampled from it" in HYPOTHESIS_NOTE
+        assert "every other figure is still a lookup" in HYPOTHESIS_NOTE
         assert AdversaryHypothesis.from_archetype("phasing", _AT).note is HYPOTHESIS_NOTE
 
 
@@ -440,11 +464,14 @@ class TestTheHypothesisIsRecorded:
 
 
 class TestTheModelIsDescribed:
-    def test_the_module_describes_the_hypothesis_as_changing_no_figure(self) -> None:
+    def test_the_module_describes_the_hypothesis_as_sampled_only_when_bound(self) -> None:
         module = " ".join((decision.__doc__ or "").split())
         assert "future sprint" not in module
         assert "manoeuvre hypothesis" in module
-        assert "changes no figure" in module.split("manoeuvre hypothesis", 1)[1]
+        after = module.split("manoeuvre hypothesis", 1)[1]
+        assert "on its own changes no figure" in after
+        assert "until a later phase samples from it" not in after
+        assert "closest approach is sampled" in after
 
     def test_the_domain_does_not_import_the_web_layer(self) -> None:
         assert "spectre.web" not in inspect.getsource(decision)

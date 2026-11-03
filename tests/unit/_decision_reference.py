@@ -32,6 +32,24 @@ scipy 1.17.1; J2 is RK45 from the SGP4 state at epoch, rtol 1e-8):
   4,279.5 s in two-body and 4,282 s at 10.582 km under SGP4 (a 0.129 km
   gap), lies outside the 1 h horizon on purpose.
 
+SPC-110's monte_carlo_nominal path (one undispersed sample, no burn) puts
+both objects on the Monte Carlo engine's RK45 with J2 and drag from their
+SGP4 states at the window start, at window starts 0 s and 600 s:
+
+* coplanar_leo: 10.0057 and 10.0060 km at 14,484.12 and 14,483.80 s
+  (+0.006 km, -4.0 and -4.3 s, against 0.10 km and 15 s).
+* geo_drift_in: 30.0001 km at 112,015.23 and 112,015.25 s (+0.0001 km,
+  -15.9 s, against 0.10 km and 60 s).
+* plane_change: 10.4036 and 10.4037 km at 1,410.93 s (-0.049 km, +0.93 s,
+  against 0.15 km and 5 s).
+
+With blue left on SGP4 and only red on RK45, the same path misses the GEO
+TCA: 30.0438 km at 110,079.65 s and 30.0448 km at 110,090.19 s (-1,951 and
+-1,941 s against 60 s), because the two models' along-track drift differs
+over 31 h. The LEO cases still pass that way (coplanar_leo -0.043 km, -5.3
+and -1.7 s; plane_change -0.030 and -0.042 km, +0.93 s), which is why blue
+must be propagated with the same physics as red.
+
 Re-measure every gap on any sgp4 upgrade, and on any change to a case's
 horizon or phases.
 """

@@ -7,8 +7,10 @@ checked here by an independent RK4 two-body integration
 case within its tolerances, from a window starting at the element-set epoch
 and from one starting ORIGIN_OFFSET_S later.
 
-Today PATHS holds the SPECTRE SGP4 path through the closest-approach helper.
-SPC-110 adds "monte_carlo_nominal" and SPC-120 adds "decision_phase3"; each
+PATHS holds the SPECTRE SGP4 path through the closest-approach helper and
+SPC-110's "monte_carlo_nominal": the Monte Carlo separation series with one
+undispersed sample and no burn, red and blue both on its RK45 model from
+their SGP4 states at the window start. SPC-120 adds "decision_phase3"; each
 item is done only when its own path passes every case at both window starts.
 
 A path with both objects in the same wrong frame passes, because separation
@@ -29,6 +31,7 @@ import numpy as np
 import pytest
 
 from spectre.astro.closest_approach import ClosestApproach, closest_approach
+from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow, elset_state, run_separation_series
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
 from tests.unit import _decision_reference as reference
 from tests.unit._decision_reference import (
@@ -71,8 +74,32 @@ def _sgp4_separation(case: ReferenceCase, start_s: float) -> Callable[[float], f
     return separation
 
 
+def _monte_carlo_nominal(case: ReferenceCase, start_s: float) -> ClosestApproach:
+    """The separation series' one nominal sample: no burn, no spread, negligible drag (B* 0, floored), at the window start."""
+    start = EPOCH + timedelta(seconds=start_s)
+    blue, red = elset_state(case.blue_tle, start), elset_state(case.red_tle, start)
+    assert blue is not None and red is not None
+    hypothesis = ManoeuvreHypothesis(
+        epoch_utc=start,
+        delta_v_magnitude_km_s=0.0,
+        delta_v_radial=0.0, delta_v_in_track=0.0, delta_v_cross_track=0.0,
+        pre_manoeuvre_state_eci_km=red.state_eci_km,
+        delta_v_magnitude_1sigma_km_s=0.0,
+        delta_v_pointing_1sigma_deg=0.0,
+        epoch_1sigma_seconds=0.0,
+        bstar_post=0.0,
+        bstar_1sigma=0.0,
+        n_samples=1,
+    )
+    window = SeparationWindow(start_utc=start, span_s=case.horizon_s - start_s, step_s=case.step_s)
+    series = run_separation_series(hypothesis, blue, window)
+    assert series.n_failed == 0
+    return series.approaches[0]
+
+
 PATHS: dict[str, ApproachPath] = {
     "sgp4": lambda c, s0: closest_approach(_sgp4_separation(c, s0), c.horizon_s - s0, step_s=c.step_s),
+    "monte_carlo_nominal": _monte_carlo_nominal,
 }
 
 _CLOSED_FORMS: dict[str, Callable[[Circular, Circular], tuple[float, float]]] = {
