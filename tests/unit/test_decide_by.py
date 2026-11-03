@@ -148,9 +148,14 @@ class TestTheResponseTimeField:
 
 
 class TestTheSweepWithholdsIt:
-    """The route's rule: no decide-by for an object assessed unable to fly the intercept."""
+    """The route's rule (SPC-167): capability MINIMAL alone no longer silences the clock.
 
-    def test_capability_minimal_withholds_it(self) -> None:
+    Only an earned MINIMAL Threat ceiling withholds it, which
+    test_threat_understanding_sweep pins; a legacy MINIMAL with no Threat
+    Understanding behind it keeps decide-by and says why.
+    """
+
+    def test_capability_minimal_alone_keeps_it(self) -> None:
         from spectre.domain.custody import Custody, CustodyStatus
         from spectre.web.routes import threat
 
@@ -158,6 +163,11 @@ class TestTheSweepWithholdsIt:
         state = SimpleNamespace(response_time_h=None, response_time_by_target={})
         held = CustodyStatus(Custody.HELD, "Custody held.")
         entries = [_entry("BLUE-1", 0.0, 23.0)]
-        result = threat._sweep_decide_by(state, entries, held, {"capability_level": "MINIMAL"}, basis)  # type: ignore[arg-type]
-        assert result.sentence == "No decide-by: the interceptor is assessed unable to fly the intercept (capability MINIMAL)."
-        assert threat._sweep_decide_by(state, entries, held, {"capability_level": "HIGH"}, basis).due is Due.SET  # type: ignore[arg-type]
+        minimal = {"capability_level": "MINIMAL", "incapacity": "the recorded status 'Degraded', declared, not observed"}
+        result = threat._sweep_decide_by(state, entries, held, (minimal, None), basis)  # type: ignore[arg-type]
+        assert result.due is Due.SET
+        assert result.sentence.endswith(
+            "Capability reads MINIMAL on the recorded status 'Degraded', declared, not observed, but the evidence "
+            "behind it could not be assessed, so decide-by stands.")
+        high = threat._sweep_decide_by(state, entries, held, ({"capability_level": "HIGH"}, None), basis)  # type: ignore[arg-type]
+        assert high.due is Due.SET and "Capability reads" not in high.sentence

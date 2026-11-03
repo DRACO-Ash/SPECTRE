@@ -37,6 +37,7 @@ from spectre.astro.maneuvers import (
 from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain import threat_understanding as tu
 from spectre.domain.custody import Custody, CustodyStatus, age_text
 from spectre.domain.decide_by import (
     DecideBy,
@@ -60,9 +61,11 @@ from spectre.domain.models import (
 )
 from spectre.domain.normality import BurnNormality
 from spectre.domain.pol_assessment import PolAssessment
+from spectre.domain.provenance import ledger_input
 from spectre.domain.threat_assessment import (
     AccessEvidence,
     ActorVerdict,
+    Band,
     CapabilityEvidence,
     ConfidenceContext,
     arrives_at_target,
@@ -93,6 +96,7 @@ from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.routes.gcat import catalogue_entry
 from spectre.web.routes.pol import (
     HeldHistory,
     burn_verdicts,
@@ -831,6 +835,7 @@ def _red_capability(
     record = get_intel(red_satno) if red_satno else None
     base = CapabilityEvidence(
         intel_threat_level=record.get("threat_level"),
+        intel_record_dated=tu.record_date(record) is not None,
         operational_status=record.get("status"),
     ) if record else CapabilityEvidence()
     if history is None:
@@ -950,6 +955,8 @@ def _compute_worst_coa(
         # beside it.
         "access_level": assessment.access_label,
         "capability_level": assessment.capability_label,
+        # What set capability MINIMAL, a declared status or a computed tank (SPC-167).
+        "incapacity": assessment.incapacity,
         "assessment_confidence": assessment.confidence,
         "confidence_basis": assessment.confidence_basis,
         "assessment_rationale": assessment.rationale,
@@ -1595,6 +1602,130 @@ def _red_capability_from(red_satno: str | None, history: _RedHistory) -> Capabil
     return _red_capability(red_satno, history.assessment, history.pol.span_days if history.pol else None)
 
 
+def _red_evidence(
+    red_satno: str | None, history: _RedHistory, custody: CustodyStatus, access_dv_m_s: float,
+) -> tuple[tuple[tu.EvidenceItem, ...], tu.HistorySignals | None]:
+    """What the sweep holds about the red object, as Threat Understanding evidence (SPC-165).
+
+    Its intel record, its GCAT entry if the catalogue is already cached, and
+    its element-set history if one arrived, with the history read once. No
+    new fetch is made for any of them. *access_dv_m_s* is what the worst
+    case costs, against which "no burns" is judged.
+    """
+    if not red_satno:
+        return (), None
+    signals = (tu.history_signals(history.pol, history.assessment)
+               if history.pol is not None and history.assessment is not None else None)
+    entry = catalogue_entry(red_satno)
+    items = [
+        *tu.intel_items(get_intel(red_satno), red_satno),
+        *(tu.gcat_items(entry[0], entry[1], red_satno) if entry is not None else ()),
+        *(tu.history_items(signals, access_delta_v_m_s=access_dv_m_s, custody=custody.state)
+          if signals is not None else ()),
+    ]
+    return tuple(items), signals
+
+
+class _Red(NamedTuple):
+    """The red object as the sweep holds it once its history has settled."""
+
+    satno: str | None
+    tle: str
+    regime: str
+    history: _RedHistory
+    custody: CustodyStatus
+    context: ConfidenceContext
+
+
+def _red_understanding(red: _Red, worst_coa: dict[str, Any] | None, now: datetime) -> tu.ThreatUnderstanding | None:
+    """The Threat Understanding behind the worst case: the range the evidence earns and how well founded it is.
+
+    ACCESS and the legacy verdict are the worst case's own, so the model sits
+    beside the verdict the operator already reads. It moves nothing but
+    decide-by (SPC-167): the verdict switch is SPC-175. A failure is logged
+    and reads as no understanding, so the sweep stands and decide-by is
+    shown, the safer of its two answers; the detail never reaches the page.
+    """
+    if worst_coa is None:
+        return None
+    try:
+        return _assess_red(red, worst_coa, now)
+    # BLE001: the shadow model must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Threat Understanding failed for %s: %s", log_safe(red.satno), log_safe(exc))
+        return None
+
+
+def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.ThreatUnderstanding:
+    """The model over what the sweep holds about *red*, against the worst case's ACCESS."""
+    items, signals = _red_evidence(red.satno, red.history, red.custody, float(worst_coa["dv"]))
+    age = elset_age(red.tle, now)
+    assessed = worst_coa["capability_level"] != "UNASSESSED"
+    situation = tu.Situation(
+        now=now, access=Band[worst_coa["access_level"]],
+        legacy=Band[worst_coa["threat_level"]] if assessed else None,
+        custody=red.custody.state, history_truncated=False, regime=red.regime,
+        elset_limit_hours=age.limit_hours if age is not None else limit_hours_for_regime(red.regime),
+        data_mode=red.context.data_mode, manual_confidence=red.context.manual_confidence,
+    )
+    return tu.assess(items, tu.with_history(situation, signals))
+
+
+#: The understanding strip's four cells, in the operator's words: Behaviour is how it manoeuvres.
+_STRIP_NAMES: dict[tu.Dimension, str] = {
+    tu.Dimension.IDENTITY: "Identity", tu.Dimension.CAPABILITY: "Capability",
+    tu.Dimension.BEHAVIOUR: "Manoeuvres", tu.Dimension.INTERACTIONS: "Interactions",
+}
+_STRIP_FILL: dict[tu.Depth, str] = {tu.Depth.EARNED: "full", tu.Depth.PARTIAL: "half", tu.Depth.NONE: "empty"}
+_LEDGER_LABEL = "threat understanding ledger"
+
+
+def _age(row: tu.LedgerRow) -> str:
+    return "undated" if row.age_days is None else age_text(row.age_days * 24.0)
+
+
+def _ledger_view(row: tu.LedgerRow) -> dict[str, str]:
+    """One row of "What it rests on", every figure as the operator reads it.
+
+    The note says what the item is ("declared, not observed") before what
+    became of it, so a declaration never reads as an observation.
+    """
+    return {
+        "dimension": _STRIP_NAMES[row.item.dimension], "claim": row.item.label,
+        "reading": tu.reading_text(row.item), "grade": row.item.grade, "age": _age(row),
+        "basis": row.item.basis.value, "q": f"{row.q:.2f}", "status": row.status.value,
+        "note": "; ".join(note for note in (row.item.note, row.note) if note),
+    }
+
+
+def _understanding_view(understanding: tu.ThreatUnderstanding) -> dict[str, Any]:
+    """Section 6.4, in shadow: the Threat line, the Understanding line, the strip and the ledger with its hash."""
+    span = understanding.range
+    strip = []
+    for dimension, name in _STRIP_NAMES.items():
+        depth = tu.depth(span.coverage[dimension])
+        held = [f"{r.item.label}: {r.item.grade}, {_age(r)}, {r.item.basis.value}"
+                for r in span.ledger if r.item.dimension is dimension]
+        strip.append({"name": name, "depth": depth.value, "fill": _STRIP_FILL[depth], "detail": "; ".join(held)})
+    return {
+        "threat": tu.threat_sentence(understanding),
+        "band": understanding.verdict.band.name.lower(),
+        "understanding": understanding.understanding.statement,
+        "strip": strip,
+        "ledger": [_ledger_view(r) for r in span.ledger],
+        "ledger_hash": ledger_input(_LEDGER_LABEL, span.ledger).sha256,
+    }
+
+
+def _with_understanding(
+    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None,
+) -> dict[str, Any] | None:
+    """The worst case with the Threat Understanding beside it (SPC-166); every other key is left as it was."""
+    if worst_coa is not None and understanding is not None:
+        worst_coa["understanding"] = _understanding_view(understanding)
+    return worst_coa
+
+
 def _worst_coa_in_context(
     state: object, entries: list[ThreatSweepEntry], evidence: tuple[CapabilityEvidence, ConfidenceContext],
     max_dv_m_s: float, red: tuple[_RedHistory, str],
@@ -2203,23 +2334,53 @@ def _with_band(worst_coa: dict[str, Any] | None, band: dict[str, str]) -> dict[s
     return worst_coa
 
 
+def _why_not_silenced(understanding: tu.ThreatUnderstanding | None) -> str:
+    """The reason in words: no model, a ceiling held back by Understanding LOW, or one never earned."""
+    if understanding is None:
+        return "but the evidence behind it could not be assessed"
+    row = tu.computed_incapacity(understanding)
+    if row is not None and row.applied:
+        return (f"and the evidence has set a MINIMAL Threat ceiling, but only at Understanding "
+                f"{understanding.understanding.level.name}")
+    held_back = f" ({row.note})" if row is not None and row.note else ""
+    deception = "".join(f", and {label} is voided: possible deception"
+                        for label in understanding.range.possible_deception)
+    return f"but that has not earned a MINIMAL Threat ceiling{held_back}{deception}"
+
+
+def _not_silenced(worst_coa: dict[str, Any], understanding: tu.ThreatUnderstanding | None) -> str:
+    """Why a legacy capability MINIMAL leaves decide-by standing, naming the evidence."""
+    return (f"Capability reads MINIMAL on {worst_coa.get('incapacity') or 'the evidence held'}, "
+            f"{_why_not_silenced(understanding)}, so decide-by stands.")
+
+
 def _sweep_decide_by(
-    state: object, entries: list[ThreatSweepEntry], custody: CustodyStatus, worst_coa: dict[str, Any] | None,
-    basis: _SweepBasis,
+    state: object, entries: list[ThreatSweepEntry], custody: CustodyStatus,
+    assessed: tuple[dict[str, Any] | None, tu.ThreatUnderstanding | None], basis: _SweepBasis,
 ) -> DecideBy:
     """Decide-by for this sweep (SPC-008), or why it is withheld.
 
+    *assessed* is the worst case and the Threat Understanding behind it.
     Withheld where custody is lost, because the arrival would rest on an
-    out-of-date orbit, and where the interceptor is assessed unable to fly the
-    intercept, because a deadline for something it cannot do would alarm.
+    out-of-date orbit, and where computed evidence has earned a MINIMAL Threat
+    ceiling at Understanding above LOW, because a deadline for something the
+    object cannot do would alarm. A recorded status alone, the cheapest claim
+    an adversary can make, no longer silences the clock (SPC-167, concept
+    section 7.4); where it would have, the sentence says why it did not.
     """
     if custody.state is Custody.LOST:
         return withheld("custody is lost, so the soonest arrival would rest on an out-of-date orbit")
-    if worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
-        return withheld("the interceptor is assessed unable to fly the intercept (capability MINIMAL)")
+    worst_coa, understanding = assessed
+    earned = tu.earned_incapacity(understanding) if understanding is not None else None
+    if earned is not None and understanding is not None:
+        return withheld(f"the evidence has earned a MINIMAL Threat ceiling, {earned.item.label}, computed from "
+                        f"{earned.item.derived_from}, at Understanding {understanding.understanding.level.name}")
     times = ResponseTimes(sign_in=state.response_time_h,  # type: ignore[attr-defined]
                           by_target=dict(state.response_time_by_target))  # type: ignore[attr-defined]
-    return decide_by(entries, times, basis.now, basis.max_dv_m_s)
+    result = decide_by(entries, times, basis.now, basis.max_dv_m_s)
+    if worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
+        return replace(result, sentence=f"{result.sentence} {_not_silenced(worst_coa, understanding)}")
+    return result
 
 
 def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
@@ -2409,7 +2570,12 @@ async def threat_sweep(
     )
     _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history=history,
                        history_task=history_task, flown=(custody, _flown_epoch(red_tle, now)))
-    decide = _sweep_decide_by(state, entries, custody, worst_coa, basis)
+    # Threat Understanding beside the verdict (SPC-166, shadow); it moves only decide-by (SPC-167).
+    understanding = _red_understanding(
+        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context), worst_coa, now,
+    )
+    decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
+    worst_coa = _with_understanding(worst_coa, understanding)
     worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
     state.last_threat_assessment = assessment

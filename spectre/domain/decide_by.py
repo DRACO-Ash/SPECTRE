@@ -17,7 +17,8 @@ a late one. Tuned, not sourced.
 
 "Credible" here means within the sweep's delta-V budget, the same filter the
 worst case card uses. The caller withholds decide-by where custody is lost or
-the object is assessed unable to fly the intercept, and says which.
+computed evidence has earned a MINIMAL Threat ceiling (SPC-167; a recorded
+status alone never does), and says which.
 
 Pure functions over plain data. No I/O, no framework.
 """
@@ -145,7 +146,7 @@ def decide_by(entries: Iterable[Any], times: ResponseTimes, now: datetime, budge
 
 
 def withheld(reason: str) -> DecideBy:
-    """No decide-by, and why: custody lost, or the object assessed unable to fly it."""
+    """No decide-by, and why: custody lost, or an earned MINIMAL Threat ceiling."""
     return DecideBy(Due.NONE, f"No decide-by: {reason}.")
 
 

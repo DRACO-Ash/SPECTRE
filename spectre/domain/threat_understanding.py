@@ -34,6 +34,13 @@ element set cap it. Orbital geometry never counts towards it. The verdict is
 the legacy reading clamped to the range, or the ceiling when Understanding
 is LOW or the range too wide to call.
 
+The adapters at the end (SPC-165) read what SPECTRE already holds, the
+intel record, the GCAT entry and the element-set history with its Pattern
+of Life reading, and build the items of section 5. The sweep runs the model
+beside the legacy verdict, in shadow (SPC-166), and lets it move one thing
+live: decide-by is withheld only on a computed MINIMAL ceiling the evidence
+has earned (SPC-167), never on a recorded status alone.
+
 Every weight and threshold here is tuned, not sourced, and says so.
 
 Pure functions over plain data. No I/O, no framework.
@@ -41,15 +48,20 @@ Pure functions over plain data. No I/O, no framework.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
-from dataclasses import KW_ONLY, dataclass
-from datetime import datetime, timedelta
+import math
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import KW_ONLY, dataclass, replace
+from datetime import UTC, datetime, timedelta
 from enum import Enum, IntEnum
+from typing import Any
 
 from spectre.domain.custody import Custody, age_text
-from spectre.domain.normality import Normality
+from spectre.domain.manoeuvre_calibration import Posture
+from spectre.domain.normality import Normality, burns_from_views, judge_burn
+from spectre.domain.pol_assessment import STANDARD_GRAVITY_M_S2, anomaly_risk_level
 from spectre.domain.provenance import Basis, weakest
-from spectre.domain.threat_assessment import Band
+from spectre.domain.threat_assessment import PROPELLANT_SPENT_PCT, Band, CapabilityEvidence
 
 __all__ = [
     "ASSESSED_LABEL_EXTRACTION",
@@ -61,12 +73,17 @@ __all__ = [
     "MANUAL_EXTRACTION",
     "MANUFACTURABLE_CAP",
     "PARTIAL",
+    "PROVIDER_GRADES",
+    "RECORD_DATE_FIELD",
     "ROUTINE_CAP",
     "SOURCE_RELIABILITY",
+    "UNATTRIBUTED",
+    "BurnSignal",
     "Depth",
     "Dimension",
     "EvidenceItem",
     "HeldBurn",
+    "HistorySignals",
     "LedgerRow",
     "Situation",
     "Status",
@@ -80,13 +97,23 @@ __all__ = [
     "burn_extraction",
     "coverage",
     "depth",
+    "earned_incapacity",
     "freshness",
+    "gcat_items",
     "half_life_days",
+    "history_items",
+    "history_signals",
+    "intel_items",
     "manual_extraction",
+    "provider_grade",
+    "reading_text",
+    "record_date",
     "reliability",
     "threat_range",
+    "threat_sentence",
     "understand",
     "verdict_for",
+    "with_history",
 ]
 
 _SECONDS_PER_DAY = 86400.0
@@ -1006,3 +1033,465 @@ def assess(items: Iterable[EvidenceItem], situation: Situation) -> ThreatUnderst
     legacy = situation.access if situation.legacy is None else situation.legacy
     return ThreatUnderstanding(range=result, understanding=rating,
                                verdict=verdict_for(legacy, result.floor, result.ceiling, rating.level))
+
+
+# ── Adapters: what SPECTRE holds, as evidence items (SPC-165) ─────────────────
+#
+# Each adapter reads one held signal and builds the items of sections 5.1 to
+# 5.3 of the concept. What an item may claim is refused by EvidenceItem
+# itself, so an adapter cannot build a reading the model forbids.
+
+#: The names the 18 SDS catalogue arrives under (provider keys: upper case,
+#: letters and digits only). Each is a copy of one catalogue, so they are one
+#: source chain and count once (section 2.4 and 5.3).
+_18SDS = "18SDS"
+_18SDS_ALIASES = frozenset({_18SDS, "18SPCS", "18THSPCS", "SPACETRACK", "JSPOC", "CSPOC"})
+#: Provider grades, the Admiralty letter, by provider key. The 18 SDS catalogue
+#: through UDL is B; a provider not listed, commercial or unattributed, reads
+#: C. An own or allied sensor is A once an analyst lists it. The table is data
+#: the owner may move under UK sovereign handling (concept section 9, decision
+#: 5). Tuned, not sourced.
+PROVIDER_GRADES: dict[str, str] = dict.fromkeys(sorted(_18SDS_ALIASES), "B")
+_UNLISTED_PROVIDER_GRADE = "C"
+#: The key an element set with no recorded source is grouped under, as Pattern of Life groups it.
+UNATTRIBUTED = "UNATTRIBUTED"
+#: Grades whose provider is own, allied or the 18 SDS: a controlled source (section 6.1, rigour).
+_CONTROLLED_GRADES = frozenset({"A", "B"})
+# A provider's own fit, not yet confirmed by another: Admiralty 2. A provider that
+# corroborated a burn confirms it: Admiralty 1. Tuned, not sourced.
+_PROVIDER_CREDIBILITY = 2
+_CORROBORATION_CREDIBILITY = 1
+# An open-source intel record is C; 3 when it is undated and names one source,
+# else 2. Tuned, not sourced.
+_INTEL_GRADE = "C"
+_INTEL_CREDIBILITY = 2
+_INTEL_CREDIBILITY_THIN = 3
+#: Separators that mark a record naming more than one source.
+_SOURCE_SEPARATORS = ("/", ";", " and ")
+#: The record field an analyst dates a record with, ISO 8601. None of the 44
+#: bundled records carries one yet.
+RECORD_DATE_FIELD = "assessed_at"
+# A status is declared by the object's operator: D, and 3. Tuned, not sourced.
+_STATUS_GRADE = "D"
+_STATUS_CREDIBILITY = 3
+# GCAT, a curated public catalogue, read directly: B2. Tuned, not sourced.
+_GCAT_GRADE = "B"
+_GCAT_CREDIBILITY = 2
+#: The GCAT fields named in the ledger, and how each is introduced.
+_GCAT_FIELDS: tuple[tuple[str, str], ...] = (("Bus", "bus"), ("LDate", "launched"), ("Owner", "owner"))
+#: A GCAT cell that holds nothing.
+_GCAT_EMPTY = frozenset({"", "-"})
+# "No burns" is coverage only, read at half extraction and capped as a ROUTINE
+# verdict is, because a quiet object and a careful one look the same. It
+# counts only over a held span of at least 30 days. Tuned, not sourced.
+_ABSENCE_EXTRACTION = 0.5
+_ABSENCE_MIN_SPAN_DAYS = 30.0
+# A gap between held element sets longer than this could hide a burn: the
+# long-gap limit Pattern of Life flags a burn with. Tuned, not sourced.
+_ABSENCE_LONG_GAP_DAYS = 10.0
+#: The anomaly index is an uncalibrated heuristic: read as an assumed figure.
+_ANOMALY_EXTRACTION = ASSUMED_FIGURE_EXTRACTION
+# A discretionary reserve below this share of its maximum lowers the ceiling
+# to MEDIUM, the cut threat_assessment grades capability by. Tuned, not sourced.
+_RESERVE_SHARE_FOR_MEDIUM = 0.5
+#: A detection grade the forensic budget never reached is read as LOW.
+_UNASSESSED_DETECTION = "LOW"
+#: A burn too soon to judge is listed as missing (section 5.3): no normality
+#: verdict was extracted, so it carries no weight and earns nothing.
+_UNJUDGED_EXTRACTION = 0.0
+_HOSTILE_FLOOR: dict[Normality, Band] = {Normality.UNPRECEDENTED: Band.HIGH, Normality.UNUSUAL: Band.MEDIUM}
+_AGGRESSIVE_POSTURES = frozenset({Posture.AGGRESSIVE, Posture.BEYOND_PLATFORM})
+_POSTURE_FLOOR: Band = Band.MEDIUM
+_DAY = timedelta(days=1)
+
+
+@dataclass(frozen=True)
+class BurnSignal:
+    """One confirmed burn in a held history, as the adapters read it."""
+
+    epoch: datetime
+    normality: Normality
+    detection: str = _UNASSESSED_DETECTION   # astro/dv_estimation grade
+    source: str = UNATTRIBUTED               # the provider whose fits detected it
+    corroborated_by: tuple[str, ...] = ()    # other providers that reported it
+    long_gap: bool = False
+    posture: Posture | None = None
+
+
+@dataclass(frozen=True)
+class HistorySignals:
+    """What one element-set history says about the object, read once.
+
+    *provider* is the provider most of its sets came from, the chain every
+    figure derived from the whole history counts under. *tank_spent* is
+    whether the tank reads spent on the regime's assumptions, and
+    *burn_after_spent* whether a confirmed burn followed the moment it first
+    did. *long_gap_open* is a gap between held sets long enough to hide a burn.
+    """
+
+    provider: str
+    newest_at: datetime
+    span_days: float
+    burns: tuple[BurnSignal, ...] = ()
+    reserve_remaining_m_s: float | None = None
+    reserve_max_m_s: float | None = None
+    tank_spent: bool = False
+    burn_after_spent: bool = False
+    anomaly_score: float | None = None
+    detection_floor_m_s: float | None = None
+    sees_routine_station_keeping: bool = False
+    long_gap_open: bool = False
+    truncated: bool = False
+
+
+def _provider_lookup_key(provider: str) -> str:
+    return "".join(ch for ch in provider.upper() if ch.isalnum()) or UNATTRIBUTED
+
+
+def provider_grade(provider: str, grades: Mapping[str, str] = PROVIDER_GRADES) -> str:
+    """The Admiralty letter for an element-set provider; one not listed reads C."""
+    return grades.get(_provider_lookup_key(provider), _UNLISTED_PROVIDER_GRADE)
+
+
+def _source_key(source: object) -> str:
+    """A provider as Pattern of Life names it, upper case: how the ledger shows it."""
+    return str(source or "").strip().upper() or UNATTRIBUTED
+
+
+def source_chain(provider: object) -> str:
+    """The source chain a provider's element sets belong to: the group key, with copies of one catalogue as one.
+
+    Spellings of one provider ("LEO LABS", "LeoLabs") are one chain, and
+    every name the 18 SDS catalogue arrives under is that catalogue.
+    """
+    key = _provider_lookup_key(str(provider or ""))
+    return _18SDS if key in _18SDS_ALIASES else key
+
+
+def record_date(record: Mapping[str, Any] | None) -> datetime | None:
+    """The date an analyst gave a record, in UTC, or None when it carries none that can be read."""
+    raw = (record or {}).get(RECORD_DATE_FIELD)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _identity_note(dated: datetime | None, source: str, single: bool, level: str, band: Band | None) -> str:
+    """What the record is, as section 7.3 lists it ("undated, single open source"), and any unread level."""
+    sourced = ("single open source" if single else "") if source else "unsourced"
+    record = ", ".join(word for word in ("" if dated else "undated", sourced) if word)
+    unread = f"its threat level '{level}' is not a recognised band, so it carries no reading" if (
+        level and band is None) else ""
+    return "; ".join(part for part in (record, unread) if part)
+
+
+def _declared_status(record: Mapping[str, Any], satno: str, dated: datetime | None) -> tuple[EvidenceItem, ...]:
+    """The recorded status: the operator's own declaration, an impaired status the model can void."""
+    status = str(record.get("status") or "").strip()
+    if not status:
+        return ()
+    impaired = CapabilityEvidence(operational_status=status).is_impaired()
+    return (EvidenceItem(
+        dimension=Dimension.CAPABILITY, label=f"recorded status {status}", derived_from=f"status:{satno}",
+        source_grade=_STATUS_GRADE, credibility=_STATUS_CREDIBILITY, extraction=ASSESSED_LABEL_EXTRACTION,
+        basis=Basis.LOOKUP, observed_at=dated, manufacturable=True, impaired_status=impaired,
+        ceiling_to=_IMPAIRED_CEILING_FLOOR if impaired else None, note="declared, not observed",
+    ),)
+
+
+def intel_items(record: Mapping[str, Any] | None, satno: str) -> tuple[EvidenceItem, ...]:
+    """The intel record: Identity, a prior, and its recorded status as declared Capability evidence.
+
+    The assessed role raises the floor to MEDIUM, and no higher, only when
+    the record is dated and sourced (section 4.6). The status is the object
+    operator's own declaration: coverage only, unless it says the object
+    cannot manoeuvre, when it is an impaired status the model voids against a
+    newer burn and lets lower the ceiling no further than MEDIUM.
+    """
+    if not record:
+        return ()
+    dated = record_date(record)
+    source = str(record.get("source") or "").strip()
+    single = not any(sep in source for sep in _SOURCE_SEPARATORS)
+    level = str(record.get("threat_level") or "").strip()
+    band = CapabilityEvidence(intel_threat_level=level).recognised_threat_level()
+    role = str(record.get("assessed_threat") or "").strip()
+    prior = band is not None and band >= Band.HIGH and dated is not None and bool(source)
+    identity = EvidenceItem(
+        dimension=Dimension.IDENTITY, label=f"intel record, role {role}" if role else "intel record",
+        derived_from=f"intel-record:{satno}", source_grade=_INTEL_GRADE,
+        credibility=_INTEL_CREDIBILITY_THIN if dated is None and single else _INTEL_CREDIBILITY,
+        extraction=ASSESSED_LABEL_EXTRACTION, basis=Basis.LOOKUP, observed_at=dated,
+        floor_to=_PRIOR_FLOOR_CAP if prior else None, note=_identity_note(dated, source, single, level, band),
+    )
+    return (identity, *_declared_status(record, satno, dated))
+
+
+def gcat_items(fields: Mapping[str, str] | None, fetched_at: datetime | None, satno: str) -> tuple[EvidenceItem, ...]:
+    """The GCAT catalogue entry: Identity coverage only, dated from the cache's refresh."""
+    if fields is None:
+        return ()
+    named = [f"{word} {value}" for key, word in _GCAT_FIELDS
+             if (value := str(fields.get(key) or "").strip()) not in _GCAT_EMPTY]
+    return (EvidenceItem(
+        dimension=Dimension.IDENTITY, label="GCAT entry: " + ", ".join(named) if named else "GCAT entry",
+        derived_from=f"gcat:{satno}", source_grade=_GCAT_GRADE, credibility=_GCAT_CREDIBILITY,
+        extraction=CATALOGUE_FIELD_EXTRACTION, basis=Basis.LOOKUP, observed_at=fetched_at,
+        note="declared fields: recorded, never move a band",
+    ),)
+
+
+def _history_item(signals: HistorySignals, grades: Mapping[str, str], **kw: Any) -> EvidenceItem:
+    """An item derived from the whole history: its provider's chain, dated from the newest set."""
+    grade = provider_grade(signals.provider, grades)
+    args: dict[str, Any] = {
+        "derived_from": f"elset-history:{source_chain(signals.provider)}", "source_grade": grade,
+        "credibility": _PROVIDER_CREDIBILITY, "basis": Basis.COMPUTED, "observed_at": signals.newest_at,
+        "controlled": grade in _CONTROLLED_GRADES,
+    }
+    args.update(kw)
+    return EvidenceItem(**args)
+
+
+def _reserve_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[EvidenceItem, ...]:
+    """Section 5.2: the discretionary reserve. Ceiling MINIMAL when spent with no later burn."""
+    remaining, maximum = signals.reserve_remaining_m_s, signals.reserve_max_m_s
+    if remaining is None or maximum is None:
+        return ()
+    figure = f"reserve {remaining:.0f} of {maximum:.0f} m/s"
+    ceiling: Band | None = None
+    note = "on the regime's assumed specific impulse and propellant fraction"
+    if signals.tank_spent and signals.burn_after_spent:
+        note = "a confirmed burn followed the moment the tank read spent, so the tank model does not hold"
+    elif signals.tank_spent:
+        ceiling, figure = Band.MINIMAL, f"tank spent: {figure}"
+    elif maximum > 0.0 and remaining / maximum < _RESERVE_SHARE_FOR_MEDIUM:
+        ceiling = Band.MEDIUM
+    return (_history_item(signals, grades, dimension=Dimension.CAPABILITY, label=figure,
+                          extraction=ASSUMED_FIGURE_EXTRACTION, ceiling_to=ceiling, note=note),)
+
+
+def _detection(burn: BurnSignal) -> str:
+    return burn.detection if burn.detection in DETECTION_EXTRACTION else _UNASSESSED_DETECTION
+
+
+def _seen_by(burn: BurnSignal, provider: str, credibility: int, grades: Mapping[str, str], **kw: Any) -> EvidenceItem:
+    """The latest burn as one provider reported it. One too soon to judge is listed and weighs nothing."""
+    grade = provider_grade(provider, grades)
+    unjudged = burn.normality is Normality.NOT_ENOUGH_HISTORY
+    args: dict[str, Any] = {
+        "dimension": Dimension.BEHAVIOUR, "label": f"latest burn, {burn.normality.value}",
+        "derived_from": f"elset-history:{source_chain(provider)}", "source_grade": grade, "credibility": credibility,
+        "extraction": _UNJUDGED_EXTRACTION if unjudged else burn_extraction(_detection(burn), long_gap=burn.long_gap),
+        "basis": Basis.COMPUTED, "observed_at": burn.epoch, "floor_to": _HOSTILE_FLOOR.get(burn.normality),
+        "routine": burn.normality is Normality.ROUTINE, "controlled": grade in _CONTROLLED_GRADES,
+        "note": "too little history to judge whether it is normal: listed as missing" if unjudged else "",
+    }
+    args.update(kw)
+    return EvidenceItem(**args)
+
+
+def _burn_items(burn: BurnSignal, grades: Mapping[str, str]) -> tuple[EvidenceItem, ...]:
+    """Section 5.3: the latest burn, once per source chain that reported it, and its posture.
+
+    Each provider in ``corroborated_by`` opens its own group at credibility 1
+    (section 4.5). A copy of the detecting provider's own report does not,
+    and nor does another copy of one catalogue: the 18 SDS catalogue counts
+    once under whichever name it arrives (section 5.3).
+    """
+    own = source_chain(burn.source)
+    named: dict[str, str] = {}
+    for provider in sorted(_source_key(p) for p in burn.corroborated_by):
+        named.setdefault(source_chain(provider), provider)
+    named.pop(own, None)
+    items = [_seen_by(burn, own, _PROVIDER_CREDIBILITY, grades)]
+    items.extend(_seen_by(burn, chain, _CORROBORATION_CREDIBILITY, grades,
+                          label=f"latest burn, {burn.normality.value}, corroborated by {name}")
+                 for chain, name in sorted(named.items()))
+    if burn.posture in _AGGRESSIVE_POSTURES:
+        items.append(_seen_by(burn, own, _PROVIDER_CREDIBILITY, grades, floor_to=_POSTURE_FLOOR, routine=False,
+                              extraction=burn_extraction(_detection(burn), long_gap=burn.long_gap),
+                              label=f"latest burn posture {burn.posture.value.lower()}", note=""))
+    return tuple(items)
+
+
+def _anomaly_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[EvidenceItem, ...]:
+    """The anomaly index: a lookup, its rung a floor capped at MEDIUM because it is uncalibrated."""
+    if signals.anomaly_score is None:
+        return ()
+    rung = min(Band[anomaly_risk_level(signals.anomaly_score)], _PRIOR_FLOOR_CAP)
+    return (_history_item(signals, grades, dimension=Dimension.BEHAVIOUR,
+                          label=f"anomaly index {signals.anomaly_score:.0f}", extraction=_ANOMALY_EXTRACTION,
+                          basis=Basis.LOOKUP, floor_to=rung if rung > Band.MINIMAL else None,
+                          note="an uncalibrated heuristic index"),)
+
+
+def _absence_holds(signals: HistorySignals, access_delta_v_m_s: float, custody: Custody) -> bool:
+    """Section 5.3: custody held, 30 days held, a floor below the intercept's cost, no gap open."""
+    floor = signals.detection_floor_m_s
+    return (custody is Custody.HELD and signals.span_days >= _ABSENCE_MIN_SPAN_DAYS
+            and floor is not None and floor < access_delta_v_m_s and not signals.long_gap_open)
+
+
+def history_items(signals: HistorySignals, *, access_delta_v_m_s: float, custody: Custody,
+                  grades: Mapping[str, str] = PROVIDER_GRADES) -> tuple[EvidenceItem, ...]:
+    """The element-set history: its reserve, its latest burn, its anomaly index or its silence.
+
+    *access_delta_v_m_s* is what the intercept costs: "no burns" counts only
+    when the detection floor could have seen a burn that size.
+    """
+    items = [*_reserve_item(signals, grades), *_anomaly_item(signals, grades)]
+    if signals.burns:
+        items.extend(_burn_items(max(signals.burns, key=lambda b: b.epoch), grades))
+    elif _absence_holds(signals, access_delta_v_m_s, custody):
+        items.append(_history_item(
+            signals, grades, dimension=Dimension.BEHAVIOUR, label=f"no burns in {signals.span_days:.0f} days",
+            extraction=_ABSENCE_EXTRACTION, routine=True, note="an absence: adds coverage and moves no band"))
+    return tuple(items)
+
+
+def with_history(situation: Situation, signals: HistorySignals | None) -> Situation:
+    """*situation* with what the history says: its burns, newest set, detection floor and truncation."""
+    if signals is None:
+        return situation
+    return replace(
+        situation,
+        burns=tuple(HeldBurn(b.epoch, b.normality) for b in signals.burns),
+        newest_elset_at=signals.newest_at,
+        sees_routine_station_keeping=signals.sees_routine_station_keeping,
+        history_truncated=signals.truncated,
+    )
+
+
+def _spent(total_m_s: float, discretionary_m_s: float, propellant: Any) -> bool:
+    """The tank reads spent: the discretionary reserve gone, or the load used to the spent line."""
+    if discretionary_m_s >= propellant.discretionary_max_m_s:
+        return True
+    # The spent line and g0 are threat_assessment's and pol_assessment's own, so the walk cannot drift from them.
+    exhaust = propellant.assumed_isp_s * STANDARD_GRAVITY_M_S2
+    used_pct = (1.0 - math.exp(-total_m_s / exhaust)) / propellant.propellant_fraction * 100.0
+    return bool(used_pct >= PROPELLANT_SPENT_PCT)
+
+
+def _tank(views: list[Any], propellant: Any) -> tuple[bool, bool]:
+    """Whether the tank reads spent, and whether a confirmed burn followed the moment it first did.
+
+    Walks the confirmed burns since any reserve reset, oldest first, as
+    Pattern of Life counts them.
+    """
+    reset = propellant.reserve_reset
+    ordered = sorted(views, key=lambda v: v.manoeuvre.epoch)
+    total = discretionary = 0.0
+    for index, view in enumerate(ordered):
+        if reset is not None and view.manoeuvre.epoch < reset:
+            continue
+        total += view.delta_v_m_s
+        discretionary += 0.0 if view.is_routine else view.delta_v_m_s
+        if _spent(total, discretionary, propellant):
+            return True, index < len(ordered) - 1
+    return False, False
+
+
+def _long_gap_open(pol: Any, epochs: list[datetime]) -> bool:
+    gaps = (later - earlier for earlier, later in zip(epochs, epochs[1:], strict=False))
+    return bool(pol.skipped_long_gap > 0) or any(gap > _ABSENCE_LONG_GAP_DAYS * _DAY for gap in gaps)
+
+
+def _burn_signals(views: list[Any], start: datetime) -> tuple[BurnSignal, ...]:
+    """Each confirmed burn, judged against those before it, oldest first."""
+    burns = burns_from_views(views)
+    signals = [
+        BurnSignal(
+            epoch=burn.epoch, normality=judge_burn(burn, burns, start).verdict,
+            detection=str(view.manoeuvre.confidence), source=source_chain(view.manoeuvre.tle_after.source),
+            corroborated_by=tuple(view.manoeuvre.corroborated_by), long_gap=burn.long_gap,
+            posture=view.posture.posture,
+        )
+        for view, burn in zip(views, burns, strict=True)
+    ]
+    return tuple(sorted(signals, key=lambda b: b.epoch))
+
+
+def history_signals(pol: Any, assessment: Any) -> HistorySignals:
+    """Read a held history (Pattern of Life's ``PolAnalysis``) and its ``PolAssessment`` once."""
+    epochs = sorted(r.epoch for r in pol.records)
+    counts = Counter(source_chain(r.source) for r in pol.records)
+    provider = min(counts, key=lambda key: (-counts[key], key))
+    views = list(assessment.manoeuvres)
+    propellant = assessment.propellant
+    spent, after = _tank(views, propellant)
+    detection = assessment.detection
+    return HistorySignals(
+        provider=provider, newest_at=epochs[-1], span_days=float(pol.span_days),
+        burns=_burn_signals(views, epochs[0]),
+        reserve_remaining_m_s=propellant.discretionary_remaining_m_s,
+        reserve_max_m_s=propellant.discretionary_max_m_s,
+        tank_spent=spent, burn_after_spent=after,
+        anomaly_score=assessment.anomaly.overall if assessment.anomaly is not None else None,
+        detection_floor_m_s=detection.floor_m_s if detection is not None else None,
+        sees_routine_station_keeping=bool(detection is not None and detection.sees_routine_station_keeping),
+        long_gap_open=_long_gap_open(pol, epochs),
+        truncated=pol.history_truncated_at is not None,
+    )
+
+
+# ── Decide-by (SPC-167, live) ─────────────────────────────────────────────────
+
+
+def computed_incapacity(result: ThreatUnderstanding) -> LedgerRow | None:
+    """The computed reading that would set a MINIMAL Threat ceiling, applied or not; an applied one first.
+
+    A recorded status can never be it: an impaired status lowers the ceiling
+    no further than MEDIUM, and it is a lookup besides.
+    """
+    rows = [row for row in result.range.ledger
+            if row.item.ceiling_to is Band.MINIMAL and row.item.basis is Basis.COMPUTED]
+    return next((row for row in rows if row.applied), rows[0] if rows else None)
+
+
+def earned_incapacity(result: ThreatUnderstanding) -> LedgerRow | None:
+    """The computed reading that has set a MINIMAL Threat ceiling, while Understanding is not LOW.
+
+    Section 7.4: decide-by is withheld only on this, or when custody is lost.
+    A spent tank must be computed, earned by independent histories and still
+    in effect; an applied MINIMAL ceiling is the range's ceiling, so the range
+    need not be asked again.
+    """
+    row = computed_incapacity(result)
+    if row is None or not row.applied or result.understanding.level is Understanding.LOW:
+        return None
+    return row
+
+
+# ── Words for the screen (SPC-166) ────────────────────────────────────────────
+#
+# Section 6.4 and I13: every band is labelled "Threat", in sentences of its
+# own; Understanding's statement is built above. No percentage is written.
+
+
+def threat_sentence(result: ThreatUnderstanding) -> str:
+    """The Threat line: the assessed point and how far it could move, or the ceiling when it cannot be called."""
+    span, verdict = result.range, result.verdict
+    if verdict.at_ceiling:
+        if span.ceiling_support == _ACCESS_SUPPORT:
+            return f"Threat: cannot assess beyond access ({span.ceiling.name})."
+        return f"Threat: cannot assess beyond the ceiling the evidence allows ({span.ceiling.name})."
+    parts = [f"Threat: assessed {verdict.assessed.name}."]
+    if span.floor < verdict.assessed:
+        parts.append(f"Threat could be as low as {span.floor.name}.")
+    if span.ceiling > verdict.assessed:
+        parts.append(f"Threat could be as high as {span.ceiling.name}.")
+    return " ".join(parts)
+
+
+def reading_text(item: EvidenceItem) -> str:
+    """What an item would do to the range, labelled Threat: a floor, a ceiling, or coverage only."""
+    if item.floor_to is not None:
+        return f"Threat floor {item.floor_to.name}"
+    if item.ceiling_to is not None:
+        return f"Threat ceiling {item.ceiling_to.name}"
+    return "coverage only"

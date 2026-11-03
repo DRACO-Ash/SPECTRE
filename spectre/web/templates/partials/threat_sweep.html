@@ -170,6 +170,43 @@
        once each, never the geometry, and what held it down. #}
     <div style="font-size:0.68rem; color:var(--text-dim); margin:-0.25rem 0 0.5rem">{{ worst_coa.confidence_basis }}</div>
 
+    {% if worst_coa.understanding is defined %}
+    {# Threat Understanding (SPC-166), in shadow: the range the evidence has
+       earned and how well founded it is, beside the verdict above, which it
+       does not change until the switch is signed off (SPC-175). Threat and
+       Understanding each take a sentence of their own, every band is
+       labelled, no percentage is written, and the ledger is collapsed
+       (concept section 6.4, I13). #}
+    {% set tu = worst_coa.understanding %}
+    <section class="threat-understanding" aria-label="Evidence behind the verdict"
+             style="border-left:3px solid var(--spectre-status-{{ tu.band }}); padding:0.35rem 0.6rem; margin:-0.2rem 0 0.5rem; font-size:0.72rem">
+      <div style="font-size:0.62rem; color:var(--text-muted); letter-spacing:0.05em">EVIDENCE BEHIND THE VERDICT, IN SHADOW</div>
+      <div style="font-weight:600; color:var(--spectre-status-{{ tu.band }})">{{ tu.threat }}</div>
+      <div style="color:var(--text-dim)">{{ tu.understanding }}</div>
+      <div class="tu-strip" style="display:flex; gap:0.3rem; margin:0.3rem 0; flex-wrap:wrap; font-size:0.66rem">
+        {% for cell in tu.strip %}
+        {% set fill = {"full": "var(--surface-raised)", "half": "linear-gradient(90deg, var(--surface-raised) 50%, transparent 50%)"}.get(cell.fill, "transparent") %}
+        <span title="{{ cell.detail or 'nothing held' }}" style="border:1px solid var(--border); border-radius:3px; padding:0.05rem 0.4rem; background:{{ fill }}">{{ cell.name }}: {{ cell.depth }}</span>
+        {% endfor %}
+      </div>
+      <div style="font-size:0.62rem; color:var(--text-dim)">Shown beside the verdict above for comparison. It does not change that verdict.</div>
+      <details class="tu-ledger" style="margin-top:0.25rem">
+        <summary style="cursor:pointer; color:var(--text-muted)">What it rests on ({{ tu.ledger | length }} items)</summary>
+        <table style="width:100%; border-collapse:collapse; font-size:0.66rem; margin-top:0.25rem">
+          <thead>
+            <tr><th scope="col">Dimension</th><th scope="col">Claim</th><th scope="col">Reading</th><th scope="col">Grade</th><th scope="col">Age</th><th scope="col">Basis</th><th scope="col">q</th><th scope="col">Status</th></tr>
+          </thead>
+          <tbody>
+            {% for row in tu.ledger %}
+            <tr><td>{{ row.dimension }}</td><td>{{ row.claim }}</td><td>{{ row.reading }}</td><td>{{ row.grade }}</td><td>{{ row.age }}</td><td>{{ row.basis }}</td><td>{{ row.q }}</td><td>{{ row.status }}{% if row.note %}: {{ row.note }}{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem">Ledger hash {{ tu.ledger_hash[:16] }}</div>
+      </details>
+    </section>
+    {% endif %}
+
     {# What the cost says about how the actor would have to behave.
        A delta-v figure on its own means nothing to an operator: 50 m/s is one
        routine year at GEO and fifty years of it at MEO. The posture reads it

@@ -126,7 +126,8 @@ _IMPAIRED_STATUS_MARKERS: tuple[str, ...] = (
 # the band could then never fire at all. It now reads the fraction of the
 # PROPELLANT LOAD, which is reachable: about 1.57 km/s for a LEO smallsat and
 # 0.85 km/s for a chemical GEO comsat, both inside Table 2's envelopes.
-_PROPELLANT_SPENT_PCT: float = 95.0
+PROPELLANT_SPENT_PCT: float = 95.0
+_PROPELLANT_SPENT_PCT: float = PROPELLANT_SPENT_PCT
 # Propellant remaining at or above this grades capability HIGH; below it, LOW,
 # so a scarce reserve cannot raise an assessed LOW (it graded MEDIUM, audit
 # F-120). Tuned, not sourced.
@@ -334,21 +335,30 @@ class CapabilityEvidence:
         """MINIMAL when something says this object cannot act, else None.
 
         A stated inability to manoeuvre, or a spent tank, dominates every other
-        signal: whatever the geometry permits, this object is not flying it.
+        signal in the legacy verdict: whatever the geometry permits, this
+        object is not flying it. That verdict is unchanged until SPC-175, but
+        it no longer silences decide-by on its own (SPC-167): see
+        :meth:`incapacity_evidence`.
+        """
+        return Band.MINIMAL if self.incapacity_evidence() else None
+
+    def incapacity_evidence(self) -> str:
+        """What says this object cannot act, in words, or "" when nothing does.
+
+        A recorded status is evidence like any other, declared by the
+        object's operator, not observed; a spent tank is computed from the
+        history. The two are told apart because only computed evidence, once
+        earned, may withhold decide-by (concept section 7.4, SPC-167).
         """
         if self.is_impaired():
-            return Band.MINIMAL
-        if (
-            self.propellant_used_pct is not None
-            and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT
-        ):
-            return Band.MINIMAL
-        if (
-            self.discretionary_remaining_m_s is not None
-            and self.discretionary_remaining_m_s <= _DISCRETIONARY_EXHAUSTED_M_S
-        ):
-            return Band.MINIMAL
-        return None
+            return f"the recorded status '{self.operational_status}', declared, not observed"
+        if self.propellant_used_pct is not None and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT:
+            return (f"a spent tank, {self.propellant_used_pct:.0f} per cent of the propellant load used, "
+                    "computed from its history")
+        if (self.discretionary_remaining_m_s is not None
+                and self.discretionary_remaining_m_s <= _DISCRETIONARY_EXHAUSTED_M_S):
+            return "a spent discretionary reserve, computed from its history"
+        return ""
 
     def recognised_threat_level(self) -> Band | None:
         """The assessed threat level as a band, or None when absent or unrecognised.
@@ -445,6 +455,9 @@ class ThreatAssessment:
     confidence_basis: str = ""
     #: Two readings that contradict each other, named; empty when none do.
     confidence_conflict: str = ""
+    #: What set capability MINIMAL, in words, a declared status or a computed
+    #: spent tank; empty when nothing did (SPC-167).
+    incapacity: str = ""
 
     @property
     def verdict_label(self) -> str:
@@ -699,6 +712,7 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence,
         confidence_basis=confidence_basis,
         confidence_conflict=conflict,
         undeliverable_reason=undeliverable_reason,
+        incapacity=capability.incapacity_evidence(),
     )
 
 

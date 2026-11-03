@@ -108,6 +108,17 @@ def value_input(label: str, value: Any) -> InputRef:
     return InputRef(label=label, sha256=_digest(json.dumps(_plain(value), sort_keys=True, default=_json_default)))
 
 
+def ledger_input(label: str, rows: Iterable[Any]) -> InputRef:
+    """An evidence ledger as an input, hashed on its rows in order (Threat Understanding, SPC-166).
+
+    Each row is hashed on its JSON as :func:`value_input` hashes a value, so
+    the same rows give the same hash (I10). The ledger arrives in canonical
+    order, so the order evidence was gathered in cannot change it.
+    """
+    return InputRef(label=label, sha256=_digest(json.dumps([_plain(row) for row in rows], sort_keys=True,
+                                                           default=_json_default)))
+
+
 def provenance(inputs: Iterable[InputRef]) -> Provenance:
     """Provenance for a result computed now from *inputs*."""
     return Provenance(

@@ -720,6 +720,8 @@ Wiring in `web/routes/threat.py`:
 
 7. **What ends a hostile floor (found building SPC-163).** Section 4.4 says any later judged burn. As built, only a later UNUSUAL or UNPRECEDENTED burn ends it, following section 5.3, section 8 ("no downgrade from ROUTINE alone") and I9. The floor's coverage and Understanding still decay, so a stale floor reads as poorly understood. Claude's choice, not a ruling.
 
+8. **A spent tank read from one provider (found building SPC-167).** Section 7.4 withholds decide-by only on an earned COMPUTED MINIMAL ceiling. Section 4.6 applies a reading only in an earned dimension, and one provider's reserve figure is q 0.34 (B2, extraction 0.5), so it cannot earn Capability alone. Contrast B already names a second provider's history as what would lower the ceiling to MINIMAL. The sweep holds one merged history, so on the live sweep today a computed spent tank never withholds decide-by: only custody LOST does, and the decide-by sentence says why the tank did not ("Capability not earned"). Before SPC-167 that one history withheld it. The options are to accept this (more deadlines, the cautious side), to grade a provider A, or to let the sweep read a second provider's cached history (SPC-169). Built as the concept reads and pinned by a test (`TestTheLiveSweepOnOneProvider`). Accepted for 0.17.0 as Claude's choice, not a ruling: showing a deadline that may prove unnecessary is the cautious side, and withholding one asserts an incapacity the evidence has not earned. SPC-169 is how a second provider earns it. The owner may overrule.
+
 ## 10. Build plan
 
 Each item is test-first: write the failing case or invariant, write the code, then run the full unit suite. The first item ships alone in 0.16.
