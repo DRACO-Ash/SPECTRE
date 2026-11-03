@@ -1,1 +1,6 @@
 <span class="badge-ok">Data Mode: {{ udl_data_mode }}</span>
+{#- The per-fetch selects name the session mode in their default option. Only
+    its text is swapped: replacing the select would drop a per-fetch choice. -#}
+{% for dm_side in ("red", "blue") %}
+<option id="{{ dm_side }}-tle-data-mode-session" value="" hx-swap-oob="innerHTML">Session mode ({{ udl_data_mode }})</option>
+{% endfor %}

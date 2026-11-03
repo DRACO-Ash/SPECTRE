@@ -82,6 +82,31 @@ _NOT_CONNECTED_MESSAGE = "Not connected to UDL — use the UDL panel to log in f
 # the upper-case one keeps its three copies to a single literal (python:S1192).
 _UDL_NAME_KEY_UPPER = "OBJECT_NAME"
 
+# A failed UDL call shows the operator one of two fixed sentences and logs the
+# detail. The exception text carries the request URL and query string, and a
+# UDL error body can carry a server stack trace; neither belongs in the browser
+# (CodeQL py/stack-trace-exposure, SPC-019). The sentence still names the call
+# that failed and what to try, so the operator is not left guessing.
+_DETAIL_IN_LOG = "the server log has the detail."
+
+
+def _udl_unreachable(call: str) -> str:
+    """The operator sentence for a UDL *call* that never got an answer."""
+    return f"UDL unreachable during the {call}. Check the network path to UDL and try again; {_DETAIL_IN_LOG}"
+
+
+def _udl_refused(call: str, status: int) -> str:
+    """The operator sentence for a UDL *call* answered with an error *status*.
+
+    A 5xx is UDL's own fault, so it must not send the operator to check
+    access or a request that were both fine.
+    """
+    if status >= 500:
+        advice = "That is a fault on the UDL side; try again later"
+    else:
+        advice = "Check your UDL access and the request, then try again"
+    return f"UDL answered the {call} with HTTP {status}. {advice}; {_DETAIL_IN_LOG}"
+
 
 async def fetch_tle_history_for_satno(
     satno: int,
@@ -138,7 +163,7 @@ async def fetch_tle_history_for_satno(
         resp.raise_for_status()
         data = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("fetch_tle_history_for_satno(%s) failed: %s", satno, exc)
+        logger.warning("fetch_tle_history_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc, limit=500))
         return []
 
     records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
@@ -279,7 +304,7 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
     except Exception as exc:   # noqa: BLE001 - a background task; any failure must reach the status flag
         set_catalog_status("error")
-        logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
+        logger.warning("Background: on-orbit catalog fetch failed: %s", log_safe(exc, limit=500))
 
 
 async def _discover_tle_sources(username: str, password: str, state: SessionState) -> None:
@@ -308,7 +333,7 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
         state.udl_available_sources = sources
         logger.info("UDL TLE sources discovered: %s", log_safe(sources))
     except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the default source list
-        logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
+        logger.warning("_discover_tle_sources failed (non-critical): %s", log_safe(exc, limit=500))
 
 
 # ── UDL session management ─────────────────────────────────────────────────
@@ -345,14 +370,13 @@ async def udl_login(
             )
         if not resp.is_success:
             body = resp.text[:300].strip() or "(empty)"
-            error = f"UDL probe returned HTTP {resp.status_code}: {body}"
             logger.warning(
                 "UDL login probe %d for operator %s: %s",
-                resp.status_code, log_safe(current_user.username), log_safe(body),
+                resp.status_code, log_safe(current_user.username), log_safe(body, limit=500),
             )
             return render(request,
                 "partials/udl_status.html",
-                {"udl_user": None, "error": error},
+                {"udl_user": None, "error": _udl_refused("login check", resp.status_code)},
             )
     # No raise_for_status: every non-success status returned above, so the
     # HTTPStatusError branch it fed could never run (audit F-250).
@@ -362,10 +386,10 @@ async def udl_login(
             {"udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL login probe failed: %s", exc)
+        logger.warning("UDL login probe failed: %s", log_safe(exc, limit=500))
         return render(request,
             "partials/udl_status.html",
-            {"udl_user": None, "error": f"UDL unreachable: {exc}"},
+            {"udl_user": None, "error": _udl_unreachable("login check")},
         )
 
     state.udl_username = username
@@ -411,6 +435,29 @@ async def elset_refresh_status(
 
 
 _VALID_DATA_MODES = {"REAL", "TEST", "EXERCISE", "SIMULATED"}
+
+# A per-request data mode outside the four is refused rather than read as REAL:
+# a mistyped mode must not pull live data into an exercise, or the reverse.
+_UNKNOWN_DATA_MODE_MESSAGE = (
+    "Data mode must be REAL, SIMULATED, EXERCISE or TEST; nothing was fetched. "
+    "Choose one of those, or Session mode."
+)
+
+
+def _request_data_mode(state: SessionState, requested: str) -> str | None:
+    """The data mode one UDL fetch uses: *requested*, or the session's when blank.
+
+    A named mode applies to this request only and never changes the session
+    mode (SPC-030). Returns None for anything outside the four UDL modes, which
+    the caller refuses.
+    """
+    choice = requested.strip().upper()
+    if not choice:
+        return state.udl_data_mode or "REAL"
+    if choice in _VALID_DATA_MODES:
+        return choice
+    logger.info("UDL fetch refused an unknown data mode %r", log_safe(requested))
+    return None
 
 
 @router.post("/data-mode", response_model=None)
@@ -481,15 +528,18 @@ async def udl_logout(
 # ── TLE fetch proxy ────────────────────────────────────────────────────────
 
 
-def _tle_precheck_error(state: SessionState, mode: str) -> str | None:
+def _tle_precheck_error(state: SessionState, mode: str, data_mode: str | None) -> str | None:
     """Return the operator-facing reason a TLE fetch cannot proceed, or None.
 
     Credentials live only in session state, so a missing pair means the
     operator never logged in; epoch mode has nothing to measure an elset
-    against until scenario time is set.
+    against until scenario time is set; a None *data_mode* is one
+    _request_data_mode refused.
     """
     if not state.udl_username or not state.udl_password:
         return _NOT_CONNECTED_MESSAGE
+    if data_mode is None:
+        return _UNKNOWN_DATA_MODE_MESSAGE
     if mode == "epoch" and state.scenario_start is None:
         return "No scenario time set. Configure scenario time in the Scenario Configuration panel first."
     return None
@@ -664,12 +714,49 @@ def _fields_side(request: Request) -> str:
     return _FIELDS_SIDES.get(request.headers.get("HX-Target", ""), "tle")
 
 
+async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[Any, str | None]:
+    """The TLE fetch's UDL request: ``(data, None)``, or ``(None, the sentence to show)``.
+
+    Lifted out of ``fetch_tle`` whole, which sat at the complexity limit of
+    15 (SPC-060). The detail of a failure goes to the log, never the page.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            url, params, timeout = _elset_request_spec(state, satno, mode, dm)
+            resp = await client.get(
+                url,
+                params=params,
+                # Both credentials are non-None once _tle_precheck_error has
+                # passed, but that narrowing happens in the caller's helper, so
+                # mypy cannot see it here.
+                auth=(state.udl_username, state.udl_password),
+                timeout=timeout,
+            )
+        resp.raise_for_status()
+        return resp.json(), None
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:300].strip() or "(empty)"
+        # The remote response body cannot go into the record verbatim
+        # (pythonsecurity:S5145), nor to the operator at all (SPC-019).
+        logger.warning(
+            "UDL returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
+        return None, _udl_refused("TLE fetch", exc.response.status_code)
+    except httpx.TimeoutException:
+        return None, "UDL request timed out."
+    except httpx.RequestError as exc:
+        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return None, _udl_unreachable("TLE fetch")
+
+
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
     mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
     name_override: Annotated[str, Query(description="Pre-populated name (e.g. from HRR watchlist commonName)")] = "",
+    data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
     current_user: User = Depends(require_login),
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
@@ -682,6 +769,9 @@ async def fetch_tle(
       the one whose epoch is closest to (but not after) the scenario start.  Requires
       scenario time to be set first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
+
+    *data_mode* names the UDL data mode for this request alone; blank uses the
+    session mode, and the session mode is never changed by it.
     """
     state = get_session_state(current_user)
 
@@ -689,50 +779,19 @@ async def fetch_tle(
                "tle_age_days": None, "mode": mode, "error": None,
                "fields_side": _fields_side(request)}
 
-    precheck_error = _tle_precheck_error(state, mode)
-    if precheck_error is not None:
+    dm = _request_data_mode(state, data_mode)
+    precheck_error = _tle_precheck_error(state, mode, dm)
+    # dm is None only when precheck_error is set; named here so mypy sees it.
+    if precheck_error is not None or dm is None:
         return render(request,
             _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": precheck_error},
         )
 
     # ── Fetch from UDL ───────────────────────────────────────────────────────
-    try:
-        async with httpx.AsyncClient() as client:
-            dm = state.udl_data_mode or "REAL"
-            url, params, timeout = _elset_request_spec(state, satno, mode, dm)
-            resp = await client.get(
-                url,
-                params=params,
-                # Both credentials are non-None once _tle_precheck_error has
-                # passed, but that narrowing now happens in the helper rather
-                # than in this frame, so mypy cannot see it here.
-                auth=(state.udl_username, state.udl_password),  # type: ignore[arg-type]
-                timeout=timeout,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
-        error = f"UDL returned {exc.response.status_code} for SATNO {satno}: {body}"
-        # The message embeds the remote response body, so it cannot be used as
-        # the record verbatim (pythonsecurity:S5145).
-        logger.warning("%s", log_safe(error))
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": error},
-        )
-    except httpx.TimeoutException:
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": "UDL request timed out."},
-        )
-    except httpx.RequestError as exc:
-        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": f"UDL unreachable: {exc}"},
-        )
+    data, fetch_error = await _get_elsets(state, satno, mode, dm)
+    if fetch_error is not None:
+        return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": fetch_error})
 
     # Normalise: /elset/current may return a single dict or a list
     records = _normalise_elset_records(data)
@@ -796,7 +855,10 @@ async def fetch_tle(
             "tle_epoch_str": tle_epoch_str,
             "tle_age_days": tle_age_days,
             "mode": mode,
-            "elset_mode": str(rec.get("dataMode") or state.udl_data_mode or "REAL").strip().upper(),
+            # The record's own mode, else the one this fetch asked for: the
+            # session mode is the wrong fallback once a request names its own.
+            "elset_mode": str(rec.get("dataMode") or dm).strip().upper(),
+            "data_mode_override": bool(data_mode.strip()),
             "error": None,
             "fields_side": _empty["fields_side"],
         },
@@ -837,6 +899,7 @@ def _newest_state_vector(data: object) -> dict[str, Any] | None:
 async def fetch_statevector(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
+    data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
     current_user: User = Depends(require_login),
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
@@ -844,7 +907,8 @@ async def fetch_statevector(
 
     Returns position (km) and velocity (km s⁻¹) in the J2000 reference frame
     at the newest epoch in the last week (_SV_WINDOW_DAYS). Useful for initialising high-fidelity
-    intercept geometry without propagating a TLE.
+    intercept geometry without propagating a TLE. *data_mode* names the UDL
+    data mode for this request alone; blank uses the session mode.
     """
     state = get_session_state(current_user)
 
@@ -852,13 +916,15 @@ async def fetch_statevector(
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
             {
-    
+
                 "sv": None,
                 "error": _NOT_CONNECTED_MESSAGE,
             },
         )
 
-    dm = state.udl_data_mode or "REAL"
+    dm = _request_data_mode(state, data_mode)
+    if dm is None:
+        return render(request, _STATEVECTOR_FIELDS_TEMPLATE, {"sv": None, "error": _UNKNOWN_DATA_MODE_MESSAGE})
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -886,7 +952,7 @@ async def fetch_statevector(
         logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
-            {"sv": None, "error": f"UDL unreachable: {exc}"},
+            {"sv": None, "error": _udl_unreachable("state vector fetch")},
         )
 
     rec = _newest_state_vector(data)
@@ -915,6 +981,7 @@ async def fetch_statevector(
         "y_dot": rec.get("yvel"),
         "z_dot": rec.get("zvel"),
         "ref_frame": rec["referenceFrame"],
+        "data_mode": str(rec.get("dataMode") or dm).strip().upper(),
     }
 
     state.append_log(
@@ -929,7 +996,7 @@ async def fetch_statevector(
 
     return render(request,
         _STATEVECTOR_FIELDS_TEMPLATE,
-        {"sv": sv, "error": None},
+        {"sv": sv, "error": None, "data_mode_override": bool(data_mode.strip())},
     )
 
 
@@ -995,11 +1062,13 @@ async def fetch_hrr_objects(
                     break
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:200].strip() or "(empty)"
-        return [], [], 0, f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
+        logger.warning("HRR fetch returned HTTP %s: %s", log_safe(exc.response.status_code), log_safe(body, limit=500))
+        return [], [], 0, _udl_refused("HRR fetch", exc.response.status_code)
     except httpx.TimeoutException:
         return [], [], 0, "UDL request timed out."
     except httpx.RequestError as exc:
-        return [], [], 0, f"UDL unreachable: {exc}"
+        logger.warning("HRR fetch failed: %s", log_safe(exc, limit=500))
+        return [], [], 0, _udl_unreachable("HRR fetch")
 
     if not notifications:
         return [], [], 0, f"No HRR notifications found in the last {_HRR_MAX_LOOKBACK_DAYS} days."
@@ -1269,7 +1338,8 @@ def _notso_page_records(resp: Any, page: int) -> tuple[list[Any] | None, str | N
     try:
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        return None, f"HTTP error on page {page}: {exc}"
+        logger.warning("NOTSO sync page %d failed: %s", page, log_safe(exc, limit=500))
+        return None, f"HTTP error on page {page}: {_udl_refused('NOTSO sync', resp.status_code)}"
     try:
         data = resp.json()
     # BLE001: any undecodable body ends paging with a reason, not a 500.
@@ -1307,15 +1377,16 @@ async def _pull_notso_pages(
                     break
     # BLE001: a failed sync is reported with what it had added so far.
     except Exception as exc:  # noqa: BLE001
-        errors.append(f"Sync failed: {exc}")
-        logger.warning("notso_sync failed: %s", exc)
+        errors.append(f"The NOTSO sync stopped before it finished. Try the sync again; {_DETAIL_IN_LOG}")
+        logger.warning("notso_sync failed: %s", log_safe(exc, limit=500))
     return total_added, page, errors
 
 
 def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
     """The status callout: red when nothing was added and something failed."""
     if errors and total_added == 0:
-        # Escaped: the messages carry exception text and UDL response bodies (F-249).
+        # Escaped, though the messages are fixed sentences now (SPC-019): one
+        # that ever carries a value again must not become markup (F-249).
         error_html = "".join(f'<p style="margin:0.1rem 0">{html.escape(e)}</p>' for e in errors)
         return f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
     warn_html = "".join(

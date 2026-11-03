@@ -205,3 +205,58 @@ class TestRefreshAtConnect:
         with _fetch_returning({50322: (_tle(_NOW), "REAL")}) as fetch:
             await refresh_held_elsets(state, "u", "p")
         fetch.assert_not_called()
+
+
+def _fetch_recording(by_satno: dict[int, tuple[str, str] | None]) -> tuple[Any, list[str]]:
+    """Like _fetch_returning, and also records the data mode each fetch asked UDL for."""
+    asked: list[str] = []
+
+    async def fake(satno: int, *_args: object, data_mode: str = "REAL", **_kwargs: object) -> tuple[str, str] | None:
+        asked.append(data_mode)
+        return by_satno.get(satno)
+
+    return patch("spectre.web.routes.udl.fetch_tle_for_satno", side_effect=fake), asked
+
+
+class TestRefreshKeepsEachSetsOwnMode:
+    """A set fetched in a per-request data mode is refreshed in that mode (SPC-030).
+
+    The refresh asked UDL in the session mode for every held set. An EXERCISE
+    track added while the session ran REAL came back from the next connect as a
+    newer REAL set, relabelled REAL: exercise data quietly became live data.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_exercise_track_is_refreshed_as_exercise_in_a_real_session(self) -> None:
+        track = RedTrack(name="SY-12 02", tle=_tle(_NOW - timedelta(days=3)), data_mode="EXERCISE")
+        state = _state_holding(track)
+        state.udl_data_mode = "REAL"
+        fetch, asked = _fetch_recording({50322: (_tle(_NOW - timedelta(hours=1)), "REAL")})
+        with fetch:
+            await refresh_held_elsets(state, "u", "p")
+        assert asked == ["EXERCISE"], "the refresh asked UDL in the session mode, not the track's own"
+
+    @pytest.mark.asyncio
+    async def test_each_udl_mode_is_asked_for_in_its_own_mode(self) -> None:
+        tracks = [
+            RedTrack(name=f"T{i}", tle=_tle(_NOW - timedelta(days=3), satno=40000 + i), data_mode=mode)
+            for i, mode in enumerate(("TEST", "SIMULATED", "REAL"))
+        ]
+        state = _state_holding(*tracks)
+        state.udl_data_mode = "EXERCISE"
+        fetch, asked = _fetch_recording({})
+        with fetch:
+            await refresh_held_elsets(state, "u", "p")
+        assert sorted(asked) == ["REAL", "SIMULATED", "TEST"]
+
+    @pytest.mark.asyncio
+    async def test_a_synthetic_target_is_refreshed_in_the_session_mode(self) -> None:
+        """The bootstrap set has no UDL mode of its own, so the session's applies."""
+        state = _state_holding()
+        state.udl_data_mode = "EXERCISE"
+        state.hrr_tle_cache = {"39034": _tle(_NOW, satno=39034)}
+        state.hrr_tle_data_mode = {"39034": "SYNTHETIC"}
+        fetch, asked = _fetch_recording({})
+        with fetch:
+            await refresh_held_elsets(state, "u", "p")
+        assert asked == ["EXERCISE"]

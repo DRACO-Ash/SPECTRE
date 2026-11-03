@@ -150,10 +150,13 @@ async def _refresh_one(
     """Fetch the newest set for *item* and keep it if it is newer: 'updated', 'current' or 'failed'."""
     from spectre.web.routes.udl import fetch_tle_for_satno
 
+    # A UDL set is refreshed in its own mode: one fetched as EXERCISE while the
+    # session ran REAL must not come back as live data (SPC-030). Only the
+    # bootstrap set, which has no UDL mode, takes the session's.
+    asked = item.mode if item.mode in UDL_MODES else (state.udl_data_mode or "REAL")
     async with sem:
         got = await fetch_tle_for_satno(
-            item.satno, *credentials,
-            data_mode=state.udl_data_mode or "REAL", source=state.udl_tle_source,
+            item.satno, *credentials, data_mode=asked, source=state.udl_tle_source,
         )
     if got is None:
         return "failed"

@@ -128,6 +128,7 @@
                       <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="red-track-form">
                       Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
                     </label>
+                    {% with dm_side = "red" %}{% include "partials/fetch_data_mode_select.html" %}{% endwith %}
                   </span>
                 </div>
               </div>
@@ -186,6 +187,7 @@
                       <input type="radio" name="mode" value="epoch"{% if not scenario_start %} disabled{% endif %} form="blue-asset-form">
                       Epoch{% if scenario_start %} ({{ scenario_start.strftime('%Y-%m-%d %H:%M') }} UTC){% else %} <em class="hint">(no scenario time)</em>{% endif %}
                     </label>
+                    {% with dm_side = "blue" %}{% include "partials/fetch_data_mode_select.html" %}{% endwith %}
                   </span>
                 </div>
               </div>

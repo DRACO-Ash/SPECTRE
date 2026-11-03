@@ -1,6 +1,12 @@
 {% if name %}
 <p class="field-success">&#10003; TLE loaded: <strong>{{ name }}</strong></p>
 {% endif %}
+{% if name and elset_mode is defined and elset_mode %}
+<p class="field-meta">
+  <span class="{{ 'badge-ok' if elset_mode == 'REAL' else 'badge-warn' }}">Data Mode: {{ elset_mode }}</span>
+  {% if data_mode_override is defined and data_mode_override %}<em class="hint">(this fetch only; session mode unchanged)</em>{% endif %}
+</p>
+{% endif %}
 {% if tle_epoch_str %}
 <p class="field-meta">
   TLE epoch: <strong>{{ tle_epoch_str }}</strong>
