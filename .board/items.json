@@ -264,12 +264,12 @@
  },
  {
   "ref": "SPC-060",
-  "priority": "med",
+  "priority": "low",
   "order": 60,
   "group": "quality",
-  "minutes": 240,
-  "task": "Break up udl.py fetch_tle (cognitive complexity 67) before anyone next edits it",
-  "note": "docs/CODE-QUALITY-GATE.md calls it a landmine: any edit puts it in the Code Quality gate's scope.",
+  "minutes": 90,
+  "task": "Give udl.py fetch_tle headroom: it sits at the complexity limit of 15, so the next branch added puts it over",
+  "note": "Measured 15 on 2026-11-03, not the 67 docs/CODE-QUALITY-GATE.md recorded before 0.5.24. Not over the limit; low urgency. Re-measure after SPC-019 and SPC-030 land, which edit udl.py.",
   "files": [
    "spectre/web/routes/udl.py"
   ]
@@ -283,7 +283,9 @@
   "task": "Reduce complexity in maneuver.py _run_intercept (38) and apply_all_intercepts (27)",
   "files": [
    "spectre/web/routes/maneuver.py"
-  ]
+  ],
+  "state": "closed",
+  "supersededBy": "Already done by e3f207f (release 0.5.24): measured on 2026-11-03, _run_intercept scores 2 and apply_all_intercepts 10, both under 15. The 38 and 27 were seeded from the history table in docs/CODE-QUALITY-GATE.md, not measured."
  },
  {
   "ref": "SPC-070",
