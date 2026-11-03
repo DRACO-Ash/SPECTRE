@@ -1073,3 +1073,12 @@ watch (N818); each was fixed in its own commit. It then passed all five
 legs, with 92 per cent coverage on changed lines. The full suite is green on
 the same tree.
 
+## 0.12.0
+
+Feature work from the backlog: a response time per target, the manoeuvre hypothesis, Alpha-5 catalogue numbers, colour tokens, and the V0.9 review leftovers.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/astro/catalogue.py`, the hypothesis types in `decision.py`, per-target response times in `decide_by.py` and `routes/threat.py`, watch and sign-out fixes in `burn_watch.py` and `planning_state.py`, and template colour tokens | `scripts/check-quality.sh` against 0.11.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. `threat.py` has one bare `Depends` fewer. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

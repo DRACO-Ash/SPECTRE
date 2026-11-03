@@ -525,7 +525,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-112",
@@ -891,7 +895,11 @@
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/web/planning_state.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-023",
@@ -952,7 +960,11 @@
   "files": [
    "spectre/data/intel.py",
    "spectre/web/decision_binding.py"
-  ]
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-027",
@@ -964,7 +976,11 @@
   "note": "Found by the SPC-100 review: no stylesheet under spectre/web/static defines --ops-gold, so every use falls back to the inherited colour. Pick an existing caution token or define it in style.css.",
   "files": [
    "spectre/web/static/style.css"
-  ]
+  ],
+  "state": "built",
+  "est": 30,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-028",
@@ -979,7 +995,11 @@
    "spectre/web/burn_watch.py",
    "spectre/web/planning_state.py",
    "spectre/web/templates/partials/threat_sweep.html"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-032",
@@ -988,9 +1008,12 @@
   "group": "udl",
   "minutes": 240,
   "task": "UDL observation endpoints (EO, radar, RF)",
-  "note": "Split from SPC-031 in 0.11.0: three separate UDL services, each needing its own contract check.",
+  "note": "Split from SPC-031 in 0.11.0: three separate UDL services, each needing its own contract check. Deferred in V0.12 (Claude's call, not a ruling): three more UDL contracts inferred before the first is checked live (SPC-033) would stack unverified assumptions.",
   "files": [
    "spectre/web/routes/udl.py"
+  ],
+  "deps": [
+   "SPC-033"
   ]
  },
  {
@@ -1005,6 +1028,19 @@
   "note": "SPC-031 reads /conjunction with satNo1 and satNo2, and the fields named in spectre/web/udl_conjunction.py's module comment. Metres is assumed when no unit is given. This needs a UDL account and network access the build environment lacks.",
   "files": [
    "spectre/web/udl_conjunction.py"
+  ]
+ },
+ {
+  "ref": "SPC-029",
+  "priority": "low",
+  "order": 29,
+  "group": "hygiene",
+  "minutes": 90,
+  "task": "Define or replace the 13 CSS names used but defined nowhere",
+  "note": "Found building SPC-027 in 0.12.0: tests/unit/test_css_tokens_are_defined.py allowlists 13 undefined var(--name) uses in _KNOWN_UNDEFINED, each with a reason. Each falls back to the inherited colour today. Defining them repaints panels in both themes, so pick per name; the allowlist may only shrink.",
+  "files": [
+   "spectre/web/static/style.css",
+   "tests/unit/test_css_tokens_are_defined.py"
   ]
  }
 ]

@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-03
+
+**Operator outputs: 2 and 3 made more exact, and output 4, the recommended response, gets its manoeuvre hypothesis.** Decide-by now honours a response time per target, a burn the sweep could not show stays watched, and every Decision Engine figure is still a lookup.
+
+### Added
+- A response time per target. Set one for a named target on the sweep form and decide-by uses it; otherwise the sign-in's, otherwise the 12 h default, and the sentence says which: "your response time for BLUE-1 of 6 h". Decide-by is the earliest decide-at across targets, so a later arrival with a longer response time can set it. A time held for a name no swept target has is said to be unused (SPC-022).
+- A manoeuvre hypothesis on an adversary action: from an archetype, an entered delta-V with a RIC direction, or a detected manoeuvre, with its direction basis and archetype carried with it (audit F-104). It is in the result's provenance and changes no figure yet; a test proves no figure or selector reads it (SPC-111).
+- Alpha-5 catalogue numbers are read wherever SPECTRE reads a catalogue number: A0001 is 100001, skipping I and O. An invalid letter stays unreadable, never guessed (SPC-026).
+
+### Fixed
+- A burn the sweep refused to show, because custody was lost or the flown orbit predates it, stays announceable by the burn watch; it used to count as already told (SPC-028).
+- An undated burn is said to have happened between two times, in the watch's alert and log and in the sweep's notes, not at a single time the software has not earned (SPC-028).
+- Signing out blanks the stored UDL credentials, so a watch check in flight cannot use them (SPC-028).
+- 22 uses of the colour token `--ops-gold`, which was defined nowhere, now use the existing `--gold`. A test refuses any colour name defined nowhere; 13 older ones are listed with reasons for SPC-029 (SPC-027).
+
+### Out of scope, named
+- UDL observation endpoints wait on the live check of the conjunction contract (SPC-032 after SPC-033). Removing a held per-target response time: it lasts until sign-out, and the form says so. An Alpha-5 number written only in a NOTSO's free text is not read.
+
 ## [0.11.0] - 2026-11-03
 
 **Operator outputs: no new output; 1 and 2 made safer, and output 4, the recommended response, gets the two foundations the Decision Engine plan puts first.** The burn watch no longer loses a burn it found, the sweep no longer reports targets it never flew, and a scenario can now name the real objects it is about. Every Decision Engine figure is still a lookup.
