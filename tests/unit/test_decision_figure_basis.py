@@ -135,10 +135,13 @@ class TestTheBasesAreTyped:
         qualifies custody (SPC-123); they are not figures."""
         about_closest_approach = {
             "ca_percentiles", "ca_std_km", "ca_samples", "ca_refusal", "ca_caveat", "ca_half_width_km", "ca_computed",
+            "tca_uncertainty", "ca_sampled_tca",   # how closely the TCA is known qualifies its time (SPC-118)
+            "tca_histogram",   # the samples' TCAs, binned no finer than each is known (SPC-124)
         }
         about_the_score = {"score_percentiles", "score_std"}
         about_custody = {"custody_state"}   # the status at the scenario epoch qualifies custody (SPC-123)
-        qualifiers = about_closest_approach | about_the_score | about_custody
+        about_delta_v = {"ca_response", "response_refusal"}   # our sized burn, or why not, qualifies it (SPC-121)
+        qualifiers = about_closest_approach | about_the_score | about_custody | about_delta_v
         assert qualifiers <= {f.name for f in fields(OutcomeMetrics)}
         figures = {f.name for f in fields(OutcomeMetrics)} - {"figure_bases"} - qualifiers
         assert figures == {f.name for f in fields(OutcomeBases)}

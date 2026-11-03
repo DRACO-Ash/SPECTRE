@@ -305,17 +305,22 @@ class TestASampledCell:
             Basis.SAMPLED,
             "P5 of 50 sampled misses, known to within 0.40 km (95 % bootstrap): 1 in 20 samples came closer. "
             "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, "
-            "propagated with the blue asset over the 1 h horizon from the scenario epoch by RK45 with J2 and "
-            "exponential drag; the element sets' own errors are not sampled, and our response is not applied "
-            "to the blue orbit",
+            "propagated with the blue asset over 1.0 h of the 1 h horizon from the scenario epoch, while both element "
+            "sets are within their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not "
+            "sampled, and our response is not applied to the blue orbit",
         )
         assert bases.time_to_closest_hours == FigureBasis(
             Basis.SAMPLED,
-            "earliest time of closest approach among the samples at or below P5, of 50 samples over the 1 h "
+            "earliest time of closest approach among the samples at or below P5, of 50 samples over 1.0 h of the 1 h "
             "horizon from the scenario epoch; RK45 with J2 and exponential drag",
         )
-        for name in ("custody_maintained", "custody_gap_hours", "delta_v_cost_km_s"):
+        for name in ("custody_maintained", "custody_gap_hours"):
             assert getattr(bases, name) == getattr(LOOKUP_BASES, name), name
+        # A manoeuvre response with no target separation keeps the lookup and says how to size it (SPC-121).
+        assert bases.delta_v_cost_km_s == FigureBasis(
+            Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. Enter a target separation to size this burn.",
+        )
+        assert _cells(sampled, 0)[1].figure_bases.delta_v_cost_km_s == LOOKUP_BASES.delta_v_cost_km_s
 
     def test_the_score_basis_stays_lookup(self, sampled: ScenarioResult) -> None:
         """D6."""
@@ -459,8 +464,8 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
     ),
     "blue out of date": (
         lambda _mp: (_scenario({0: _evasive()}, binding=_binding(blue_age=30.0)), _never),
-        "Not sampled: the blue orbit is out of date or its age is unknown, so a miss sampled from it would not be "
-        "earned.",
+        "Not sampled: the blue orbit is out of date, at its limit already or of unknown age, so a miss sampled from "
+        "it would not be earned.",
     ),
     "red element set after the burn": (
         lambda _mp: (_bound({0: _steady(50, at=EPOCH - timedelta(hours=1))}), _never),
@@ -469,8 +474,8 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
     ),
     "red age unknown": (
         lambda _mp: (_scenario({0: _evasive()}, binding=_binding(red_age=None)), _never),
-        "Not sampled: the red orbit is out of date or its age is unknown, so a miss sampled from it would not be "
-        "earned.",
+        "Not sampled: the red orbit is out of date, at its limit already or of unknown age, so a miss sampled from "
+        "it would not be earned.",
     ),
     "no blue state": (
         _without_state(PLANE_CHANGE.blue_tle),

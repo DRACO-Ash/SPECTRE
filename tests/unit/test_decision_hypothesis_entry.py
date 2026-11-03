@@ -20,12 +20,13 @@ from spectre.domain.decision import (
     AdversaryHypothesis,
     PreManoeuvreState,
     Scenario,
+    ScenarioBinding,
     longest_horizon_h,
     needs_a_run,
     pre_manoeuvre_state,
 )
 from tests.unit._decision_reference import EPOCH, PLANE_CHANGE
-from tests.unit.test_decision_sampled import _bound, _steady
+from tests.unit.test_decision_sampled import _elset, _scenario, _steady
 
 _STATE = (7000.0, 0.0, 0.0, 0.0, 7.546, 0.0)
 _NOW = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
@@ -114,12 +115,17 @@ class TestTheLongestHorizon:
     @pytest.mark.parametrize("rows", [1, 2])
     @pytest.mark.parametrize("n", [100, 500, 1000, 2000])
     def test_the_cap_admits_the_horizon_named_and_refuses_a_tenth_more(self, n: int, rows: int) -> None:
-        """Checked against the real cost, not a copy of the formula: a burn at the scenario epoch, as the hint assumes."""
+        """Checked against the real cost, not a copy of the formula: a burn at the scenario epoch, as the hint assumes.
+
+        The search stops where an element set passes its limit (SPC-118), so both are given a limit past every
+        horizon here, and the horizon is the span searched.
+        """
         hours = longest_horizon_h(n, rows=rows)
         assert hours > 0.0
+        binding = ScenarioBinding(red=_elset("red", limit=720.0), blue=_elset("blue", limit=720.0))
 
         def scenario(horizon: float) -> Scenario:
-            return _bound({row: _steady(n) for row in range(rows)}, horizon_hours=horizon)
+            return _scenario({row: _steady(n) for row in range(rows)}, binding=binding, horizon_hours=horizon)
 
         assert needs_a_run(scenario(hours)), f"{hours} h at {n} samples over {rows} rows was refused"
         assert not needs_a_run(scenario(round(hours + 0.1, 1))), f"{hours + 0.1} h at {n} samples was admitted"

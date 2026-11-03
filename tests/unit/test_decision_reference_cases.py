@@ -14,7 +14,11 @@ their SGP4 states at the window start. SPC-120 adds "decision_phase3": the
 Decision Engine itself, evaluating a scenario bound to both element sets with
 one row whose action does not move red, so its closest approach is computed
 by SGP4 on both objects. Each item is done only when its own path passes
-every case at both window starts.
+every case at both window starts. SPC-121 adds "decision_phase3_rk45": the
+same scenario with a manoeuvre response given a target separation, which puts
+every computed cell on RK45 for both objects; its no-action cell must still
+reproduce every case. Adding SPC-121 to GATED_ITEMS needs SPC-102 in its
+.board dependencies, which is the owner's change.
 
 A path with both objects in the same wrong frame passes, because separation
 does not depend on the frame; a path that mixes frames between the two
@@ -36,6 +40,7 @@ import pytest
 from spectre.astro.closest_approach import ClosestApproach, closest_approach
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow, elset_state, run_separation_series
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
+from spectre.astro.response_burn import RESPONSE_PROPAGATOR
 from spectre.domain.decision import (
     ActionType,
     AdversaryAction,
@@ -45,6 +50,7 @@ from spectre.domain.decision import (
     ScenarioBinding,
     evaluate_scenario,
 )
+from spectre.domain.decision_figures import ResponseBurnSpec
 from tests.unit import _decision_reference as reference
 from tests.unit._decision_reference import (
     EPOCH,
@@ -140,10 +146,43 @@ def _decision_phase3(case: ReferenceCase, start_s: float) -> ClosestApproach:
     return cell.ca_computed.approach
 
 
+def _decision_phase3_rk45(case: ReferenceCase, start_s: float) -> ClosestApproach:
+    """The Decision Engine's computed closest approach once a response's burn is sized (SPC-121).
+
+    The decision_phase3 scenario with a manoeuvre response given a 1 km target, which every case already meets,
+    so no burn is flown; but a sized response puts every computed cell on RK45 for both orbits, from their SGP4
+    states at the scenario epoch, and the no-action cell must still reproduce the case.
+    """
+    age_h = start_s / 3600.0
+
+    def bound(side: str, tle: str, satno: int) -> BoundElset:
+        return BoundElset(
+            side=side, name=f"{side} {case.name}", stk_name=f"{side.upper()}_{case.name.upper()}",  # type: ignore[arg-type]
+            satno=satno, tle=tle, data_mode="REAL", epoch=EPOCH, age_hours=age_h,
+            limit_hours=_LIMIT_HOURS[case.name],
+        )
+
+    scenario = Scenario(
+        name=case.title, epoch_utc=EPOCH + timedelta(seconds=start_s),
+        adversary_actions=[AdversaryAction("A0", "No action", ActionType.NO_ACTION, 0.5, 0.5)],
+        friendly_responses=[
+            FriendlyResponse("F0", "Hold", ActionType.NO_ACTION, 0.0, 1.0, 0.0),
+            FriendlyResponse("F1", "Avoid", ActionType.MANOEUVRE, 0.3, 0.8, 0.0, burn=ResponseBurnSpec(target_km=1.0)),
+        ],
+        horizon_hours=(case.horizon_s - start_s) / 3600.0,
+        binding=ScenarioBinding(red=bound("red", case.red_tle, 90002), blue=bound("blue", case.blue_tle, 90001)),
+    )
+    cell = evaluate_scenario(scenario).outcome_matrix[0][0]
+    assert cell.ca_computed is not None, cell.ca_refusal
+    assert cell.ca_computed.propagator == RESPONSE_PROPAGATOR
+    return cell.ca_computed.approach
+
+
 PATHS: dict[str, ApproachPath] = {
     "sgp4": lambda c, s0: closest_approach(_sgp4_separation(c, s0), c.horizon_s - s0, step_s=c.step_s),
     "monte_carlo_nominal": _monte_carlo_nominal,
     "decision_phase3": _decision_phase3,
+    "decision_phase3_rk45": _decision_phase3_rk45,
 }
 
 _CLOSED_FORMS: dict[str, Callable[[Circular, Circular], tuple[float, float]]] = {

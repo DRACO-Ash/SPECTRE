@@ -265,9 +265,11 @@ class TestWhatTheBindingSays:
         assert "a manoeuvre with no hypothesis names no burn and stays a lookup" in BINDING_NOTE
         # Inverted by SPC-123: with a red track bound, custody is computed too, so not every other figure is a lookup.
         assert "Every other figure is still a lookup." not in BINDING_NOTE
+        # Inverted by SPC-121: a manoeuvre response given a target separation has its burn sized.
         assert (
             "With a red track bound, custody is its custody as the sweep judges it at evaluation, carried over the "
-            "horizon. Our delta-V is still a lookup." in BINDING_NOTE
+            "horizon. Our delta-V is computed for a manoeuvre response given a target separation, and otherwise a "
+            "lookup." in BINDING_NOTE
         )
         assert "km (lookup)" not in BINDING_NOTE and "custody (lookup)" not in BINDING_NOTE
         assert ScenarioBinding(red=_elset()).note is BINDING_NOTE

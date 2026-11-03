@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
+from spectre.astro.response_burn import BurnAxis
 from spectre.domain.decision import (
     BINDING_NOTE,
     MAX_SAMPLE_HOURS,
@@ -38,11 +39,13 @@ from spectre.domain.decision import (
     needs_a_run,
     pre_manoeuvre_state,
 )
-from spectre.domain.manoeuvre_calibration import from_km_s
+from spectre.domain.decision_figures import ResponseBurnSpec
+from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
 from spectre.web.decision_binding import bind_scenario
 from spectre.web.decision_custody import red_custody, with_red_custody
 from spectre.web.decision_job import JobState, cancel_job, evaluated_line, job_view, new_job, start_job
+from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import SessionState, get_session_state
@@ -74,6 +77,18 @@ _HYPOTHESIS_NO_RED = (
     "to None."
 )
 _HYPOTHESIS_NO_STATE = "The red element set cannot be propagated to the burn time in row {row}."
+# Our burn per friendly row (SPC-121): a target separation up to this, km, and a budget up to this, m/s.
+_MAX_TARGET_KM = 100_000.0
+_MAX_BUDGET_M_S = 1000.0
+_DEFAULT_BUDGET_M_S = 50.0
+_RESPONSE_RELOAD = "The response fields do not match the friendly rows; reload the panel."
+_AXIS_UNKNOWN = "Choose a listed axis for row {row}."
+_AXIS_LABELS: dict[BurnAxis, str] = {
+    BurnAxis.CHEAPEST: "Cheapest, from the manoeuvre library",
+    BurnAxis.RADIAL: "Radial",
+    BurnAxis.IN_TRACK: "In-track",
+    BurnAxis.CROSS_TRACK: "Cross-track",
+}
 
 
 class _Inputs:
@@ -338,8 +353,9 @@ class _ResponseColumns(NamedTuple):
 
 def _friendly_rows(
     ids: list[str], names: list[str], types: list[str], columns: _ResponseColumns,
+    burns: Sequence[ResponseBurnSpec | None] = (),
 ) -> list[FriendlyResponse]:
-    """Build the friendly responses from the form's parallel arrays."""
+    """Build the friendly responses from the form's parallel arrays, each manoeuvre with its burn or None."""
     return [
         FriendlyResponse(
             id=ids[i],
@@ -348,8 +364,52 @@ def _friendly_rows(
             cost=float(_at(columns.costs, i, 0.5)),
             reversibility=float(_at(columns.reversibilities, i, 0.5)),
             time_to_execute_hours=float(_at(columns.times_h, i, 6.0)),
+            burn=_at(burns, i, None),
         )
         for i in range(len(ids))
+    ]
+
+
+def _burn_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> tuple[list[str], list[str], list[str]] | None:
+    """The three burn columns, or None when the form posts none; columns of another length than the rows are
+    refused. Every row posts all three, blanks included, so they stay aligned with the friendly rows (SPC-121)."""
+    raw = (form.fr_targets, form.fr_budgets, form.fr_axes)
+    if all(column is None for column in raw):
+        return None
+    if any(len(column or []) != rows for column in raw):
+        inputs.refuse(_RESPONSE_RELOAD)
+        return None
+    targets, budgets, axes = (list(column or []) for column in raw)
+    return targets, budgets, axes
+
+
+def _burn_spec(inputs: _Inputs, target: str, budget: str, axis: str, row: int) -> ResponseBurnSpec | None:
+    """One manoeuvre row's burn: None with no target; the budget 50 m/s when blank; the axis from the list."""
+    if not target.strip():
+        return None
+    target_km = inputs.number(target, f"target separation (km) in row {row}", _MAX_TARGET_KM, positive=True)
+    budget_m_s = _DEFAULT_BUDGET_M_S
+    if budget.strip():
+        budget_m_s = inputs.number(budget, f"delta-V budget (m/s) in row {row}", _MAX_BUDGET_M_S, positive=True)
+    try:
+        chosen = BurnAxis(axis.strip())
+    except ValueError:
+        inputs.refuse(_AXIS_UNKNOWN.format(row=row))
+        return None
+    if inputs.problem is not None:
+        return None
+    return ResponseBurnSpec(target_km=target_km, budget_km_s=to_km_s(budget_m_s), axis=chosen)
+
+
+def _burns(inputs: _Inputs, form: _ScenarioForm) -> list[ResponseBurnSpec | None]:
+    """Each friendly row's burn, read only for a manoeuvre row; empty when the form posts no burn fields."""
+    types = form.fr_types or []
+    columns = _burn_columns(form, len(form.fr_ids or []), inputs)
+    if columns is None:
+        return []
+    return [
+        _burn_spec(inputs, target, budget, axis, i + 1) if _action_type(types, i) is ActionType.MANOEUVRE else None
+        for i, (target, budget, axis) in enumerate(zip(*columns, strict=True))
     ]
 
 
@@ -409,6 +469,13 @@ def _hypothesis_context() -> dict[str, object]:
         "max_samples": _MAX_SAMPLES,
         "max_sample_hours": f"{MAX_SAMPLE_HOURS:,.0f}",
         "longest_horizon": f"{longest_horizon_h(_DEFAULT_SAMPLES):.1f}",
+        # Our burns to size count against the cap too (SPC-121).
+        "longest_horizon_one_burn": f"{longest_horizon_h(_DEFAULT_SAMPLES, burns=1):.1f}",
+        "longest_horizon_five_burns": f"{longest_horizon_h(_DEFAULT_SAMPLES, burns=5):.1f}",
+        "burn_axes": [(axis.value, label) for axis, label in _AXIS_LABELS.items()],
+        "default_budget": f"{_DEFAULT_BUDGET_M_S:g}",
+        "max_budget": f"{_MAX_BUDGET_M_S:g}",
+        "max_target": f"{_MAX_TARGET_KM:g}",
     }
 
 
@@ -453,6 +520,10 @@ class _ScenarioForm(BaseModel):
     fr_costs: list[str] | None = Field(default=None, alias="fr_cost")
     fr_revs: list[str] | None = Field(default=None, alias="fr_rev")
     fr_times: list[str] | None = Field(default=None, alias="fr_time")
+    # Our burn per friendly row (SPC-121): every row posts all three, blanks included; only manoeuvre rows are read.
+    fr_targets: list[str] | None = Field(default=None, alias="fr_target")
+    fr_budgets: list[str] | None = Field(default=None, alias="fr_budget")
+    fr_axes: list[str] | None = Field(default=None, alias="fr_axis")
     # Scoring weights
     w_custody: str = "0.35"
     w_ca: str = "0.25"
@@ -483,6 +554,7 @@ class _Parsed(NamedTuple):
     adversary: _AdversaryColumns
     friendly:  _ResponseColumns
     entries:   list[_HypothesisEntry | None]
+    burns:     list[ResponseBurnSpec | None]
 
 
 def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
@@ -502,7 +574,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
         inputs.column(form.fr_times, "time to execute (hours)", _MAX_HORIZON_H),
     )
     entries = _entries(inputs, form, len(adversary.ids), horizon)
-    return _Parsed(horizon, weights, adversary, friendly, entries)
+    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form))
 
 
 @router.post("/evaluate", response_class=HTMLResponse)
@@ -546,7 +618,7 @@ def _scenario(
         epoch_utc=now,
         adversary_actions=_adversary_rows(parsed.adversary, hypotheses),
         friendly_responses=_friendly_rows(
-            form.fr_ids or [], form.fr_names or [], form.fr_types or [], parsed.friendly,
+            form.fr_ids or [], form.fr_names or [], form.fr_types or [], parsed.friendly, parsed.burns,
         ),
         horizon_hours=parsed.horizon,
         w_custody=w_custody_n,
@@ -585,7 +657,7 @@ async def _evaluate_inline(
     except Exception:
         logger.exception("Decision evaluation failed")
         return _err("Evaluation error: the scenario could not be evaluated; the server log has the detail.")
-    return render(request, "partials/decision_results.html", {"result": result})
+    return render(request, "partials/decision_results.html", {"result": result, "links": trajectory_links(result)})
 
 
 @router.get("/job", response_class=HTMLResponse)
@@ -602,7 +674,9 @@ def _job_page(request: Request, view: dict[str, Any]) -> HTMLResponse:
     """The results of a finished job, else the job partial for *view*."""
     job = view["job"]
     if job is not None and job.state is JobState.DONE and job.result is not None:
-        return render(request, "partials/decision_results.html", {"result": job.result})
+        return render(
+            request, "partials/decision_results.html", {"result": job.result, "links": trajectory_links(job.result)},
+        )
     return render(request, "partials/decision_job.html", view)
 
 

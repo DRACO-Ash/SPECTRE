@@ -252,6 +252,10 @@ _RUNNING = (
     "Sampling hypothesis {p.row} of {p.rows}: {p.done:,} of {p.total:,} samples, {p.elapsed_s:.0f} s of the "
     "{budget:g} s budget used. Scenario epoch {epoch:%H:%M} UTC."
 )
+_SIZING = (
+    "Sizing our burn for {label}: trial {p.done} of at most {p.total}, {p.elapsed_s:.0f} s of the {budget:g} s "
+    "budget used. Scenario epoch {epoch:%H:%M} UTC."
+)
 _STOPPED = "Evaluation stopped: {reason}. Nothing was scored; evaluate again to see the figures."
 _FAILED = "The evaluation failed; the server log has the detail. Nothing was scored."
 _DONE = "The evaluation finished."
@@ -264,6 +268,8 @@ def _message(job: DecisionJob) -> str:
     if job.state is JobState.RUNNING:
         if job.progress is None:
             return _STARTING.format(budget=budget, epoch=epoch)
+        if job.progress.stage == "sizing":   # SPC-121: the label is the response's name, escaped where rendered
+            return _SIZING.format(label=job.progress.label, p=job.progress, budget=budget, epoch=epoch)
         return _RUNNING.format(p=job.progress, budget=budget, epoch=epoch)
     return {
         JobState.STOPPED: _STOPPED.format(reason=job.stopped),

@@ -1,8 +1,12 @@
 {# Relative Geometry Visualisation — Hill (CW) frame
-   Context: geom (RelativeGeometry), chart_json (JSON string — server-serialised)
+   Context: geom (RelativeGeometry), chart_json (a server-serialised JSON string), id_prefix and opener_selector
+   (fixed by the route: "" and the intercept result's button, or "decision-" and the Decision Engine cell that opened
+   it, so both panels can be open on the operator page without sharing an id).
    Chart data is injected via a JSON.parse of a server-rendered safe string.
    Autoescape is ON; chart_json is emitted with |tojson filter for HTML-safe embedding. #}
 
+{% set id_prefix = id_prefix | default('') %}
+{% set opener_selector = opener_selector | default("form[hx-target='#intercept-geometry-container'] button[type=submit]") %}
 <style>
   /* The heading takes focus when the panel opens, so the move has to be seen
      as well as announced. :focus rather than :focus-visible, because the focus
@@ -10,11 +14,11 @@
      focus-visible. currentColor is the heading's own --ops-blue, measured at
      4.95:1 on the ops panel background and 4.66:1 on steel, both clear of the
      3:1 floor for a non-text indicator. */
-  #geom-panel-heading:focus { outline: 2px solid currentColor; }
+  #{{ id_prefix }}geom-panel-heading:focus { outline: 2px solid currentColor; }
 </style>
 
-<section id="geom-panel"
-     aria-labelledby="geom-panel-heading"
+<section id="{{ id_prefix }}geom-panel"
+     aria-labelledby="{{ id_prefix }}geom-panel-heading"
      style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;
             padding:0.85rem 1rem; margin-top:0.7rem">
 
@@ -33,7 +37,7 @@
          9.13px wider and pushed the method line beside it from x=487 to x=496.
          This is a panel label and keeps the typeface of the labels either
          side of it. #}
-      <h3 id="geom-panel-heading" tabindex="-1"
+      <h3 id="{{ id_prefix }}geom-panel-heading" tabindex="-1"
           style="display:inline; margin:0; font-family:inherit; line-height:inherit; font-size:0.65rem; font-weight:800; color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.08em; outline-offset:3px">
         Relative Geometry — Hill Frame
       </h3>
@@ -57,11 +61,10 @@
          announces "button" and nothing else. This is also the panel's ONLY
          dismissal route: no scrim, and the panel is destroyed rather than
          hidden, so Escape is added here rather than assumed. #}
-      <button type="button"
-              onclick="spectreCloseGeometryPanel()"
+      <button type="button" class="geom-close btn-secondary"
               aria-label="Close geometry panel"
               title="Close geometry panel"
-              class="btn-secondary" style="font-size:0.65rem; padding:0.15rem 0.5rem">✕</button>
+              style="font-size:0.65rem; padding:0.15rem 0.5rem">✕</button>
     </div>
   </div>
 
@@ -103,10 +106,18 @@
   </div>
   {% endfor %}
 
+  {# ── Opened from a Decision Engine cell (SPC-124): what this view is, beside the cell's figures. Fixed
+       sentences from the route; nothing posted is echoed. Guarded, so the intercept panel renders as before. ── #}
+  {% if decision_notes is defined and decision_notes %}
+  <div role="note" class="decision-view-notes" style="font-size:0.61rem; color:var(--text-dim); margin:0.3rem 0 0.15rem">
+    {% for note in decision_notes %}<p style="margin:0.1rem 0">{{ note }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
   {# ── Chart tabs ── #}
   <div style="display:flex; gap:0.3rem; margin-top:0.5rem; margin-bottom:0.4rem">
     {% for tid, tlabel in [("vr","V-bar / R-bar"), ("hr","H-bar / R-bar"), ("rt","Range vs Time")] %}
-    <button id="gtab-{{ tid }}" data-tab="{{ tid }}" onclick="geomTab(this.dataset.tab)"
+    <button type="button" id="{{ id_prefix }}gtab-{{ tid }}" data-tab="{{ tid }}"
             style="font-size:0.65rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:3px;
                    cursor:pointer; border:1px solid var(--border);
                    background:{% if loop.first %}rgba(59,139,235,0.18){% else %}transparent{% endif %};
@@ -117,14 +128,14 @@
   </div>
 
   {# ── Chart canvases ── #}
-  <div id="gchart-vr" style="position:relative; height:320px">
-    <canvas id="cw-chart-vr"></canvas>
+  <div id="{{ id_prefix }}gchart-vr" style="position:relative; height:320px">
+    <canvas id="{{ id_prefix }}cw-chart-vr"></canvas>
   </div>
-  <div id="gchart-hr" style="position:relative; height:320px; display:none">
-    <canvas id="cw-chart-hr"></canvas>
+  <div id="{{ id_prefix }}gchart-hr" style="position:relative; height:320px; display:none">
+    <canvas id="{{ id_prefix }}cw-chart-hr"></canvas>
   </div>
-  <div id="gchart-rt" style="position:relative; height:320px; display:none">
-    <canvas id="cw-chart-rt"></canvas>
+  <div id="{{ id_prefix }}gchart-rt" style="position:relative; height:320px; display:none">
+    <canvas id="{{ id_prefix }}cw-chart-rt"></canvas>
   </div>
 
   {# ── Legend ── #}
@@ -162,6 +173,8 @@
 
 <script>
 (function () {
+  /* Every id in this panel carries the route's prefix, so a second panel on the page finds only its own nodes. */
+  var IDS = {{ id_prefix | tojson }};
   /* ── Parse server-rendered chart data (safe — no user strings in data) ── */
   var _cwd = JSON.parse({{ chart_json | tojson }});
 
@@ -287,7 +300,7 @@
 
   function _initVR() {
     if (_charts.vr) return;
-    var ctx = document.getElementById('cw-chart-vr');
+    var ctx = document.getElementById(IDS + 'cw-chart-vr');
     if (!ctx) return;
     _charts.vr = new Chart(ctx, {
       type: 'line',
@@ -301,7 +314,7 @@
 
   function _initHR() {
     if (_charts.hr) return;
-    var ctx = document.getElementById('cw-chart-hr');
+    var ctx = document.getElementById(IDS + 'cw-chart-hr');
     if (!ctx) return;
     _charts.hr = new Chart(ctx, {
       type: 'line',
@@ -312,7 +325,7 @@
 
   function _initRT() {
     if (_charts.rt) return;
-    var ctx = document.getElementById('cw-chart-rt');
+    var ctx = document.getElementById(IDS + 'cw-chart-rt');
     if (!ctx) return;
     _charts.rt = new Chart(ctx, {
       type: 'line',
@@ -321,11 +334,11 @@
     });
   }
 
-  /* ── Tab switching ── */
-  window.geomTab = function(id) {
+  /* ── Tab switching: bound to this panel's own buttons, not a global the next panel would replace ── */
+  function geomTab(id) {
     ['vr','hr','rt'].forEach(function(tid) {
-      var panel = document.getElementById('gchart-' + tid);
-      var btn   = document.getElementById('gtab-' + tid);
+      var panel = document.getElementById(IDS + 'gchart-' + tid);
+      var btn   = document.getElementById(IDS + 'gtab-' + tid);
       if (!panel || !btn) return;
       var active = (tid === id);
       panel.style.display = active ? '' : 'none';
@@ -336,7 +349,11 @@
     if (id === 'vr') _initVR();
     if (id === 'hr') { _initHR(); }
     if (id === 'rt') { _initRT(); }
-  };
+  }
+  ['vr','hr','rt'].forEach(function(tid) {
+    var btn = document.getElementById(IDS + 'gtab-' + tid);
+    if (btn) { btn.addEventListener('click', function () { geomTab(tid); }); }
+  });
 
   /* Init first tab immediately */
   _initVR();
@@ -360,16 +377,22 @@
 
    For that scoping to be usable, focus has to be inside the panel to begin
    with, which is the other half of this block: the heading takes focus on
-   open, and the control that opened the panel takes it back on close. */
+   open, and the control that opened the panel takes it back on close.
+
+   Every id carries the route's prefix and nothing is put on window, so the
+   intercept panel and a Decision Engine view open on the same page each find,
+   close and return focus for their own panel only. */
 (function () {
-  var panel = document.getElementById('geom-panel');
+  var IDS = {{ id_prefix | tojson }};
+  var OPENER = {{ opener_selector | tojson }};
+  var panel = document.getElementById(IDS + 'geom-panel');
   if (!panel) { return; }
 
-  /* The one control that can open this panel. Falls back to whatever had
-     focus when the fragment landed, which is that same button on the keyboard
-     path. */
-  var opener = document.querySelector(
-    "form[hx-post='/plan/geometry/intercept'] button[type=submit]");
+  /* The control that opened this panel: the intercept result's button, or
+     the Decision Engine cell whose form was submitted. Falls back to
+     whatever had focus when the fragment landed, which is that same button
+     on the keyboard path. */
+  var opener = document.querySelector(OPENER);
   if (!opener) {
     var active = document.activeElement;
     if (active && active !== document.body && typeof active.focus === 'function') {
@@ -378,7 +401,7 @@
   }
 
   function spectreCloseGeometryPanel() {
-    var p = document.getElementById('geom-panel');
+    var p = document.getElementById(IDS + 'geom-panel');
     if (p) { p.remove(); }
     /* Without this, focus falls to body and the keyboard operator restarts
        from the top of the console at the moment the exit was meant to help. */
@@ -391,9 +414,10 @@
     spectreCloseGeometryPanel();
   });
 
-  window.spectreCloseGeometryPanel = spectreCloseGeometryPanel;
+  var close = panel.querySelector('.geom-close');
+  if (close) { close.addEventListener('click', spectreCloseGeometryPanel); }
 
-  var heading = document.getElementById('geom-panel-heading');
+  var heading = document.getElementById(IDS + 'geom-panel-heading');
   if (heading) { heading.focus(); }
 })();
 </script>

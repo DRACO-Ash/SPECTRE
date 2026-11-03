@@ -20,9 +20,10 @@ from typing import Literal, NamedTuple
 
 import numpy as np
 
+from spectre.astro.along_track import position_error_km
 from spectre.astro.closest_approach import ClosestApproach, closest_approach
 from spectre.astro.monte_carlo import SeparationWindow
-from spectre.astro.propagator import TLE_ERRORS, StateVector, TLEOrbit
+from spectre.astro.propagator import TLE_ERRORS, StateVector, TLEOrbit, regime_from_tle
 
 #: What every computed closest approach propagates with, stated on it.
 ELSET_PROPAGATOR = "SGP4 for both orbits, from their element sets, with no burn"
@@ -37,6 +38,18 @@ class ElsetApproach(NamedTuple):
     closing_speed_km_s: float
     window: SeparationWindow
     propagator: str = ELSET_PROPAGATOR
+
+
+_SECONDS_PER_DAY = 86_400.0
+
+
+def elset_position_error_km(tle: str, epoch: datetime, at: datetime) -> float:
+    """The position error the sweep assumes for *tle*, whose epoch is *epoch*, aged to *at* (SPC-118).
+
+    The model is spectre/astro/along_track.py's, tuned rather than sourced: 1 km at epoch plus 2 km a day in LEO
+    and MEO, 2 km plus 1 km a day at GEO and beyond, the regime read from the element set's own elements.
+    """
+    return position_error_km((at - epoch).total_seconds() / _SECONDS_PER_DAY, regime_from_tle(tle))
 
 
 class ElsetFailure(NamedTuple):

@@ -5,7 +5,8 @@
    Uncertainty column, the score spread on each ranking card and the spread note; and the computed closest
    approach of SPC-120: its line, its edge caveat, the result's computed notes and the Phase 3 footer; and the
    custody of SPC-123: the red track's status at evaluation, each row's custody sentence, a degraded cell and the
-   result's custody notes. #}
+   result's custody notes. The Show trajectory forms (SPC-124) read "links", which only the route passes, and the
+   TCA histogram reads each cell's tca_histogram; both are guarded too. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -95,8 +96,14 @@
     {% if result.computed_caveat is defined and result.computed_caveat is not none %}
     <div class="computed-caveat" style="color:var(--gold)">{{ result.computed_caveat }}</div>
     {% endif %}
-    {% if result.computed_span_note is defined and result.computed_span_note is not none %}
-    <div class="computed-span" style="color:var(--gold)">{{ result.computed_span_note }}</div>
+    {% if result.searched_span_note is defined and result.searched_span_note is not none %}
+    <div class="computed-span" style="color:var(--gold)">{{ result.searched_span_note }}</div>
+    {% endif %}
+    {% if result.rk45_reference_line is defined and result.rk45_reference_line is not none %}
+    <div class="rk45-reference" style="color:var(--gold)">{{ result.rk45_reference_line }}</div>
+    {% endif %}
+    {% if result.burn_score_note is defined and result.burn_score_note is not none %}
+    <div class="burn-score-note" style="color:var(--gold)">{{ result.burn_score_note }}</div>
     {% endif %}
     {% if result.propagator_line is defined and result.propagator_line is not none %}
     <div class="propagator-line" style="color:var(--gold)">{{ result.propagator_line }}</div>
@@ -206,11 +213,15 @@
               custody{% if om.custody_state is defined and om.custody_state is not none and om.custody_state.value == "degraded" %} degraded{% endif %} {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
               </span>
             </div>
+            {% set tca_title = om.tca_title if om.tca_title is defined else none %}
             {% if band is not none and om.ca_band is defined %}
             <div class="sampled-band"{% if om.ca_distribution is defined %} title="{{ om.ca_distribution }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_band }}</div>
+            {% if om.ca_sampled_tca_line is defined and om.ca_sampled_tca_line is not none %}
+            <div class="sampled-tca"{% if tca_title is not none %} title="{{ tca_title }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_sampled_tca_line }}</div>
+            {% endif %}
             {% endif %}
             {% if computed is not none and om.ca_computed_line is defined %}
-            <div class="computed-line" style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_computed_line }}</div>
+            <div class="computed-line"{% if tca_title is not none %} title="{{ tca_title }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_computed_line }}</div>
             {% if om.ca_computed_caveat is not none %}
             <div class="computed-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_computed_caveat }}</div>
             {% endif %}
@@ -221,6 +232,33 @@
             {% if om.ca_refusal is defined and om.ca_refusal is not none %}
             <div class="sampling-refused" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_refusal }}</div>
             {% endif %}
+            {% if om.ca_response_line is defined and om.ca_response_line is not none %}
+            <div class="response-line" style="font-size:0.55rem; color:{% if om.ca_response is defined and om.ca_response is not none %}var(--text-dim){% else %}var(--gold){% endif %}">{{ om.ca_response_line }}</div>
+            {% endif %}
+            {# Show trajectory (SPC-124): the Hill-frame view for this cell's pair and window, through the geometry
+               route. Every figure posted is already in the route's units; nothing is converted here. #}
+            {% set link = links[i][j] if links is defined and links | length > i and links[i] | length > j else none %}
+            {% if link is not none %}
+            <form class="show-trajectory" hx-post="/plan/geometry/intercept" hx-target="#decision-geometry" hx-swap="innerHTML" style="margin:0.15rem 0 0">
+              <input type="hidden" name="red_sat" value="{{ link.red_sat }}">
+              <input type="hidden" name="blue_sat" value="{{ link.blue_sat }}">
+              <input type="hidden" name="burn_epoch_str" value="{{ link.burn_epoch_str }}">
+              <input type="hidden" name="dv_prograde" value="{{ link.dv_prograde }}">
+              <input type="hidden" name="dv_normal" value="{{ link.dv_normal }}">
+              <input type="hidden" name="dv_radial" value="{{ link.dv_radial }}">
+              <input type="hidden" name="tof_hours" value="{{ link.tof_hours }}">
+              <input type="hidden" name="coast_hours" value="{{ link.coast_hours }}">
+              <input type="hidden" name="method" value="decision">
+              <input type="hidden" name="red_epoch" value="{{ link.red_epoch }}">
+              <input type="hidden" name="blue_epoch" value="{{ link.blue_epoch }}">
+              <input type="hidden" name="context" value="{{ link.context }}">
+              <input type="hidden" name="our_burn" value="{{ 'true' if link.our_burn else 'false' }}">
+              <button type="submit" class="btn-secondary" aria-label="{{ link.aria_label }}" style="font-size:0.55rem; padding:0.1rem 0.35rem">Show trajectory</button>
+              {% if link.note is not none %}
+              <span class="trajectory-note" style="display:block; font-size:0.52rem; color:var(--text-dim)">{{ link.note }}</span>
+              {% endif %}
+            </form>
+            {% endif %}
           </td>
         {% endfor %}
         <td class="row-uncertainty" style="padding:0.25rem 0.35rem; font-size:0.56rem; color:var(--text-dim)">{% if result.row_uncertainty is defined %}{{ result.row_uncertainty[i] }}{% else %}Lookup: no spread computed.{% endif %}</td>
@@ -229,8 +267,98 @@
     </tbody>
   </table>
   </div>
+  <div id="decision-geometry" aria-live="polite"></div>
+  {% if links is defined %}
+  <script>
+  (function () {
+    /* Which cell opened the view: every cell's trajectory form posts to the same view, so the one submitted is
+       marked and the view's close and Escape return focus there. Listened for on this table, not on document. */
+    var region = document.getElementById('decision-geometry');
+    var table = region ? region.parentElement : null;
+    if (!table) { return; }
+    table.addEventListener('submit', function (event) {
+      var form = event.target;
+      if (!form.classList || !form.classList.contains('show-trajectory')) { return; }
+      table.querySelectorAll('form.show-trajectory[data-geometry-opener]').forEach(function (f) {
+        f.removeAttribute('data-geometry-opener');
+      });
+      form.setAttribute('data-geometry-opener', 'true');
+    }, true);
+  })();
+  </script>
+  {% endif %}
 
 </div>
+
+{# ── TCA histogram (SPC-124): a sampled cell's times of closest approach, binned no finer than each sample's TCA
+     is known. The data is numbers only, through tojson; Chart.js is the vendored copy base.html loads. ── #}
+{% set hist_cells = [] %}
+{% for row in result.outcome_matrix %}{% set hi = loop.index0 %}{% for om in row %}{% if om.tca_histogram is defined and om.tca_histogram is not none %}{% set _ = hist_cells.append((hi, loop.index0, om.tca_histogram)) %}{% endif %}{% endfor %}{% endfor %}
+{% if hist_cells %}
+<section class="tca-histogram" aria-labelledby="tca-hist-heading"
+         style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem">
+  <h3 id="tca-hist-heading" style="margin:0 0 0.4rem; font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Sampled times of closest approach</h3>
+  <label for="tca-hist-cell" style="font-size:0.62rem; color:var(--text-dim); margin-right:0.4rem">Sampled cell</label>
+  <select id="tca-hist-cell" onchange="spectreTcaHistogram(this.value)" style="font-size:0.62rem">
+    {% for hi, hj, h in hist_cells %}
+    <option value="{{ hi }}-{{ hj }}">{{ adv[hi].name }} against {{ fr[hj].name }}</option>
+    {% endfor %}
+  </select>
+  {% for hi, hj, h in hist_cells %}
+  <script type="application/json" id="tca-hist-data-{{ hi }}-{{ hj }}">{{ h.chart_data | tojson }}</script>
+  <p class="tca-hist-caption" data-cell="{{ hi }}-{{ hj }}"{% if not loop.first %} hidden{% endif %} style="font-size:0.58rem; color:var(--text-dim); margin:0.3rem 0">{{ h.caption }}</p>
+  {% endfor %}
+  <div style="position:relative; height:200px">
+    <canvas id="tca-hist-chart" role="img" aria-label="Histogram of sampled times of closest approach for the selected cell"></canvas>
+  </div>
+  <details style="font-size:0.58rem; color:var(--text-dim); margin-top:0.3rem">
+    <summary>Histogram as a table</summary>
+    {% for hi, hj, h in hist_cells %}
+    <table data-cell="{{ hi }}-{{ hj }}"{% if not loop.first %} hidden{% endif %} style="border-collapse:collapse; margin-top:0.2rem">
+      <thead><tr><th scope="col">TCA from ({{ h.clock_unit }} after the scenario epoch)</th><th scope="col">TCA to ({{ h.clock_unit }} after the scenario epoch)</th><th scope="col">Samples</th></tr></thead>
+      <tbody>
+        {% for lo, up, n in h.rows %}<tr><td>{{ lo }}</td><td>{{ up }}</td><td>{{ n }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+  </details>
+  <script>
+  (function () {
+    var chart = null;
+    function draw(cell) {
+      var block = document.getElementById('tca-hist-data-' + cell);
+      document.querySelectorAll('.tca-histogram [data-cell]').forEach(function (el) {
+        el.hidden = el.getAttribute('data-cell') !== cell;
+      });
+      if (!block || typeof Chart === 'undefined') { return; }
+      var data = JSON.parse(block.textContent);
+      /* The bars and the axis take the table's own text: its edges are stated exactly, so nothing here rounds a time. */
+      var table = document.querySelector('.tca-histogram table[data-cell="' + cell + '"]');
+      var labels = table ? Array.prototype.map.call(table.querySelectorAll('tbody tr td:first-child'), function (td) { return td.textContent; }) : [];
+      var axis = table ? table.querySelector('thead th').textContent : '';
+      var styles = getComputedStyle(document.documentElement);
+      var bar = styles.getPropertyValue('--ops-blue').trim();
+      var dim = styles.getPropertyValue('--text-dim').trim();
+      if (chart) { chart.destroy(); }
+      chart = new Chart(document.getElementById('tca-hist-chart'), {
+        type: 'bar',
+        data: { labels: labels, datasets: [{ label: 'Samples', data: data.counts, backgroundColor: bar }] },
+        options: {
+          animation: false, maintainAspectRatio: false, plugins: { legend: { display: false } },
+          scales: {
+            x: { title: { display: true, text: axis, color: dim }, ticks: { color: dim } },
+            y: { beginAtZero: true, title: { display: true, text: 'Samples', color: dim }, ticks: { color: dim, precision: 0 } }
+          }
+        }
+      });
+    }
+    window.spectreTcaHistogram = draw;
+    var select = document.getElementById('tca-hist-cell');
+    if (select) { draw(select.value); }
+  })();
+  </script>
+</section>
+{% endif %}
 
 {# ── Per-adversary Rankings ─────────────────────────────────────────────────── #}
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px;
@@ -274,7 +402,8 @@
               border-top:1px solid var(--border); padding-top:0.3rem">
     {% set n_sampled = result.n_sampled_cells if result.n_sampled_cells is defined else 0 %}
     {% set n_computed = result.n_computed_cells if result.n_computed_cells is defined else 0 %}
-    Phase {% if n_computed %}3 · computed closest approach in {{ n_computed }} cells · sampled in {{ n_sampled }} cells{% elif n_sampled %}2 · sampled closest approach in {{ n_sampled }} cells{% else %}1{% endif %} · {{ result.scenario.name }}
+    {% set n_burns = result.n_burn_cells if result.n_burn_cells is defined else 0 %}
+    Phase {% if n_computed %}3 · computed closest approach in {{ n_computed }} cells · sampled in {{ n_sampled }} cells{% elif n_sampled %}2 · sampled closest approach in {{ n_sampled }} cells{% else %}1{% endif %}{% if n_burns %} · our burn sized in {{ n_burns }} cells{% endif %} · {{ result.scenario.name }}
     · {{ "%g" | format(result.scenario.horizon_hours) }}h horizon
   </div>
 

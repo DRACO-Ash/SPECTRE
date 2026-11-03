@@ -233,8 +233,11 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 ## Phase 3: SGP4-Propagated Outcomes
 
-**Status: in progress. Closest approach and its time are computed (SPC-120) and custody is computed from the bound
-red track's status (SPC-123); our response applied to the blue orbit (SPC-121) is next.**
+**Status: in progress. Closest approach and its time are computed (SPC-120), custody is computed from the bound
+red track's status (SPC-123), the sampled path searches only while both element sets are current and every TCA
+carries an uncertainty (SPC-118), and a manoeuvre response given a target separation has its burn sized and
+applied to the blue asset (SPC-121), and each cell shows its TCA with its uncertainty, a link to the Hill-frame
+view for its pair and window, and, when sampled, a histogram of its samples' TCAs (SPC-124).**
 
 SPC-120, as built. In a scenario bound on both sides each row gets exactly one closest approach. A row whose action
 carries a hypothesis is sampled (RK45 on both objects), or refused and kept a lookup: the no-burn figure is not its
@@ -300,6 +303,85 @@ since custody may be computed beside it. Offline, custody is degraded (UDL not c
 the whole horizon, which is honest, since nothing offline can judge whether a burn is normal, and will be common; the
 custody gap ignores the measured element-set cadence, so it is pessimistic. Owner to confirm that degraded scores as
 lost: it follows the operator's definition, and is one branch in `custody_over_horizon` if the owner decides otherwise.
+
+SPC-118, as built. One helper, `_searched_span_s`, sets the span both paths search and the span the propagator gap
+is measured over: from the scenario epoch to the earlier of the horizon's end and the moment either bound element
+set passes its limit. The sampled path searched the whole horizon before, so 100 samples over 48 h were admitted on
+a 24 h LEO limit (4,784 sample-hours over 47 h) and 50 samples 20 h old ran 44 h past it; now they search 24 h and
+4 h. An element set at its limit already earns no span and is refused before anything runs, and a hypothesised
+burn after the span a row earns is refused, since its figure would be the no-burn one. The span note,
+`searched_span_note`, covers a sampled-only result too. Each computed or sampled closest approach carries
+`tca_uncertainty`: both element sets' position error at the TCA (`elset_position_error_km`, along_track.py's tuned
+model), combined in quadrature, over the closing speed, all of the error taken along the approach, so it errs wide.
+A sampled cell uses the closing speed of the sample that sets its TCA, which the separation series now records per
+sample. There is none at an edge of the search, at a closing speed of rounding noise, or when it would be wider than
+the span, and the page says which. Measured: coplanar_leo 1.888 km over 5.533 m/s, about 341 s (shown "± 6 min",
+4.0 h); geo_drift_in 4.662 km over 1.094 m/s, 4,259.5 s ("± 1.2 h", 31 h), which covers the 1,951 s the GEO TCA
+moved between propagators; plane_change 1.460 km over 394.0 m/s, 3.7 s ("± 4 s", 0.39 h). The hours after the
+scenario epoch print to 0.01 h while the uncertainty is under 3 min, to 0.1 h while it is under 30 min, and to the
+hour above, so rounding never moves the time by more than its uncertainty; a TCA too slow to fix within the span
+prints to the hour with "± more than the 48.0 h searched".
+
+SPC-121, as built. A manoeuvre response may carry a target separation, a delta-V budget (50 m/s unless given) and
+an axis (`ResponseBurnSpec`). SGP4 cannot take an impulsive burn and SPECTRE fits no element set to a burnt orbit,
+so a figure that includes our burn is propagated by RK45 with J2 and drag for both orbits from their SGP4 states at
+the scenario epoch, and blue burns from its own RK45 arc at the response's time to execute after the epoch
+(`spectre/astro/response_burn.py`). Once any response in a scenario is sized, every computed cell in the result is
+on RK45, the no-burn ones included, so no row is ranked across two propagators (`_require_one_propagator`); the
+SGP4 figure with no burn is shown beside it with the measured difference (`rk45_reference_line`; coplanar_leo
+10.005 km against 10.006 km, 0.16 s apart), the propagator gap is no longer measured, and with no target anywhere
+0.15.0 behaviour is unchanged. What a burn buys is the RK45 closest approach after it minus the RK45 one before it,
+from the same arcs. The size is a search, not an optimiser: the manoeuvre library's Clohessy-Wiltshire size
+(`tactical.collision_avoidance`) gives the axis unless the operator names one and a first size; both senses are
+flown; the size doubles to the target or the budget and halves back to within 1 %, at most 16 trials. The library
+guesses about 0.23 m/s for coplanar_leo to 20 km; 3.08 m/s retrograde in-track is what reaches it, because a
+prograde burn closes the miss (1 m/s gives 9.705 km) and every burn moves the encounter. A sampled row sizes the
+burn once on the hypothesis's nominal burn and applies it to blue in every sample, paired by sample; the cell scores
+on P5 after the burn and says what it buys at P5 (plane_change Evasive 0.25 h in, 100 samples: 5.47 m/s inward,
+9.45 km to 19.94 km, half-width 0.04 km), and when P5 after sits under the target it counts the samples that came
+closer (16 of 100 in that run); when the whole budget falls short on the nominal, the cell says so rather than
+calling the burn sized to the target. A burn after the closest approach or the span, or whose arc fails or
+re-enters, is refused in its cell and its delta-V stays a lookup; a burn after the closest approach names the RK45
+closest approach it was decided on. A manoeuvre response with no target says how to size it, and a target entered
+where the closest approach is a lookup (unbound, a manoeuvre with no hypothesis, a refused row) says it was not
+used. The cap counts burns: each adds 0.3 of a sample
+per sample (the measured worst, 29 % in LEO over 1 h), 16 samples to size it and blue's burnt arc, and the
+computed rows' sizing costs (2 + 16 k) samples over the span; GEO over 72 h with five burning responses is refused
+conservatively (5,917 sample-hours), as sampling at GEO already is. Sizing ticks the job's budget; the computed
+rows' sizing is not counted as a hypothesis, and the job page names the response being sized, by its id when it has
+no name. Measured: coplanar_leo over 6 h with one burn 0.95 s, ten trials, and
+with five 3.6 s; the plane_change sampled row above 1.9 s. The score still normalises closest approach to 50,000 km,
+so what a burn buys barely moves it while its delta-V does (30.1 km moves a score by 0.0002, 8.85 m/s adds 0.0177);
+`burn_score_note` says to read the cell, not the ranking, until SPC-151 settles the weights.
+
+SPC-124, as built. Each computed cell prints its TCA with its uncertainty and its propagator ("± 4 s, 0.39 h after
+the scenario epoch; SGP4, no burn"), and each sampled cell the earliest TCA at or below P5 with the TCA's P5 to P95
+across samples; the hover says what the uncertainty rests on. Every propagated cell has a Show trajectory button,
+whose accessible name starts with that visible label and adds its adversary and response (WCAG 2.5.3, Label in
+Name), that posts to the existing geometry route
+(`spectre/web/decision_trajectory.py` builds the values, converting km/s to m/s there and only there): a computed
+cell with no burn from the scenario epoch over the span searched; a cell with our burn from the later of the epoch
+and 24 h before the burn (the route's longest coast), our burn drawn as the opposite change in red's velocity
+relative to blue, over the rest of the span; a sampled cell with the hypothesis's nominal burn, from the burn when
+it is before the window, saying that our burn is not drawn since the view takes one burn. A lookup or refused
+cell has no button. The view is a third model, so the route, given an allowlisted context, says it is a
+Clohessy-Wiltshire picture from both SGP4 states that shows the shape of the approach, not the cell's figures, which
+stand; and where the element set now held is not the one the evaluation used, it names both epochs. The view and
+the intercept result's panel can be open on the operator page together, so the route gives the decision view its
+own id prefix and the control that opened it: they share no id and set nothing on `window`, so each draws its own
+chart, its close and Escape remove only itself, and focus returns to the cell whose form was submitted (the results
+mark it). The route
+now binds a form model (`Annotated[_GeometryForm, Form()]`), which keeps the posted names and clears its last bare
+`Depends`. A sampled cell whose series records closing speeds carries `tca_histogram`: each sample's TCA, its
+uncertainty from its own closing speed, in bins the smallest of 1 s to 12 h that is at least the wider of a
+twentieth of the range and the median drawn sample's uncertainty (the plane change's 3.7 s gives 5 s bins). The
+median floors the bins, so up to half the drawn samples may be known less well than a bin, and the caption says how
+many. Samples at an edge of the search, and samples closing too slowly to fix a time within the span, are counted
+in the caption, not drawn. Each bin edge is a whole multiple of a whole-second width, so the table states it
+exactly in h:mm, or h:mm:ss for bins under a minute, and the chart labels its bars and axis from the table: no edge
+is rounded. The panel offers a labelled select of the sampled cells, a canvas drawn with the vendored Chart.js from
+numbers-only JSON, and the same figures as a table; 500 samples cost about 7 ms. The Show trajectory button and the histogram
+draw no figure the cell does not already state.
 
 **Dependency:** Phase 2 complete; both red and blue TLEs available in session state
 

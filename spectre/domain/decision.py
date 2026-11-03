@@ -106,12 +106,20 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 import numpy as np
 
-from spectre.astro.elset_approach import ElsetApproach, ElsetFailure, elset_closest_approach
+from spectre.astro.closest_approach import ClosestApproach
+from spectre.astro.elset_approach import (
+    ElsetApproach,
+    ElsetFailure,
+    elset_closest_approach,
+    elset_position_error_km,
+)
 from spectre.astro.monte_carlo import (
     _MIN_CONVERGENCE_SAMPLES,
     MANOEUVRE_ARCHETYPES,
     REENTRY_FLOOR_KM,
+    BlueBurn,
     BlueTrack,
+    BurnSeries,
     ManoeuvreHypothesis,
     ManoeuvreType,
     SeparationSeries,
@@ -124,8 +132,28 @@ from spectre.astro.monte_carlo import (
     run_separation_series,
     separation_integration_s,
 )
+from spectre.astro.response_burn import (
+    MAX_SIZING_TRIALS,
+    RESPONSE_PROPAGATOR,
+    BurnAxis,
+    BurnRefusal,
+    BurnRequest,
+    Rk45Plan,
+    SizedBurn,
+    SizingTick,
+    elset_response_plan,
+    hypothesis_response_plan,
+)
 from spectre.domain.custody import BASIS as CUSTODY_BASIS
 from spectre.domain.custody import Custody, CustodyStatus, Horizon, age_text, custody_over_horizon
+from spectre.domain.decision_figures import (
+    ResponseBurnSpec,
+    ResponseFigure,
+    TcaHistogram,
+    TcaUncertainty,
+    tca_histogram,
+    tca_uncertainty,
+)
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.domain.provenance import (
     Basis,
@@ -335,7 +363,8 @@ def _require_fraction(owner: str, field_name: str, value: float) -> None:
 HYPOTHESIS_NOTE: str = (
     "A manoeuvre hypothesis records how the adversary might move and where that came from. With a red track "
     "bound, its burn time sets when custody is lost; with both sides bound, the closest approach of its row and "
-    "its time are sampled from it, and our delta-V stays a lookup; without one, a manoeuvre row's closest approach "
+    "its time are sampled from it, and our delta-V is computed only for a manoeuvre response given a target "
+    "separation; without one, a manoeuvre row's closest approach "
     "stays a lookup and its custody takes the worst case, a burn at the scenario epoch, since it names no burn."
 )
 
@@ -732,6 +761,9 @@ class FriendlyResponse:
     reversibility:        float    # [0, 1] — 1 = fully reversible
     time_to_execute_hours: float   # Execution latency
     description:          str = ""
+    # Our burn on the blue asset (SPC-121): a target separation to size it to, with its budget and axis. A
+    # manoeuvre response only; it burns at its time to execute after the scenario epoch.
+    burn:                 ResponseBurnSpec | None = None
 
     def __post_init__(self) -> None:
         _require_fraction("FriendlyResponse", "cost", self.cost)
@@ -741,6 +773,25 @@ class FriendlyResponse:
                 f"FriendlyResponse.time_to_execute_hours must be finite and >= 0; "
                 f"got {self.time_to_execute_hours!r}"
             )
+        if self.burn is not None:
+            _require_burn_spec(self)
+
+
+def _require_burn_spec(response: FriendlyResponse) -> None:
+    """Only a manoeuvre burns, toward a finite target above 0 within a finite budget above 0, on a known axis."""
+    spec = response.burn
+    if not isinstance(spec, ResponseBurnSpec):
+        raise TypeError(f"FriendlyResponse.burn takes a ResponseBurnSpec; got {type(spec).__name__}")
+    if response.action_type is not ActionType.MANOEUVRE:
+        raise ValueError(f"only a manoeuvre response burns; this one is {response.action_type.value}")
+    if not (math.isfinite(spec.target_km) and spec.target_km > 0.0):
+        raise ValueError(f"FriendlyResponse.burn's target must be finite and above 0 km; got {spec.target_km!r}")
+    if not (math.isfinite(spec.budget_km_s) and spec.budget_km_s > 0.0):
+        raise ValueError(
+            f"FriendlyResponse.burn's budget must be finite and above 0 m/s; got {from_km_s(spec.budget_km_s)!r}"
+        )
+    if not isinstance(spec.axis, BurnAxis):
+        raise ValueError(f"FriendlyResponse.burn's axis must be one of {', '.join(BurnAxis)}; got {spec.axis!r}")
 
 
 @dataclass
@@ -783,6 +834,17 @@ class OutcomeMetrics:
     # The bound red track's custody at the scenario epoch, held, degraded or lost (SPC-123). Set exactly when
     # custody's basis is computed; custody_maintained and custody_gap_hours then carry it over the horizon.
     custody_state:        Custody | None = None
+    # How closely the time of closest approach is known (SPC-118); only on a computed or sampled closest approach.
+    tca_uncertainty:      TcaUncertainty | None = None
+    # The sampled TCA and its spread across samples (SPC-118); only on a sampled closest approach.
+    ca_sampled_tca:       SampledTca | None = None
+    # Our burn on the blue asset and what it buys (SPC-121). Set exactly when our delta-V's basis is computed;
+    # delta_v_cost_km_s is then the burn's size, and the closest approach is computed after it or sampled.
+    ca_response:          ResponseFigure | None = None
+    # Why a manoeuvre response's target separation was not sized here, so its delta-V stays a lookup (SPC-121).
+    response_refusal:     str | None = None
+    # The samples' TCAs as a histogram, binned no finer than each is known (SPC-124); only on a sampled cell.
+    tca_histogram:        TcaHistogram | None = None
 
     def __post_init__(self) -> None:
         sampled = _cell_bases(self).closest_approach_km.kind is Basis.SAMPLED
@@ -803,6 +865,8 @@ class OutcomeMetrics:
             raise ValueError("a caveat on the sampled closest approach needs a sampled band")
         _require_computed(self)
         _require_custody(self)
+        _require_tca(self)
+        _require_response(self)
 
     @property
     def ca_band(self) -> str | None:
@@ -829,8 +893,23 @@ class OutcomeMetrics:
         if found is not None:
             return _COMPUTED_TITLE.format(
                 miss=found.approach.miss_km, tca_s=found.approach.tca_s, v=from_km_s(found.closing_speed_km_s),
+                how=_TITLE_HOW[self._how],
             )
         return self.ca_distribution or LOOKUP_CELL_TITLE
+
+    @property
+    def _how(self) -> str:
+        """How a computed figure was propagated, as its line says it."""
+        found = self.ca_computed
+        if found is None or found.propagator != RESPONSE_PROPAGATOR:
+            return _SGP4_NO_BURN
+        burnt = self.ca_response is not None and self.ca_response.sized.burn is not None
+        return _RK45_AFTER_BURN if burnt else _RK45_NO_BURN
+
+    @property
+    def ca_response_line(self) -> str | None:
+        """Our burn and what it buys, or why it was not sized; None when this response names no target."""
+        return self.ca_response.line if self.ca_response is not None else self.response_refusal
 
     @property
     def ca_computed_line(self) -> str | None:
@@ -839,10 +918,28 @@ class OutcomeMetrics:
         if found is None:
             return None
         start = found.window.start_utc
+        tca = self.tca_uncertainty or _NO_TCA_UNCERTAINTY
         return _COMPUTED_LINE.format(
-            miss=found.approach.miss_km, tca=_to_the_minute(found.approach.tca_utc(start)),
-            h=found.approach.tca_s / _SECONDS_PER_HOUR,
+            miss=found.approach.miss_km, tca=_to_the_minute(found.approach.tca_utc(start)), pm=_pm(tca),
+            h=tca.hours(found.approach.tca_s / _SECONDS_PER_HOUR), how=self._how,
         )
+
+    @property
+    def ca_sampled_tca_line(self) -> str | None:
+        """The sampled TCA with its uncertainty, and the TCA's spread across samples; None when not sampled."""
+        found = self.ca_sampled_tca
+        if found is None:
+            return None
+        tca = self.tca_uncertainty or _NO_TCA_UNCERTAINTY
+        return _SAMPLED_TCA_LINE.format(
+            tca=_to_the_minute(found.tca_utc), pm=_pm(tca), h=tca.hours(found.tca_h), t5=tca.hours(found.p5_h),
+            t95=tca.hours(found.p95_h),
+        )
+
+    @property
+    def tca_title(self) -> str | None:
+        """What the TCA's uncertainty rests on, or why there is none, for the TCA line's hover."""
+        return None if self.tca_uncertainty is None else self.tca_uncertainty.title
 
     @property
     def ca_computed_caveat(self) -> str | None:
@@ -889,6 +986,76 @@ class OutcomeMetrics:
 
 
 _PERCENTILE_KEYS = (5, 50, 95)
+
+
+class SampledTca(NamedTuple):
+    """A sampled cell's TCA, the earliest at or below P5, and P5 and P95 of every sample's TCA, hours (SPC-118)."""
+
+    tca_utc: datetime
+    tca_h:   float
+    p5_h:    float
+    p95_h:   float
+
+
+#: Stands in for a cell built before SPC-118, which carries no TCA uncertainty: no ±, hours to 2 decimals.
+_NO_TCA_UNCERTAINTY = TcaUncertainty(None, math.nan, math.nan, math.nan, at_edge=False)
+_SGP4_NO_BURN = "SGP4, no burn"
+_RK45_NO_BURN = "RK45, no burn"
+_RK45_AFTER_BURN = "RK45, after our burn"
+_TITLE_HOW: dict[str, str] = {
+    _SGP4_NO_BURN: "SGP4 for both orbits with no burn",
+    _RK45_NO_BURN: "RK45 with J2 and drag for both orbits with no burn",
+    _RK45_AFTER_BURN: "RK45 with J2 and drag for both orbits after our burn",
+}
+_SAMPLED_TCA_LINE = (
+    "Earliest TCA at or below P5: {tca:%Y-%m-%d %H:%M} UTC{pm}, {h} h after the scenario epoch. Across samples the "
+    "TCA runs from {t5} h (P5) to {t95} h (P95)."
+)
+
+
+def _pm(tca: TcaUncertainty) -> str:
+    """The uncertainty after a time, with its space; nothing when there is none."""
+    return f" {tca.pm}" if tca.pm else ""
+
+
+def _require_response(cell: OutcomeMetrics) -> None:
+    """Our burn is carried only with a computed delta-V; the cell shows its size, and its closest approach is
+    computed after it on RK45 for both orbits, or sampled, never a lookup (SPC-121).
+
+    Every path that computes our delta-V carries the burn. The converse is not enforced, so a cell built by hand
+    with every figure computed, as the basis tests build one, still stands.
+    """
+    bases = _cell_bases(cell)
+    figure = cell.ca_response
+    if figure is None:
+        return
+    if bases.delta_v_cost_km_s.kind is not Basis.COMPUTED:
+        raise ValueError("ca_response is set only when our delta-V's basis is computed")
+    if cell.delta_v_cost_km_s != round(figure.delta_v_km_s, 5):
+        raise ValueError(
+            f"a sized burn's cell shows its size, {from_km_s(figure.delta_v_km_s):.2f} m/s; got delta_v_cost_km_s "
+            f"{cell.delta_v_cost_km_s!r}"
+        )
+    if bases.closest_approach_km.kind is Basis.LOOKUP:
+        raise ValueError("a sized burn's closest approach is computed or sampled, never a lookup")
+    if cell.ca_computed is not None and cell.ca_computed.propagator != RESPONSE_PROPAGATOR:
+        raise ValueError("a sized burn's computed closest approach is RK45 for both orbits, never SGP4")
+
+
+def _require_one_propagator(matrix: Sequence[Sequence[OutcomeMetrics]]) -> None:
+    """Every computed cell in a result names the same propagator, so no row is ranked across two (SPC-121)."""
+    named = {cell.ca_computed.propagator for row in matrix for cell in row if cell.ca_computed is not None}
+    if len(named) > 1:
+        raise ValueError(f"a result's computed cells share one propagator; got {sorted(named)}")
+
+
+def _require_tca(cell: OutcomeMetrics) -> None:
+    """A TCA uncertainty only on a computed or sampled closest approach, and a sampled TCA only on a sampled one."""
+    kind = _cell_bases(cell).closest_approach_km.kind
+    if cell.tca_uncertainty is not None and kind not in (Basis.COMPUTED, Basis.SAMPLED):
+        raise ValueError("tca_uncertainty is set only on a computed or sampled closest approach")
+    if (cell.ca_sampled_tca is not None or cell.tca_histogram is not None) and kind is not Basis.SAMPLED:
+        raise ValueError("ca_sampled_tca and tca_histogram are set only on a sampled closest approach")
 
 #: The sampled band in the cell, with how closely its percentiles are known (SPC-117).
 _CA_BAND = "Sampled: P5 {p5:.1f} km to P95 {p95:.1f} km, median {p50:.1f} km, each known to within {hw:.1f} km, {n} samples."
@@ -972,7 +1139,8 @@ BINDING_NOTE: str = (
     "its time are computed from these orbits by SGP4, with no burn, for every row whose action does not move the "
     "red track, and sampled for a row whose action carries a hypothesis; a manoeuvre with no hypothesis names no "
     "burn and stays a lookup. With a red track bound, custody is its custody as the sweep judges it at evaluation, "
-    "carried over the horizon. Our delta-V is still a lookup."
+    "carried over the horizon. Our delta-V is computed for a manoeuvre response given a target separation, and "
+    "otherwise a lookup."
 )
 
 _SIDES = frozenset({"red", "blue"})
@@ -1141,6 +1309,9 @@ class ScenarioResult:
     propagator_gap_km:      float | None = None
     # Per adversary row: its custody over the horizon in a sentence, when not the rule of thumb (SPC-123).
     row_custody:            tuple[str | None, ...] = ()
+    # The pair's closest approach with no burn on SGP4 and on RK45, once our burn put every computed cell on RK45
+    # (SPC-121): shown so the operator sees what the propagators alone move.
+    rk45_reference:         tuple[ElsetApproach, ElsetApproach] | None = None
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -1228,29 +1399,83 @@ class ScenarioResult:
         """How many cells score on a computed closest approach (SPC-120)."""
         return len(self._computed())
 
+    def _on_rk45(self) -> bool:
+        """Whether the computed cells are RK45 for both orbits because a response's burn was sized (SPC-121)."""
+        return any(found.propagator == RESPONSE_PROPAGATOR for found in self._computed())
+
+    def _responses(self) -> list[tuple[int, OutcomeMetrics]]:
+        return [
+            (i, cell) for i, row in enumerate(self.outcome_matrix) for cell in row
+            if getattr(cell, "ca_response", None) is not None
+        ]
+
+    @property
+    def n_burn_cells(self) -> int:
+        """How many cells carry our sized burn, a burn of none included (SPC-121)."""
+        return len(self._responses())
+
     @property
     def computed_caveat(self) -> str | None:
         """What a computed closest approach does not say; None when no cell is computed (SPC-120)."""
-        return COMPUTED_CAVEAT if self._computed() else None
+        if not self._computed():
+            return None
+        return COMPUTED_CAVEAT_WITH_BURNS if self._on_rk45() else COMPUTED_CAVEAT
 
     @property
-    def computed_span_note(self) -> str | None:
-        """The search's span when the element sets' limits cut it short of the horizon, else None (SPC-120)."""
-        found = self._computed()
-        if not found:
+    def rk45_reference_line(self) -> str | None:
+        """The SGP4 and RK45 figures with no burn and how far apart they are, once the computed cells are RK45."""
+        if self.rk45_reference is None:
             return None
-        window = found[0].window
-        if window.span_s >= self.scenario.horizon_hours * _SECONDS_PER_HOUR:
+        sgp4, rk45 = (found.approach for found in self.rk45_reference)
+        start = self.rk45_reference[0].window.start_utc
+        return RK45_FOR_BURNS.format(
+            sm=sgp4.miss_km, st=sgp4.tca_utc(start), rm=rk45.miss_km, rt=rk45.tca_utc(start),
+            dm=abs(rk45.miss_km - sgp4.miss_km), dt=abs(rk45.tca_s - sgp4.tca_s),
+        )
+
+    @property
+    def burn_score_note(self) -> str | None:
+        """How little what a burn buys moves its score, against what its delta-V adds; None with no burn (SPC-121)."""
+        burnt = [
+            (i, cell) for i, cell in self._responses()
+            if cell.ca_response is not None and cell.ca_response.sized.burn is not None
+        ]
+        if not burnt:
             return None
-        return _COMPUTED_SPAN.format(
-            span=window.span_s / _SECONDS_PER_HOUR, horizon=self.scenario.horizon_hours,
-            end=window.start_utc + timedelta(seconds=window.span_s),
+        i, cell = max(burnt, key=lambda pair: abs(cast("ResponseFigure", pair[1].ca_response).buys_km))
+        buys = cast("ResponseFigure", cell.ca_response).buys_km
+        w = self.scenario
+        return BURN_SCORE_NOTE.format(
+            buys=buys, adv=w.adversary_actions[i].name, ca=w.w_closest_approach * abs(buys) / _CA_NORMALISATION_KM,
+            dv=from_km_s(cell.delta_v_cost_km_s), dvs=w.w_dv_cost * cell.delta_v_cost_km_s / _DV_NORMALISATION_KM_S,
+        )
+
+    @property
+    def searched_span_s(self) -> float:
+        """The seconds from the scenario epoch that computed and sampled cells were searched over (SPC-118)."""
+        return _searched_span_s(self.scenario)
+
+    @property
+    def searched_span_note(self) -> str | None:
+        """The span computed and sampled cells were searched over, when the element sets' limits cut it short of
+        the horizon; None when no cell is computed or sampled, or the whole horizon was searched (SPC-118)."""
+        if not (self._computed() or self._bands()):
+            return None
+        span = self.searched_span_s
+        if span >= self.scenario.horizon_hours * _SECONDS_PER_HOUR:
+            return None
+        return _SEARCHED_SPAN.format(
+            span=span / _SECONDS_PER_HOUR, horizon=self.scenario.horizon_hours,
+            end=self.scenario.epoch_utc + timedelta(seconds=span),
         )
 
     @property
     def propagator_line(self) -> str | None:
-        """How far apart the two propagators place these orbits, when computed and sampled rows sit together."""
-        if not (self._computed() and self._bands()):
+        """How far apart the two propagators place these orbits, when computed and sampled rows sit together.
+
+        None once the computed cells are RK45 too (SPC-121): every figure is then one propagator.
+        """
+        if not (self._computed() and self._bands()) or self._on_rk45():
             return None
         gap = self.propagator_gap_km
         return _PROPAGATORS_UNCOMPARED if gap is None else _PROPAGATOR_LINE.format(gap=gap)
@@ -1270,8 +1495,10 @@ class ScenarioResult:
 
     @property
     def score_spread_note(self) -> str | None:
-        """SCORE_SPREAD_NOTE when any cell is sampled, else None (SPC-115)."""
-        return SCORE_SPREAD_NOTE if self._bands() else None
+        """SCORE_SPREAD_NOTE when any cell is sampled, else None (SPC-115); its burn variant once a burn is sized."""
+        if not self._bands():
+            return None
+        return SCORE_SPREAD_NOTE_WITH_BURNS if self._responses() else SCORE_SPREAD_NOTE
 
     @property
     def row_uncertainty(self) -> tuple[str, ...]:
@@ -1295,7 +1522,8 @@ class ScenarioResult:
             return None
         w = self.scenario.w_closest_approach
         delta = max(w * (_norm_ca(band[5]) - _norm_ca(band[95])) for band in bands)
-        return _RESULT_CAVEAT.format(delta=delta)
+        caveat = _RESULT_CAVEAT_WITH_BURNS if self._responses() else _RESULT_CAVEAT
+        return caveat.format(delta=delta)
 
 
 _ROW_SAMPLED = (
@@ -1306,17 +1534,25 @@ _ROW_LOOKUP = "Lookup: no spread computed."
 _ROW_REFUSED = "Not sampled, so no spread: the cells say why."
 _ROW_NOT_COMPUTED = "Not computed, so no spread: the cells say why."
 _ROW_COMPUTED = "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it."
+_ROW_RK45 = (
+    "Computed by RK45 for both orbits, our burn applied where a response names a target: one figure per cell, no "
+    "spread; element-set error is not in it."
+)
 
 
 def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
-    """A row's spread: every cell of a row is sampled from one series or none is, so its first cell speaks for it."""
-    cell = row[0]
+    """A row's spread, from its first sampled cell, else its first cell: a row is sampled from one series or none.
+
+    With our burn (SPC-121) a response's cell has its own band; the row's first sampled cell speaks for the row.
+    """
+    cell = next((c for c in row if c.ca_percentiles is not None), row[0])
     if cell.ca_percentiles is not None:
         return _ROW_SAMPLED.format(
             std=cell.ca_std_km, n=cell.ca_samples, hw=cell.ca_half_width_km, s=_spread_figure(cast("float", cell.score_std)),
         )
-    if getattr(cell, "ca_computed", None) is not None:
-        return _ROW_COMPUTED
+    found = getattr(cell, "ca_computed", None)
+    if found is not None:
+        return _ROW_RK45 if found.propagator == RESPONSE_PROPAGATOR else _ROW_COMPUTED
     if cell.ca_refusal is None:
         return _ROW_LOOKUP
     return _ROW_NOT_COMPUTED if cell.ca_refusal.startswith(_NOT_COMPUTED) else _ROW_REFUSED
@@ -1342,6 +1578,8 @@ _BASE_CA_KM: dict[ActionType, float] = {
 _OTHER_CA_KM = 3000.0
 #: The score's closest approach normalisation, km: no threat at or beyond it.
 _CA_NORMALISATION_KM = 50_000.0
+#: The score's delta-V normalisation, km/s (100 m/s).
+_DV_NORMALISATION_KM_S = 0.1
 
 
 def compute_outcome_metrics(
@@ -1405,9 +1643,18 @@ def _outcome(
 def _lookup_cell(
     adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, custody: _RowCustody | None,
 ) -> OutcomeMetrics:
-    """The lookup model's cell; with the row's custody when it is not the rule of thumb (SPC-123)."""
+    """The lookup model's cell; with the row's custody when it is not the rule of thumb (SPC-123).
+
+    A response that names a target says the target was not used, in the cell and in its delta-V's note (SPC-121).
+    """
     figures = _lookup_figures(adversary, friendly, scenario)
-    return _outcome(scenario, friendly, _Built(figures, scenario.horizon_hours * 0.4, LOOKUP_BASES), custody)
+    if friendly.burn is None:
+        return _outcome(scenario, friendly, _Built(figures, scenario.horizon_hours * 0.4, LOOKUP_BASES), custody)
+    unused = _TARGET_UNUSED.format(target=friendly.burn.target_km)
+    delta_v = FigureBasis(Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. {unused}")
+    bases = dataclasses.replace(LOOKUP_BASES, delta_v_cost_km_s=delta_v)
+    built = _Built(figures, scenario.horizon_hours * 0.4, bases)
+    return _outcome(scenario, friendly, built, custody, response_refusal=unused)
 
 
 def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario) -> _Figures:
@@ -1462,7 +1709,7 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
     """
     norm_custody  = 0.0 if figures.custody_maintained else min(figures.custody_gap_hours / scenario.horizon_hours, 1.0)
     norm_ca       = _norm_ca(figures.closest_approach_km)   # high CA = low score (good)
-    norm_dv       = min(figures.delta_v_km_s / 0.1, 1.0)
+    norm_dv       = min(figures.delta_v_km_s / _DV_NORMALISATION_KM_S, 1.0)
     norm_time     = min(friendly.time_to_execute_hours / scenario.horizon_hours, 1.0)
     norm_rev      = 1.0 - friendly.reversibility          # reward reversibility → lower score
 
@@ -1486,7 +1733,7 @@ class Sampler(Protocol):
 
     def __call__(
         self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
-        tick: Tick | None = ...,
+        tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ...,
     ) -> SeparationSeries: ...
 
 
@@ -1536,8 +1783,12 @@ _NO_HORIZON = (
 )
 _TOO_FEW = "Not sampled: {n} samples are fewer than the {least} the convergence check needs."
 _STALE = (
-    "Not sampled: the {side} orbit is out of date or its age is unknown, so a miss sampled from it would not be "
-    "earned."
+    "Not sampled: the {side} orbit is out of date, at its limit already or of unknown age, so a miss sampled from "
+    "it would not be earned."
+)
+_BURN_PAST_SPAN = (
+    "Not sampled: the burn at {burn:%Y-%m-%d %H:%M} UTC is after {end:%Y-%m-%d %H:%M} UTC, when the {side} element "
+    "set passes its limit, so the window this row can earn holds no burn and its figure would be the no-burn one."
 )
 _AFTER_BURN = (
     "Not sampled: the red element set dates from {epoch:%Y-%m-%d %H:%M} UTC, after the burn at "
@@ -1570,12 +1821,15 @@ _UNCONVERGED = (
 _SAMPLED_CA_NOTE = (
     "P5 of {n} sampled misses, known to within {hw:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
     "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated "
-    "with the blue asset over the {horizon:g} h horizon from the scenario epoch by RK45 with J2 and exponential "
-    "drag; the element sets' own errors are not sampled, and our response is not applied to the blue orbit"
+    "with the blue asset over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element "
+    "sets are within their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not "
+    "sampled, {ours}"
 )
+_NO_BURN_ENDING = "and our response is not applied to the blue orbit"
+_BURN_ENDING = "and our burn is applied to the blue asset in every sample"
 _SAMPLED_TIME_NOTE = (
-    "earliest time of closest approach among the samples at or below P5, of {n} samples over the {horizon:g} h "
-    "horizon from the scenario epoch; RK45 with J2 and exponential drag"
+    "earliest time of closest approach among the samples at or below P5, of {n} samples over {span:.1f} h of the "
+    "{horizon:g} h horizon from the scenario epoch; RK45 with J2 and exponential drag"
 )
 _CELL_CAVEAT = "1 in 20 samples came closer than P5; the closest of {n} was {closest:.1f} km."
 _EDGE_CAVEAT = (
@@ -1593,6 +1847,14 @@ _RESULT_CAVEAT = (
     "same closest approach. The score normalises closest approach to 50,000 km, so the sampled spread moves it "
     "by at most {delta:.4f} here."
 )
+#: _RESULT_CAVEAT once a response's burn is sized (SPC-121).
+_RESULT_CAVEAT_WITH_BURNS = (
+    "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers only the "
+    "hypothesis: its delta-V, pointing, timing and drag. Element-set errors, the hypothesis being wrong and our "
+    "burn's execution error are not in it. A response with a target separation applies our burn, sized on the "
+    "hypothesis's nominal burn, to the blue asset in every sample, so its cells differ from the rest of the row. The "
+    "score normalises closest approach to 50,000 km, so the sampled spread moves it by at most {delta:.4f} here."
+)
 #: Shown with the sampled caveat when any cell is sampled (SPC-117): what a converged band is, in the operator's terms.
 CONVERGED_MEANS = (
     "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is larger "
@@ -1608,6 +1870,12 @@ SCORE_SPREAD_NOTE = (
     "approach is normalised to 50,000 km, not because the outcome is certain. Our response is not applied to the "
     "blue orbit, so within a sampled row the ranking is decided by lookup figures."
 )
+#: SCORE_SPREAD_NOTE once a response's burn is sized (SPC-121).
+SCORE_SPREAD_NOTE_WITH_BURNS = (
+    "Score spread is the 1-sigma spread of the composite score across samples. It is small because closest "
+    "approach is normalised to 50,000 km, not because the outcome is certain, and the same normalisation keeps "
+    "what our burn buys from moving the ranking much."
+)
 #: A row whose action carries a hypothesis in a scenario not bound on both sides.
 UNSAMPLED_ROW_NOTE = (
     "Hypothesis carried, not sampled: bind a red track and a blue asset to sample its closest approach."
@@ -1615,10 +1883,14 @@ UNSAMPLED_ROW_NOTE = (
 
 
 class RowSampling(NamedTuple):
-    """One eligible row's separation series, or why it was not sampled; never both."""
+    """One eligible row's separation series, or why it was not sampled; never both.
+
+    *sized* holds each response's burn sized on the hypothesis's nominal burn, or why it was not (SPC-121).
+    """
 
     series:  SeparationSeries | None
     refusal: str | None
+    sized:   tuple[SizedBurn | BurnRefusal, ...] = ()
 
 
 class _Row(NamedTuple):
@@ -1629,7 +1901,8 @@ class _Row(NamedTuple):
     blue:       BoundElset
     blue_track: BlueTrack | None   # blue's SGP4 state at the window start
     red_track:  BlueTrack | None   # red's SGP4 state at the hypothesis's burn
-    window:     SeparationWindow
+    window:     SeparationWindow   # from the scenario epoch over the span searched (SPC-118)
+    horizon_s:  float
 
 
 def _refusal(sentence: str) -> str:
@@ -1642,10 +1915,21 @@ def _too_few(row: _Row) -> str | None:
 
 
 def _stale(row: _Row) -> str | None:
-    for elset in (row.red, row.blue):
-        if elset.freshness is not Freshness.CURRENT:
-            return _STALE.format(side=elset.side)
-    return None
+    """An orbit out of date, of unknown age or at its limit already earns no span to sample over (SPC-118)."""
+    side = _unearned_side(row.red, row.blue)
+    return None if side is None else _STALE.format(side=side)
+
+
+def _burn_past_span(row: _Row) -> str | None:
+    """A burn at or after the end of the span the row earns, when a limit cut it short, leaves the no-burn figure."""
+    span = row.window.span_s
+    burn_s = (row.hypothesis.epoch_utc - row.window.start_utc).total_seconds()
+    if span >= row.horizon_s or burn_s < span:
+        return None
+    side = min((row.red, row.blue), key=_earned_s).side
+    return _BURN_PAST_SPAN.format(
+        burn=row.hypothesis.epoch_utc, end=row.window.start_utc + timedelta(seconds=span), side=side,
+    )
 
 
 def _after_burn(row: _Row) -> str | None:
@@ -1707,7 +1991,7 @@ def _unconverged(series: SeparationSeries) -> str | None:
 
 #: Checked in this order before anything runs; the first that speaks refuses the row.
 _PRE_RUN_CHECKS: tuple[Callable[[_Row], str | None], ...] = (
-    _too_few, _stale, _after_burn, _no_state, _start_mismatch, _velocity_mismatch,
+    _too_few, _stale, _burn_past_span, _after_burn, _no_state, _start_mismatch, _velocity_mismatch,
 )
 #: Checked in this order once the series has run.
 _POST_RUN_CHECKS: tuple[Callable[[SeparationSeries], str | None], ...] = (_failed, _unconverged)
@@ -1721,19 +2005,63 @@ def _first_refusal[T](subject: T, checks: tuple[Callable[[T], str | None], ...])
     return None
 
 
-def _floor_s(row: _Row) -> float:
+#: The share of a sample's own cost one more search against a burnt blue arc adds (SPC-121): rounded up from the
+#: worst measured, 29 % in LEO over 1 h (3.0 to 3.6 ms a sample; 16 % over 24 h, 42 % at GEO, whose samples run
+#: about 12 times cheaper and are refused conservatively anyway).
+_BURN_SEARCH_FRACTION = 0.3
+
+
+def _burn_extra_s(n: int, span_s: float, burns: int) -> float:
+    """What sizing and applying *burns* of our burns adds to a row of *n* samples, s of sample time (SPC-121).
+
+    Each burn: one more search per sample, at _BURN_SEARCH_FRACTION of the sample's own cost; MAX_SIZING_TRIALS
+    trials to size it, each charged as a sample; and blue's burnt arc, integrated once over the span.
+    """
+    per_sample = span_s + SET_UP_S_PER_SAMPLE
+    return burns * (n * _BURN_SEARCH_FRACTION * per_sample + MAX_SIZING_TRIALS * per_sample + span_s)
+
+
+def _computed_sizing_s(span_s: float, burns: int) -> float:
+    """What sizing *burns* of our burns against the computed rows costs, s of sample time: both RK45 arcs and
+    MAX_SIZING_TRIALS trials per burn, each charged as a sample (SPC-121)."""
+    return (2 + MAX_SIZING_TRIALS * burns) * (span_s + SET_UP_S_PER_SAMPLE)
+
+
+def _floor_s(row: _Row, burns: int = 0) -> float:
     """A lower bound on a row's cost, known without drawing a sample: its samples times the window and set-up."""
-    return row.hypothesis.n_samples * (row.window.span_s + SET_UP_S_PER_SAMPLE)
+    n = row.hypothesis.n_samples
+    return n * (row.window.span_s + SET_UP_S_PER_SAMPLE) + _burn_extra_s(n, row.window.span_s, burns)
 
 
-def _cost_s(row: _Row) -> float:
+def _cost_s(row: _Row, burns: int = 0) -> float:
     """What a row costs: the larger of its samples times the window and what its series integrates, and set-up."""
     n = row.hypothesis.n_samples
     propagated = max(n * row.window.span_s, separation_integration_s(row.hypothesis, row.window))
-    return propagated + n * SET_UP_S_PER_SAMPLE
+    return propagated + n * SET_UP_S_PER_SAMPLE + _burn_extra_s(n, row.window.span_s, burns)
 
 
-def _cost(rows: Sequence[_Row]) -> float:
+class _Work(NamedTuple):
+    """What one evaluation would run: its ready sampled rows, how many of our burns each sizes and applies, and
+    the span the computed rows' burns are sized over, None when they are not (SPC-121)."""
+
+    rows:      Sequence[_Row]
+    burns:     int = 0
+    computed_s: float | None = None
+
+    def at_span(self, span_s: float) -> _Work:
+        rows = [_at_span(row, span_s) for row in self.rows]
+        return self._replace(rows=rows, computed_s=None if self.computed_s is None else span_s)
+
+    @property
+    def span_s(self) -> float:
+        return self.rows[0].window.span_s if self.rows else cast("float", self.computed_s)
+
+    @property
+    def empty(self) -> bool:
+        return not self.rows and self.computed_s is None
+
+
+def _cost(work: _Work) -> float:
     """What *rows* cost together, in sample-hours; their floor alone once that is over the cap.
 
     The exact cost draws every sample to find its burn time, so a row far over the cap is refused on the floor
@@ -1767,53 +2095,82 @@ def _cost(rows: Sequence[_Row]) -> float:
     at a time, server-wide. The default hypothesis, 500 samples over 48 h, costs about 24,171 and is refused:
     it would hold the server's only sampling slot for 5 to 8 minutes at the rates measured. Not timed by any test.
     """
-    floor = sum(_floor_s(row) for row in rows) / _SECONDS_PER_HOUR
-    return floor if floor > MAX_SAMPLE_HOURS else sum(_cost_s(row) for row in rows) / _SECONDS_PER_HOUR
+    computed = 0.0 if work.computed_s is None else _computed_sizing_s(work.computed_s, work.burns)
+    floor = (sum(_floor_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
+    if floor > MAX_SAMPLE_HOURS:
+        return floor
+    return (sum(_cost_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
 
 
 def _at_span(row: _Row, span_s: float) -> _Row:
     return row._replace(window=row.window._replace(span_s=span_s))
 
 
-def _longest_tenths(rows: Sequence[_Row]) -> int:
-    """The longest horizon, in tenths of an hour, at which *rows* fit under the cap; 0 when none does.
+def _longest_tenths(work: _Work) -> int:
+    """The longest horizon, in tenths of an hour, at which *work* fits under the cap; 0 when none does.
 
     The cost never falls as the horizon grows, so a bisection over whole tenths finds it. The current horizon,
     rounded up, is over the cap, or this would not be asked.
     """
-    fits, over = 0, math.ceil(rows[0].window.span_s / _TENTH_HOUR_S)
+    fits, over = 0, math.ceil(work.span_s / _TENTH_HOUR_S)
     while over - fits > 1:
         mid = (fits + over) // 2
-        if _cost([_at_span(row, mid * _TENTH_HOUR_S) for row in rows]) > MAX_SAMPLE_HOURS:
+        if _cost(work.at_span(mid * _TENTH_HOUR_S)) > MAX_SAMPLE_HOURS:
             over = mid
         else:
             fits = mid
     return fits
 
 
-def _cap_refusal(rows: Sequence[_Row]) -> str | None:
-    """Why the rows that would run together are refused, naming what would fit; None when they fit."""
-    total = _cost(rows)
+class _OverCap(NamedTuple):
+    """What an evaluation over the cap would cost, sample-hours, and what would fit instead."""
+
+    total:  float
+    advice: str
+
+
+def _over_cap(work: _Work) -> _OverCap | None:
+    """Whether *work* is over the cap, with the longest horizon that would fit; None when it fits or is empty."""
+    if work.empty:
+        return None
+    total = _cost(work)
     if total <= MAX_SAMPLE_HOURS:
         return None
-    counted = f"{len(rows)} hypothesis" if len(rows) == 1 else f"{len(rows)} hypotheses"
-    tenths = _longest_tenths(rows)
+    tenths = _longest_tenths(work)
     advice = _SHORTEN.format(h=tenths / 10) if tenths > 0 else _NO_HORIZON.format(least=_MIN_CONVERGENCE_SAMPLES)
-    over = _OVER_CAP.format(
-        total=math.ceil(total), set_up=SET_UP_S_PER_SAMPLE / 60.0, rows=counted, cap=MAX_SAMPLE_HOURS,
+    return _OverCap(total, advice)
+
+
+def _counted(work: _Work) -> str:
+    """What the cap was summed across: the hypotheses, and our burns when any are sized."""
+    n = len(work.rows)
+    rows = f"{n} hypothesis" if n == 1 else f"{n} hypotheses"
+    if not work.burns:
+        return rows
+    burns = f"{work.burns} of our burns to size"
+    return f"{rows} with {burns}" if n else burns
+
+
+def _cap_refusal(work: _Work, over: _OverCap) -> str:
+    """Why the rows that would run together are refused, naming what would fit."""
+    sentence = _OVER_CAP.format(
+        total=math.ceil(over.total), set_up=SET_UP_S_PER_SAMPLE / 60.0, rows=_counted(work), cap=MAX_SAMPLE_HOURS,
         budget=EVALUATION_BUDGET_S,
     )
-    return _refusal(over + advice)
+    return _refusal(sentence + over.advice)
 
 
 class SamplingProgress(NamedTuple):
-    """How far a sampled evaluation has got: hypothesis *row* of the *rows* that run, *done* of its *total* samples."""
+    """How far an evaluation has got: row *row* of the *rows* that run, *done* of its *total* samples, or, at
+    stage "sizing", trial *done* of at most *total* sizing our burn for the response *label* (SPC-121)."""
 
     row:       int
     rows:      int
     done:      int
     total:     int
     elapsed_s: float
+    stage:     str = "sampling"
+    label:     str = ""
 
 
 def _ignore(_progress: SamplingProgress) -> None:
@@ -1860,13 +2217,18 @@ class _Budget:
         self.row = 0
         self.started: float | None = None
         self.spent = False
+        self.stage, self.label = "sampling", ""
 
     def _elapsed(self) -> float:
         return self.run.clock() - cast("float", self.started)
 
     def begin_row(self) -> bool:
-        """Whether the next row may start: the first always does, and none once the budget is spent."""
+        """Whether the next sampled row may start: the first always does, and none once the budget is spent."""
         self.row += 1
+        return self.may_start()
+
+    def may_start(self) -> bool:
+        """Whether the next piece of work may start, without counting it as a row: the computed rows' sizing."""
         if self.started is None:
             self.started = self.run.clock()
         elif not self.spent:
@@ -1880,7 +2242,7 @@ class _Budget:
         Otherwise the budget ran out during sample *done*, so *done* - 1 were finished within it.
         """
         elapsed = self._elapsed()
-        self.run.progress(SamplingProgress(self.row, self.rows, done, total, elapsed))
+        self.run.progress(SamplingProgress(self.row, self.rows, done, total, elapsed, self.stage, self.label))
         reason = self.run.stop()
         if reason:
             raise EvaluationStoppedError(reason)
@@ -1888,26 +2250,95 @@ class _Budget:
             self.spent = True
             raise _BudgetSpentError(done - 1, total)
 
+    def sizing(self, labels: dict[str, str]) -> SizingTick:
+        """A sizing tick that reports the response by name; the stage is sizing until sampling resumes."""
 
-def _checked(series: SeparationSeries) -> RowSampling:
+        def tick(key: str, done: int, total: int) -> None:
+            self.stage, self.label = "sizing", labels.get(key, "")
+            self.tick(done, total)
+
+        return tick
+
+    def sampling(self) -> Tick:
+        """The sampling tick, after any sizing."""
+        self.stage, self.label = "sampling", ""
+        return self.tick
+
+
+def _checked(series: SeparationSeries, sized: tuple[SizedBurn | BurnRefusal, ...] = ()) -> RowSampling:
     """A series that has run, or why it is refused."""
     refusal = _first_refusal(series, _POST_RUN_CHECKS)
-    return RowSampling(series=None, refusal=refusal) if refusal is not None else RowSampling(series, None)
+    return RowSampling(series=None, refusal=refusal) if refusal is not None else RowSampling(series, None, sized)
 
 
-def _run(row: _Row, sampler: Sampler, budget: _Budget | None) -> RowSampling:
-    """Run a row's series, under *budget* when there is one: a row it does not cover is refused, naming it."""
+class _Responses(NamedTuple):
+    """The scenario's burns to size (SPC-121): one request per manoeuvre response with a target, keyed by its
+    column, and each response's name for the job page."""
+
+    requests: tuple[BurnRequest, ...]
+    labels:   dict[str, str]
+
+
+def _responses_to_size(scenario: Scenario) -> _Responses:
+    requests, labels = [], {}
+    for j, friendly in enumerate(scenario.friendly_responses):
+        spec = friendly.burn
+        if spec is None:
+            continue
+        key = str(j)
+        requests.append(BurnRequest(
+            key, friendly.time_to_execute_hours * _SECONDS_PER_HOUR, spec.target_km, spec.budget_km_s, spec.axis,
+        ))
+        labels[key] = friendly.name.strip() or f"response {friendly.id}"
+    return _Responses(tuple(requests), labels)
+
+
+def _size_row(
+    row: _Row, blue: BlueTrack, responses: _Responses, budget: _Budget | None,
+) -> tuple[SizedBurn | BurnRefusal, ...]:
+    """Each response's burn sized on the row's nominal burn; refused for propagation when an arc fails."""
+    tick = None if budget is None else budget.sizing(responses.labels)
+    sized = hypothesis_response_plan(row.hypothesis, blue, row.window, responses.requests, tick=tick)
+    if sized is None:
+        return tuple(BurnRefusal(request.key, "propagation", 0) for request in responses.requests)
+    return sized
+
+
+def _sample(
+    row: _Row, sampler: Sampler, sized: tuple[SizedBurn | BurnRefusal, ...], tick: Tick | None,
+) -> SeparationSeries:
+    """Run the row's series, passing *tick* and our sized burns only when there are any (SPC-113, SPC-121)."""
+    burns = tuple(s.burn for s in sized if isinstance(s, SizedBurn) and s.burn is not None)
+    kwargs: dict[str, Any] = {}
+    if tick is not None:
+        kwargs["tick"] = tick
+    if burns:
+        kwargs["blue_burns"] = burns
+    return sampler(row.hypothesis, cast("BlueTrack", row.blue_track), row.window, **kwargs)
+
+
+def _run(row: _Row, sampler: Sampler, budget: _Budget | None, responses: _Responses | None = None) -> RowSampling:
+    """Run a row's series, under *budget* when there is one: a row it does not cover is refused, naming it.
+
+    Our burns are sized first, on the row's nominal burn, and applied in every sample (SPC-121).
+    """
     blue = cast("BlueTrack", row.blue_track)   # _no_state refused None
+    wanted = responses is not None and bool(responses.requests)
     if budget is None:
-        return _checked(sampler(row.hypothesis, blue, row.window))
+        sized = _size_row(row, blue, cast("_Responses", responses), None) if wanted else ()
+        return _checked(_sample(row, sampler, sized, None), sized)
     budget_s = budget.run.budget_s
     if not budget.begin_row():
         return RowSampling(None, _refusal(_BUDGET_NONE.format(budget=budget_s)))
     try:
-        series = sampler(row.hypothesis, blue, row.window, tick=budget.tick)
+        sized = _size_row(row, blue, cast("_Responses", responses), budget) if wanted else ()
+    except _BudgetSpentError:
+        return RowSampling(None, _refusal(_BUDGET_SIZING.format(budget=budget_s)))
+    try:
+        series = _sample(row, sampler, sized, budget.sampling())
     except _BudgetSpentError as spent:
         return RowSampling(None, _refusal(_BUDGET_PART.format(budget=budget_s, k=spent.done, n=spent.total)))
-    return _checked(series)
+    return _checked(series, sized)
 
 
 def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
@@ -1922,46 +2353,90 @@ def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
     red, blue = (None, None) if binding is None else (binding.red, binding.blue)
     if red is None or blue is None:
         return []
-    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=scenario.horizon_hours * _SECONDS_PER_HOUR)
+    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
     blue_track = elset_state(blue.tle, window.start_utc)
     return [
         None if a.hypothesis is None else _Row(
             hypothesis=a.hypothesis.hypothesis, red=red, blue=blue, blue_track=blue_track,
             red_track=elset_state(red.tle, a.hypothesis.hypothesis.epoch_utc), window=window,
+            horizon_s=scenario.horizon_hours * _SECONDS_PER_HOUR,
         )
         for a in scenario.adversary_actions
     ]
 
 
-def _pre_plan(scenario: Scenario) -> tuple[list[_Row | None], list[str | None]]:
-    """Each row as checked before anything runs, and why it is refused (the cap included); None where it is not."""
+class _PrePlan(NamedTuple):
+    """What an evaluation will run, known before anything does: each row as checked and why it is refused, the
+    burns to size, whether the computed rows' burns will be sized, and why not when they are over the cap."""
+
+    rows:      list[_Row | None]
+    refusals:  list[str | None]
+    responses: _Responses
+    sizing:    bool
+    sizing_refusal: str | None
+
+    @property
+    def ready(self) -> int:
+        return sum(row is not None and refusal is None for row, refusal in zip(self.rows, self.refusals, strict=True))
+
+
+def _computes_rows(scenario: Scenario) -> bool:
+    """Whether some row's closest approach will be computed: bound on both sides with time earned, and a row whose
+    action does not move red and carries no hypothesis."""
+    binding = scenario.binding
+    if binding is None or binding.red is None or binding.blue is None or _searched_span_s(scenario) <= 0.0:
+        return False
+    return any(a.action_type in _STILL_ACTIONS and a.hypothesis is None for a in scenario.adversary_actions)
+
+
+def _pre_plan(scenario: Scenario) -> _PrePlan:
+    """Each row as checked before anything runs, and why it is refused (the cap included); None where it is not.
+
+    The cap counts our burns to size, in the sampled rows and against the computed rows (SPC-121); over it, the
+    rows and the computed burns are refused together.
+    """
     rows = _eligible_rows(scenario)
+    responses = _responses_to_size(scenario)
     refusals = [None if row is None else _first_refusal(row, _PRE_RUN_CHECKS) for row in rows]
     ready = [row for row, refusal in zip(rows, refusals, strict=True) if row is not None and refusal is None]
-    over = _cap_refusal(ready)
-    return rows, [None if row is None else refusal or over for row, refusal in zip(rows, refusals, strict=True)]
+    sizing = bool(responses.requests) and _computes_rows(scenario)
+    work = _Work(ready, len(responses.requests), _searched_span_s(scenario) if sizing else None)
+    over = _over_cap(work)
+    row_over = None if over is None else _cap_refusal(work, over)
+    sizing_refusal = None
+    if over is not None and sizing:
+        sizing_refusal = _RESPONSE_OVER_CAP.format(
+            total=math.ceil(over.total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+        ) + over.advice + _DV_LOOKUP
+        sizing = False
+    checked = [None if row is None else refusal or row_over for row, refusal in zip(rows, refusals, strict=True)]
+    return _PrePlan(rows, checked, responses, sizing, sizing_refusal)
 
 
-def longest_horizon_h(n_samples: int, rows: int = 1) -> float:
+def longest_horizon_h(n_samples: int, rows: int = 1, burns: int = 0) -> float:
     """The longest horizon, in hours floored to tenths, at which *rows* hypotheses of *n_samples* fit the cap.
 
     For the panel's hint (SPC-114): a burn at the scenario epoch integrates about (n + 2) times the horizon per
     row (each sample, blue and red's unburnt arc), and each sample adds SET_UP_S_PER_SAMPLE. A burn before the
-    epoch costs more, so this is an upper bound; the cap itself is checked on the real cost.
+    epoch costs more, so this is an upper bound; the cap itself is checked on the real cost. Each of *burns* of
+    our burns (SPC-121) adds _BURN_SEARCH_FRACTION of a sample per sample, MAX_SIZING_TRIALS samples to size it
+    and blue's burnt arc: m = n (1 + 0.3 k) + 16 k samples, each with set-up, over (m + 2 + k) arcs.
     """
-    set_up_h = rows * n_samples * SET_UP_S_PER_SAMPLE / _SECONDS_PER_HOUR
-    hours = (MAX_SAMPLE_HOURS - set_up_h) / (rows * (n_samples + 2))
+    m = n_samples * (1.0 + _BURN_SEARCH_FRACTION * burns) + MAX_SIZING_TRIALS * burns
+    set_up_h = rows * m * SET_UP_S_PER_SAMPLE / _SECONDS_PER_HOUR
+    hours = (MAX_SAMPLE_HOURS - set_up_h) / (rows * (m + 2 + burns))
     return max(math.floor(hours * 10) / 10, 0.0)
 
 
 def needs_a_run(scenario: Scenario) -> bool:
-    """Whether evaluating *scenario* would sample anything: some row passes every check before the run and the cap.
+    """Whether evaluating *scenario* would sample or size anything: some row passes every check before the run and
+    the cap, or the computed rows' burns will be sized (SPC-121).
 
     False for a lookup scenario and for one whose every eligible row is refused before anything runs; those
     evaluate in milliseconds, so the route can answer them on the request.
     """
-    rows, refusals = _pre_plan(scenario)
-    return any(row is not None and refusal is None for row, refusal in zip(rows, refusals, strict=True))
+    pre = _pre_plan(scenario)
+    return pre.ready > 0 or pre.sizing
 
 
 def plan_sampling(
@@ -1983,31 +2458,44 @@ def plan_sampling(
     does not cover is refused, naming it, and a stop raises
     EvaluationStoppedError.
     """
-    rows, refusals = _pre_plan(scenario)
-    if not rows:
+    pre = _pre_plan(scenario)
+    budget = None if run is None else _Budget(run, pre.ready)
+    return _plan_sampling(scenario, sampler, budget, pre)
+
+
+def _plan_sampling(
+    scenario: Scenario, sampler: Sampler, budget: _Budget | None, pre: _PrePlan,
+) -> tuple[RowSampling | None, ...]:
+    if not pre.rows:
         return (None,) * len(scenario.adversary_actions)
-    ready = sum(row is not None and refusal is None for row, refusal in zip(rows, refusals, strict=True))
-    budget = None if run is None else _Budget(run, ready)
     return tuple(
-        None if row is None else _plan_row(row, refusal, sampler, budget)
-        for row, refusal in zip(rows, refusals, strict=True)
+        None if row is None else _plan_row(row, refusal, sampler, budget, pre.responses)
+        for row, refusal in zip(pre.rows, pre.refusals, strict=True)
     )
 
 
-def _plan_row(row: _Row, refusal: str | None, sampler: Sampler, budget: _Budget | None) -> RowSampling:
+def _plan_row(
+    row: _Row, refusal: str | None, sampler: Sampler, budget: _Budget | None, responses: _Responses,
+) -> RowSampling:
     """A row refused before anything runs, or its series run and checked."""
-    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget)
+    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget, responses)
 
 
-def _sampled_bases(series: SeparationSeries, horizon_hours: float) -> OutcomeBases:
-    n = len(series.approaches)
+def _sampled_bases(series: SeparationSeries, horizon_hours: float, *, burnt: bool = False) -> OutcomeBases:
+    n, span = len(series.approaches), series.window.span_s / _SECONDS_PER_HOUR
+    ours = _BURN_ENDING if burnt else _NO_BURN_ENDING
     return outcome_bases(
         custody_maintained=LOOKUP_BASES.custody_maintained,
         custody_gap_hours=LOOKUP_BASES.custody_gap_hours,
         closest_approach_km=FigureBasis(
-            Basis.SAMPLED, _SAMPLED_CA_NOTE.format(n=n, hw=series.percentile_half_width_km, horizon=horizon_hours),
+            Basis.SAMPLED,
+            _SAMPLED_CA_NOTE.format(
+                n=n, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours, ours=ours,
+            ),
         ),
-        time_to_closest_hours=FigureBasis(Basis.SAMPLED, _SAMPLED_TIME_NOTE.format(n=n, horizon=horizon_hours)),
+        time_to_closest_hours=FigureBasis(
+            Basis.SAMPLED, _SAMPLED_TIME_NOTE.format(n=n, span=span, horizon=horizon_hours),
+        ),
         delta_v_cost_km_s=LOOKUP_BASES.delta_v_cost_km_s,
     )
 
@@ -2025,25 +2513,30 @@ def _cell_caveat(series: SeparationSeries) -> str:
 
 
 def _sampled_cell(
-    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, series: SeparationSeries,
-    custody: _RowCustody | None,
+    adversary: AdversaryAction, scenario: Scenario, series: SeparationSeries, custody: _RowCustody | None,
+    response: _ResponseCell,
 ) -> OutcomeMetrics:
     """A cell scored on the sampled P5, with its time the earliest TCA at or below it; the rest are lookups.
 
     Each sample's miss is scored too, through the same _score, for the composite score's P5, P50, P95 and
-    1-sigma spread across samples (SPC-115). The score is linear in the miss below 50,000 km.
+    1-sigma spread across samples (SPC-115). The score is linear in the miss below 50,000 km. With our burn
+    (SPC-121), *series* is the samples after it and the delta-V is the burn's.
     """
+    friendly = response.friendly
     figures = _custodial(_lookup_figures(adversary, friendly, scenario), custody)._replace(
         closest_approach_km=series.miss_km_p5,
     )
+    figures = response.figures(figures)
     scores = np.array([
         _score(scenario, friendly, figures._replace(closest_approach_km=a.miss_km)) for a in series.approaches
     ])
-    built = _Built(
-        figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, _sampled_bases(series, scenario.horizon_hours),
-    )
+    bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt))
+    built = _Built(figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, bases)
+    tca, sampled_tca = _sampled_tca(scenario, series)
     return _outcome(
-        scenario, friendly, built, custody,
+        scenario, friendly, built, custody, tca_uncertainty=tca, ca_sampled_tca=sampled_tca,
+        tca_histogram=_tca_histogram(scenario, series),
+        ca_response=response.figure, response_refusal=response.refusal,
         ca_percentiles=series.percentiles,
         ca_std_km=series.miss_km_std,
         ca_samples=len(series.approaches),
@@ -2052,6 +2545,153 @@ def _sampled_cell(
         score_percentiles={k: float(np.percentile(scores, k)) for k in _PERCENTILE_KEYS},
         score_std=float(np.std(scores)),
     )
+
+
+def _sampled_tca(scenario: Scenario, series: SeparationSeries) -> tuple[TcaUncertainty, SampledTca]:
+    """The uncertainty of a sampled cell's TCA, from the sample that sets it, and the TCA's spread (SPC-118)."""
+    index = cast("int", series.earliest_at_or_below_p5_index)   # a converged series has a sample at or below P5
+    approach = series.approaches[index]
+    speeds = series.closing_speeds_km_s
+    speed = speeds[index] if speeds else math.nan
+    start = series.window.start_utc
+    tca = _tca_uncertainty(cast("ScenarioBinding", scenario.binding), start, approach, speed, series.window.span_s)
+    hours = np.array([a.tca_s for a in series.approaches]) / _SECONDS_PER_HOUR
+    p5, p95 = (float(p) for p in np.percentile(hours, (5, 95)))
+    return tca, SampledTca(approach.tca_utc(start), approach.tca_s / _SECONDS_PER_HOUR, p5, p95)
+
+
+def _tca_histogram(scenario: Scenario, series: SeparationSeries) -> TcaHistogram | None:
+    """The samples' TCAs, hours after the scenario epoch, each with its own uncertainty, from its closing speed; the
+    samples at an edge of the search, and those too slow to fix a time, counted, not drawn (SPC-124). None when the
+    series recorded no closing speed."""
+    speeds = series.closing_speeds_km_s
+    if not speeds:
+        return None
+    binding, start, span = cast("ScenarioBinding", scenario.binding), series.window.start_utc, series.window.span_s
+    offset_h = (start - scenario.epoch_utc).total_seconds() / _SECONDS_PER_HOUR
+    shown = [(a, v) for a, v in zip(series.approaches, speeds, strict=True) if not a.at_window_edge]
+    closing = sum(a.at_window_edge and a.tca_s > 0.0 for a in series.approaches)
+    return tca_histogram(
+        [offset_h + a.tca_s / _SECONDS_PER_HOUR for a, _ in shown],
+        [_tca_uncertainty(binding, start, a, v, span).sigma_s for a, v in shown],
+        n_closing=closing, n_opening=series.n_at_window_edge - closing,
+    )
+
+
+def _response_of(
+    results: Sequence[SizedBurn | BurnRefusal], column: int,
+) -> SizedBurn | BurnRefusal | None:
+    key = str(column)
+    return next((result for result in results if result.key == key), None)
+
+
+def _burn_at(scenario: Scenario, friendly: FriendlyResponse) -> datetime:
+    return scenario.epoch_utc + timedelta(hours=friendly.time_to_execute_hours)
+
+
+def _burnt_series(series: SeparationSeries, after: BurnSeries) -> SeparationSeries:
+    """The row's series as it stands after one of our burns: the same samples, against the burnt blue asset."""
+    stats = after.stats
+    return dataclasses.replace(
+        series, approaches=after.approaches, closing_speeds_km_s=after.closing_speeds_km_s, n_failed=after.n_failed,
+        miss_km_p5=stats.p5, miss_km_p50=stats.p50, miss_km_p95=stats.p95, miss_km_std=stats.std,
+        percentile_half_width_km=stats.half_width_km, converged=stats.converged, tolerance_km=stats.tolerance_km,
+        after_burns=(),
+    )
+
+
+def _after_burn_refusal(after: BurnSeries | None, n: int) -> str | None:
+    """Why a sampled cell after our burn is not earned: its series is missing, a sample failed, or unconverged."""
+    if after is None or after.n_failed > 0:
+        failed = n if after is None else after.n_failed
+        return _refusal(_AFTER_BURN_FAILED.format(k=failed, n=n))
+    if not after.stats.converged:
+        return _refusal(_AFTER_BURN_UNCONVERGED.format(hw=after.stats.half_width_km, tol=after.stats.tolerance_km))
+    return None
+
+
+def _sampled_response_cell(
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan, column: int,
+) -> OutcomeMetrics:
+    """A sampled cell, after our burn where this response's was sized and applied (SPC-121)."""
+    sampling = cast("RowSampling", plan.sampling)
+    series = cast("SeparationSeries", sampling.series)
+    result = _response_of(sampling.sized, column)
+    spec = friendly.burn
+    if spec is None or result is None:
+        return _sampled_cell(adversary, scenario, series, plan.custody, _ResponseCell(friendly, None, None))
+    at = _burn_at(scenario, friendly)
+    if isinstance(result, BurnRefusal):
+        sentence = _response_refusal(result, at, series.window, _NOMINAL_TCA)
+        return _sampled_cell(adversary, scenario, series, plan.custody, _ResponseCell(friendly, None, sentence))
+    if result.burn is None:
+        figure = ResponseFigure(
+            result, at, spec.target_km, spec.budget_km_s, sampled_before_p5_km=series.miss_km_p5,
+            sampled_under_target=_under_target(series, spec.target_km),
+        )
+        return _sampled_cell(adversary, scenario, series, plan.custody, _ResponseCell(friendly, figure, None))
+    after = next((b for b in series.after_burns if b.burn == result.burn), None)
+    refusal = _after_burn_refusal(after, series.n_samples_run)
+    if refusal is not None:
+        return _refused_cell(_lookup_cell(adversary, friendly, scenario, plan.custody), refusal)
+    burnt = _burnt_series(series, cast("BurnSeries", after))
+    figure = ResponseFigure(
+        result, at, spec.target_km, spec.budget_km_s, sampled_before_p5_km=series.miss_km_p5,
+        sampled_after_p5_km=burnt.miss_km_p5, sampled_under_target=_under_target(burnt, spec.target_km),
+    )
+    return _sampled_cell(adversary, scenario, burnt, plan.custody, _ResponseCell(friendly, figure, None))
+
+
+def _under_target(series: SeparationSeries, target_km: float) -> tuple[int, int]:
+    """How many of the series' samples came closer than *target_km*, of how many."""
+    return sum(a.miss_km < target_km for a in series.approaches), len(series.approaches)
+
+
+def _response_refusal(result: BurnRefusal, at: datetime, window: SeparationWindow, basis: str) -> str:
+    """Why this response's burn was not sized, ending with its delta-V a lookup (SPC-121).
+
+    A burn after the closest approach names the one it was decided on, the RK45 figure with no burn, and *basis*
+    says how it was propagated: never the cell's own TCA, which may be SGP4's or a sample's.
+    """
+    if result.reason == "after_window":
+        return _RESPONSE_AFTER_SPAN.format(at=at, span=window.span_s / _SECONDS_PER_HOUR)
+    if result.reason == "after_tca":
+        tca = _to_the_minute(window.start_utc + timedelta(seconds=cast("float", result.tca_s)))
+        return _RESPONSE_AFTER_TCA.format(at=at, tca=tca, basis=basis)
+    reentered = _RESPONSE_REENTERED.format(floor=REENTRY_FLOOR_KM) if result.reason == "reentered" else ""
+    return _RESPONSE_FAILED.format(reentered=reentered)
+
+
+class _ResponseCell(NamedTuple):
+    """What one response brings to its cell (SPC-121): our sized burn, or why it was not sized, or neither."""
+
+    friendly: FriendlyResponse
+    figure:   ResponseFigure | None
+    refusal:  str | None
+
+    @property
+    def burnt(self) -> bool:
+        return self.figure is not None and self.figure.sized.burn is not None
+
+    def figures(self, figures: _Figures) -> _Figures:
+        """*figures* with the burn's delta-V in place of the lookup's."""
+        return figures if self.figure is None else figures._replace(delta_v_km_s=self.figure.delta_v_km_s)
+
+    def bases(self, bases: OutcomeBases) -> OutcomeBases:
+        """*bases* with our delta-V's: computed for a sized burn; else the lookup, saying why it was not sized."""
+        if self.figure is not None:
+            delta_v = FigureBasis(Basis.COMPUTED, self.figure.note)
+        elif self.refusal is not None:
+            delta_v = FigureBasis(Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. {self.refusal}")
+        elif self.friendly.action_type is ActionType.MANOEUVRE:
+            delta_v = FigureBasis(Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. {_ENTER_TARGET}")
+        else:
+            return bases
+        return outcome_bases(
+            custody_maintained=bases.custody_maintained, custody_gap_hours=bases.custody_gap_hours,
+            closest_approach_km=bases.closest_approach_km, time_to_closest_hours=bases.time_to_closest_hours,
+            delta_v_cost_km_s=delta_v,
+        )
 
 
 def _refused_cell(metrics: OutcomeMetrics, refusal: str | None) -> OutcomeMetrics:
@@ -2099,10 +2739,23 @@ _COMPUTED_TIME_NOTE = (
     "time of that closest approach from the scenario epoch, SGP4 for both orbits, refined to 0.01 s and shown to "
     "the minute"
 )
-_COMPUTED_LINE = "Computed: {miss:.1f} km at {tca:%Y-%m-%d %H:%M} UTC, {h:.2f} h after the scenario epoch; SGP4, no burn."
+_COMPUTED_LINE = "Computed: {miss:.1f} km at {tca:%Y-%m-%d %H:%M} UTC{pm}, {h} h after the scenario epoch; {how}."
 _COMPUTED_TITLE = (
-    "Computed: {miss:.3f} km at {tca_s:,.2f} s after the scenario epoch, passing at {v:,.0f} m/s; SGP4 for both "
-    "orbits with no burn, so one figure, with no distribution."
+    "Computed: {miss:.3f} km at {tca_s:,.2f} s after the scenario epoch, passing at {v:,.0f} m/s; {how}, so one "
+    "figure, with no distribution."
+)
+#: The computed note once our burn put every computed cell on RK45 (SPC-121).
+_RK45_CA_NOTE = (
+    "smallest separation of the bound red track {red} and blue asset {blue} over {span:.1f} h of the {horizon:g} h "
+    "horizon from the scenario epoch, both propagated by RK45 with J2 and exponential drag from their SGP4 states "
+    "then (red epoch {re:%Y-%m-%d %H:%M} UTC, blue epoch {be:%Y-%m-%d %H:%M} UTC) {burn}, sampled every {step:g} s "
+    "and each local minimum refined to 0.01 s; element-set error is not in it"
+)
+_RK45_NO_BURN_NOTE = "with no burn"
+_RK45_BURN_NOTE = "with our burn applied to the blue asset"
+_RK45_TIME_NOTE = (
+    "time of that closest approach from the scenario epoch, RK45 for both orbits, refined to 0.01 s and shown to "
+    "the minute"
 )
 _STILL_CLOSING = (
     "Still closing when the search ends, so the closest approach comes after it: this is the separation then, not "
@@ -2112,9 +2765,9 @@ _ALREADY_OPENING = (
     "Already opening at the scenario epoch: the closest in the horizon is now, and any closer approach was before "
     "it."
 )
-_COMPUTED_SPAN = (
-    "Computed over the first {span:.1f} h of the {horizon:g} h horizon, while both element sets are within their "
-    "limits; past {end:%Y-%m-%d %H:%M} UTC a computed miss would rest on an out-of-date orbit."
+_SEARCHED_SPAN = (
+    "Closest approaches are searched over the first {span:.1f} h of the {horizon:g} h horizon, while both element "
+    "sets are within their limits; past {end:%Y-%m-%d %H:%M} UTC a miss would rest on an out-of-date orbit."
 )
 #: Shown once with the result when any cell is computed (SPC-120). The element-set model is along_track.py's.
 COMPUTED_CAVEAT = (
@@ -2123,6 +2776,68 @@ COMPUTED_CAVEAT = (
     "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
     "approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as "
     "1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it."
+)
+#: COMPUTED_CAVEAT once a response's burn is sized (SPC-121).
+COMPUTED_CAVEAT_WITH_BURNS = (
+    "Computed cells propagate both bound orbits as their element sets stand, with no red burn, so every row whose "
+    "action does not move the red track shares its no-burn figure. A response with a target separation applies our "
+    "burn to the blue asset, so its cells differ from the rest of the row. Element-set error, which the sweep takes "
+    "as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in any of them."
+)
+#: Shown with the result once a response's burn put every computed cell on RK45 (SPC-121).
+RK45_FOR_BURNS = (
+    "Our burn cannot be applied to an element set, so in this result every closest approach is propagated by RK45 "
+    "with J2 and exponential drag for both orbits, from their SGP4 states at the scenario epoch. With no burn, SGP4 "
+    "puts the closest approach at {sm:.3f} km at {st:%Y-%m-%d %H:%M:%S} UTC and RK45 at {rm:.3f} km at "
+    "{rt:%H:%M:%S} UTC: {dm:.3f} km and {dt:.0f} s apart, which is the propagators, not any burn."
+)
+#: Shown with the result when a burn is sized: the score cannot see what it buys (SPC-121; weights are SPC-151).
+BURN_SCORE_NOTE = (
+    "The score normalises closest approach to 50,000 km and delta-V to 100 m/s, so the {buys:.1f} km our burn buys "
+    "against {adv} moves its score by {ca:.4f} while its {dv:.2f} m/s adds {dvs:.4f}: read what a burn buys from its "
+    "cell, not from the ranking."
+)
+_DV_LOOKUP = " This cell's delta-V is a lookup."
+_ENTER_TARGET = "Enter a target separation to size this burn."
+_RESPONSE_AFTER_TCA = (
+    "Our burn is not sized: at {at:%Y-%m-%d %H:%M} UTC, the response's time to execute after the scenario epoch, it "
+    "comes after the closest approach at {tca:%Y-%m-%d %H:%M} UTC ({basis}), so it cannot open it. Shorten the time "
+    "to execute." + _DV_LOOKUP
+)
+#: What an after-TCA refusal's closest approach rests on, in a computed and in a sampled row.
+_RK45_TCA = "RK45 for both orbits, no burn"
+_NOMINAL_TCA = "RK45, red with the hypothesis's nominal burn"
+#: Follows the lookup delta-V of a cell whose response names a target but whose closest approach is a lookup.
+_TARGET_UNUSED = (
+    "No burn is shown for the {target:g} km target: it is sized against this cell's closest approach computed or "
+    "sampled, and here that is a lookup." + _DV_LOOKUP
+)
+_RESPONSE_AFTER_SPAN = (
+    "Our burn is not sized: at {at:%Y-%m-%d %H:%M} UTC it comes after the {span:.1f} h searched, so it cannot change "
+    "the closest approach in it." + _DV_LOOKUP
+)
+_RESPONSE_FAILED = (
+    "Our burn is not sized: the blue asset's arc after it could not be propagated{reentered}." + _DV_LOOKUP
+)
+_RESPONSE_REENTERED = ", since it re-entered below {floor:g} km"
+_RESPONSE_OVER_CAP = (
+    "Our burn is not sized: sizing it with the rest of this evaluation needs at least {total:,} sample-hours, above "
+    "the {cap:,.0f} one evaluation may run within its {budget:g} s budget. "
+)
+_RESPONSE_BUDGET = (
+    "Our burn is not sized: this evaluation's {budget:g} s budget ran out before it was." + _DV_LOOKUP
+)
+_BUDGET_SIZING = (
+    "Not sampled: this evaluation's {budget:g} s budget ran out while our burn was sized for this row. Take fewer "
+    "samples or a shorter horizon."
+)
+_AFTER_BURN_FAILED = (
+    "Not sampled after our burn: {k} of {n} samples failed to propagate against the burnt blue asset, and a P5 "
+    "without them could hide the closest."
+)
+_AFTER_BURN_UNCONVERGED = (
+    "Not sampled after our burn: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:.1f} km "
+    "this miss needs."
 )
 _PROPAGATOR_LINE = (
     "Computed rows use SGP4; sampled rows use RK45 with J2 and drag, from the same element sets. Over this horizon "
@@ -2138,10 +2853,18 @@ COMPUTED_BINDING_NOTE = "Closest approach not computed: bind a red track and a b
 
 
 class ComputedPlan(NamedTuple):
-    """The bound pair's computed closest approach, or why it was not computed; never both."""
+    """The bound pair's computed closest approach, or why it was not computed; never both.
+
+    Once a response's burn is sized (SPC-121), *approach* is RK45 for both orbits with no burn, *responses* holds
+    each burn or why it was not sized, and *sgp4_reference* the SGP4 figure with no burn, shown beside it.
+    *response_refusal* says why no burn was sized at all, when the cap or the budget stopped it.
+    """
 
     approach: ElsetApproach | None
     refusal:  str | None
+    responses: tuple[SizedBurn | BurnRefusal, ...] = ()
+    sgp4_reference: ElsetApproach | None = None
+    response_refusal: str | None = None
 
 
 def _earned_s(elset: BoundElset) -> float:
@@ -2157,7 +2880,41 @@ def _unearned_side(red: BoundElset, blue: BoundElset) -> str | None:
     return None
 
 
+def _searched_span_s(scenario: Scenario) -> float:
+    """The seconds from the scenario epoch both paths search (SPC-118): to the horizon's end or the moment either
+    bound element set passes its limit, whichever is first; 0 when either earns no time; the horizon unbound."""
+    horizon = scenario.horizon_hours * _SECONDS_PER_HOUR
+    binding = scenario.binding
+    red, blue = (None, None) if binding is None else (binding.red, binding.blue)
+    if red is None or blue is None:
+        return horizon
+    if _unearned_side(red, blue) is not None:
+        return 0.0
+    return min(horizon, _earned_s(red), _earned_s(blue))
+
+
 def plan_computed(scenario: Scenario) -> ComputedPlan | None:
+    """The bound pair's closest approach, or why not; None unless bound on both sides (SPC-120, SPC-121)."""
+    return _plan_computed(scenario, _pre_plan(scenario), None)
+
+
+def _size_computed(
+    scenario: Scenario, window: SeparationWindow, responses: _Responses, budget: _Budget | None,
+) -> Rk45Plan | ElsetFailure | str:
+    """The pair on RK45 with each response's burn sized, or why not: an arc failed, or the budget ran out."""
+    binding = cast("ScenarioBinding", scenario.binding)
+    red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
+    if budget is None:
+        return elset_response_plan(red.tle, blue.tle, window, responses.requests)
+    if not budget.may_start():
+        return _RESPONSE_BUDGET.format(budget=budget.run.budget_s)
+    try:
+        return elset_response_plan(red.tle, blue.tle, window, responses.requests, tick=budget.sizing(responses.labels))
+    except _BudgetSpentError:
+        return _RESPONSE_BUDGET.format(budget=budget.run.budget_s)
+
+
+def _plan_computed(scenario: Scenario, pre: _PrePlan, budget: _Budget | None) -> ComputedPlan | None:
     """The bound pair's closest approach with no burn, both on SGP4, or why not; None unless bound on both sides.
 
     One search per scenario, shared by every computed row and response: our response is not applied to the blue
@@ -2173,37 +2930,98 @@ def plan_computed(scenario: Scenario) -> ComputedPlan | None:
     side = _unearned_side(red, blue)
     if side is not None:
         return ComputedPlan(None, _refusal(_NOT_COMPUTED_STALE.format(side=side)))
-    span_s = min(scenario.horizon_hours * _SECONDS_PER_HOUR, _earned_s(red), _earned_s(blue))
-    found = elset_closest_approach(red.tle, blue.tle, SeparationWindow(start_utc=scenario.epoch_utc, span_s=span_s))
+    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
+    found = elset_closest_approach(red.tle, blue.tle, window)
     if isinstance(found, ElsetFailure):
         return ComputedPlan(None, _refusal(_NOT_COMPUTED_SGP4.format(side=found.side)))
-    return ComputedPlan(found, None)
+    if not pre.sizing:
+        return ComputedPlan(found, None, response_refusal=pre.sizing_refusal)
+    return _with_burns(found, _size_computed(scenario, window, pre.responses, budget), pre.responses)
 
 
-def _computed_bases(scenario: Scenario, found: ElsetApproach) -> OutcomeBases:
+def _with_burns(found: ElsetApproach, sized: Rk45Plan | ElsetFailure | str, responses: _Responses) -> ComputedPlan:
+    """The computed plan once the burns were sized: on RK45 when any was, else the SGP4 figure with why not."""
+    if isinstance(sized, str):
+        return ComputedPlan(found, None, response_refusal=sized)
+    if isinstance(sized, ElsetFailure):
+        failed = tuple(BurnRefusal(request.key, "propagation", 0) for request in responses.requests)
+        return ComputedPlan(found, None, responses=failed)
+    if not any(isinstance(result, SizedBurn) for result in sized.responses):
+        return ComputedPlan(found, None, responses=sized.responses)   # nothing burns, so SGP4 stands
+    return ComputedPlan(sized.before, None, responses=sized.responses, sgp4_reference=found)
+
+
+def _computed_bases(scenario: Scenario, found: ElsetApproach, *, burnt: bool = False) -> OutcomeBases:
     binding = cast("ScenarioBinding", scenario.binding)   # plan_computed computes only when both sides are bound
     red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
-    note = _COMPUTED_CA_NOTE.format(
+    rk45 = found.propagator == RESPONSE_PROPAGATOR
+    note = (_RK45_CA_NOTE if rk45 else _COMPUTED_CA_NOTE).format(
         red=red.stk_name, blue=blue.stk_name, span=found.window.span_s / _SECONDS_PER_HOUR,
         horizon=scenario.horizon_hours, re=red.epoch, be=blue.epoch, step=found.window.step_s,
+        burn=_RK45_BURN_NOTE if burnt else _RK45_NO_BURN_NOTE,
     )
     return outcome_bases(
         custody_maintained=LOOKUP_BASES.custody_maintained,
         custody_gap_hours=LOOKUP_BASES.custody_gap_hours,
         closest_approach_km=FigureBasis(Basis.COMPUTED, note),
-        time_to_closest_hours=FigureBasis(Basis.COMPUTED, _COMPUTED_TIME_NOTE),
+        time_to_closest_hours=FigureBasis(Basis.COMPUTED, _RK45_TIME_NOTE if rk45 else _COMPUTED_TIME_NOTE),
         delta_v_cost_km_s=LOOKUP_BASES.delta_v_cost_km_s,
     )
 
 
 def _computed_cell(
-    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, found: ElsetApproach,
-    custody: _RowCustody | None,
+    adversary: AdversaryAction, scenario: Scenario, found: ElsetApproach, custody: _RowCustody | None,
+    response: _ResponseCell,
 ) -> OutcomeMetrics:
-    """A cell scored on the computed miss, unrounded, with its time the computed TCA; the rest are lookups."""
+    """A cell scored on the computed miss, unrounded, with its time the computed TCA; the rest are lookups, but our
+    delta-V where this response's burn was sized (SPC-121)."""
+    friendly = response.friendly
     figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=found.approach.miss_km)
-    built = _Built(figures, found.approach.tca_s / _SECONDS_PER_HOUR, _computed_bases(scenario, found))
-    return _outcome(scenario, friendly, built, custody, ca_computed=found)
+    bases = response.bases(_computed_bases(scenario, found, burnt=response.burnt))
+    built = _Built(response.figures(figures), found.approach.tca_s / _SECONDS_PER_HOUR, bases)
+    tca = _tca_uncertainty(
+        cast("ScenarioBinding", scenario.binding), found.window.start_utc, found.approach, found.closing_speed_km_s,
+        found.window.span_s,
+    )
+    return _outcome(
+        scenario, friendly, built, custody, ca_computed=found, tca_uncertainty=tca, ca_response=response.figure,
+        response_refusal=response.refusal,
+    )
+
+
+def _computed_response_cell(
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan, column: int,
+) -> OutcomeMetrics:
+    """A computed cell, after our burn where this response's was sized (SPC-121)."""
+    computed = cast("ComputedPlan", plan.computed)
+    found = cast("ElsetApproach", computed.approach)
+    spec = friendly.burn
+    result = _response_of(computed.responses, column)
+    if spec is None:
+        return _computed_cell(adversary, scenario, found, plan.custody, _ResponseCell(friendly, None, None))
+    if result is None:
+        refusal = computed.response_refusal
+        return _computed_cell(adversary, scenario, found, plan.custody, _ResponseCell(friendly, None, refusal))
+    at = _burn_at(scenario, friendly)
+    if isinstance(result, BurnRefusal):
+        sentence = _response_refusal(result, at, found.window, _RK45_TCA)
+        return _computed_cell(adversary, scenario, found, plan.custody, _ResponseCell(friendly, None, sentence))
+    figure = ResponseFigure(result, at, spec.target_km, spec.budget_km_s)
+    return _computed_cell(adversary, scenario, result.after, plan.custody, _ResponseCell(friendly, figure, None))
+
+
+def _tca_uncertainty(
+    binding: ScenarioBinding, start: datetime, approach: ClosestApproach, speed_km_s: float, span_s: float,
+) -> TcaUncertainty:
+    """The TCA's uncertainty: both bound element sets' position error at the TCA, in quadrature, over the closing
+    speed (SPC-118). Only a computed or sampled cell asks, and both of its element sets are current, so both epochs
+    are known."""
+    at = approach.tca_utc(start)
+    errors = (
+        elset_position_error_km(elset.tle, cast("datetime", elset.epoch), at)
+        for elset in (cast("BoundElset", binding.red), cast("BoundElset", binding.blue))
+    )
+    return tca_uncertainty(math.hypot(*errors), speed_km_s, span_s, at_edge=approach.at_window_edge)
 
 
 def _propagator_gap(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]]) -> float | None:
@@ -2216,11 +3034,12 @@ def _propagator_gap(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics
         for action, row in zip(scenario.adversary_actions, matrix, strict=True)
         if any(c.ca_percentiles is not None for c in row)
     ]
-    if not (sampled and any(c.ca_computed is not None for row in matrix for c in row)):
-        return None
+    computed = [c.ca_computed for row in matrix for c in row if c.ca_computed is not None]
+    if not (sampled and computed) or computed[0].propagator == RESPONSE_PROPAGATOR:
+        return None   # nothing to compare, or every figure is RK45 already (SPC-121)
     binding = cast("ScenarioBinding", scenario.binding)
     red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
-    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=scenario.horizon_hours * _SECONDS_PER_HOUR)
+    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
     return rk45_sgp4_gap_km(red.tle, blue.tle, window, tuple(sampled))
 
 
@@ -2234,7 +3053,7 @@ class _RowPlan(NamedTuple):
 
 
 def _cell(
-    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan,
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan, column: int = 0,
 ) -> OutcomeMetrics:
     """One cell, with exactly one closest approach.
 
@@ -2245,14 +3064,14 @@ def _cell(
     if plan.sampling is not None:
         if plan.sampling.series is None:
             return _refused_cell(_lookup_cell(adversary, friendly, scenario, plan.custody), plan.sampling.refusal)
-        return _sampled_cell(adversary, friendly, scenario, plan.sampling.series, plan.custody)
+        return _sampled_response_cell(adversary, friendly, scenario, plan, column)
     if plan.computed is None:
         return _lookup_cell(adversary, friendly, scenario, plan.custody)
     refusal = plan.computed.refusal
     if adversary.action_type not in _STILL_ACTIONS:
         refusal = _refusal(_NOT_A_BURN)
     elif plan.computed.approach is not None:
-        return _computed_cell(adversary, friendly, scenario, plan.computed.approach, plan.custody)
+        return _computed_response_cell(adversary, friendly, scenario, plan, column)
     return _refused_cell(_lookup_cell(adversary, friendly, scenario, plan.custody), refusal)
 
 
@@ -2469,14 +3288,21 @@ def evaluate_scenario(
 
     t0 = time.monotonic()
 
-    # Build outcome matrix: a lookup in every cell but those of a row sampled, computed or refused
-    plan = plan_sampling(scenario, sampler, run=run)
-    computed = plan_computed(scenario)
+    # Build outcome matrix: a lookup in every cell but those of a row sampled, computed or refused. One budget
+    # covers the sampled rows and the computed rows' burns (SPC-113, SPC-121).
+    pre = _pre_plan(scenario)
+    budget = None if run is None else _Budget(run, pre.ready)
+    plan = _plan_sampling(scenario, sampler, budget, pre)
+    computed = _plan_computed(scenario, pre, budget)
     custody = _custody_plan(scenario)
     outcome_matrix = [
-        [_cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held)) for friendly in scenario.friendly_responses]
+        [
+            _cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held), j)
+            for j, friendly in enumerate(scenario.friendly_responses)
+        ]
         for adversary, sampling, held in zip(scenario.adversary_actions, plan, custody, strict=True)
     ]
+    _require_one_propagator(outcome_matrix)
 
     # Rank per adversary action
     ranked_per_adversary = [
@@ -2502,4 +3328,15 @@ def evaluate_scenario(
         row_notes=_row_notes(scenario, plan),
         propagator_gap_km=_propagator_gap(scenario, outcome_matrix),
         row_custody=tuple(None if c is None else c.sentence for c in custody),
+        rk45_reference=_rk45_reference(computed),
     )
+
+
+def _rk45_reference(computed: ComputedPlan | None) -> tuple[ElsetApproach, ElsetApproach] | None:
+    """The SGP4 and RK45 figures with no burn, once the computed cells are on RK45 (SPC-121).
+
+    Sizing runs only when some row will be computed (_computes_rows), so the pair's figure always has a cell.
+    """
+    if computed is None or computed.sgp4_reference is None or computed.approach is None:
+        return None
+    return computed.sgp4_reference, computed.approach

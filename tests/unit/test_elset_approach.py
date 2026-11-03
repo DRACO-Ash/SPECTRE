@@ -143,7 +143,7 @@ class TestThePropagatorGap:
 
         def dense_arc(*_: object) -> None:
             if arc == "re-enters":
-                raise monte_carlo._ReenteredError("the arc reaches the floor")
+                raise monte_carlo.ReenteredError("the arc reaches the floor")
 
         monkeypatch.setattr(monte_carlo, "_dense_arc", dense_arc)
         assert rk45_sgp4_gap_km(_RED, _BLUE, _SIX_HOURS) is None

@@ -53,6 +53,8 @@ _KM_S_ATTRIBUTES: tuple[str, ...] = (
     "delta_v_km_s", "predicted_delta_v_km_s", "total_delta_v",
     "dv_stats.mean", "dv_stats.std", "dv_stats.p95",
     "dv_stats.low_2sigma", "dv_stats.high_2sigma",
+    # The Decision Engine's burns (SPC-121, SPC-124): our budget, our burn's RIC parts, and a closing speed.
+    "budget_km_s", "delta_v_ric_km_s", "closing_speed_km_s",
 )
 
 #: The one deliberate exception, with its reason.
@@ -201,6 +203,29 @@ class TestRelabellingIsNotConverting:
             "these lines label a km/s value as m/s without scaling it, so the "
             "number shown is a thousand times too small:\n  " + "\n  ".join(offenders)
         )
+
+
+class TestTheDecisionEngineBurnIsInMetresPerSecond:
+    """SPC-121 and SPC-124 carry new km/s figures from the astro package (63)."""
+
+    def test_the_new_km_s_attributes_are_guarded(self) -> None:
+        for name in ("budget_km_s", "delta_v_ric_km_s", "closing_speed_km_s"):
+            assert name in _KM_S_ATTRIBUTES, name
+
+    def test_the_burn_cell_and_its_drawing_are_in_m_s(self) -> None:
+        from spectre.domain.decision import evaluate_scenario
+        from spectre.web.decision_trajectory import trajectory_links
+        from tests.unit.test_decision_figure_basis import _render
+        from tests.unit.test_decision_response import _AVOID, _avoid, _computed_scenario, _hold
+
+        result = evaluate_scenario(_computed_scenario(_hold(), _avoid()))
+        cell = result.outcome_matrix[0][_AVOID]
+        assert cell.ca_response is not None
+        line = cell.ca_response.line
+        assert re.match(r"Our burn: 3\.\d\d m/s in-track \(retrograde\)", line), line
+        assert line in " ".join(_render(result).split()).replace("&#39;", "'")
+        link = trajectory_links(result)[0][_AVOID]
+        assert link is not None and link.dv_prograde == pytest.approx(cell.ca_response.delta_v_km_s * 1000.0)
 
 
 class TestTheConversionHappensExactlyOnce:

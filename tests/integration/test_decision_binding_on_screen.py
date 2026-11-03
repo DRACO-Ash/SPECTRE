@@ -203,7 +203,7 @@ class TestTheResult:
         assert bound.status_code == 200
         text = _flat(re.sub(r"<[^>]+>", "", bound.text))
         assert re.search(r"\d+\.\d km \(computed\)", text)
-        assert re.search(r"Computed: \d[\d.,]* km at \d{4}-\d\d-\d\d \d\d:\d\d UTC, \d+\.\d\d h after the scenario epoch; SGP4, no burn\.", text)
+        assert re.search(r"Computed: \d[\d.,]* km at \d{4}-\d\d-\d\d \d\d:\d\d UTC( ± [^,]+)?, \d+(\.\d+)? h after the scenario epoch; SGP4, no burn\.", text)
         assert COMPUTED_CAVEAT in text
         assert "Phase 3 · computed closest approach in 1 cells · sampled in 0 cells" in text
         unbound = _flat(re.sub(r"<[^>]+>", "", _evaluate(client, auth_cookie, _form(adv_type=["no_action"])).text))

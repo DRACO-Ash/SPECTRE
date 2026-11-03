@@ -15,7 +15,7 @@ _ROUTES = Path(__file__).resolve().parents[2] / "spectre" / "web" / "routes"
 
 # Frozen on 2 November 2026 (0.9.0). Lower a figure when a file improves.
 _ALLOWED: dict[str, int] = {
-    "admin.py": 12, "decision.py": 0, "gcat.py": 3, "geometry.py": 1, "maneuver.py": 4, "operator.py": 7,
+    "admin.py": 12, "decision.py": 0, "gcat.py": 3, "geometry.py": 0, "maneuver.py": 4, "operator.py": 7,
     "plan.py": 1, "pol.py": 5, "threat.py": 6, "training.py": 20, "udl.py": 16,
 }
 

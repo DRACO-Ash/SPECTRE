@@ -229,15 +229,15 @@ class TestWhatIsNotComputed:
         cell = _cells(result, _NO_ACTION)[0]
         assert cell.ca_computed is not None
         assert cell.ca_computed.window == SeparationWindow(EPOCH, span_h * 3600.0)
-        assert result.computed_span_note == (
-            f"Computed over the first {span_h:.1f} h of the 10 h horizon, while both element sets are within their "
-            f"limits; past 2026-10-17 {end} UTC a computed miss would rest on an out-of-date orbit."
+        assert result.searched_span_note == (
+            f"Closest approaches are searched over the first {span_h:.1f} h of the 10 h horizon, while both element "
+            f"sets are within their limits; past 2026-10-17 {end} UTC a miss would rest on an out-of-date orbit."
         )
         assert f"over {span_h:.1f} h of the 10 h horizon" in cell.figure_bases.closest_approach_km.note
-        assert result.computed_span_note in _page(result)
+        assert result.searched_span_note in _page(result)
 
     def test_an_untrimmed_span_has_no_note(self, computed: ScenarioResult) -> None:
-        assert computed.computed_span_note is None
+        assert computed.searched_span_note is None
 
 
 # ── D9, D10: the edge lines and the notes ──
@@ -293,8 +293,13 @@ class TestTheEdgesAndTheNotes:
             "time of that closest approach from the scenario epoch, SGP4 for both orbits, refined to 0.01 s and "
             "shown to the minute",
         )
-        for name in ("custody_maintained", "custody_gap_hours", "delta_v_cost_km_s"):
+        for name in ("custody_maintained", "custody_gap_hours"):
             assert getattr(bases, name) == getattr(LOOKUP_BASES, name), name
+        # A manoeuvre response with no target separation keeps the lookup and says how to size it (SPC-121).
+        assert bases.delta_v_cost_km_s == FigureBasis(
+            Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. Enter a target separation to size this burn.",
+        )
+        assert _cells(computed, _NO_ACTION)[1].figure_bases.delta_v_cost_km_s == LOOKUP_BASES.delta_v_cost_km_s
         assert bases.composite_score.kind is Basis.LOOKUP
 
     def test_the_basis_note_names_each_sides_own_epoch(self) -> None:
@@ -306,7 +311,7 @@ class TestTheEdgesAndTheNotes:
     def test_the_cell_line_and_hover(self, computed: ScenarioResult) -> None:
         cell = _cells(computed, _NO_ACTION)[0]
         assert cell.ca_computed_line == (
-            "Computed: 10.4 km at 2026-10-17 12:24 UTC, 0.39 h after the scenario epoch; SGP4, no burn."
+            "Computed: 10.4 km at 2026-10-17 12:24 UTC ± 4 s, 0.39 h after the scenario epoch; SGP4, no burn."
         )
         assert cell.ca_title == (
             "Computed: 10.404 km at 1,410.93 s after the scenario epoch, passing at 394 m/s; SGP4 for both orbits "
@@ -523,7 +528,7 @@ class TestThePage:
         text = _page(computed)
         assert text.count("10.4 km (computed)") == 12
         assert text.count(
-            "Computed: 10.4 km at 2026-10-17 12:24 UTC, 0.39 h after the scenario epoch; SGP4, no burn."
+            "Computed: 10.4 km at 2026-10-17 12:24 UTC ± 4 s, 0.39 h after the scenario epoch; SGP4, no burn."
         ) == 12
         assert text.count(_NOT_A_BURN) == 4
         html = _render(computed)

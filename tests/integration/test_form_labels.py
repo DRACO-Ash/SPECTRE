@@ -159,3 +159,19 @@ class TestTheSweepTargetConfig:
         assert "BLUE-1: 6 h" in text and "BLUE-2: 1.5 h" in text
         # A held time can be changed but not removed, so the operator is told how long it lasts.
         assert "A time held for a target can be changed, and is kept until you sign out." in text
+
+
+class TestTheDecisionResults:
+    """SPC-124 (49): the results carry a select, the histogram's cell, and a form per propagated cell."""
+
+    def test_every_field_in_the_results_is_labelled(self) -> None:
+        from spectre.domain.decision import evaluate_scenario
+        from tests.unit.test_decision_sampled import _bound
+        from tests.unit.test_decision_tca_histogram import _WithSpeeds
+        from tests.unit.test_decision_trajectory import _render_with_links
+
+        page = _render_with_links(evaluate_scenario(_bound(), sampler=_WithSpeeds()))
+        assert 'id="tca-hist-cell"' in page and '<label for="tca-hist-cell"' in page
+        assert "Show trajectory" in page
+        assert _unlabelled(page) == []
+        assert _duplicate_ids(page) == []

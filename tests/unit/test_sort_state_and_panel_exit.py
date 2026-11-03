@@ -134,14 +134,15 @@ class TestTheGeometryPanelEscapeIsScopedToThePanel:
 class TestTheGeometryPanelManagesFocus:
     def test_the_panel_has_a_heading_to_send_focus_to(self) -> None:
         source = _source("intercept_geometry.html")
-        assert '<h3 id="geom-panel-heading"' in source, "a native heading, not a role on a span (Web:S6819)"
+        # The ids carry the route's prefix: "" for the intercept panel, "decision-" for a Decision Engine view.
+        assert '<h3 id="{{ id_prefix }}geom-panel-heading"' in source, "a native heading, not a role on a span (Web:S6819)"
         assert not re.search(r'<span[^>]*role="heading"', source)
         assert 'tabindex="-1"' in source, "the heading must be focusable, not tabbable"
-        assert 'aria-labelledby="geom-panel-heading"' in source, "the panel is named by it"
+        assert 'aria-labelledby="{{ id_prefix }}geom-panel-heading"' in source, "the panel is named by it"
 
     def test_focus_moves_into_the_panel_on_open(self) -> None:
         source = _source("intercept_geometry.html")
-        assert re.search(r"getElementById\('geom-panel-heading'\);\s*\n\s*if \(heading\) \{ heading\.focus\(\); \}", source), (
+        assert re.search(r"getElementById\(IDS \+ 'geom-panel-heading'\);\s*\n\s*if \(heading\) \{ heading\.focus\(\); \}", source), (
             "the heading is never focused, so opening the panel leaves the "
             "keyboard operator outside it"
         )
@@ -158,7 +159,7 @@ class TestTheGeometryPanelManagesFocus:
     def test_the_focused_heading_is_visible(self) -> None:
         """Measured 4.95:1 on the ops panel and 4.66:1 on steel, floor 3:1."""
         source = _source("intercept_geometry.html")
-        assert "#geom-panel-heading:focus { outline: 2px solid currentColor; }" in source
+        assert "#{{ id_prefix }}geom-panel-heading:focus { outline: 2px solid currentColor; }" in source
 
 
 class TestTheSweepRowSpeaksRatherThanHovers:

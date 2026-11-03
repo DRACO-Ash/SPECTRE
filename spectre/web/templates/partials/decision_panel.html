@@ -10,7 +10,39 @@
   "max_samples": max_samples if max_samples is defined else 2000,
   "max_sample_hours": max_sample_hours if max_sample_hours is defined else "",
   "longest_horizon": longest_horizon if longest_horizon is defined else "",
+  "longest_horizon_one_burn": longest_horizon_one_burn if longest_horizon_one_burn is defined else "",
+  "longest_horizon_five_burns": longest_horizon_five_burns if longest_horizon_five_burns is defined else "",
+  "burn_axes": burn_axes if burn_axes is defined else [("cheapest", "Cheapest, from the manoeuvre library")],
+  "default_budget": default_budget if default_budget is defined else "50",
+  "max_budget": max_budget if max_budget is defined else "1000",
+  "max_target": max_target if max_target is defined else "100000",
 } %}
+
+{# ── Our burn for one friendly row (SPC-121). Read only for a manoeuvre response; a blank target leaves its delta-V
+     a lookup. Every field sits in its label and carries no id, because the block is repeated per row, and the
+     row builder below emits this same block. Every row posts all three fields, blanks included. ── #}
+{% macro response_burn_fields(h) -%}
+<details class="fr-burn" style="grid-column:1 / -1; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+  <summary style="cursor:pointer">Our burn (manoeuvre responses only)</summary>
+  <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.3rem; margin-top:0.2rem">
+    <label>Target separation (km)
+      <input type="number" name="fr_target" min="0" max="{{ h.max_target }}" step="any" placeholder="blank: a lookup" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Delta-V budget (m/s)
+      <input type="number" name="fr_budget" min="0" max="{{ h.max_budget }}" step="any" placeholder="{{ h.default_budget }}" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Axis
+      <select name="fr_axis" style="width:100%; font-size:0.6rem">
+        {%- for value, label in h.burn_axes %}
+        <option value="{{ value }}">{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+  </div>
+  <p style="margin:0.2rem 0 0">With both sides bound, our burn is sized at the response's time to execute after the
+    scenario epoch to put the closest approach at the target, within the budget, and applied to the blue asset.</p>
+</details>
+{%- endmacro %}
 
 {# ── A manoeuvre hypothesis for one adversary row (SPC-114). Every field sits in its label and carries no id,
      because the block is repeated per row, and the row builder below emits this same block. Every row posts all
@@ -53,7 +85,8 @@
     Evaluate; a negative time is a burn already made since the red element set's epoch. Blank fields take the
     archetype's, and an archetype's direction is assumed in-track.{% if h.longest_horizon %} At most
     {{ h.max_sample_hours }} sample-hours per evaluation: at {{ h.default_samples }} samples a horizon up to about
-    {{ h.longest_horizon }} h fits, less when the burn is before the scenario epoch.{% endif %}</p>
+    {{ h.longest_horizon }} h fits{% if h.longest_horizon_one_burn %} with no burn to size, {{ h.longest_horizon_one_burn }} h
+    with one and {{ h.longest_horizon_five_burns }} h with five{% endif %}, less when the burn is before the scenario epoch.{% endif %}</p>
 </details>
 {%- endmacro %}
 
@@ -163,6 +196,7 @@
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
         </button>
+        {{ response_burn_fields(hyp) }}
       </div>
     </div>
     <button type="button" onclick="addFrRow()"
@@ -261,7 +295,8 @@ function addFrRow() {
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Normalised cost [0,1]">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
     <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5" style="font-size:0.63rem" title="Time to execute (h)">
-    <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
+    <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
+    {{ response_burn_fields(hyp) }}`;
   document.getElementById('fr-rows').appendChild(div);
 }
 
