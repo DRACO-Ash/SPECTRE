@@ -9,6 +9,7 @@ the physics test flies the real solvers with no stub.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -119,9 +120,12 @@ def _spy(monkeypatch: pytest.MonkeyPatch, tof_by_red: dict[str, float]) -> list[
         tof = tof_by_red.get(red_tle)
         if tof is None:
             return [], [], []
+        # Like the runner, a target with no element set is skipped, not flown.
+        flown = [t for t in targets
+                 if (manual.get(t.target_name) if t.target_source == "manual" else state.hrr_tle_cache.get(t.target_satno))]
         entries = [ThreatSweepEntry(target=t, burn_epoch=epochs[0][1], burn_location="now", delta_v_m_s=120.0,
                                     tof_hours=tof, dv_prograde=120.0, dv_normal=0.0, dv_radial=0.0,
-                                    method="hohmann", regime="LEO") for t in targets]
+                                    method="hohmann", regime="LEO") for t in flown]
         return entries, [], []
 
     monkeypatch.setattr(threat, "_run_target_sweep", run)
@@ -342,6 +346,32 @@ class TestTheOperatorsEarlierSweep:
         assert "Last shown before the burn" not in page
 
 
+def _notice(event_class: str, *, created: datetime, event: datetime | None = None,
+            legacy: bool = False) -> dict[str, Any]:
+    """A cached NOTSO about the red object; *event* is the time its description gives, if any."""
+    stamp = created.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    if legacy:
+        return {"createdAt": stamp, "msgType": event_class, "satNo": 62902,
+                "msgText": f"MSGID: X\nSATNO: 62902\nTYPE: {event_class}"}
+    body: dict[str, Any] = {"Event_Class": event_class, "SatIds": ["62902"]}
+    if event is not None:
+        body["Event_Description"] = f"Jday {event.timetuple().tm_yday:03d} {event:%H%M}z\nProviders report it."
+    return {"createdAt": stamp, "msgBody": body}
+
+
+def _notsos(monkeypatch: pytest.MonkeyPatch, records: list[dict[str, Any]]) -> None:
+    """Hold *records* as the NOTSO cache the operator last synced; nothing is fetched."""
+
+    class _Cache:
+        def get_for_satno(self, _satno: Any) -> list[dict[str, Any]]:
+            return records
+
+        def last_sync_utc(self) -> str:
+            return "2026-11-02T05:00:00Z"
+
+    monkeypatch.setattr("spectre.data.notso_cache.get_notso_cache", _Cache)
+
+
 class TestTheNotsoCue:
     def test_a_newer_manoeuvre_notice_is_named(self, client: Any, auth_cookie: str, leo: Any,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,20 +379,9 @@ class TestTheNotsoCue:
         records = _events_history(_RECENT_RAISE)
         before = _confirmed(records)[-1].tle_before.tle
         now = _arrange(leo, monkeypatch, records)
-        satno = str(int(records[-1].tle.splitlines()[0][2:7]))
-        stamp = (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-        class _Cache:
-            def get_for_satno(self, _satno: Any) -> list[dict[str, Any]]:
-                return [
-                    {"createdAt": stamp, "msgBody": {"Event_Class": "Verified Maneuver / Planned", "SatIds": [satno]}},
-                    {"createdAt": stamp, "msgBody": {"Event_Class": "Photometric Change", "SatIds": [satno]}},
-                ]
-
-            def last_sync_utc(self) -> str:
-                return "2026-11-02T05:00:00Z"
-
-        monkeypatch.setattr("spectre.data.notso_cache.get_notso_cache", _Cache)
+        event = now - timedelta(minutes=10)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event),
+                              _notice("Photometric Change", created=event, event=event)])
         _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
         page = _sweep(client, auth_cookie)
         assert "reports a Verified Maneuver by RED-LEO" in page
@@ -460,3 +479,396 @@ class TestTheSnapshot:
         leo.hrr_tle_cache.pop("CLUSTER-MARK", None)
         assert seen == ["clustered"]
         assert all(isinstance(c["state"], threat._FrozenTargets) for c in calls)
+
+
+class TestTheNotsoCueReadsTheEventTime:
+    """V0.9 review 3 and 24: a notice counts as newer by the event time it states, never by when it was written."""
+
+    def test_a_notice_about_the_burn_on_screen_is_not_a_newer_one(self, client: Any, auth_cookie: str, leo: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        assert burn.tle_after.epoch < now - timedelta(minutes=30)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=now - timedelta(minutes=30),
+                                      event=burn.burn_epoch)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "from 14h to 3h" in page
+        assert "No element set since shows a confirmed burn yet" not in page
+
+    @pytest.mark.parametrize("legacy", [True, False])
+    def test_a_notice_with_no_event_time_is_not_called_newer(self, client: Any, auth_cookie: str, leo: Any,
+                                                             monkeypatch: pytest.MonkeyPatch, legacy: bool) -> None:
+        """Written after the post-burn set, but about the burn on screen as far as anyone can tell."""
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        created = now - timedelta(minutes=30)
+        _notsos(monkeypatch, [_notice("Verified Maneuver", created=created, legacy=legacy)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "No element set since shows a confirmed burn yet" not in page
+        assert (f"NOTSO created at {threat._when(created)} reports a Verified Maneuver by RED-LEO "
+                "but gives no event time") in page
+
+    def test_a_notice_from_before_the_confirmed_burn_is_not_named(self, client: Any, auth_cookie: str, leo: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        _arrange(leo, monkeypatch, records)
+        earlier = burn.tle_after.epoch - timedelta(hours=2)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=earlier, event=earlier),
+                              _notice("Verified Maneuver", created=earlier)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "from 14h to 3h" in page
+        assert "reports a Verified Maneuver" not in page
+
+    def test_a_future_dated_notice_is_not_named(self, client: Any, auth_cookie: str, leo: Any,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        _notsos(monkeypatch, [
+            _notice("Verified Maneuver / Planned", created=now - timedelta(minutes=10), event=now + timedelta(hours=1)),
+            _notice("Verified Maneuver", created=now + timedelta(hours=1)),
+        ])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "from 14h to 3h" in page
+        assert "reports a Verified Maneuver" not in page
+
+    def test_the_uk_spelling_counts(self, client: Any, auth_cookie: str, leo: Any,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        event = now - timedelta(minutes=10)
+        _notsos(monkeypatch, [_notice("Verified Manoeuvre / Planned", created=event, event=event)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert f"NOTSO at {threat._when(event)} reports a Verified Manoeuvre by RED-LEO" in page
+
+
+    def test_a_dated_notice_is_named_before_a_later_undated_one(self, client: Any, auth_cookie: str, leo: Any,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+        """The notice that says when the object moved is the one named, even if an undated one was written later."""
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        event = now - timedelta(minutes=40)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event),
+                              _notice("Verified Maneuver", created=now - timedelta(minutes=10))])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in page
+        assert "gives no event time" not in page
+
+
+class TestNoBurnStillNamesTheNotso:
+    def test_a_manoeuvre_notice_is_named_when_no_burn_is_confirmed(self, client: Any, auth_cookie: str, leo: Any,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+        """V0.9 review 4: "no burn to compare" never stands alone while a notice says it moved."""
+        records = _events_history(_RECENT_RAISE, tail_sets=40)
+        now = _arrange(leo, monkeypatch, records)
+        event = now - timedelta(hours=2)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "There is no burn to compare." in section
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in section
+
+
+    def test_a_notice_about_a_burn_already_confirmed_is_not_named(self, client: Any, auth_cookie: str, leo: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+        """A notice about the last confirmed burn, days old, is not a new manoeuvre no element set shows."""
+        records = _events_history(_RECENT_RAISE, tail_sets=40)
+        burn = _confirmed(records)[-1]
+        _arrange(leo, monkeypatch, records)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=burn.tle_after.epoch,
+                                      event=burn.burn_epoch)])
+        _spy(monkeypatch, {records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "There is no burn to compare." in section
+        assert "reports a Verified Maneuver" not in section
+
+
+class TestTheSweepsSetIsNewerThanTheHistory:
+    """V0.9 review 1 and 10: the red set flown can be newer than the newest held set."""
+
+    def test_no_burn_in_the_history_is_not_no_burn(self, client: Any, auth_cookie: str, leo: Any,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+        full = _events_history(_RECENT_RAISE)
+        history = full[:-2]
+        _arrange(leo, monkeypatch, history, red_tle=full[-1].tle, now=full[-1].epoch + timedelta(hours=1))
+        calls = _spy(monkeypatch, {full[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "There is no burn to compare" not in section
+        assert (f"flies its element set of {threat._when(full[-1].epoch)}, newer than the newest in its history "
+                f"({threat._when(history[-1].epoch)})") in section
+        assert "the change is not computed" in section
+        assert len(calls) == 1
+
+    def test_a_burn_found_carries_the_caveat(self, client: Any, auth_cookie: str, leo: Any,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+        full = _events_history([*_RECENT_RAISE, (1, 60.0, None)])
+        history = full[:-2]
+        before = _confirmed(history)[-1].tle_before.tle
+        _arrange(leo, monkeypatch, history, red_tle=full[-1].tle, now=full[-1].epoch + timedelta(hours=1))
+        _spy(monkeypatch, {before: 14.0, full[-1].tle: 3.0})
+        page = html.unescape(_sweep(client, auth_cookie))
+        assert "That burn cut the warning on BLUE-LEO from 14h to 3h." in page
+        assert (f"Caveat: the sweep's element set ({threat._when(full[-1].epoch)}) is newer than the newest in its "
+                f"history ({threat._when(history[-1].epoch)}); a burn between them would be in the after figures "
+                "but not named.") in page
+
+
+class TestCustodyLostStillSaysWhatUdlHolds:
+    def test_a_stale_red_set_with_a_post_burn_set_held(self, client: Any, auth_cookie: str, leo: Any,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        """V0.9 review 13: custody lost, and UDL holds a set from after the burn; say how to get it."""
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        stale = next(r for r in reversed(records) if r.epoch <= records[-1].epoch - timedelta(hours=30))
+        _arrange(leo, monkeypatch, records, red_tle=stale.tle)
+        _spy(monkeypatch, {stale.tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "custody is lost, so any figure would rest on an out-of-date orbit" in page
+        assert (f"UDL holds an element set from after a burn at {threat._when(burn.burn_epoch)}; reconnect to UDL "
+                "to refresh held element sets (sets entered by hand are not refreshed), then sweep again.") in page
+
+
+def _section(page: str) -> str:
+    return page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+
+
+class TestTheCueStandsBesideARefusal:
+    """V0.10 review 1: a refusal to compute never hides a cached notice that says the object moved."""
+
+    def test_a_burn_that_may_be_unseen(self, client: Any, auth_cookie: str, leo: Any,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        full = _events_history(_RECENT_RAISE)
+        history = full[:-2]
+        now = _arrange(leo, monkeypatch, history, red_tle=full[-1].tle, now=full[-1].epoch + timedelta(hours=1))
+        event = now - timedelta(hours=3)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {full[-1].tle: 3.0})
+        section = _section(_sweep(client, auth_cookie))
+        assert "cannot be named, so the change is not computed" in section
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in section
+
+    def test_custody_lost(self, client: Any, auth_cookie: str, leo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        stale = next(r for r in reversed(records) if r.epoch <= records[-1].epoch - timedelta(hours=30))
+        now = _arrange(leo, monkeypatch, records, red_tle=stale.tle)
+        event = now - timedelta(minutes=20)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {stale.tle: 3.0})
+        section = _section(_sweep(client, auth_cookie))
+        assert "custody is lost" in section
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in section
+
+    def test_a_red_set_from_before_the_burn(self, client: Any, auth_cookie: str, leo: Any,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records, red_tle=burn.tle_before.tle)
+        event = now - timedelta(minutes=10)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0})
+        section = _section(_sweep(client, auth_cookie))
+        assert "from before its burn at" in section
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in section
+
+    def test_a_notice_about_the_confirmed_burn_is_still_not_named(self, client: Any, auth_cookie: str, leo: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        _arrange(leo, monkeypatch, records, red_tle=burn.tle_before.tle)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=burn.tle_after.epoch,
+                                      event=burn.burn_epoch)])
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0})
+        section = _section(_sweep(client, auth_cookie))
+        assert "from before its burn at" in section
+        assert "reports a Verified Maneuver" not in section
+
+    def test_without_a_history_nothing_is_claimed_about_element_sets(self, client: Any, auth_cookie: str, leo: Any,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+        """No history, so "no element set since shows a confirmed burn" would be unearned."""
+        records = _events_history(_RECENT_RAISE)
+        now = _arrange(leo, monkeypatch, records)
+        leo.udl_username, leo.udl_password = None, None
+        event = now - timedelta(minutes=10)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {records[-1].tle: 3.0})
+        section = _section(_sweep(client, auth_cookie))
+        assert "What the burn changed: cannot say." in section
+        assert "No element set since shows a confirmed burn yet" not in section
+
+
+class TestAnUndatedBurn:
+    def test_a_red_set_inside_an_undated_burns_window_is_refused(self, client: Any, auth_cookie: str, leo: Any,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+        """V0.9 review 25: the set at the window's start may predate the burn, so it is refused, not diffed."""
+        from spectre.astro import pattern_of_life
+
+        records = _events_history(_RECENT_RAISE)
+        monkeypatch.setattr(pattern_of_life.Manoeuvre, "burn_epoch", property(lambda self: self.epoch))
+        burn = _confirmed(records)[-1]
+        assert burn.burn_window == (burn.tle_before.epoch, burn.epoch)
+        _arrange(leo, monkeypatch, records, red_tle=burn.tle_before.tle)
+        calls = _spy(monkeypatch, {burn.tle_before.tle: 14.0})
+        page = _sweep(client, auth_cookie)
+        assert "from before its burn at" in page
+        assert "did not shorten" not in page
+        assert "cut the warning" not in page
+        assert len(calls) == 1
+
+
+@pytest.fixture
+def hrr(leo: Any) -> Iterator[Any]:
+    """The session's HRR objects and their element sets, restored afterwards."""
+    saved = (list(leo.hrr_objects), dict(leo.hrr_tle_cache))
+    yield leo
+    leo.hrr_objects = saved[0]
+    leo.hrr_tle_cache.clear()
+    leo.hrr_tle_cache.update(saved[1])
+
+
+def _sweep_group(client: Any, cookie: str, group: str) -> str:
+    resp = client.post("/plan/threat/sweep", data={"red_sat": "RED-LEO", "tgt_group": group, "max_dv_m_s": _BUDGET},
+                       cookies={"spectre_session": cookie}, headers=csrf_headers(cookie))
+    assert resp.status_code == 200
+    return " ".join(resp.text.split())
+
+
+def _no_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """UDL answers no element set for any target; nothing reaches the network."""
+
+    async def nothing(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", nothing)
+
+
+class TestOnlyTheTargetsFlownAreCompared:
+    """V0.9 review 8: a target with no element set was never flown, so it is not "out of reach"."""
+
+    def test_an_unflown_target_is_named_not_counted(self, client: Any, auth_cookie: str, hrr: Any,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        _arrange(hrr, monkeypatch, records)
+        hrr.hrr_objects = [{"name": "BLUE-NOSET", "satno": "77777", "country": "GBR", "rank": 1}]
+        hrr.hrr_tle_cache.pop("77777", None)
+        _no_fetch(monkeypatch)
+        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
+        page = _sweep_group(client, auth_cookie, "blue:1")
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "That burn cut the warning on BLUE-LEO from 14h to 3h." in section
+        assert "out of reach before and after" not in section
+        assert "Not swept, so its warning change is not computed: BLUE-NOSET (no element set)." in section
+        assert "Both against the same 1 target and its same element set," in section
+
+    def test_nothing_flown_is_not_none_in_reach(self, client: Any, auth_cookie: str, hrr: Any,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        _arrange(hrr, monkeypatch, records)
+        hrr.manual_sweep_tles = []
+        hrr.hrr_objects = [{"name": "BLUE-NOSET", "satno": "77777", "country": "GBR", "rank": 1}]
+        hrr.hrr_tle_cache.pop("77777", None)
+        _no_fetch(monkeypatch)
+        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
+        page = _sweep_group(client, auth_cookie, "blue:1")
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "is in reach within" not in section
+        assert "did not shorten" not in section
+        assert ("What the burn changed is not computed: no target was swept, so no warning was flown before or "
+                "after. Not swept: BLUE-NOSET (no element set).") in section
+
+    def test_nothing_flown_still_names_the_notso(self, client: Any, auth_cookie: str, hrr: Any,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+        """V0.10 review 1: the not-computed sentence never hides a notice that says the object moved."""
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        now = _arrange(hrr, monkeypatch, records)
+        hrr.manual_sweep_tles = []
+        hrr.hrr_objects = [{"name": "BLUE-NOSET", "satno": "77777", "country": "GBR", "rank": 1}]
+        hrr.hrr_tle_cache.pop("77777", None)
+        _no_fetch(monkeypatch)
+        event = now - timedelta(minutes=10)
+        _notsos(monkeypatch, [_notice("Verified Maneuver / Planned", created=event, event=event)])
+        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
+        section = _section(_sweep_group(client, auth_cookie, "blue:1"))
+        assert "no target was swept" in section
+        assert f"NOTSO at {threat._when(event)} reports a Verified Maneuver by RED-LEO" in section
+
+
+class TestYourWarning:
+    """V0.9 review 14 and 23: "your warning" means a friendly asset, and only that."""
+
+    def test_a_blue_hrr_asset_reads_as_yours(self, client: Any, auth_cookie: str, hrr: Any,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        _arrange(hrr, monkeypatch, records)
+        hrr.hrr_objects = [{"name": "BLUE-1", "satno": "77001", "country": "GBR", "rank": 1},
+                           {"name": "RED-2", "satno": "77002", "country": "RUS", "rank": 1}]
+        hrr.hrr_tle_cache.update({"77001": _target_tle(), "77002": _target_tle()})
+        _no_fetch(monkeypatch)
+        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
+        page = _sweep_group(client, auth_cookie, "all")
+        section = page.split("What the burn changed", 1)[1].split("</section>", 1)[0]
+        assert "cut your warning on BLUE-1 from 14h to 3h" in section
+        assert "cut the warning on RED-2 from 14h to 3h" in section
+        assert "cut the warning on BLUE-LEO from 14h to 3h" in section
+
+    def test_a_blue_object_with_no_number_makes_nothing_yours(self, client: Any, auth_cookie: str, hrr: Any,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+        from tests.unit.test_dv_estimation import _checksum
+
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        _arrange(hrr, monkeypatch, records)
+        # A pasted set with an Alpha-5 number the catalogue reader cannot read: its satno is "".
+        lines = [line[:2] + "A2902" + line[7:-1] for line in _target_tle().splitlines()]
+        alpha5 = "\n".join(line + str(_checksum(line)) for line in lines)
+        hrr.manual_sweep_tles = [{"name": "PASTED", "tle": alpha5, "confidence": "HIGH"}]
+        hrr.hrr_objects = [{"name": "UK-PENDING", "country": "GBR", "rank": 1}]
+        _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
+        page = _sweep(client, auth_cookie)
+        assert "That burn cut the warning on PASTED from 14h to 3h." in page
+        assert "your warning" not in page
+
+
+class TestTheCustodyStatementsAreShown:
+    """V0.9 review 26: the unconfirmed-detection note and the long-gap caveat each have a test that needs them."""
+
+    _T0 = datetime(2026, 11, 2, 3, 0, tzinfo=UTC)
+
+    def _burn(self, *, long_gap: bool = False) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(burn_epoch=self._T0, burn_window=(self._T0, self._T0), long_gap=long_gap, gap_days=12.0,
+                               tle_after=SimpleNamespace(epoch=self._T0 + timedelta(hours=1)))
+
+    def test_a_newer_unconfirmed_detection_is_named(self) -> None:
+        from types import SimpleNamespace
+
+        later = self._T0 + timedelta(hours=3)
+        candidate = SimpleNamespace(burn_epoch=later, burn_window=(later, later))
+        pol_ = SimpleNamespace(candidate_manoeuvres=[candidate], records=[])
+        context = threat._ChangeContext("RED-X", None, None, SimpleNamespace(pol=pol_), None)
+        notes = threat._change_notes(context, [self._burn()], None, self._T0 + timedelta(hours=4))
+        assert any("An unconfirmed detection at 06:00 UTC on 2 Nov" in n and "is not counted" in n for n in notes)
+
+    def test_a_long_gap_carries_its_caveat(self) -> None:
+        line = threat._burn_line(self._burn(long_gap=True), "RED-X", {}, self._T0 + timedelta(hours=4))
+        assert "12 days apart" in line.caveat
+        assert "may already include other burns" in line.caveat
+        assert threat._burn_line(self._burn(), "RED-X", {}, self._T0 + timedelta(hours=4)).caveat == ""

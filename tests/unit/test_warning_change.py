@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spectre.astro.pattern_of_life import Manoeuvre
 from spectre.domain.warning_change import (
     Change,
     burns_in_window,
@@ -40,6 +41,20 @@ def _burn(start: datetime, end: datetime | None = None) -> SimpleNamespace:
     return SimpleNamespace(burn_window=(start, end or start))
 
 
+def _record(epoch: datetime) -> SimpleNamespace:
+    return SimpleNamespace(epoch=epoch, tle="")
+
+
+def _manoeuvre(before: SimpleNamespace, after: SimpleNamespace) -> Manoeuvre:
+    """A real detection the estimator could not date, so its window is the bracket between the sets."""
+    return Manoeuvre(
+        epoch=after.epoch, gap_days=(after.epoch - before.epoch).total_seconds() / 86400.0, delta_v_km_s=0.05,
+        delta_alt_km=10.0, delta_inc_deg=0.0, delta_ecc=0.0, delta_raan_corrected_deg=0.0,
+        delta_argp_corrected_deg=0.0, delta_period_s=1.0, delta_drift_deg_day=None, dominant_element="altitude",
+        tle_before=before, tle_after=after,  # type: ignore[arg-type]
+    )
+
+
 class TestClassify:
     """U1: one row's change, within a stated 15-minute tolerance."""
 
@@ -50,6 +65,8 @@ class TestClassify:
         (3.0, 14.0, Change.LENGTHENED),
         (10.0, 9.8, Change.UNCHANGED),
         (10.0, 9.7, Change.CUT),
+        (10.0, 9.75, Change.UNCHANGED),
+        (10.0, 10.25, Change.UNCHANGED),
         (None, None, Change.UNCHANGED),
     ])
     def test_each_change(self, before: float | None, after: float | None, expected: Change) -> None:
@@ -94,6 +111,35 @@ class TestHeadline:
             "That burn did not shorten your warning on any of the 2 targets swept. Largest change: BLUE-2, 3h to 8h."
         )
 
+    def test_nothing_moved_beyond_the_tolerance(self) -> None:
+        """Review finding 30: the commonest outcome, worded exactly, with the tolerance in minutes."""
+        rows = compare([("A", True), ("B", True)], {"A": 10.0, "B": 8.0}, {"A": 9.9, "B": 8.25})
+        assert headline(rows, 1, 500.0, _hours) == (
+            "That burn did not shorten your warning on any of the 2 targets swept. "
+            "None changed by more than 15 minutes."
+        )
+
+    def test_a_target_out_of_reach_is_named_and_never_called_unchanged(self) -> None:
+        """Review findings 2 and 9: the table lists BLUE-1 as no longer in reach, so the headline says so."""
+        rows = compare([("BLUE-1", True), ("BLUE-2", True)], {"BLUE-1": 5.0, "BLUE-2": 8.0}, {"BLUE-2": 8.0})
+        assert headline(rows, 1, 500.0, _hours) == (
+            "That burn did not shorten your warning on any of the 2 targets swept. No longer in reach: BLUE-1."
+        )
+
+    def test_the_only_target_going_out_of_reach_is_not_none_changed(self) -> None:
+        rows = compare([("A", True)], {"A": 5.0}, {})
+        line = headline(rows, 1, 500.0, _hours)
+        assert "None changed" not in line
+        assert line.endswith("No longer in reach: A.")
+
+    def test_out_of_reach_and_lengthened_are_both_told(self) -> None:
+        names = ["G1", "G2", "G3", "G4", "L"]
+        rows = compare([(n, True) for n in names], {**dict.fromkeys(names[:4], 5.0), "L": 3.0}, {"L": 8.0})
+        assert headline(rows, 1, 500.0, _hours) == (
+            "That burn did not shorten your warning on any of the 5 targets swept. "
+            "No longer in reach: G1, G2, G3 and 1 more. Largest change: L, 3h to 8h."
+        )
+
     def test_nothing_in_reach_either_side(self) -> None:
         rows = compare([("A", True), ("B", True)], {}, {})
         assert headline(rows, 1, 500.0, _hours) == (
@@ -136,6 +182,19 @@ class TestOneAnnouncementPerBurn:
         accounted = _NOW - timedelta(hours=5)
         assert is_new_burn(_burn(accounted + timedelta(minutes=1)), accounted)
 
+    def test_a_burn_from_the_last_post_burn_set_is_new_and_the_last_burn_is_not(self) -> None:
+        """Review finding 7: two undated burns in a row share the set between them.
+
+        The watch accounts up to the first burn's post-burn set, r2. The second
+        burn's bracket starts at r2, so it can only be a later burn and must be
+        announced; the first, whose bracket ends at r2, must not be repeated.
+        """
+        r1, r2, r3 = (_record(_NOW - timedelta(hours=h)) for h in (30, 20, 8))
+        first, second = _manoeuvre(r1, r2), _manoeuvre(r2, r3)
+        accounted = first.tle_after.epoch
+        assert is_new_burn(second, accounted)
+        assert not is_new_burn(first, accounted)
+
     def test_with_nothing_accounted_every_burn_is_new(self) -> None:
         assert is_new_burn(_burn(_NOW - timedelta(days=30)), None)
 
@@ -150,3 +209,16 @@ class TestUnconfirmed:
 
     def test_an_older_candidate_is_not(self) -> None:
         assert newest_unconfirmed([_burn(_NOW - timedelta(hours=9))], _NOW - timedelta(hours=3)) is None
+
+    def test_a_candidate_from_the_last_post_burn_set_is_named_and_one_before_it_is_not(self) -> None:
+        """An undated candidate whose bracket starts at the confirmed burn's post-burn set is newer.
+
+        The confirmed burn lies between r1 and r2. A candidate between r2 and r3
+        can only be later, so it must be named; a candidate between r0 and r1,
+        whose bracket ends before r2, must not.
+        """
+        r0, r1, r2, r3 = (_record(_NOW - timedelta(hours=h)) for h in (40, 30, 20, 8))
+        confirmed, later, earlier = _manoeuvre(r1, r2), _manoeuvre(r2, r3), _manoeuvre(r0, r1)
+        after = confirmed.tle_after.epoch
+        assert newest_unconfirmed([earlier, later], after) is later
+        assert newest_unconfirmed([earlier], after) is None

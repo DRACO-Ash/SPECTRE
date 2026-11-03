@@ -176,15 +176,25 @@ def _quiet_headline(rows: Sequence[TargetWarning], burns: str, budget_m_s: float
     if all(r.before_h is None and r.after_h is None for r in rows):
         return (f"None of the {count} targets swept is in reach within {budget_m_s:g} m/s, "
                 f"before or after {'that burn' if burns == 'That burn' else 'those burns'}.")
-    moved = [r for r in rows if r.change is not Change.UNCHANGED and r.before_h is not None and r.after_h is not None]
+    moved = [r for r in rows if r.change is Change.LENGTHENED]
+    gone = [r for r in rows if r.change is Change.NO_LONGER_IN_REACH]
     whose = "your" if rows and all(r.ours for r in rows) else "the"
     line = f"{burns} did not shorten {whose} warning on any of the {count} targets swept."
-    if not moved:
+    if not moved and not gone:
         return f"{line} None changed by more than {UNCHANGED_WITHIN_H * 60:.0f} minutes."
+    if gone:
+        line += f" {_no_longer_in_reach(gone)}"
+    if not moved:
+        return line
     biggest = max(moved, key=lambda r: abs((r.after_h or 0.0) - (r.before_h or 0.0)))
-    before = hours(biggest.before_h) if biggest.before_h is not None else "out of reach"
-    after = hours(biggest.after_h) if biggest.after_h is not None else "out of reach"
-    return f"{line} Largest change: {biggest.name}, {before} to {after}."
+    return f"{line} Largest change: {biggest.name}, {hours(biggest.before_h or 0.0)} to {hours(biggest.after_h or 0.0)}."
+
+
+def _no_longer_in_reach(gone: Sequence[TargetWarning]) -> str:
+    """The targets the burn took out of reach, at most three by name, so the quiet headline never hides them."""
+    names = [r.name for r in gone[:_NAMED_IN_HEADLINE]]
+    extra = len(gone) - len(names)
+    return f"No longer in reach: {', '.join(names)}{f' and {extra} more' if extra else ''}."
 
 
 def headline(
@@ -231,15 +241,23 @@ def burns_in_window(manoeuvres: Iterable[Any], now: datetime, limit_hours: float
 def is_new_burn(manoeuvre: Any, accounted_until: datetime | None) -> bool:
     """Whether a burn has not yet been told to the operator.
 
-    New only when the earliest time it can have happened is after the
-    post-burn element set of the last burn already accounted for, so a
-    re-estimate that moves a known burn's epoch a few minutes is not
-    announced twice.
+    *accounted_until* is the post-burn element set of the last burn already
+    told, and that set is inclusive: every burn told so far lies at or before
+    it. So a burn is new when the latest time it can have happened is after
+    that set. A re-estimate of a known burn still sits at or before the set
+    and is not announced twice; the next undated burn, whose bracket starts at
+    that same set, ends after it and is announced.
     """
-    return accounted_until is None or manoeuvre.burn_window[0] > accounted_until
+    return accounted_until is None or manoeuvre.burn_window[1] > accounted_until
 
 
 def newest_unconfirmed(candidates: Iterable[Any], after: datetime | None) -> Any | None:
-    """The newest unconfirmed detection later than *after*, to name and not count."""
-    newer = [c for c in candidates if after is None or c.burn_window[0] > after]
+    """The newest unconfirmed detection later than *after*, to name and not count.
+
+    *after* is the post-burn element set of the latest confirmed burn, inclusive
+    as in :func:`is_new_burn`: a candidate is newer when the latest time it can
+    have happened is after that set, so an undated candidate whose bracket
+    starts at that same set is named.
+    """
+    newer = [c for c in candidates if after is None or c.burn_window[1] > after]
     return max(newer, key=lambda c: c.burn_window[0], default=None)

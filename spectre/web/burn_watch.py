@@ -120,10 +120,27 @@ def _first_line(change: WarningChange) -> str:
     return change.headline if change.headline else "the change in your warning is not computed"
 
 
+def _burn_when(burns: list[Any]) -> str:
+    """When the latest of the burns happened, as the operator reads it."""
+    latest = max(burns, key=lambda m: m.burn_window[0])
+    return f"{latest.burn_epoch:%H:%M} UTC on {latest.burn_epoch.day} {latest.burn_epoch:%b}"
+
+
+class _Stated(Exception):
+    """A check that failed at a known stage, carrying the fixed sentence the operator is shown.
+
+    ``unseen`` is whether burns since the last good check may still be unseen;
+    it is false once the check has found the burn and failed only to compute it.
+    """
+
+    def __init__(self, lead: str, *, unseen: bool = True) -> None:
+        super().__init__(lead)
+        self.lead, self.unseen = lead, unseen
+
+
 def _record(state: SessionState, watch: BurnWatch, burns: list[Any], change: WarningChange, now: datetime) -> BurnAlert:
     """Hold the alert, log it once and account for the burns it announced."""
-    latest = max(burns, key=lambda m: m.burn_window[0])
-    when = f"{latest.burn_epoch:%H:%M} UTC on {latest.burn_epoch.day} {latest.burn_epoch:%b}"
+    when = _burn_when(burns)
     alert = BurnAlert(watch.red_name, when, now, change)
     state.burn_alert = alert
     state.append_log(f"[BURN] {watch.red_name} burned at {when}: {_first_line(change)}")
@@ -149,38 +166,84 @@ async def _new_burns(
         state.elset_histories.pop(watch.red_satno, None)
     held = await held_history(state, watch.red_satno, now)
     if held.pol is None:
-        raise LookupError(held.problem or "no history")
+        # held_history's problems are fixed sentences of its own, safe to show as they are.
+        raise _Stated(held.problem or "No element-set history is held for this object.")
     loop = asyncio.get_running_loop()
-    assessment, _ = await loop.run_in_executor(
-        None, history_evidence, held.pol, reserve_reset_for(state, watch.red_satno),
-    )
+    try:
+        assessment, _ = await loop.run_in_executor(
+            None, history_evidence, held.pol, reserve_reset_for(state, watch.red_satno),
+        )
+    except Exception as exc:
+        raise _Stated("The element-set history could not be analysed.") from exc
     limit = limit_hours_for_regime(watch.red_regime)
     burns = [m for m in burns_in_window(held.pol.manoeuvres, now, limit) if is_new_burn(m, watch.accounted_until)]
     return held.pol, assessment, burns
 
 
-async def check_once(state: SessionState, watch: BurnWatch, now: datetime, compute: Compute) -> BurnAlert | None:
-    """One check: probe UDL, fetch the history only if it moved, announce any new burn."""
+#: What a failed check shows when it failed asking UDL for the newest set; never exception text.
+_FETCH_FAILED = "The element set could not be fetched from UDL at {now}; trying again at {next}."
+#: What follows the sentence of a check that failed at a later, known stage.
+_STATED_TAIL = " Checked at {now}; trying again at {next}."
+
+
+def _good(watch: BurnWatch, now: datetime, epoch: datetime | None) -> None:
+    """The check succeeded: the newest set is seen and nothing is outstanding."""
+    watch.newest_epoch = epoch
+    watch.last_good_at, watch.problem = now, ""
+
+
+async def check_once(
+    state: SessionState, key: SessionKey, watch: BurnWatch, now: datetime, compute: Compute,
+) -> BurnAlert | None:
+    """One check: probe UDL, fetch the history only if it moved, announce any new burn.
+
+    The newest set counts as seen only once the check has finished with it, so
+    a computation that fails leaves the set unseen and the next check retries it.
+    After each wait it asks again whether it is still wanted, so a sign-out
+    mid-check uses the UDL password no further and leaves no alert behind.
+    """
     watch.checked_at = now
     watch.next_check_at = now + CHECK_EVERY
     try:
-        epoch = await _probe(state, watch)
-        if watch.newest_epoch is not None and epoch is not None and epoch <= watch.newest_epoch:
-            watch.last_good_at, watch.problem = now, ""
-            return None
-        found = await _new_burns(state, watch, now, epoch)
-        watch.newest_epoch = epoch
-        watch.last_good_at, watch.problem = now, ""
-        if found is None or not found[2]:
-            return None
-        change = await compute(state, watch, found, now)
-        return _record(state, watch, found[2], change, now)
+        return await _check(state, key, watch, now, compute)
     except Exception as exc:  # noqa: BLE001 - one failed check must not end the watch; it says so and retries
-        logger.warning("Burn watch check failed for %s: %s", log_safe(watch.red_satno), log_safe(exc))
+        logger.warning("Burn watch check failed for %s: %s", log_safe(watch.red_satno),
+                       log_safe(exc.__cause__ or exc))
+        times = {"now": _hm(now), "next": _hm(watch.next_check_at)}
+        if isinstance(exc, _Stated):
+            sentence, unseen = exc.lead + _STATED_TAIL.format(**times), exc.unseen
+        else:
+            sentence, unseen = _FETCH_FAILED.format(**times), True
         since = f" Burns since {_hm(watch.last_good_at)}, the last good check, are not yet seen." if watch.last_good_at else ""
-        watch.problem = (f"The element set could not be fetched from UDL at {_hm(now)}; trying again at "
-                         f"{_hm(watch.next_check_at)}.{since}")
+        watch.problem = sentence + (since if unseen else "")
         return None
+
+
+async def _check(
+    state: SessionState, key: SessionKey, watch: BurnWatch, now: datetime, compute: Compute,
+) -> BurnAlert | None:
+    """The body of one check; a failure past the probe raises :class:`_Stated` with its own sentence."""
+    epoch = await _probe(state, watch)
+    if still_wanted(state, key, watch):
+        return None
+    if watch.newest_epoch is not None and epoch is not None and epoch <= watch.newest_epoch:
+        _good(watch, now, watch.newest_epoch)
+        return None
+    found = await _new_burns(state, watch, now, epoch)
+    if found is None or not found[2]:
+        _good(watch, now, epoch)
+        return None
+    if still_wanted(state, key, watch):
+        return None
+    try:
+        change = await compute(state, watch, found, now)
+    except Exception as exc:
+        lead = f"{watch.red_name} burned at {_burn_when(found[2])}, but what it changed could not be computed."
+        raise _Stated(lead, unseen=False) from exc
+    if still_wanted(state, key, watch):
+        return None
+    _good(watch, now, epoch)
+    return _record(state, watch, found[2], change, now)
 
 
 async def watch_loop(
@@ -198,7 +261,7 @@ async def watch_loop(
             return
         now = _utc_now()
         if now >= watch.next_check_at:
-            await check_once(state, watch, now, compute)
+            await check_once(state, key, watch, now, compute)
         await asyncio.sleep(TICK_S)
 
 

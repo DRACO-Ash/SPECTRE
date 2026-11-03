@@ -159,11 +159,15 @@ def is_manoeuvre_notice(rec: dict[str, Any]) -> bool:
     return "maneuver" in kind or "manoeuvre" in kind
 
 
+def event_time(rec: dict[str, Any]) -> datetime | None:
+    """When the notice says the event began, or ``None`` when it gives no event time."""
+    body = rec.get("msgBody") or {}
+    return _event_start(str(body.get("Event_Description") or ""), _parse_iso(rec.get("createdAt")))
+
+
 def notice_time(rec: dict[str, Any]) -> datetime | None:
     """When the notice says the event began, else when the record was created."""
-    created = _parse_iso(rec.get("createdAt"))
-    body = rec.get("msgBody") or {}
-    return _event_start(str(body.get("Event_Description") or ""), created) or created
+    return event_time(rec) or _parse_iso(rec.get("createdAt"))
 
 
 def _parse_iso(s: str | None) -> datetime | None:

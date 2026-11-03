@@ -224,6 +224,15 @@ class TestEachCellShowsItsOwnBasis:
         assert "Custody: computed in every cell." in text
         assert "Custody here is a rule of thumb" not in text
 
+    def test_mixed_custody_is_still_called_a_rule_of_thumb(self) -> None:
+        """Review finding 28: one lookup custody cell on screen keeps the rule-of-thumb line."""
+        result = evaluate_scenario(_scenario(2))
+        cell = result.outcome_matrix[0][1]
+        result.outcome_matrix[0][1] = dataclasses.replace(cell, figure_bases=_bases(custody_maintained=Basis.COMPUTED))
+        assert result.custody_rule_of_thumb is True
+        assert "Custody: lookup in 1 of 2 cells, computed in 1." in result.basis_lines
+        assert "Custody here is a rule of thumb" in _text(_render(result))
+
     def test_the_score_note_says_the_weights_are_rescaled(self) -> None:
         """Review finding: the route scales the panel weights to sum to one before scoring."""
         from spectre.domain.decision import LOOKUP_BASES

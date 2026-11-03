@@ -1647,7 +1647,10 @@ def _sweep_basis(  # noqa: PLR0913 - one argument per thing the runs hold consta
         frozen=_FrozenTargets({t.target_satno: cache[t.target_satno] for t in targets if t.target_satno in cache}),
         red_regime=red_regime,
         max_dv_m_s=max_dv_m_s,
-        blue_satnos=frozenset(str(o.get("satno") or "").strip() for o in hrr_objects if _hrr_side(o) == "blue"),
+        # A blue object with no number adds nothing: "" would make every unnumbered target "yours".
+        blue_satnos=frozenset(
+            s for s in (str(o.get("satno") or "").strip() for o in hrr_objects if _hrr_side(o) == "blue") if s
+        ),
         now=now,
     )
 
@@ -1698,16 +1701,55 @@ class _ChangeContext(NamedTuple):
     prior: ThreatAssessment | None
 
 
-def _custody_refusal(history: _RedHistory, custody: CustodyStatus) -> WarningChange | None:
+def _window_burns(pol: Any, basis: _SweepBasis) -> list[Any]:
+    """The confirmed burns within the regime's element-set age limit, earliest first."""
+    limit = limit_hours_for_regime(basis.red_regime)
+    return sorted(burns_in_window(pol.manoeuvres, basis.now, limit), key=lambda m: m.burn_window[0])
+
+
+def _held_after(burns: list[Any], red_epoch: datetime | None) -> str:
+    """With custody lost, what UDL already holds from after a burn the flown set predates, and how to get it."""
+    if not burns or red_epoch is None or red_epoch >= burns[-1].burn_window[1]:
+        return ""
+    return (f" UDL holds an element set from after a burn at {_when(burns[-1].burn_epoch)}; reconnect to UDL to "
+            "refresh held element sets (sets entered by hand are not refreshed), then sweep again.")
+
+
+def _custody_refusal(
+    history: _RedHistory, custody: CustodyStatus, red_epoch: datetime | None, basis: _SweepBasis,
+) -> WarningChange | None:
     """No figures without a history, or with custody lost."""
     if history.pol is None:
         return WarningChange(Status.CANNOT_SAY, f"What the burn changed: cannot say. {history.problem}")
     if custody.state is Custody.LOST:
         return WarningChange(
             Status.NOT_COMPUTED,
-            "What the burn changed is not shown: custody is lost, so any figure would rest on an out-of-date orbit.",
+            "What the burn changed is not shown: custody is lost, so any figure would rest on an out-of-date orbit."
+            + _held_after(_window_burns(history.pol, basis), red_epoch),
         )
     return None
+
+
+def _newer_than_held(pol: Any, red_epoch: datetime | None) -> datetime | None:
+    """The newest held set's epoch when the set the sweep flew is newer still, else ``None``.
+
+    The history is cached and refreshed apart from the red track, so a burn
+    between the two would be in the after figures but in no held set.
+    """
+    newest: datetime | None = pol.records[-1].epoch if pol.records else None
+    if red_epoch is None or newest is None or red_epoch <= newest:
+        return None
+    return newest
+
+
+def _unseen_burn(red_epoch: datetime, newest: datetime) -> WarningChange:
+    """No burn held, but the sweep flew a set newer than any held: a burn between them cannot be ruled out."""
+    return WarningChange(
+        Status.NOT_COMPUTED,
+        f"The sweep above flies its element set of {_when(red_epoch)}, newer than the newest in its history "
+        f"({_when(newest)}); a burn between them would be in its figures but cannot be named, so the change is "
+        "not computed. Reconnect to UDL to refresh held element sets, then sweep again.",
+    )
 
 
 def _no_burn(pol: Any, now: datetime, limit_hours: float) -> WarningChange:
@@ -1726,15 +1768,25 @@ def _no_burn(pol: Any, now: datetime, limit_hours: float) -> WarningChange:
 
 def _burn_selection(
     history: _RedHistory, red_epoch: datetime | None, custody: CustodyStatus, basis: _SweepBasis,
+    only: list[Any] | None = None,
 ) -> WarningChange | list[Any]:
-    """The burns to compare across, or the sentence saying why there are none to compare."""
-    refusal = _custody_refusal(history, custody)
+    """The burns to compare across, or the sentence saying why there are none to compare.
+
+    *only*, from the watch, keeps the burns it is announcing: a burn already
+    told to the operator is neither flown from nor worded again.
+    """
+    refusal = _custody_refusal(history, custody, red_epoch, basis)
     if refusal is not None:
         return refusal
     pol: Any = history.pol  # a history is held: _custody_refusal answered for none
     limit = limit_hours_for_regime(basis.red_regime)
-    burns = sorted(burns_in_window(pol.manoeuvres, basis.now, limit), key=lambda m: m.burn_window[0])
+    burns = _window_burns(pol, basis)
+    if only is not None:
+        burns = [m for m in burns if m in only]
     if not burns:
+        newest = _newer_than_held(pol, red_epoch)
+        if red_epoch is not None and newest is not None:
+            return _unseen_burn(red_epoch, newest)
         return _no_burn(pol, basis.now, limit)
     latest = burns[-1]
     if red_epoch is not None and red_epoch < latest.burn_window[1]:
@@ -1767,13 +1819,14 @@ def _burn_line(m: Any, red_name: str, verdicts: dict[datetime, Any], now: dateti
     return BurnLine(when, f"Is this normal? {verdict.sentence}" if verdict else "", caveat)
 
 
-def _basis_line(basis: _SweepBasis, before: Any, red_epoch: datetime | None) -> str:
-    """What the figures rest on, in small text under the section."""
+def _basis_line(basis: _SweepBasis, before: Any, red_epoch: datetime | None, flown: int) -> str:
+    """What the figures rest on, in small text under the section; *flown* counts only the targets swept."""
     after = f"(epoch {_when(red_epoch)})" if red_epoch else ""
+    against = "1 target and its same element set" if flown == 1 else f"{flown} targets and their same element sets"
     return (
         f"Computed at {basis.now:%H:%M} UTC. Before: its last element set before the burn "
         f"(epoch {_when(before.epoch)}), flown as if it had not burned. After: the element set this sweep "
-        f"flew {after}. Both against the same {len(basis.targets)} targets and their same element sets, the same "
+        f"flew {after}. Both against the same {against}, the same "
         f"{len(_SWEEP_METHODS)} transfer methods and the {basis.max_dv_m_s:g} m/s budget. Each orbit is offered "
         "its own burn times (now, and its apsides and nodes over the next 24 hours), so part of a change can be "
         "timing rather than reach. Warning time runs from the moment it burns to arrival, for its fastest "
@@ -1805,20 +1858,49 @@ def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: date
     if newer is not None:
         notes.append(f"An unconfirmed detection at {_when(newer.burn_epoch)} is newer and is not counted, "
                      "because it is not confirmed.")
+    held_newest = _newer_than_held(pol, context.red_epoch)
+    if context.red_epoch is not None and held_newest is not None:
+        notes.append(f"Caveat: the sweep's element set ({_when(context.red_epoch)}) is newer than the newest in its "
+                     f"history ({_when(held_newest)}); a burn between them would be in the after figures but not named.")
     notes.append(_notso_cue(context.red_name, context.red_satno, burns[-1].tle_after.epoch, now))
     return tuple(n for n in notes if n)
+
+
+def _not_flown(basis: _SweepBasis, target: ThreatTarget) -> str:
+    """Why the sweep runner skipped *target*, as ``_run_target_sweep`` decides it; ``""`` when it was flown."""
+    tle = (basis.manual_tle_by_name.get(target.target_name) if target.target_source == "manual"
+           else basis.frozen.hrr_tle_cache.get(target.target_satno))
+    if not tle:
+        return "no element set"
+    try:
+        regime = regime_from_tle(tle)
+    except TLE_ERRORS:
+        return ""  # the runner flies it on the assumption it is compatible, and says so
+    return "" if regimes_compatible(basis.red_regime, regime) else "regime mismatch"
 
 
 def _build_change(
     basis: _SweepBasis, burns: list[Any], before: list[ThreatSweepEntry], after: list[ThreatSweepEntry],
     context: _ChangeContext,
 ) -> WarningChange:
-    """The rows, the headline, each burn's line, the notes and the basis."""
+    """The rows, the headline, each burn's line, the notes and the basis.
+
+    Only the targets the runner flew are compared: one it skipped has no
+    figure either side, which is not the same as out of reach.
+    """
+    skipped = {t.target_name: why for t in basis.targets if (why := _not_flown(basis, t))}
+    named = ", ".join(f"{name} ({why})" for name, why in skipped.items())
+    if skipped and len(skipped) == len(basis.targets):
+        return WarningChange(Status.NOT_COMPUTED, "What the burn changed is not computed: no target was swept, so no "
+                                                  f"warning was flown before or after. Not swept: {named}.")
     rows = compare(
-        [(t.target_name, t.target_source == "blue" or t.target_satno in basis.blue_satnos) for t in basis.targets],
+        [(t.target_name, t.target_source == "blue" or t.target_satno in basis.blue_satnos)
+         for t in basis.targets if t.target_name not in skipped],
         least_warning_by_target(before, basis.max_dv_m_s),
         least_warning_by_target(after, basis.max_dv_m_s),
     )
+    not_swept = (f"Not swept, so {'its' if len(skipped) == 1 else 'their'} warning change is not computed: {named}."
+                 if skipped else "")
     changed = tuple(r for r in rows if r.change.name != "UNCHANGED")
     top = next((r for r in rows if r.change.name in ("CUT", "NEWLY_IN_REACH")), None)
     verdicts = burn_verdicts(context.history.pol, context.history.assessment) if context.history.assessment else {}
@@ -1828,8 +1910,8 @@ def _build_change(
         rows=tuple(rows),
         footer=footer(rows),
         burns=tuple(_burn_line(m, context.red_name, verdicts, basis.now) for m in burns),
-        notes=_change_notes(context, burns, top, basis.now),
-        basis=_basis_line(basis, burns[0].tle_before, context.red_epoch),
+        notes=_change_notes(context, burns, top, basis.now) + ((not_swept,) if not_swept else ()),
+        basis=_basis_line(basis, burns[0].tle_before, context.red_epoch, len(basis.targets) - len(skipped)),
         worst=worst_change(rows),
         changed=changed,
     )
@@ -1852,36 +1934,60 @@ async def _warning_change(
     red_epoch = age.epoch if age else None
     selection = _burn_selection(history, red_epoch, custody, basis)
     if isinstance(selection, WarningChange):
-        return selection
+        return _with_notso_cue(selection, red_name, red_satno, history.pol, basis.now)
     before, _, _ = await _fly(basis, selection[0].tle_before.tle)
-    return _build_change(
+    change = _build_change(
         basis, selection, before, entries, _ChangeContext(red_name, red_satno, red_epoch, history, prior),
     )
+    return _with_notso_cue(change, red_name, red_satno, history.pol, basis.now)
+
+
+def _with_notso_cue(
+    change: WarningChange, red_name: str, red_satno: str | None, pol: Any, now: datetime,
+) -> WarningChange:
+    """No burn to compare, or a change not computed, never stands alone while a cached notice says it moved.
+
+    Only with a history held: without one there are no element sets to say a
+    notice is newer than. Figures carry the cue in their own notes.
+    """
+    if change.status not in (Status.NO_BURN, Status.NOT_COMPUTED) or pol is None:
+        return change
+    latest_after = max((m.tle_after.epoch for m in pol.manoeuvres), default=None)
+    cue = _notso_cue(red_name, red_satno, latest_after, now)
+    return replace(change, notes=(*change.notes, cue)) if cue else change
 
 
 def _notso_cue(red_name: str, red_satno: str | None, latest_after: datetime | None, now: datetime) -> str:
     """A manoeuvre NOTSO newer than any confirmed burn: named, never turned into a figure.
 
-    Read from the cache the operator syncs; nothing is pulled from UDL here.
+    Newer by the event time the notice states. A notice that states none is
+    newer only if it was written after the last post-burn element set, and is
+    then named as possibly a burn already accounted for. Read from the cache the
+    operator syncs; nothing is pulled from UDL here.
     """
     if not red_satno:
         return ""
-    from spectre.data.notso_cache import event_class, get_notso_cache, is_manoeuvre_notice, notice_time
+    from spectre.data.notso_cache import event_class, event_time, get_notso_cache, is_manoeuvre_notice, notice_time
 
     cache = get_notso_cache()
-    newer: list[tuple[datetime, dict[str, Any]]] = []
-    for rec in cache.get_for_satno(red_satno):
+    newer: list[tuple[bool, datetime, dict[str, Any]]] = []
+    for rec in filter(is_manoeuvre_notice, cache.get_for_satno(red_satno)):
+        # With no event time, notice_time is when the record was written, which
+        # is after the event, so such a notice is flagged undated and worded so.
         when = notice_time(rec)
-        if is_manoeuvre_notice(rec) and when is not None and when <= now and (
-                latest_after is None or when > latest_after):
-            newer.append((when, rec))
+        if when is not None and when <= now and (latest_after is None or when > latest_after):
+            newer.append((event_time(rec) is not None, when, rec))
     if not newer:
         return ""
-    when, rec = max(newer, key=lambda pair: pair[0])
-    synced = cache.last_sync_utc() or "never"
+    # A notice that says when the object moved outranks any undated one.
+    dated, when, rec = max(newer, key=lambda n: (n[0], n[1]))
+    synced = f"NOTSO cache last synced {cache.last_sync_utc() or 'never'}."
+    if not dated:
+        return (f"NOTSO created at {_when(when)} reports a {event_class(rec)} by {red_name} but gives no event "
+                "time, so it may be a burn already accounted for or one no element set shows yet; its effect on your "
+                f"warning cannot be computed. {synced}")
     return (f"NOTSO at {_when(when)} reports a {event_class(rec)} by {red_name}. No element set since shows "
-            "a confirmed burn yet, so its effect on your warning cannot be computed. "
-            f"NOTSO cache last synced {synced}.")
+            f"a confirmed burn yet, so its effect on your warning cannot be computed. {synced}")
 
 
 async def _watch_change(
@@ -1903,7 +2009,7 @@ async def _watch_change(
     custody = _red_custody(red_tle, history, now)
     age = elset_age(red_tle, now)
     red_epoch = age.epoch if age else None
-    selection = _burn_selection(history, red_epoch, custody, basis)
+    selection = _burn_selection(history, red_epoch, custody, basis, only=burns)
     if isinstance(selection, WarningChange):
         return selection
     after, _, _ = await _fly(basis, red_tle)

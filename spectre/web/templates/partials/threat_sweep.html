@@ -84,10 +84,10 @@
   <section class="sweep-warning-change" aria-label="What the burn changed"
            style="border-left:4px solid var(--spectre-status-{{ wc_band }}); background:rgba(var(--spectre-status-{{ wc_band }}-rgb), 0.06);
                   border-radius:4px; padding:0.5rem 0.7rem; margin:0.3rem 0; font-size:0.78rem">
-    <div style="font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted)">What the burn changed</div>
+    <div style="font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim)">What the burn changed</div>
     <div style="font-weight:700; margin-top:0.15rem">{{ wc.headline }}</div>
     {% for line in wc.burns %}
-    <div style="margin-top:0.25rem">{{ line.when }} {{ line.verdict }}{% if line.caveat %} <span style="color:var(--text-muted)">{{ line.caveat }}</span>{% endif %}</div>
+    <div style="margin-top:0.25rem">{{ line.when }} {{ line.verdict }}{% if line.caveat %} <span style="color:var(--text-dim)">{{ line.caveat }}</span>{% endif %}</div>
     {% endfor %}
     {% if wc.changed %}
     <table class="hrr-table" style="font-size:0.7rem; margin-top:0.35rem">
@@ -106,11 +106,11 @@
       </tbody>
     </table>
     {% endif %}
-    {% if wc.footer %}<div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">{{ wc.footer }}</div>{% endif %}
+    {% if wc.footer %}<div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.2rem">{{ wc.footer }}</div>{% endif %}
     {% for note in wc.notes %}
-    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:0.2rem">{{ note }}</div>
+    <div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.2rem">{{ note }}</div>
     {% endfor %}
-    {% if wc.basis %}<div style="font-size:0.62rem; color:var(--text-muted); margin-top:0.25rem">{{ wc.basis }}</div>{% endif %}
+    {% if wc.basis %}<div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.25rem">{{ wc.basis }}</div>{% endif %}
   </section>
   {% endif %}
 

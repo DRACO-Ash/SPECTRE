@@ -88,3 +88,26 @@ def test_the_decide_by_line_renders_in_every_state(due: str, band: str) -> None:
     assert f"Decide-by sentence for {due}." in html
     section = html[html.index("sweep-decide-by"):html.index("</section>", html.index("sweep-decide-by"))]
     assert f"--spectre-status-{band}" in section
+
+
+def _defined_tokens() -> set[str]:
+    """Every CSS custom property the static stylesheets define."""
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static"
+    return {m for css in static.rglob("*.css") for m in re.findall(r"(--[\w-]+)\s*:", css.read_text(encoding="utf-8"))}
+
+
+@pytest.mark.parametrize("change", [
+    _FIGURES,
+    WarningChange(Status.NOT_COMPUTED, "What the burn changed is not shown: custody is lost."),
+    WarningChange(Status.NO_BURN, "No confirmed burn in its element sets.", notes=("NOTSO at 03:00 UTC.",)),
+])
+def test_the_section_uses_only_defined_tokens(change: WarningChange) -> None:
+    """V0.9 review 17: an undefined var() is an invalid declaration, so quiet text renders at full weight."""
+    html = _render(_context(warning_change=change))
+    start = html.index("sweep-warning-change")
+    section = html[start:html.index("</section>", start)]
+    used = set(re.findall(r"var\((--[\w-]+)", section))
+    assert used
+    assert used <= _defined_tokens(), sorted(used - _defined_tokens())
