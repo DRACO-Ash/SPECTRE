@@ -1,33 +1,28 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.13: 3 items, 690 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 11h30 to 11h30 (middle 11h30), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-029        90m  priority low; anchors the release
-    SPC-110       360m  priority high
-    SPC-112       240m  priority high
-  lane 1 (360m): SPC-110
-  lane 2 (330m): SPC-112, SPC-029
-
-V0.14: 4 items, 840 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
+V0.14: 5 items, 765 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 12h45 to 12h45 (middle 12h45), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-113       180m  priority high
     SPC-114       240m  priority high
-    SPC-150       180m  fills the release to its floor
-    SPC-113       180m  priority high; anchors the release
     SPC-115       240m  priority high
-  lane 1 (600m): SPC-114, SPC-150, SPC-113
-  lane 2 (240m): SPC-115
+    SPC-034        45m  priority low; anchors the release
+    SPC-116        60m  rider: priority med, adds no gate
+  lane 1 (480m): SPC-113, SPC-114, SPC-116
+  lane 2 (285m): SPC-115, SPC-034
 
-V0.15: 2 items, 660 priced min, gates container, lint, quality, sast, tests
-  forecast 11h00 to 11h00 (middle 11h00), people's time 0 min, evidence: settings (nothing measured yet)
+V0.15: 3 items, 840 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-120       300m  priority high; anchors the release
+    SPC-150       180m  fills the release to its floor
     SPC-121       360m  priority high
   lane 1 (660m): SPC-120, SPC-121
+  lane 2 (180m): SPC-150
 
 V0.16: 3 items, 720 priced min, gates browser, container, lint, quality, sast, tests
   forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-124       300m  priority med, adds gate browser
     SPC-123       300m  priority high; anchors the release
     SPC-125       120m  rider: priority med, adds no gate
-    SPC-124       300m  priority med, adds gate browser
   lane 1 (420m): SPC-123, SPC-125
   lane 2 (300m): SPC-124
 

@@ -509,7 +509,11 @@
   ],
   "files": [
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
  },
  {
   "ref": "SPC-111",
@@ -546,7 +550,11 @@
   ],
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
  },
  {
   "ref": "SPC-113",
@@ -555,7 +563,7 @@
   "group": "decision",
   "minutes": 180,
   "task": "Phase 2: evaluate off the request thread with a time budget and named refusals",
-  "note": "Up to 25 cells of 500 samples each. Adversary samples are propagated once per action and blue once per response, then paired. A cell that fails says why, as the sweep does: no silent excepts.",
+  "note": "Up to 25 cells of 500 samples each. Adversary samples are propagated once per action and blue once per response, then paired. A cell that fails says why, as the sweep does: no silent excepts. Since 0.13.0 the route already runs the evaluation on a worker thread, so other sessions are not stalled; what remains is the time budget, per-cell refusals and pairing propagations.",
   "deps": [
    "SPC-112"
   ],
@@ -1041,6 +1049,37 @@
   "files": [
    "spectre/web/static/style.css",
    "tests/unit/test_css_tokens_are_defined.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-116",
+  "priority": "med",
+  "order": 116,
+  "group": "decision",
+  "minutes": 60,
+  "task": "A coarse velocity check when a hypothesis starts from the bound red track",
+  "note": "SPC-112 refuses a hypothesis whose pre-burn position is more than 10 km from the bound red track, but checks no velocity: element-set error alone allows about 11 m/s, more than the 2 m/s archetype burns, so a tight check would refuse honest cases. A coarse check, about 0.1 km/s, would still catch a unit or object mix-up. Claude's call in 0.13.0 to defer it, not a ruling.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-034",
+  "priority": "low",
+  "order": 34,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "Steel theme: the admin nav ghost buttons have dark text on the dark bar; the admin flash uses an undefined class",
+  "note": "Found building SPC-029 in 0.13.0. spectre-card-custody is used by the admin flash and defined by no stylesheet.",
+  "files": [
+   "spectre/web/static/style.css"
   ]
  }
 ]

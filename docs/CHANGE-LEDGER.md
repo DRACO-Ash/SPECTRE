@@ -1082,3 +1082,12 @@ Feature work from the backlog: a response time per target, the manoeuvre hypothe
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/astro/catalogue.py`, the hypothesis types in `decision.py`, per-target response times in `decide_by.py` and `routes/threat.py`, watch and sign-out fixes in `burn_watch.py` and `planning_state.py`, and template colour tokens | `scripts/check-quality.sh` against 0.11.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. `threat.py` has one bare `Depends` fewer. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.13.0
+
+Feature work from the backlog: the sampled closest approach and P5 scoring for the Decision Engine, and colour names.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the separation series in `spectre/astro/monte_carlo.py`, a B* property in `propagator.py`, sampling, refusals and the cost cap in `decision.py`, the evaluation on a worker thread in `routes/decision.py`, colour tokens in the stylesheets and templates | `scripts/check-quality.sh` against 0.12.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A sampled evaluation uses up to about 9 s of one CPU per request, within its cap. | n/a. |
+

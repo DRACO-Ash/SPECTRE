@@ -9,6 +9,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response, gets its first figure computed from real orbits.** When a scenario is bound to a red track and a blue asset and an adversary action carries a manoeuvre hypothesis, that cell's closest approach is sampled from the Monte Carlo engine and scored on its P5, the smallest likely miss. Every other figure is still a lookup, and the page says which is which.
+
+### Added
+- A separation series from the Monte Carlo engine: each sample of the hypothesis's burn, drawn from its delta-V, pointing, timing and drag spreads, is flown against the bound blue asset over the horizon, red and blue alike on RK45 with J2 and drag, and its closest approach found with the shared helper. It passes the closest-approach reference cases at both window starts (SPC-110).
+- Sampled cells. The cell's closest approach is the P5 of the samples' misses, with P5, P50 and P95, the spread, the samples and the propagator in its basis, and its time to closest approach from a sample at or below P5. The ranking still reads as a weighted heuristic, and the page says the 50,000 km normalisation lets the sampled spread move a score only slightly (SPC-112).
+- Each refusal is a sentence in the cell, never a quiet fallback to the lookup: over the cost cap (it names the longest horizon that would fit), a stale orbit, an element set newer than the burn, a hypothesis that does not start at the bound red track, failed samples, or samples that did not converge (SPC-112).
+
+### Changed
+- The decision evaluation runs on a worker thread, so a sampled evaluation, up to about 9 s within its cap, no longer stalls every other signed-in session.
+- The 13 colour names used but defined nowhere now resolve in both themes, and a test keeps it that way (SPC-029).
+
+### Out of scope, named
+- The panel to enter a hypothesis (SPC-114), the time budget off the request (SPC-113) and P5 to P95 bands in the cells (SPC-115). Our response is not yet applied to the blue orbit, so a sampled closest approach is the same across a row's responses. A coarse velocity check on the hypothesis's start (SPC-116).
+
 ## [0.12.0] - 2026-11-03
 
 **Operator outputs: 2 and 3 made more exact, and output 4, the recommended response, gets its manoeuvre hypothesis.** Decide-by now honours a response time per target, a burn the sweep could not show stays watched, and every Decision Engine figure is still a lookup.
