@@ -881,6 +881,8 @@ REENTRY_FLOOR_KM = 100.0
 
 #: A trajectory: the state [x, y, z, vx, vy, vz] at t seconds after the window start.
 _Trajectory = Callable[[float], np.ndarray]
+#: Called after each sample of a separation series with (samples done, samples in all); it may raise to stop it.
+Tick = Callable[[int, int], None]
 
 
 class SeparationWindow(NamedTuple):
@@ -960,7 +962,7 @@ _REENTERED = "re-entered"
 
 
 def run_separation_series(
-    hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow,
+    hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, *, tick: Tick | None = None,
 ) -> SeparationSeries:
     """Each sample's closest approach to *blue* in *window*, with P5, P50 and P95 of the misses.
 
@@ -984,12 +986,17 @@ def run_separation_series(
     here, because the equations of motion hold the GIL. Raises ValueError,
     before anything is integrated, when the window is one the helper would
     refuse or *blue* holds at another instant.
+
+    *tick*, when given, is called after each sample with (samples done,
+    samples in all), outside the sample's own excepts. It may raise to stop
+    the series: the exception propagates and no series is returned (SPC-113's
+    budget and cancellation).
     """
     _check_window(window, blue)
     t_start = time.monotonic()
     samples = generate_samples(hypothesis)
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
-    outcomes = _approaches(hypothesis, samples, blue, window)
+    outcomes = _approaches(hypothesis, samples, blue, window, tick)
     found = tuple(a for a in outcomes if isinstance(a, ClosestApproach))
     misses = np.array([a.miss_km for a in found])
     half_width = percentile_half_width_km(misses.tolist(), seed=hypothesis.random_seed or 0)
@@ -1063,8 +1070,14 @@ def _check_window(window: SeparationWindow, blue: BlueTrack) -> None:
 
 def _approaches(
     hypothesis: ManoeuvreHypothesis, samples: np.ndarray, blue: BlueTrack, window: SeparationWindow,
+    tick: Tick | None = None,
 ) -> list[ClosestApproach | str]:
-    """One closest approach per sample, in sample order, _FAILED or _REENTERED where there is none."""
+    """One closest approach per sample, in sample order, _FAILED or _REENTERED where there is none.
+
+    *tick* is called after each sample, outside _try_sample, so its excepts never swallow what a tick raises;
+    the exception propagates and no result is returned. When the shared arcs fail, no sample runs and no tick
+    is called.
+    """
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     earliest = _earliest_s(burn_s + samples[:, 3])
     try:
@@ -1075,7 +1088,12 @@ def _approaches(
     if blue_arc is None or unburnt is None:
         return [_FAILED] * len(samples)
     arcs = _Arcs(blue=blue_arc, unburnt=unburnt, burn_s=burn_s)
-    return [_try_sample(sample, arcs, hypothesis.bstar_post, window) for sample in samples]
+    outcomes: list[ClosestApproach | str] = []
+    for sample in samples:
+        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window))
+        if tick is not None:
+            tick(len(outcomes), len(samples))
+    return outcomes
 
 
 def _altitude_km(_t: float, state: np.ndarray, *_: float) -> float:

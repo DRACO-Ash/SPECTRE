@@ -3,8 +3,8 @@
 Binding records which real objects a scenario is about and how old their
 orbits are. Without a hypothesis it changes no figure: the page after the
 "Bound to" block is the same as the unbound page, computation time aside.
-No form field attaches a hypothesis yet (SPC-114), so a sampled closest
-approach (SPC-112) cannot reach this page through the route.
+The panel's hypothesis section (SPC-114) is tested in
+test_decision_hypothesis_panel.py; these forms post none.
 """
 
 from __future__ import annotations
@@ -82,9 +82,10 @@ def _line(block: str, side: str) -> str:
 
 
 def _after_binding(html: str) -> str:
-    """The page after the "Bound to" block, with computation time masked."""
+    """The page after the "Bound to" block, with computation time and the scenario epoch's minute masked."""
     start = html.index('class="scenario-binding"')
-    return re.sub(r"\d+\.\d+s", "#s", html[html.index("</div>", start):])
+    after = re.sub(r"\d+\.\d+s", "#s", html[html.index("</div>", start):])
+    return re.sub(r"Scenario epoch \d{4}-\d\d-\d\d \d\d:\d\d UTC", "Scenario epoch # UTC", after)
 
 
 class TestThePanel:

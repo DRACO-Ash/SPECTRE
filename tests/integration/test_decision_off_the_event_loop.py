@@ -1,9 +1,9 @@
-"""A sampled evaluation runs off the event loop (0.13.0).
+"""An evaluation answered on the request runs off the event loop (0.13.0).
 
-Sampling a closest approach can take about 9 s within its cap. On the event
-loop that stalls every signed-in session, the burn watch included, until
-SPC-113 adds its own time budget, so the route hands the evaluation to a
-worker thread.
+A scenario that samples nothing is still evaluated on the request, on a
+worker thread, so a slow evaluation never stalls the other signed-in
+sessions or the burn watch. One that samples runs as a session job, also on a
+worker thread (SPC-113, tests/integration/test_decision_job.py).
 """
 
 from __future__ import annotations

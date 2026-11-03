@@ -27,6 +27,7 @@ from spectre.config.settings import (
 from spectre.data.intel import satno_from_tle
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
+from spectre.web.decision_job import server_starting, server_stopping
 from spectre.web.format_units import format_m_s, format_tof_label
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
@@ -235,8 +236,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     await init_db()
     _load_hrr_from_disk()
+    server_starting()
     logger.info("SPECTRE %s ready — listening for requests", __version__)
     yield
+    # A sampled evaluation's worker thread stops at its next sample, so the exit does not wait out its budget.
+    server_stopping()
     logger.info("SPECTRE %s shutting down", __version__)
 
 

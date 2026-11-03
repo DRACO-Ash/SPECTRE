@@ -467,3 +467,58 @@ def test_the_look_back_follows_the_earliest_sample_burn() -> None:
     earliest = min(0.0, float(burns.min()))
     expected = 3600.0 + (3600.0 - earliest) + sum(3600.0 - b for b in burns)
     assert separation_integration_s(hypothesis, _WINDOW) == pytest.approx(expected, rel=1e-12)
+
+
+# The tick (SPC-113): the decision layer's budget and stop are checked once per sample, outside the sample's
+# own excepts, so a tick that raises stops the series and reaches the caller.
+
+
+def test_the_tick_is_called_once_per_sample_with_its_count() -> None:
+    """B9."""
+    ticks: list[tuple[int, int]] = []
+    series = run_separation_series(_hypothesis(n_samples=5), _BLUE, _WINDOW, tick=lambda k, n: ticks.append((k, n)))
+    assert ticks == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+    assert len(series.approaches) == 5
+
+
+def test_the_tick_follows_its_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tick k comes after sample k has run, so a budget reading it counts k samples finished, not k - 1."""
+    tried: list[int] = []
+    real = monte_carlo._try_sample
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        tried.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(monte_carlo, "_try_sample", counted)
+    seen: list[tuple[int, int]] = []
+    run_separation_series(_hypothesis(n_samples=4), _BLUE, _WINDOW, tick=lambda k, _n: seen.append((k, len(tried))))
+    assert seen == [(1, 1), (2, 2), (3, 3), (4, 4)]
+
+
+class _StopHereError(Exception):
+    """What the test's tick raises."""
+
+
+def test_a_tick_that_raises_stops_the_series_and_reaches_the_caller() -> None:
+    """B9: the ValueError and ArithmeticError excepts around each sample do not swallow it, and no result returns."""
+    ticks: list[int] = []
+
+    def tick(k: int, _n: int) -> None:
+        ticks.append(k)
+        if k == 2:
+            raise _StopHereError
+
+    with pytest.raises(_StopHereError):
+        run_separation_series(_hypothesis(n_samples=5), _BLUE, _WINDOW, tick=tick)
+    assert ticks == [1, 2]
+
+
+def test_a_tick_that_raises_a_value_error_is_not_counted_as_a_failed_sample() -> None:
+    """The tick runs outside _try_sample, so even an exception its excepts name propagates."""
+
+    def tick(_k: int, _n: int) -> None:
+        raise ValueError("stop")
+
+    with pytest.raises(ValueError, match="stop"):
+        run_separation_series(_hypothesis(n_samples=3), _BLUE, _WINDOW, tick=tick)

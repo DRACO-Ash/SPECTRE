@@ -1,7 +1,8 @@
 {# Decision Engine Results — rendered into #decision-results #}
 {# Context: result (ScenarioResult); result.scenario.binding is optional (SPC-100). A sampled cell's band,
    refusal and caveat, the row notes and the sampled caveat (SPC-112) are each guarded with "is defined", so an
-   older result renders under StrictUndefined. #}
+   older result renders under StrictUndefined. So are the spread fields of SPC-115: the band's hover, the
+   Uncertainty column, the score spread on each ranking card and the spread note. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -76,6 +77,11 @@
     {% if result.sampled_caveat is defined and result.sampled_caveat is not none %}
     <div class="sampled-caveat" style="color:var(--gold)">{{ result.sampled_caveat }}</div>
     {% endif %}
+    {% if result.score_spread_note is defined and result.score_spread_note is not none %}
+    <div class="score-spread-note" style="color:var(--gold)">{{ result.score_spread_note }}</div>
+    {% endif %}
+    {# A job's result arrives after the request, so the moment its times count from is on screen. #}
+    <div class="scenario-epoch">Scenario epoch {{ result.scenario.epoch_utc.strftime('%Y-%m-%d %H:%M') }} UTC; times to closest approach count from it.</div>
   </div>
 
   <div style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
@@ -115,6 +121,7 @@
           {% endif %}
         </th>
         {% endfor %}
+        <th style="text-align:left; padding:0.2rem 0.35rem; font-weight:600; color:var(--text-dim)">Uncertainty</th>
       </tr>
     </thead>
     <tbody>
@@ -129,6 +136,9 @@
           </div>
           {% if a.hypothesis is defined and a.hypothesis is not none %}
           <div class="row-hypothesis" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.sentence }}</div>
+          {% if a.hypothesis.burn_line is defined %}
+          <div class="row-burn" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.burn_line(result.scenario.epoch_utc) }}</div>
+          {% endif %}
           {% endif %}
           {% if result.row_notes is defined and result.row_notes | length > i and result.row_notes[i] is not none %}
           <div class="row-note" style="font-size:0.56rem; color:var(--gold)">{{ result.row_notes[i] }}</div>
@@ -158,7 +168,7 @@
             </div>
             <div style="font-size:0.57rem; color:var(--text-dim)">
               <span{% if om.basis is defined %} title="{{ om.basis }}"{% endif %}>
-              <span class="figure" data-figure="closest_approach_km"
+              <span class="figure" data-figure="closest_approach_km"{% if band is none %} title="{{ om.ca_title if om.ca_title is defined else 'Lookup: a fixed figure, with no distribution.' }}"{% endif %}
                     data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ ("%.1f" if band is not none else "%.0f") | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
               <span class="figure" data-figure="custody_maintained"
                     data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
@@ -166,7 +176,7 @@
               </span>
             </div>
             {% if band is not none and om.ca_band is defined %}
-            <div class="sampled-band" style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_band }}</div>
+            <div class="sampled-band"{% if om.ca_distribution is defined %} title="{{ om.ca_distribution }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_band }}</div>
             {% endif %}
             {% if om.ca_caveat is defined and om.ca_caveat is not none %}
             <div class="sampled-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_caveat }}</div>
@@ -176,6 +186,7 @@
             {% endif %}
           </td>
         {% endfor %}
+        <td class="row-uncertainty" style="padding:0.25rem 0.35rem; font-size:0.56rem; color:var(--text-dim)">{% if result.row_uncertainty is defined %}{{ result.row_uncertainty[i] }}{% else %}Lookup: no spread computed.{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -200,7 +211,9 @@
       {{ a.name }}
     </div>
     <div style="display:flex; gap:0.4rem; flex-wrap:wrap">
+      {% set ranked = result.ranked_cells[i] if result.ranked_cells is defined else [] %}
       {% for resp, score in result.ranked_per_adversary[i] %}
+        {% set cell = ranked[loop.index0][2] if ranked | length > loop.index0 else none %}
         {% if score < 0.25 %}{% set sc = "#22c55e" %}{% elif score < 0.5 %}{% set sc = "#f59e0b" %}{% else %}{% set sc = "#ef4444" %}{% endif %}
         <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:4px;
                     padding:0.3rem 0.5rem; font-size:0.62rem; min-width:7rem">
@@ -209,6 +222,11 @@
             {{ resp.name | truncate(16, True, '…') }}
           </div>
           <div style="font-family:monospace; color:{{ sc }}">{{ "%.3f" | format(score) }}</div>
+          {% if cell is not none and cell.score_spread_text is defined %}
+          <div class="score-spread"{% if cell.score_percentiles_text is defined and cell.score_percentiles_text is not none %} title="{{ cell.score_percentiles_text }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ cell.score_spread_text }}</div>
+          {% else %}
+          <div class="score-spread" style="font-size:0.55rem; color:var(--text-dim)">Score spread: lookup, none computed</div>
+          {% endif %}
         </div>
       {% endfor %}
     </div>
@@ -218,7 +236,7 @@
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim);
               border-top:1px solid var(--border); padding-top:0.3rem">
     Phase {% if result.n_sampled_cells is defined and result.n_sampled_cells %}2 · sampled closest approach in {{ result.n_sampled_cells }} cells{% else %}1{% endif %} · {{ result.scenario.name }}
-    · {{ result.scenario.horizon_hours | int }}h horizon
+    · {{ "%g" | format(result.scenario.horizon_hours) }}h horizon
   </div>
 
 </div>

@@ -39,6 +39,19 @@ honestly (too few samples, an out-of-date orbit, a hypothesis built from
 another element set, a failed or unconverged series, or a scenario over the
 cost cap) is refused with a sentence in each of its cells and keeps its lookups.
 
+A sampled evaluation may run under a RunControl (SPC-113): one wall-time
+budget across its rows, a stop that names why it is no longer wanted, and a
+progress callback. The web layer runs it as a session job the page polls, so
+no request waits for it. A row the budget does not cover is refused, naming
+the budget; a stop ends the evaluation with EvaluationStoppedError and no
+result. Without a RunControl, evaluation is exactly as before.
+
+A sampled cell also carries how closely its percentiles are known and the
+composite score's spread across its samples (SPC-115); the score's basis stays
+lookup. The panel builds a hypothesis from the bound red track's state at a
+burn time counted from the scenario epoch (SPC-114): pre_manoeuvre_state,
+with_spread and burn_line serve it.
+
 Typical use::
 
     scenario = Scenario(
@@ -63,7 +76,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 import numpy as np
 
@@ -71,11 +84,13 @@ from spectre.astro.monte_carlo import (
     _MIN_CONVERGENCE_SAMPLES,
     CONVERGENCE_TOLERANCE_KM,
     MANOEUVRE_ARCHETYPES,
+    REENTRY_FLOOR_KM,
     BlueTrack,
     ManoeuvreHypothesis,
     ManoeuvreType,
     SeparationSeries,
     SeparationWindow,
+    Tick,
     _ric_split,
     elset_state,
     hypothesis_from_tle_record,
@@ -312,6 +327,15 @@ _SOURCE_LEADS: dict[HypothesisSource, str] = {
 }
 
 
+#: The burn on its own line in the results (SPC-114), and whose state each source starts from.
+_BURN_LINE = "Burn at {burn:%Y-%m-%d %H:%M} UTC, {h:+.1f} h from the scenario epoch, from {start} state then."
+_STARTS: dict[HypothesisSource, str] = {
+    HypothesisSource.ARCHETYPE: "the bound red track's",
+    HypothesisSource.ENTERED: "the bound red track's",
+    HypothesisSource.DETECTED: "the detected element set's",
+}
+
+
 class PreManoeuvreState(NamedTuple):
     """Where and when the adversary is just before the hypothesised burn."""
 
@@ -476,6 +500,12 @@ def _sealed_copy(hypothesis: ManoeuvreHypothesis) -> _SealedHypothesis:
     return _SealedHypothesis(**{**values, "pre_manoeuvre_state_eci_km": state})
 
 
+def pre_manoeuvre_state(tle: str, at: datetime) -> PreManoeuvreState | None:
+    """Where the element set puts the object at *at*, as a hypothesis's start; None when it cannot be propagated."""
+    track = elset_state(tle, at)
+    return None if track is None else PreManoeuvreState(at, tuple(float(x) for x in track.state_eci_km))
+
+
 @dataclass(frozen=True, eq=False)
 class AdversaryHypothesis:
     """A manoeuvre hypothesis for one adversary action, with where it came from.
@@ -492,6 +522,8 @@ class AdversaryHypothesis:
     source:        HypothesisSource
     archetype_key: str | None = None
     frame:         str = "RIC"
+    # The delta-V spread was entered by the operator, not taken from the archetype (SPC-114); set by with_spread.
+    spread_entered: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.hypothesis, ManoeuvreHypothesis):
@@ -515,13 +547,28 @@ class AdversaryHypothesis:
 
     @classmethod
     def from_entered(
-        cls, delta_v_m_s: float, direction_ric: Sequence[float], at: PreManoeuvreState, *,
+        cls, delta_v_m_s: float, direction_ric: Sequence[float] | None, at: PreManoeuvreState, *,
         archetype: str | None = None, n_samples: int = 500,
     ) -> AdversaryHypothesis:
-        """A delta-V the operator entered, in m/s, along a RIC direction, with an archetype's dispersions if named."""
+        """A delta-V the operator entered, in m/s, along a RIC direction, with an archetype's dispersions if named.
+
+        With no direction, the archetype's assumed in-track direction is taken, and the basis says so; without
+        an archetype, a direction is needed.
+        """
         row = None if archetype is None else _known_archetype(archetype)
-        nominal = _nominal(to_km_s(delta_v_m_s), _unit_ric(direction_ric), at, _ENTERED_DIRECTION)
+        if direction_ric is None:
+            if row is None:
+                raise ValueError("An entered delta-V without an archetype needs a direction.")
+            unit, basis = (0.0, 1.0, 0.0), _ARCHETYPE_DIRECTION
+        else:
+            unit, basis = _unit_ric(direction_ric), _ENTERED_DIRECTION
+        nominal = _nominal(to_km_s(delta_v_m_s), unit, at, basis)
         return cls(_dispersed(nominal, row, n_samples), HypothesisSource.ENTERED, archetype_key=archetype)
+
+    def with_spread(self, delta_v_1sigma_m_s: float) -> AdversaryHypothesis:
+        """This hypothesis with a delta-V spread the operator entered, in m/s (1 sigma); the other spreads stay."""
+        spread = dataclasses.replace(self.hypothesis, delta_v_magnitude_1sigma_km_s=to_km_s(delta_v_1sigma_m_s))
+        return dataclasses.replace(self, hypothesis=spread, spread_entered=True)
 
     @classmethod
     def from_detection(
@@ -563,8 +610,22 @@ class AdversaryHypothesis:
     def sentence(self) -> str:
         """How the hypothesis was made, in one sentence."""
         lead = _SOURCE_LEADS[self.source].format(archetype=self.archetype)
-        spread = f"dispersions from the {self.archetype} archetype" if self.archetype else "default dispersions, no archetype"
-        return f"{lead}: {self.delta_v_m_s:.1f} m/s; direction ({self.frame}) {self.direction_basis}; {spread}."
+        return f"{lead}: {self.delta_v_m_s:.1f} m/s; direction ({self.frame}) {self.direction_basis}; {self._spreads}."
+
+    @property
+    def _spreads(self) -> str:
+        """Where the dispersions came from: the archetype, the defaults, or an entered delta-V spread (SPC-114)."""
+        rest = f"from the {self.archetype} archetype" if self.archetype else "the defaults, no archetype"
+        if not self.spread_entered:
+            return f"dispersions {rest}" if self.archetype else "default dispersions, no archetype"
+        sigma = from_km_s(self.hypothesis.delta_v_magnitude_1sigma_km_s)
+        return f"delta-V spread {sigma:.1f} m/s (1 sigma) entered; pointing and timing spreads {rest}"
+
+    def burn_line(self, scenario_epoch: datetime) -> str:
+        """When the burn is, against the scenario epoch, and whose state it starts from (SPC-114)."""
+        burn = self.hypothesis.epoch_utc
+        hours = (burn - scenario_epoch).total_seconds() / 3600.0
+        return _BURN_LINE.format(burn=burn, h=hours, start=_STARTS[self.source])
 
     @property
     def note(self) -> str:
@@ -576,7 +637,10 @@ class AdversaryHypothesis:
         inner = dataclasses.asdict(self.hypothesis)
         inner["epoch_utc"] = self.hypothesis.epoch_utc.isoformat()
         inner["pre_manoeuvre_state_eci_km"] = [float(x) for x in self.hypothesis.pre_manoeuvre_state_eci_km]
-        return {"source": self.source.value, "archetype_key": self.archetype_key, "frame": self.frame, "hypothesis": inner}
+        return {
+            "source": self.source.value, "archetype_key": self.archetype_key, "frame": self.frame,
+            "spread_entered": self.spread_entered, "hypothesis": inner,
+        }
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AdversaryHypothesis):
@@ -660,13 +724,23 @@ class OutcomeMetrics:
     # What P5 does not say about a sampled cell: the closest sample, and any
     # that were still closing when the window ended.
     ca_caveat:            str | None = None
+    # How closely P5, P50 and P95 are known, km (95 % bootstrap half-width),
+    # and the composite score's P5, P50, P95 and 1-sigma spread across the
+    # samples (SPC-115). Set with the band; the score's basis stays lookup.
+    ca_half_width_km:     float | None = None
+    score_percentiles:    dict[int, float] | None = None
+    score_std:            float | None = None
 
     def __post_init__(self) -> None:
         sampled = _cell_bases(self).closest_approach_km.kind is Basis.SAMPLED
-        band = (self.ca_percentiles, self.ca_std_km, self.ca_samples)
+        band = (
+            self.ca_percentiles, self.ca_std_km, self.ca_samples, self.ca_half_width_km, self.score_percentiles,
+            self.score_std,
+        )
         if not all((part is not None) == sampled for part in band):
             raise ValueError(
-                "ca_percentiles, ca_std_km and ca_samples are set exactly when the closest approach's basis is sampled"
+                "ca_percentiles, ca_std_km, ca_samples, ca_half_width_km, score_percentiles and score_std are set "
+                "exactly when the closest approach's basis is sampled"
             )
         if self.ca_percentiles is not None:
             _require_band(self.ca_percentiles, cast("float", self.ca_std_km), self.closest_approach_km)
@@ -682,6 +756,36 @@ class OutcomeMetrics:
             return None
         p = self.ca_percentiles
         return f"Sampled: P5 {p[5]:.1f} km to P95 {p[95]:.1f} km, median {p[50]:.1f} km, {self.ca_samples} samples."
+
+    @property
+    def ca_distribution(self) -> str | None:
+        """The sampled distribution in full, for the band's hover; None when the closest approach is not sampled."""
+        if self.ca_percentiles is None:
+            return None
+        p = self.ca_percentiles
+        return _CA_DISTRIBUTION.format(
+            n=self.ca_samples, p5=p[5], p50=p[50], p95=p[95], std=self.ca_std_km, hw=self.ca_half_width_km,
+        )
+
+    @property
+    def ca_title(self) -> str:
+        """The closest approach's hover: its distribution when sampled, else LOOKUP_CELL_TITLE."""
+        return self.ca_distribution or LOOKUP_CELL_TITLE
+
+    @property
+    def score_spread_text(self) -> str:
+        """The composite score's spread across samples, for a ranking card; a lookup cell says none was computed."""
+        if self.score_std is None:
+            return _SCORE_SPREAD_LOOKUP
+        return _SCORE_SPREAD.format(s=_spread_figure(self.score_std), n=self.ca_samples)
+
+    @property
+    def score_percentiles_text(self) -> str | None:
+        """The score's P5, P50 and P95 across samples, for the card's hover; None for a lookup cell."""
+        p = self.score_percentiles
+        if p is None:
+            return None
+        return _SCORE_PERCENTILES.format(p5=p[5], p50=p[50], p95=p[95])
 
     @property
     def modelled(self) -> bool:
@@ -704,6 +808,23 @@ class OutcomeMetrics:
 
 
 _PERCENTILE_KEYS = (5, 50, 95)
+
+#: The band's hover (SPC-115). The element-set model is spectre/astro/along_track.py's _ERROR_MODEL_KM.
+_CA_DISTRIBUTION = (
+    "Distribution of {n} sampled misses: P5 {p5:.1f} km, P50 {p50:.1f} km, P95 {p95:.1f} km; spread {std:.1f} km "
+    "(1 sigma); each percentile known to within {hw:.2f} km (95 % bootstrap). Not in this spread: element-set "
+    "error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, and the "
+    "hypothesis being wrong."
+)
+_SCORE_SPREAD = "Score spread {s} (1 sigma, {n} samples)"
+_SCORE_SPREAD_LOOKUP = "Score spread: lookup, none computed"
+_SCORE_PERCENTILES = "Score P5 {p5:.4f}, P50 {p50:.4f}, P95 {p95:.4f} across samples; the score's basis is lookup."
+#: Below this a spread would print as 0.0000, which reads as none; it is shown as under 0.0001 instead.
+_SMALLEST_SHOWN_SPREAD = 0.00005
+
+
+def _spread_figure(std: float) -> str:
+    return "under 0.0001" if std < _SMALLEST_SHOWN_SPREAD else f"{std:.4f}"
 
 
 def _require_band(percentiles: dict[int, float], std_km: float, closest_approach_km: float) -> None:
@@ -931,6 +1052,25 @@ class ScenarioResult:
         return len(self._bands())
 
     @property
+    def score_spread_note(self) -> str | None:
+        """SCORE_SPREAD_NOTE when any cell is sampled, else None (SPC-115)."""
+        return SCORE_SPREAD_NOTE if self._bands() else None
+
+    @property
+    def row_uncertainty(self) -> tuple[str, ...]:
+        """One sentence per adversary row for the Uncertainty column: its spread, or why it has none (SPC-115)."""
+        return tuple(_row_uncertainty(row) for row in self.outcome_matrix)
+
+    @property
+    def ranked_cells(self) -> list[list[tuple[FriendlyResponse, float, OutcomeMetrics]]]:
+        """ranked_per_adversary with each response's cell beside it, matched by response id."""
+        index = {r.id: j for j, r in enumerate(self.scenario.friendly_responses)}
+        return [
+            [(resp, score, self.outcome_matrix[i][index[resp.id]]) for resp, score in ranked]
+            for i, ranked in enumerate(self.ranked_per_adversary)
+        ]
+
+    @property
     def sampled_caveat(self) -> str | None:
         """What a sampled closest approach does not say, with how far its spread can move a score; None unsampled."""
         bands = self._bands()
@@ -939,6 +1079,24 @@ class ScenarioResult:
         w = self.scenario.w_closest_approach
         delta = max(w * (_norm_ca(band[5]) - _norm_ca(band[95])) for band in bands)
         return _RESULT_CAVEAT.format(delta=delta)
+
+
+_ROW_SAMPLED = (
+    "Closest approach spread {std:.1f} km (1 sigma) over {n} samples; P5, P50 and P95 known to within {hw:.2f} km. "
+    "Score spread across samples {s}."
+)
+_ROW_LOOKUP = "Lookup: no spread computed."
+_ROW_REFUSED = "Not sampled, so no spread: the cells say why."
+
+
+def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
+    """A row's spread: every cell of a row is sampled from one series or none is, so its first cell speaks for it."""
+    cell = row[0]
+    if cell.ca_percentiles is not None:
+        return _ROW_SAMPLED.format(
+            std=cell.ca_std_km, n=cell.ca_samples, hw=cell.ca_half_width_km, s=_spread_figure(cast("float", cell.score_std)),
+        )
+    return _ROW_REFUSED if cell.ca_refusal is not None else _ROW_LOOKUP
 
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
@@ -1069,16 +1227,33 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
 
 # ── Sampled closest approach (SPC-112) ─────────────────────────────────────────
 
-#: A sampler: one hypothesis's separation series against the blue track over a window (SPC-110).
-Sampler = Callable[[ManoeuvreHypothesis, BlueTrack, SeparationWindow], SeparationSeries]
+class Sampler(Protocol):
+    """One hypothesis's separation series against the blue track over a window (SPC-110).
 
-#: The most sample-hours one evaluation may run while the operator waits. POST /decision/evaluate runs it on a
-#: worker thread, so other sessions are not stalled, but the operator's own request still waits for all of it
-#: until SPC-113 adds a time budget and named refusals. A row
-#: costs the larger of its samples times the horizon and the hours its series integrates
+    *tick* is passed only when the evaluation runs under a RunControl (SPC-113), so a sampler that takes three
+    arguments still serves an evaluation without one.
+    """
+
+    def __call__(
+        self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
+        tick: Tick | None = ...,
+    ) -> SeparationSeries: ...
+
+
+#: The wall time one sampled evaluation may take, in seconds (SPC-113). It runs as a session job the page polls,
+#: holding the server's only sampling slot, so this bounds how long a second operator waits too.
+EVALUATION_BUDGET_S: float = 120.0
+#: The rate the cap assumes, in sample-hours per second of wall time: about a fifth under the slowest measured,
+#: 51 (plane_change Evasive, 500 samples over 11.7 h, 115.7 s, with other work on the machine; the same case ran
+#: at 74 and 75 idle). At 50 that case left 4.3 s of the budget, so a loaded server would refuse it part-way after holding
+#: the only sampling slot for 2 minutes; at 40 the cap's worst case takes about 94 s at 51. See _cost for the table.
+_SLOWEST_SAMPLE_HOURS_PER_S = 40.0
+#: The most sample-hours one evaluation may run: what EVALUATION_BUDGET_S covers at _SLOWEST_SAMPLE_HOURS_PER_S.
+#: A row costs the larger of its samples times the horizon and the hours its series integrates
 #: (separation_integration_s, which counts any burn before the window), plus SET_UP_S_PER_SAMPLE for each
-#: sample; the rows that would run are summed before any of them runs. See _cost for the measurements.
-MAX_SAMPLE_HOURS: float = 600.0
+#: sample; the rows that would run are summed before any of them runs. The cap refuses what cannot fit before
+#: anything runs; the budget, checked after every sample, refuses what overruns anyway.
+MAX_SAMPLE_HOURS: float = EVALUATION_BUDGET_S * _SLOWEST_SAMPLE_HOURS_PER_S
 #: What one sample costs whatever its window, in seconds of sample time: its solve_ivp set-up and its
 #: closest-approach search. Fitted as wall = a x sample-hours + b x samples over six evaluations from 58
 #: samples over 10 h to 20,000 over 0.028 h: b / a = 0.146 h, rounded up to 9 minutes. Without it the cap did
@@ -1087,6 +1262,13 @@ SET_UP_S_PER_SAMPLE: float = 540.0
 #: How far, km, the hypothesis's pre-burn position may sit from the bound red track at its burn time. J2000
 #: against TEME differs by about 46 km at LEO radius and 275 km at GEO in 2026, so a frame mix is caught.
 START_TOLERANCE_KM: float = 10.0
+#: How far, km/s, the hypothesis's pre-burn velocity may sit from the bound red track's at its burn time (SPC-116).
+#: Coarse on purpose. The element set's own error allows about 11 m/s within START_TOLERANCE_KM, so nothing finer
+#: is honest; a units slip is a factor of 1,000, and another object at a crossing differs by hundreds of m/s (394 m/s
+#: in the plane-change reference case at 1,411 s, 10.4 km apart). A frame mix is caught first by position (46 km at
+#: LEO), its velocity effect being only about 50 m/s there. A burn under 100 m/s already folded into the state is
+#: not caught here, so _after_burn stays the guard for that.
+START_VELOCITY_TOLERANCE_KM_S: float = 0.1
 _SECONDS_PER_HOUR = 3600.0
 _TENTH_HOUR_S = 360.0
 
@@ -1094,7 +1276,7 @@ _LOOKUPS = " This cell's figures are lookups."
 _OVER_CAP = (
     "Not sampled: this scenario needs at least {total:,} sample-hours (samples times the hours each is "
     "propagated, counting any burn before the window, plus {set_up:g} minutes of set-up for each sample, across "
-    "{rows}), above the {cap:,.0f} this page can run while you wait. "
+    "{rows}), above the {cap:,.0f} one evaluation may run within its {budget:g} s budget. "
 )
 _SHORTEN = "At these sample counts the longest horizon that fits is {h:.1f} h."
 _NO_HORIZON = (
@@ -1115,7 +1297,20 @@ _START_MISMATCH = (
     "Not sampled: the hypothesis starts {d:.1f} km from the bound red track at its burn time, more than "
     "{tol:g} km, so it was built from another element set, time or frame."
 )
-_FAILED = "Not sampled: {k} of {n} samples failed to propagate, and a P5 without them could hide the closest."
+_VELOCITY_MISMATCH = (
+    "Not sampled: the hypothesis starts {dv:,.1f} m/s from the bound red track's velocity at its burn time, more "
+    "than {tol:g} m/s, so its velocity is in other units or from another object."
+)
+_FAILED = "Not sampled: {k} of {n} samples failed to propagate{reentered}, and a P5 without them could hide the closest."
+_REENTERED = ", {r} of them by re-entering below {floor:g} km"
+_BUDGET_PART = (
+    "Not sampled: this evaluation's {budget:g} s budget ran out after {k:,} of {n:,} samples of this hypothesis, "
+    "and a P5 from part of them would not be earned. Take fewer samples or a shorter horizon."
+)
+_BUDGET_NONE = (
+    "Not sampled: this evaluation's {budget:g} s budget ran out before this hypothesis started. Take fewer samples "
+    "or a shorter horizon."
+)
 _UNCONVERGED = (
     "Not sampled: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:g} km convergence "
     "check. Take more samples, with a shorter horizon if that goes over the {cap:,.0f} sample-hour cap."
@@ -1141,6 +1336,14 @@ _RESULT_CAVEAT = (
     "not in it. Our response is not applied to the blue orbit yet, so every response in a sampled row has the "
     "same closest approach. The score normalises closest approach to 50,000 km, so the sampled spread moves it "
     "by at most {delta:.4f} here."
+)
+#: The hover on a lookup cell's closest approach (SPC-115): it has no band to show.
+LOOKUP_CELL_TITLE = "Lookup: a fixed figure, with no distribution."
+#: Shown once under the sampled caveat when any cell is sampled (SPC-115).
+SCORE_SPREAD_NOTE = (
+    "Score spread is the 1-sigma spread of the composite score across samples. It is small because closest "
+    "approach is normalised to 50,000 km, not because the outcome is certain. Our response is not applied to the "
+    "blue orbit, so within a sampled row the ranking is decided by lookup figures."
 )
 #: A row whose action carries a hypothesis in a scenario not bound on both sides.
 UNSAMPLED_ROW_NOTE = (
@@ -1201,8 +1404,10 @@ def _no_state(row: _Row) -> str | None:
 
 
 def _start_mismatch(row: _Row) -> str | None:
-    """Position only: within the 10 km tolerance, velocity may differ by about 11 m/s from the element set's own
-    error, more than the 2 m/s archetype burns, so velocity could not tell an included burn apart (_after_burn does).
+    """The start's position against the bound red track at the burn time; _velocity_mismatch checks its velocity.
+
+    Within the 10 km tolerance, velocity may differ by about 11 m/s from the element set's own error, more than
+    the 2 m/s archetype burns, so no velocity check could tell an included burn apart (_after_burn does).
     """
     red = cast("BlueTrack", row.red_track)   # _no_state, run before this, refused a row without one
     pre = np.asarray(row.hypothesis.pre_manoeuvre_state_eci_km, dtype=float)
@@ -1210,8 +1415,25 @@ def _start_mismatch(row: _Row) -> str | None:
     return None if d <= START_TOLERANCE_KM else _START_MISMATCH.format(d=d, tol=START_TOLERANCE_KM)
 
 
+def _velocity_mismatch(row: _Row) -> str | None:
+    """The start's velocity against the bound red track at the burn time, to START_VELOCITY_TOLERANCE_KM_S.
+
+    Catches a velocity in other units or taken from another object; passing it is not validation.
+    """
+    red = cast("BlueTrack", row.red_track)   # _no_state, run before this, refused a row without one
+    pre = np.asarray(row.hypothesis.pre_manoeuvre_state_eci_km, dtype=float)
+    dv = float(np.linalg.norm(pre[3:] - red.state_eci_km[3:]))
+    if dv <= START_VELOCITY_TOLERANCE_KM_S:
+        return None
+    return _VELOCITY_MISMATCH.format(dv=from_km_s(dv), tol=from_km_s(START_VELOCITY_TOLERANCE_KM_S))
+
+
 def _failed(series: SeparationSeries) -> str | None:
-    return _FAILED.format(k=series.n_failed, n=series.n_samples_run) if series.n_failed > 0 else None
+    if series.n_failed <= 0:
+        return None
+    r = series.n_reentered
+    reentered = _REENTERED.format(r=r, floor=REENTRY_FLOOR_KM) if r > 0 else ""
+    return _FAILED.format(k=series.n_failed, n=series.n_samples_run, reentered=reentered)
 
 
 def _unconverged(series: SeparationSeries) -> str | None:
@@ -1222,7 +1444,7 @@ def _unconverged(series: SeparationSeries) -> str | None:
 
 #: Checked in this order before anything runs; the first that speaks refuses the row.
 _PRE_RUN_CHECKS: tuple[Callable[[_Row], str | None], ...] = (
-    _too_few, _stale, _after_burn, _no_state, _start_mismatch,
+    _too_few, _stale, _after_burn, _no_state, _start_mismatch, _velocity_mismatch,
 )
 #: Checked in this order once the series has run.
 _POST_RUN_CHECKS: tuple[Callable[[SeparationSeries], str | None], ...] = (_failed, _unconverged)
@@ -1253,18 +1475,31 @@ def _cost(rows: Sequence[_Row]) -> float:
 
     The exact cost draws every sample to find its burn time, so a row far over the cap is refused on the floor
     without drawing any: a million samples took 1 s and 238 MB just to be costed. The floor bounds the samples
-    drawn to 4,000.
+    drawn to 40,000.
 
-    Measured single-threaded in the venv (Python 3.13, scipy 1.17.1, numpy 2.4.6, 4 CPUs), whole
-    evaluate_scenario on a 4 x 4 grid with one row sampled, LEO 300 km unless stated, idle machine. To fit the
-    set-up term, before it existed: 58 samples over 10 h (608.7 with set-up) took 9.45 s, 200 over 2.9 h
-    (615.8) 8.47 s, 1,000 over 0.5 h (651) 9.05 s, 2,000 over 0.29 h (880.6) 12.11 s, 5,000 over 0.115 h
-    (1,325) 17.75 s and 20,000 over 0.028 h (3,560) 49.21 s. Under the cap with it: the Evasive archetype's
-    50 over 11.3 h (595.1) 8.80 s, 58 over 9.8 h (596.7) 8.41 and 8.74 s, 200 over 2.8 h (595.6) 8.82 s,
-    500 over 1 h (577) 8.97 s, 1,000 over 0.44 h (590.9) 8.90 s, 2,000 over 0.14 h (580.3) 7.58 s, 3,500 over
-    0.02 h (595) 7.79 s, 58 over 9.8 h at 550 km 7.42 s, a burn 10.5 h before a 1 h window (595) 6.32 s and
-    one after an 11.8 h window (597.5) 1.99 s. The largest allowed evaluation is therefore about 9 s on an
-    idle machine, more beside other work. Not timed by any test.
+    The set-up term was fitted single-threaded in the venv (Python 3.13, scipy 1.17.1, numpy 2.4.6, 4 CPUs) on
+    a 4 x 4 grid with one row sampled, LEO 300 km, idle machine, before it existed: 58 samples over 10 h (608.7
+    with set-up) took 9.45 s, 200 over 2.9 h (615.8) 8.47 s, 1,000 over 0.5 h (651) 9.05 s, 2,000 over 0.29 h
+    (880.6) 12.11 s, 5,000 over 0.115 h (1,325) 17.75 s and 20,000 over 0.028 h (3,560) 49.21 s.
+
+    The cap and budget (SPC-113) rest on these, the reference element sets in tests/unit/_decision_reference.py,
+    burn 0.25 h into the window unless stated, cost with set-up:
+
+    plane_change Evasive, 100 samples over 1, 6, 24 and 48 h: 1.4, 7.6, 31.7 and 67.0 s (48 h costs 4,886,
+    73 sample-hours a second), all converged, half-width 0.06 km; 500 over 1 h (about 575) 6.9 s; 500 over 12 h
+    (6,075) 104.3 s, 58 a second, half-width 0.04 km. coplanar_leo (about 505 km) Evasive, 500 over 12 h (6,075)
+    102.0 s, 60 a second; 100 over 1 h and 6 h (615) 2.4 and 10.7 s, 57.5 a second, with other work on the
+    machine; Orbit Raise 100 over 1 h and 6 h 2.3 and 11.5 s, not converged (1.76 km).
+    geo_drift_in Station Keeping, 100 over 6 h and 24 h (2,438) 3.2 and 10.0 s, 243 a second, so GEO is refused
+    conservatively; Intercept 100 over 6 h 2.1 s, not converged (3.94 km). plane_change with the burn 2 h before a
+    1 h window, 500 samples (1,582) 26.3 s, 60 a second, not converged (Evasive 1.77 km, Orbit Raise 8.37 km).
+    plane_change Evasive with the burn at the window start, under a RunControl, 500 over 11.7 h (5,951): 115.66 s
+    with other work on the machine, 51 a second, the slowest rate measured; 80.2 s and 79.19 s idle, 74 and 75 a
+    second. So MAX_SAMPLE_HOURS assumes 40, about a fifth under 51.
+
+    Two series at once on two threads took 45.6 s against 10.6 s for one alone, so one sampled evaluation runs
+    at a time, server-wide. The default hypothesis, 500 samples over 48 h, costs about 24,171 and is refused:
+    it would hold the server's only sampling slot for 5 to 8 minutes at the rates measured. Not timed by any test.
     """
     floor = sum(_floor_s(row) for row in rows) / _SECONDS_PER_HOUR
     return floor if floor > MAX_SAMPLE_HOURS else sum(_cost_s(row) for row in rows) / _SECONDS_PER_HOUR
@@ -1300,14 +1535,113 @@ def _cap_refusal(rows: Sequence[_Row]) -> str | None:
     advice = _SHORTEN.format(h=tenths / 10) if tenths > 0 else _NO_HORIZON.format(least=_MIN_CONVERGENCE_SAMPLES)
     over = _OVER_CAP.format(
         total=math.ceil(total), set_up=SET_UP_S_PER_SAMPLE / 60.0, rows=counted, cap=MAX_SAMPLE_HOURS,
+        budget=EVALUATION_BUDGET_S,
     )
     return _refusal(over + advice)
 
 
-def _run(row: _Row, sampler: Sampler) -> RowSampling:
-    series = sampler(row.hypothesis, cast("BlueTrack", row.blue_track), row.window)   # _no_state refused None
+class SamplingProgress(NamedTuple):
+    """How far a sampled evaluation has got: hypothesis *row* of the *rows* that run, *done* of its *total* samples."""
+
+    row:       int
+    rows:      int
+    done:      int
+    total:     int
+    elapsed_s: float
+
+
+def _ignore(_progress: SamplingProgress) -> None:
+    """No one is watching the progress."""
+
+
+@dataclass(frozen=True)
+class RunControl:
+    """How a sampled evaluation is bounded and watched (SPC-113).
+
+    *budget_s* is the wall time its rows may take together, counted from the
+    first row's start on *clock*. *stop* returns a fixed reason once the
+    evaluation is no longer wanted, else None. *progress* hears once per
+    sample. All three are called on the evaluating thread.
+    """
+
+    budget_s: float
+    stop:     Callable[[], str | None]
+    progress: Callable[[SamplingProgress], None] = _ignore
+    clock:    Callable[[], float] = time.monotonic
+
+
+class EvaluationStoppedError(Exception):
+    """A sampled evaluation stopped because it was no longer wanted; *reason* is the stop's fixed sentence."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class _BudgetSpentError(Exception):
+    """The budget ran out with *done* of *total* samples of a row finished within it."""
+
+    def __init__(self, done: int, total: int) -> None:
+        super().__init__(f"{done} of {total}")
+        self.done, self.total = done, total
+
+
+class _Budget:
+    """One evaluation's budget across its rows: its clock starts at the first row, and it ticks once per sample."""
+
+    def __init__(self, run: RunControl, rows: int) -> None:
+        self.run, self.rows = run, rows
+        self.row = 0
+        self.started: float | None = None
+        self.spent = False
+
+    def _elapsed(self) -> float:
+        return self.run.clock() - cast("float", self.started)
+
+    def begin_row(self) -> bool:
+        """Whether the next row may start: the first always does, and none once the budget is spent."""
+        self.row += 1
+        if self.started is None:
+            self.started = self.run.clock()
+        elif not self.spent:
+            self.spent = self._elapsed() > self.run.budget_s
+        return not self.spent
+
+    def tick(self, done: int, total: int) -> None:
+        """Report progress, then stop when no longer wanted, then refuse the row once the budget is spent.
+
+        A row whose last sample ends past the budget keeps its complete series; the next row will not start.
+        Otherwise the budget ran out during sample *done*, so *done* - 1 were finished within it.
+        """
+        elapsed = self._elapsed()
+        self.run.progress(SamplingProgress(self.row, self.rows, done, total, elapsed))
+        reason = self.run.stop()
+        if reason:
+            raise EvaluationStoppedError(reason)
+        if elapsed > self.run.budget_s and done < total:
+            self.spent = True
+            raise _BudgetSpentError(done - 1, total)
+
+
+def _checked(series: SeparationSeries) -> RowSampling:
+    """A series that has run, or why it is refused."""
     refusal = _first_refusal(series, _POST_RUN_CHECKS)
     return RowSampling(series=None, refusal=refusal) if refusal is not None else RowSampling(series, None)
+
+
+def _run(row: _Row, sampler: Sampler, budget: _Budget | None) -> RowSampling:
+    """Run a row's series, under *budget* when there is one: a row it does not cover is refused, naming it."""
+    blue = cast("BlueTrack", row.blue_track)   # _no_state refused None
+    if budget is None:
+        return _checked(sampler(row.hypothesis, blue, row.window))
+    budget_s = budget.run.budget_s
+    if not budget.begin_row():
+        return RowSampling(None, _refusal(_BUDGET_NONE.format(budget=budget_s)))
+    try:
+        series = sampler(row.hypothesis, blue, row.window, tick=budget.tick)
+    except _BudgetSpentError as spent:
+        return RowSampling(None, _refusal(_BUDGET_PART.format(budget=budget_s, k=spent.done, n=spent.total)))
+    return _checked(series)
 
 
 def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
@@ -1333,7 +1667,40 @@ def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
     ]
 
 
-def plan_sampling(scenario: Scenario, sampler: Sampler = run_separation_series) -> tuple[RowSampling | None, ...]:
+def _pre_plan(scenario: Scenario) -> tuple[list[_Row | None], list[str | None]]:
+    """Each row as checked before anything runs, and why it is refused (the cap included); None where it is not."""
+    rows = _eligible_rows(scenario)
+    refusals = [None if row is None else _first_refusal(row, _PRE_RUN_CHECKS) for row in rows]
+    ready = [row for row, refusal in zip(rows, refusals, strict=True) if row is not None and refusal is None]
+    over = _cap_refusal(ready)
+    return rows, [None if row is None else refusal or over for row, refusal in zip(rows, refusals, strict=True)]
+
+
+def longest_horizon_h(n_samples: int, rows: int = 1) -> float:
+    """The longest horizon, in hours floored to tenths, at which *rows* hypotheses of *n_samples* fit the cap.
+
+    For the panel's hint (SPC-114): a burn at the scenario epoch integrates about (n + 2) times the horizon per
+    row (each sample, blue and red's unburnt arc), and each sample adds SET_UP_S_PER_SAMPLE. A burn before the
+    epoch costs more, so this is an upper bound; the cap itself is checked on the real cost.
+    """
+    set_up_h = rows * n_samples * SET_UP_S_PER_SAMPLE / _SECONDS_PER_HOUR
+    hours = (MAX_SAMPLE_HOURS - set_up_h) / (rows * (n_samples + 2))
+    return max(math.floor(hours * 10) / 10, 0.0)
+
+
+def needs_a_run(scenario: Scenario) -> bool:
+    """Whether evaluating *scenario* would sample anything: some row passes every check before the run and the cap.
+
+    False for a lookup scenario and for one whose every eligible row is refused before anything runs; those
+    evaluate in milliseconds, so the route can answer them on the request.
+    """
+    rows, refusals = _pre_plan(scenario)
+    return any(row is not None and refusal is None for row, refusal in zip(rows, refusals, strict=True))
+
+
+def plan_sampling(
+    scenario: Scenario, sampler: Sampler = run_separation_series, *, run: RunControl | None = None,
+) -> tuple[RowSampling | None, ...]:
     """Each adversary row's separation series, or why it was refused; None for a row that is not eligible.
 
     A row is eligible when its action carries a hypothesis and the scenario
@@ -1341,24 +1708,29 @@ def plan_sampling(scenario: Scenario, sampler: Sampler = run_separation_series) 
     before anything runs: at least 50 samples, both orbits current, the red
     element set no newer than the burn, both element sets propagated (blue to
     the scenario epoch, red to the burn) and the hypothesis starting within
-    START_TOLERANCE_KM of the bound red track. The rows that pass are costed
+    START_TOLERANCE_KM of the bound red track and within
+    START_VELOCITY_TOLERANCE_KM_S of its velocity. The rows that pass are costed
     together against MAX_SAMPLE_HOURS; above it every one is refused, naming
     the longest horizon that would fit, and nothing runs. The rest run one at
     a time on this thread, and a series with a failed sample or not converged
-    is refused.
+    is refused. Under *run*, the rest share its budget in order: a row it
+    does not cover is refused, naming it, and a stop raises
+    EvaluationStoppedError.
     """
-    rows = _eligible_rows(scenario)
+    rows, refusals = _pre_plan(scenario)
     if not rows:
         return (None,) * len(scenario.adversary_actions)
-    refusals = [None if row is None else _first_refusal(row, _PRE_RUN_CHECKS) for row in rows]
-    ready = [row for i, row in enumerate(rows) if row is not None and refusals[i] is None]
-    over = _cap_refusal(ready)
-    return tuple(None if row is None else _plan_row(row, refusals[i] or over, sampler) for i, row in enumerate(rows))
+    ready = sum(row is not None and refusal is None for row, refusal in zip(rows, refusals, strict=True))
+    budget = None if run is None else _Budget(run, ready)
+    return tuple(
+        None if row is None else _plan_row(row, refusal, sampler, budget)
+        for row, refusal in zip(rows, refusals, strict=True)
+    )
 
 
-def _plan_row(row: _Row, refusal: str | None, sampler: Sampler) -> RowSampling:
+def _plan_row(row: _Row, refusal: str | None, sampler: Sampler, budget: _Budget | None) -> RowSampling:
     """A row refused before anything runs, or its series run and checked."""
-    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler)
+    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget)
 
 
 def _sampled_bases(series: SeparationSeries, horizon_hours: float) -> OutcomeBases:
@@ -1384,8 +1756,15 @@ def _cell_caveat(series: SeparationSeries) -> str:
 def _sampled_cell(
     adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, series: SeparationSeries,
 ) -> OutcomeMetrics:
-    """A cell scored on the sampled P5, with its time the earliest TCA at or below it; the rest are lookups."""
+    """A cell scored on the sampled P5, with its time the earliest TCA at or below it; the rest are lookups.
+
+    Each sample's miss is scored too, through the same _score, for the composite score's P5, P50, P95 and
+    1-sigma spread across samples (SPC-115). The score is linear in the miss below 50,000 km.
+    """
     figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=series.miss_km_p5)
+    scores = np.array([
+        _score(scenario, friendly, figures._replace(closest_approach_km=a.miss_km)) for a in series.approaches
+    ])
     return OutcomeMetrics(
         custody_maintained=figures.custody_maintained,
         custody_gap_hours=round(figures.custody_gap_hours, 2),
@@ -1398,6 +1777,9 @@ def _sampled_cell(
         ca_std_km=series.miss_km_std,
         ca_samples=len(series.approaches),
         ca_caveat=_cell_caveat(series),
+        ca_half_width_km=series.percentile_half_width_km,
+        score_percentiles={k: float(np.percentile(scores, k)) for k in _PERCENTILE_KEYS},
+        score_std=float(np.std(scores)),
     )
 
 
@@ -1520,6 +1902,7 @@ def evaluate_scenario(
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
     *,
     sampler: Sampler = run_separation_series,
+    run: RunControl | None = None,
 ) -> ScenarioResult:
     """Evaluate all (adversary × friendly) combinations and return a ranked result.
 
@@ -1532,6 +1915,10 @@ def evaluate_scenario(
     sampler:
         Runs a row's separation series (SPC-112); a test passes a fake. Only
         a row plan_sampling finds eligible calls it.
+    run:
+        Bounds and watches the sampled rows (SPC-113): one wall-time budget,
+        a stop and progress. Without it, evaluation is exactly as before.
+        A stop raises EvaluationStoppedError and returns no result.
 
     Returns
     -------
@@ -1546,7 +1933,7 @@ def evaluate_scenario(
     t0 = time.monotonic()
 
     # Build outcome matrix: a lookup in every cell but those of a row plan_sampling sampled or refused
-    plan = plan_sampling(scenario, sampler)
+    plan = plan_sampling(scenario, sampler, run=run)
     outcome_matrix = [
         [_cell(adversary, friendly, scenario, sampling) for friendly in scenario.friendly_responses]
         for adversary, sampling in zip(scenario.adversary_actions, plan, strict=True)

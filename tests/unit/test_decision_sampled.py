@@ -7,7 +7,8 @@ its time to closest approach the earliest TCA at or below P5, and both say
 they are sampled; every other figure, and every other row, is a lookup
 exactly as before. A row that cannot be sampled honestly is refused with a
 sentence in each of its cells and keeps its lookups. The cost is capped
-before anything runs, because the evaluation still runs on the request thread.
+before anything runs, at what one evaluation can run within its 120 s budget
+(SPC-113).
 
 D1 to D17 inject a fake sampler, so they run in milliseconds and test the
 domain's rules, not the propagator; D18 runs the real series once.
@@ -38,6 +39,7 @@ from spectre.astro.monte_carlo import (
 )
 from spectre.domain import decision
 from spectre.domain.decision import (
+    EVALUATION_BUDGET_S,
     LOOKUP_BASES,
     MAX_SAMPLE_HOURS,
     SET_UP_S_PER_SAMPLE,
@@ -90,10 +92,11 @@ def _binding(
     )
 
 
-def _evasive(n_samples: int = 50, *, offset_km: float = 0.0) -> AdversaryHypothesis:
-    """The Evasive archetype burning at EPOCH from red's state there, moved *offset_km* along x."""
+def _evasive(n_samples: int = 50, *, offset_km: float = 0.0, dv_offset_km_s: float = 0.0) -> AdversaryHypothesis:
+    """The Evasive archetype burning at EPOCH from red's state there, moved *offset_km* and *dv_offset_km_s* along x."""
     state = _RED_AT_EPOCH.state_eci_km.copy()
     state[0] += offset_km
+    state[3] += dv_offset_km_s
     return AdversaryHypothesis.from_archetype("evasive", PreManoeuvreState(EPOCH, tuple(state)), n_samples=n_samples)
 
 
@@ -191,7 +194,9 @@ class _Fake:
 
     def __call__(self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow) -> SeparationSeries:
         self.calls.append((hypothesis, blue, window))
-        return _series(window, **self.series)
+        series = dict(self.series)
+        reentered = series.pop("n_reentered", 0)
+        return dataclasses.replace(_series(window, **series), n_reentered=reentered)
 
 
 def _never(*_: Any) -> NoReturn:
@@ -345,7 +350,8 @@ def _metrics(**changes: Any) -> OutcomeMetrics:
         "custody_maintained": True, "custody_gap_hours": 0.0, "closest_approach_km": 3.0,
         "time_to_closest_hours": 0.33, "delta_v_cost_km_s": 0.0, "composite_score": 0.2,
         "figure_bases": _sampled_bases(), "ca_percentiles": {5: 3.0, 50: 8.0, 95: 20.0}, "ca_std_km": 5.0,
-        "ca_samples": 50,
+        "ca_samples": 50, "ca_half_width_km": 0.4, "score_percentiles": {5: 0.19, 50: 0.2, 95: 0.2},
+        "score_std": 0.00003,
     }
     return OutcomeMetrics(**{**values, **changes})
 
@@ -358,7 +364,11 @@ class TestTheInvariantsHold:
         ("changes", "match"),
         [
             ({"figure_bases": LOOKUP_BASES}, "sampled"),
-            ({"ca_percentiles": None, "ca_std_km": None, "ca_samples": None}, "sampled"),
+            (
+                {"ca_percentiles": None, "ca_std_km": None, "ca_samples": None, "ca_half_width_km": None,
+                 "score_percentiles": None, "score_std": None},
+                "sampled",
+            ),
             ({"ca_std_km": None}, "sampled"),
             ({"ca_samples": None}, "sampled"),
             ({"closest_approach_km": 8.0}, "P5"),
@@ -371,7 +381,7 @@ class TestTheInvariantsHold:
             ({"ca_refusal": "Not sampled: no."}, "refused"),
             (
                 {"figure_bases": LOOKUP_BASES, "ca_percentiles": None, "ca_std_km": None, "ca_samples": None,
-                 "ca_caveat": "c"},
+                 "ca_half_width_km": None, "score_percentiles": None, "score_std": None, "ca_caveat": "c"},
                 "caveat",
             ),
         ],
@@ -390,6 +400,7 @@ class TestTheInvariantsHold:
     def test_a_refused_lookup_cell_is_accepted(self) -> None:
         cell = _metrics(
             figure_bases=LOOKUP_BASES, ca_percentiles=None, ca_std_km=None, ca_samples=None, ca_refusal="Not sampled.",
+            ca_half_width_km=None, score_percentiles=None, score_std=None,
         )
         assert cell.ca_refusal == "Not sampled."
         assert cell.ca_band is None
@@ -415,12 +426,13 @@ def _without_state(side_tle: str) -> Callable[[pytest.MonkeyPatch], tuple[Scenar
 #: Each refusal: how to make it, and the sentence its cells carry.
 _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]], str]] = {
     "over the cap": (
-        # 2 x ((76 + 2) x 3.75 h + 76 x 9 min) = 607.8; at 3.7 h it is exactly 600.
-        lambda _mp: (_bound({0: _steady(76), 1: _steady(76)}, horizon_hours=3.75), _never),
-        "Not sampled: this scenario needs at least 608 sample-hours (samples times the hours each is propagated, "
+        # The floor, 2 x 500 x (4.7 h + 9 min) = 4,850, is over the cap, so it is the figure; at 4.6 h the exact
+        # cost is 2 x ((500 + 2) x 4.6 h + 500 x 9 min) = 4,768.4, which fits.
+        lambda _mp: (_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=4.7), _never),
+        "Not sampled: this scenario needs at least 4,850 sample-hours (samples times the hours each is propagated, "
         "counting any burn before the window, plus 9 minutes of set-up for each sample, across 2 hypotheses), "
-        "above the 600 this page can run while you wait. At these sample counts the longest horizon that fits is "
-        "3.7 h.",
+        "above the 4,800 one evaluation may run within its 120 s budget. At these sample counts the longest "
+        "horizon that fits is 4.6 h.",
     ),
     "too few samples": (
         lambda _mp: (_bound({0: _evasive(49)}), _never),
@@ -454,14 +466,24 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
         "Not sampled: the hypothesis starts 50.0 km from the bound red track at its burn time, more than 10 km, "
         "so it was built from another element set, time or frame.",
     ),
+    "velocity mismatch": (
+        lambda _mp: (_bound({0: _evasive(dv_offset_km_s=0.15)}), _never),
+        "Not sampled: the hypothesis starts 150.0 m/s from the bound red track's velocity at its burn time, more "
+        "than 100 m/s, so its velocity is in other units or from another object.",
+    ),
     "failed samples": (
         lambda _mp: (_bound(), _Fake(n_failed=1)),
         "Not sampled: 1 of 50 samples failed to propagate, and a P5 without them could hide the closest.",
     ),
+    "re-entered samples": (
+        lambda _mp: (_bound(), _Fake(n_failed=2, n_reentered=2)),
+        "Not sampled: 2 of 50 samples failed to propagate, 2 of them by re-entering below 100 km, and a P5 without "
+        "them could hide the closest.",
+    ),
     "not converged": (
         lambda _mp: (_bound(), _Fake(half_width=2.3, converged=False)),
         "Not sampled: P5, P50 and P95 are known only to within 2.3 km, wider than the 1 km convergence check. "
-        "Take more samples, with a shorter horizon if that goes over the 600 sample-hour cap.",
+        "Take more samples, with a shorter horizon if that goes over the 4,800 sample-hour cap.",
     ),
 }
 
@@ -493,8 +515,10 @@ class TestTheCapAndTheRefusals:
         assert result.ranked_per_adversary == lookup.ranked_per_adversary
         assert result.row_notes == (None, None, None, None)
 
-    def test_the_cap_is_600_sample_hours_with_9_minutes_of_set_up_a_sample(self) -> None:
-        assert MAX_SAMPLE_HOURS == 600.0
+    def test_the_cap_is_4800_sample_hours_from_a_120_s_budget_with_9_minutes_of_set_up_a_sample(self) -> None:
+        """B1: 120 s at 40 sample-hours a second, about a fifth under the slowest rate measured, 51 (SPC-113)."""
+        assert MAX_SAMPLE_HOURS == 4800.0
+        assert EVALUATION_BUDGET_S == 120.0
         assert SET_UP_S_PER_SAMPLE == 540.0
 
     def test_over_the_cap_nothing_runs(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -502,86 +526,88 @@ class TestTheCapAndTheRefusals:
         _scenario_over, result = _refused("over the cap", monkeypatch)
         assert [c.ca_refusal is not None for c in _cells(result, 0) + _cells(result, 1)] == [True] * 8
 
-    def test_at_the_cap_it_runs(self) -> None:
-        """D10: exactly 600 sample-hours, (75 + 2) x 3.75 h and 75 x 9 min for each of two rows."""
+    def test_under_the_cap_it_runs(self) -> None:
+        """B2: 4,768.4 sample-hours, (500 + 2) x 4.6 h and 500 x 9 min for each of two rows."""
         fake = _Fake()
-        result = evaluate_scenario(_bound({0: _steady(75), 1: _steady(75)}, horizon_hours=3.75), sampler=fake)
+        result = evaluate_scenario(_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=4.6), sampler=fake)
         assert len(fake.calls) == 2
         assert all(c.ca_percentiles is not None for c in _cells(result, 0) + _cells(result, 1))
 
     def test_a_row_refused_before_the_run_is_not_counted_against_the_cap(self) -> None:
         fake = _Fake()
-        rows = {0: _steady(75), 1: _steady(75), 2: _evasive(49)}
-        result = evaluate_scenario(_bound(rows, horizon_hours=3.75), sampler=fake)
+        rows = {0: _steady(500), 1: _steady(500), 2: _evasive(49)}
+        result = evaluate_scenario(_bound(rows, horizon_hours=4.6), sampler=fake)
         assert len(fake.calls) == 2
         assert _cells(result, 2)[0].ca_refusal is not None
         assert "fewer than the 50" in str(_cells(result, 2)[0].ca_refusal)
 
     def test_a_burn_before_the_window_counts_its_look_back(self) -> None:
-        """A burn 12 h before a 1 h window integrates 13 h a sample: 50 samples is over the cap at any horizon.
+        """A burn 12 h before a 1 h window integrates about 13 h a sample: 500 samples is over the cap at any horizon.
 
-        Counted as samples times the horizon, the same row would be 50 sample-hours and would run. The red
+        Counted as samples times the horizon, the same row would be 500 sample-hours and would run. The red
         element set predates the burn, so it cannot already include it.
         """
         early = EPOCH - timedelta(hours=12)
         h = AdversaryHypothesis.from_archetype(
-            "evasive", PreManoeuvreState(early, tuple(_red_at(early).state_eci_km)), n_samples=50,
+            "evasive", PreManoeuvreState(early, tuple(_red_at(early).state_eci_km)), n_samples=500,
         )
         binding = ScenarioBinding(red=_elset("red", age=13.0, epoch=early - timedelta(hours=1)), blue=_elset("blue"))
         result = evaluate_scenario(_scenario({0: h}, binding=binding), sampler=_never)
         refusal = str(_cells(result, 0)[0].ca_refusal)
         assert refusal.startswith("Not sampled: this scenario needs at least ")
         needs = float(re.search(r"needs at least ([\d,]+) sample-hours", refusal).group(1).replace(",", ""))  # type: ignore[union-attr]
-        assert needs > 50 * 13
+        assert needs > 500 * 12
         assert refusal.endswith(
             "No horizon of 0.1 h or more fits at these sample counts: take fewer samples, at least 50, or start "
             "the scenario nearer the burn." + _LOOKUPS
         )
 
     def test_a_burn_after_the_window_counts_its_search(self) -> None:
-        """A burn 13 h in, after a 12 h window: 51 samples searched over 12 h is 612 h, though only 25 h integrate.
+        """A burn 13 h in, after a 12 h window: 401 samples searched over 12 h is 4,812 h, though only 25 h integrate.
 
-        51 x 12 h and 51 x 9 min is 619.65, so 620. Counted as integrated hours alone it would be 32.65 and would run.
+        401 x 12 h and 401 x 9 min is 4,872.15, so 4,873. Counted as integrated hours alone it would be 85.15 and
+        would run.
         """
-        scenario = _bound({0: _steady(51, at=EPOCH + timedelta(hours=13))}, horizon_hours=12.0)
+        scenario = _bound({0: _steady(401, at=EPOCH + timedelta(hours=13))}, horizon_hours=12.0)
         refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
-        assert refusal.startswith("Not sampled: this scenario needs at least 620 sample-hours")
+        assert refusal.startswith("Not sampled: this scenario needs at least 4,873 sample-hours")
 
     def test_a_burn_after_the_window_is_costed_by_its_search_beside_a_look_back(self) -> None:
         """Under the floor, so costed exactly: a burn after a 4 h window and one 5 h before it, red fitted at -6 h.
 
-        Row 0, 51 samples, burn at +5 h: searched 51 x 4 = 204 h, integrated only 4 + 5 = 9 h; with set-up
-        211.65. Row 1, 50 samples, burn at -5 h: 4 + 9 + 50 x 9 = 463 h, with set-up 470.5. Together 682.15,
-        so 683; counting row 0 by what it integrates, 487.15 would run. At 3.2 h, 103 x 3.2 + 270.15 = 599.75.
+        Row 0, 510 samples, burn at +5 h: searched 510 x 4 = 2,040 h, integrated only 4 + 5 = 9 h; with set-up
+        2,116.5. Row 1, 500 samples, burn at -5 h: 4 + 9 + 500 x 9 = 4,513 h, with set-up 4,588. Together
+        6,704.5, so 6,705; counting row 0 by what it integrates, 4,673.5 would run. At 2.1 h,
+        1,012 x 2.1 + 2,656.5 = 4,781.7, and at 2.2 h 4,882.9.
         """
         binding = ScenarioBinding(red=_elset("red", age=6.0, epoch=EPOCH - timedelta(hours=6)), blue=_elset("blue"))
-        rows = {0: _steady(51, at=EPOCH + timedelta(hours=5)), 1: _steady(50, at=EPOCH - timedelta(hours=5))}
+        rows = {0: _steady(510, at=EPOCH + timedelta(hours=5)), 1: _steady(500, at=EPOCH - timedelta(hours=5))}
         scenario = _scenario(rows, binding=binding, horizon_hours=4.0)
         refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
-        assert refusal.startswith("Not sampled: this scenario needs at least 683 sample-hours")
-        assert refusal.endswith("across 2 hypotheses), above the 600 this page can run while you wait. At these "
-                                "sample counts the longest horizon that fits is 3.2 h." + _LOOKUPS)
+        assert refusal.startswith("Not sampled: this scenario needs at least 6,705 sample-hours")
+        assert refusal.endswith("across 2 hypotheses), above the 4,800 one evaluation may run within its 120 s "
+                                "budget. At these sample counts the longest horizon that fits is 2.1 h." + _LOOKUPS)
 
     def test_one_hypothesis_is_named_in_the_singular_with_its_longest_horizon(self) -> None:
-        """58 x (12 h + 9 min) is 704.7, the floor, so 705 without drawing a sample; at 9.8 h the cost is
-        (58 + 2) x 9.8 h + 58 x 9 min = 596.7, and at 9.9 h 602.7."""
-        scenario = _bound({0: _steady(58)}, horizon_hours=12.0)
+        """580 x (12 h + 9 min) is 7,047, the floor, so 7,047 without drawing a sample; at 8.0 h the cost is
+        (580 + 2) x 8.0 h + 580 x 9 min = 4,743, and at 8.1 h 4,801.2."""
+        scenario = _bound({0: _steady(580)}, horizon_hours=12.0)
         assert _cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal == (
-            "Not sampled: this scenario needs at least 705 sample-hours (samples times the hours each is propagated, "
-            "counting any burn before the window, plus 9 minutes of set-up for each sample, across 1 hypothesis), "
-            "above the 600 this page can run while you wait. At these sample counts the longest horizon that fits "
-            "is 9.8 h." + _LOOKUPS
+            "Not sampled: this scenario needs at least 7,047 sample-hours (samples times the hours each is "
+            "propagated, counting any burn before the window, plus 9 minutes of set-up for each sample, across 1 "
+            "hypothesis), above the 4,800 one evaluation may run within its 120 s budget. At these sample counts the "
+            "longest horizon that fits is 8.0 h." + _LOOKUPS
         )
 
     def test_many_samples_over_a_short_window_count_their_set_up(self) -> None:
-        """4,000 samples over 0.1 h: 400 sample-hours propagated, but 600 more of set-up, so 1,000 and refused.
+        """40,000 samples over 0.1 h: 4,000 sample-hours propagated, but 6,000 more of set-up, so 10,000 and refused.
 
         Each sample costs a solve_ivp set-up and a closest-approach search whatever its window; without that,
         20,000 samples over 0.028 h counted 560 and ran for 49 s.
         """
-        refusal = str(_cells(evaluate_scenario(_bound({0: _steady(4000)}, horizon_hours=0.1), sampler=_never), 0)[0]
+        refusal = str(_cells(evaluate_scenario(_bound({0: _steady(40_000)}, horizon_hours=0.1), sampler=_never), 0)[0]
                       .ca_refusal)
-        assert refusal.startswith("Not sampled: this scenario needs at least 1,000 sample-hours")
+        assert refusal.startswith("Not sampled: this scenario needs at least 10,000 sample-hours")
         assert refusal.endswith(
             "No horizon of 0.1 h or more fits at these sample counts: take fewer samples, at least 50, or start "
             "the scenario nearer the burn." + _LOOKUPS
@@ -621,6 +647,50 @@ class TestTheCapAndTheRefusals:
         carried = AdversaryHypothesis.from_archetype("evasive", PreManoeuvreState(EPOCH, tuple(state)), n_samples=50)
         cell = _cells(evaluate_scenario(_bound({0: carried}), sampler=_Fake()), 0)[0]
         assert cell.ca_refusal is None and cell.ca_percentiles is not None
+
+    def test_the_velocity_tolerance_is_100_m_s_and_just_inside_it_is_sampled(self) -> None:
+        """V2: a start 99.9 m/s off in velocity is sampled; the check is coarse on purpose (SPC-116)."""
+        assert decision.START_VELOCITY_TOLERANCE_KM_S == 0.1
+        fake = _Fake()
+        cell = _cells(evaluate_scenario(_bound({0: _evasive(dv_offset_km_s=0.0999)}), sampler=fake), 0)[0]
+        assert len(fake.calls) == 1
+        assert cell.ca_refusal is None and cell.ca_percentiles is not None
+
+    def test_a_start_just_over_the_velocity_tolerance_is_refused(self) -> None:
+        """V3: to a tenth of a m/s, so the figure never reads as the tolerance it is over."""
+        cell = _cells(evaluate_scenario(_bound({0: _evasive(dv_offset_km_s=0.1001)}), sampler=_never), 0)[0]
+        assert str(cell.ca_refusal).startswith(
+            "Not sampled: the hypothesis starts 100.1 m/s from the bound red track's velocity at its burn time, more "
+            "than 100 m/s,"
+        )
+
+    @pytest.mark.parametrize(("nudge", "sampled"), [(0.0, True), (-1.0, False)])
+    def test_a_start_exactly_at_the_velocity_tolerance_is_accepted(
+        self, nudge: float, sampled: bool, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The velocity tolerance is set to the hypothesis's own velocity difference, then to just below it."""
+        carried = _evasive(dv_offset_km_s=0.07)
+        dv = float(np.linalg.norm(
+            np.asarray(carried.hypothesis.pre_manoeuvre_state_eci_km, dtype=float)[3:] - _RED_AT_EPOCH.state_eci_km[3:],
+        ))
+        monkeypatch.setattr(decision, "START_VELOCITY_TOLERANCE_KM_S", dv if nudge == 0.0 else math.nextafter(dv, 0.0))
+        cell = _cells(evaluate_scenario(_bound({0: carried}), sampler=_Fake()), 0)[0]
+        assert (cell.ca_percentiles is not None) is sampled
+
+    def test_a_velocity_in_metres_per_second_is_refused(self) -> None:
+        """V4: the velocity entered in m/s, not km/s, is a thousand times too large and caught here."""
+        state = _RED_AT_EPOCH.state_eci_km.copy()
+        state[3:] *= 1000.0
+        carried = AdversaryHypothesis.from_archetype("evasive", PreManoeuvreState(EPOCH, tuple(state)), n_samples=50)
+        cell = _cells(evaluate_scenario(_bound({0: carried}), sampler=_never), 0)[0]
+        assert "so its velocity is in other units or from another object." in str(cell.ca_refusal)
+
+    def test_position_is_reported_before_velocity(self) -> None:
+        """Both off: the position sentence is the one given, since _start_mismatch runs first."""
+        cell = _cells(
+            evaluate_scenario(_bound({0: _evasive(offset_km=50.0, dv_offset_km_s=0.5)}), sampler=_never), 0,
+        )[0]
+        assert str(cell.ca_refusal).startswith("Not sampled: the hypothesis starts 50.0 km from")
 
     @pytest.mark.parametrize(("nudge", "sampled"), [(0.0, True), (-1.0, False)])
     def test_a_start_exactly_at_the_tolerance_is_accepted(

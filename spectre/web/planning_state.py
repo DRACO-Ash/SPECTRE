@@ -112,6 +112,9 @@ class SessionState:
     # (spectre.web.burn_watch, SPC-006).
     burn_watch: Any | None = None
     burn_alert: Any | None = None
+    # This sign-in's sampled Decision Engine evaluation, queued, running or
+    # finished (spectre.web.decision_job, SPC-113).
+    decision_job: Any | None = None
     # The operator's response time in hours, for decide-by (SPC-008); None
     # until they set it, when the default is used and said to be the default.
     response_time_h: float | None = None
