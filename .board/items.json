@@ -1175,5 +1175,299 @@
    "spectre/domain/decision.py",
    "spectre/web/decision_custody.py"
   ]
+ },
+ {
+  "ref": "SPC-160",
+  "priority": "high",
+  "order": -10,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Confidence stops counting copies and geometry",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I12 four measured cases. Across all 64 subsets of the 6 inputs, adding one never lowers the level unless it adds a conflict. SYNTHETIC gives LOW. Custody LOST gives LOW. History figures count once Owner priority: the Threat Understanding items lead the backlog from 2026-11-03.",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py",
+   "threat_sweep.html",
+   "tests/unit/test_threat_assessment.py",
+   "test_threat_sweep_template.py"
+  ]
+ },
+ {
+  "ref": "SPC-161",
+  "priority": "high",
+  "order": -9,
+  "group": "understanding",
+  "minutes": 180,
+  "task": "Separate the custody-gap meaning from `AdversaryAction.confidence`",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Raising intelligence confidence no longer lengthens our custody gap. Existing reference cases are unchanged at the default",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "tests/unit/test_decision_reference_cases.py"
+  ]
+ },
+ {
+  "ref": "SPC-162",
+  "priority": "high",
+  "order": -8,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Evidence items, reliability and coverage",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: q in [0, 1]. Freshness monotone in age. QDF reset halves pre-burn items. Undated counts as one half-life. Manufacturable cap. I2 duplicate no-op. A single capped item never earns",
+  "files": [
+   "spectre/domain/threat_understanding.py",
+   "tests/unit/test_threat_understanding.py"
+  ]
+ },
+ {
+  "ref": "SPC-163",
+  "priority": "high",
+  "order": -7,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Threat range, readings, voiding and conflicts",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I1, I3, I5, I6, I7, I9. floor ≤ assessed ≤ ceiling across parametrised grids. Contrast A voids the status",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-162"
+  ]
+ },
+ {
+  "ref": "SPC-164",
+  "priority": "high",
+  "order": -6,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Understanding categories, caps and statement",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: One case per criterion row. SYNTHETIC LOW. UNKNOWN mode MODERATE. Manual set cap. I4",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-162",
+   "SPC-163"
+  ]
+ },
+ {
+  "ref": "SPC-165",
+  "priority": "high",
+  "order": -5,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Adapters from held signals",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The absence rule with the Δv test. `corroborated_by` opens a group. The `long_gap` halving. The worked example rows 1 to 6 reproduce",
+  "files": [
+   "threat_understanding.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/gcat.py"
+  ],
+  "deps": [
+   "SPC-162"
+  ]
+ },
+ {
+  "ref": "SPC-166",
+  "priority": "high",
+  "order": -4,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Sweep wiring in shadow, with ledger hash",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The legacy verdict is unchanged on all 20 bundled red objects. I10: same inputs give the same hash",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/domain/provenance.py",
+   "tests/unit/test_threat_sweep.py"
+  ],
+  "deps": [
+   "SPC-163",
+   "SPC-164",
+   "SPC-165"
+  ]
+ },
+ {
+  "ref": "SPC-167",
+  "priority": "high",
+  "order": -3,
+  "group": "understanding",
+  "minutes": 180,
+  "task": "Status becomes evidence; decide-by withheld only on an earned MINIMAL ceiling",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Degraded with a newer burn keeps decide-by. A COMPUTED spent tank with no later burn still withholds",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-163"
+  ]
+ },
+ {
+  "ref": "SPC-168",
+  "priority": "high",
+  "order": -2,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Operator display: Threat and Understanding lines, outlined badge, strip, ledger, panels",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I13 regex: no shared sentence, no percentage, no bare band. The badge is outlined under LOW. The strip matches on every panel",
+  "files": [
+   "threat_sweep.html",
+   "pair_card.html",
+   "pol_results.html"
+  ],
+  "deps": [
+   "SPC-166"
+  ]
+ },
+ {
+  "ref": "SPC-169",
+  "priority": "high",
+  "order": -1,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Screening with cached history; RANGE and UNDERSTANDING columns",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A cached history raises Understanding. An uncached one reads \"no history held\". The new disagreement case renders",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "threat_screen.html",
+   "spectre/domain/threat_assessment.py",
+   "test_threat_screen_template.py"
+  ],
+  "deps": [
+   "SPC-166"
+  ]
+ },
+ {
+  "ref": "SPC-170",
+  "priority": "high",
+  "order": 0,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Cues and value of information",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Order follows steps per hour. VOI is 0 when both hypotheticals give the same range. No cue for an earned dimension. Contrast B ranks as in 4.12",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-163",
+   "SPC-164"
+  ]
+ },
+ {
+  "ref": "SPC-171",
+  "priority": "high",
+  "order": 1,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Decision Engine: collect-first rows and the MINIMAX guidance",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A straddle with time gives COLLECT_FIRST. The same range with decide-by PASSED gives ACT_ON_CEILING. Bases stay LOOKUP. Probability is never prefilled",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "test_decision_figure_basis.py",
+   "test_decision_understanding.py"
+  ],
+  "deps": [
+   "SPC-170",
+   "SPC-161"
+  ]
+ },
+ {
+  "ref": "SPC-172",
+  "priority": "med",
+  "order": 2,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Interactions v1 from warning changes",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A pass with no prior burn adds nothing. NEWLY_IN_REACH after a burn raises the floor to HIGH. Worked example row 7",
+  "files": [
+   "spectre/domain/interaction_graph.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-165"
+  ]
+ },
+ {
+  "ref": "SPC-173",
+  "priority": "med",
+  "order": 3,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Interactions v2: UDL conjunctions and closest approaches held per object",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Malformed miss-distance strings are refused and stated. Stale sets are refused. The \"closer than before the burn\" rule holds",
+  "files": [
+   "spectre/web/udl_conjunction.py",
+   "spectre/astro/elset_approach.py",
+   "interaction_graph.py"
+  ],
+  "deps": [
+   "SPC-172"
+  ]
+ },
+ {
+  "ref": "SPC-174",
+  "priority": "med",
+  "order": 4,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Hostile seeds and propagation",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: 1-hop and 2-hop values. A third hop adds nothing. A benign seed has no effect. One edge never lifts the floor past MEDIUM through propagation",
+  "files": [
+   "interaction_graph.py"
+  ],
+  "deps": [
+   "SPC-172"
+  ]
+ },
+ {
+  "ref": "SPC-175",
+  "priority": "med",
+  "order": 5,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Verdict switch behind a setting, with a reference table",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3).",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/config/constants.py"
+  ],
+  "deps": [
+   "SPC-166",
+   "SPC-167",
+   "SPC-168",
+   "SPC-169"
+  ]
+ },
+ {
+  "ref": "SPC-176",
+  "priority": "med",
+  "order": 6,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Adjudication log and coverage report",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: An override never changes a band. The coverage rate is computed once 30 or more adjudications exist",
+  "files": [
+   "spectre/domain/adjudication.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-166"
+  ]
+ },
+ {
+  "ref": "SPC-177",
+  "priority": "low",
+  "order": 7,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "Citation check gate for doctrine wording",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A test fails if any yardstick or ICD 203 term renders while the `VERIFIED` flag is false Needs network access to gov.uk and dni.gov, and MOD channels for AJP-2.1, to verify the doctrine citations.",
+  "files": [
+   "docs/threat_confidence_concept.md",
+   "spectre/domain/threat_understanding.py"
+  ],
+  "needs_owner": true,
+  "human_minutes": 60
  }
 ]
