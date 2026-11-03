@@ -1,9 +1,38 @@
 {# Decision Engine Results — rendered into #decision-results #}
-{# Context: result (ScenarioResult) #}
+{# Context: result (ScenarioResult); result.scenario.binding is optional (SPC-100) #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}
+{% set binding = result.scenario.binding if result.scenario.binding is defined else none %}
+
+{# ── Bound to (SPC-100): which real objects this scenario is about, and how old their orbits were at
+     evaluation. No figure below reads them. One div with no div inside, so the page after it can be
+     compared bound against unbound. ── #}
+<div role="note" class="scenario-binding" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.4rem">
+  {% if binding is not none %}
+  <strong style="color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.05em">Bound to</strong>
+  {% for side, b in (("Red", binding.red), ("Blue", binding.blue)) %}
+  <p style="margin:0.1rem 0">
+    {% if b is none %}{{ side }}: not bound.{% else %}
+    {{ side }}: {{ b.name }} ({{ b.stk_name }}), {% if b.satno is not none %}SATNO {{ b.satno }}.{% else %}SATNO unreadable.{% endif %}
+    {% if b.epoch is not none %}
+    Epoch {{ b.epoch.strftime('%Y-%m-%d %H:%M UTC') }},
+    {% set out_of_date = b.freshness.value == "out of date" %}<span class="{{ 'badge-warn' if out_of_date else 'badge-ok' }}"
+      title="Age at evaluation. STALE is past {{ '%.0f' | format(b.limit_hours) }} hours, the limit for this regime">{{ b.age_label }} old{% if out_of_date %} STALE{% endif %}</span>
+    {% else %}
+    Epoch unreadable <span class="badge-warn" title="The epoch cannot be read, so the age is unknown">epoch unreadable</span>
+    {% endif %}
+    Data mode {{ b.data_mode }}{% if b.data_mode not in ("REAL", "MANUAL") %} {% set badge_mode = b.data_mode %}{% include "partials/_provenance_badge.html" %}{% endif %}{% if b.training %}, training{% endif %}.
+    <span style="display:block">{{ b.sentence }}</span>
+    {% endif %}
+  </p>
+  {% endfor %}
+  <p style="margin:0.1rem 0">{{ binding.note }}</p>
+  {% else %}
+  Scenario not bound to a red track or blue asset.
+  {% endif %}
+</div>
 
 {# ── Recommendation Banner: a modelled estimate, and it says so ─────────────────────────────────────────── #}
 <div style="background:rgba(59,139,235,0.10); border:1px solid rgba(59,139,235,0.45);

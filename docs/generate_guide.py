@@ -1272,6 +1272,11 @@ def _section_13_decision_engine(doc: Document) -> None:
         "assessment is complete — it answers the question 'Given what the adversary might "
         "do, what is our best response?' rather than 'How do we intercept?'"
     )
+    _add_body(doc,
+        "A scenario may be bound to a held red track and blue asset under 'Bind to real "
+        "objects'. The result then names them, with each orbit's epoch and age at "
+        "evaluation, but every figure is still a lookup and none is computed from these orbits."
+    )
 
     _add_heading_h2(doc, "Adversary Action Modelling")
     _add_body(doc,

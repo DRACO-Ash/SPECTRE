@@ -39,6 +39,8 @@ def test_the_gap_is_scaled_by_adversary_confidence() -> None:
 
 
 def test_no_tle_path_remains() -> None:
+    """No figure takes an element set. A bound scenario carries its element sets on
+    Scenario.binding (SPC-100), deliberately unread until a later phase computes from them."""
     for fn in (decision.compute_outcome_metrics, decision.evaluate_scenario):
         params = inspect.signature(fn).parameters
         assert "blue_tle" not in params and "red_tle" not in params

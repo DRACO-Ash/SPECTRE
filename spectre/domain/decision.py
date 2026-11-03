@@ -15,6 +15,12 @@ An earlier "TLE refinement" took one instant's separation, could only lower
 the estimate, hid every error behind a bare except, and never ran because the
 route passed no red element set; it was removed (audit F-111).
 
+A scenario may be bound to a held red track and blue asset (SPC-100). The
+binding names the real objects the scenario is about and carries their element
+sets, their epochs and their ages at evaluation. It is shown with the result
+and goes into its provenance, but changes no figure: no function here reads
+it until a later phase computes from the orbits.
+
 Phase 2 (future sprint) will attach a ``ManoeuvreHypothesis`` to
 ``AdversaryAction`` and wire in the Monte Carlo engine for probabilistic scoring.
 
@@ -38,9 +44,20 @@ import time
 from collections import Counter
 from dataclasses import dataclass, fields
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
+from typing import Literal
 
-from spectre.domain.provenance import Basis, FigureBasis, Provenance, provenance, value_input, weakest
+from spectre.domain.custody import age_text
+from spectre.domain.provenance import (
+    Basis,
+    FigureBasis,
+    InputRef,
+    Provenance,
+    provenance,
+    tle_input,
+    value_input,
+    weakest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +305,124 @@ class OutcomeMetrics:
         )
 
 
+# ── Binding to real objects (SPC-100) ─────────────────────────────────────────
+
+#: Shown with every binding, on the panel and with the result.
+BINDING_NOTE: str = (
+    "Binding records which real objects this scenario is about. It changes no figure yet: "
+    "closest approach, custody and every other figure are still lookups, not computed from these orbits."
+)
+
+_SIDES = frozenset({"red", "blue"})
+
+
+class Freshness(StrEnum):
+    """How a bound element set's age at evaluation stands against its regime's limit."""
+
+    CURRENT = "current"
+    OUT_OF_DATE = "out of date"
+    UNKNOWN = "unknown"
+
+
+def _require_side(elset: BoundElset) -> None:
+    if elset.side not in _SIDES:
+        raise ValueError(f"BoundElset.side must be red or blue; got {elset.side!r}")
+
+
+def _require_age_facts(elset: BoundElset) -> None:
+    """The epoch, age and limit are all known or all unknown, and a known age and limit make sense."""
+    facts = (elset.epoch, elset.age_hours, elset.limit_hours)
+    if all(f is None for f in facts):
+        return
+    if elset.epoch is None or elset.age_hours is None or elset.limit_hours is None:
+        raise ValueError("an element set's epoch, age and limit are read together")
+    if not (math.isfinite(elset.age_hours) and elset.age_hours >= 0.0):
+        raise ValueError(f"BoundElset.age_hours must be finite and >= 0; got {elset.age_hours!r}")
+    if not (math.isfinite(elset.limit_hours) and elset.limit_hours > 0.0):
+        raise ValueError(f"BoundElset.limit_hours must be finite and > 0; got {elset.limit_hours!r}")
+
+
+_FRESHNESS_SENTENCES: dict[Freshness, str] = {
+    Freshness.CURRENT: "Orbit current: {age} old at evaluation, limit {limit}.",
+    Freshness.OUT_OF_DATE: (
+        "Orbit out of date: {age} old at evaluation against a {limit} limit, "
+        "so a burn since its epoch would not be seen."
+    ),
+    Freshness.UNKNOWN: "Its epoch cannot be read, so its age is unknown; read it as out of date.",
+}
+
+
+@dataclass(frozen=True)
+class BoundElset:
+    """One held object a scenario is bound to, with its element set's age at evaluation.
+
+    The age and limit are worked out where the element set is read and passed
+    in as plain values, so the domain stays free of the web layer. All three
+    of epoch, age and limit are None when the epoch cannot be read.
+    """
+
+    side:        Literal["red", "blue"]
+    name:        str
+    stk_name:    str
+    satno:       int | None
+    tle:         str
+    data_mode:   str
+    epoch:       datetime | None
+    age_hours:   float | None
+    limit_hours: float | None
+    training:    bool = False
+
+    def __post_init__(self) -> None:
+        _require_side(self)
+        _require_age_facts(self)
+
+    @property
+    def freshness(self) -> Freshness:
+        """The sweep's staleness rule (ElsetAge.stale): out of date only when the age is past the limit."""
+        if self.age_hours is None or self.limit_hours is None:
+            return Freshness.UNKNOWN
+        return Freshness.OUT_OF_DATE if self.age_hours > self.limit_hours else Freshness.CURRENT
+
+    @property
+    def age_label(self) -> str | None:
+        return None if self.age_hours is None else age_text(self.age_hours)
+
+    @property
+    def limit_label(self) -> str | None:
+        return None if self.limit_hours is None else f"{self.limit_hours:.0f} h"
+
+    @property
+    def sentence(self) -> str:
+        """The orbit's age in a sentence: it says orbit, never custody."""
+        return _FRESHNESS_SENTENCES[self.freshness].format(age=self.age_label, limit=self.limit_label)
+
+
+@dataclass(frozen=True)
+class ScenarioBinding:
+    """The red track and blue asset a scenario is about; at least one of them."""
+
+    red:  BoundElset | None = None
+    blue: BoundElset | None = None
+
+    def __post_init__(self) -> None:
+        if self.red is None and self.blue is None:
+            raise ValueError("a binding names at least one object; pass binding=None for an unbound scenario")
+        if self.red is not None and self.red.side != "red":
+            raise ValueError("ScenarioBinding.red must hold a red element set")
+        if self.blue is not None and self.blue.side != "blue":
+            raise ValueError("ScenarioBinding.blue must hold a blue element set")
+
+    @property
+    def bound(self) -> tuple[BoundElset, ...]:
+        """The bound element sets, red first."""
+        return tuple(b for b in (self.red, self.blue) if b is not None)
+
+    @property
+    def note(self) -> str:
+        """BINDING_NOTE, here for the results template, whose only context is the result."""
+        return BINDING_NOTE
+
+
 @dataclass
 class Scenario:
     """A what-if scenario: N adversary actions × M friendly responses."""
@@ -304,6 +439,10 @@ class Scenario:
     w_dv_cost:          float = 0.20    # Penalty for ΔV expenditure
     w_time_to_exec:     float = 0.10    # Penalty for slow response
     w_reversibility:    float = 0.10    # Reward for reversible actions
+
+    # The real objects this scenario is about (SPC-100). Carried, shown and put
+    # in provenance; no figure reads it yet.
+    binding:            ScenarioBinding | None = None
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -537,6 +676,13 @@ def find_robust_response(
 
 # ── Top-level evaluation ───────────────────────────────────────────────────────
 
+def _binding_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
+    """Each bound element set as a provenance input, so a bound result traces to its orbits (F-121)."""
+    if scenario.binding is None:
+        return ()
+    return tuple(tle_input(f"{b.side} {b.stk_name}", b.tle, b.epoch) for b in scenario.binding.bound)
+
+
 def evaluate_scenario(
     scenario: Scenario,
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
@@ -589,5 +735,5 @@ def evaluate_scenario(
         robust_best_response=robust_response,
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
-        provenance=provenance([value_input("scenario", scenario)]),
+        provenance=provenance([value_input("scenario", scenario), *_binding_inputs(scenario)]),
     )

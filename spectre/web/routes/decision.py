@@ -1,6 +1,7 @@
 """Decision Engine routes — Phase 1 deterministic scenario evaluation.
 
 GET  /plan/decision/panel   → scenario builder input form
+GET  /plan/decision/bind    → the bind fields, rebuilt from the held objects (SPC-100)
 POST /plan/decision/evaluate → evaluates scenario, returns ranked results partial
 """
 
@@ -13,22 +14,25 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, NamedTuple
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from spectre.domain.decision import (
+    BINDING_NOTE,
     ActionType,
     AdversaryAction,
     FriendlyResponse,
     Scenario,
+    ScenarioBinding,
     SelectorStrategy,
     evaluate_scenario,
 )
 from spectre.web.auth import require_login
+from spectre.web.decision_binding import bind_scenario
 from spectre.web.deps import render
 from spectre.web.models import User
-from spectre.web.planning_state import get_session_state
+from spectre.web.planning_state import SessionState, get_session_state
 
 logger = logging.getLogger(__name__)
 
@@ -172,17 +176,47 @@ def _normalised_weights(*weights: float) -> tuple[float, ...]:
     return tuple(w / total for w in weights)
 
 
+def _bind_context(state: SessionState, red_sat: str = "", blue_sat: str = "") -> dict[str, object]:
+    """The bind fields' context: the held objects, and each choice only while it is still held on its side."""
+    held_red = {t.stk_name for t in state.red_tracks}
+    held_blue = {a.stk_name for a in state.blue_assets}
+    return {
+        "red_tracks": state.red_tracks,
+        "blue_assets": state.blue_assets,
+        "selected_red": red_sat if red_sat in held_red else "",
+        "selected_blue": blue_sat if blue_sat in held_blue else "",
+        "binding_note": BINDING_NOTE,
+    }
+
+
 @router.get("/panel", response_class=HTMLResponse)
 async def decision_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the decision engine scenario builder panel."""
     state = get_session_state(current_user)
     pol   = getattr(state, "last_pol_analysis", None)
     return render(request, "partials/decision_panel.html", {
         "pol": pol,
+        **_bind_context(state),
     })
+
+
+@router.get("/bind", response_class=HTMLResponse)
+async def decision_bind(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    red_sat: Annotated[str, Query()] = "",
+    blue_sat: Annotated[str, Query()] = "",
+) -> HTMLResponse:
+    """Return the bind fields rebuilt from the session, keeping a choice that is still held.
+
+    The panel re-fetches these each time the block comes into view, so an
+    object added or removed since the panel loaded is offered or dropped.
+    """
+    state = get_session_state(current_user)
+    return render(request, "partials/decision_bind_fields.html", _bind_context(state, red_sat, blue_sat))
 
 
 class _ScenarioForm(BaseModel):
@@ -217,6 +251,18 @@ class _ScenarioForm(BaseModel):
     w_time: str = "0.10"
     w_rev: str = "0.10"
     strategy: str = "minimax"
+    # The held objects the scenario is about (SPC-100), by stk_name; blank is not bound.
+    # These are the intercept engine's field names; the sweep posts only red_sat.
+    red_sat: str = ""
+    blue_sat: str = ""
+
+
+def _binding_phrase(binding: ScenarioBinding | None) -> str:
+    """The session log's note of what a scenario is bound to, or nothing when unbound."""
+    if binding is None:
+        return ""
+    sides = " and ".join(f"{b.side} {b.stk_name}" for b in binding.bound)
+    return f" Bound to {sides}."
 
 
 @router.post("/evaluate", response_class=HTMLResponse)
@@ -241,6 +287,11 @@ async def decision_evaluate(
     )
     if inputs.problem is not None:
         return _err(inputs.problem)
+    now = datetime.now(UTC)
+    state = get_session_state(current_user)
+    bound = bind_scenario(state, form.red_sat.strip(), form.blue_sat.strip(), now)
+    if bound.problem is not None:
+        return _err(bound.problem)
     adversary_actions = _adversary_rows(
         form.adv_ids or [], form.adv_names or [], form.adv_types or [], *adv_columns,
     )
@@ -250,7 +301,7 @@ async def decision_evaluate(
 
     scenario = Scenario(
         name=scenario_name,
-        epoch_utc=datetime.now(UTC),
+        epoch_utc=now,
         adversary_actions=adversary_actions,
         friendly_responses=friendly_responses,
         horizon_hours=horizon,
@@ -259,9 +310,8 @@ async def decision_evaluate(
         w_dv_cost=w_dv_n,
         w_time_to_exec=w_time_n,
         w_reversibility=w_rev_n,
+        binding=bound.binding,
     )
-
-    state = get_session_state(current_user)
 
     try:
         result = evaluate_scenario(scenario, strategy=strat)
@@ -269,6 +319,7 @@ async def decision_evaluate(
             f"[Decision] Evaluated '{scenario_name}': "
             f"{len(adversary_actions)} adversary actions × {len(friendly_responses)} friendly responses. "
             f"Modelled recommendation: {result.robust_best_response.name} ({strat.value})"
+            f"{_binding_phrase(bound.binding)}"
         )
     # The traceback goes to the log; the page says only that it failed.
     except Exception:

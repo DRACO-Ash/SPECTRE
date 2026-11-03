@@ -9,6 +9,8 @@ SPC-152, summarised in `.board/README.md`. It corrects three points in the phase
 ● Score on the P5 closest approach, not P95: for a miss distance the conservative figure is the smallest one.
 ● The Phase 4 tree is server-rendered rather than D3.js, which is not vendored.
 Foundation work comes first: scenarios bound to real element sets, a basis on every figure, and reference cases.
+Gate for Phase 2 (SPC-110) and Phase 3 (SPC-120): tests/unit/test_decision_reference_cases.py passes with that phase's
+path added to PATHS, at both window starts (SPC-102).
 
 ---
 
@@ -33,6 +35,10 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
   derived from the figures its formula uses and is held at lookup by its scoring rule, so the modelled badge stays
   while the ranking is a weighted heuristic. Later releases set a figure's kind through `outcome_bases()` and the page
   marks it in its own cell.
+- A scenario may be bound to one held red track and one held blue asset (SPC-100). The binding records which real
+  objects the scenario is about, puts their element sets in the result's provenance and shows each orbit's epoch and
+  age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) in a "Bound to" block.
+  It changes no figure: `compute_outcome_metrics` and `find_robust_response` never read it, and a test pins that.
 - Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
 - Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") with a basis line per figure,
   a "(lookup)" mark on each closest approach and custody in the outcome matrix, and per-adversary ranked response cards
@@ -42,7 +48,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 | File | Role |
 |------|------|
 | `spectre/domain/decision.py` | Core data model + `evaluate_scenario()` |
-| `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `POST /plan/decision/evaluate` |
+| `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `GET /plan/decision/bind`, `POST /plan/decision/evaluate` |
+| `spectre/web/decision_binding.py` | Binds a scenario to held objects and reads each element set's age (SPC-100) |
 | `spectre/web/templates/partials/decision_panel.html` | Scenario builder form |
 | `spectre/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
 
@@ -89,6 +96,7 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 4. Update `decision_panel.html` with per-row hypothesis accordion
 5. Update `decision_results.html` to show P5/P50/P95 bands in cells
 6. Add `hypothesis_*` form fields to `decision_evaluate` route
+7. Gate: tests/unit/test_decision_reference_cases.py passes with this phase's path added to PATHS, at both window starts (SPC-102).
 
 ---
 
@@ -120,6 +128,9 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 2. Require `blue_tle` and `red_tle` in `evaluate_scenario()` for Phase 3 path
 3. Add TCA to `OutcomeMetrics`
 4. Wire "Show Trajectory" button → `POST /plan/geometry/intercept` with cell parameters
+5. Gate: tests/unit/test_decision_reference_cases.py passes with this phase's path added to PATHS, at both window starts (SPC-102).
+6. Carry TCA unrounded with the edge flag; decision.py:462 rounds time_to_closest_hours to 0.01 h, coarser than the
+   plane-change tolerance, and the results page shows closest approach in whole km (decision_results.html:121).
 
 ---
 
