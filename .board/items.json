@@ -1220,7 +1220,11 @@
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py",
    "tests/unit/test_decision_reference_cases.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-162",
@@ -1293,7 +1297,11 @@
   ],
   "deps": [
    "SPC-162"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-166",
@@ -1312,7 +1320,11 @@
    "SPC-163",
    "SPC-164",
    "SPC-165"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-167",
@@ -1321,14 +1333,18 @@
   "group": "understanding",
   "minutes": 180,
   "task": "Status becomes evidence; decide-by withheld only on an earned MINIMAL ceiling",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Degraded with a newer burn keeps decide-by. A COMPUTED spent tank with no later burn still withholds",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Degraded with a newer burn keeps decide-by. A COMPUTED spent tank with no later burn still withholds Built in 0.17.0. On one provider's history a spent tank does not earn the MINIMAL ceiling, so decide-by stands (concept decision 8, Claude's choice, not a ruling); SPC-169 is how a second provider earns it.",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/web/routes/threat.py"
   ],
   "deps": [
    "SPC-163"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
  },
  {
   "ref": "SPC-168",

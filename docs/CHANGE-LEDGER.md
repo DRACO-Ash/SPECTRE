@@ -1118,3 +1118,12 @@ Feature work from the backlog: computed friendly responses, element-set limits o
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/threat_understanding.py`, confidence in `threat_assessment.py`, response burns, figures and trajectories in new decision modules, burn series in `monte_carlo.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Sizing a response burn adds up to a few seconds of one CPU inside the existing sampled-evaluation job budget. | n/a. |
 
+## 0.17.0
+
+Feature work from the backlog: Threat Understanding on the sweep, decide-by from earned evidence, and the custody gap separated from intelligence confidence.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: adapters and the screen text in `threat_understanding.py`, the ledger hash in `provenance.py`, the sweep's evidence gathering in `routes/threat.py` and `routes/gcat.py`, the custody gap share in `decision.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The catalogue row is read from the cache only; the sweep fetches nothing new. | n/a. |
+

@@ -1,52 +1,43 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.17: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
+V0.18: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-161       180m  priority high; anchors the release
-    SPC-165       300m  priority high
-    SPC-166       300m  priority high
-  lane 1 (600m): SPC-165, SPC-166
-  lane 2 (180m): SPC-161
+    SPC-169       240m  priority high, adds gate browser, container, lint, quality, sast, tests
+    SPC-168       300m  priority high; anchors the release
+    SPC-170       240m  priority high
+  lane 1 (300m): SPC-168
+  lane 2 (480m): SPC-169, SPC-170
 
-V0.18: 4 items, 765 priced min, gates browser, container, lint, quality, sast, tests
+V0.19: 4 items, 765 priced min, gates browser, container, lint, quality, sast, tests
   forecast 12h45 to 12h45 (middle 12h45), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-167       180m  priority high; anchors the release
+    SPC-172       300m  rider: priority med, adds no gate
     SPC-119        45m  rider: priority low, adds no gate
-    SPC-169       240m  priority high
-    SPC-168       300m  priority high
-  lane 1 (420m): SPC-167, SPC-169
-  lane 2 (345m): SPC-168, SPC-119
+    SPC-125       120m  rider: priority med, adds no gate
+    SPC-171       300m  priority high; anchors the release
+  lane 1 (465m): SPC-119, SPC-125, SPC-171
+  lane 2 (300m): SPC-172
 
-V0.19: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
+V0.20: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-170       240m  priority high; anchors the release
-    SPC-171       300m  priority high, adds gate browser, container, lint, quality, sast, tests
-    SPC-175       240m  rider: priority med, adds no gate
-  lane 1 (300m): SPC-171
-  lane 2 (480m): SPC-170, SPC-175
-
-V0.20: 3 items, 720 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-125       120m  priority med
-    SPC-172       300m  priority med; anchors the release
-    SPC-173       300m  priority med
-  lane 1 (420m): SPC-172, SPC-125
-  lane 2 (300m): SPC-173
+    SPC-150       180m  priority high
+    SPC-173       300m  priority med; anchors the release
+    SPC-174       300m  priority med
+  lane 1 (600m): SPC-173, SPC-174
+  lane 2 (180m): SPC-150
 
 V0.21: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-150       180m  priority high
-    SPC-176       300m  priority med, adds gate browser, container, lint, quality, sast, tests
-    SPC-174       300m  priority med; anchors the release
-  lane 1 (480m): SPC-150, SPC-176
-  lane 2 (300m): SPC-174
+    SPC-176       300m  priority med, adds gate browser
+    SPC-130       240m  priority med
+    SPC-175       240m  priority med; anchors the release
+  lane 1 (300m): SPC-176
+  lane 2 (480m): SPC-130, SPC-175
 
-V0.22: 3 items, 660 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 11h00 to 11h00 (middle 11h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-130       240m  priority med; anchors the release
-    SPC-131       240m  priority med, adds gate browser
+V0.22: 2 items, 420 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 7h00 to 7h00 (middle 7h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-131       240m  priority med; anchors the release
     SPC-132       180m  priority med
-  lane 1 (660m): SPC-130, SPC-131, SPC-132
+  lane 1 (420m): SPC-131, SPC-132
 
 V0.23: 2 items, 840 priced min, gates container, lint, quality, sast, tests
   forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)

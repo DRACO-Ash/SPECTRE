@@ -9,6 +9,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-03
+
+**Operator outputs: 1 and 3 made more honest, and Threat Understanding reaches the sweep.** Beside today's verdict, which is unchanged, the sweep now shows the threat range and how well SPECTRE understands the satellite, with the evidence behind both.
+
+### Added
+- Threat Understanding on the sweep, beside the verdict. The threat range (floor and ceiling within access) and Understanding (HIGH, MODERATE or LOW) show under the confidence line, each labelled, with the evidence ledger collapsed by default and its hash. The verdict badge and sentence are unchanged and pinned for all 20 bundled red objects (SPC-166).
+- The evidence comes from what SPECTRE already holds: the assessed record, counted for identity only when it carries a date; the GCAT catalogue row; the element-set history's reserve and spent-tank readings; each burn's normality; the providers that corroborate it, with spellings of one provider counted once; and the anomaly index as a capped lookup. A burn with too little history to judge is listed as missing, not counted (SPC-165).
+- A custody gap share per adversary row on the decision panel, defaulting to 0.7, with P, Conf and Gap labelled and explained (SPC-161).
+
+### Changed
+- Decide-by is withheld only when custody is lost or the evidence earns a computed MINIMAL ceiling with Understanding above LOW. A declared Degraded status no longer withholds it, and a spent tank read from one provider's history does not earn the ceiling, so decide-by stands and the sentence says why (SPC-167).
+- Intelligence confidence no longer sets our custody gap; it is recorded and moves no figure, and the expected-value selector weights by probability as before. The operator guide said otherwise and is corrected (SPC-161).
+
+### Out of scope, named
+- The full display across panels (SPC-168), a second provider's history (SPC-169), what to collect next (SPC-170), collect-first in the Decision Engine (SPC-171), interactions (SPC-172 to SPC-174), and the verdict switch, off until the owner signs off (SPC-175).
+
 ## [0.16.0] - 2026-11-03
 
 **Operator outputs advanced: 4, the recommended response, now computes what our own manoeuvre buys; and the owner's Threat Understanding concept begins: the more SPECTRE understands a satellite, its capability, manoeuvres and interactions, the more it understands its threat.**
