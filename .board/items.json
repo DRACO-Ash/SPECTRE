@@ -622,7 +622,7 @@
   "group": "decision",
   "minutes": 300,
   "task": "Phase 3: SGP4-propagated closest approach and TCA for each outcome",
-  "note": "Propagate both objects over the horizon and refine each minimum as the access search does (F-115). Replaces the per-type lookup distance whenever a scenario is bound.",
+  "note": "Propagate both objects over the horizon and refine each minimum as the access search does (F-115). Replaces the per-type lookup distance whenever a scenario is bound. Built in 0.15.0 for rows whose action does not move red; a manoeuvre row with no hypothesis stays a lookup, since its no-burn miss would understate the threat (Claude's call).",
   "deps": [
    "SPC-100",
    "SPC-102"
@@ -630,7 +630,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/astro/propagator.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
  },
  {
   "ref": "SPC-121",
@@ -655,14 +659,18 @@
   "group": "decision",
   "minutes": 300,
   "task": "Phase 3: custody in outcomes from the operator's definition",
-  "note": "Custody is lost while information is not timely and actionable enough to judge normality and warning time (operator, 2026-10-28). Uses SPC-018's status; replaces the rule of thumb in compute_outcome_metrics.",
+  "note": "Custody is lost while information is not timely and actionable enough to judge normality and warning time (operator, 2026-10-28). Uses SPC-018's status; replaces the rule of thumb in compute_outcome_metrics. Built in 0.15.0. Degraded custody scores as lost (Claude's call by the operator's definition, not a ruling): offline, every bound evaluation reads custody lost. Reversible in custody_over_horizon.",
   "deps": [
    "SPC-018",
    "SPC-120"
   ],
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
  },
  {
   "ref": "SPC-124",
@@ -1114,7 +1122,11 @@
    "spectre/web/static/themes.css",
    "spectre/web/static/spectre-theme.css",
    "tests/unit/test_contrast_floors.py"
-  ]
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
  },
  {
   "ref": "SPC-117",
@@ -1130,6 +1142,38 @@
   "files": [
    "spectre/astro/monte_carlo.py",
    "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-118",
+  "priority": "med",
+  "order": 118,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Trim the sampled path to element-set limits, as the computed path is, and give each TCA an uncertainty",
+  "note": "From the V0.15 design risks. The computed path searches only while both orbits are inside their age limits; the sampled path does not (100 samples over 48 h is admitted on a 24 h LEO limit). A slow approach makes TCA ill-conditioned: 0.044 km moved the GEO TCA by 1,951 s, so a per-cell TCA uncertainty (position error over closing speed) is owed.",
+  "deps": [
+   "SPC-120"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-119",
+  "priority": "low",
+  "order": 119,
+  "group": "decision",
+  "minutes": 45,
+  "task": "Decision Engine wording: BIND_TO_EARN tells a red-bound operator to bind red; the limit-at-horizon-end edge sentence",
+  "note": "Left by the V0.15 fix round. BIND_TO_EARN predates 0.15.0. Custody evaluation may also wait up to 20 s on a first UDL history fetch; say so on the page while it waits.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/decision_custody.py"
   ]
  }
 ]

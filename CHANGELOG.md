@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response. With both sides bound, closest approach and custody come from the real orbits, not lookups, and custody means what the operator means by it.** Recommendations can change for every bound scenario, because closest approach and custody no longer depend on the response chosen.
+
+### Added
+- Computed closest approach. With a red track and a blue asset bound, a row whose action does not move red gets its closest approach and its time from SGP4 on both element sets, refined as the access search does, over the span both orbits stay inside their age limits. It passes the reference cases. A manoeuvre row with no hypothesis stays a lookup, because its no-burn miss would understate the threat (SPC-120).
+- Custody in each outcome is the bound red track's custody, held, degraded or lost as on the sweep and by the same rule, carried over the horizon: lost from the moment its newest element set passes its limit, assuming no newer one arrives. Degraded, an orbit current but no history to judge its burns, scores as lost, so with UDL not connected a bound evaluation reads custody lost. An unbound scenario keeps the rule of thumb and says so (SPC-123).
+
+### Changed
+- A sampled closest approach converges when its uncertainty is small next to the miss, with an absolute floor, not only below 1 km, so a burn already made can be sampled; the page says what converged means (SPC-117).
+- One figure never mixes propagators: computed is SGP4 on both sides, sampled is RK45 on both. When both kinds share a matrix, the page states the measured gap between the propagators, below which a difference between rows means nothing.
+
+### Fixed
+- The admin error flash, the Steel theme's logout hover and its focus ring are above their contrast floors (SPC-035).
+
+### Out of scope, named
+- Our response is not applied to the blue orbit (SPC-121). The sampled path is not yet trimmed to the element-set limits, and a time of closest approach carries no uncertainty (SPC-118).
+
 ## [0.14.0] - 2026-11-03
 
 **Operator output advanced: 4, the recommended response. An operator can now enter a manoeuvre hypothesis, run it against the real orbits without holding up anyone else, and read the sampled closest approach as a band, with lookups still labelled as lookups.**
