@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from math import inf
 from typing import Annotated, Any
 
@@ -101,7 +102,7 @@ def _udl_refused(call: str, status: int) -> str:
     A 5xx is UDL's own fault, so it must not send the operator to check
     access or a request that were both fine.
     """
-    if status >= 500:
+    if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
         advice = "That is a fault on the UDL side; try again later"
     else:
         advice = "Check your UDL access and the request, then try again"
