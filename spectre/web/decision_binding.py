@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, Protocol
 
 from spectre.data.intel import satno_from_tle
 from spectre.domain.decision import BoundElset, ScenarioBinding
@@ -38,19 +38,33 @@ class BindOutcome(NamedTuple):
     problem: str | None
 
 
-def bound_elset(
-    side: Literal["red", "blue"], *, name: str, stk_name: str, tle: str, data_mode: str, training: bool,
-    now: datetime,
-) -> BoundElset:
-    """One bound element set from plain values, aged at *now*.
+class HeldElset(Protocol):
+    """What binding reads from a held object: a red track, a blue asset, or a later source (SPC-150)."""
 
-    Plain values rather than a held object, so a later source (a sweep
-    target, SPC-150) can bind through the same door.
+    @property
+    def name(self) -> str: ...
+    @property
+    def stk_name(self) -> str: ...
+    @property
+    def tle(self) -> str: ...
+    @property
+    def data_mode(self) -> str: ...
+    @property
+    def training(self) -> bool: ...
+
+
+def bound_elset(side: Literal["red", "blue"], held: HeldElset, now: datetime) -> BoundElset:
+    """One bound element set from *held*, aged at *now*.
+
+    It takes anything shaped like a held object, so a later source (a sweep
+    target, SPC-150) can bind through the same door. The object's own data
+    mode is read, never the session's or the target cache's.
     """
+    tle = held.tle
     age = elset_age(tle, now)
     return BoundElset(
-        side=side, name=name, stk_name=stk_name, satno=satno_from_tle(tle), tle=tle,
-        data_mode=data_mode, training=training,
+        side=side, name=held.name, stk_name=held.stk_name, satno=satno_from_tle(tle), tle=tle,
+        data_mode=held.data_mode, training=held.training,
         epoch=None if age is None else age.epoch,
         age_hours=None if age is None else age.hours,
         limit_hours=None if age is None else age.limit_hours,
@@ -59,16 +73,6 @@ def bound_elset(
 
 def _held[T: (RedTrack, BlueAsset)](objects: Iterable[T], stk_name: str) -> T | None:
     return next((obj for obj in objects if obj.stk_name == stk_name), None)
-
-
-def _bind_one(
-    side: Literal["red", "blue"], obj: RedTrack | BlueAsset, now: datetime,
-) -> BoundElset:
-    # The object's own provenance, read once each, never the session's mode or the target cache's.
-    return bound_elset(
-        side, name=obj.name, stk_name=obj.stk_name, tle=obj.tle, data_mode=obj.data_mode,
-        training=obj.training, now=now,
-    )
 
 
 def _same_object(red: BoundElset, blue: BoundElset) -> str | None:
@@ -88,8 +92,8 @@ def bind_scenario(state: SessionState, red_sat: str, blue_sat: str, now: datetim
     blue_obj = _held(state.blue_assets, blue_sat) if blue_sat else None
     if blue_sat and blue_obj is None:
         return BindOutcome(None, _NOT_HELD.format(kind="Blue asset", name=blue_sat))
-    red = None if red_obj is None else _bind_one("red", red_obj, now)
-    blue = None if blue_obj is None else _bind_one("blue", blue_obj, now)
+    red = None if red_obj is None else bound_elset("red", red_obj, now)
+    blue = None if blue_obj is None else bound_elset("blue", blue_obj, now)
     if red is None and blue is None:
         return BindOutcome(None, None)
     problem = _same_object(red, blue) if red is not None and blue is not None else None

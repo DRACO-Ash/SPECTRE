@@ -86,7 +86,7 @@ def test_a_future_epoch_binds_at_zero_hours() -> None:
 
 @pytest.mark.parametrize("tle", [_day_zero(_tle(_NOW)), "not a tle"])
 def test_an_unreadable_epoch_binds_as_unknown(tle: str) -> None:
-    elset = bound_elset("red", name="RX", stk_name="RX", tle=tle, data_mode="MANUAL", training=False, now=_NOW)
+    elset = bound_elset("red", RedTrack("RX", tle, data_mode="MANUAL"), _NOW)
     assert elset.freshness is Freshness.UNKNOWN
     assert (elset.epoch, elset.age_hours, elset.limit_hours) == (None, None, None)
 

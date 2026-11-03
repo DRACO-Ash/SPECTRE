@@ -185,13 +185,14 @@ class TestTheResult:
         assert _UNBOUND in unbound.text
         assert _after_binding(html) == _after_binding(unbound.text), "binding changed something on screen"
 
-    @pytest.mark.parametrize(("hours", "leo", "age", "limit"), [
+    @pytest.mark.parametrize("case", [
         (13 * 24.0, False, "13.0 d", 72),
         (48.0, True, "2.0 d", 24),
     ])
-    def test_a_stale_set_is_bound_and_flagged_as_the_red_card_flags_it(  # noqa: PLR0913 - fixtures and cases
-        self, client: Any, auth_cookie: str, held: Any, hours: float, leo: bool, age: str, limit: int,
+    def test_a_stale_set_is_bound_and_flagged_as_the_red_card_flags_it(
+        self, client: Any, auth_cookie: str, held: Any, case: tuple[float, bool, str, int],
     ) -> None:
+        hours, leo, age, limit = case
         _hold(held, red_hours=hours, red_leo=leo)
         resp = _evaluate(client, auth_cookie, _form(red_sat="RX"))
         assert resp.status_code == 200
