@@ -64,6 +64,7 @@ from spectre.domain.threat_assessment import (
     AccessEvidence,
     ActorVerdict,
     CapabilityEvidence,
+    ConfidenceContext,
     arrives_at_target,
     assess_threat,
     rank_actors,
@@ -875,6 +876,7 @@ def _compute_worst_coa(
     entries: list[ThreatSweepEntry],
     capability: CapabilityEvidence | None = None,
     max_dv_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+    context: ConfidenceContext | None = None,
 ) -> dict[str, Any] | None:
     """Identify and describe the most dangerous course of action from sweep entries.
 
@@ -887,6 +889,9 @@ def _compute_worst_coa(
     *capability* carries what is known about the red object's ability to act.
     Without it the verdict is geometry alone, which is what this function used
     to be while calling itself an adversary capability assessment.
+
+    *context* is the red set's data mode and the red custody, which cap the
+    verdict's confidence and never move the verdict (SPC-160).
 
     Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
     """
@@ -910,6 +915,7 @@ def _compute_worst_coa(
             regime=worst.regime,
         ),
         capability or CapabilityEvidence(),
+        context,
     )
     threat_level = assessment.verdict_label
     threat_color, threat_bg = _BAND_COLOURS.get(
@@ -945,6 +951,7 @@ def _compute_worst_coa(
         "access_level": assessment.access_label,
         "capability_level": assessment.capability_label,
         "assessment_confidence": assessment.confidence,
+        "confidence_basis": assessment.confidence_basis,
         "assessment_rationale": assessment.rationale,
         "inputs_used": assessment.inputs_used,
         "inputs_missing": assessment.inputs_missing,
@@ -1448,10 +1455,35 @@ def _red_track_mode(state: object, red_sat: str, red_satno: str | None) -> str:
     object up in the target cache instead, so a hand-entered red set read as
     REAL whenever the same object was also an HRR target.
     """
+    recorded = _red_recorded_mode(state, red_sat, red_satno)
+    return "REAL" if recorded is None else recorded
+
+
+def _red_confidence_context(
+    state: object, red: tuple[str, str | None], stated: str | None, custody: CustodyStatus,
+) -> ConfidenceContext:
+    """What caps the worst case's confidence: the red set's mode, the operator's stated confidence and custody.
+
+    *red* is the red object's name and catalogue number. *stated* is the
+    operator's stated confidence in a pasted set, which the form always
+    supplies, and None when the set was not pasted in.
+    """
+    if stated is None:
+        return ConfidenceContext(data_mode=_red_recorded_mode(state, *red), custody=custody.state)
+    return ConfidenceContext(data_mode="MANUAL", custody=custody.state, manual_confidence=stated)
+
+
+def _red_recorded_mode(state: object, red_sat: str, red_satno: str | None) -> str | None:
+    """The red set's data mode as recorded, or None when nothing recorded one.
+
+    Confidence reads an unrecorded mode as UNKNOWN, not REAL (concept 6.2,
+    SPC-160); the provenance banner's REAL default is a later item's.
+    """
     for track in state.red_tracks:  # type: ignore[attr-defined]
         if track.stk_name == red_sat:
             return str(track.data_mode)
-    return str(state.hrr_tle_data_mode.get(red_satno or "", "REAL"))  # type: ignore[attr-defined]
+    mode = state.hrr_tle_data_mode.get(red_satno or "")  # type: ignore[attr-defined]
+    return None if mode is None else str(mode)
 
 
 def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
@@ -1564,16 +1596,18 @@ def _red_capability_from(red_satno: str | None, history: _RedHistory) -> Capabil
 
 
 def _worst_coa_in_context(
-    state: object, entries: list[ThreatSweepEntry], capability: CapabilityEvidence,
+    state: object, entries: list[ThreatSweepEntry], evidence: tuple[CapabilityEvidence, ConfidenceContext],
     max_dv_m_s: float, red: tuple[_RedHistory, str],
 ) -> dict[str, Any] | None:
     """The worst course of action, with its behaviour label and phase angle.
 
-    *red* is the interceptor's history and element set. *entries* is sorted
-    on the same warning-time key the worst case is chosen by, so its first
-    entry is the worst.
+    *evidence* is the interceptor's capability and what bears on the
+    confidence in it. *red* is the interceptor's history and element set.
+    *entries* is sorted on the same warning-time key the worst case is
+    chosen by, so its first entry is the worst.
     """
-    worst = _compute_worst_coa(entries, capability, max_dv_m_s)
+    capability, context = evidence
+    worst = _compute_worst_coa(entries, capability, max_dv_m_s, context)
     if worst is None:
         return None
     history, red_tle = red
@@ -2358,10 +2392,16 @@ async def threat_sweep(
     # property of the threatening object, not of the things it might reach.
     history = await _settle_red_history(state, history_task, red_satno)
     red_capability = _red_capability_from(red_satno, history)
+    # Custody and the red set's data mode cap the verdict's confidence, so
+    # custody is judged before the worst case is assessed (SPC-160).
+    custody = _red_custody(red_tle, history, now)
+    stated_confidence = manual_red_confidence if manual_red_tle else None
+    confidence_context = _red_confidence_context(state, (red_sat.strip(), red_satno), stated_confidence, custody)
 
     # Identify the most dangerous course of action.
-    worst_coa = _worst_coa_in_context(state, entries, red_capability, max_dv_m_s, (history, red_tle))
-    custody = _red_custody(red_tle, history, now)
+    worst_coa = _worst_coa_in_context(
+        state, entries, (red_capability, confidence_context), max_dv_m_s, (history, red_tle),
+    )
     red_history = _red_history_view(history, custody)
     # What the burn changed, from the orbit before it and the one just flown.
     warning_change = await _warning_change(
@@ -2394,7 +2434,7 @@ async def threat_sweep(
         # hid the fastest approaches: refusals cluster on the aggressive end.
         "method_refusals": method_refusals,
         "red_satno": red_satno or "",
-        "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
+        "manual_red_confidence": stated_confidence,
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(state, red_tle, grouped, now),

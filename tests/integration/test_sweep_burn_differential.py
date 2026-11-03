@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from spectre.astro.pattern_of_life import ParseCounts, analyse_pattern_of_life
-from spectre.domain.models import RedTrack, ThreatAssessment, ThreatSweepEntry, ThreatTarget
+from spectre.domain.models import BlueAsset, RedTrack, ThreatAssessment, ThreatSweepEntry, ThreatTarget
 from spectre.web.burn_watch import CHECK_EVERY
 from spectre.web.routes import pol, threat
 from tests.conftest import csrf_headers
@@ -995,3 +995,68 @@ class TestTheCustodyStatementsAreShown:
         assert "12 days apart" in line.caveat
         assert "may already include other burns" in line.caveat
         assert threat._burn_line(self._burn(), "RED-X", {}, self._T0 + timedelta(hours=4)).caveat == ""
+
+
+class TestTheSweepsConfidenceReadsItsDataModeAndCustody:
+    """SPC-160: the worst case card's confidence is capped by the red set's data mode and the red custody."""
+
+    @staticmethod
+    def _post(client: Any, cookie: str, **extra: str) -> str:
+        resp = client.post("/plan/threat/sweep",
+                           data={"red_sat": "RED-LEO", "tgt_group": "none", "max_dv_m_s": _BUDGET, **extra},
+                           cookies={"spectre_session": cookie}, headers=csrf_headers(cookie))
+        assert resp.status_code == 200
+        return html.unescape(" ".join(resp.text.split()))
+
+    def test_a_synthetic_red_set_reads_low(self, client: Any, auth_cookie: str, leo: Any,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        leo.red_tracks[0].data_mode = "SYNTHETIC"
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._post(client, auth_cookie)
+        assert "Confidence LOW." in page
+        assert "computed from SYNTHETIC element sets: describes the exercise, not the satellite" in page
+
+    def test_custody_lost_reads_low(self, client: Any, auth_cookie: str, leo: Any,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records, now=records[-1].epoch + timedelta(days=4))
+        _spy(monkeypatch, {records[-1].tle: 3.0})
+        page = self._post(client, auth_cookie)
+        assert "Confidence LOW." in page
+        assert "custody of the interceptor is lost" in page
+
+    def test_a_hand_entered_track_held_in_custody_names_only_its_entry(self, client: Any, auth_cookie: str,
+                                                                       leo: Any,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._post(client, auth_cookie)
+        assert "the element set was entered by hand with no stated confidence" in page
+        assert "custody of the interceptor" not in page
+        assert "custody was not assessed" not in page
+
+    def test_a_manual_override_caps_at_the_operators_stated_confidence(self, client: Any, auth_cookie: str,
+                                                                       leo: Any,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._post(client, auth_cookie, manual_red_tle=records[-1].tle, manual_red_confidence="LOW")
+        assert "Confidence LOW." in page
+        assert "the element set was entered by hand at LOW confidence" in page
+
+    def test_a_red_set_with_no_recorded_mode_is_not_taken_as_live(self, client: Any, auth_cookie: str, leo: Any,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+        """Concept 6.2: an unrecorded mode reads UNKNOWN for confidence, not REAL, and caps at MODERATE."""
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        leo.red_tracks = []
+        monkeypatch.setattr(leo, "blue_assets", [BlueAsset(name="RED-LEO", tle=records[-1].tle)])
+        monkeypatch.setattr(leo, "hrr_tle_data_mode", {})
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._post(client, auth_cookie)
+        assert "the element set's data mode is not recorded" in page
+        assert "Confidence HIGH." not in page

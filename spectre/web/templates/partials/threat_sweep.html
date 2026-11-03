@@ -166,6 +166,9 @@
       </span>
       {% endif %}
     </div>
+    {# What the confidence rests on (SPC-160): independent sources counted
+       once each, never the geometry, and what held it down. #}
+    <div style="font-size:0.68rem; color:var(--text-dim); margin:-0.25rem 0 0.5rem">{{ worst_coa.confidence_basis }}</div>
 
     {# What the cost says about how the actor would have to behave.
        A delta-v figure on its own means nothing to an operator: 50 m/s is one

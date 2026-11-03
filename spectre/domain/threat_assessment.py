@@ -42,6 +42,7 @@ import contextlib
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+from spectre.domain.custody import Custody
 from spectre.domain.manoeuvre_calibration import (
     ManoeuvreKind,
     Posture,
@@ -58,6 +59,7 @@ __all__ = [
     "ActorVerdict",
     "Band",
     "CapabilityEvidence",
+    "ConfidenceContext",
     "ScreeningResult",
     "ThreatAssessment",
     "assess_threat",
@@ -141,9 +143,80 @@ _DISCRETIONARY_AMPLE_SHARE: float = 0.5
 # a capability verdict is actually asking.
 _DISCRETIONARY_EXHAUSTED_M_S: float = 0.0
 
-# Geometry plus three capability inputs. Fewer than this and the verdict rests
-# on an assessed label with little behaviour behind it.
-_EVIDENCE_FOR_HIGH_CONFIDENCE: int = 4
+# ── Confidence: how well founded the verdict is (SPC-160) ───────────────────
+#
+# Confidence was a count of inputs: four or more read HIGH, and orbital
+# geometry was one of the four. So an object with no intel record and a
+# history showing no burns read HIGH on geometry, a regime-assumed full tank
+# counted twice (propellant used and discretionary reserve) and "0 burns".
+# The four figures a history gives come from one source chain, and agreement
+# among copies is not corroboration (Dong, Berti-Equille and Srivastava,
+# PVLDB 2(1), 2009). Geometry is the question being asked, not evidence about
+# the satellite. Confidence now counts what is known about the satellite, by
+# independent source, once each: the interim rule the Threat Understanding
+# concept (docs/threat_confidence_concept.md, section 6) replaces in full at
+# SPC-162 to SPC-164.
+
+
+class _Level(IntEnum):
+    """Confidence, ordered so the weakest limit can be taken with ``min``.
+
+    MODERATE, not MEDIUM, as UK assessment practice names its middle level,
+    so a confidence never reads like a threat band.
+    """
+
+    LOW = 0
+    MODERATE = 1
+    HIGH = 2
+
+
+#: The independent sources the six capability inputs come from.
+_RECORD = "the assessed record"
+_HISTORY = "the element-set history"
+
+#: What a source tells us about the satellite, in the concept's dimensions.
+_IDENTITY, _CAPABILITY, _BEHAVIOUR = "identity", "capability", "behaviour"
+_DIMENSIONS: tuple[str, ...] = (_IDENTITY, _CAPABILITY, _BEHAVIOUR)
+
+# All three dimensions held reads HIGH, two read MODERATE, after the concept's
+# Information Base criteria (section 6.1). Tuned, not sourced.
+_DIMENSIONS_FOR_HIGH: int = 3
+_DIMENSIONS_FOR_MODERATE: int = 2
+
+# The interceptor's custody caps confidence: a picture that cannot be kept
+# current is not a well-founded one (section 6.1, Complexity and Volatility).
+# Not assessed reads as not HIGH. Tuned, not sourced.
+_CUSTODY_CAP: dict[Custody | None, _Level] = {
+    Custody.HELD: _Level.HIGH,
+    Custody.DEGRADED: _Level.MODERATE,
+    Custody.LOST: _Level.LOW,
+    None: _Level.MODERATE,
+}
+_CUSTODY_REASON: dict[Custody | None, str] = {
+    Custody.DEGRADED: "custody of the interceptor is degraded",
+    Custody.LOST: "custody of the interceptor is lost",
+    None: "custody was not assessed",
+}
+
+# Live tracking is the only data mode that does not cap. A set entered by hand
+# caps at the operator's stated confidence; one with none stated, and a mode
+# not recorded, cap at MODERATE; every other mode (SYNTHETIC, TEST, EXERCISE,
+# SIMULATED) describes the exercise, not the satellite, and reads LOW
+# (section 6.2). Tuned, not sourced.
+_LIVE_MODE = "REAL"
+_MANUAL_MODE = "MANUAL"
+_UNRECORDED_MODES: frozenset[str] = frozenset({"", "UNKNOWN"})
+_MANUAL_CAP: dict[str, _Level] = {
+    "CONFIRMED": _Level.HIGH,
+    "HIGH": _Level.HIGH,
+    "MEDIUM": _Level.MODERATE,
+    "LOW": _Level.LOW,
+    "UNCONFIRMED": _Level.LOW,
+}
+
+# Two readings that contradict each other leave the picture unsettled, so a
+# conflict caps confidence (section 4.7). Tuned, not sourced.
+_CONFLICT_CAP: _Level = _Level.MODERATE
 
 # The behavioural anomaly score is graded through the Pattern of Life ladder
 # (pol_assessment._RISK_LADDER), so one score reads one band in both panels.
@@ -221,6 +294,9 @@ class CapabilityEvidence:
     """
 
     intel_threat_level: str | None = None      # from the assessed record
+    #: True when the assessed record carries a date. None of the 44 bundled
+    #: records does, so nothing sets it yet (concept section 5, SPC-165).
+    intel_record_dated: bool = False
     operational_status: str | None = None      # "Operational", "Degraded", ...
     #: Fraction of the PROPELLANT LOAD consumed, from PropellantAssessment.
     #: Not the fraction of total spacecraft mass, which is what the field used
@@ -274,15 +350,25 @@ class CapabilityEvidence:
             return Band.MINIMAL
         return None
 
+    def recognised_threat_level(self) -> Band | None:
+        """The assessed threat level as a band, or None when absent or unrecognised.
+
+        An unrecognised label is NO evidence, not low evidence, so a typo or a
+        new label cannot quietly downgrade an object.
+        """
+        if not self.intel_threat_level:
+            return None
+        with contextlib.suppress(KeyError):
+            return Band[self.intel_threat_level.strip().upper()]
+        return None
+
     def _signals(self) -> list[Band]:
         """Every capability signal this object offers, as a severity each."""
         candidates: list[Band] = []
 
-        if self.intel_threat_level:
-            # An unrecognised label is NO evidence, not low evidence, so a typo
-            # or a new label cannot quietly downgrade an object.
-            with contextlib.suppress(KeyError):
-                candidates.append(Band[self.intel_threat_level.strip().upper()])
+        assessed = self.recognised_threat_level()
+        if assessed is not None:
+            candidates.append(assessed)
 
         if self.anomaly_score is not None:
             candidates.append(Band[anomaly_risk_level(self.anomaly_score)])
@@ -355,6 +441,10 @@ class ThreatAssessment:
     undeliverable_reason: str = ""
     #: The code, calibration and evidence behind this verdict (audit F-121).
     provenance: Provenance | None = None
+    #: What ``confidence`` rests on, source by source, and what holds it down.
+    confidence_basis: str = ""
+    #: Two readings that contradict each other, named; empty when none do.
+    confidence_conflict: str = ""
 
     @property
     def verdict_label(self) -> str:
@@ -367,6 +457,151 @@ class ThreatAssessment:
     @property
     def capability_label(self) -> str:
         return self.capability.label if self.capability is not None else "UNASSESSED"
+
+
+@dataclass(frozen=True)
+class ConfidenceContext:
+    """What bears on confidence without being evidence about the satellite.
+
+    *data_mode* is the UDL dataMode of the interceptor's element set, MANUAL
+    for one entered by hand, ``None`` when not recorded. *manual_confidence*
+    is the operator's stated confidence in a hand-entered set. *custody* is
+    the interceptor's custody by the shared rule, ``None`` when not assessed.
+    """
+
+    data_mode: str | None = None
+    custody: Custody | None = None
+    manual_confidence: str | None = None
+
+
+def _dimensions_by_source(capability: CapabilityEvidence) -> dict[str, list[str]]:
+    """What each independent source tells us about the satellite, counted once per dimension.
+
+    The operational status is declared by the object's operator and is not
+    counted; nor is "no burns observed", an absence rather than a reading.
+    An undated record is not counted either: taken as one half-life old, a
+    single-source record scores 0.09, below the 0.25 an item needs to
+    establish a dimension (concept sections 4.3 and 4.12, row 1).
+    """
+    held: dict[str, list[str]] = {}
+    if capability.recognised_threat_level() is not None and capability.intel_record_dated:
+        held[_RECORD] = [_IDENTITY]
+    history: list[str] = []
+    if capability.propellant_used_pct is not None or capability.discretionary_remaining_m_s is not None:
+        history.append(_CAPABILITY)
+    if capability.anomaly_score is not None or (capability.manoeuvres_observed or 0) > 0:
+        history.append(_BEHAVIOUR)
+    if history:
+        held[_HISTORY] = history
+    return held
+
+
+def _not_counted(capability: CapabilityEvidence) -> list[str]:
+    """The inputs present that add nothing to confidence, each with the reason."""
+    reasons: list[str] = []
+    if capability.intel_threat_level and capability.recognised_threat_level() is None:
+        reasons.append(_unrecognised_label(capability.intel_threat_level))
+    elif capability.intel_threat_level and not capability.intel_record_dated:
+        reasons.append("the assessed record, which carries no date, so cannot establish identity")
+    if capability.operational_status:
+        reasons.append(f"the recorded status '{capability.operational_status}', which is declared, not observed")
+    if capability.manoeuvres_observed == 0:
+        reasons.append("no burns observed, an absence rather than a reading")
+    return reasons
+
+
+def _unrecognised_label(label: str) -> str:
+    return f"assessed threat level ('{label}' is not a recognised band)"
+
+
+def _conflict(capability: CapabilityEvidence) -> str:
+    """A status saying the object cannot manoeuvre, against a history showing it does."""
+    burns = capability.manoeuvres_observed or 0
+    if not (capability.is_impaired() and burns > 0):
+        return ""
+    plural = "burn" if burns == 1 else "burns"
+    return (f"the record says {capability.operational_status}, but the history shows {burns} {plural}: "
+            "possible deception")
+
+
+def _information_base(held: dict[str, list[str]]) -> tuple[_Level, str]:
+    """The level the dimensions held support, and what is missing when it is not HIGH."""
+    dimensions = [d for d in _DIMENSIONS if any(d in found for found in held.values())]
+    missing = ", ".join(d for d in _DIMENSIONS if d not in dimensions)
+    if len(dimensions) >= _DIMENSIONS_FOR_HIGH:
+        return _Level.HIGH, ""
+    if len(dimensions) >= _DIMENSIONS_FOR_MODERATE:
+        return _Level.MODERATE, f"{missing} not held"
+    return _Level.LOW, f"{missing} not held"
+
+
+def _data_mode_limit(context: ConfidenceContext) -> tuple[_Level, str]:
+    """The cap the interceptor's element set's provenance puts on confidence."""
+    mode = (context.data_mode or "").strip().upper()
+    if mode == _LIVE_MODE:
+        return _Level.HIGH, ""
+    if mode in _UNRECORDED_MODES:
+        return _Level.MODERATE, "the element set's data mode is not recorded"
+    if mode == _MANUAL_MODE:
+        stated = (context.manual_confidence or "").strip().upper()
+        if stated not in _MANUAL_CAP:
+            return _Level.MODERATE, "the element set was entered by hand with no stated confidence"
+        return _MANUAL_CAP[stated], f"the element set was entered by hand at {stated} confidence"
+    return _Level.LOW, f"computed from {mode} element sets: describes the exercise, not the satellite"
+
+
+def _confidence(capability: CapabilityEvidence, context: ConfidenceContext) -> tuple[str, str, str]:
+    """The confidence level, the sentence saying what it rests on, and any conflict.
+
+    The level is the weakest of what the evidence supports, the data mode,
+    custody and any conflict. Orbital geometry is not counted: it is the
+    question being asked, not evidence about the satellite.
+    """
+    held = _dimensions_by_source(capability)
+    conflict = _conflict(capability)
+    limits = [
+        _information_base(held),
+        _data_mode_limit(context),
+        (_CUSTODY_CAP[context.custody], _CUSTODY_REASON.get(context.custody, "")),
+        (_CONFLICT_CAP, conflict) if conflict else (_Level.HIGH, ""),
+    ]
+    level = min(cap for cap, _ in limits)
+    sentence = f"Confidence {level.name}. {_sources_clause(held)} Orbital geometry is not counted."
+    not_counted = _not_counted(capability)
+    if not_counted:
+        sentence += f" Not counted: {'; '.join(not_counted)}."
+    reasons = [reason for cap, reason in limits if cap < _Level.HIGH]
+    if reasons:
+        sentence += f" Not higher because: {'; '.join(reasons)}."
+    return level.name, sentence, conflict
+
+
+def _sources_clause(held: dict[str, list[str]]) -> str:
+    """The independent sources confidence rests on, each named once with what it tells us."""
+    if not held:
+        return "Rests on 0 independent sources: nothing is held about the satellite itself."
+    noun = "source" if len(held) == 1 else "sources"
+    sources = "; ".join(f"{source} ({', '.join(dims)})" for source, dims in held.items())
+    return f"Rests on {len(held)} independent {noun}, each counted once: {sources}."
+
+
+def _inputs(capability: CapabilityEvidence) -> tuple[list[str], list[str]]:
+    """The capability inputs used and missing; an unrecognised label is missing, with the reason."""
+    used: list[str] = ["orbital geometry"]
+    missing: list[str] = []
+    for label, value in (
+        ("assessed threat level", capability.recognised_threat_level()),
+        ("operational status", capability.operational_status),
+        ("propellant budget", capability.propellant_used_pct),
+        # _signals reads it, so the verdict must list it (audit F-228).
+        ("discretionary reserve", capability.discretionary_remaining_m_s),
+        ("behavioural anomaly score", capability.anomaly_score),
+        ("observed manoeuvre history", capability.manoeuvres_observed),
+    ):
+        (used if value is not None else missing).append(label)
+    if capability.intel_threat_level and capability.recognised_threat_level() is None:
+        missing[missing.index("assessed threat level")] = _unrecognised_label(capability.intel_threat_level)
+    return used, missing
 
 
 def _impairment_clause(capability: CapabilityEvidence) -> str:
@@ -382,7 +617,8 @@ def _impairment_clause(capability: CapabilityEvidence) -> str:
     return ""
 
 
-def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> ThreatAssessment:
+def assess_threat(access: AccessEvidence, capability: CapabilityEvidence,
+                  context: ConfidenceContext | None = None) -> ThreatAssessment:
     """Compose the two into one verdict, showing the working.
 
     The rule is that the weaker of the two governs, because a threat needs both
@@ -392,27 +628,19 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
     Where no capability evidence exists the verdict falls back to geometry
     alone and says so, with low confidence, rather than quietly scoring an
     unknown object as harmless.
+
+    *context* carries what bears on confidence without being evidence about
+    the satellite: the element set's data mode and the interceptor's custody.
+    It never moves the verdict.
     """
+    context = context or ConfidenceContext()
     access_band = access.band()
     capability_band = capability.band()
-
-    used: list[str] = ["orbital geometry"]
-    missing: list[str] = []
-
-    for label, value in (
-        ("assessed threat level", capability.intel_threat_level),
-        ("operational status", capability.operational_status),
-        ("propellant budget", capability.propellant_used_pct),
-        # _signals reads it, so the verdict must list it (audit F-228).
-        ("discretionary reserve", capability.discretionary_remaining_m_s),
-        ("behavioural anomaly score", capability.anomaly_score),
-        ("observed manoeuvre history", capability.manoeuvres_observed),
-    ):
-        (used if value is not None else missing).append(label)
+    used, missing = _inputs(capability)
+    confidence, confidence_basis, conflict = _confidence(capability, context)
 
     if capability_band is None:
         verdict = access_band
-        confidence = "LOW"
         rationale = (
             f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
             f"({access_band.label} accessibility). No capability evidence was available "
@@ -421,7 +649,6 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         )
     else:
         verdict = Band(min(access_band, capability_band))
-        confidence = "HIGH" if len(used) >= _EVIDENCE_FOR_HIGH_CONFIDENCE else "MEDIUM"
         if capability_band < access_band:
             rationale = (
                 f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
@@ -467,7 +694,10 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         posture_label=posture.posture_label,
         posture_rationale=posture.rationale,
         posture_basis=posture.basis,
-        provenance=provenance([value_input("access", access), value_input("capability", capability)]),
+        provenance=provenance([value_input("access", access), value_input("capability", capability),
+                               value_input("confidence context", context)]),
+        confidence_basis=confidence_basis,
+        confidence_conflict=conflict,
         undeliverable_reason=undeliverable_reason,
     )
 
