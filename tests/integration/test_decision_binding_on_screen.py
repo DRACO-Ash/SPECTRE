@@ -1,14 +1,17 @@
 """The decision panel offers the held objects to bind, and the result says what it is bound to (SPC-100).
 
 Binding records which real objects a scenario is about and how old their
-orbits are. Without a hypothesis it changes no figure: the page after the
-"Bound to" block is the same as the unbound page, computation time aside.
+orbits are. Bound on both sides, a row whose action does not move red has its
+closest approach computed by SGP4 (SPC-120), and a manoeuvre with no
+hypothesis says why it is not; before SPC-120 the page after the "Bound to"
+block was the same as the unbound page.
 The panel's hypothesis section (SPC-114) is tested in
 test_decision_hypothesis_panel.py; these forms post none.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -16,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from spectre.domain.decision import BINDING_NOTE
+from spectre.domain.decision import BINDING_NOTE, COMPUTED_CAVEAT, CUSTODY_NOTE
 from tests.integration.test_decision_input_validation import _evaluate, _form
 from tests.integration.test_form_labels import _unlabelled
 from tests.unit.test_elset_freshness import _checksummed, _tle
@@ -157,7 +160,7 @@ class TestThePanel:
 
 
 class TestTheResult:
-    def test_a_bound_evaluation_shows_what_it_is_bound_to_and_changes_no_figure(
+    def test_a_bound_evaluation_shows_what_it_is_bound_to(
         self, client: Any, auth_cookie: str, held: Any,
     ) -> None:
         _hold(held)
@@ -186,7 +189,55 @@ class TestTheResult:
         assert held.log_entries[-1].endswith(" Bound to red RX and blue BY.")
         unbound = _evaluate(client, auth_cookie, _form())
         assert _UNBOUND in unbound.text
-        assert _after_binding(html) == _after_binding(unbound.text), "binding changed something on screen"
+        # Inverted by SPC-120: a manoeuvre row with no hypothesis now says why its closest approach is not computed.
+        assert _after_binding(html) != _after_binding(unbound.text)
+        assert text.count("Not computed: a manoeuvre with no hypothesis names no burn") == 1
+        assert "Not computed" not in _flat(re.sub(r"<[^>]+>", "", unbound.text))
+
+    def test_a_bound_row_that_does_not_move_red_is_computed_on_screen(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """SPC-120: red's element set an hour older than blue's puts the two GEO objects about 15 degrees apart."""
+        _hold(held, red_hours=6.0)
+        bound = _evaluate(client, auth_cookie, _form(red_sat="RX", blue_sat="BY", adv_type=["no_action"]))
+        assert bound.status_code == 200
+        text = _flat(re.sub(r"<[^>]+>", "", bound.text))
+        assert re.search(r"\d+\.\d km \(computed\)", text)
+        assert re.search(r"Computed: \d[\d.,]* km at \d{4}-\d\d-\d\d \d\d:\d\d UTC, \d+\.\d\d h after the scenario epoch; SGP4, no burn\.", text)
+        assert COMPUTED_CAVEAT in text
+        assert "Phase 3 · computed closest approach in 1 cells · sampled in 0 cells" in text
+        unbound = _flat(re.sub(r"<[^>]+>", "", _evaluate(client, auth_cookie, _form(adv_type=["no_action"])).text))
+        assert "(computed)" not in unbound and "Phase 1" in unbound
+
+    def test_a_bound_red_tracks_custody_is_computed_on_screen(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """K10, SPC-123: UDL is not connected in this session, so custody is degraded, counts as lost, and says so."""
+        _hold(held)
+        form = _form(red_sat="RX", blue_sat="BY", adv_type=["no_action"], horizon_hours="24")
+        resp = _evaluate(client, auth_cookie, form)
+        assert resp.status_code == 200
+        text = html.unescape(_flat(re.sub(r"<[^>]+>", "", resp.text)))
+        assert (
+            "Custody at evaluation: Custody degraded: its orbit is current (5.0 h old, limit 72 h), but whether its "
+            "burns are normal cannot be judged. UDL is not connected, so no element-set history is held."
+        ) in text
+        assert (
+            "Custody degraded for the whole 24 h horizon, which counts as lost: its orbit is current, so how a burn "
+            "changes your warning time can be judged, but whether it is normal cannot, and custody needs both."
+        ) in text
+        assert "✗ custody degraded (computed)" in text and "✓ custody" not in text
+        assert CUSTODY_NOTE in text
+        assert "Custody here is a rule of thumb" not in text
+        assert "Basis: Custody: computed in every cell." in text
+
+    def test_an_unbound_page_keeps_the_rule_of_thumb_and_says_bind_a_red_track(
+        self, client: Any, auth_cookie: str,
+    ) -> None:
+        text = _flat(re.sub(r"<[^>]+>", "", _evaluate(client, auth_cookie, _form()).text))
+        assert "Custody here is a rule of thumb" in text
+        assert "Bind a red track to compute it from its element set and history." in text
+        assert "Custody at evaluation" not in text
 
     @pytest.mark.parametrize("case", [
         (13 * 24.0, False, "13.0 d", 72),

@@ -1,10 +1,10 @@
-"""Decision Engine: scenario evaluation, from lookups and a sampled closest approach.
+"""Decision Engine: scenario evaluation, from lookups and a sampled or computed closest approach.
 
 Evaluates a grid of adversary actions × friendly responses with a lookup model
-and a weighted composite scoring function. Custody, closest approach, time to
-approach and delta-V are rules of thumb and constants per action type, scaled
-by the operator's inputs, and they are uncalibrated against any observed
-outcome. A selector (minimax by default) picks the friendly response with the
+and a weighted composite scoring function. Delta-V, and custody, closest
+approach and time to approach unless sampled or computed below, are rules of
+thumb and constants per action type, scaled by the operator's inputs, and they
+are uncalibrated against any observed outcome. A selector (minimax by default) picks the friendly response with the
 least worst-case cost.
 
 Every figure in a cell states its own basis (lookup, sampled or computed),
@@ -18,7 +18,7 @@ route passed no red element set; it was removed (audit F-111).
 A scenario may be bound to a held red track and blue asset (SPC-100). The
 binding names the real objects the scenario is about and carries their element
 sets, their epochs and their ages at evaluation. It is shown with the result
-and goes into its provenance, and on its own changes no figure.
+and goes into its provenance; the sampled and computed paths below read it.
 
 An adversary action may carry a manoeuvre hypothesis (SPC-111): how the
 adversary might move, taken from an archetype in the Monte Carlo table, a
@@ -48,9 +48,35 @@ result. Without a RunControl, evaluation is exactly as before.
 
 A sampled cell also carries how closely its percentiles are known and the
 composite score's spread across its samples (SPC-115); the score's basis stays
-lookup. The panel builds a hypothesis from the bound red track's state at a
+lookup.
+
+When the scenario is bound on both sides, a row whose action does not move
+red (no action, a sensor retask, a posture change) and carries no hypothesis
+has its closest approach and time computed (SPC-120): plan_computed propagates
+both bound orbits by SGP4 from their element sets with no burn, over the part
+of the horizon both are within their limits, through the shared helper. The
+figure belongs to the pair, one search shared by every computed row and
+response, since our response is not applied to the blue orbit yet. A
+manoeuvre with no hypothesis names no burn, so it stays a lookup and says why;
+a stale orbit or a failed SGP4 instant refuses the figure. One figure never
+mixes propagators: computed is SGP4 on both objects, sampled RK45 on both, and
+a matrix holding both states the measured gap between the two. The panel builds a hypothesis from the bound red track's state at a
 burn time counted from the scenario epoch (SPC-114): pre_manoeuvre_state,
 with_spread and burn_line serve it.
+
+When the bound red track carries its custody status as the sweep judges it
+(SPC-018, read by the web layer), every row's custody and gap are that status
+carried over the horizon on the assumption that no newer element set arrives
+(SPC-123): lost from the earliest of the epoch, if lost already, the moment
+the newest element set passes its limit, and a hypothesised burn newer than
+it. Each gap is an upper bound, with basis computed, and the same for every
+response in a row, since our response is not applied to custody yet. A
+manoeuvre with no hypothesis names no burn time, so its custody takes the
+worst case, a burn at the scenario epoch, as a lookup, unless custody is lost
+from the epoch already, which no burn time can change. Degraded custody can
+judge the warning time but not whether a burn is normal, and the operator's
+custody needs both, so it counts as lost. Without a red status the rule of
+thumb stays.
 
 Typical use::
 
@@ -74,15 +100,15 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, fields
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 import numpy as np
 
+from spectre.astro.elset_approach import ElsetApproach, ElsetFailure, elset_closest_approach
 from spectre.astro.monte_carlo import (
     _MIN_CONVERGENCE_SAMPLES,
-    CONVERGENCE_TOLERANCE_KM,
     MANOEUVRE_ARCHETYPES,
     REENTRY_FLOOR_KM,
     BlueTrack,
@@ -94,10 +120,12 @@ from spectre.astro.monte_carlo import (
     _ric_split,
     elset_state,
     hypothesis_from_tle_record,
+    rk45_sgp4_gap_km,
     run_separation_series,
     separation_integration_s,
 )
-from spectre.domain.custody import age_text
+from spectre.domain.custody import BASIS as CUSTODY_BASIS
+from spectre.domain.custody import Custody, CustodyStatus, Horizon, age_text, custody_over_horizon
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.domain.provenance import (
     Basis,
@@ -133,13 +161,29 @@ class SelectorStrategy(Enum):
     MINIMIN           = "minimin"
 
 
-#: What every Phase 1 outcome rests on, shown to the operator with the result.
-MODELLED_BASIS = (
-    "Outcomes are Phase 1 lookup constants and weights, not propagated orbits: "
+_MODELLED = (
+    "Outcomes are lookup constants and weights, not propagated orbits: "
     "closest approach is a fixed figure per action type scaled by response cost, "
-    "time to approach is a fixed fraction of the horizon, and custody follows a "
-    "rule of thumb. Use it to compare trade-offs, not as an operational answer."
+    "time to approach is a fixed fraction of the horizon, and custody {custody}. "
+    "Use it to compare trade-offs, not as an operational answer."
 )
+#: What an outcome rests on when every figure is a lookup, shown to the operator with the result.
+MODELLED_BASIS = _MODELLED.format(custody="follows a rule of thumb")
+#: MODELLED_BASIS when every figure is a lookup but custody is the worst case, not the rule of thumb (SPC-123).
+WORST_CASE_BASIS = _MODELLED.format(
+    custody="takes the worst case, a burn at the scenario epoch, since no manoeuvre names a burn time",
+)
+#: A single cell's MODELLED_BASIS when its custody is the worst case (SPC-123).
+WORST_CASE_CELL_BASIS = _MODELLED.format(
+    custody="takes the worst case, a burn at the scenario epoch, since this manoeuvre names no burn time",
+)
+#: Follows MODELLED_BASIS on the result when the scenario is not bound on both sides: what binding would earn.
+BIND_TO_EARN = (
+    "Bind a red track and a blue asset to compute the closest approach of a row whose action does not move the "
+    "red track, or to sample one that carries a manoeuvre hypothesis."
+)
+#: Follows MODELLED_BASIS on the result when both sides are bound and every row was refused: binding is done.
+EVERY_ROW_REFUSED = "Both orbits are bound, but no closest approach could be computed or sampled: each cell says why."
 
 
 # ── Figure bases ──────────────────────────────────────────────────────────────
@@ -289,9 +333,10 @@ def _require_fraction(owner: str, field_name: str, value: float) -> None:
 
 #: Shown with every hypothesis once the panel carries one (SPC-114).
 HYPOTHESIS_NOTE: str = (
-    "A manoeuvre hypothesis records how the adversary might move and where that came from. It changes no "
-    "figure unless both sides are bound; then the closest approach of its row and its time are sampled from it, "
-    "and every other figure is still a lookup."
+    "A manoeuvre hypothesis records how the adversary might move and where that came from. With a red track "
+    "bound, its burn time sets when custody is lost; with both sides bound, the closest approach of its row and "
+    "its time are sampled from it, and our delta-V stays a lookup; without one, a manoeuvre row's closest approach "
+    "stays a lookup and its custody takes the worst case, a burn at the scenario epoch, since it names no burn."
 )
 
 
@@ -719,7 +764,7 @@ class OutcomeMetrics:
     ca_std_km:            float | None = None
     # How many sampled misses the band is taken over, set with the band.
     ca_samples:           int | None = None
-    # Why a row that carries a hypothesis was not sampled, ending "lookups".
+    # Why the closest approach was not sampled or computed, ending "is a lookup".
     ca_refusal:           str | None = None
     # What P5 does not say about a sampled cell: the closest sample, and any
     # that were still closing when the window ended.
@@ -730,6 +775,14 @@ class OutcomeMetrics:
     ca_half_width_km:     float | None = None
     score_percentiles:    dict[int, float] | None = None
     score_std:            float | None = None
+    # A computed closest approach (SPC-120): both bound orbits on SGP4 with no
+    # burn, the miss, TCA and edge flag unrounded. Set exactly when the closest
+    # approach's basis is computed; closest_approach_km and time_to_closest_hours
+    # are then its miss and TCA, rounded.
+    ca_computed:          ElsetApproach | None = None
+    # The bound red track's custody at the scenario epoch, held, degraded or lost (SPC-123). Set exactly when
+    # custody's basis is computed; custody_maintained and custody_gap_hours then carry it over the horizon.
+    custody_state:        Custody | None = None
 
     def __post_init__(self) -> None:
         sampled = _cell_bases(self).closest_approach_km.kind is Basis.SAMPLED
@@ -748,6 +801,8 @@ class OutcomeMetrics:
                 raise ValueError("a cell is sampled or refused, not both")
         elif self.ca_caveat is not None:
             raise ValueError("a caveat on the sampled closest approach needs a sampled band")
+        _require_computed(self)
+        _require_custody(self)
 
     @property
     def ca_band(self) -> str | None:
@@ -755,7 +810,7 @@ class OutcomeMetrics:
         if self.ca_percentiles is None:
             return None
         p = self.ca_percentiles
-        return f"Sampled: P5 {p[5]:.1f} km to P95 {p[95]:.1f} km, median {p[50]:.1f} km, {self.ca_samples} samples."
+        return _CA_BAND.format(p5=p[5], p95=p[95], p50=p[50], hw=self.ca_half_width_km, n=self.ca_samples)
 
     @property
     def ca_distribution(self) -> str | None:
@@ -769,8 +824,33 @@ class OutcomeMetrics:
 
     @property
     def ca_title(self) -> str:
-        """The closest approach's hover: its distribution when sampled, else LOOKUP_CELL_TITLE."""
+        """The closest approach's hover: the computed figure in full, the sampled distribution, or LOOKUP_CELL_TITLE."""
+        found = self.ca_computed
+        if found is not None:
+            return _COMPUTED_TITLE.format(
+                miss=found.approach.miss_km, tca_s=found.approach.tca_s, v=from_km_s(found.closing_speed_km_s),
+            )
         return self.ca_distribution or LOOKUP_CELL_TITLE
+
+    @property
+    def ca_computed_line(self) -> str | None:
+        """The computed closest approach and its time, to the minute, for the cell; None when not computed."""
+        found = self.ca_computed
+        if found is None:
+            return None
+        start = found.window.start_utc
+        return _COMPUTED_LINE.format(
+            miss=found.approach.miss_km, tca=_to_the_minute(found.approach.tca_utc(start)),
+            h=found.approach.tca_s / _SECONDS_PER_HOUR,
+        )
+
+    @property
+    def ca_computed_caveat(self) -> str | None:
+        """What a computed minimum at an edge of the search is not: an encounter. None otherwise."""
+        found = self.ca_computed
+        if found is None or not found.approach.at_window_edge:
+            return None
+        return _STILL_CLOSING if found.approach.tca_s > 0.0 else _ALREADY_OPENING
 
     @property
     def score_spread_text(self) -> str:
@@ -795,7 +875,8 @@ class OutcomeMetrics:
     @property
     def basis(self) -> str:
         if _all_lookup(self.figure_bases):
-            return MODELLED_BASIS
+            worst_case = self.figure_bases.custody_maintained.note == _WORST_CASE_NOTE
+            return WORST_CASE_CELL_BASIS if worst_case else MODELLED_BASIS
         return "; ".join(f"{FIGURE_LABELS[name]}: {fb.kind.value}, {fb.note}" for name, fb in self.figure_bases.items())
 
     def __str__(self) -> str:
@@ -808,6 +889,9 @@ class OutcomeMetrics:
 
 
 _PERCENTILE_KEYS = (5, 50, 95)
+
+#: The sampled band in the cell, with how closely its percentiles are known (SPC-117).
+_CA_BAND = "Sampled: P5 {p5:.1f} km to P95 {p95:.1f} km, median {p50:.1f} km, each known to within {hw:.1f} km, {n} samples."
 
 #: The band's hover (SPC-115). The element-set model is spectre/astro/along_track.py's _ERROR_MODEL_KM.
 _CA_DISTRIBUTION = (
@@ -825,6 +909,43 @@ _SMALLEST_SHOWN_SPREAD = 0.00005
 
 def _spread_figure(std: float) -> str:
     return "under 0.0001" if std < _SMALLEST_SHOWN_SPREAD else f"{std:.4f}"
+
+
+def _require_computed(cell: OutcomeMetrics) -> None:
+    """The computed figure is set exactly when the closest approach is computed, alone, and the cell shows it."""
+    found = cell.ca_computed
+    if (found is not None) != (_cell_bases(cell).closest_approach_km.kind is Basis.COMPUTED):
+        raise ValueError("ca_computed is set exactly when the closest approach's basis is computed")
+    if found is None:
+        return
+    if cell.ca_refusal is not None:
+        raise ValueError("a cell is computed or refused, not both")
+    miss, hours = round(found.approach.miss_km, 1), round(found.approach.tca_s / _SECONDS_PER_HOUR, 2)
+    if cell.closest_approach_km != miss:
+        raise ValueError(f"a computed cell scores and shows the computed miss, {miss} km; got {cell.closest_approach_km!r}")
+    if cell.time_to_closest_hours != hours:
+        raise ValueError(f"a computed cell shows the computed time, {hours} h; got {cell.time_to_closest_hours!r}")
+
+
+def _require_custody(cell: OutcomeMetrics) -> None:
+    """Custody and its gap rest on one basis; a computed custody carries its state and agrees with it."""
+    bases = _cell_bases(cell)
+    kind = bases.custody_maintained.kind
+    if bases.custody_gap_hours.kind is not kind:
+        raise ValueError("custody and its gap share one basis")
+    if (cell.custody_state is not None) != (kind is Basis.COMPUTED):
+        raise ValueError("custody_state is set exactly when custody's basis is computed")
+    if cell.custody_state is None:
+        return
+    if cell.custody_maintained and cell.custody_gap_hours != 0.0:
+        raise ValueError(f"computed custody maintained has no gap; got {cell.custody_gap_hours!r} h")
+    if cell.custody_state is not Custody.HELD and cell.custody_maintained:
+        raise ValueError(f"custody {cell.custody_state.value} at the scenario epoch is not maintained")
+
+
+def _to_the_minute(when: datetime) -> datetime:
+    """*when* rounded to the nearest minute, for a time shown to the minute."""
+    return (when + timedelta(seconds=30)).replace(second=0, microsecond=0)
 
 
 def _require_band(percentiles: dict[int, float], std_km: float, closest_approach_km: float) -> None:
@@ -847,9 +968,11 @@ def _require_band(percentiles: dict[int, float], std_km: float, closest_approach
 
 #: Shown with every binding, on the panel and with the result.
 BINDING_NOTE: str = (
-    "Binding records which real objects this scenario is about. It changes no figure unless an adversary "
-    "action carries a hypothesis and both sides are bound; then the closest approach of that row and its time are "
-    "sampled from these orbits, and every other figure is still a lookup."
+    "Binding records which real objects this scenario is about. With both sides bound, the closest approach and "
+    "its time are computed from these orbits by SGP4, with no burn, for every row whose action does not move the "
+    "red track, and sampled for a row whose action carries a hypothesis; a manoeuvre with no hypothesis names no "
+    "burn and stays a lookup. With a red track bound, custody is its custody as the sweep judges it at evaluation, "
+    "carried over the horizon. Our delta-V is still a lookup."
 )
 
 _SIDES = frozenset({"red", "blue"})
@@ -910,10 +1033,14 @@ class BoundElset:
     age_hours:   float | None
     limit_hours: float | None
     training:    bool = False
+    # The red track's custody at evaluation, as the sweep judges it (SPC-018), read by the web layer; red only.
+    custody:     CustodyStatus | None = None
 
     def __post_init__(self) -> None:
         _require_side(self)
         _require_age_facts(self)
+        if self.custody is not None and self.side != "red":
+            raise ValueError("custody describes our information about the red track; a blue element set carries none")
 
     @property
     def freshness(self) -> Freshness:
@@ -980,7 +1107,8 @@ class Scenario:
     w_reversibility:    float = 0.10    # Reward for reversible actions
 
     # The real objects this scenario is about (SPC-100). Carried, shown and put
-    # in provenance; read only by plan_sampling, for a row with a hypothesis.
+    # in provenance; read by plan_sampling, for a row with a hypothesis, and by
+    # plan_computed, for the pair's closest approach with no burn (SPC-120).
     binding:            ScenarioBinding | None = None
 
     def __post_init__(self) -> None:
@@ -1008,6 +1136,11 @@ class ScenarioResult:
     provenance:             Provenance | None = None
     # Per adversary row: why a hypothesis it carries was not sampled, else None (SPC-112).
     row_notes:              tuple[str | None, ...] = ()
+    # How far RK45 and SGP4 place the bound orbits apart over the horizon, km, red's plus blue's; measured only
+    # when the matrix holds both a computed and a sampled cell, and None too when it could not be (SPC-120).
+    propagator_gap_km:      float | None = None
+    # Per adversary row: its custody over the horizon in a sentence, when not the rule of thumb (SPC-123).
+    row_custody:            tuple[str | None, ...] = ()
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -1023,13 +1156,48 @@ class ScenarioResult:
 
     @property
     def basis(self) -> str:
-        """MODELLED_BASIS while every figure is a lookup, else MIXED_BASIS; never the lines repeated."""
-        return MODELLED_BASIS if all(_all_lookup(b) for b in self._bases()) else MIXED_BASIS
+        """MODELLED_BASIS while every figure is a lookup, else MIXED_BASIS; never the lines repeated.
+
+        With custody the worst case in every cell, not the rule of thumb, it is WORST_CASE_BASIS instead (SPC-123).
+
+        The all-lookup line then says what to do: bind both sides, or, with both bound, read each cell's refusal.
+        """
+        bases = self._bases()
+        if not all(_all_lookup(b) for b in bases):
+            return MIXED_BASIS
+        binding = getattr(self.scenario, "binding", None)
+        bound = binding is not None and binding.red is not None and binding.blue is not None
+        worst_case = bool(bases) and not self.custody_rule_of_thumb   # every row a manoeuvre naming no burn time
+        modelled = WORST_CASE_BASIS if worst_case else MODELLED_BASIS
+        return f"{modelled} {EVERY_ROW_REFUSED if bound else BIND_TO_EARN}"
 
     @property
     def custody_rule_of_thumb(self) -> bool:
-        """Whether any cell's custody is still the rule of thumb, so the page says so only then."""
-        return any(b.custody_maintained.kind is Basis.LOOKUP for b in self._bases())
+        """Whether any cell's custody is still the rule of thumb, so the page says so only then.
+
+        A manoeuvre with no hypothesis takes the worst case (SPC-123): a lookup, but not the rule of thumb.
+        """
+        return any(
+            b.custody_maintained.kind is Basis.LOOKUP and b.custody_maintained.note != _WORST_CASE_NOTE
+            for b in self._bases()
+        )
+
+    @property
+    def custody_bind_note(self) -> str | None:
+        """What would compute custody, while the rule of thumb stands: bind a red track, or none was read."""
+        if not self.custody_rule_of_thumb:
+            return None
+        binding = getattr(self.scenario, "binding", None)
+        return CUSTODY_BIND_RED if binding is None or binding.red is None else CUSTODY_NOT_READ
+
+    @property
+    def custody_note(self) -> str | None:
+        """CUSTODY_NOTE when any cell's custody is computed from the bound red track's status, else None (SPC-123).
+
+        The worst case does not rest on the status, so it alone does not bring the note: its row sentence says why.
+        """
+        computed = any(b.custody_maintained.kind is Basis.COMPUTED for b in self._bases())
+        return CUSTODY_NOTE if computed else None
 
     @property
     def basis_lines(self) -> tuple[str, ...]:
@@ -1050,6 +1218,55 @@ class ScenarioResult:
     def n_sampled_cells(self) -> int:
         """How many cells score on a sampled closest approach."""
         return len(self._bands())
+
+    def _computed(self) -> list[ElsetApproach]:
+        cells = (cell for row in self.outcome_matrix for cell in row)
+        return [found for cell in cells if (found := getattr(cell, "ca_computed", None)) is not None]
+
+    @property
+    def n_computed_cells(self) -> int:
+        """How many cells score on a computed closest approach (SPC-120)."""
+        return len(self._computed())
+
+    @property
+    def computed_caveat(self) -> str | None:
+        """What a computed closest approach does not say; None when no cell is computed (SPC-120)."""
+        return COMPUTED_CAVEAT if self._computed() else None
+
+    @property
+    def computed_span_note(self) -> str | None:
+        """The search's span when the element sets' limits cut it short of the horizon, else None (SPC-120)."""
+        found = self._computed()
+        if not found:
+            return None
+        window = found[0].window
+        if window.span_s >= self.scenario.horizon_hours * _SECONDS_PER_HOUR:
+            return None
+        return _COMPUTED_SPAN.format(
+            span=window.span_s / _SECONDS_PER_HOUR, horizon=self.scenario.horizon_hours,
+            end=window.start_utc + timedelta(seconds=window.span_s),
+        )
+
+    @property
+    def propagator_line(self) -> str | None:
+        """How far apart the two propagators place these orbits, when computed and sampled rows sit together."""
+        if not (self._computed() and self._bands()):
+            return None
+        gap = self.propagator_gap_km
+        return _PROPAGATORS_UNCOMPARED if gap is None else _PROPAGATOR_LINE.format(gap=gap)
+
+    @property
+    def computed_binding_note(self) -> str | None:
+        """COMPUTED_BINDING_NOTE when only one side is bound, so no closest approach can be computed."""
+        binding = getattr(self.scenario, "binding", None)
+        if binding is None or (binding.red is None) == (binding.blue is None):
+            return None
+        return COMPUTED_BINDING_NOTE
+
+    @property
+    def converged_means(self) -> str | None:
+        """CONVERGED_MEANS when any cell is sampled, else None (SPC-117)."""
+        return CONVERGED_MEANS if self._bands() else None
 
     @property
     def score_spread_note(self) -> str | None:
@@ -1087,6 +1304,8 @@ _ROW_SAMPLED = (
 )
 _ROW_LOOKUP = "Lookup: no spread computed."
 _ROW_REFUSED = "Not sampled, so no spread: the cells say why."
+_ROW_NOT_COMPUTED = "Not computed, so no spread: the cells say why."
+_ROW_COMPUTED = "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it."
 
 
 def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
@@ -1096,7 +1315,11 @@ def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
         return _ROW_SAMPLED.format(
             std=cell.ca_std_km, n=cell.ca_samples, hw=cell.ca_half_width_km, s=_spread_figure(cast("float", cell.score_std)),
         )
-    return _ROW_REFUSED if cell.ca_refusal is not None else _ROW_LOOKUP
+    if getattr(cell, "ca_computed", None) is not None:
+        return _ROW_COMPUTED
+    if cell.ca_refusal is None:
+        return _ROW_LOOKUP
+    return _ROW_NOT_COMPUTED if cell.ca_refusal.startswith(_NOT_COMPUTED) else _ROW_REFUSED
 
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
@@ -1146,18 +1369,45 @@ def compute_outcome_metrics(
     - composite_score: weighted sum of the normalised terms (higher = worse)
 
     It never reads the scenario's binding or the action's hypothesis: a
-    sampled row is filled by evaluate_scenario from plan_sampling (SPC-112).
+    sampled row is filled by evaluate_scenario from plan_sampling (SPC-112),
+    a computed one from plan_computed (SPC-120), and custody from the bound
+    red track's status (SPC-123).
     """
-    figures = _lookup_figures(adversary, friendly, scenario)
+    return _lookup_cell(adversary, friendly, scenario, None)
+
+
+class _Built(NamedTuple):
+    """What a cell is built from: its figures unrounded, its time to closest approach in hours, and their bases."""
+
+    figures:   _Figures
+    tca_hours: float
+    bases:     OutcomeBases
+
+
+def _outcome(
+    scenario: Scenario, friendly: FriendlyResponse, built: _Built, custody: _RowCustody | None, **extra: Any,
+) -> OutcomeMetrics:
+    """One cell from *built*, with the row's custody in place of the rule of thumb when there is one (SPC-123)."""
+    figures = _custodial(built.figures, custody)
     return OutcomeMetrics(
         custody_maintained=figures.custody_maintained,
         custody_gap_hours=round(figures.custody_gap_hours, 2),
         closest_approach_km=round(figures.closest_approach_km, 1),
-        time_to_closest_hours=round(scenario.horizon_hours * 0.4, 2),   # Phase 1: simplified
+        time_to_closest_hours=round(built.tca_hours, 2),
         delta_v_cost_km_s=round(figures.delta_v_km_s, 5),
         composite_score=round(_score(scenario, friendly, figures), 6),
-        figure_bases=LOOKUP_BASES,
+        figure_bases=_custody_bases(built.bases, custody),
+        custody_state=None if custody is None else custody.state,
+        **extra,
     )
+
+
+def _lookup_cell(
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, custody: _RowCustody | None,
+) -> OutcomeMetrics:
+    """The lookup model's cell; with the row's custody when it is not the rule of thumb (SPC-123)."""
+    figures = _lookup_figures(adversary, friendly, scenario)
+    return _outcome(scenario, friendly, _Built(figures, scenario.horizon_hours * 0.4, LOOKUP_BASES), custody)
 
 
 def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario) -> _Figures:
@@ -1272,7 +1522,8 @@ START_VELOCITY_TOLERANCE_KM_S: float = 0.1
 _SECONDS_PER_HOUR = 3600.0
 _TENTH_HOUR_S = 360.0
 
-_LOOKUPS = " This cell's figures are lookups."
+#: Custody may be computed in a refused cell (SPC-123), so a refusal speaks for the closest approach alone.
+_LOOKUPS = " This cell's closest approach is a lookup."
 _OVER_CAP = (
     "Not sampled: this scenario needs at least {total:,} sample-hours (samples times the hours each is "
     "propagated, counting any burn before the window, plus {set_up:g} minutes of set-up for each sample, across "
@@ -1312,8 +1563,9 @@ _BUDGET_NONE = (
     "or a shorter horizon."
 )
 _UNCONVERGED = (
-    "Not sampled: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:g} km convergence "
-    "check. Take more samples, with a shorter horizon if that goes over the {cap:,.0f} sample-hour cap."
+    "Not sampled: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:.1f} km this miss needs "
+    "(1 km, or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the "
+    "{cap:,.0f} sample-hour cap."
 )
 _SAMPLED_CA_NOTE = (
     "P5 of {n} sampled misses, known to within {hw:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
@@ -1330,12 +1582,23 @@ _EDGE_CAVEAT = (
     " In {k} of {n} samples the objects were still closing when the window ended, so the closest approach may "
     "come after it."
 )
+_OPENING_CAVEAT = (
+    " In {k} of {n} samples the objects were already opening when the window began, so the closest approach was "
+    "before it."
+)
 _RESULT_CAVEAT = (
     "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers only the "
     "hypothesis: its delta-V, pointing, timing and drag. Element-set errors, and the hypothesis being wrong, are "
     "not in it. Our response is not applied to the blue orbit yet, so every response in a sampled row has the "
     "same closest approach. The score normalises closest approach to 50,000 km, so the sampled spread moves it "
     "by at most {delta:.4f} here."
+)
+#: Shown with the sampled caveat when any cell is sampled (SPC-117): what a converged band is, in the operator's terms.
+CONVERGED_MEANS = (
+    "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is larger "
+    "(95 % bootstrap): more samples would move them by less than that. Whether a move that size matters depends "
+    "on how close is too close for your asset, which this page is not told. It says nothing about element-set error "
+    "or the hypothesis being wrong."
 )
 #: The hover on a lookup cell's closest approach (SPC-115): it has no band to show.
 LOOKUP_CELL_TITLE = "Lookup: a fixed figure, with no distribution."
@@ -1439,7 +1702,7 @@ def _failed(series: SeparationSeries) -> str | None:
 def _unconverged(series: SeparationSeries) -> str | None:
     if series.converged:
         return None
-    return _UNCONVERGED.format(hw=series.percentile_half_width_km, tol=CONVERGENCE_TOLERANCE_KM, cap=MAX_SAMPLE_HOURS)
+    return _UNCONVERGED.format(hw=series.percentile_half_width_km, tol=series.tolerance_km, cap=MAX_SAMPLE_HOURS)
 
 
 #: Checked in this order before anything runs; the first that speaks refuses the row.
@@ -1489,10 +1752,13 @@ def _cost(rows: Sequence[_Row]) -> float:
     73 sample-hours a second), all converged, half-width 0.06 km; 500 over 1 h (about 575) 6.9 s; 500 over 12 h
     (6,075) 104.3 s, 58 a second, half-width 0.04 km. coplanar_leo (about 505 km) Evasive, 500 over 12 h (6,075)
     102.0 s, 60 a second; 100 over 1 h and 6 h (615) 2.4 and 10.7 s, 57.5 a second, with other work on the
-    machine; Orbit Raise 100 over 1 h and 6 h 2.3 and 11.5 s, not converged (1.76 km).
+    machine; Orbit Raise 100 over 1 h and 6 h 2.3 and 11.5 s, half-width 1.76 km (refused at 1 km before SPC-117,
+    converged now against 5 % of its 153.25 km P5).
     geo_drift_in Station Keeping, 100 over 6 h and 24 h (2,438) 3.2 and 10.0 s, 243 a second, so GEO is refused
-    conservatively; Intercept 100 over 6 h 2.1 s, not converged (3.94 km). plane_change with the burn 2 h before a
-    1 h window, 500 samples (1,582) 26.3 s, 60 a second, not converged (Evasive 1.77 km, Orbit Raise 8.37 km).
+    conservatively; Intercept 100 over 6 h 2.1 s, not converged (3.94 km, P5 7.16 km). plane_change with the burn
+    2 h before a 1 h window, 500 samples (1,582) 26.3 s, 60 a second, half-widths 1.77 km (Evasive) and 8.37 km
+    (Orbit Raise), refused at 1 km before SPC-117; at seed 42 now 0.95 km against a 41.67 km P5 and 8.51 km against
+    842.97 km, both converged.
     plane_change Evasive with the burn at the window start, under a RunControl, 500 over 11.7 h (5,951): 115.66 s
     with other work on the machine, 51 a second, the slowest rate measured; 80.2 s and 79.19 s idle, 74 and 75 a
     second. So MAX_SAMPLE_HOURS assumes 40, about a fifth under 51.
@@ -1750,29 +2016,34 @@ def _cell_caveat(series: SeparationSeries) -> str:
     n = len(series.approaches)
     caveat = _CELL_CAVEAT.format(n=n, closest=series.closest_sample_km)
     closing = sum(a.at_window_edge and a.tca_s > 0.0 for a in series.approaches)
-    return caveat + _EDGE_CAVEAT.format(k=closing, n=n) if closing else caveat
+    opening = series.n_at_window_edge - closing
+    if closing:
+        caveat += _EDGE_CAVEAT.format(k=closing, n=n)
+    if opening:
+        caveat += _OPENING_CAVEAT.format(k=opening, n=n)
+    return caveat
 
 
 def _sampled_cell(
     adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, series: SeparationSeries,
+    custody: _RowCustody | None,
 ) -> OutcomeMetrics:
     """A cell scored on the sampled P5, with its time the earliest TCA at or below it; the rest are lookups.
 
     Each sample's miss is scored too, through the same _score, for the composite score's P5, P50, P95 and
     1-sigma spread across samples (SPC-115). The score is linear in the miss below 50,000 km.
     """
-    figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=series.miss_km_p5)
+    figures = _custodial(_lookup_figures(adversary, friendly, scenario), custody)._replace(
+        closest_approach_km=series.miss_km_p5,
+    )
     scores = np.array([
         _score(scenario, friendly, figures._replace(closest_approach_km=a.miss_km)) for a in series.approaches
     ])
-    return OutcomeMetrics(
-        custody_maintained=figures.custody_maintained,
-        custody_gap_hours=round(figures.custody_gap_hours, 2),
-        closest_approach_km=round(series.miss_km_p5, 1),
-        time_to_closest_hours=round(series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, 2),
-        delta_v_cost_km_s=round(figures.delta_v_km_s, 5),
-        composite_score=round(_score(scenario, friendly, figures), 6),
-        figure_bases=_sampled_bases(series, scenario.horizon_hours),
+    built = _Built(
+        figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, _sampled_bases(series, scenario.horizon_hours),
+    )
+    return _outcome(
+        scenario, friendly, built, custody,
         ca_percentiles=series.percentiles,
         ca_std_km=series.miss_km_std,
         ca_samples=len(series.approaches),
@@ -1784,20 +2055,10 @@ def _sampled_cell(
 
 
 def _refused_cell(metrics: OutcomeMetrics, refusal: str | None) -> OutcomeMetrics:
-    """The lookup cell, with the refusal in the cell and in its closest approach's note."""
+    """The lookup cell, with the refusal in the cell and in its closest approach's note; its custody is kept."""
     note = f"{LOOKUP_BASES.closest_approach_km.note}. {refusal}"
-    bases = dataclasses.replace(LOOKUP_BASES, closest_approach_km=FigureBasis(Basis.LOOKUP, note))
+    bases = dataclasses.replace(metrics.figure_bases, closest_approach_km=FigureBasis(Basis.LOOKUP, note))
     return dataclasses.replace(metrics, figure_bases=bases, ca_refusal=refusal)
-
-
-def _cell(
-    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, sampling: RowSampling | None,
-) -> OutcomeMetrics:
-    if sampling is None:
-        return compute_outcome_metrics(adversary, friendly, scenario)
-    if sampling.series is None:
-        return _refused_cell(compute_outcome_metrics(adversary, friendly, scenario), sampling.refusal)
-    return _sampled_cell(adversary, friendly, scenario, sampling.series)
 
 
 def _row_notes(scenario: Scenario, plan: Sequence[RowSampling | None]) -> tuple[str | None, ...]:
@@ -1805,6 +2066,282 @@ def _row_notes(scenario: Scenario, plan: Sequence[RowSampling | None]) -> tuple[
         UNSAMPLED_ROW_NOTE if a.hypothesis is not None and p is None else None
         for a, p in zip(scenario.adversary_actions, plan, strict=True)
     )
+
+
+# ── Computed closest approach (SPC-120) ────────────────────────────────────────
+
+#: The actions that do not move the red track. In a scenario bound on both sides, a row of one of these without a
+#: hypothesis has its closest approach computed: where the pair goes with no burn is that row's outcome.
+_STILL_ACTIONS: frozenset[ActionType] = frozenset(
+    {ActionType.NO_ACTION, ActionType.SENSOR_RETASK, ActionType.POSTURE_CHANGE},
+)
+_NOT_COMPUTED = "Not computed: "
+_NOT_COMPUTED_STALE = (
+    _NOT_COMPUTED + "the {side} orbit is out of date or its age is unknown, so a miss computed from it would not "
+    "be earned."
+)
+_NOT_COMPUTED_SGP4 = (
+    _NOT_COMPUTED + "SGP4 could not propagate the {side} element set across the horizon, so a miss without those "
+    "instants could hide the closest."
+)
+_NOT_A_BURN = (
+    _NOT_COMPUTED + "a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show "
+    "only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row."
+)
+_COMPUTED_CA_NOTE = (
+    "smallest separation of the bound red track {red} and blue asset {blue} over {span:.1f} h of the {horizon:g} h "
+    "horizon from the scenario epoch, both propagated by SGP4 from their element sets (red epoch "
+    "{re:%Y-%m-%d %H:%M} UTC, blue epoch {be:%Y-%m-%d %H:%M} UTC) with no burn, sampled every {step:g} s and each "
+    "local minimum refined to 0.01 s; element-set error is not in it, and our response is not applied to the blue "
+    "orbit"
+)
+_COMPUTED_TIME_NOTE = (
+    "time of that closest approach from the scenario epoch, SGP4 for both orbits, refined to 0.01 s and shown to "
+    "the minute"
+)
+_COMPUTED_LINE = "Computed: {miss:.1f} km at {tca:%Y-%m-%d %H:%M} UTC, {h:.2f} h after the scenario epoch; SGP4, no burn."
+_COMPUTED_TITLE = (
+    "Computed: {miss:.3f} km at {tca_s:,.2f} s after the scenario epoch, passing at {v:,.0f} m/s; SGP4 for both "
+    "orbits with no burn, so one figure, with no distribution."
+)
+_STILL_CLOSING = (
+    "Still closing when the search ends, so the closest approach comes after it: this is the separation then, not "
+    "an encounter."
+)
+_ALREADY_OPENING = (
+    "Already opening at the scenario epoch: the closest in the horizon is now, and any closer approach was before "
+    "it."
+)
+_COMPUTED_SPAN = (
+    "Computed over the first {span:.1f} h of the {horizon:g} h horizon, while both element sets are within their "
+    "limits; past {end:%Y-%m-%d %H:%M} UTC a computed miss would rest on an out-of-date orbit."
+)
+#: Shown once with the result when any cell is computed (SPC-120). The element-set model is along_track.py's.
+COMPUTED_CAVEAT = (
+    "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the pair "
+    "goes if the red track does not move, so every row whose action does not move it shares one figure. Our "
+    "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
+    "approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as "
+    "1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it."
+)
+_PROPAGATOR_LINE = (
+    "Computed rows use SGP4; sampled rows use RK45 with J2 and drag, from the same element sets. Over this horizon "
+    "the two propagators place these orbits up to {gap:.1f} km apart in separation, so a difference between a "
+    "computed row and a sampled row smaller than {gap:.1f} km is the propagators, not the burn."
+)
+_PROPAGATORS_UNCOMPARED = (
+    "The two propagators could not be compared for these orbits, so do not compare a computed row with a sampled "
+    "row."
+)
+#: Shown with a scenario bound on one side only (SPC-120).
+COMPUTED_BINDING_NOTE = "Closest approach not computed: bind a red track and a blue asset to compute it."
+
+
+class ComputedPlan(NamedTuple):
+    """The bound pair's computed closest approach, or why it was not computed; never both."""
+
+    approach: ElsetApproach | None
+    refusal:  str | None
+
+
+def _earned_s(elset: BoundElset) -> float:
+    """Seconds from the scenario epoch until *elset* passes its limit; 0 or less when it has none left."""
+    return (cast("float", elset.limit_hours) - cast("float", elset.age_hours)) * _SECONDS_PER_HOUR
+
+
+def _unearned_side(red: BoundElset, blue: BoundElset) -> str | None:
+    """The first side whose orbit is out of date, of unknown age or at its limit already; None when both earn time."""
+    for elset in (red, blue):
+        if elset.freshness is not Freshness.CURRENT or _earned_s(elset) <= 0.0:
+            return elset.side
+    return None
+
+
+def plan_computed(scenario: Scenario) -> ComputedPlan | None:
+    """The bound pair's closest approach with no burn, both on SGP4, or why not; None unless bound on both sides.
+
+    One search per scenario, shared by every computed row and response: our response is not applied to the blue
+    orbit yet (SPC-121). It runs from the scenario epoch to the earlier of the horizon's end and the moment
+    either element set passes its limit, since past that a computed miss would rest on an out-of-date orbit.
+    Refused, as sampling refuses it, when either orbit is out of date or of unknown age, and when SGP4 cannot
+    propagate either element set at any instant searched.
+    """
+    binding = scenario.binding
+    red, blue = (None, None) if binding is None else (binding.red, binding.blue)
+    if red is None or blue is None:
+        return None
+    side = _unearned_side(red, blue)
+    if side is not None:
+        return ComputedPlan(None, _refusal(_NOT_COMPUTED_STALE.format(side=side)))
+    span_s = min(scenario.horizon_hours * _SECONDS_PER_HOUR, _earned_s(red), _earned_s(blue))
+    found = elset_closest_approach(red.tle, blue.tle, SeparationWindow(start_utc=scenario.epoch_utc, span_s=span_s))
+    if isinstance(found, ElsetFailure):
+        return ComputedPlan(None, _refusal(_NOT_COMPUTED_SGP4.format(side=found.side)))
+    return ComputedPlan(found, None)
+
+
+def _computed_bases(scenario: Scenario, found: ElsetApproach) -> OutcomeBases:
+    binding = cast("ScenarioBinding", scenario.binding)   # plan_computed computes only when both sides are bound
+    red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
+    note = _COMPUTED_CA_NOTE.format(
+        red=red.stk_name, blue=blue.stk_name, span=found.window.span_s / _SECONDS_PER_HOUR,
+        horizon=scenario.horizon_hours, re=red.epoch, be=blue.epoch, step=found.window.step_s,
+    )
+    return outcome_bases(
+        custody_maintained=LOOKUP_BASES.custody_maintained,
+        custody_gap_hours=LOOKUP_BASES.custody_gap_hours,
+        closest_approach_km=FigureBasis(Basis.COMPUTED, note),
+        time_to_closest_hours=FigureBasis(Basis.COMPUTED, _COMPUTED_TIME_NOTE),
+        delta_v_cost_km_s=LOOKUP_BASES.delta_v_cost_km_s,
+    )
+
+
+def _computed_cell(
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, found: ElsetApproach,
+    custody: _RowCustody | None,
+) -> OutcomeMetrics:
+    """A cell scored on the computed miss, unrounded, with its time the computed TCA; the rest are lookups."""
+    figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=found.approach.miss_km)
+    built = _Built(figures, found.approach.tca_s / _SECONDS_PER_HOUR, _computed_bases(scenario, found))
+    return _outcome(scenario, friendly, built, custody, ca_computed=found)
+
+
+def _propagator_gap(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]]) -> float | None:
+    """The propagators' gap over the horizon, measured only when computed and sampled cells sit together.
+
+    Red is measured on each sampled row's own arc, from its burn, which may be days before the window.
+    """
+    sampled = [
+        cast("AdversaryHypothesis", action.hypothesis).hypothesis
+        for action, row in zip(scenario.adversary_actions, matrix, strict=True)
+        if any(c.ca_percentiles is not None for c in row)
+    ]
+    if not (sampled and any(c.ca_computed is not None for row in matrix for c in row)):
+        return None
+    binding = cast("ScenarioBinding", scenario.binding)
+    red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
+    window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=scenario.horizon_hours * _SECONDS_PER_HOUR)
+    return rk45_sgp4_gap_km(red.tle, blue.tle, window, tuple(sampled))
+
+
+class _RowPlan(NamedTuple):
+    """What one adversary row's cells are built from: its sampling, if eligible, the pair's computed plan, and
+    its custody when the bound red track's status was read (SPC-123)."""
+
+    sampling: RowSampling | None
+    computed: ComputedPlan | None
+    custody:  _RowCustody | None = None
+
+
+def _cell(
+    adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan,
+) -> OutcomeMetrics:
+    """One cell, with exactly one closest approach.
+
+    A row carrying a hypothesis is sampled, or refused and kept a lookup: the no-burn figure is not its outcome.
+    Otherwise, bound on both sides, a row whose action does not move red is computed, or refused; a manoeuvre
+    names no burn, so it is refused. Unbound, every cell is a lookup.
+    """
+    if plan.sampling is not None:
+        if plan.sampling.series is None:
+            return _refused_cell(_lookup_cell(adversary, friendly, scenario, plan.custody), plan.sampling.refusal)
+        return _sampled_cell(adversary, friendly, scenario, plan.sampling.series, plan.custody)
+    if plan.computed is None:
+        return _lookup_cell(adversary, friendly, scenario, plan.custody)
+    refusal = plan.computed.refusal
+    if adversary.action_type not in _STILL_ACTIONS:
+        refusal = _refusal(_NOT_A_BURN)
+    elif plan.computed.approach is not None:
+        return _computed_cell(adversary, friendly, scenario, plan.computed.approach, plan.custody)
+    return _refused_cell(_lookup_cell(adversary, friendly, scenario, plan.custody), refusal)
+
+
+# ── Custody over the horizon (SPC-123) ─────────────────────────────────────────
+
+_CUSTODY_COMPUTED_NOTE = (
+    "the bound red track {red}'s custody as the sweep judges it at the scenario epoch, {state}, carried over the "
+    "{h:g} h horizon on the assumption that no newer element set arrives: lost once its newest element set passes "
+    "its limit or a hypothesised burn is newer than it; degraded counts as lost, since it cannot judge whether a "
+    "burn is normal; our response is not applied"
+)
+_CUSTODY_GAP_NOTE = (
+    "hours of the horizon custody is lost from then, an upper bound, since a newer element set may arrive sooner; "
+    "our response is not applied"
+)
+_WORST_CASE_NOTE = (
+    "worst case: this manoeuvre names no burn time, so the burn is taken at the scenario epoch and custody is lost "
+    "for the whole horizon"
+)
+_WORST_CASE_GAP_NOTE = "the whole horizon, the worst case for a manoeuvre that names no burn time"
+_WORST_CASE = (
+    "Custody lost for up to the whole {h:g} h horizon, taking the worst case: this manoeuvre names no burn time, so "
+    "the burn is taken at the scenario epoch. Add a manoeuvre hypothesis with a burn time to compute it."
+)
+#: Shown with the result when any row's custody comes from the bound red track's status (SPC-123).
+CUSTODY_NOTE = (
+    "Custody is the bound red track's as the sweep judges it, held, degraded or lost, carried over the horizon on "
+    "the assumption that no newer element set arrives, so each custody gap is an upper bound. Our response is not "
+    "applied to custody yet: a sensor retask that would bring a newer element set sooner is not modelled, so every "
+    "response in a row has the same custody. Degraded custody can judge the warning time but not whether a burn "
+    "is normal, so it counts as lost. " + CUSTODY_BASIS
+)
+#: Follows the rule-of-thumb line when no red track is bound (SPC-123).
+CUSTODY_BIND_RED = "Bind a red track to compute it from its element set and history."
+#: Follows the rule-of-thumb line when a red track is bound but its custody was not read.
+CUSTODY_NOT_READ = "The bound red track's custody was not read for this evaluation, so the rule of thumb stands."
+
+
+class _RowCustody(NamedTuple):
+    """One row's custody over the horizon, the same for every response: our response is not applied to it."""
+
+    maintained: bool
+    gap_hours:  float
+    state:      Custody | None   # at the scenario epoch when computed; None for the worst case, a lookup
+    bases:      tuple[FigureBasis, FigureBasis]
+    sentence:   str
+
+
+def _custodial(figures: _Figures, custody: _RowCustody | None) -> _Figures:
+    if custody is None:
+        return figures
+    return figures._replace(custody_maintained=custody.maintained, custody_gap_hours=custody.gap_hours)
+
+
+def _custody_bases(bases: OutcomeBases, custody: _RowCustody | None) -> OutcomeBases:
+    if custody is None:
+        return bases
+    maintained, gap = custody.bases
+    return outcome_bases(
+        custody_maintained=maintained, custody_gap_hours=gap, closest_approach_km=bases.closest_approach_km,
+        time_to_closest_hours=bases.time_to_closest_hours, delta_v_cost_km_s=bases.delta_v_cost_km_s,
+    )
+
+
+def _row_custody(action: AdversaryAction, red: BoundElset, scenario: Scenario) -> _RowCustody:
+    """The bound red track's custody carried over the horizon for *action*, or the worst case when it names no burn.
+
+    Custody lost from the epoch already is lost whatever the burn time, so it is computed for every row.
+    """
+    h = scenario.horizon_hours
+    burn = None if action.hypothesis is None else action.hypothesis.hypothesis.epoch_utc
+    over = custody_over_horizon(
+        cast("CustodyStatus", red.custody), elset_hours=red.age_hours, limit_hours=red.limit_hours,
+        horizon=Horizon(scenario.epoch_utc, h, burn),
+    )
+    if action.hypothesis is None and action.action_type is ActionType.MANOEUVRE and not over.lost_from_epoch:
+        worst = (FigureBasis(Basis.LOOKUP, _WORST_CASE_NOTE), FigureBasis(Basis.LOOKUP, _WORST_CASE_GAP_NOTE))
+        return _RowCustody(False, h, None, worst, _WORST_CASE.format(h=h))
+    note = _CUSTODY_COMPUTED_NOTE.format(red=red.stk_name, state=over.at_epoch.value, h=h)
+    computed = (FigureBasis(Basis.COMPUTED, note), FigureBasis(Basis.COMPUTED, _CUSTODY_GAP_NOTE))
+    return _RowCustody(over.maintained, over.lost_hours, over.at_epoch, computed, over.sentence)
+
+
+def _custody_plan(scenario: Scenario) -> tuple[_RowCustody | None, ...]:
+    """Each row's custody when a red track is bound with its status read; None for every row otherwise."""
+    red = None if scenario.binding is None else scenario.binding.red
+    if red is None or red.custody is None:
+        return (None,) * len(scenario.adversary_actions)
+    return tuple(_row_custody(action, red, scenario) for action in scenario.adversary_actions)
 
 
 # ── Response ranking ──────────────────────────────────────────────────────────
@@ -1932,11 +2469,13 @@ def evaluate_scenario(
 
     t0 = time.monotonic()
 
-    # Build outcome matrix: a lookup in every cell but those of a row plan_sampling sampled or refused
+    # Build outcome matrix: a lookup in every cell but those of a row sampled, computed or refused
     plan = plan_sampling(scenario, sampler, run=run)
+    computed = plan_computed(scenario)
+    custody = _custody_plan(scenario)
     outcome_matrix = [
-        [_cell(adversary, friendly, scenario, sampling) for friendly in scenario.friendly_responses]
-        for adversary, sampling in zip(scenario.adversary_actions, plan, strict=True)
+        [_cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held)) for friendly in scenario.friendly_responses]
+        for adversary, sampling, held in zip(scenario.adversary_actions, plan, custody, strict=True)
     ]
 
     # Rank per adversary action
@@ -1961,4 +2500,6 @@ def evaluate_scenario(
             [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario)],
         ),
         row_notes=_row_notes(scenario, plan),
+        propagator_gap_km=_propagator_gap(scenario, outcome_matrix),
+        row_custody=tuple(None if c is None else c.sentence for c in custody),
     )

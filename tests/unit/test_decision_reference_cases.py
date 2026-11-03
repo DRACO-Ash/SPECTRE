@@ -10,8 +10,11 @@ and from one starting ORIGIN_OFFSET_S later.
 PATHS holds the SPECTRE SGP4 path through the closest-approach helper and
 SPC-110's "monte_carlo_nominal": the Monte Carlo separation series with one
 undispersed sample and no burn, red and blue both on its RK45 model from
-their SGP4 states at the window start. SPC-120 adds "decision_phase3"; each
-item is done only when its own path passes every case at both window starts.
+their SGP4 states at the window start. SPC-120 adds "decision_phase3": the
+Decision Engine itself, evaluating a scenario bound to both element sets with
+one row whose action does not move red, so its closest approach is computed
+by SGP4 on both objects. Each item is done only when its own path passes
+every case at both window starts.
 
 A path with both objects in the same wrong frame passes, because separation
 does not depend on the frame; a path that mixes frames between the two
@@ -33,6 +36,15 @@ import pytest
 from spectre.astro.closest_approach import ClosestApproach, closest_approach
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow, elset_state, run_separation_series
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
+from spectre.domain.decision import (
+    ActionType,
+    AdversaryAction,
+    BoundElset,
+    FriendlyResponse,
+    Scenario,
+    ScenarioBinding,
+    evaluate_scenario,
+)
 from tests.unit import _decision_reference as reference
 from tests.unit._decision_reference import (
     EPOCH,
@@ -97,9 +109,41 @@ def _monte_carlo_nominal(case: ReferenceCase, start_s: float) -> ClosestApproach
     return series.approaches[0]
 
 
+#: Each case's element-set limit, hours: the sweep's 72 h for GEO, 24 h otherwise.
+_LIMIT_HOURS: dict[str, float] = {"coplanar_leo": 24.0, "geo_drift_in": 72.0, "plane_change": 24.0}
+
+
+def _decision_phase3(case: ReferenceCase, start_s: float) -> ClosestApproach:
+    """The Decision Engine's computed closest approach (SPC-120): one NO_ACTION row, both sides bound.
+
+    The scenario starts *start_s* after the element-set epoch, so each element set is that old at evaluation,
+    against its regime's limit, and its horizon runs to the case's horizon.
+    """
+    age_h = start_s / 3600.0
+
+    def bound(side: str, tle: str, satno: int) -> BoundElset:
+        return BoundElset(
+            side=side, name=f"{side} {case.name}", stk_name=f"{side.upper()}_{case.name.upper()}",  # type: ignore[arg-type]
+            satno=satno, tle=tle, data_mode="REAL", epoch=EPOCH, age_hours=age_h,
+            limit_hours=_LIMIT_HOURS[case.name],
+        )
+
+    scenario = Scenario(
+        name=case.title, epoch_utc=EPOCH + timedelta(seconds=start_s),
+        adversary_actions=[AdversaryAction("A0", "No action", ActionType.NO_ACTION, 0.5, 0.5)],
+        friendly_responses=[FriendlyResponse("F0", "Hold", ActionType.NO_ACTION, 0.0, 1.0, 0.0)],
+        horizon_hours=(case.horizon_s - start_s) / 3600.0,
+        binding=ScenarioBinding(red=bound("red", case.red_tle, 90002), blue=bound("blue", case.blue_tle, 90001)),
+    )
+    cell = evaluate_scenario(scenario).outcome_matrix[0][0]
+    assert cell.ca_computed is not None, cell.ca_refusal
+    return cell.ca_computed.approach
+
+
 PATHS: dict[str, ApproachPath] = {
     "sgp4": lambda c, s0: closest_approach(_sgp4_separation(c, s0), c.horizon_s - s0, step_s=c.step_s),
     "monte_carlo_nominal": _monte_carlo_nominal,
+    "decision_phase3": _decision_phase3,
 }
 
 _CLOSED_FORMS: dict[str, Callable[[Circular, Circular], tuple[float, float]]] = {

@@ -1,12 +1,13 @@
-"""A scenario may be bound to the real objects it is about; only a row with a hypothesis reads it (SPC-100).
+"""A scenario may be bound to the real objects it is about; only the sampled and computed paths read it (SPC-100).
 
-The Decision Engine's figures are lookups. Binding a scenario to a held red
-track and blue asset records which objects it is about, carries their element
-sets into the result's provenance and shows how old they are. On its own it
-changes no figure: only a row whose adversary action carries a hypothesis
-reads it, to sample that row's closest approach (SPC-112). These tests pin
-both halves: the binding is carried and checked, and the lookup path never
-reads it.
+Binding a scenario to a held red track and blue asset records which objects
+it is about, carries their element sets into the result's provenance and
+shows how old they are. A row whose adversary action carries a hypothesis
+reads it to sample that row's closest approach (SPC-112), and, bound on both
+sides, a row whose action does not move red has its closest approach
+computed from both element sets by SGP4 (SPC-120). These tests pin both
+halves: the binding is carried and checked, and the lookup path never reads
+it.
 """
 
 from __future__ import annotations
@@ -17,12 +18,13 @@ import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from spectre.domain import decision
+from spectre.domain.custody import Custody, CustodyStatus
 from spectre.domain.decision import (
     BINDING_NOTE,
     ActionType,
@@ -126,17 +128,42 @@ class TestTheLookupPathNeverReadsTheBinding:
         with pytest.raises(AssertionError):
             _ = _Tripwire() == None  # noqa: E711 - the comparison is what must trip
 
-    def test_binding_without_a_hypothesis_changes_no_figure(self) -> None:
-        """A regression pin: bound and unbound agree on every figure, mark and choice."""
+    def test_binding_without_a_hypothesis_changes_only_the_closest_approach(self) -> None:
+        """Inverted by SPC-120: bound on both sides, the rows that do not move red are computed.
+
+        Before SPC-120, bound and unbound agreed on every figure, mark and choice. Now the three rows whose action
+        does not move red share one computed closest approach and time, the manoeuvre row keeps its lookups and
+        says why it is not computed, and custody, its gap and our delta-V are the lookups they were.
+        """
         for strategy in SelectorStrategy:
             bound = evaluate_scenario(_four_by_four(_binding()), strategy)
             unbound = evaluate_scenario(_four_by_four(), strategy)
-            assert bound.outcome_matrix == unbound.outcome_matrix, strategy
-            assert bound.ranked_per_adversary == unbound.ranked_per_adversary, strategy
-            assert bound.robust_best_response == unbound.robust_best_response, strategy
-            assert bound.basis == unbound.basis
-            assert bound.basis_lines == unbound.basis_lines
+            for bound_row, unbound_row, action in zip(
+                bound.outcome_matrix, unbound.outcome_matrix, bound.scenario.adversary_actions, strict=True,
+            ):
+                for cell, plain in zip(bound_row, unbound_row, strict=True):
+                    assert (cell.custody_maintained, cell.custody_gap_hours, cell.delta_v_cost_km_s) == (
+                        plain.custody_maintained, plain.custody_gap_hours, plain.delta_v_cost_km_s,
+                    )
+                    if action.action_type is ActionType.MANOEUVRE:
+                        assert str(cell.ca_refusal).startswith("Not computed: a manoeuvre with no hypothesis")
+                        assert dataclasses.replace(cell, ca_refusal=None, figure_bases=plain.figure_bases) == plain
+                    else:
+                        assert cell.ca_computed is not None and cell.ca_computed == bound_row[0].ca_computed
+            # Bound with no custody status read, custody stays the rule of thumb (SPC-123); with one, it does not.
             assert bound.custody_rule_of_thumb == unbound.custody_rule_of_thumb
+            assert bound.basis_lines != unbound.basis_lines
+            assert "Closest approach: lookup in 4 of 16 cells, computed in 12." in bound.basis_lines
+
+    def test_a_red_custody_status_replaces_the_rule_of_thumb(self) -> None:
+        """K13, the other half of the pin above: bound with the red track's status read, custody is computed."""
+        binding = _binding()
+        status = CustodyStatus(Custody.HELD, "Custody held.")
+        custodied = ScenarioBinding(red=dataclasses.replace(cast("BoundElset", binding.red), custody=status), blue=binding.blue)
+        bound = evaluate_scenario(_four_by_four(custodied))
+        unbound = evaluate_scenario(_four_by_four())
+        assert unbound.custody_rule_of_thumb is True and bound.custody_rule_of_thumb is False
+        assert "Custody: lookup in 4 of 16 cells, computed in 12." in bound.basis_lines
 
 
 class TestABoundResultNamesItsElementSets:
@@ -227,12 +254,21 @@ class TestSides:
 
 
 class TestWhatTheBindingSays:
-    def test_the_note_says_only_a_row_with_a_hypothesis_is_sampled_from_the_orbits(self) -> None:
-        """SPC-112: the note no longer says no figure is computed from the orbits; one row's can be sampled."""
-        assert "changes no figure yet" not in BINDING_NOTE
-        assert "changes no figure unless an adversary action carries a hypothesis and both sides are bound" in BINDING_NOTE
-        assert "closest approach of that row and its time are sampled from these orbits" in BINDING_NOTE
-        assert "every other figure is still a lookup" in BINDING_NOTE
+    def test_the_note_says_which_rows_are_computed_and_which_sampled(self) -> None:
+        """SPC-120: the note no longer says binding changes no figure without a hypothesis."""
+        assert "changes no figure" not in BINDING_NOTE
+        assert (
+            "With both sides bound, the closest approach and its time are computed from these orbits by SGP4, with "
+            "no burn, for every row whose action does not move the red track, and sampled for a row whose action "
+            "carries a hypothesis" in BINDING_NOTE
+        )
+        assert "a manoeuvre with no hypothesis names no burn and stays a lookup" in BINDING_NOTE
+        # Inverted by SPC-123: with a red track bound, custody is computed too, so not every other figure is a lookup.
+        assert "Every other figure is still a lookup." not in BINDING_NOTE
+        assert (
+            "With a red track bound, custody is its custody as the sweep judges it at evaluation, carried over the "
+            "horizon. Our delta-V is still a lookup." in BINDING_NOTE
+        )
         assert "km (lookup)" not in BINDING_NOTE and "custody (lookup)" not in BINDING_NOTE
         assert ScenarioBinding(red=_elset()).note is BINDING_NOTE
 

@@ -118,15 +118,19 @@ class TestWhenUdlIsSlowOrFails:
 
 
 def _fresh_orbit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The red element set read as 5 hours old against the GEO limit."""
+    """The red element set read as 5 hours old against the GEO limit.
+
+    Custody reads the age in pol.custody_from_history, the rule the sweep and the Decision Engine share (SPC-123).
+    """
     from datetime import UTC, datetime
 
     from spectre.web.elsets import ElsetAge
 
-    monkeypatch.setattr(
-        threat, "elset_age",
-        lambda *_a, **_k: ElsetAge(epoch=datetime(2026, 10, 29, tzinfo=UTC), hours=5.0, limit_hours=72.0),
-    )
+    def aged(*_a: Any, **_k: Any) -> ElsetAge:
+        return ElsetAge(epoch=datetime(2026, 10, 29, tzinfo=UTC), hours=5.0, limit_hours=72.0)
+
+    monkeypatch.setattr(threat, "elset_age", aged)
+    monkeypatch.setattr(pol, "elset_age", aged)
 
 
 class TestCustody:

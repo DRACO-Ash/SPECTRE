@@ -37,7 +37,7 @@ from spectre.astro.maneuvers import (
 from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
-from spectre.domain.custody import Custody, CustodyStatus, age_text, assess_custody
+from spectre.domain.custody import Custody, CustodyStatus, age_text
 from spectre.domain.decide_by import (
     DecideBy,
     ResponseTimes,
@@ -92,7 +92,14 @@ from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
-from spectre.web.routes.pol import HeldHistory, burn_verdicts, held_history, history_evidence, reserve_reset_for
+from spectre.web.routes.pol import (
+    HeldHistory,
+    burn_verdicts,
+    custody_from_history,
+    held_history,
+    history_evidence,
+    reserve_reset_for,
+)
 from spectre.web.routes.udl import spawn_session_task
 
 logger = logging.getLogger(__name__)
@@ -1530,17 +1537,9 @@ async def _settle_red_history(
 
 
 def _red_custody(red_tle: str, history: _RedHistory, now: datetime) -> CustodyStatus:
-    """Whether the interceptor is in custody: its orbit's age and its history (SPC-018)."""
-    age = elset_age(red_tle, now)
-    pol = history.pol
-    return assess_custody(
-        elset_hours=age.hours if age else None,
-        limit_hours=age.limit_hours if age else 0.0,
-        elset_count=pol.tle_count if pol else 0,
-        history_days=pol.span_days if pol else 0.0,
-        normality=history.normality.verdict if history.normality else None,
-        history_problem=history.problem,
-        truncated_at=pol.history_truncated_at if pol else None,
+    """Whether the interceptor is in custody: its orbit's age and its history (SPC-018), by the shared rule."""
+    return custody_from_history(
+        red_tle, now, pol=history.pol, normality=history.normality, problem=history.problem,
     )
 
 

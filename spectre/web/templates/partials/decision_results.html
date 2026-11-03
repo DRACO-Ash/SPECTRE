@@ -2,7 +2,10 @@
 {# Context: result (ScenarioResult); result.scenario.binding is optional (SPC-100). A sampled cell's band,
    refusal and caveat, the row notes and the sampled caveat (SPC-112) are each guarded with "is defined", so an
    older result renders under StrictUndefined. So are the spread fields of SPC-115: the band's hover, the
-   Uncertainty column, the score spread on each ranking card and the spread note. #}
+   Uncertainty column, the score spread on each ranking card and the spread note; and the computed closest
+   approach of SPC-120: its line, its edge caveat, the result's computed notes and the Phase 3 footer; and the
+   custody of SPC-123: the red track's status at evaluation, each row's custody sentence, a degraded cell and the
+   result's custody notes. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -10,8 +13,8 @@
 {% set binding = result.scenario.binding if result.scenario.binding is defined else none %}
 
 {# ── Bound to (SPC-100): which real objects this scenario is about, and how old their orbits were at
-     evaluation. No figure below reads them. One div with no div inside, so the page after it can be
-     compared bound against unbound. ── #}
+     evaluation. A sampled row (SPC-112) and a computed row (SPC-120) below read them. One div with no div
+     inside, so the page after it can be compared bound against unbound. ── #}
 <div role="note" class="scenario-binding" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.4rem">
   {% if binding is not none %}
   <strong style="color:var(--ops-blue); text-transform:uppercase; letter-spacing:0.05em">Bound to</strong>
@@ -28,10 +31,16 @@
     {% endif %}
     Data mode {{ b.data_mode }}{% if b.data_mode not in ("REAL", "MANUAL") %} {% set badge_mode = b.data_mode %}{% include "partials/_provenance_badge.html" %}{% endif %}{% if b.training %}, training{% endif %}.
     <span style="display:block">{{ b.sentence }}</span>
+    {% if b.custody is defined and b.custody is not none %}
+    <span class="custody-at-evaluation" style="display:block">Custody at evaluation: {{ b.custody.sentence }}</span>
+    {% endif %}
     {% endif %}
   </p>
   {% endfor %}
   <p style="margin:0.1rem 0">{{ binding.note }}</p>
+  {% if result.computed_binding_note is defined and result.computed_binding_note is not none %}
+  <p class="computed-binding-note" style="margin:0.1rem 0">{{ result.computed_binding_note }}</p>
+  {% endif %}
   {% else %}
   Scenario not bound to a red track or blue asset.
   {% endif %}
@@ -73,9 +82,27 @@
     {% endif %}
     {% if result.custody_rule_of_thumb is not defined or result.custody_rule_of_thumb %}
     <div>Custody here is a rule of thumb, not the held, degraded or lost custody shown on the sweep.</div>
+    {% if result.custody_bind_note is defined and result.custody_bind_note is not none %}
+    <div class="custody-bind-note">{{ result.custody_bind_note }}</div>
+    {% endif %}
+    {% endif %}
+    {% if result.custody_note is defined and result.custody_note is not none %}
+    <div class="custody-note" style="color:var(--gold)">{{ result.custody_note }}</div>
     {% endif %}
     {% if result.sampled_caveat is defined and result.sampled_caveat is not none %}
     <div class="sampled-caveat" style="color:var(--gold)">{{ result.sampled_caveat }}</div>
+    {% endif %}
+    {% if result.computed_caveat is defined and result.computed_caveat is not none %}
+    <div class="computed-caveat" style="color:var(--gold)">{{ result.computed_caveat }}</div>
+    {% endif %}
+    {% if result.computed_span_note is defined and result.computed_span_note is not none %}
+    <div class="computed-span" style="color:var(--gold)">{{ result.computed_span_note }}</div>
+    {% endif %}
+    {% if result.propagator_line is defined and result.propagator_line is not none %}
+    <div class="propagator-line" style="color:var(--gold)">{{ result.propagator_line }}</div>
+    {% endif %}
+    {% if result.converged_means is defined and result.converged_means is not none %}
+    <div class="converged-means" style="color:var(--gold)">{{ result.converged_means }}</div>
     {% endif %}
     {% if result.score_spread_note is defined and result.score_spread_note is not none %}
     <div class="score-spread-note" style="color:var(--gold)">{{ result.score_spread_note }}</div>
@@ -140,6 +167,9 @@
           <div class="row-burn" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.burn_line(result.scenario.epoch_utc) }}</div>
           {% endif %}
           {% endif %}
+          {% if result.row_custody is defined and result.row_custody | length > i and result.row_custody[i] is not none %}
+          <div class="row-custody" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_custody[i] }}</div>
+          {% endif %}
           {% if result.row_notes is defined and result.row_notes | length > i and result.row_notes[i] is not none %}
           <div class="row-note" style="font-size:0.56rem; color:var(--gold)">{{ result.row_notes[i] }}</div>
           {% endif %}
@@ -150,6 +180,7 @@
           {# Guarded here: StrictUndefined raises on an attribute of an undefined value before a macro runs. #}
           {% set fbs = om.figure_bases if om.figure_bases is defined else none %}
           {% set band = om.ca_percentiles if om.ca_percentiles is defined else none %}
+          {% set computed = om.ca_computed if om.ca_computed is defined else none %}
           {# Colour: green < 0.25, amber < 0.50, red >= 0.50 #}
           {% if om.composite_score < 0.25 %}
             {% set score_color = "#22c55e" %}
@@ -169,14 +200,20 @@
             <div style="font-size:0.57rem; color:var(--text-dim)">
               <span{% if om.basis is defined %} title="{{ om.basis }}"{% endif %}>
               <span class="figure" data-figure="closest_approach_km"{% if band is none %} title="{{ om.ca_title if om.ca_title is defined else 'Lookup: a fixed figure, with no distribution.' }}"{% endif %}
-                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ ("%.1f" if band is not none else "%.0f") | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
+                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ ("%.1f" if band is not none or computed is not none else "%.0f") | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
               <span class="figure" data-figure="custody_maintained"
                     data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
-              custody {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
+              custody{% if om.custody_state is defined and om.custody_state is not none and om.custody_state.value == "degraded" %} degraded{% endif %} {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
               </span>
             </div>
             {% if band is not none and om.ca_band is defined %}
             <div class="sampled-band"{% if om.ca_distribution is defined %} title="{{ om.ca_distribution }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_band }}</div>
+            {% endif %}
+            {% if computed is not none and om.ca_computed_line is defined %}
+            <div class="computed-line" style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_computed_line }}</div>
+            {% if om.ca_computed_caveat is not none %}
+            <div class="computed-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_computed_caveat }}</div>
+            {% endif %}
             {% endif %}
             {% if om.ca_caveat is defined and om.ca_caveat is not none %}
             <div class="sampled-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_caveat }}</div>
@@ -235,7 +272,9 @@
 
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim);
               border-top:1px solid var(--border); padding-top:0.3rem">
-    Phase {% if result.n_sampled_cells is defined and result.n_sampled_cells %}2 · sampled closest approach in {{ result.n_sampled_cells }} cells{% else %}1{% endif %} · {{ result.scenario.name }}
+    {% set n_sampled = result.n_sampled_cells if result.n_sampled_cells is defined else 0 %}
+    {% set n_computed = result.n_computed_cells if result.n_computed_cells is defined else 0 %}
+    Phase {% if n_computed %}3 · computed closest approach in {{ n_computed }} cells · sampled in {{ n_sampled }} cells{% elif n_sampled %}2 · sampled closest approach in {{ n_sampled }} cells{% else %}1{% endif %} · {{ result.scenario.name }}
     · {{ "%g" | format(result.scenario.horizon_hours) }}h horizon
   </div>
 

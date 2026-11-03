@@ -33,19 +33,20 @@ Design notes
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, NamedTuple
+from datetime import datetime, timedelta
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from spectre.astro.closest_approach import MAX_SAMPLES, ClosestApproach, closest_approach
+from spectre.astro.closest_approach import MAX_SAMPLES, ClosestApproach, _grid, closest_approach
 from spectre.astro.constants import J2_EARTH, MU_EARTH, R_EARTH, classify_orbit_regime
 
 logger = logging.getLogger(__name__)
@@ -604,6 +605,25 @@ _BOOTSTRAP_RESAMPLES = 200
 _SHOWN_PERCENTILES = (5.0, 50.0, 95.0)
 
 
+#: A separation series' misses converge to within this fraction of P5 where that is wider than
+#: CONVERGENCE_TOLERANCE_KM (SPC-117). The operator reads P5 to answer whether red can reach a blue asset, a question
+#: of magnitude: a few km at several hundred km changes no answer, while below 20 km the 1 km floor governs, so a
+#: close approach is held exactly as tightly as before. Measured at seed 42, the cases it admits have half-widths of
+#: 0.5 to 3.4 % of P5 (worst across seeds about 3 %); the GEO Intercept case, P5 7 to 8 km known to 1.8 to 3.9 km,
+#: stays refused. run_monte_carlo's SMA check keeps the 1 km absolute tolerance.
+MISS_TOLERANCE_FRACTION: float = 0.05
+
+
+def miss_tolerance_km(p5_km: float) -> float:
+    """How closely a series' P5, P50 and P95 must be known: 1 km, or MISS_TOLERANCE_FRACTION of P5 where wider.
+
+    A P5 that is not finite gives the floor, so no tolerance is widened by a series with no misses.
+    """
+    if not math.isfinite(p5_km):
+        return CONVERGENCE_TOLERANCE_KM
+    return max(CONVERGENCE_TOLERANCE_KM, MISS_TOLERANCE_FRACTION * p5_km)
+
+
 def percentile_half_width_km(sma_values: list[float], seed: int = 0) -> float:
     """The widest 95 % bootstrap half-width of SMA P5, P50 and P95, in km.
 
@@ -901,9 +921,9 @@ class SeparationSeries:
     sample order; ``n_failed`` counts the rest, and ``n_reentered`` those of
     them whose red arc went below REENTRY_FLOOR_KM. The percentiles and
     standard deviation are numpy's over the approaches' misses, NaN when there
-    are none. ``converged`` is the engine's own check
-    (percentile_half_width_km within CONVERGENCE_TOLERANCE_KM), never true
-    below 50 samples. ``integration_s`` is what the series cost: the seconds of
+    are none. ``converged`` is the engine's own check: percentile_half_width_km
+    within ``tolerance_km``, which is miss_tolerance_km of P5 (1 km, or 5 % of
+    P5 where that is wider, SPC-117), never true below 50 samples. ``integration_s`` is what the series cost: the seconds of
     trajectory it integrated (separation_integration_s).
     """
 
@@ -921,6 +941,7 @@ class SeparationSeries:
     random_seed: int
     integration_s: float
     wall_time_seconds: float
+    tolerance_km: float = CONVERGENCE_TOLERANCE_KM
     propagator: str = SEPARATION_PROPAGATOR
 
     @property
@@ -1003,6 +1024,7 @@ def run_separation_series(
     p5, p50, p95 = (
         (float(p) for p in np.percentile(misses, _SHOWN_PERCENTILES)) if misses.size else (math.nan,) * 3
     )
+    tolerance = miss_tolerance_km(p5)
     series = SeparationSeries(
         window=window,
         approaches=found,
@@ -1014,10 +1036,11 @@ def run_separation_series(
         miss_km_p95=p95,
         miss_km_std=float(np.std(misses)) if misses.size else math.nan,
         percentile_half_width_km=half_width,
-        converged=half_width <= CONVERGENCE_TOLERANCE_KM,
+        converged=half_width <= tolerance,
         random_seed=hypothesis.random_seed,
         integration_s=_integration_s(burn_s + samples[:, 3], burn_s, window.span_s),
         wall_time_seconds=time.monotonic() - t_start,
+        tolerance_km=tolerance,
     )
     logger.info(
         "Separation series: %d/%d samples in %.1fs over %.0f s",
@@ -1178,3 +1201,57 @@ def _sample_approach(
         return float(np.linalg.norm(blue(t)[:3] - red(t)[:3]))
 
     return closest_approach(separation, window.span_s, step_s=window.step_s)
+
+
+def rk45_sgp4_gap_km(
+    red_tle: str, blue_tle: str, window: SeparationWindow, hypotheses: Sequence[ManoeuvreHypothesis] = (),
+) -> float | None:
+    """How far apart RK45 and SGP4 place these two orbits over *window*, red's gap plus blue's, km (SPC-120).
+
+    Each object's RK45 arc is integrated as a separation series integrates it and compared with SGP4 at every
+    instant of the helper's grid; the largest difference is that object's gap. Blue is integrated from its SGP4
+    state at the window start, at its own B*. Red is integrated as each of *hypotheses* (the sampled rows') has
+    it before its burn: from the pre-manoeuvre state at the burn, at ``bstar_post``, back and forward, so a burn
+    days before the window is measured over the days it is integrated; red's gap is the largest of them. With no
+    hypotheses, red is integrated from its SGP4 state at the window start, as blue is. By the triangle
+    inequality the sum bounds how far the two propagators' separations, and so their minima, can differ on the
+    grid: a computed row (SGP4, SPC-120) and a sampled row (RK45) that differ by less than this differ by the
+    propagators, not the burn. None when any arc cannot be had or integrated across the window.
+    """
+    grid = _grid(window.span_s, window.step_s)
+    red_arcs: list[Callable[[], _Trajectory | None]] = [
+        functools.partial(_unburnt_arc, h, 0.0, window.span_s, (h.epoch_utc - window.start_utc).total_seconds())
+        for h in hypotheses
+    ] or [functools.partial(_elset_arc, red_tle, window)]
+    reds = [_propagator_gap_km(red_tle, arc, window, grid) for arc in red_arcs]
+    blue = _propagator_gap_km(blue_tle, functools.partial(_elset_arc, blue_tle, window), window, grid)
+    if blue is None or None in reds:
+        return None
+    return max(cast("list[float]", reds)) + blue
+
+
+def _elset_arc(tle: str, window: SeparationWindow) -> _Trajectory | None:
+    """This engine's RK45 arc of *tle* over *window*, from its SGP4 state at the window start; None if none."""
+    start = elset_state(tle, window.start_utc)
+    return None if start is None else _dense_arc(start.state_eci_km, 0.0, window.span_s, start.bstar)
+
+
+def _propagator_gap_km(
+    tle: str, arc_of: Callable[[], _Trajectory | None], window: SeparationWindow, grid: list[float],
+) -> float | None:
+    """The largest distance between the RK45 arc *arc_of* gives and SGP4 for one element set over *grid*, km."""
+    from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
+
+    try:
+        arc = arc_of()
+        if arc is None:
+            return None
+        orbit = TLEOrbit(tle)
+        return max(
+            float(np.linalg.norm(arc(t)[:3] - orbit.propagate(window.start_utc + timedelta(seconds=t)).r))
+            for t in grid
+        )
+    except _ReenteredError:
+        return None
+    except TLE_ERRORS:   # a failed SGP4 instant, or a failed solve (numpy's LinAlgError is a ValueError)
+        return None

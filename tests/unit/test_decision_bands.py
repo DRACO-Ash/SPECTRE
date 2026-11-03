@@ -47,7 +47,7 @@ def sampled() -> ScenarioResult:
 
 @pytest.fixture(scope="module")
 def mixed() -> ScenarioResult:
-    """Row 0 sampled, row 1 refused (10 samples are too few), rows 2 and 3 lookups."""
+    """Row 0 sampled, row 1 refused (10 samples are too few), rows 2 and 3 computed (SPC-120; lookups before)."""
     return evaluate_scenario(_bound({0: _evasive(), 1: _evasive(10)}), sampler=_Fake())
 
 
@@ -135,8 +135,8 @@ class TestThePageShowsTheSpread:
             "Closest approach spread 5.0 km (1 sigma) over 50 samples; P5, P50 and P95 known to within 0.40 km. "
             "Score spread across samples under 0.0001.",
             "Not sampled, so no spread: the cells say why.",
-            "Lookup: no spread computed.",
-            "Lookup: no spread computed.",
+            "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
+            "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
         ]
         assert list(mixed.row_uncertainty) == cells
 

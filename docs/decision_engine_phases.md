@@ -26,7 +26,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 - Engine computes an N × M outcome matrix; each cell contains:
   - `composite_score` (weighted sum of custody, closest approach and our delta-V with the response's time to execute
     and reversibility; lower = better for friendly)
-  - `custody_maintained` and `custody_gap_hours` (a rule of thumb, not the held, degraded or lost custody on the sweep)
+  - `custody_maintained` and `custody_gap_hours` (a rule of thumb, not the held, degraded or lost custody on the sweep,
+    unless a red track is bound and its custody read: SPC-123, Phase 3 below)
   - `closest_approach_km` (a fixed 200, 3,000, 5,000 or 10,000 km per adversary action type, raised by response cost;
     no orbit propagated)
   - `time_to_closest_hours` (0.4 of the horizon) and `delta_v_cost_km_s` (response cost x 0.05 km/s for a manoeuvre)
@@ -38,8 +39,11 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 - A scenario may be bound to one held red track and one held blue asset (SPC-100). The binding records which real
   objects the scenario is about, puts their element sets in the result's provenance and shows each orbit's epoch and
   age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) in a "Bound to" block.
-  On its own it changes no figure: `compute_outcome_metrics` and `find_robust_response` never read it, and a test
-  pins that. Only `plan_sampling` reads it, for a row whose action carries a hypothesis (SPC-112, below).
+  `compute_outcome_metrics` and `find_robust_response` never read it, and a test pins that. `plan_sampling` reads it
+  for a row whose action carries a hypothesis (SPC-112, below), and `plan_computed` reads it for the pair's closest
+  approach with no burn, which every row whose action does not move red takes when both sides are bound (SPC-120,
+  Phase 3 below). The red track's custody, read by the route as the sweep reads it, replaces the custody rule of
+  thumb in every row (SPC-123, Phase 3 below).
 - Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
 - Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") with a basis line per figure,
   a "(lookup)" mark on each closest approach and custody in the outcome matrix, and per-adversary ranked response cards
@@ -51,15 +55,18 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 | `spectre/domain/decision.py` | Core data model + `evaluate_scenario()` |
 | `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `GET /plan/decision/bind`, `POST /plan/decision/evaluate` |
 | `spectre/web/decision_binding.py` | Binds a scenario to held objects and reads each element set's age (SPC-100) |
+| `spectre/web/decision_custody.py` | Reads the bound red track's custody as the sweep does, before evaluation (SPC-123) |
 | `spectre/web/templates/partials/decision_panel.html` | Scenario builder form |
 | `spectre/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
 
 ### Known Phase 1 limitations
 
-- Outcome metrics are **lookup estimates**, not SGP4 propagations (closest approach is a constant per action type)
+- Unbound, outcome metrics are **lookup estimates** (closest approach is a constant per action type). Bound on
+  both sides, closest approach and its time are computed by SGP4 for a row whose action does not move red
+  (SPC-120) and sampled for a row with a hypothesis (SPC-112); a manoeuvre with no hypothesis stays a lookup
 - An adversary action may carry a manoeuvre hypothesis (SPC-111, Phase 2 step 1). On its own it changes no figure;
   in a scenario bound on both sides its row's closest approach and time to closest approach are sampled (SPC-112),
-  and every other figure, custody included, is still a lookup
+  and with a red track bound its burn time sets when custody is lost (SPC-123); our delta-V is still a lookup
 - No uncertainty — single deterministic outcome per (adversary, response) pair
 - ΔV cost is estimated from orbital mechanics rules of thumb, not simulated
 
@@ -145,14 +152,35 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
    server log has the detail. A Cancel that arrives after the job has finished leaves it alone, and the results
    are shown.
 
-   Sampling converges only where the 1 km absolute convergence tolerance allows. 1,000 samples over 0.44 h and more
-   over shorter horizons converged at LEO 300 km, and with the larger cap the plane change converged out to 48 h
-   (half-width 0.06 km at 100 samples, 0.04 km at 500) and coplanar LEO Evasive over 6 h (0.51 km). Not every burn in
-   or before a window of 1 h or more is refused, as this paragraph said before SPC-113: coplanar LEO Evasive over
-   1 h (1.22 km), coplanar LEO Orbit Raise (1.76 km), GEO Intercept (3.94 km) and a burn 2 h before the window
-   (1.77 to 8.37 km) were not converged. A burn already made, the operator's "something moved" case, is the one
-   that most often fails it; a relative tolerance is an owner decision. The unconverged refusal says to take more
-   samples with a shorter horizon.
+   Until SPC-117, sampling converged only where the 1 km absolute convergence tolerance allowed. 1,000 samples over
+   0.44 h and more over shorter horizons converged at LEO 300 km, and with the larger cap the plane change converged
+   out to 48 h (half-width 0.06 km at 100 samples, 0.04 km at 500) and coplanar LEO Evasive over 6 h (0.51 km).
+   Coplanar LEO Evasive over 1 h (1.22 km), coplanar LEO Orbit Raise (1.76 km), GEO Intercept (3.94 km) and a burn
+   2 h before the window (1.77 to 8.37 km) were not converged. A burn already made, the operator's "something
+   moved" case, was the one that most often failed it.
+
+   SPC-117 sets the tolerance from what the operator does with the figure: 1 km, or 5 % of P5 where that is larger
+   (`miss_tolerance_km`, `MISS_TOLERANCE_FRACTION`), carried on each series as `tolerance_km`. The operator reads P5
+   to answer "can it reach one of mine", a question of magnitude: 8.5 km at 843 km changes no answer, and the score
+   moves by at most w_ca x half-width / 50,000 (4e-5 at 8.5 km and w_ca 0.25). Below 20 km the 1 km floor governs,
+   so every close approach the operator would act on is held exactly as tightly as before. Measured at seed 42, the
+   burn 0.25 h into the window unless stated, half-width against P5: plane_change Evasive 0.061 km against 9.45 km
+   (100 samples over 1 h) and 0.044 km against 9.37 km (500); coplanar Evasive 1.217 km against 162.65 km (100 over
+   1 h), 0.755 km against 161.50 km (500 over 1 h) and 0.375 km against 11.05 km (500 over 6 h, 3.4 %); coplanar
+   Orbit Raise 1.758 km against 153.25 km (100 over 1 h) and 0.730 km against 152.12 km (500); GEO Station Keeping
+   0.273 km against 306.5 km (100 over 24 h); plane_change with the burn 2 h before a 1 h window, 500 samples,
+   Evasive 0.950 km against 41.67 km and Orbit Raise 8.513 km against 842.97 km; at 100 samples, 1.301 km against
+   42.97 km and 11.338 km against 855.86 km. These are admitted at 0.5 to 3.4 % of P5; across 12 to 20 seeds the
+   worst is about 3 %. GEO Intercept, P5 7.16 km known to 3.939 km at 100 samples over 6 h and 8.14 km to 1.759 km at
+   500, is genuinely unknown and stays refused for every seed measured (smallest half-width 2.41 km against 1 km).
+   The bootstrap half-width is roughly calibrated against the 95 % spread of P5 across seeds but varies about two
+   times between seeds, so a verdict near the tolerance can flip with the seed; 1.77 km for the burn-2-h-before
+   Evasive case above was another setup, 0.95 km at seed 42. `run_monte_carlo`'s SMA check keeps 1 km absolute. The
+   page says what converged means (`CONVERGED_MEANS`) and leaves whether a move that size matters to the operator,
+   since it is not told how close is too close for the asset; each band carries its half-width, the unconverged refusal
+   names the tolerance it missed and says to take more samples with a shorter horizon, and a sampled cell names the
+   samples already opening at the window start, which is where every sample of a burn 2 h before the window is
+   closest.
 
    Our response is not applied to the blue orbit yet, so blue is one trajectory per scenario: each series
    integrates blue once, about 1/500 of its cost, and every response in a sampled row has the same closest
@@ -205,7 +233,73 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 ## Phase 3: SGP4-Propagated Outcomes
 
-**Status: After Phase 2**
+**Status: in progress. Closest approach and its time are computed (SPC-120) and custody is computed from the bound
+red track's status (SPC-123); our response applied to the blue orbit (SPC-121) is next.**
+
+SPC-120, as built. In a scenario bound on both sides each row gets exactly one closest approach. A row whose action
+carries a hypothesis is sampled (RK45 on both objects), or refused and kept a lookup: the no-burn figure is not its
+outcome. A row whose action does not move red (no action, a sensor retask, a posture change) is computed:
+`plan_computed` propagates both bound orbits by SGP4 from their element sets with no burn
+(`spectre/astro/elset_approach.py`), searched every 60 s by the shared helper with each local minimum refined to
+0.01 s, the access search's step and tolerance (audit F-115). A manoeuvre row with no hypothesis is refused, with
+a sentence saying to add a hypothesis: a propagated orbit as it stands only says where red goes if it does not move,
+and scoring a manoeuvre on it would understate the threat. The figure belongs to the pair, one search per scenario
+shared by every computed row and response, since our response is not applied to the blue orbit yet; the page says
+so in `computed_caveat`, as the sampled caveat does. The search runs from the scenario epoch to the earlier of the
+horizon's end and the moment either element set passes its limit (a 20 h old LEO set with a 24 h limit earns 4 h),
+and the page states a trimmed span. A stale or unknown-age orbit on either side, an element set that does not
+parse and a failed SGP4 instant anywhere in the search are refused, naming the side; a failure is never read as
+infinite, which could hide the minimum. Each cell carries the miss, TCA and edge flag unrounded (`ca_computed`),
+prints the miss to 0.1 km with a TCA line to the minute, and hovers the seconds and the relative speed in m/s; a
+minimum at an edge of the search says it is not an encounter.
+
+One figure never mixes propagators: computed is SGP4 on both objects, sampled is RK45 on both, and an invariant on
+`OutcomeMetrics` holds a computed figure apart from a sampled band and a refusal. With blue on SGP4 and red on
+RK45 the GEO reference TCA was 1,951 s off (0.13.0). Both-SGP4 against both-RK45 agree on every reference case to
+within 0.001 km and 1.1 s, because the error is largely common to both objects, but each object alone drifts:
+RK45 from its SGP4 state against SGP4 itself, ISS 0.58, 4.49 and 16.97 km at 6, 24 and 48 h; SSO at 500 km with
+B* 1e-4 0.74, 5.07 and 11.44 km; the GEO reference red 1.21, 5.39 and 11.31 km. So when a matrix holds both a
+computed and a sampled row the result states the measured gap, `rk45_sgp4_gap_km`: red's largest RK45 to SGP4
+distance over the grid plus blue's, which by the triangle inequality bounds how far the two separations differ.
+Each arc is measured as the sampled row integrates it: blue from its SGP4 state at the window start, red from each
+sampled row's pre-manoeuvre state at its burn, at `bstar_post`, taking the largest of the sampled rows. A burn
+before the window integrates red for longer, and the gap grows with it: plane_change over 1 h is 0.41 km from the
+window start but 0.63, 3.62 and 4.43 km from a burn 2, 24 and 72 h before it; coplanar_leo over 6 h 0.92, 2.81
+and 4.65 km. A difference between a computed row and a sampled row smaller than that is the propagators, not the
+burn (from the window start: coplanar_leo 0.41 km over 6 h, geo_drift_in 22.62 km over 48 h, plane_change 0.41 km
+over 1 h). A refused row is not sampled, so its burn plays no part; a result with no computed cell measures no gap.
+
+Measured with the venv at cd44cb5 (Python 3.13, sgp4 2.27): the computed path gives coplanar_leo 10.0055 km, TCA
+4.1 s early; geo_drift_in 29.9991 km, 14.8 s early; plane_change 10.4036 km, 0.9 s late, at both window starts
+and at a 60 or 300 s step. On the F-115 counter-rotating 15 km/s pair it gives 299.980 km at 3,599.01 s against
+the 0.1 s brute-force 299.981 km at 3,599.00 s. An ISS pair costs 0.07 s over 72 h; the trim to the element sets'
+limits keeps every search to 72 h or less.
+
+SPC-123, as built. Custody is the operator's (28 October 2026): timely and actionable information to judge whether a
+burn is normal and how the warning time changed. With a red track bound, the evaluate route reads its custody as the
+sweep does (`spectre/web/decision_custody.py`): its history through the one held copy (`pol.held_history`), a
+bounded 20 s wait for a first fetch, and the sweep's own rule, now `pol.custody_from_history`, so the two cannot
+judge one object differently. The status rides on the bound element set (`BoundElset.custody`, red only), so the
+evaluation and any job it runs as do no I/O. `custody_over_horizon` (`spectre/domain/custody.py`) carries the
+status at the scenario epoch over the horizon on the assumption that no newer element set arrives: custody is lost
+from the earliest of the epoch, if it is lost already; the moment the newest element set passes its limit (epoch
+plus limit minus age, strictly past, as the sweep's rule is); and a hypothesised burn newer than the newest element
+set, which that set cannot show (a burn already made counts from the epoch). `custody_maintained` is never lost
+within the horizon and `custody_gap_hours` the hours lost, an upper bound, both computed, and the cell carries the
+status at the epoch (`custody_state`). Degraded custody can judge the warning time but not whether a burn is normal,
+and the operator's custody needs both, so it counts as lost for the whole horizon, shown as degraded and scored as
+lost (review of 3 November 2026: shown and not scored, it carried a green tick the software had not earned). A
+manoeuvre row with no hypothesis names no burn time, so it takes the worst case, a burn at the scenario epoch, as a
+lookup, and says so, unless custody is lost from the epoch already (lost, degraded, or at its limit), which no burn
+time can change, so it is computed. A result whose every row is the worst case says so in its basis line
+(`WORST_CASE_BASIS`), not "a rule of thumb", and so does each such cell (`WORST_CASE_CELL_BASIS`).
+Custody describes our information about red, so our response is not applied to it: a sensor retask loses its
+rule-of-thumb advantage, and the page says so. Unbound, blue only, or with no status read, the rule of thumb stays
+and the page says how to earn the computed figure. A refused cell's suffix now speaks for its closest approach only,
+since custody may be computed beside it. Offline, custody is degraded (UDL not connected), so it counts as lost for
+the whole horizon, which is honest, since nothing offline can judge whether a burn is normal, and will be common; the
+custody gap ignores the measured element-set cadence, so it is pessimistic. Owner to confirm that degraded scores as
+lost: it follows the operator's definition, and is one branch in `custody_over_horizon` if the owner decides otherwise.
 
 **Dependency:** Phase 2 complete; both red and blue TLEs available in session state
 
@@ -216,7 +310,9 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
   - Apply adversary manoeuvre hypothesis (sampled from MC)
   - Propagate both objects to horizon; compute actual minimum separation via `TLEOrbit.propagate()`
   - Apply response ΔV to blue TLE; propagate; recompute separation
-- `OutcomeMetrics.custody_maintained` becomes a true SGP4 result (line-of-sight check at each step)
+- `OutcomeMetrics.custody_maintained` becomes a true SGP4 result (line-of-sight check at each step). SPC-123 took the
+  operator's definition instead, which is about information, not geometry: the bound red track's held, degraded or
+  lost custody carried over the horizon (above). A sensor's line of sight to red is not modelled.
 - Enables time-of-closest-approach (TCA) calculation
 
 ### UI additions
@@ -227,13 +323,21 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 
 ### Implementation steps
 
-1. Add `propagate_outcome()` in `decision.py` — wraps `TLEOrbit.propagate()`
-2. Require `blue_tle` and `red_tle` in `evaluate_scenario()` for Phase 3 path
-3. Add TCA to `OutcomeMetrics`
+1. Add `propagate_outcome()` in `decision.py`, wrapping `TLEOrbit.propagate()`. Done in SPC-120 as
+   `plan_computed`, through `elset_closest_approach` in `spectre/astro/elset_approach.py`, so `decision.py` never
+   names the propagator.
+2. Require `blue_tle` and `red_tle` in `evaluate_scenario()` for Phase 3 path. Done in SPC-120 through the binding:
+   the computed path runs only when the scenario is bound on both sides, and a scenario bound on one side says
+   "Closest approach not computed: bind a red track and a blue asset to compute it."
+3. Add TCA to `OutcomeMetrics`. Done in SPC-120: `ca_computed` carries the TCA in seconds with the edge flag.
 4. Wire "Show Trajectory" button → `POST /plan/geometry/intercept` with cell parameters
 5. Gate: tests/unit/test_decision_reference_cases.py passes with this phase's path added to PATHS, at both window starts (SPC-102).
-6. Carry TCA unrounded with the edge flag; decision.py:462 rounds time_to_closest_hours to 0.01 h, coarser than the
-   plane-change tolerance, and the results page shows closest approach in whole km (decision_results.html:121).
+   Passed by SPC-120's `decision_phase3`: a scenario at the window start, bound to both element sets aged to it
+   against a 24 h limit (72 h at GEO), with one no-action row, run through `evaluate_scenario`.
+6. Carry TCA unrounded with the edge flag; decision.py:1156 and :1772 (at cd44cb5) round time_to_closest_hours to
+   0.01 h, coarser than the plane-change tolerance, and the results page showed closest approach in whole km
+   (decision_results.html:172 at cd44cb5). Done in SPC-120: `ca_computed` holds the miss, TCA and edge flag
+   unrounded, a computed cell prints 0.1 km and its TCA to the minute, and the hover gives the seconds.
 
 ---
 

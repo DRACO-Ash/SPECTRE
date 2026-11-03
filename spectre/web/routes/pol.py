@@ -30,7 +30,7 @@ from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import PolAssessment, assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
-from spectre.web.elsets import limit_hours_for_regime
+from spectre.web.elsets import elset_age, limit_hours_for_regime
 from spectre.web.format_units import to_m_s
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -564,6 +564,26 @@ def _all_detections(pol: object) -> list[Any]:
     """
     return list(getattr(pol, "manoeuvres", []) or []) + list(
         getattr(pol, "candidate_manoeuvres", []) or []
+    )
+
+
+def custody_from_history(
+    red_tle: str, now: datetime, *, pol: Any | None, normality: BurnNormality | None, problem: str,
+) -> CustodyStatus:
+    """Whether a red object is in custody at *now*: its orbit's age and its held history (SPC-018).
+
+    One rule for the sweep and the Decision Engine (SPC-123), so the two cannot judge one object differently.
+    *pol* is its analysed history, None with *problem* saying why; *normality* the verdict on its latest burn.
+    """
+    age = elset_age(red_tle, now)
+    return assess_custody(
+        elset_hours=age.hours if age else None,
+        limit_hours=age.limit_hours if age else 0.0,
+        elset_count=pol.tle_count if pol else 0,
+        history_days=pol.span_days if pol else 0.0,
+        normality=normality.verdict if normality else None,
+        history_problem=problem,
+        truncated_at=pol.history_truncated_at if pol else None,
     )
 
 

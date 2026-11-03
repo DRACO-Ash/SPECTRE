@@ -30,6 +30,7 @@ from spectre.astro.monte_carlo import (
     SeparationWindow,
     elset_state,
     generate_samples,
+    miss_tolerance_km,
     percentile_half_width_km,
     propagate_single_sample,
     run_separation_series,
@@ -170,7 +171,18 @@ def test_convergence_is_the_engines_own_check(dispersed: SeparationSeries) -> No
     half_width = percentile_half_width_km(_misses(dispersed), seed=_SEED)
     assert math.isfinite(half_width)
     assert dispersed.percentile_half_width_km == half_width
-    assert dispersed.converged is (half_width <= CONVERGENCE_TOLERANCE_KM)
+    assert dispersed.tolerance_km == miss_tolerance_km(dispersed.miss_km_p5)
+    assert dispersed.converged is (half_width <= dispersed.tolerance_km)
+
+
+def test_a_half_width_exactly_at_the_relative_tolerance_has_converged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SPC-117: at a P5 over 20 km the tolerance is 5 % of it; a half-width just over that has not converged."""
+    monkeypatch.setattr(monte_carlo, "miss_tolerance_km", lambda p5: 0.05 * 400.0 if math.isfinite(p5) else 1.0)
+    for half_width, converged in ((20.0, True), (math.nextafter(20.0, math.inf), False)):
+        monkeypatch.setattr(monte_carlo, "percentile_half_width_km", lambda *_, hw=half_width, **__: hw)
+        series = run_separation_series(_hypothesis(n_samples=1), _BLUE, _WINDOW)
+        assert series.tolerance_km == 20.0
+        assert series.converged is converged
 
 
 def test_a_half_width_exactly_at_the_tolerance_has_converged(monkeypatch: pytest.MonkeyPatch) -> None:

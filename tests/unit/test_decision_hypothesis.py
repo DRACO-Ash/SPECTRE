@@ -248,11 +248,15 @@ class TestEachSourceSaysHowItWasMade:
         with pytest.raises(ValueError, match="'loiter' is not a known manoeuvre archetype"):
             AdversaryHypothesis.from_detection(_make_record(), _manoeuvre(0.013), archetype="loiter")
 
-    def test_the_carrier_says_it_changes_no_figure_unless_both_sides_are_bound(self) -> None:
+    def test_the_carrier_says_what_it_changes_once_bound(self) -> None:
+        """Inverted by SPC-123: with a red track bound, the burn time sets when custody is lost."""
         assert "changes no figure yet" not in HYPOTHESIS_NOTE
-        assert "changes no figure unless both sides are bound" in HYPOTHESIS_NOTE
+        assert "changes no figure unless both sides are bound" not in HYPOTHESIS_NOTE
+        assert "and the row's other figures are still lookups" not in HYPOTHESIS_NOTE
+        assert "With a red track bound, its burn time sets when custody is lost" in HYPOTHESIS_NOTE
         assert "closest approach of its row and its time are sampled from it" in HYPOTHESIS_NOTE
-        assert "every other figure is still a lookup" in HYPOTHESIS_NOTE
+        assert "without one, a manoeuvre row's closest approach stays a lookup" in HYPOTHESIS_NOTE
+        assert "its custody takes the worst case, a burn at the scenario epoch" in HYPOTHESIS_NOTE
         assert AdversaryHypothesis.from_archetype("phasing", _AT).note is HYPOTHESIS_NOTE
 
 

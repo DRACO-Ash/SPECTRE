@@ -24,8 +24,13 @@ from typing import Any
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from spectre.astro.closest_approach import ClosestApproach
+from spectre.astro.elset_approach import ElsetApproach
+from spectre.astro.monte_carlo import SeparationWindow
+from spectre.domain.custody import Custody
 from spectre.domain.decision import (
     _SCORE_INPUTS,
+    BIND_TO_EARN,
     FIGURE_LABELS,
     LOOKUP_BASES,
     MIXED_BASIS,
@@ -66,18 +71,33 @@ def _scenario(n_friendly: int = 2) -> Scenario:
                     adversary_actions=adversary, friendly_responses=friendly)
 
 
+def _with_bases(cell: OutcomeMetrics, bases: OutcomeBases) -> OutcomeMetrics:
+    """*cell* with *bases*; a computed closest approach carries the figure it rests on (SPC-120's invariant).
+
+    The figure is made to match the cell's own, so these tests of the bases see only the change of kind.
+    """
+    found = None
+    if bases.closest_approach_km.kind is Basis.COMPUTED:
+        window = SeparationWindow(datetime(2026, 4, 10, tzinfo=UTC), 72 * 3600.0)
+        approach = ClosestApproach(cell.closest_approach_km, cell.time_to_closest_hours * 3600.0, False)
+        found = ElsetApproach(approach, 7.5, window)
+    # A computed custody carries its state at the scenario epoch (SPC-123's invariant); these cells keep custody.
+    state = Custody.HELD if bases.custody_maintained.kind is Basis.COMPUTED else None
+    return dataclasses.replace(cell, figure_bases=bases, ca_computed=found, custody_state=state)
+
+
 def _mixed_result() -> ScenarioResult:
     """A 1 x 2 result whose second cell has a computed closest approach."""
     result = evaluate_scenario(_scenario(2))
     cell = result.outcome_matrix[0][1]
-    result.outcome_matrix[0][1] = dataclasses.replace(cell, figure_bases=_bases(closest_approach_km=Basis.COMPUTED))
+    result.outcome_matrix[0][1] = _with_bases(cell, _bases(closest_approach_km=Basis.COMPUTED))
     return result
 
 
 def _all_computed_result() -> ScenarioResult:
     result = evaluate_scenario(_scenario(2))
     every = _bases(**dict.fromkeys(_FIGURES, Basis.COMPUTED))
-    result.outcome_matrix[0] = [dataclasses.replace(c, figure_bases=every) for c in result.outcome_matrix[0]]
+    result.outcome_matrix[0] = [_with_bases(c, every) for c in result.outcome_matrix[0]]
     return result
 
 
@@ -109,13 +129,16 @@ def _tags(html: str, figure: str) -> list[str]:
 
 class TestTheBasesAreTyped:
     def test_every_outcome_figure_has_its_own_basis(self) -> None:
-        """The sampled band, its spread, half-width, refusal and caveat qualify closest approach (SPC-112, SPC-115),
-        and the score's spread across samples qualifies the score (SPC-115); they are not figures."""
+        """The sampled band, its spread, half-width, refusal and caveat, and the computed figure (SPC-120) qualify
+        closest approach (SPC-112, SPC-115),
+        the score's spread across samples qualifies the score (SPC-115), and custody's state at the scenario epoch
+        qualifies custody (SPC-123); they are not figures."""
         about_closest_approach = {
-            "ca_percentiles", "ca_std_km", "ca_samples", "ca_refusal", "ca_caveat", "ca_half_width_km",
+            "ca_percentiles", "ca_std_km", "ca_samples", "ca_refusal", "ca_caveat", "ca_half_width_km", "ca_computed",
         }
         about_the_score = {"score_percentiles", "score_std"}
-        qualifiers = about_closest_approach | about_the_score
+        about_custody = {"custody_state"}   # the status at the scenario epoch qualifies custody (SPC-123)
+        qualifiers = about_closest_approach | about_the_score | about_custody
         assert qualifiers <= {f.name for f in fields(OutcomeMetrics)}
         figures = {f.name for f in fields(OutcomeMetrics)} - {"figure_bases"} - qualifiers
         assert figures == {f.name for f in fields(OutcomeBases)}
@@ -155,7 +178,7 @@ class TestTheScoreBasisIsDerived:
     def test_the_score_stays_a_lookup_when_every_figure_is_computed(self) -> None:
         every = _bases(**dict.fromkeys(_FIGURES, Basis.COMPUTED))
         assert every.composite_score.kind is Basis.LOOKUP
-        cell = dataclasses.replace(evaluate_scenario(_scenario(1)).outcome_matrix[0][0], figure_bases=every)
+        cell = _with_bases(evaluate_scenario(_scenario(1)).outcome_matrix[0][0], every)
         assert cell.modelled is True
 
 
@@ -189,12 +212,12 @@ class TestTheResultIsDerivedFromItsCells:
         assert mixed.basis == MIXED_BASIS
         plain = evaluate_scenario(_scenario(2))
         assert plain.basis_lines == ("Every figure in every cell is a lookup.",)
-        assert plain.basis == MODELLED_BASIS
+        assert plain.basis == f"{MODELLED_BASIS} {BIND_TO_EARN}"
 
     def test_an_unrecorded_cell_reads_as_lookup(self) -> None:
         result = _unrecorded_result()
         assert result.modelled is True
-        assert result.basis == MODELLED_BASIS
+        assert result.basis == f"{MODELLED_BASIS} {BIND_TO_EARN}"
 
 
 class TestEachCellShowsItsOwnBasis:
@@ -236,7 +259,10 @@ class TestEachCellShowsItsOwnBasis:
         """Review finding 28: one lookup custody cell on screen keeps the rule-of-thumb line."""
         result = evaluate_scenario(_scenario(2))
         cell = result.outcome_matrix[0][1]
-        result.outcome_matrix[0][1] = dataclasses.replace(cell, figure_bases=_bases(custody_maintained=Basis.COMPUTED))
+        # Custody and its gap rest on one basis (SPC-123), so both are computed in the second cell.
+        result.outcome_matrix[0][1] = _with_bases(
+            cell, _bases(custody_maintained=Basis.COMPUTED, custody_gap_hours=Basis.COMPUTED),
+        )
         assert result.custody_rule_of_thumb is True
         assert "Custody: lookup in 1 of 2 cells, computed in 1." in result.basis_lines
         assert "Custody here is a rule of thumb" in _text(_render(result))

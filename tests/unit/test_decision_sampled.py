@@ -5,8 +5,10 @@ in a scenario bound to a red track and a blue asset (SPC-100), is sampled.
 Its closest approach is the P5 of the separation series' misses (SPC-110),
 its time to closest approach the earliest TCA at or below P5, and both say
 they are sampled; every other figure, and every other row, is a lookup
-exactly as before. A row that cannot be sampled honestly is refused with a
-sentence in each of its cells and keeps its lookups. The cost is capped
+exactly as before, except that a bound row whose action does not move red
+has its closest approach computed by SGP4 (SPC-120,
+tests/unit/test_decision_computed.py). A row that cannot be sampled honestly
+is refused with a sentence in each of its cells and keeps its lookups. The cost is capped
 before anything runs, at what one evaluation can run within its 120 s budget
 (SPC-113).
 
@@ -63,7 +65,8 @@ from spectre.domain.provenance import Basis, FigureBasis
 from tests.unit._decision_reference import EPOCH, PLANE_CHANGE
 from tests.unit.test_decision_figure_basis import _render, _text
 
-_LOOKUPS = " This cell's figures are lookups."
+#: Inverted by SPC-123: custody may be computed in a refused cell, so the suffix speaks for the closest approach.
+_LOOKUPS = " This cell's closest approach is a lookup."
 _RED_AT_EPOCH = elset_state(PLANE_CHANGE.red_tle, EPOCH)
 assert _RED_AT_EPOCH is not None
 
@@ -204,9 +207,13 @@ def _never(*_: Any) -> NoReturn:
 
 
 def _lookup(scenario: Scenario) -> ScenarioResult:
-    """The same scenario evaluated with no hypothesis anywhere: today's lookups."""
+    """The same scenario evaluated with no hypothesis and no binding: every cell a lookup.
+
+    Unbound, since a bound row without a hypothesis is now computed or refused (SPC-120).
+    """
     plain = dataclasses.replace(
         scenario, adversary_actions=[dataclasses.replace(a, hypothesis=None) for a in scenario.adversary_actions],
+        binding=None,
     )
     return evaluate_scenario(plain)
 
@@ -219,7 +226,11 @@ def _cells(result: ScenarioResult, row: int) -> list[OutcomeMetrics]:
 
 class TestOnlyABoundRowWithAHypothesisIsSampled:
     def test_only_the_bound_row_with_a_hypothesis_is_sampled(self) -> None:
-        """D1: one sample run for the row, shared by its four cells; every other row is today's lookup."""
+        """D1: one sample run for the row, shared by its four cells; every other row is computed (SPC-120).
+
+        Before SPC-120 every other row was today's lookup; the three rows whose action does not move red now
+        share the pair's computed closest approach, and RK45 runs for the sampled row alone.
+        """
         fake = _Fake()
         scenario = _bound()
         result = evaluate_scenario(scenario, sampler=fake)
@@ -232,9 +243,9 @@ class TestOnlyABoundRowWithAHypothesisIsSampled:
         for cell in _cells(result, 0):
             assert cell.figure_bases.closest_approach_km.kind is Basis.SAMPLED
             assert cell.figure_bases.time_to_closest_hours.kind is Basis.SAMPLED
-        lookup = _lookup(scenario)
         for row in (1, 2, 3):
-            assert _cells(result, row) == _cells(lookup, row), row
+            assert all(cell.figure_bases.closest_approach_km.kind is Basis.COMPUTED for cell in _cells(result, row))
+            assert all(cell.ca_percentiles is None for cell in _cells(result, row))
 
     @pytest.mark.parametrize(
         "binding",
@@ -281,7 +292,9 @@ class TestASampledCell:
             assert cell.ca_percentiles == {5: 3.0, 50: 8.0, 95: 20.0}
             assert cell.ca_std_km == 5.0
             assert cell.ca_samples == 50
-            assert cell.ca_band == "Sampled: P5 3.0 km to P95 20.0 km, median 8.0 km, 50 samples."
+            assert cell.ca_band == (
+                "Sampled: P5 3.0 km to P95 20.0 km, median 8.0 km, each known to within 0.4 km, 50 samples."
+            )
             assert cell.ca_refusal is None
             assert cell.ca_caveat == "1 in 20 samples came closer than P5; the closest of 50 was 2.0 km."
 
@@ -330,9 +343,15 @@ class TestASampledCell:
         )
 
     def test_samples_closest_at_the_window_start_are_not_called_closing(self) -> None:
-        """Their nearest point is the window's first instant: they were opening, not still closing at its end."""
+        """Their nearest point is the window's first instant: they were opening, not still closing at its end.
+
+        SPC-117 names them too, since a burn already made, now sampled, is often closest at the window start.
+        """
         result = evaluate_scenario(_bound(), sampler=_Fake(edges=_Edges(start=2)))
-        assert _cells(result, 0)[0].ca_caveat == "1 in 20 samples came closer than P5; the closest of 50 was 2.0 km."
+        assert _cells(result, 0)[0].ca_caveat == (
+            "1 in 20 samples came closer than P5; the closest of 50 was 2.0 km. In 2 of 50 samples the objects "
+            "were already opening when the window began, so the closest approach was before it."
+        )
 
 
 # ── D8: the invariants ──
@@ -482,8 +501,9 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
     ),
     "not converged": (
         lambda _mp: (_bound(), _Fake(half_width=2.3, converged=False)),
-        "Not sampled: P5, P50 and P95 are known only to within 2.3 km, wider than the 1 km convergence check. "
-        "Take more samples, with a shorter horizon if that goes over the 4,800 sample-hour cap.",
+        "Not sampled: P5, P50 and P95 are known only to within 2.3 km, wider than the 1.0 km this miss needs (1 km, "
+        "or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the 4,800 "
+        "sample-hour cap.",
     ),
 }
 
@@ -512,7 +532,7 @@ class TestTheCapAndTheRefusals:
                     Basis.LOOKUP, f"{LOOKUP_BASES.closest_approach_km.note}. {sentence}",
                 )
                 assert dataclasses.replace(cell, ca_refusal=None, figure_bases=LOOKUP_BASES) == plain
-        assert result.ranked_per_adversary == lookup.ranked_per_adversary
+        assert [result.ranked_per_adversary[i] for i in rows] == [lookup.ranked_per_adversary[i] for i in rows]
         assert result.row_notes == (None, None, None, None)
 
     def test_the_cap_is_4800_sample_hours_from_a_120_s_budget_with_9_minutes_of_set_up_a_sample(self) -> None:
@@ -792,9 +812,9 @@ class TestTheBindingIsReadOnlyWithAHypothesis:
 
 class TestTheResultCountsItsSampledCells:
     def test_the_basis_lines_count_sampled_cells(self, sampled: ScenarioResult) -> None:
-        """D21."""
-        assert "Closest approach: lookup in 12 of 16 cells, sampled in 4." in sampled.basis_lines
-        assert "Time to closest approach: lookup in 12 of 16 cells, sampled in 4." in sampled.basis_lines
+        """D21: the other 12 cells were lookups before SPC-120; their rows do not move red, so they are computed."""
+        assert "Closest approach: sampled in 4 of 16 cells, computed in 12." in sampled.basis_lines
+        assert "Time to closest approach: sampled in 4 of 16 cells, computed in 12." in sampled.basis_lines
         assert "Score: lookup in every cell." in sampled.basis_lines
         assert sampled.n_sampled_cells == 4
 
@@ -849,10 +869,12 @@ class TestThePage:
         """P1."""
         text = _page(sampled)
         assert text.count("3.0 km (sampled)") == 4
-        assert text.count("Sampled: P5 3.0 km to P95 20.0 km, median 8.0 km, 50 samples.") == 4
+        assert text.count(
+            "Sampled: P5 3.0 km to P95 20.0 km, median 8.0 km, each known to within 0.4 km, 50 samples."
+        ) == 4
         assert text.count("1 in 20 samples came closer than P5; the closest of 50 was 2.0 km.") == 4
-        assert "Phase 2 · sampled closest approach in 4 cells" in text
-        assert "Phase 1" not in text
+        assert "Phase 3 · computed closest approach in 12 cells · sampled in 4 cells" in text
+        assert "Phase 1" not in text and "Phase 2" not in text
 
     def test_a_refused_cell_shows_its_sentence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """P2."""

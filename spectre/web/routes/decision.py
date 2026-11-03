@@ -1,4 +1,4 @@
-"""Decision Engine routes: scenario evaluation, from lookups and a sampled closest approach.
+"""Decision Engine routes: scenario evaluation, from lookups, a sampled or computed closest approach and custody.
 
 GET  /plan/decision/panel      → scenario builder input form, with a manoeuvre hypothesis per adversary row (SPC-114)
 GET  /plan/decision/bind       → the bind fields, rebuilt from the held objects (SPC-100)
@@ -41,6 +41,7 @@ from spectre.domain.decision import (
 from spectre.domain.manoeuvre_calibration import from_km_s
 from spectre.web.auth import require_login
 from spectre.web.decision_binding import bind_scenario
+from spectre.web.decision_custody import red_custody, with_red_custody
 from spectre.web.decision_job import JobState, cancel_job, evaluated_line, job_view, new_job, start_job
 from spectre.web.deps import render
 from spectre.web.models import SessionKey, User
@@ -513,6 +514,7 @@ async def decision_evaluate(
     """Evaluate a decision scenario and return the ranked results partial, or the job that will.
 
     The scenario epoch is now, the moment Evaluate is pressed; a hypothesis's burn time counts from it (SPC-114).
+    A bound red track's custody is read here, as the sweep reads it (SPC-123), so the evaluation does no I/O.
     """
     inputs = _Inputs()
     parsed = _parse(inputs, form)
@@ -526,7 +528,10 @@ async def decision_evaluate(
     hypotheses = _hypotheses(parsed.entries, bound.binding, now)
     if hypotheses.problem is not None:
         return _err(hypotheses.problem)
-    scenario = _scenario(form, parsed, hypotheses.carried, bound.binding, now)
+    binding = bound.binding
+    if binding is not None and binding.red is not None:
+        binding = with_red_custody(binding, await red_custody(state, binding.red, now))
+    scenario = _scenario(form, parsed, hypotheses.carried, binding, now)
     return await _answer(request, current_user, scenario, _strategy(form.strategy))
 
 

@@ -42,7 +42,8 @@ def test_no_tle_path_remains() -> None:
     """No figure takes an element set. A bound scenario carries its element sets on
     Scenario.binding (SPC-100), read only to sample the closest approach of a row
     whose action carries a hypothesis (SPC-112), through the Monte Carlo engine's
-    elset_state, never a propagator named here."""
+    elset_state, and to compute the pair's closest approach with no burn (SPC-120),
+    through spectre.astro.elset_approach; never a propagator named here."""
     for fn in (decision.compute_outcome_metrics, decision.evaluate_scenario):
         params = inspect.signature(fn).parameters
         assert "blue_tle" not in params and "red_tle" not in params
@@ -53,7 +54,11 @@ def test_no_tle_path_remains() -> None:
 
 def test_the_docstrings_describe_the_lookup_model() -> None:
     module = " ".join((decision.__doc__ or "").split())
-    assert "SGP4" not in module
+    # SPC-120: SGP4 now computes one figure, so the docstring names it there and only there (audit F-113 found it
+    # named as driving the whole evaluation, which it did not).
+    assert "SGP4" in module
+    assert "computed" in module and "plan_computed" in module
+    assert "SGP4 propagation drives" not in module
     assert "lookup" in module and "uncalibrated" in module
     # SPC-112: the one figure that can be sampled, and on what it scores.
     assert "No orbit is propagated" not in module
