@@ -268,11 +268,16 @@
   "order": 31,
   "group": "udl",
   "minutes": 300,
-  "task": "UDL conjunction and observation endpoints",
-  "note": "Old TODO P2-B, docs/phased_plan.md Phase 3.2.",
+  "task": "UDL conjunction lookup (observation endpoints split to SPC-032)",
+  "note": "Old TODO P2-B, docs/phased_plan.md Phase 3.2. Built in 0.11.0 as a probe: GET /udl/conjunction, with the UDL path and field names inferred from UDL's published API and not checked against live UDL (SPC-033).",
   "files": [
-   "spectre/web/routes/udl.py"
-  ]
+   "spectre/web/routes/udl.py",
+   "spectre/web/udl_conjunction.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-060",
@@ -445,12 +450,16 @@
   "group": "decision",
   "minutes": 240,
   "task": "Decision Engine foundation: bind a scenario to a real red track and blue asset",
-  "note": "Owner ruling 2026-10-28: invest in every phase. Operator ranks recommended response 4th of 4, so the engine follows the outputs 1 to 3 work. Scenarios carry no orbit today; this takes the element sets, epochs and data mode from the session.",
+  "note": "Owner ruling 2026-10-28: invest in every phase. Operator ranks recommended response 4th of 4, so the engine follows the outputs 1 to 3 work. Scenarios carry no orbit today; this takes the element sets, epochs and data mode from the session. Design estimate rose to 270 minutes on review (scratchpad design, wf_2415740b-d94).",
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py",
    "spectre/web/templates/partials/decision_panel.html"
-  ]
+  ],
+  "state": "built",
+  "est": 270,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-101",
@@ -477,10 +486,14 @@
   "group": "decision",
   "minutes": 240,
   "task": "Decision Engine reference cases: hand-checked scenarios with independent closest approach and TCA",
-  "note": "The gate every later phase must pass, as the orbital audit did: co-planar LEO, GEO drift-in, a plane change. Values from an independent integration, never from the code under test.",
+  "note": "The gate every later phase must pass, as the orbital audit did: co-planar LEO, GEO drift-in, a plane change. Values from an independent integration, never from the code under test. Pulled forward from V0.12 into 0.11.0: it had no dependency and SPC-110 waits on it.",
   "files": [
    "tests/unit/test_decision_reference_cases.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-110",
@@ -890,7 +903,11 @@
   "note": "Found by the V0.10 UDL build: pol.py error paths (about lines 489, 507, 538 at 0.10.0). The fix used for udl.py applies.",
   "files": [
    "spectre/web/routes/pol.py"
-  ]
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-024",
@@ -902,7 +919,11 @@
   "note": "Found by the V0.10 UDL build: POST /udl/data-mode. Refuse it as the per-fetch override does.",
   "files": [
    "spectre/web/routes/udl.py"
-  ]
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-025",
@@ -914,6 +935,76 @@
   "note": "Found by the V0.10 UDL build.",
   "files": [
    "spectre/web/routes/maneuver.py"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-026",
+  "priority": "med",
+  "order": 26,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Read Alpha-5 catalogue numbers in satno_from_tle",
+  "note": "Found by the SPC-100 review: a held set numbered A0001 reads 'SATNO unreadable', and two element sets for one Alpha-5 object are not caught as the same object by the binder. Alpha-5 covers catalogue numbers from 100,000.",
+  "files": [
+   "spectre/data/intel.py",
+   "spectre/web/decision_binding.py"
+  ]
+ },
+ {
+  "ref": "SPC-027",
+  "priority": "low",
+  "order": 27,
+  "group": "hygiene",
+  "minutes": 30,
+  "task": "Define the --ops-gold colour token or replace its 22 uses",
+  "note": "Found by the SPC-100 review: no stylesheet under spectre/web/static defines --ops-gold, so every use falls back to the inherited colour. Pick an existing caution token or define it in style.css.",
+  "files": [
+   "spectre/web/static/style.css"
+  ]
+ },
+ {
+  "ref": "SPC-028",
+  "priority": "high",
+  "order": 28,
+  "group": "warning",
+  "minutes": 120,
+  "task": "V0.9 review leftovers: custody-lost watch half, band map pin, undated burn times, credentials on sign-out",
+  "note": "Left by the 0.11.0 fix groups as outside their scope. (1) Finding 13, watch half: _watch_after_sweep treats a burn as already told when custody was lost. (2) Finding 29: pin the band map in threat_sweep.html. (3) burn_watch._record and threat._change_notes give an undated burn a single time it has not earned; the sweep says 'between X and Y'. (4) Finding 6: clear_account_state does not blank the stored UDL credentials, so a check in flight at sign-out can still use them.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/burn_watch.py",
+   "spectre/web/planning_state.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ]
+ },
+ {
+  "ref": "SPC-032",
+  "priority": "low",
+  "order": 32,
+  "group": "udl",
+  "minutes": 240,
+  "task": "UDL observation endpoints (EO, radar, RF)",
+  "note": "Split from SPC-031 in 0.11.0: three separate UDL services, each needing its own contract check.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ]
+ },
+ {
+  "ref": "SPC-033",
+  "priority": "med",
+  "order": 33,
+  "group": "udl",
+  "minutes": 30,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Check the UDL conjunction contract against live UDL",
+  "note": "SPC-031 reads /conjunction with satNo1 and satNo2, and the fields named in spectre/web/udl_conjunction.py's module comment. Metres is assumed when no unit is given. This needs a UDL account and network access the build environment lacks.",
+  "files": [
+   "spectre/web/udl_conjunction.py"
   ]
  }
 ]

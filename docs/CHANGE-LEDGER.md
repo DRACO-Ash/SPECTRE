@@ -1051,3 +1051,19 @@ first failed on a bare 500 in the UDL error sentence and, earlier, on a
 silent except and a bare 2 in the delta-V band; each was named or logged.
 It then passed all five legs, with 97 per cent coverage on changed lines.
 The full suite is green on the same tree.
+
+## 0.11.0
+
+Feature work from the backlog: the scenario binding and reference cases for the Decision Engine, a UDL conjunction lookup, and fixes from the V0.9 adversarial review.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_binding.py`, `spectre/astro/closest_approach.py`, `spectre/web/udl_conjunction.py`, the binding types in `decision.py`, the conjunction route in `routes/udl.py`, fixes in `burn_watch.py`, `warning_change.py` and `routes/threat.py`, and template sections | `scripts/check-quality.sh` before upload: see the outcome below. The decision panel route moves to `Annotated`, so `decision.py` has no bare `Depends` left. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The conjunction lookup adds 2 UDL requests per lookup, inside the per-user UDL data limiter. | n/a. |
+
+**A feature that is itself a probe, not of a gate.** The conjunction lookup
+reads UDL's `/conjunction` service with field names inferred from UDL's
+published API, never seen live. It is not a gate probe and does not use this
+submission's one PROBE. If live UDL answers in another shape, the panel says
+it found nothing usable rather than showing a wrong figure; SPC-033 is the check.
+

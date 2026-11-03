@@ -9,6 +9,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
+**Operator outputs: no new output; 1 and 2 made safer, and output 4, the recommended response, gets the two foundations the Decision Engine plan puts first.** The burn watch no longer loses a burn it found, the sweep no longer reports targets it never flew, and a scenario can now name the real objects it is about. Every Decision Engine figure is still a lookup.
+
+### Added
+- Bind a decision scenario to a held red track and blue asset. The result names them, with each orbit's epoch, its age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) and its data mode, and puts their element sets in its provenance. It changes no figure, and says so: "Binding records which real objects this scenario is about. It changes no figure yet". A test proves no figure or selector reads the binding (SPC-100).
+- Closest-approach reference cases every later Decision Engine phase must pass: co-planar LEO, GEO drift-in and a plane change with crossing planes, each with an expected miss distance and time of closest approach from a closed form checked by an independent two-body integration. The helper that finds a closest approach in sampled separations is shared with the scenario planner (SPC-102).
+- A UDL conjunction lookup: the close approaches UDL holds for a catalogue number, newest first, at most 50, with UDL's own miss distance and probability of collision, each labelled as UDL's figure, not SPECTRE's. This is a probe: the UDL path and field names are inferred from UDL's published API and have not been checked against live UDL (SPC-033). Records it cannot read are skipped and counted, never guessed (SPC-031).
+
+### Fixed
+- The burn watch no longer loses a burn when working out what it changed fails. It used to mark the element set as handled first, so the next check skipped it and cleared the problem; it now retries, names the burn and its time while it does, and no longer blames UDL for a failure that was its own. A history it cannot use is said to be that, not a failed fetch.
+- The watch announces a burn whose pre-burn element set is the previous burn's post-burn set; it used to miss it. A new burn is flown from its own pre-burn set, not bundled with burns already announced. It also stops at once when the sign-in ends mid-check, and its live region no longer replaces itself every minute, so a screen reader hears the alert.
+- The sweep's "Sweep again" button no longer replaces the results panel itself, which left every later sweep with nowhere to show.
+- "What the burn changed" counts only the targets it flew. A target with no element set was reported as out of reach before and after; it is now named as not compared. The quiet headline no longer says nothing changed when a target went out of reach.
+- With custody lost, the sweep says what newer element set UDL already holds and how to fetch it. When the sweep's orbit is newer than the held history, the change carries a caveat that an unseen burn may be part of it. A NOTSO manoeuvre notice newer than the last confirmed burn is named beside a refusal too, not only beside a figure.
+- An HRR blue object with no catalogue number no longer makes every unnumbered target read as yours.
+- Pattern of Life errors say what failed and keep the detail in the server log (SPC-023). The session data mode refuses anything but REAL, SIMULATED, EXERCISE or TEST (SPC-024), and so does the intercept panel's (SPC-025).
+- Two burn-watch tests would have called UDL with a test password from 10:00 UTC on 3 November 2026; the watch's clock is pinned and any UDL call now fails the test.
+
+### Changed
+- The scenario provenance hash changes: the scenario's recorded value now includes its binding, or None.
+- Muted text in "What the burn changed" uses a colour token that exists; it used an undefined one.
+
+### Out of scope, named
+- UDL observation endpoints (SPC-032), the live check of the conjunction contract (SPC-033), Alpha-5 catalogue numbers (SPC-026), the undefined `--ops-gold` colour token (SPC-027), and four V0.9 review items left outside this release's fix groups (SPC-028). Response time per blue asset (SPC-022) moves to V0.12.
+
 ## [0.10.0] - 2026-11-03
 
 **Operator output advanced: 3, the decide-by time, which completes outputs 1 to 3.** Output 4, the recommended response, is next.
