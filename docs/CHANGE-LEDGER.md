@@ -1067,3 +1067,9 @@ published API, never seen live. It is not a gate probe and does not use this
 submission's one PROBE. If live UDL answers in another shape, the panel says
 it found nothing usable rather than showing a wrong figure; SPC-033 is the check.
 
+**Local check before upload.** `scripts/check-quality.sh` first failed two
+argument counts on the SPC-100 lines and then an exception name in the burn
+watch (N818); each was fixed in its own commit. It then passed all five
+legs, with 92 per cent coverage on changed lines. The full suite is green on
+the same tree.
+
