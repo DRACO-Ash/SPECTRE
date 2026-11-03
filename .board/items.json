@@ -563,14 +563,18 @@
   "group": "decision",
   "minutes": 180,
   "task": "Phase 2: evaluate off the request thread with a time budget and named refusals",
-  "note": "Up to 25 cells of 500 samples each. Adversary samples are propagated once per action and blue once per response, then paired. A cell that fails says why, as the sweep does: no silent excepts. Since 0.13.0 the route already runs the evaluation on a worker thread, so other sessions are not stalled; what remains is the time budget, per-cell refusals and pairing propagations.",
+  "note": "Up to 25 cells of 500 samples each. Adversary samples are propagated once per action and blue once per response, then paired. A cell that fails says why, as the sweep does: no silent excepts. Since 0.13.0 the route already runs the evaluation on a worker thread, so other sessions are not stalled; what remains is the time budget, per-cell refusals and pairing propagations. Built in 0.14.0 with a 120 s budget and a 6,000 sample-hour cap from measured rates (Claude's call; a 300 s budget, cap 15,000, is the owner's to choose). Blue is one trajectory per scenario because our response is not applied to its orbit, so no per-response pairing was built.",
   "deps": [
    "SPC-112"
   ],
   "files": [
    "spectre/web/routes/decision.py",
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
  },
  {
   "ref": "SPC-114",
@@ -586,7 +590,11 @@
   "files": [
    "spectre/web/templates/partials/decision_panel.html",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
  },
  {
   "ref": "SPC-115",
@@ -601,7 +609,11 @@
   ],
   "files": [
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
  },
  {
   "ref": "SPC-120",
@@ -1068,7 +1080,11 @@
   ],
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
  },
  {
   "ref": "SPC-034",
@@ -1080,6 +1096,40 @@
   "note": "Found building SPC-029 in 0.13.0. spectre-card-custody is used by the admin flash and defined by no stylesheet.",
   "files": [
    "spectre/web/static/style.css"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-035",
+  "priority": "med",
+  "order": 35,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Admin error flash text below 4.5:1 in all three themes; Steel logout hover and focus ring unmeasured or marginal",
+  "note": "Found building SPC-034 in 0.14.0. The error flash needs its own text token, as the success flash got. The Steel focus ring is 3.14:1, just over the 3:1 floor.",
+  "files": [
+   "spectre/web/static/themes.css",
+   "spectre/web/static/spectre-theme.css",
+   "tests/unit/test_contrast_floors.py"
+  ]
+ },
+ {
+  "ref": "SPC-117",
+  "priority": "med",
+  "order": 117,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Convergence tolerance for sampled closest approach: 1 km absolute refuses most burns already made",
+  "note": "Measured in the V0.14 design: a burn already made, the operator's 'something moved' case, gave half-widths of 1.77 to 8.37 km against the engine's 1 km tolerance (monte_carlo.py), so it is refused as not converged even when the spread is small next to the miss. Decide whether a relative tolerance is honest, and say on the page what it means.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
   ]
  }
 ]

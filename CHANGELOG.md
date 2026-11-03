@@ -9,6 +9,26 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response. An operator can now enter a manoeuvre hypothesis, run it against the real orbits without holding up anyone else, and read the sampled closest approach as a band, with lookups still labelled as lookups.**
+
+### Added
+- A hypothesis section on each adversary row of the decision panel: archetype, delta-V, RIC direction, spread and samples (100 to 2,000, default 500), each range-checked inline with the field named. A row without one stays a lookup (SPC-114).
+- A sampled evaluation runs as a job the page checks every 2 s, showing which hypothesis is being sampled and how much of its 120 s budget is used, with Cancel. It stops within a sample when cancelled, replaced by a newer evaluation, signed out or the server stops. One sampled evaluation runs at a time on the server; a second waits, says it is queued, and its budget starts when it runs. A cell that does not finish names the budget (SPC-113).
+- Sampled cells show P5 to P95, with P5, P50, P95, the spread, the samples and the convergence on hover, and an uncertainty column; the ranking shows the spread of the score across samples. A lookup cell shows no band and says lookup (SPC-115).
+- A hypothesis that starts more than 100 m/s from the bound red track's velocity is refused as being in other units or from another object (SPC-116).
+
+### Changed
+- The cost cap rises from 600 to 6,000 sample-hours, set from measured rates for the 120 s budget. A default hypothesis over 48 h is still refused, and the refusal names the longest horizon that fits, for example 11.8 h at 500 samples. The horizon field takes tenths of an hour so that horizon can be entered.
+
+### Fixed
+- The Steel theme's admin bar buttons had dark text on the dark bar; they read 7.12:1. The admin flash used a class no stylesheet defined (SPC-034).
+- The results footer showed a 9.4 h horizon as 9h.
+
+### Out of scope, named
+- Our response is not applied to the blue orbit, so a sampled closest approach is the same across a row's responses. Most burns already made are refused as not converged against the 1 km tolerance (SPC-117). The admin error flash's contrast (SPC-035).
+
 ## [0.13.0] - 2026-11-03
 
 **Operator output advanced: 4, the recommended response, gets its first figure computed from real orbits.** When a scenario is bound to a red track and a blue asset and an adversary action carries a manoeuvre hypothesis, that cell's closest approach is sampled from the Monte Carlo engine and scored on its P5, the smallest likely miss. Every other figure is still a lookup, and the page says which is which.

@@ -1091,3 +1091,12 @@ Feature work from the backlog: the sampled closest approach and P5 scoring for t
 | Code Quality | **HYGIENE** | None made for the gate. New code: the separation series in `spectre/astro/monte_carlo.py`, a B* property in `propagator.py`, sampling, refusals and the cost cap in `decision.py`, the evaluation on a worker thread in `routes/decision.py`, colour tokens in the stylesheets and templates | `scripts/check-quality.sh` against 0.12.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A sampled evaluation uses up to about 9 s of one CPU per request, within its cap. | n/a. |
 
+## 0.14.0
+
+Feature work from the backlog: the sampled evaluation as a session job, P5 to P95 bands, the hypothesis panel, a velocity check, and Steel contrast.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_job.py`, a progress tick in `monte_carlo.py`, the budget, bands and velocity check in `decision.py`, the job and hypothesis routes in `routes/decision.py`, template sections and theme tokens | `scripts/check-quality.sh` against 0.13.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A sampled evaluation can now hold one CPU for up to 120 s, one at a time on the server; the page polls every 2 s while it runs. | n/a. |
+
