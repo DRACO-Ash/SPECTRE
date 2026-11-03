@@ -145,7 +145,7 @@
          for LOW. .spectre-band-badge carries the darkened fill token, which
          clears 4.5:1 in both themes. #}
       <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
-      <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
+      <span style="font-size:0.78rem; font-weight:600; color:var(--gold)">MOST DANGEROUS COURSE OF ACTION</span>
       {% if worst_coa.behaviour_label is defined %}<span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.behaviour_label }}</span>{% endif %}
     </div>
 

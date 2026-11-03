@@ -54,7 +54,7 @@
 
   {# Fails closed: a result that cannot say whether it is modelled is shown as modelled. #}
   {% if result.modelled is not defined or result.modelled %}
-  <div role="note" style="margin-top:0.35rem; font-size:0.64rem; font-weight:700; color:var(--ops-gold)">
+  <div role="note" style="margin-top:0.35rem; font-size:0.64rem; font-weight:700; color:var(--gold)">
     Modelled estimate, not a computed solution.
   </div>
   {% endif %}
@@ -117,7 +117,7 @@
       {% set i = loop.index0 %}
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.25rem 0.35rem">
-          <div style="font-weight:600; color:var(--ops-gold)">{{ a.name | truncate(22, True, '…') }}</div>
+          <div style="font-weight:600; color:var(--gold)">{{ a.name | truncate(22, True, '…') }}</div>
           <div style="font-size:0.58rem; color:var(--text-dim)">
             {{ a.action_type.value | replace('_',' ') | title }} ·
             P={{ a.probability }} · Conf={{ a.confidence }}
@@ -175,7 +175,7 @@
   {% for a in adv %}
   {% set i = loop.index0 %}
   <div style="margin-bottom:0.5rem">
-    <div style="font-size:0.63rem; font-weight:700; color:var(--ops-gold); margin-bottom:0.2rem">
+    <div style="font-size:0.63rem; font-weight:700; color:var(--gold); margin-bottom:0.2rem">
       {{ a.name }}
     </div>
     <div style="display:flex; gap:0.4rem; flex-wrap:wrap">

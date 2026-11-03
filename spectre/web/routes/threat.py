@@ -1212,8 +1212,9 @@ def _append_manual_targets(
         name = manual["name"]
         tle = manual["tle"]
         confidence = manual.get("confidence", "")
-        # satno_from_tle answers None for a number it cannot read (Alpha-5,
-        # for one); str() made that "None", which then looked fetchable.
+        # satno_from_tle answers None for a number it cannot read (a letter
+        # that is not Alpha-5, for one); str() made that "None", which then
+        # looked fetchable.
         number = satno_from_tle(tle) if tle else None
         satno = str(number) if number is not None else ""
         targets.append(ThreatTarget(

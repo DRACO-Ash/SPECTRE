@@ -9,8 +9,8 @@
       TLE clustering:
       <strong style="color:var(--text-primary)">{{ cs.objects_clustered }}</strong> object{{ "s" if cs.objects_clustered != 1 else "" }} reduced
       {% if cs.total_tles_in > 0 %}
-      (<strong style="color:var(--ops-gold)">{{ cs.total_tles_in }}</strong> TLEs
-      &#8594; <strong style="color:var(--ops-gold)">{{ cs.total_representatives_out }}</strong> representative{{ "s" if cs.total_representatives_out != 1 else "" }},
+      (<strong style="color:var(--gold)">{{ cs.total_tles_in }}</strong> TLEs
+      &#8594; <strong style="color:var(--gold)">{{ cs.total_representatives_out }}</strong> representative{{ "s" if cs.total_representatives_out != 1 else "" }},
       {{ "%.0f"|format(cs.overall_reduction_pct) }}% reduction)
       {% endif %}
       {% if cs.objects_skipped > 0 %}
@@ -69,7 +69,7 @@
           {% if obj.skipped %}<span style="color:var(--text-muted)">—</span>{% else %}{{ obj.clusters_found }}{% endif %}
         </td>
         <td style="text-align:right; padding:0.12rem 0.4rem; color:{% if obj.noise_count > 0 %}var(--amber){% else %}var(--text-muted){% endif %}">{{ obj.noise_count }}</td>
-        <td style="text-align:right; padding:0.12rem 0 0.12rem 0.4rem; color:{% if obj.skipped or obj.fallback %}var(--text-muted){% elif obj.reduction_pct >= 30 %}var(--ops-gold){% else %}var(--text-dim){% endif %}">
+        <td style="text-align:right; padding:0.12rem 0 0.12rem 0.4rem; color:{% if obj.skipped or obj.fallback %}var(--text-muted){% elif obj.reduction_pct >= 30 %}var(--gold){% else %}var(--text-dim){% endif %}">
           {% if obj.skipped or obj.fallback %}—{% else %}{{ "%.0f"|format(obj.reduction_pct) }}%{% endif %}
         </td>
         <td style="text-align:center; padding:0.12rem 0 0.12rem 0.4rem; font-size:0.65rem; white-space:nowrap">

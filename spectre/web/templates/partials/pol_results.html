@@ -101,7 +101,7 @@
       <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
         {{ intel.mission_profile }}
       </div>
-      <div style="font-size:0.68rem; color:var(--ops-gold); font-style:italic; margin-bottom:0.4rem">
+      <div style="font-size:0.68rem; color:var(--gold); font-style:italic; margin-bottom:0.4rem">
         {{ intel.behaviour_class }}
       </div>
       <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.5; max-width:52rem">
@@ -266,7 +266,7 @@
       {% if reserve_reset %}
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Since reserve reset</td>
-        <td style="text-align:right; font-weight:600; color:var(--ops-gold)">
+        <td style="text-align:right; font-weight:600; color:var(--gold)">
           {{ pb.spent_since_reset_m_s | m_s }} m/s
         </td>
       </tr>
@@ -357,14 +357,14 @@
                "derived from Table 3, not asserted") }}
   {% endif %}
   {% if pol.next_manoeuvre_est %}
-  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--ops-gold)") }}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--gold)") }}
   {% endif %}
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
   {{ stat_card("Altitude", pol.records[-1].alt_km | round(1) ~ " km", "current mean") }}
   {{ stat_card("Inclination [𝑖]", pol.records[-1].inc_deg | round(4) ~ "°", "current") }}
   {% if pol.records[-1].geo_longitude_deg is not none %}
-  {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--ops-gold)") }}
+  {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--gold)") }}
   {% endif %}
   {% if pol.records[-1].geo_drift_rate_deg_day is not none %}
   {% set dr = pol.records[-1].geo_drift_rate_deg_day %}
@@ -457,9 +457,9 @@
     </table>
     <div style="margin-top:0.5rem; font-size:0.62rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
       <strong>Out-of-PoL trigger:</strong> ΔV &gt;
-      <span style="color:var(--ops-gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
+      <span style="color:var(--gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
       or gap &gt;
-      <span style="color:var(--ops-gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
+      <span style="color:var(--gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
     </div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Need ≥ 2 manoeuvres for statistical bounds.</p>
@@ -558,7 +558,7 @@
       <div style="border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.5rem; text-align:center">
         <div style="font-size:0.58rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em">+{{ label }}</div>
         {% if lon is not none %}
-        <div style="font-size:1rem; font-weight:800; color:var(--ops-gold)">{{ lon | round(1) }}°</div>
+        <div style="font-size:1rem; font-weight:800; color:var(--gold)">{{ lon | round(1) }}°</div>
         <div style="font-size:0.6rem; color:{{ DRIFT_COLOR.get(dir,'#6b7280') }}">
           {{ DRIFT_ICON.get(dir,"") }} {{ dir }}</div>
         {% else %}

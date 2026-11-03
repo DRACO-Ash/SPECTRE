@@ -932,10 +932,10 @@ class TestYourWarning:
         records = _events_history(_RECENT_RAISE)
         before = _confirmed(records)[-1].tle_before.tle
         _arrange(hrr, monkeypatch, records)
-        # A pasted set with an Alpha-5 number the catalogue reader cannot read: its satno is "".
-        lines = [line[:2] + "A2902" + line[7:-1] for line in _target_tle().splitlines()]
-        alpha5 = "\n".join(line + str(_checksum(line)) for line in lines)
-        hrr.manual_sweep_tles = [{"name": "PASTED", "tle": alpha5, "confidence": "HIGH"}]
+        # A pasted set whose number cannot be read (I is not an Alpha-5 letter): its satno is "".
+        lines = [line[:2] + "I2902" + line[7:-1] for line in _target_tle().splitlines()]
+        unreadable = "\n".join(line + str(_checksum(line)) for line in lines)
+        hrr.manual_sweep_tles = [{"name": "PASTED", "tle": unreadable, "confidence": "HIGH"}]
         hrr.hrr_objects = [{"name": "UK-PENDING", "country": "GBR", "rank": 1}]
         _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
         page = _sweep(client, auth_cookie)

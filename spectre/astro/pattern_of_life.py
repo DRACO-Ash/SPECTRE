@@ -35,6 +35,7 @@ from typing import Any, NamedTuple
 from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
+from spectre.astro.catalogue import catalogue_number
 from spectre.astro.constants import (
     MU_EARTH,
     R_EARTH,
@@ -784,16 +785,17 @@ class ParseCounts(NamedTuple):
     other_object: int = 0
 
 
-# Alpha-5 catalogue numbers: a letter, I and O excluded, stands for 10 to 33.
-_ALPHA5 = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-
-
 def _catalogue_number(l1: str) -> int:
-    """The catalogue number in columns 3-7 of line 1, alpha-5 included."""
-    field = l1[2:7].strip()
-    if field[:1].isalpha():
-        return (_ALPHA5.index(field[0].upper()) + 10) * 10_000 + int(field[1:])
-    return int(field)
+    """The catalogue number in columns 3-7 of line 1, Alpha-5 included.
+
+    Read by the one shared reader, so the history and ``satno_from_tle`` agree
+    on every field (SPC-026). An unreadable field raises ValueError, which the
+    caller counts as a malformed pair.
+    """
+    number = catalogue_number(l1[2:7])
+    if number is None:
+        raise ValueError(f"line 1 carries no readable catalogue number: {l1[2:7]!r}")
+    return number
 
 
 def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:

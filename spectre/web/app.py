@@ -24,6 +24,7 @@ from spectre.config.settings import (
     validate_secret_key,
     validate_sqlite_support,
 )
+from spectre.data.intel import satno_from_tle
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.format_units import format_m_s, format_tof_label
@@ -55,6 +56,7 @@ templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL
 templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 templates.env.filters["m_s"] = format_m_s        # {{ dv | m_s }} → delta-v in m/s, honestly rounded
 templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m", one definition
+templates.env.filters["satno"] = satno_from_tle  # {{ tle | satno }} is the catalogue number or None, Alpha-5 read
 
 
 def banner_class(marking: str) -> str:

@@ -114,7 +114,7 @@
   {# Correlated manoeuvres #}
   {% if result.correlated_manoeuvre_epochs %}
   <div style="font-size:0.65rem; margin-bottom:0.35rem">
-    <span style="color:var(--ops-gold); font-weight:700">
+    <span style="color:var(--gold); font-weight:700">
       {{ result.correlated_manoeuvre_epochs | length }} correlated manoeuvre(s) within ±48h:
     </span>
     {% for epoch in result.correlated_manoeuvre_epochs %}

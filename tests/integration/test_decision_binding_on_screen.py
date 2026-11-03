@@ -214,15 +214,19 @@ class TestTheResult:
         red = _line(_binding_block(resp.text), "Red")
         assert re.search(r"Data mode SIMULATED <span[^>]*>SIMULATED</span>, training\.", red)
 
-    def test_an_alpha5_catalogue_number_reads_as_unreadable(
-        self, client: Any, auth_cookie: str, held: Any,
+    @pytest.mark.parametrize(("field", "shown"), [
+        ("A0001", "SATNO 100001."),
+        ("I0001", "SATNO unreadable."),
+    ])
+    def test_an_alpha5_catalogue_number_is_read_and_a_bad_letter_is_not(
+        self, client: Any, auth_cookie: str, held: Any, field: str, shown: str,
     ) -> None:
-        _hold(held, red_tle=_alpha5(_tle(datetime.now(tz=UTC) - timedelta(hours=5), satno=50322)))
+        _hold(held, red_tle=_alpha5(_tle(datetime.now(tz=UTC) - timedelta(hours=5), satno=50322), field))
         resp = _evaluate(client, auth_cookie, _form(red_sat="RX"))
         assert resp.status_code == 200
         assert "error-msg" not in resp.text
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
-        assert "Red: RX (RX), SATNO unreadable." in text
+        assert f"Red: RX (RX), {shown}" in text
         assert "None" not in text
 
     def test_an_unreadable_epoch_renders(self, client: Any, auth_cookie: str, held: Any) -> None:
