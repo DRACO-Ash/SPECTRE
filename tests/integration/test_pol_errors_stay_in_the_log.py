@@ -19,8 +19,9 @@ from tests.integration.conftest import session_state
 _MARKER = "secret-internal-detail-4471"
 
 
-@pytest.fixture
-def open_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(autouse=True)
+def _open_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test here posts more than once, so the UDL rate limits are opened."""
     monkeypatch.setattr(rate_limit, "_udl_auth_limiter", rate_limit.SlidingWindowLimiter(50, 60))
     monkeypatch.setattr(rate_limit, "_udl_data_limiter", rate_limit.SlidingWindowLimiter(50, 60))
 
@@ -34,7 +35,7 @@ def _analyse(client: Any, cookie: str, source: str) -> Any:
 
 @pytest.mark.parametrize("source", ["udl_direct", "udl"])
 def test_a_failed_udl_fetch_keeps_its_detail_in_the_log(
-    client: Any, auth_cookie: str, open_limits: None, monkeypatch: pytest.MonkeyPatch,
+    client: Any, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture, source: str,
 ) -> None:
     async def refused(*_a: Any, **_k: Any) -> None:
@@ -56,7 +57,7 @@ def test_a_failed_udl_fetch_keeps_its_detail_in_the_log(
 
 
 def test_a_failed_analysis_keeps_its_detail_in_the_log(
-    client: Any, auth_cookie: str, open_limits: None, monkeypatch: pytest.MonkeyPatch,
+    client: Any, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     async def merged(*_a: Any, **_k: Any) -> tuple[str, str, dict[str, Any], dict[str, Any], str]:
