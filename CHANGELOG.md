@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `spectre.domain.pree_scoring`: evidence-coverage-weighted threat scoring with explicit
+  confidence tiers, vendored from the Pree service at commit `9584063`. Complements
+  `threat_assessment`, which answers reachability (ACCESS and CAPABILITY); this answers how
+  threatening the observed evidence is, and how much of the evidence was there to read. A missing
+  indicator is excluded from the weighting and reported as `TBC, re-verify` rather than defaulted
+  to zero, a mean or a "safe" value, so a score of 97 at LOW confidence cannot be mistaken for 97
+  at HIGH. Pure standard library, no I/O, 100% covered by 24 tests.
+
+### Changed
+
+- The vendored scorer's relative-velocity rationale reads in metres per second, converted rather
+  than relabelled, to satisfy the house rule in `test_operator_sees_metres_per_second`. Scores are
+  unaffected: the arithmetic still runs on the km/s input and matches Pree's output exactly. The
+  conversion carries its own test, because the house guard is string-based and cannot detect a
+  label changed without its value, which is one of the four failures that guard was built after.
+
 ## [0.6.4] - 2026-10-28
 
 ### Fixed
