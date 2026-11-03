@@ -38,6 +38,7 @@ __all__ = [
     "is_new_burn",
     "least_warning_by_target",
     "newest_unconfirmed",
+    "when_burned",
 ]
 
 #: A change smaller than this reads as unchanged. Each orbit is offered its own
@@ -261,3 +262,20 @@ def newest_unconfirmed(candidates: Iterable[Any], after: datetime | None) -> Any
     """
     newer = [c for c in candidates if after is None or c.burn_window[1] > after]
     return max(newer, key=lambda c: c.burn_window[0], default=None)
+
+
+def _moment(moment: datetime) -> str:
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def when_burned(manoeuvre: Any) -> str:
+    """When a burn or detection happened, only as closely as that is known.
+
+    "at 03:12 UTC on 2 Nov" when the estimator dated it, so its window is one
+    moment. Otherwise "between X and Y", the element sets either side: its
+    burn epoch is then the set after it, which is no time the burn earned.
+    """
+    start, end = manoeuvre.burn_window
+    if start == end:
+        return f"at {_moment(manoeuvre.burn_epoch)}"
+    return f"between {_moment(start)} and {_moment(end)}"

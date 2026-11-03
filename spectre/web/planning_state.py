@@ -115,6 +115,9 @@ class SessionState:
     # The operator's response time in hours, for decide-by (SPC-008); None
     # until they set it, when the default is used and said to be the default.
     response_time_h: float | None = None
+    # Response times set for named targets, by target name (SPC-022). A target
+    # here takes its own; any other takes response_time_h, else the default.
+    response_time_by_target: dict[str, float] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""
@@ -239,10 +242,13 @@ def clear_account_state(user_id: int) -> None:
     """Discard the state of every sign-in of an account.
 
     Called when its sessions are revoked (logout, password change) and when it
-    is deleted, so its UDL password goes with them.
+    is deleted, so its UDL password goes with them. The credentials are blanked
+    on each state as well as the state dropped: a burn watch check in flight
+    still holds the state, and must find no password in it (V0.9 review 6).
     """
     for key in [k for k in _store if k.user_id == user_id]:
-        del _store[key]
+        state = _store.pop(key)[1]
+        state.udl_username = state.udl_password = None
 
 
 # ── App-level on-orbit catalog (shared across all operator sessions) ─────────

@@ -143,3 +143,19 @@ def test_the_training_banner_is_a_note_not_a_live_status() -> None:
     source = (Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates" / "training.html").read_text()
     banner = source[source.index('id="training-mode-banner"'):][:200]
     assert 'role="note"' in banner and 'role="status"' not in banner
+
+
+class TestTheSweepTargetConfig:
+    def test_the_response_time_per_target_is_labelled_and_shows_what_is_held(
+        self, client: Any, auth_cookie: str, udl_state: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SPC-022: the per-target response time is a labelled field on the sweep form, with the times held."""
+        monkeypatch.setattr(udl_state, "response_time_by_target", {"BLUE-1": 6.0, "BLUE-2": 1.5})
+        resp = client.get("/plan/threat/target-config?red_sat=RED-X", cookies={"spectre_session": auth_cookie})
+        assert resp.status_code == 200
+        assert 'name="target_response_name"' in resp.text and 'name="target_response_h"' in resp.text
+        assert _unlabelled(resp.text) == []
+        text = " ".join(re.sub(r"<[^>]+>", " ", resp.text).split())
+        assert "BLUE-1: 6 h" in text and "BLUE-2: 1.5 h" in text
+        # A held time can be changed but not removed, so the operator is told how long it lasts.
+        assert "A time held for a target can be changed, and is kept until you sign out." in text

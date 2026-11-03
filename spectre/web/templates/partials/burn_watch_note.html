@@ -20,7 +20,7 @@
 {% endif %}
   {% if ba is not none %}
   <div class="burn-alert" style="border-left:4px solid var(--spectre-status-high); background:rgba(var(--spectre-status-high-rgb), 0.06); border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.3rem">
-    <strong>{{ ba.red_name }} burned at {{ ba.burn_when }}</strong> (seen {{ ba.seen_at.strftime('%H:%M UTC') }}):
+    <strong>{{ ba.red_name }} burned {{ ba.burn_when }}</strong> (seen {{ ba.seen_at.strftime('%H:%M UTC') }}):
     {% if ba.change.status.value == "figures" %}{{ ba.change.headline }}{% else %}the change in your warning is not computed: {{ ba.change.headline }}{% endif %}
     <button class="btn-secondary btn-sm" type="button" hx-post="/plan/threat/sweep" hx-include="#threat-sweep-form"
             hx-target="#threat-sweep-results" hx-swap="innerHTML" title="Run the sweep again to see the full change">Sweep again</button>

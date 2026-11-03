@@ -120,6 +120,34 @@ class TestAnnouncing:
         assert _burn_lines(state)[-1] == ("[BURN] RED-X burned at 04:00 UTC on 2 Nov: That burn cut your warning on "
                                           "BLUE-1 from 14h to 3h.")
 
+    @pytest.mark.parametrize(("dated", "said"), [
+        (True, "at 04:00 UTC on 2 Nov"),
+        (False, "between 22:00 UTC on 1 Nov and 05:00 UTC on 2 Nov"),
+    ])
+    async def test_it_says_when_it_burned_only_as_closely_as_that_is_known(
+            self, owner: Any, monkeypatch: pytest.MonkeyPatch, dated: bool, said: str) -> None:
+        """An undated burn earned no single time: its epoch is the set after it, so the alert gives its bracket.
+
+        The sweep already said "between X and Y" for it; the watch named the
+        post-burn set's epoch as the moment it burned.
+        """
+        key, state = owner
+        burn = _burn(_BURN_AT, _BURN_AT + timedelta(hours=1))
+        if not dated:
+            burn.burn_window = (burn.tle_before.epoch, burn.tle_after.epoch)
+            burn.burn_epoch = burn.tle_after.epoch
+        _Udl(monkeypatch, [burn], _NOW - timedelta(minutes=30))
+        alert = await check_once(state, key, _watch(state, accounted=_NOW - timedelta(days=3)), _NOW, _compute)
+        assert alert is not None and alert.burn_when == said
+        assert _burn_lines(state)[-1].startswith(f"[BURN] RED-X burned {said}: ")
+
+        async def fails(*_a: Any) -> WarningChange:
+            raise RuntimeError("solver")
+
+        state.elset_histories.clear()
+        await check_once(state, key, _watch(state, accounted=_NOW - timedelta(days=3)), _NOW, fails)
+        assert state.burn_watch.problem.startswith(f"RED-X burned {said}, but what it changed could not be computed.")
+
     @pytest.mark.parametrize("shift_minutes", [-2, 2])
     async def test_a_redated_burn_is_not_announced_again(self, owner: Any, monkeypatch: pytest.MonkeyPatch,
                                                          shift_minutes: int) -> None:
@@ -293,6 +321,36 @@ class TestItStops:
         assert await check_once(state, key, watch, _NOW, compute) is None
         assert (len(computed), state.burn_alert, len(_burn_lines(state)) - before) == (computes, None, 0)
 
+    @pytest.mark.parametrize("stage", ["probe", "history"])
+    async def test_a_check_in_flight_after_signing_out_makes_no_udl_request(
+            self, owner: Any, monkeypatch: pytest.MonkeyPatch, stage: str) -> None:
+        """Signing out takes the UDL credentials from the state the check still holds (V0.9 review 6).
+
+        The real probe and the real history fetch run; only the UDL requests under
+        them are stood in. Before, both went to UDL with the signed-out password.
+        """
+        key, state = owner
+        requests: list[Any] = []
+
+        async def newest_set(*args: Any, **_k: Any) -> None:
+            requests.append(("newest set", args))
+
+        async def history(*args: Any, **_k: Any) -> tuple[str, str, dict[str, Any], dict[str, Any], str]:
+            requests.append(("history", args))
+            return "", "", {}, {}, ""
+
+        monkeypatch.setattr(udl, "fetch_tle_for_satno", newest_set)
+        monkeypatch.setattr(pol, "_fetch_merged_history", history)
+        watch = _watch(state, accounted=_NOW - timedelta(days=3))
+        state.elset_histories.clear()
+        clear_account_state(key.user_id)
+        if stage == "probe":
+            assert await check_once(state, key, watch, _NOW, _compute) is None
+        else:
+            with pytest.raises(burn_watch._StatedError):
+                await burn_watch._new_burns(state, watch, _NOW, _NOW)
+        assert requests == []
+
     async def test_eight_hours_after_signing_in_it_stops(self, owner: Any) -> None:
         """W6: expiry runs from the sign-in, not from when the watch started."""
         key, state = owner
@@ -460,7 +518,7 @@ class TestTheNote:
             page = client.get("/plan/threat/burn-watch", cookies={"spectre_session": auth_cookie}).text
             assert "Not watching RED-X for burns: UDL is disconnected." in page
             assert "hx-trigger" not in page
-            state.burn_alert = burn_watch.BurnAlert("RED-X", "04:00 UTC on 2 Nov", _NOW,
+            state.burn_alert = burn_watch.BurnAlert("RED-X", "at 04:00 UTC on 2 Nov", _NOW,
                                                     WarningChange(Status.FIGURES, "That burn cut your warning."))
             page = client.get("/plan/threat/burn-watch", cookies={"spectre_session": auth_cookie}).text
             assert "RED-X burned at 04:00 UTC on 2 Nov" in page
@@ -492,7 +550,7 @@ class TestTheNoteRendering:
         """T2 rendered the note with no alert and no problem, so raw colours there stayed green (V0.9 review 29)."""
         watch = _watch(SimpleNamespace(), accounted=None)
         watch.problem = "The element set could not be fetched from UDL."
-        alert = burn_watch.BurnAlert("RED-X", "03:12 UTC on 2 Nov", _NOW,
+        alert = burn_watch.BurnAlert("RED-X", "at 03:12 UTC on 2 Nov", _NOW,
                                      WarningChange(Status.FIGURES, "That burn cut your warning."))
         html = _note(burn_watch=watch, burn_alert=alert, watch_ends_at=_NOW + timedelta(hours=7))
         alert_tag = re.search(r'<div class="burn-alert" style="([^"]*)"', html)
@@ -514,7 +572,7 @@ class TestTheNoteRendering:
         """
         watch = _watch(SimpleNamespace(), accounted=None)
         watch.stopped = stopped
-        alert = burn_watch.BurnAlert("RED-X", "03:12 UTC on 2 Nov", _NOW,
+        alert = burn_watch.BurnAlert("RED-X", "at 03:12 UTC on 2 Nov", _NOW,
                                      WarningChange(Status.FIGURES, "That burn cut your warning."))
         html = _note(burn_watch=watch, burn_alert=alert, watch_ends_at=_NOW + timedelta(hours=7))
         live, note = _opening_tag(html, "burn-watch-live"), _opening_tag(html, "burn-watch-note")
@@ -536,7 +594,7 @@ class TestTheNoteRendering:
         Sweep Targets button does, and the note passes nothing down.
         """
         watch = _watch(SimpleNamespace(), accounted=None)
-        alert = burn_watch.BurnAlert("RED-X", "03:12 UTC on 2 Nov", _NOW,
+        alert = burn_watch.BurnAlert("RED-X", "at 03:12 UTC on 2 Nov", _NOW,
                                      WarningChange(Status.FIGURES, "That burn cut your warning."))
         html = _note(burn_watch=watch, burn_alert=alert, watch_ends_at=_NOW + timedelta(hours=7))
         button = re.search(r'<button[^>]*>Sweep again</button>', html)

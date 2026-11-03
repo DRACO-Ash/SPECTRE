@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from spectre.domain.models import ThreatTarget
-from spectre.domain.warning_change import WarningChange, burns_in_window, is_new_burn
+from spectre.domain.warning_change import WarningChange, burns_in_window, is_new_burn, when_burned
 from spectre.web.elsets import limit_hours_for_regime
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
@@ -82,6 +82,7 @@ class BurnAlert:
     """A burn the watch found, and what it changed."""
 
     red_name: str
+    #: "at X" for a dated burn, "between X and Y" for an undated one.
     burn_when: str
     seen_at: datetime
     change: WarningChange
@@ -107,6 +108,9 @@ async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
     from spectre.web.elsets import _epoch_of
     from spectre.web.routes.udl import fetch_tle_for_satno
 
+    if not state.udl_username or not state.udl_password:
+        # Signed out or disconnected: no request goes to UDL without the operator's own credentials.
+        raise _StatedError("UDL is not connected, so the newest element set was not asked for.")
     newest = await fetch_tle_for_satno(
         watch.red_satno, state.udl_username or "", state.udl_password or "",
         data_mode=state.udl_data_mode, source=state.udl_tle_source,
@@ -121,9 +125,8 @@ def _first_line(change: WarningChange) -> str:
 
 
 def _burn_when(burns: list[Any]) -> str:
-    """When the latest of the burns happened, as the operator reads it."""
-    latest = max(burns, key=lambda m: m.burn_window[0])
-    return f"{latest.burn_epoch:%H:%M} UTC on {latest.burn_epoch.day} {latest.burn_epoch:%b}"
+    """When the latest of the burns happened, as the operator reads it: "at X", or "between X and Y" if undated."""
+    return when_burned(max(burns, key=lambda m: m.burn_window[0]))
 
 
 class _StatedError(Exception):
@@ -143,7 +146,7 @@ def _record(state: SessionState, watch: BurnWatch, burns: list[Any], change: War
     when = _burn_when(burns)
     alert = BurnAlert(watch.red_name, when, now, change)
     state.burn_alert = alert
-    state.append_log(f"[BURN] {watch.red_name} burned at {when}: {_first_line(change)}")
+    state.append_log(f"[BURN] {watch.red_name} burned {when}: {_first_line(change)}")
     watch.accounted_until = max(m.tle_after.epoch for m in burns)
     return alert
 
@@ -238,7 +241,7 @@ async def _check(
     try:
         change = await compute(state, watch, found, now)
     except Exception as exc:
-        lead = f"{watch.red_name} burned at {_burn_when(found[2])}, but what it changed could not be computed."
+        lead = f"{watch.red_name} burned {_burn_when(found[2])}, but what it changed could not be computed."
         raise _StatedError(lead, unseen=False) from exc
     if still_wanted(state, key, watch):
         return None

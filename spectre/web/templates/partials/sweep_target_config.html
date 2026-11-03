@@ -120,6 +120,46 @@
 </details>
 {% endif %}
 
+{# Response time for one named target (SPC-022). Sent with the sweep; decide-by
+   uses a target's own time, else the one above, else the 12 h default. Guarded,
+   because the template tests render with StrictUndefined. #}
+{% if interceptor_name %}
+{% set held_times = response_times if response_times is defined and response_times else {} %}
+<details id="ts-target-response" style="margin-top:0.6rem; border-top:1px solid var(--border); padding-top:0.5rem">
+  <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+    <span style="display:inline-block; transition:transform 0.15s; font-size:0.65rem">&#9654;</span>
+    Response Time per Target
+    {% if held_times %}
+    <span style="background:var(--ops-blue); color:#fff; font-size:0.65rem; padding:0.1rem 0.4rem; border-radius:3px; font-weight:700">{{ held_times | length }}</span>
+    {% endif %}
+  </summary>
+  <p class="label-dim" style="font-size:0.7rem; margin:0.4rem 0">
+    The hours you need to respond for one target. Decide-by uses it for that target, your response time above for any other, and 12 hours if neither is set. It is held when you sweep; blank hours keep what is held. A time held for a target can be changed, and is kept until you sign out.
+  </p>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem">
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+      Target Name
+      <input type="text" name="target_response_name" id="ts-target-response-name" class="form-control"
+             placeholder="e.g. BLUE-1" maxlength="80"
+             style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
+    </label>
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+      Response time (h)
+      <input type="number" name="target_response_h" id="ts-target-response-h" class="form-control"
+             placeholder="12" step="0.5" min="0.5" max="168"
+             style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
+    </label>
+  </div>
+  {% if held_times %}
+  <ul class="label-dim" style="font-size:0.7rem; margin:0.4rem 0 0; padding-left:1rem">
+    {% for name, hours in held_times | dictsort %}
+    <li>{{ name }}: {{ "%g" | format(hours) }} h</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</details>
+{% endif %}
+
 {# Sweep button — shown when interceptor is selected #}
 {% if interceptor_name %}
 <div class="submit-row" style="margin-top:0.7rem; padding-top:0.5rem; border-top:1px solid var(--border)">

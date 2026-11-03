@@ -18,8 +18,9 @@ from typing import Any
 import pytest
 
 from spectre.astro.pattern_of_life import ParseCounts
+from spectre.domain.custody import Custody, CustodyStatus
 from spectre.domain.models import ThreatTarget
-from spectre.domain.warning_change import Change, Status
+from spectre.domain.warning_change import Change, Status, WarningChange
 from spectre.web import burn_watch
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, check_once
 from spectre.web.models import SessionKey
@@ -189,11 +190,17 @@ def _basis(now: datetime) -> Any:
 
 
 def _history(newest: datetime | None, afters: list[datetime]) -> Any:
+    """A held history whose burns each happened an hour before the post-burn set in *afters*."""
     if newest is None:
         return threat._RedHistory(None, None, None, "Its element-set history is still loading from UDL.", None)
-    held = SimpleNamespace(manoeuvres=[SimpleNamespace(tle_after=SimpleNamespace(epoch=a)) for a in afters],
-                           records=[SimpleNamespace(epoch=newest)])
+    burns = [SimpleNamespace(burn_window=(a - timedelta(hours=1), a - timedelta(hours=1)),
+                             burn_epoch=a - timedelta(hours=1), tle_after=SimpleNamespace(epoch=a)) for a in afters]
+    held = SimpleNamespace(manoeuvres=burns, candidate_manoeuvres=[], records=[SimpleNamespace(epoch=newest)])
     return threat._RedHistory(held, None, None, "", newest)
+
+
+_HELD = CustodyStatus(Custody.HELD, "Custody held.")
+_LOST = CustodyStatus(Custody.LOST, "Custody lost.")
 
 
 class TestASweepStartsTheWatch:
@@ -208,11 +215,14 @@ class TestASweepStartsTheWatch:
         return recorded
 
     def _sweep_ends(self, udl_username: str | None, history: Any, *, satno: str | None = "90010",
-                    session_key: Any = "sign-in") -> tuple[Any, Any]:
+                    session_key: Any = "sign-in", flown: tuple[CustodyStatus, datetime] | None = None,
+                    ) -> tuple[Any, Any]:
+        """The sweep ends; by default custody is held and it flew the history's newest set."""
         state = SimpleNamespace(udl_username=udl_username)
         user = SimpleNamespace(session_key=session_key)
+        newest = history.pol.records[-1].epoch if history.pol is not None else None
         threat._watch_after_sweep(state, user, _basis(self._NOW), ("RED-LEO", satno), history=history,
-                                  history_task=None)
+                                  history_task=None, flown=flown or (_HELD, newest))
         return state, user
 
     def test_the_burns_the_sweep_showed_are_accounted_for(self, started: list[Any]) -> None:
@@ -234,6 +244,65 @@ class TestASweepStartsTheWatch:
         (_, _, watch, _), = started
         assert watch.accounted_until is None and watch.newest_epoch is None
         assert watch.next_check_at == self._NOW
+
+    def test_a_burn_refused_for_custody_lost_stays_announceable(self, started: list[Any]) -> None:
+        """The sweep gave no figures, so the burn was never told: the first check runs at once (V0.9 review 13).
+
+        The watch was told the burn was accounted for and the newest set seen, so
+        it never announced the burn the sweep had refused to give figures for.
+        """
+        burn_after = self._NOW - timedelta(hours=5)
+        self._sweep_ends("operator", _history(self._NOW - timedelta(hours=1), [burn_after]),
+                         flown=(_LOST, self._NOW - timedelta(hours=30)))
+        (_, _, watch, _), = started
+        assert (watch.accounted_until, watch.newest_epoch, watch.next_check_at) == (None, None, self._NOW)
+
+    def test_a_burn_after_the_set_the_sweep_flew_stays_announceable(self, started: list[Any]) -> None:
+        """The flown set predates the second burn: only the first is in its figures, so only it is accounted."""
+        afters = [self._NOW - timedelta(hours=20), self._NOW - timedelta(hours=5)]
+        self._sweep_ends("operator", _history(self._NOW - timedelta(hours=1), afters),
+                         flown=(_HELD, self._NOW - timedelta(hours=8)))
+        (_, _, watch, _), = started
+        assert (watch.accounted_until, watch.newest_epoch, watch.next_check_at) == (afters[0], None, self._NOW)
+
+    def test_an_undated_burn_whose_pre_burn_set_was_flown_stays_announceable(self, started: list[Any]) -> None:
+        """Flying the set at the start of an undated burn's bracket is not flying a set from after the burn.
+
+        The sweep refuses figures for a set before the end of the bracket, so
+        the burn was never told, and the watch must still announce it.
+        """
+        after = self._NOW - timedelta(hours=2)
+        start, end = after - timedelta(hours=8), after - timedelta(hours=1)
+        undated = SimpleNamespace(burn_window=(start, end), burn_epoch=None, tle_after=SimpleNamespace(epoch=after))
+        newest = self._NOW - timedelta(hours=1)
+        held = SimpleNamespace(manoeuvres=[undated], candidate_manoeuvres=[], records=[SimpleNamespace(epoch=newest)])
+        self._sweep_ends("operator", threat._RedHistory(held, None, None, "", newest), flown=(_HELD, start))
+        (_, _, watch, _), = started
+        assert (watch.accounted_until, watch.newest_epoch, watch.next_check_at) == (None, None, self._NOW)
+
+    async def test_the_first_check_then_announces_it(self, owner: Any, started: list[Any],
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+        """The watch the custody-lost sweep started announces the burn when UDL holds nothing newer."""
+        key, state = owner
+        history = _history(self._NOW - timedelta(hours=1), [self._NOW - timedelta(hours=5)])
+        state.elset_histories[_SATNO] = pol.HeldHistory(_SATNO, self._NOW, pol=history.pol)
+        monkeypatch.setattr(threat, "_utc_now", lambda: self._NOW)
+        monkeypatch.setattr(pol, "history_evidence", lambda *_a: (SimpleNamespace(manoeuvres=[]), None))
+
+        async def probe(_state: Any, _watch: Any) -> datetime:
+            return history.pol.records[-1].epoch
+
+        async def compute(*_a: Any) -> Any:
+            return WarningChange(Status.FIGURES, "That burn cut the warning on BLUE-LEO from 14h to 3h.")
+
+        monkeypatch.setattr(burn_watch, "_probe", probe)
+        threat._watch_after_sweep(state, SimpleNamespace(session_key=key), _basis(self._NOW), ("RED-LEO", str(_SATNO)),
+                                  history=history, history_task=None, flown=(_LOST, self._NOW - timedelta(hours=30)))
+        (_, _, watch, _), = started
+        state.burn_watch = watch
+        alert = await check_once(state, key, watch, watch.next_check_at, compute)
+        assert alert is not None and alert.burn_when == "at 04:00 UTC on 2 Nov"
+        assert alert.change.headline == "That burn cut the warning on BLUE-LEO from 14h to 3h."
 
     @pytest.mark.parametrize(("udl_username", "satno", "session_key"), [
         (None, "90010", "sign-in"), ("", "90010", "sign-in"), ("operator", None, "sign-in"), ("operator", "90010", None),

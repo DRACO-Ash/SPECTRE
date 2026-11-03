@@ -1,13 +1,15 @@
 """Decide-by: the latest moment the operator can still act in time (SPC-008).
 
 The operator's third output, joint second with the warning-time change: "what
-do I need to decide, by when?" The decide-by time is the fastest credible
-arrival at a target minus the operator's own response time, the hours it takes
-to plan, approve and carry out a response. Past it, a response started now
-would land after the arrival it is answering.
+do I need to decide, by when?" Each target's decide-at is its fastest credible
+arrival minus the operator's response time for it, the hours it takes to plan,
+approve and carry out a response; the decide-by time is the earliest of those.
+Past it, a response started now would land after the arrival it is answering.
 
-The response time is the operator's to set. Until they do, a default of 12
-hours is used and every sentence says it is the default (owner, 2 November
+The response time is the operator's to set, for the sign-in and, where it
+differs, for a named target (SPC-022): a target's own time is used for it, else
+the sign-in's. Until either is set, a default of 12
+hours is used and every sentence says which it used (owner, 2 November
 2026: "don't ask me again, just crack on"; the value is Claude's choice, not a
 ruling). 12 hours is conservative on purpose: a defensive manoeuvre needs
 planning, approval and an upload pass, and an early decide-by costs less than
@@ -22,8 +24,8 @@ Pure functions over plain data. No I/O, no framework.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
@@ -33,6 +35,7 @@ __all__ = [
     "MAX_RESPONSE_H",
     "DecideBy",
     "Due",
+    "ResponseTimes",
     "decide_by",
     "earliest_arrival",
     "parse_response_hours",
@@ -72,10 +75,32 @@ def _hours(hours: float) -> str:
     return f"{hours:g} h"
 
 
-def _response(hours: float, is_default: bool) -> str:
-    if is_default:
-        return f"the default response time of {_hours(hours)}, which you have not set"
-    return f"your response time of {_hours(hours)}"
+@dataclass(frozen=True)
+class ResponseTimes:
+    """The operator's response times: one per named target where set, and the sign-in's (SPC-022).
+
+    A target's own time is used for it; a target with none takes the
+    sign-in's, and with neither set the default is used and said to be the
+    default. Hours, already checked by :func:`parse_response_hours`.
+    """
+
+    sign_in: float | None = None
+    by_target: Mapping[str, float] = field(default_factory=dict)
+
+    def for_target(self, name: str) -> tuple[float, str]:
+        """The hours used for *name*, and how the sentence names which time they are."""
+        own = self.by_target.get(name)
+        if own is not None:
+            return own, f"your response time for {name} of {_hours(own)}"
+        if self.sign_in is not None:
+            return self.sign_in, f"your response time of {_hours(self.sign_in)}"
+        return DEFAULT_RESPONSE_H, f"the default response time of {_hours(DEFAULT_RESPONSE_H)}, which you have not set"
+
+
+def _arrivals(entries: Iterable[Any], budget_m_s: float) -> list[tuple[datetime, Any]]:
+    """Each intercept within *budget_m_s* that arrives, with its arrival: burn time plus flight time."""
+    return [(e.burn_epoch + timedelta(hours=e.tof_hours), e) for e in entries
+            if e.delta_v_m_s <= budget_m_s and getattr(e, "arrives", True)]
 
 
 def earliest_arrival(entries: Iterable[Any], budget_m_s: float) -> tuple[datetime, Any] | None:
@@ -85,32 +110,36 @@ def earliest_arrival(entries: Iterable[Any], budget_m_s: float) -> tuple[datetim
     transfer can arrive first; the worst case card ranks on flight time alone,
     which is the warning, not the arrival.
     """
-    feasible = [(e.burn_epoch + timedelta(hours=e.tof_hours), e) for e in entries
-                if e.delta_v_m_s <= budget_m_s and getattr(e, "arrives", True)]
-    return min(feasible, key=lambda pair: pair[0], default=None)
+    return min(_arrivals(entries, budget_m_s), key=lambda pair: pair[0], default=None)
 
 
-def decide_by(
-    arrival: tuple[datetime, Any] | None, response_h: float, is_default: bool, now: datetime, budget_m_s: float,
-) -> DecideBy:
-    """The decide-by time from the earliest arrival, or why there is none."""
-    if arrival is None:
+def decide_by(entries: Iterable[Any], times: ResponseTimes, now: datetime, budget_m_s: float) -> DecideBy:
+    """The earliest decide-at across the targets in reach, or why there is none.
+
+    Each intercept's decide-at is its arrival minus the response time for its
+    target. With response times that differ, a later arrival with a longer
+    response time can need deciding first, so the earliest arrival minus one
+    response time is not the answer. A tie goes to the sooner arrival.
+    """
+    decisions = [(at - timedelta(hours=times.for_target(e.target.target_name)[0]), at, e)
+                 for at, e in _arrivals(entries, budget_m_s)]
+    if not decisions:
         return DecideBy(Due.NONE, f"No decide-by: no target is in reach within {budget_m_s:g} m/s.")
-    at, entry = arrival
+    decide_at, at, entry = min(decisions, key=lambda d: (d[0], d[1]))
     target = entry.target.target_name
-    decide_at = at - timedelta(hours=response_h)
+    response = times.for_target(target)[1]
     if decide_at <= now:
         left = max((at - now).total_seconds() / 3600.0, 0.0)
         return DecideBy(
             Due.PASSED,
             f"Decide-by has passed for {target}: an intercept could arrive at {_when(at)}, "
-            f"{left:.1f} h from now, inside {_response(response_h, is_default)}.",
+            f"{left:.1f} h from now, inside {response}.",
             decide_at, at, target,
         )
     return DecideBy(
         Due.SET,
         f"Decide by {_when(decide_at)} for {target}: its fastest intercept within {budget_m_s:g} m/s could arrive "
-        f"at {_when(at)}, and that is {_response(response_h, is_default)}.",
+        f"at {_when(at)}, and that is {response}.",
         decide_at, at, target,
     )
 

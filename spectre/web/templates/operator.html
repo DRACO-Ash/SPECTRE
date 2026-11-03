@@ -604,7 +604,7 @@
                 <input type="number" name="max_dv_m_s" value="500" step="10" min="0" />
               </label>
               <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
-                     title="How many hours you need to plan, approve and carry out a response. Decide-by is the soonest an intercept could arrive minus this. Blank keeps what you set last; until you set it, 12 hours is used and the sweep says it is the default.">Your response time (h)
+                     title="How many hours you need to plan, approve and carry out a response. Used for every target without a response time of its own (set those under Response Time per Target); each target's decide-at is its soonest arrival minus its time, and decide-by is the earliest. Blank keeps what you set last; until you set it, 12 hours is used and the sweep says it is the default.">Your response time (h)
                 <input type="number" name="response_time_h" placeholder="12" step="0.5" min="0.5" max="168" />
               </label>
             </div>

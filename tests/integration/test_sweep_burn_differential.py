@@ -18,6 +18,7 @@ import pytest
 
 from spectre.astro.pattern_of_life import ParseCounts, analyse_pattern_of_life
 from spectre.domain.models import RedTrack, ThreatAssessment, ThreatSweepEntry, ThreatTarget
+from spectre.web.burn_watch import CHECK_EVERY
 from spectre.web.routes import pol, threat
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
@@ -178,6 +179,23 @@ class TestTheDifferentialIsOnScreen:
         assert len(calls) == 2
         assert calls[0]["red_tle"] == records[-1].tle
         assert page.count("from 14h to 3h") == 1
+
+
+class TestTheSweepTellsTheWatchWhatItShowed:
+    """The route hands the watch the set it flew, so a burn it has just shown is not announced again at once."""
+
+    def test_a_burn_shown_with_custody_held_is_accounted_for(self, client: Any, auth_cookie: str, leo: Any,
+                                                             monkeypatch: pytest.MonkeyPatch,
+                                                             _no_live_watch: list[Any]) -> None:
+        records = _events_history(_RECENT_RAISE)
+        burn = _confirmed(records)[-1]
+        now = _arrange(leo, monkeypatch, records)
+        _spy(monkeypatch, {burn.tle_before.tle: 14.0, records[-1].tle: 3.0})
+        assert "That burn cut the warning on BLUE-LEO from 14h to 3h." in _sweep(client, auth_cookie)
+        (_, _, watch), = _no_live_watch
+        assert watch.accounted_until == burn.tle_after.epoch
+        assert watch.newest_epoch == records[-1].epoch
+        assert watch.next_check_at == now + CHECK_EVERY
 
 
 class TestNoFiguresItCannotStandBehind:
@@ -434,6 +452,84 @@ class TestDecideBy:
         assert "Response time must be more than 0 and at most 168 hours." in page
         assert leo.response_time_h == 6.0
         leo.response_time_h = None
+
+    @staticmethod
+    def _sweep_for(client: Any, cookie: str, name: str, hours: str) -> str:
+        resp = client.post("/plan/threat/sweep",
+                           data={"red_sat": "RED-LEO", "tgt_group": "none", "max_dv_m_s": _BUDGET,
+                                 "target_response_name": name, "target_response_h": hours},
+                           cookies={"spectre_session": cookie}, headers=csrf_headers(cookie))
+        assert resp.status_code == 200
+        return html.unescape(" ".join(resp.text.split()))
+
+    def test_a_target_takes_its_own_response_time(self, client: Any, auth_cookie: str, leo: Any,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+        """SPC-022: set for BLUE-LEO, it is used for BLUE-LEO and said to be its own, and a blank keeps it."""
+        records = _events_history(_RECENT_RAISE)
+        now = _arrange(leo, monkeypatch, records)
+        monkeypatch.setattr(leo, "response_time_h", 8.0)
+        monkeypatch.setattr(leo, "response_time_by_target", {})
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_for(client, auth_cookie, " BLUE-LEO ", "1")
+        decide = now + timedelta(hours=2)
+        assert f"Decide by {decide:%H:%M} UTC on {decide.day} {decide:%b} for BLUE-LEO" in page
+        assert "your response time for BLUE-LEO of 1 h" in page
+        assert leo.response_time_by_target == {"BLUE-LEO": 1.0}
+        assert leo.response_time_h == 8.0, "the sign-in's time stays the default for other targets"
+        assert "your response time for BLUE-LEO of 1 h" in self._sweep_for(client, auth_cookie, "BLUE-LEO", "")
+
+    @pytest.mark.parametrize("case", [
+        ("BLUE-LEO", "0", "Response time must be more than 0 and at most 168 hours. The response time for BLUE-LEO "
+                          "is unchanged."),
+        ("BLUE-LEO", "soon", "Response time must be a number of hours; got 'soon'. The response time for BLUE-LEO "
+                             "is unchanged."),
+        ("", "3", "A response time for one target needs the target's name; it was not set."),
+        ("B" * 81, "3", "A target's name for a response time must be at most 80 characters; it was not set."),
+    ])
+    def test_a_bad_per_target_time_is_refused_with_a_reason(self, client: Any, auth_cookie: str, leo: Any,
+                                                            monkeypatch: pytest.MonkeyPatch,
+                                                            case: tuple[str, str, str]) -> None:
+        """Checked as the sign-in's time is; nothing held changes, and the time already held is still used."""
+        name, hours, said = case
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        monkeypatch.setattr(leo, "response_time_by_target", {"BLUE-LEO": 6.0})
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_for(client, auth_cookie, name, hours)
+        assert said in page
+        assert leo.response_time_by_target == {"BLUE-LEO": 6.0}
+        assert "your response time for BLUE-LEO of 6 h" in page
+
+    def test_a_name_no_target_in_the_sweep_has_is_said(self, client: Any, auth_cookie: str, leo: Any,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+        """A mistyped name would otherwise be held and never used, without a word."""
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        monkeypatch.setattr(leo, "response_time_by_target", {})
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_for(client, auth_cookie, "BLUE-9", "2")
+        assert ("The response time for BLUE-9 is held, but no target in this sweep is called BLUE-9, so decide-by "
+                "did not use it.") in page
+
+    @pytest.mark.parametrize("case", [("BLUE-2", "2"), ("BLUE-LEO", "2"), ("", "")])
+    def test_a_matched_or_absent_name_is_not_called_unmatched(self, client: Any, auth_cookie: str, leo: Any,
+                                                              monkeypatch: pytest.MonkeyPatch,
+                                                              case: tuple[str, str]) -> None:
+        """Against two targets, a name either of them has is used, and no name at all is not a mistyped one.
+
+        The sign-in's time is 1 h, so the named target's 2 h is the earlier decide-at and the one named.
+        """
+        name, hours = case
+        records = _events_history(_RECENT_RAISE)
+        _arrange(leo, monkeypatch, records)
+        leo.manual_sweep_tles.append({"name": "BLUE-2", "tle": _target_tle(), "confidence": "HIGH"})
+        monkeypatch.setattr(leo, "response_time_h", 1.0)
+        monkeypatch.setattr(leo, "response_time_by_target", {})
+        _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
+        page = self._sweep_for(client, auth_cookie, name, hours)
+        assert "Decide by" in page or "Decide-by has passed" in page
+        assert "no target in this sweep is called" not in page
+        assert (f"your response time for {name} of 2 h" in page) is bool(name)
 
     def test_custody_lost_withholds_it(self, client: Any, auth_cookie: str, leo: Any,
                                        monkeypatch: pytest.MonkeyPatch) -> None:
@@ -723,7 +819,8 @@ class TestAnUndatedBurn:
         _arrange(leo, monkeypatch, records, red_tle=burn.tle_before.tle)
         calls = _spy(monkeypatch, {burn.tle_before.tle: 14.0})
         page = _sweep(client, auth_cookie)
-        assert "from before its burn at" in page
+        assert (f"from before its burn between {threat._when(burn.burn_window[0])} and "
+                f"{threat._when(burn.burn_window[1])}, so its figures") in page
         assert "did not shorten" not in page
         assert "cut the warning" not in page
         assert len(calls) == 1
@@ -866,6 +963,32 @@ class TestTheCustodyStatementsAreShown:
         context = threat._ChangeContext("RED-X", None, None, SimpleNamespace(pol=pol_), None)
         notes = threat._change_notes(context, [self._burn()], None, self._T0 + timedelta(hours=4))
         assert any("An unconfirmed detection at 06:00 UTC on 2 Nov" in n and "is not counted" in n for n in notes)
+
+    @pytest.mark.parametrize(("hours", "said"), [
+        (0, "An unconfirmed detection at 06:00 UTC on 2 Nov is newer"),
+        (2, "An unconfirmed detection between 06:00 UTC on 2 Nov and 08:00 UTC on 2 Nov is newer"),
+    ])
+    def test_an_undated_detection_is_named_by_its_bracket(self, hours: int, said: str) -> None:
+        """No single time is given for a detection that earned none, as the burn's own line already says."""
+        from types import SimpleNamespace
+
+        start = self._T0 + timedelta(hours=3)
+        end = start + timedelta(hours=hours)
+        candidate = SimpleNamespace(burn_epoch=end, burn_window=(start, end))
+        pol_ = SimpleNamespace(candidate_manoeuvres=[candidate], records=[])
+        context = threat._ChangeContext("RED-X", None, None, SimpleNamespace(pol=pol_), None)
+        notes = threat._change_notes(context, [self._burn()], None, self._T0 + timedelta(hours=6))
+        assert any(n.startswith(said) for n in notes), notes
+
+    def test_custody_lost_names_an_undated_burn_by_its_bracket(self) -> None:
+        """The custody-lost refusal's "UDL holds a set from after a burn" gives no time the burn did not earn."""
+        from types import SimpleNamespace
+
+        start, end = self._T0 - timedelta(hours=4), self._T0
+        burn = SimpleNamespace(burn_epoch=end, burn_window=(start, end))
+        held_after = threat._held_after([burn], start - timedelta(hours=1))
+        assert held_after.startswith(" UDL holds an element set from after a burn between 23:00 UTC on 1 Nov and "
+                                     "03:00 UTC on 2 Nov; reconnect")
 
     def test_a_long_gap_carries_its_caveat(self) -> None:
         line = threat._burn_line(self._burn(long_gap=True), "RED-X", {}, self._T0 + timedelta(hours=4))

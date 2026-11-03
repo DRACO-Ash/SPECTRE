@@ -8,6 +8,7 @@ colours must come from the band tokens, which swap on the light theme.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -63,7 +64,7 @@ def test_the_table_shows_only_what_changed() -> None:
 def test_the_watch_note_renders_in_every_state(state: str) -> None:
     watch = {"watching": _watch(), "problem": _watch(problem="The element set could not be fetched from UDL."),
              "stopped": _watch(stopped="UDL is disconnected"), "alert": _watch(), "none": None}[state]
-    alert = BurnAlert("RED-X", "03:12 UTC on 2 Nov", _NOW, _FIGURES) if state == "alert" else None
+    alert = BurnAlert("RED-X", "at 03:12 UTC on 2 Nov", _NOW, _FIGURES) if state == "alert" else None
     html = _render(_context(burn_watch=watch, burn_alert=alert, watch_ends_at=_NOW + timedelta(hours=7)))
     assert 'id="burn-watch-note"' in html
     assert ("hx-trigger=\"every 60s\"" in html) == (state in ("watching", "problem", "alert"))
@@ -78,6 +79,31 @@ def test_new_colours_come_from_the_band_tokens() -> None:
         block = html[start:html.index("</section>" if "section" in marker else "</div>\n", start)]
         assert not re.search(r"#[0-9a-fA-F]{3,6}\b", block), marker
         assert not re.search(r"(?<!var\(--spectre-status-)(?<![-\w])rgba?\((?!var\()", block), marker
+
+
+@pytest.mark.parametrize(("worst", "band"), [
+    (Change.NEWLY_IN_REACH, "critical"), (Change.CUT, "high"), (Change.LENGTHENED, "minimal"),
+    (Change.NO_LONGER_IN_REACH, "minimal"), (Change.UNCHANGED, "unknown"), (None, "unknown"),
+])
+def test_the_section_band_follows_the_worst_change(worst: Change | None, band: str) -> None:
+    """V0.9 review 29: the band map was unpinned, so inverting it (newly in reach as minimal) stayed green."""
+    html = _render(_context(warning_change=replace(_FIGURES, worst=worst)))
+    start = html.index("sweep-warning-change")
+    opening = html[start:html.index(">", start)]
+    assert f"border-left:4px solid var(--spectre-status-{band});" in opening
+    assert f"background:rgba(var(--spectre-status-{band}-rgb), 0.06);" in opening
+
+
+@pytest.mark.parametrize(("row", "band"), [
+    (TargetWarning("BLUE-9", True, None, 9.5, Change.NEWLY_IN_REACH), "critical"),
+    (TargetWarning("BLUE-9", True, 14.0, 3.0, Change.CUT), "high"),
+    (TargetWarning("BLUE-9", True, 3.0, 14.0, Change.LENGTHENED), "minimal"),
+    (TargetWarning("BLUE-9", True, 9.5, None, Change.NO_LONGER_IN_REACH), "minimal"),
+])
+def test_each_changed_row_takes_the_band_of_its_own_change(row: TargetWarning, band: str) -> None:
+    html = _render(_context(warning_change=replace(_FIGURES, changed=(row,))))
+    cell = re.search(r"<td>BLUE-9</td>.*?<td style=\"color:var\(--spectre-status-([\w-]+)\)", html, re.S)
+    assert cell is not None and cell.group(1) == band
 
 
 @pytest.mark.parametrize(("due", "band"), [("set", "high"), ("passed", "critical"), ("none", "unknown")])

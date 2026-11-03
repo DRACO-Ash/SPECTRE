@@ -39,10 +39,9 @@ from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, stat
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain.custody import Custody, CustodyStatus, age_text, assess_custody
 from spectre.domain.decide_by import (
-    DEFAULT_RESPONSE_H,
     DecideBy,
+    ResponseTimes,
     decide_by,
-    earliest_arrival,
     parse_response_hours,
     withheld,
 )
@@ -78,8 +77,10 @@ from spectre.domain.warning_change import (
     compare,
     footer,
     headline,
+    is_new_burn,
     least_warning_by_target,
     newest_unconfirmed,
+    when_burned,
     worst_change,
 )
 from spectre.web.auth import require_login
@@ -349,8 +350,8 @@ async def remove_manual_tle(
 @router.get("/target-config", response_model=None)
 async def target_config(
     request: Request,
+    current_user: Annotated[User, Depends(require_login)],
     red_sat: str = Query("", description="Selected interceptor stk_name — used to filter by regime"),
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
     state = get_session_state(current_user)
@@ -364,6 +365,7 @@ async def target_config(
         "interceptor_regime": regime,
         "interceptor_name": red_sat,
         "manual_tles": state.manual_sweep_tles,
+        "response_times": state.response_time_by_target,
     })
 
 
@@ -1711,7 +1713,7 @@ def _held_after(burns: list[Any], red_epoch: datetime | None) -> str:
     """With custody lost, what UDL already holds from after a burn the flown set predates, and how to get it."""
     if not burns or red_epoch is None or red_epoch >= burns[-1].burn_window[1]:
         return ""
-    return (f" UDL holds an element set from after a burn at {_when(burns[-1].burn_epoch)}; reconnect to UDL to "
+    return (f" UDL holds an element set from after a burn {when_burned(burns[-1])}; reconnect to UDL to "
             "refresh held element sets (sets entered by hand are not refreshed), then sweep again.")
 
 
@@ -1792,8 +1794,8 @@ def _burn_selection(
     if red_epoch is not None and red_epoch < latest.burn_window[1]:
         return WarningChange(
             Status.NOT_COMPUTED,
-            f"The sweep above flies its element set of {_when(red_epoch)}, from before its burn at "
-            f"{_when(latest.burn_epoch)}, so its figures do not include the burn and the change is not computed. "
+            f"The sweep above flies its element set of {_when(red_epoch)}, from before its burn "
+            f"{when_burned(latest)}, so its figures do not include the burn and the change is not computed. "
             f"UDL holds a set from after it ({_when(latest.tle_after.epoch)}); reconnect to UDL to refresh "
             "held element sets (sets entered by hand are not refreshed), then sweep again.",
         )
@@ -1856,7 +1858,7 @@ def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: date
     notes = [_last_shown(context.prior, context.red_satno, burns[0], top)]
     newer = newest_unconfirmed(pol.candidate_manoeuvres, burns[-1].tle_after.epoch)
     if newer is not None:
-        notes.append(f"An unconfirmed detection at {_when(newer.burn_epoch)} is newer and is not counted, "
+        notes.append(f"An unconfirmed detection {when_burned(newer)} is newer and is not counted, "
                      "because it is not confirmed.")
     held_newest = _newer_than_held(pol, context.red_epoch)
     if context.red_epoch is not None and held_newest is not None:
@@ -2018,32 +2020,65 @@ async def _watch_change(
     return _build_change(basis, selection, before, after, context)
 
 
+def _shown_until(pol: Any, flown: tuple[CustodyStatus, datetime | None]) -> datetime | None:
+    """The post-burn set of the last burn whose change the sweep showed, or ``None`` if it showed none.
+
+    The sweep's figures include a burn only with custody held and a flown set
+    from after it; a burn it refused figures for was never told, so the watch
+    must still announce it (V0.9 review 13).
+    """
+    custody, red_epoch = flown
+    if custody.state is Custody.LOST or red_epoch is None:
+        return None
+    return max((m.tle_after.epoch for m in pol.manoeuvres if m.burn_window[1] <= red_epoch), default=None)
+
+
+def _watch_start(
+    pol: Any, flown: tuple[CustodyStatus, datetime | None], basis: _SweepBasis,
+) -> tuple[datetime | None, datetime | None, datetime]:
+    """Where a watch starts: what is accounted for, the newest set it has seen, and when it first checks.
+
+    With a burn in the window left unshown, or no history yet, no set counts
+    as seen and the first check runs at once, so it fetches and announces.
+    """
+    if pol is None:
+        return None, None, basis.now
+    accounted = _shown_until(pol, flown)
+    limit = limit_hours_for_regime(basis.red_regime)
+    if any(is_new_burn(m, accounted) for m in burns_in_window(pol.manoeuvres, basis.now, limit)):
+        return accounted, None, basis.now
+    return accounted, pol.records[-1].epoch if pol.records else None, basis.now + CHECK_EVERY
+
+
+def _flown_epoch(red_tle: str, now: datetime) -> datetime | None:
+    """The epoch of the element set the sweep flew, if it can be read."""
+    age = elset_age(red_tle, now)
+    return age.epoch if age else None
+
+
 def _watch_after_sweep(  # noqa: PLR0913 - one argument per thing the watch starts from, all named at the call
     state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None], *,
     history: _RedHistory, history_task: asyncio.Task[HeldHistory] | None,
+    flown: tuple[CustodyStatus, datetime | None],
 ) -> None:
     """Start, or replace, the burn watch on the object just swept (SPC-006).
 
-    Only with UDL connected and a catalogue number to ask UDL about. The burns
-    the history already held are accounted for, because the sweep has just
-    shown them; with the history still loading, none is, so the first check
-    announces any burn in the window.
+    Only with UDL connected and a catalogue number to ask UDL about. *flown*
+    is the sweep's custody and the epoch of the set it flew. The burns whose
+    change the sweep showed are accounted for; any burn in the window it did
+    not show, and every burn while the history is still loading, is left for
+    the first check, which then runs at once and announces it.
     """
     red_name, red_satno = red
     if not red_satno or not state.udl_username or user.session_key is None:  # type: ignore[attr-defined]
         return
-    pol = history.pol
-    confirmed = pol.manoeuvres if pol is not None else []
+    accounted, newest, first_check = _watch_start(history.pol, flown, basis)
     watch = BurnWatch(
         red_name=red_name, red_satno=int(red_satno), red_regime=basis.red_regime,
         targets=list(basis.targets), manual_tle_by_name=dict(basis.manual_tle_by_name),
-        max_dv_m_s=basis.max_dv_m_s,
-        accounted_until=max((m.tle_after.epoch for m in confirmed), default=None) if pol is not None else None,
-        started_at=basis.now, next_check_at=basis.now + CHECK_EVERY,
-        newest_epoch=pol.records[-1].epoch if pol is not None and pol.records else None,
+        max_dv_m_s=basis.max_dv_m_s, accounted_until=accounted,
+        started_at=basis.now, next_check_at=first_check, newest_epoch=newest,
     )
-    if pol is None:
-        watch.next_check_at = basis.now
     start_watch(state, user.session_key, watch, first_history=history_task,  # type: ignore[arg-type]
                 compute=_watch_change, spawn=spawn_session_task)
 
@@ -2148,9 +2183,9 @@ def _sweep_decide_by(
         return withheld("custody is lost, so the soonest arrival would rest on an out-of-date orbit")
     if worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
         return withheld("the interceptor is assessed unable to fly the intercept (capability MINIMAL)")
-    set_hours = state.response_time_h  # type: ignore[attr-defined]
-    hours = DEFAULT_RESPONSE_H if set_hours is None else float(set_hours)
-    return decide_by(earliest_arrival(entries, basis.max_dv_m_s), hours, set_hours is None, basis.now, basis.max_dv_m_s)
+    times = ResponseTimes(sign_in=state.response_time_h,  # type: ignore[attr-defined]
+                          by_target=dict(state.response_time_by_target))  # type: ignore[attr-defined]
+    return decide_by(entries, times, basis.now, basis.max_dv_m_s)
 
 
 def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
@@ -2160,6 +2195,40 @@ def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
         errors.append(f"{problem} Decide-by uses the response time already set.")
     elif hours is not None:
         state.response_time_h = hours  # type: ignore[attr-defined]
+
+
+#: The longest target name a response time is held under; the form field carries the same limit.
+_MAX_TARGET_NAME = 80
+
+
+def _take_target_response_time(state: object, form: Any, errors: list[str]) -> str:
+    """Hold the response time the sweep form sets for one named target (SPC-022), and return that name.
+
+    Checked as the sign-in's time is. A blank time keeps what is held, and
+    returns ``""``, as does a refusal, which says why and changes nothing.
+    """
+    name = str(form.get("target_response_name") or "").strip()
+    hours, problem = parse_response_hours(str(form.get("target_response_h") or ""))
+    if hours is None and not problem:
+        return ""
+    if not name:
+        errors.append("A response time for one target needs the target's name; it was not set.")
+    elif len(name) > _MAX_TARGET_NAME:
+        errors.append(f"A target's name for a response time must be at most {_MAX_TARGET_NAME} characters; "
+                      "it was not set.")
+    elif problem:
+        errors.append(f"{problem} The response time for {name} is unchanged.")
+    else:
+        state.response_time_by_target[name] = hours  # type: ignore[attr-defined]
+        return name
+    return ""
+
+
+def _unmatched_response_target(name: str, targets: list[ThreatTarget], errors: list[str]) -> None:
+    """A response time just set for a name no swept target has is said, not held in silence."""
+    if name and all(t.target_name != name for t in targets):
+        errors.append(f"The response time for {name} is held, but no target in this sweep is called {name}, "
+                      "so decide-by did not use it.")
 
 
 @router.post("/sweep", response_model=None)
@@ -2186,6 +2255,7 @@ async def threat_sweep(
     manual_red_confidence = str(form.get("manual_red_confidence") or "MEDIUM").strip().upper()
     manual_red_tle: str | None = _validate_manual_red_tle(manual_red_tle_raw, errors)
     _take_response_time(state, str(form.get("response_time_h") or ""), errors)
+    response_target = _take_target_response_time(state, form, errors)
 
     parsed = _parse_target_group(tgt_group)
     if parsed.error:
@@ -2232,6 +2302,7 @@ async def threat_sweep(
         })
 
     targets = _cap_targets(state, targets, _manual_tle_by_name, red_regime, errors)
+    _unmatched_response_target(response_target, targets, errors)
 
     # Its own history comes from UDL while the sweep computes.
     history_task = _start_red_history(state, red_satno, now)
@@ -2296,8 +2367,8 @@ async def threat_sweep(
     warning_change = await _warning_change(
         basis, (red_sat.strip(), red_satno, red_tle), history, entries, (custody, prior),
     )
-    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno),
-                       history=history, history_task=history_task)
+    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history=history,
+                       history_task=history_task, flown=(custody, _flown_epoch(red_tle, now)))
     decide = _sweep_decide_by(state, entries, custody, worst_coa, basis)
     worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
