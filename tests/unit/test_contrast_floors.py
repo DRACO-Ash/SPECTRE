@@ -766,20 +766,16 @@ class TestTheAdminPageNamesItsColoursOnce:
         ratio = _ratio(ink, fill)
         assert ratio >= _AA_NORMAL, f"the {theme} admin badge is {ratio:.2f}:1, {ink} on {fill}"
 
-    @pytest.mark.parametrize(("theme", "green", "card"), [
-        ("dark", _DARK["--spectre-color-nominal-green"], _DARK["--spectre-color-orbital-grey"]),
-        ("steel", _STEEL["--spectre-color-nominal-green"], _STEEL["--spectre-surface-overlay"]),
-        ("steel, prefers dark", _STEEL["--spectre-color-nominal-green"],
-         _tokens("themes.css", '[data-theme="steel"]')["--spectre-surface-overlay"]),
-    ])
-    def test_the_success_flash_clears_the_floor_on_its_card(
-        self, theme: str, green: str, card: str
-    ) -> None:
-        flash = (self._ADMIN / "admin_flash.html").read_text(encoding="utf-8")
-        assert "custody-green" not in flash
-        assert "var(--spectre-color-nominal-green)" in flash
-        ratio = _ratio(green, card)
-        assert ratio >= _AA_NORMAL, f"the {theme} success flash is {ratio:.2f}:1, {green} on {card}"
+    def test_the_success_flash_names_no_retired_green(self) -> None:
+        """Its contrast is measured by TestTheAdminPageNamesOnlyStyledClasses.
+
+        SPC-029 measured the flash text on the bare card overlay, which was
+        right while the card named a class nothing styled. SPC-034 gave the
+        card its nominal wash, so the surface moved and the measurement moved
+        with it, to the composited wash over the page.
+        """
+        for template in (self._ADMIN / "admin_flash.html", self._ADMIN.parent / "admin" / "users.html"):
+            assert "custody-green" not in template.read_text(encoding="utf-8"), template.name
 
     def test_the_header_caption_takes_the_console_user_label_colour(self) -> None:
         """The signed-in caption sits on .nav-bar, which Steel keeps dark.
@@ -802,3 +798,315 @@ class TestTheAdminPageNamesItsColoursOnce:
         dark_ink = _chase(_declared_var(".nav-user", "color"), _DARK_BRAND, _DARK_ALIASES)
         ratio = _ratio(dark_ink, dark_bar)
         assert ratio >= _AA_NORMAL, f"the dark caption is {ratio:.2f}:1, {dark_ink} on {dark_bar}"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SPC-034: the admin nav bar's ghost buttons, and the flash class nothing styled
+# ══════════════════════════════════════════════════════════════════════════
+
+def _uncommented(filename: str) -> str:
+    return re.sub(r"/\*.*?\*/", "", (_STATIC / filename).read_text(encoding="utf-8"), flags=re.S)
+
+
+def _on_screen(filename: str) -> str:
+    """*filename* uncommented, less its ``@media print`` blocks, which never paint the console."""
+    return re.sub(r"@media print\s*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}", "", _uncommented(filename))
+
+
+def _raw_tokens(filename: str, selector: str) -> dict[str, str]:
+    """Every ``--token: value;`` in *selector*'s own block, values verbatim.
+
+    ``_tokens`` keeps only hex values. The ghost button's hover fill in the
+    dark theme is ``rgba(255, 255, 255, 0.07)`` and a card variant's fill is
+    an 8% wash in every theme, so measuring either needs the raw value and
+    the alias chain that leads to it. Token blocks hold no nested braces, so
+    the first closing brace ends the block.
+    """
+    text = _uncommented(filename)
+    start = text.find(selector)
+    if start < 0:
+        return {}
+    opening = text.index("{", start)
+    body = text[opening + 1:text.index("}", opening)]
+    return {name: value.strip() for name, value in re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", body)}
+
+
+#: The three token sets the admin page is painted with. Steel has two (see
+#: _STEEL above): the media block wins under prefers-color-scheme: light and
+#: drops out under prefers dark, leaving themes.css's values.
+_RAW_DARK = {**_raw_tokens("style.css", ":root {"), **_raw_tokens("spectre-theme.css", ":root {")}
+_RAW_STEEL_PREFERS_DARK = {
+    **_RAW_DARK,
+    **_raw_tokens("spectre-theme.css", '[data-theme="steel"]'),
+    **_raw_tokens("themes.css", '[data-theme="steel"]'),
+}
+_RAW_STEEL = {**_RAW_STEEL_PREFERS_DARK, **_raw_tokens("spectre-theme.css", _MEDIA_LIGHT)}
+_RAW_THEMES = [
+    ("dark", _RAW_DARK),
+    ("steel", _RAW_STEEL),
+    ("steel, prefers dark", _RAW_STEEL_PREFERS_DARK),
+]
+
+
+def _follow(value: str, raw: dict[str, str]) -> str:
+    """*value* with every ``var(--x)`` replaced by what *raw* gives ``--x``."""
+    seen: set[str] = set()
+    while reference := re.fullmatch(r"var\(\s*(--[a-z0-9-]+)\s*\)", value.strip()):
+        name = reference.group(1)
+        assert name in raw and name not in seen, f"{name} resolves to no value in this theme"
+        seen.add(name)
+        value = raw[name]
+    return value.strip()
+
+
+def _paint(value: str, under: str) -> str:
+    """What a resolved colour value paints over *under*, as ``#RRGGBB``."""
+    if value == "transparent":
+        return under
+    rgba = re.fullmatch(r"rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)", value)
+    if rgba:
+        red, green, blue, alpha = rgba.groups()
+        return _over(f"#{int(red):02X}{int(green):02X}{int(blue):02X}", float(alpha), under)
+    assert re.fullmatch(r"#[0-9A-Fa-f]{6}", value), f"cannot paint {value!r}"
+    return value.upper()
+
+
+def _rule_listing(filename: str, selector: str) -> str | None:
+    """The block of the one rule that lists *selector*, alone or in a selector list.
+
+    ``a:hover`` shares its rule with ``.spectre-link:hover``, so matching the
+    whole selector text would miss it. None when no rule lists it, which is
+    how the unfixed sheet is measured.
+    """
+    blocks = [
+        body
+        for head, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _on_screen(filename))
+        if selector in (member.strip() for member in head.split(","))
+    ]
+    assert len(blocks) <= 1, f"{len(blocks)} rules in {filename} list `{selector}`"
+    return blocks[0] if blocks else None
+
+
+def _first_declared(candidates: list[tuple[str, str]], prop: str) -> str:
+    """*prop* from the most specific rule in *candidates* that sets it.
+
+    Candidates are listed most specific first, so the first rule that exists
+    and declares *prop* is the one the browser obeys. An absent rule is
+    skipped: with no Steel override the ghost button falls through to
+    ``.spectre-btn``.
+    """
+    for filename, selector in candidates:
+        block = _rule_listing(filename, selector) or ""
+        match = re.search(rf"(?<![-\w]){re.escape(prop)}\s*:\s*([^;}}]+)", block)
+        if match:
+            return match.group(1).strip()
+    raise AssertionError(f"no rule in {candidates} declares {prop}")
+
+
+def _specificity(selector: str) -> tuple[int, int, int]:
+    """(ids, classes with attributes and pseudo-classes, types) for *selector*."""
+    bare = re.sub(r"\[[^\]]*\]", "[]", selector)
+    middle = bare.count("[]") + len(re.findall(r"\.[\w-]+", bare)) + len(re.findall(r"(?<!:):[\w-]+", bare))
+    return bare.count("#"), middle, len(re.findall(r"(?:^|[\s>+~])[a-z][\w-]*", bare))
+
+
+_STEEL_GHOST = '[data-theme="steel"] .nav-bar .spectre-btn-ghost'
+
+#: Every rule that can paint an admin nav ghost button's ink or fill:
+#: (stylesheet, selector, Steel only, hover only, element only). The link
+#: rules reach Console, an <a>; ``a:hover`` (0,1,1) outranks ``.spectre-btn``
+#: (0,1,0) for colour, and ``.spectre-btn:hover`` sets none.
+_GHOST_CASCADE = [
+    ("themes.css", f"{_STEEL_GHOST}:hover", True, True, None),
+    ("themes.css", _STEEL_GHOST, True, False, None),
+    ("spectre-theme.css", ".spectre-btn:hover", False, True, None),
+    ("spectre-theme.css", ".spectre-btn", False, False, None),
+    ("spectre-theme.css", "a:hover", False, True, "a"),
+    ("spectre-theme.css", "a", False, False, "a"),
+]
+
+
+def _ghost_rules(theme: str, hover: bool, element: str) -> list[tuple[str, str]]:
+    """The rules that reach this ghost button, most specific first.
+
+    A tie would be settled by source order, which this does not model, so it
+    refuses one rather than guess.
+    """
+    rules = [
+        (filename, selector)
+        for filename, selector, steel_only, hover_only, only in _GHOST_CASCADE
+        if (theme.startswith("steel") or not steel_only) and (hover or not hover_only) and only in (None, element)
+    ]
+    ranks = [_specificity(selector) for _, selector in rules]
+    assert len(set(ranks)) == len(ranks), f"rules of equal specificity reach the ghost button: {rules}"
+    return [rule for _, rule in sorted(zip(ranks, rules, strict=True), reverse=True)]
+
+
+def _nav_bar(theme: str, raw: dict[str, str]) -> str:
+    """The bar the admin nav actions sit on. Steel keeps it dark in themes.css."""
+    if theme == "dark":
+        return _paint(_follow(f"var({_declared_var('.nav-bar', 'background')})", raw), "#000000")
+    return _paint(_declared("themes.css", '[data-theme="steel"] .nav-bar', "background"), "#000000")
+
+
+class TestTheAdminNavGhostButtons:
+    """SPC-034: ``Console`` and ``Sign Out`` on /admin/users, 14px/500.
+
+    Both are ``.spectre-btn .spectre-btn-ghost`` in the nav_actions block,
+    which base.html places inside ``nav.nav-bar``. Steel keeps that bar dark
+    (#1a2a3a, a Bluestaq identity requirement) but nothing re-pointed the
+    ghost button's label, so it took ``.spectre-btn``'s
+    var(--spectre-text-primary): Steel's DARK body ink on the dark bar, at
+    1.21:1 (#111827) under prefers-color-scheme: light and 1.01:1 (#1c2b3a)
+    under prefers dark. The dark theme is measured too, so the Steel fix is
+    seen not to move it.
+    """
+
+    def test_the_admin_nav_actions_are_ghost_buttons_on_the_nav_bar(self) -> None:
+        """What is measured below is what the page renders."""
+        templates = _STATIC.parent / "templates"
+        base = (templates / "base.html").read_text(encoding="utf-8")
+        assert re.search(r'<nav class="nav-bar">.*\{% block nav_actions %\}.*</nav>', base, re.S)
+        page = (templates / "admin" / "users.html").read_text(encoding="utf-8")
+        start = page.index("{% block nav_actions %}")
+        actions = page[start:page.index("{% endblock %}", start)]
+        ghosts = re.findall(r'<(\w+)\b[^>]*class="spectre-btn spectre-btn-ghost"', actions)
+        assert ghosts == ["a", "button"], f"the nav ghost controls are {ghosts}, not Console <a> and Sign Out <button>"
+
+    @pytest.mark.parametrize("hover", [False, True], ids=["rest", "hover"])
+    @pytest.mark.parametrize("element", ["a", "button"], ids=["console", "sign-out"])
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES)
+    def test_the_ghost_label_clears_the_floor_on_the_nav_bar(
+        self, theme: str, raw: dict[str, str], element: str, hover: bool
+    ) -> None:
+        rules = _ghost_rules(theme, hover, element)
+        surface = _paint(_follow(_first_declared(rules, "background"), raw), _nav_bar(theme, raw))
+        ink = _paint(_follow(_first_declared(rules, "color"), raw), surface)
+        ratio = _ratio(ink, surface)
+        state = "hovered" if hover else "resting"
+        assert ratio >= _AA_NORMAL, (
+            f"the {theme} {state} admin nav ghost <{element}> is {ratio:.2f}:1, "
+            f"{ink} on {surface}, at 14px/500 against a 4.5 floor"
+        )
+
+
+_TEMPLATES = _STATIC.parent / "templates"
+_ADMIN_TEMPLATES = sorted((_TEMPLATES / "admin").glob("*.html")) + sorted(
+    (_TEMPLATES / "partials").glob("admin_*.html")
+)
+
+
+def _class_names(page: Path) -> set[str]:
+    """Every class *page* names, both branches of a Jinja conditional included."""
+    attributes = re.findall(r'class="([^"]*)"', page.read_text(encoding="utf-8"))
+    return {name for attribute in attributes for name in re.sub(r"\{[%{].*?[%}]\}", " ", attribute).split()}
+
+
+#: Classes an admin template names for meaning rather than looks. Each needs
+#: a test that answers for it; spectre-btn-ghost's is
+#: test_a_ghost_button_is_unfilled_by_spectre_btn_itself.
+_MARKER_CLASSES = {"spectre-btn-ghost"}
+
+#: A compound that roots a whole theme rather than scoping a region of the page.
+_THEME_ROOT = re.compile(r"(?::root|html|\[data-theme=\"[\w-]+\"\])(?::not\([^)]*\))*")
+
+
+def _selectors() -> list[str]:
+    """Every on-screen selector in every stylesheet, selector lists split apart."""
+    heads = (
+        head
+        for sheet in sorted(_STATIC.rglob("*.css"))
+        for head in re.findall(r"([^{}]+)\{[^{}]*\}", _on_screen(sheet.relative_to(_STATIC).as_posix()))
+    )
+    return [member.strip() for head in heads for member in head.split(",")]
+
+
+def _classes_styled_everywhere() -> set[str]:
+    """Classes named in the key compound of a selector with no ancestor but a theme root."""
+    styled: set[str] = set()
+    for selector in _selectors():
+        *ancestors, key = re.split(r"\s*[\s>+~]\s*", selector)
+        if all(_THEME_ROOT.fullmatch(ancestor) for ancestor in ancestors):
+            styled.update(re.findall(r"\.([\w-]+)", key))
+    return styled
+
+
+class TestTheAdminPageNamesOnlyStyledClasses:
+    """SPC-034: the success flash named ``spectre-card-custody``.
+
+    No stylesheet defines it, so the card fell back to the plain
+    ``.spectre-card`` and a success looked like any other card. The card
+    variants are threat, caution, nominal and info; a successful admin action
+    is nominal, the twin of the error branch's threat.
+    """
+
+    def test_every_class_an_admin_template_names_is_styled(self) -> None:
+        """Styled wherever it appears, not merely named in some selector.
+
+        A rule scoped under an ancestor, such as Steel's ``.nav-bar
+        .spectre-btn-ghost``, cannot reach the same class in a table row, so
+        only a rule whose sole ancestor is a theme root counts here.
+        """
+        styled = _classes_styled_everywhere() | _MARKER_CLASSES
+        missing = sorted(
+            f"{page.name}: {name}"
+            for page in _ADMIN_TEMPLATES
+            for name in _class_names(page)
+            if name not in styled
+        )
+        assert not missing, f"admin templates name classes no rule styles wherever they appear: {missing}"
+
+    def test_a_ghost_button_is_unfilled_by_spectre_btn_itself(self) -> None:
+        """What lets ``spectre-btn-ghost`` stand as a marker in _MARKER_CLASSES.
+
+        The table rows' Edit, Delete and Cancel carry it, and no rule reaches
+        them: they look unfilled because ``.spectre-btn`` already is. The only
+        rules that name it are Steel's, scoped to the nav bar, where
+        TestTheAdminNavGhostButtons measures them. Should an unscoped ghost
+        rule ever arrive, this fails, and the marker entry should go.
+        """
+        assert _declared("spectre-theme.css", ".spectre-btn", "background") == "transparent"
+        naming = [selector for selector in _selectors() if re.search(r"\.spectre-btn-ghost(?![\w-])", selector)]
+        assert naming, "no rule names .spectre-btn-ghost, so the Steel nav bar fix has gone"
+        stray = [selector for selector in naming if not selector.startswith(_STEEL_GHOST)]
+        assert not stray, f"rules reach .spectre-btn-ghost outside the Steel nav bar: {stray}"
+
+    @pytest.mark.parametrize("template", ["admin/users.html", "partials/admin_flash.html"])
+    def test_a_successful_admin_action_flashes_the_nominal_card(self, template: str) -> None:
+        """Success is nominal and failure is threat, whichever template renders it.
+
+        Being styled is not enough: the info card is styled too, and a success
+        drawn in the information blue would pass every contrast test here.
+        """
+        text = (_TEMPLATES / template).read_text(encoding="utf-8")
+        branches = re.search(
+            r"\{% if flash\.type == 'error' %\}([\w-]+)\{% else %\}([\w-]+)\{% endif %\}", text
+        )
+        assert branches, f"the flash card's class in {template} has moved"
+        assert branches.groups() == ("spectre-card-threat", "spectre-card-nominal"), (
+            f"the flash in {template} is {branches.group(1)} on error and {branches.group(2)} on success"
+        )
+
+    @pytest.mark.parametrize("template", ["admin/users.html", "partials/admin_flash.html"])
+    @pytest.mark.parametrize(("theme", "raw"), _RAW_THEMES)
+    def test_the_success_flash_text_clears_the_floor_on_its_own_card(
+        self, theme: str, raw: dict[str, str], template: str
+    ) -> None:
+        """The flash text on the card's own fill, composited over the page.
+
+        A card variant replaces .spectre-card's overlay with a translucent
+        wash, so the surface under the text is that wash over the page's
+        --bg, which html and body paint (style.css).
+        """
+        text = (_TEMPLATES / template).read_text(encoding="utf-8")
+        card = re.search(r"spectre-card-threat\{% else %\}(spectre-card-[\w-]+)\{% endif %\}", text)
+        colour = re.search(r"\{% else %\}(var\(--[\w-]+\))\{% endif %\}", text)
+        assert card and colour, f"the success flash in {template} has moved"
+        page = _paint(_follow(_declared("style.css", "html, body", "background"), raw), "#000000")
+        wash = _first_declared([("spectre-theme.css", f".{card.group(1)}")], "background")
+        fill = _paint(_follow(wash, raw), page)
+        ink = _paint(_follow(colour.group(1), raw), fill)
+        ratio = _ratio(ink, fill)
+        assert ratio >= _AA_NORMAL, (
+            f"the {theme} success flash in {template} is {ratio:.2f}:1, {ink} on {fill}"
+        )

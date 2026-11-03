@@ -30,10 +30,10 @@
   <!-- Flash message area (updated via HTMX OOB) -->
   <div id="admin-flash">
     {% if flash %}
-    <div class="spectre-card {% if flash.type == 'error' %}spectre-card-threat{% else %}spectre-card-custody{% endif %}"
+    <div class="spectre-card {% if flash.type == 'error' %}spectre-card-threat{% else %}spectre-card-nominal{% endif %}"
          style="margin-bottom:var(--spectre-space-4)">
       <p style="font-size:var(--spectre-size-small);
-                color:{% if flash.type == 'error' %}var(--spectre-color-threat-red){% else %}var(--spectre-color-nominal-green){% endif %}">
+                color:{% if flash.type == 'error' %}var(--spectre-color-threat-red){% else %}var(--spectre-color-nominal-green-text){% endif %}">
         {{ flash.message }}
       </p>
     </div>
