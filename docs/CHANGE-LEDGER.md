@@ -1037,3 +1037,12 @@ Feature work from the backlog: the warning-time change and the burn watch (outpu
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/warning_change.py`, `spectre/web/burn_watch.py`, the differential and watch helpers in `routes/threat.py`, NOTSO helpers, session liveness helpers, the basis types in `provenance.py` and `decision.py`, and template sections | `scripts/check-quality.sh` against 0.8.0 before upload: see the outcome below. The new route uses `Annotated`, and `tests/unit/test_routes_use_annotated_depends.py` now holds the 77 older bare `Depends` defaults from growing. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The watch adds up to 6 UDL element-set requests an hour per signed-in operator watching an object, outside the per-user UDL limiter, plus 2 history requests only when a newer set appears. | n/a. |
 
+## 0.10.0
+
+Feature work from the backlog: decide-by, the delta-V band, a data mode per fetch, and UDL error text kept out of the page; and the plane-change ranking fixed.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/decide_by.py`, `spectre/astro/along_track.py`, the band and decide-by helpers in `routes/threat.py`, the per-fetch data mode and error sentences in `routes/udl.py`, the refresh mode in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.9.0 before upload: see the outcome below. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

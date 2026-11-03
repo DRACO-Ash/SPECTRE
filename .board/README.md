@@ -74,6 +74,8 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-10-28 | Decision Engine | Invest in every phase: SPC-100 to SPC-152 |
 | 2026-10-28 | Analyst session before the Phase 3 capabilities | Deferred; SPC-080 stays open |
 | 2026-10-28 | The operator's question, output ranking and custody definition | Confirmed with an operator; see the acceptance test above |
+| 2026-11-02 | Stop asking; carry on through the versions | Recorded. Claude's own calls are marked as such, never as rulings |
+| 2026-11-03 | Default response time for decide-by | 12 hours, Claude's choice, not a ruling: conservative, and every sentence says it is the default |
 
 ## Decision Engine plan
 

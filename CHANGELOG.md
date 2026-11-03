@@ -9,6 +9,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-03
+
+**Operator output advanced: 3, the decide-by time, which completes outputs 1 to 3.** Output 4, the recommended response, is next.
+
+### Added
+- Decide-by. The sweep says "Decide by 21:00 UTC on 2 Nov for BLUE-1: its fastest intercept within 500 m/s could arrive at 09:00 UTC on 3 Nov", or that decide-by has passed. It is the soonest credible arrival, burn time plus flight time, minus your response time, set on the sweep form and kept for the sign-in. Until you set it, 12 hours is used and every sentence says it is the default. It is withheld, with the reason, when custody is lost or the interceptor is assessed unable to fly the intercept (SPC-008).
+- A band on the worst case's delta-V from element-set age: the figure re-solved with each orbit moved ahead and behind along track by the error its age implies, with the basis on screen. A minimum-time intercept spends the whole budget by construction, so its band is on flight time (SPC-005, red team finding 6).
+- A data mode per fetch. The Red and Blue TLE fetches take REAL, SIMULATED, EXERCISE or TEST for that fetch only, never changing the session mode; anything else is refused and nothing is fetched. The result says which mode it used, and a set fetched in its own mode is refreshed in that mode at the next UDL connect, not the session's (SPC-030).
+
+### Fixed
+- A plane change is no longer the most dangerous course of action. It only aligns the planes, and its zero flight time ranked it "arriving in < 1m" whenever it fitted the budget, since warning-time ranking arrived in 0.5.14. It now never ranks on warning time and counts for neither decide-by nor the before-and-after; its rows read "aligns planes only".
+- No UDL error reaches the page as exception text or UDL's own reply: eleven sites in the UDL routes now say what failed and what to try, and a 5xx says the fault is UDL's. The detail goes to the server log (SPC-019).
+
+### Changed
+- The TLE fetch's request handling is a helper of its own, giving the route headroom under the complexity limit (SPC-060).
+
 ## [0.9.0] - 2026-11-02
 
 **Operator outputs advanced: 2, the warning-time change, with output 1 beside it; and lays the foundation for output 4, recommended response: every Decision Engine figure now states its own basis (lookup, sampled or computed), so later releases can show computed figures beside lookups honestly.** The decide-by time is not shown yet, and the sweep says so.

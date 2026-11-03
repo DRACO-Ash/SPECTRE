@@ -89,7 +89,11 @@
    "spectre/web/routes/threat.py",
    "spectre/web/templates/partials/threat_sweep_row.html",
    "spectre/web/format_units.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
  },
  {
   "ref": "SPC-006",
@@ -149,7 +153,11 @@
   ],
   "deps": [
    "SPC-007"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
  },
  {
   "ref": "SPC-010",
@@ -248,7 +256,11 @@
   "files": [
    "spectre/web/routes/udl.py",
    "spectre/web/templates/partials/data_mode_status.html"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
  },
  {
   "ref": "SPC-031",
@@ -272,7 +284,11 @@
   "note": "Measured 15 on 2026-11-03, not the 67 docs/CODE-QUALITY-GATE.md recorded before 0.5.24. Not over the limit; low urgency. Re-measure after SPC-019 and SPC-030 land, which edit udl.py.",
   "files": [
    "spectre/web/routes/udl.py"
-  ]
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
  },
  {
   "ref": "SPC-061",
@@ -845,6 +861,59 @@
   "note": "Found by the V0.9 design review. udl.py returns f-strings carrying {exc} at the UDL login, TLE, state vector, catalogue, NOTSO page fetch and NOTSO sync error paths. The fix CodeQL drove for pol.py applies: a fixed sentence to the browser, the detail through log_safe to the log.",
   "files": [
    "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-022",
+  "priority": "low",
+  "order": 22,
+  "group": "hygiene",
+  "minutes": 120,
+  "task": "Response time per blue asset, not one per sign-in",
+  "note": "Decide-by uses one response time per sign-in (0.10.0); the item asked for one per asset.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/planning_state.py"
+  ]
+ },
+ {
+  "ref": "SPC-023",
+  "priority": "med",
+  "order": 23,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Pattern of Life routes put exception text into the page",
+  "note": "Found by the V0.10 UDL build: pol.py error paths (about lines 489, 507, 538 at 0.10.0). The fix used for udl.py applies.",
+  "files": [
+   "spectre/web/routes/pol.py"
+  ]
+ },
+ {
+  "ref": "SPC-024",
+  "priority": "med",
+  "order": 24,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "Setting the session data mode silently treats an unknown value as REAL",
+  "note": "Found by the V0.10 UDL build: POST /udl/data-mode. Refuse it as the per-fetch override does.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ]
+ },
+ {
+  "ref": "SPC-025",
+  "priority": "low",
+  "order": 25,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "The intercept panel's data mode field is not checked against the four modes",
+  "note": "Found by the V0.10 UDL build.",
+  "files": [
+   "spectre/web/routes/maneuver.py"
   ]
  }
 ]
