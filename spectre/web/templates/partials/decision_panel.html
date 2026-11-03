@@ -1,7 +1,8 @@
 {# Decision Engine — Scenario Builder input panel #}
 {# Context: pol (PolAnalysis|None); red_tracks, blue_assets, selected_red, selected_blue and
    binding_note for the bind fields (SPC-100), each optional; archetypes, default_samples, min_samples,
-   max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional #}
+   max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional;
+   adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional #}
 
 {% set hyp = {
   "archetypes": archetypes if archetypes is defined else [],
@@ -16,6 +17,8 @@
   "default_budget": default_budget if default_budget is defined else "50",
   "max_budget": max_budget if max_budget is defined else "1000",
   "max_target": max_target if max_target is defined else "100000",
+  "fields_note": adversary_fields_note if adversary_fields_note is defined else "",
+  "default_gap": default_gap if default_gap is defined else 0.7,
 } %}
 
 {# ── Our burn for one friendly row (SPC-121). Read only for a manoeuvre response; a blank target leaves its delta-V
@@ -146,11 +149,13 @@
           <option value="posture_change">Posture Change</option>
           <option value="no_action">No Action</option>
         </select>
-        <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
-               placeholder="P" style="font-size:0.63rem" title="Probability [0,1]">
-        <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
-               placeholder="Conf" style="font-size:0.63rem" title="Intel confidence [0,1]">
-        <span style="font-size:0.6rem; color:var(--text-dim)">P · Conf</span>
+        {# SPC-161: Conf no longer sets the custody gap; Gap does, and the note under the rows says what each means. #}
+        <label style="font-size:0.6rem; color:var(--text-dim)">P<input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
+        <label style="font-size:0.6rem; color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
+        <label style="font-size:0.6rem; color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
         {# The glyph is the whole of the button, so without aria-label a screen
            reader announced these four row controls as an unnamed "button" and an
            operator navigating by control could not tell one from another
@@ -165,6 +170,9 @@
         {{ hypothesis_fields(hyp) }}
       </div>
     </div>
+    {% if hyp.fields_note %}
+    <p class="adv-fields-note hint" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">{{ hyp.fields_note }}</p>
+    {% endif %}
     <button type="button" onclick="addAdvRow()"
             style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
       + Add Adversary Action
@@ -269,9 +277,9 @@ function addAdvRow() {
       <option value="posture_change">Posture Change</option>
       <option value="no_action">No Action</option>
     </select>
-    <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Probability [0,1]">
-    <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Intel confidence [0,1]">
-    <span style="font-size:0.6rem;color:var(--text-dim)">P · Conf</span>
+    <label style="font-size:0.6rem;color:var(--text-dim)">P<input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
+    <label style="font-size:0.6rem;color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
+    <label style="font-size:0.6rem;color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
     <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
     {{ hypothesis_fields(hyp) }}`;
   document.getElementById('adv-rows').appendChild(div);

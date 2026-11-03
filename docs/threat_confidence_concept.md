@@ -661,7 +661,7 @@ Wiring in `web/routes/threat.py`:
 
 **2. AdversaryAction.confidence is not touched.**
 ● In `_lookup_figures`, `custody_gap_hours = scenario.horizon_hours × adversary.confidence` (`decision.py:1426`). Higher intelligence confidence therefore lengthens our own custody gap, so the field's meaning is inverted.
-● SPC-161 separates the two meanings first. Until it lands, nothing from Understanding is suggested for this field.
+● SPC-161 separated the two meanings in 0.17.0: the custody gap has its own per-row share, and confidence moves no figure. Understanding may now be offered for this field, as a suggestion the operator accepts, never prefilled.
 
 **3. AdversaryAction.probability is never prefilled.**
 ● Both fields default to 0.5 (`routes/decision.py:194` to `:195`).
@@ -695,7 +695,7 @@ Wiring in `web/routes/threat.py`:
 
 ● **No feedback that moves a band.**
 
-● **No suggestion into `AdversaryAction.confidence`** until SPC-161 lands.
+● **No silent fill of `AdversaryAction.confidence`.** SPC-161 has separated its meaning, so Understanding may be offered as a suggestion, never written into the field unasked.
 
 ● **No change to how ACCESS is computed.** Geometry stays the ceiling.
 

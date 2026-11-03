@@ -88,9 +88,9 @@ def _custodied(status: CustodyStatus | None = _HELD, *, blue: bool = True, **kwa
 
 
 def _burn_at_quarter_hour(scenario: Scenario) -> Scenario:
-    """Row 0 carries a hypothesis burning 0.25 h into the 1 h horizon, at confidence 0.5."""
+    """Row 0 carries a hypothesis burning 0.25 h into the 1 h horizon, with a rule-of-thumb gap share of 0.5."""
     action = dataclasses.replace(
-        scenario.adversary_actions[0], confidence=0.5, hypothesis=_steady(50, at=EPOCH + timedelta(hours=0.25)),
+        scenario.adversary_actions[0], custody_gap_fraction=0.5, hypothesis=_steady(50, at=EPOCH + timedelta(hours=0.25)),
     )
     return dataclasses.replace(scenario, adversary_actions=[action, *scenario.adversary_actions[1:]])
 
@@ -130,14 +130,14 @@ class TestABoundRedTracksCustodyIsComputed:
         assert held.row_custody[_NO_ACTION] == _HELD_THROUGH
 
     def test_a_hypothesised_burn_loses_custody_from_the_burn(self, burnt: ScenarioResult) -> None:
-        """K3: 0.75 h of the 1 h horizon, where the rule of thumb gave horizon x confidence, 0.5 h."""
+        """K3: 0.75 h of the 1 h horizon, where the rule of thumb gave horizon x gap share, 0.5 h."""
         for cell in burnt.outcome_matrix[_MANOEUVRE]:
             assert cell.ca_percentiles is not None   # sampled, and custody is computed beside it
             assert _custody(cell) == (False, 0.75, Custody.HELD, Basis.COMPUTED, Basis.COMPUTED)
         assert burnt.row_custody[_MANOEUVRE] == _BURN_AHEAD
 
     def test_a_manoeuvre_without_a_hypothesis_takes_the_worst_case(self, held: ScenarioResult) -> None:
-        """K4: lost for the whole horizon, a lookup, where the rule of thumb gave horizon x confidence."""
+        """K4: lost for the whole horizon, a lookup, where the rule of thumb gave horizon x gap share."""
         for cell in held.outcome_matrix[_MANOEUVRE]:
             assert _custody(cell) == (False, 1.0, None, Basis.LOOKUP, Basis.LOOKUP)
             assert "worst case" in cell.figure_bases.custody_maintained.note

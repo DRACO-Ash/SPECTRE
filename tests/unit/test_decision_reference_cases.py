@@ -23,6 +23,13 @@ reproduce every case. Adding SPC-121 to GATED_ITEMS needs SPC-102 in its
 A path with both objects in the same wrong frame passes, because separation
 does not depend on the frame; a path that mixes frames between the two
 objects fails.
+
+SPC-161 adds that a row's intelligence confidence moves no figure of any
+reference case: with a manoeuvre row beside the no-action one and red's
+custody not read, so the rule of thumb sets custody, every cell is the same at
+confidence 0 and 1, and the manoeuvre row's gap against doing nothing is the
+horizon x the default custody gap share, DEFAULT_CUSTODY_GAP_FRACTION, as the page's default confidence
+gave it.
 """
 
 from __future__ import annotations
@@ -41,11 +48,13 @@ from spectre.astro.closest_approach import ClosestApproach, closest_approach
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow, elset_state, run_separation_series
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
 from spectre.astro.response_burn import RESPONSE_PROPAGATOR
+from spectre.domain import decision
 from spectre.domain.decision import (
     ActionType,
     AdversaryAction,
     BoundElset,
     FriendlyResponse,
+    OutcomeMetrics,
     Scenario,
     ScenarioBinding,
     evaluate_scenario,
@@ -119,12 +128,8 @@ def _monte_carlo_nominal(case: ReferenceCase, start_s: float) -> ClosestApproach
 _LIMIT_HOURS: dict[str, float] = {"coplanar_leo": 24.0, "geo_drift_in": 72.0, "plane_change": 24.0}
 
 
-def _decision_phase3(case: ReferenceCase, start_s: float) -> ClosestApproach:
-    """The Decision Engine's computed closest approach (SPC-120): one NO_ACTION row, both sides bound.
-
-    The scenario starts *start_s* after the element-set epoch, so each element set is that old at evaluation,
-    against its regime's limit, and its horizon runs to the case's horizon.
-    """
+def _both_bound(case: ReferenceCase, start_s: float) -> ScenarioBinding:
+    """Both element sets bound, each *start_s* old at evaluation against its regime's limit; red's custody not read."""
     age_h = start_s / 3600.0
 
     def bound(side: str, tle: str, satno: int) -> BoundElset:
@@ -134,12 +139,21 @@ def _decision_phase3(case: ReferenceCase, start_s: float) -> ClosestApproach:
             limit_hours=_LIMIT_HOURS[case.name],
         )
 
+    return ScenarioBinding(red=bound("red", case.red_tle, 90002), blue=bound("blue", case.blue_tle, 90001))
+
+
+def _decision_phase3(case: ReferenceCase, start_s: float) -> ClosestApproach:
+    """The Decision Engine's computed closest approach (SPC-120): one NO_ACTION row, both sides bound.
+
+    The scenario starts *start_s* after the element-set epoch, so each element set is that old at evaluation,
+    against its regime's limit, and its horizon runs to the case's horizon.
+    """
     scenario = Scenario(
         name=case.title, epoch_utc=EPOCH + timedelta(seconds=start_s),
         adversary_actions=[AdversaryAction("A0", "No action", ActionType.NO_ACTION, 0.5, 0.5)],
         friendly_responses=[FriendlyResponse("F0", "Hold", ActionType.NO_ACTION, 0.0, 1.0, 0.0)],
         horizon_hours=(case.horizon_s - start_s) / 3600.0,
-        binding=ScenarioBinding(red=bound("red", case.red_tle, 90002), blue=bound("blue", case.blue_tle, 90001)),
+        binding=_both_bound(case, start_s),
     )
     cell = evaluate_scenario(scenario).outcome_matrix[0][0]
     assert cell.ca_computed is not None, cell.ca_refusal
@@ -153,15 +167,6 @@ def _decision_phase3_rk45(case: ReferenceCase, start_s: float) -> ClosestApproac
     so no burn is flown; but a sized response puts every computed cell on RK45 for both orbits, from their SGP4
     states at the scenario epoch, and the no-action cell must still reproduce the case.
     """
-    age_h = start_s / 3600.0
-
-    def bound(side: str, tle: str, satno: int) -> BoundElset:
-        return BoundElset(
-            side=side, name=f"{side} {case.name}", stk_name=f"{side.upper()}_{case.name.upper()}",  # type: ignore[arg-type]
-            satno=satno, tle=tle, data_mode="REAL", epoch=EPOCH, age_hours=age_h,
-            limit_hours=_LIMIT_HOURS[case.name],
-        )
-
     scenario = Scenario(
         name=case.title, epoch_utc=EPOCH + timedelta(seconds=start_s),
         adversary_actions=[AdversaryAction("A0", "No action", ActionType.NO_ACTION, 0.5, 0.5)],
@@ -170,12 +175,27 @@ def _decision_phase3_rk45(case: ReferenceCase, start_s: float) -> ClosestApproac
             FriendlyResponse("F1", "Avoid", ActionType.MANOEUVRE, 0.3, 0.8, 0.0, burn=ResponseBurnSpec(target_km=1.0)),
         ],
         horizon_hours=(case.horizon_s - start_s) / 3600.0,
-        binding=ScenarioBinding(red=bound("red", case.red_tle, 90002), blue=bound("blue", case.blue_tle, 90001)),
+        binding=_both_bound(case, start_s),
     )
     cell = evaluate_scenario(scenario).outcome_matrix[0][0]
     assert cell.ca_computed is not None, cell.ca_refusal
     assert cell.ca_computed.propagator == RESPONSE_PROPAGATOR
     return cell.ca_computed.approach
+
+
+def _with_a_manoeuvre_row(case: ReferenceCase, start_s: float, confidence: float) -> list[list[OutcomeMetrics]]:
+    """The decision_phase3 scenario with a manoeuvre row added at *confidence*, red's custody not read (SPC-161)."""
+    scenario = Scenario(
+        name=case.title, epoch_utc=EPOCH + timedelta(seconds=start_s),
+        adversary_actions=[
+            AdversaryAction("A0", "No action", ActionType.NO_ACTION, 0.5, confidence),
+            AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, 0.5, confidence),
+        ],
+        friendly_responses=[FriendlyResponse("F0", "Hold", ActionType.NO_ACTION, 0.0, 1.0, 0.0)],
+        horizon_hours=(case.horizon_s - start_s) / 3600.0,
+        binding=_both_bound(case, start_s),
+    )
+    return evaluate_scenario(scenario).outcome_matrix
 
 
 PATHS: dict[str, ApproachPath] = {
@@ -291,6 +311,21 @@ def test_every_path_reproduces_every_case(path: str, case: ReferenceCase, start_
     assert abs(result.miss_km - case.miss_km) <= case.miss_tol_km, message
     assert abs(result.tca_s - expected_tca) <= case.tca_tol_s, message
     assert result.at_window_edge is False, message
+
+
+@pytest.mark.parametrize("start_s", _WINDOW_STARTS, ids=["from-epoch", "from-epoch-plus-600s"])
+@pytest.mark.parametrize("case", REFERENCE_CASES, ids=_CASE_IDS)
+def test_intelligence_confidence_moves_no_figure_of_any_case(case: ReferenceCase, start_s: float) -> None:
+    """SPC-161: the rule of thumb's gap was the horizon x confidence, so a surer row lost custody for longer."""
+    unsure, sure = (_with_a_manoeuvre_row(case, start_s, c) for c in (0.0, 1.0))
+    assert sure == unsure
+    no_action, manoeuvre = sure[0][0], sure[1][0]
+    assert no_action.ca_computed is not None, no_action.ca_refusal
+    assert abs(no_action.ca_computed.approach.miss_km - case.miss_km) <= case.miss_tol_km
+    assert (no_action.custody_maintained, no_action.custody_gap_hours) == (True, 0.0)
+    assert manoeuvre.custody_maintained is False
+    horizon_h = (case.horizon_s - start_s) / 3600.0
+    assert manoeuvre.custody_gap_hours == round(horizon_h * decision.DEFAULT_CUSTODY_GAP_FRACTION, 2)
 
 
 @pytest.mark.parametrize("case", REFERENCE_CASES, ids=_CASE_IDS)

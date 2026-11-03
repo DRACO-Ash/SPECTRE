@@ -25,7 +25,9 @@ from pydantic import BaseModel, Field
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.astro.response_burn import BurnAxis
 from spectre.domain.decision import (
+    ADVERSARY_FIELDS_NOTE,
     BINDING_NOTE,
+    DEFAULT_CUSTODY_GAP_FRACTION,
     MAX_SAMPLE_HOURS,
     ActionType,
     AdversaryAction,
@@ -188,13 +190,14 @@ def _action_type(types: Sequence[str], index: int) -> ActionType:
 
 
 class _AdversaryColumns(NamedTuple):
-    """The adversary form's columns, one entry per row."""
+    """The adversary form's columns, one entry per row: each row's custody gap share apart from its confidence."""
 
     ids:   list[str]
     names: list[str]
     types: list[str]
     probs: list[float]
     confs: list[float]
+    gaps:  list[float]
 
 
 def _adversary_rows(
@@ -209,6 +212,7 @@ def _adversary_rows(
             probability=float(_at(columns.probs, i, 0.5)),
             confidence=float(_at(columns.confs, i, 0.5)),
             hypothesis=_at(hypotheses, i, None),
+            custody_gap_fraction=_at(columns.gaps, i, DEFAULT_CUSTODY_GAP_FRACTION),
         )
         for i in range(len(columns.ids))
     ]
@@ -452,6 +456,8 @@ async def decision_panel(
     pol   = getattr(state, "last_pol_analysis", None)
     return render(request, "partials/decision_panel.html", {
         "pol": pol,
+        "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
+        "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
         **_bind_context(state),
         **_hypothesis_context(),
     })
@@ -513,6 +519,8 @@ class _ScenarioForm(BaseModel):
     adv_types: list[str] | None = Field(default=None, alias="adv_type")
     adv_probs: list[str] | None = Field(default=None, alias="adv_prob")
     adv_confs: list[str] | None = Field(default=None, alias="adv_conf")
+    # Each row's custody gap share (SPC-161), apart from its confidence; a form without the column takes the default.
+    adv_gaps: list[str] | None = Field(default=None, alias="adv_gap")
     # Friendly responses (up to 4)
     fr_ids: list[str] | None = Field(default=None, alias="fr_id")
     fr_names: list[str] | None = Field(default=None, alias="fr_name")
@@ -568,6 +576,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
     adversary = _AdversaryColumns(
         form.adv_ids or [], form.adv_names or [], form.adv_types or [],
         inputs.column(form.adv_probs, "probability"), inputs.column(form.adv_confs, "confidence"),
+        inputs.column(form.adv_gaps, "custody gap share"),
     )
     friendly = _ResponseColumns(
         inputs.column(form.fr_costs, "cost"), inputs.column(form.fr_revs, "reversibility"),

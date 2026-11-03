@@ -6,7 +6,8 @@
    approach of SPC-120: its line, its edge caveat, the result's computed notes and the Phase 3 footer; and the
    custody of SPC-123: the red track's status at evaluation, each row's custody sentence, a degraded cell and the
    result's custody notes. The Show trajectory forms (SPC-124) read "links", which only the route passes, and the
-   TCA histogram reads each cell's tca_histogram; both are guarded too. #}
+   TCA histogram reads each cell's tca_histogram; both are guarded too. A row's custody gap share (SPC-161) is
+   guarded, and shown only on a manoeuvre row whose custody is the rule of thumb, the one place it sets a figure. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -166,7 +167,8 @@
           <div style="font-weight:600; color:var(--gold)">{{ a.name | truncate(22, True, '…') }}</div>
           <div style="font-size:0.58rem; color:var(--text-dim)">
             {{ a.action_type.value | replace('_',' ') | title }} ·
-            P={{ a.probability }} · Conf={{ a.confidence }}
+            P={{ a.probability }} · Conf={{ a.confidence }}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
+              and (result.row_custody is not defined or result.row_custody | length <= i or result.row_custody[i] is none) %} · <span class="row-gap" title="The rule of thumb loses custody for this share of the horizon when the response neither manoeuvres nor retasks a sensor; Conf moves no figure">Gap={{ a.custody_gap_fraction }}</span>{% endif %}
           </div>
           {% if a.hypothesis is defined and a.hypothesis is not none %}
           <div class="row-hypothesis" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.sentence }}</div>

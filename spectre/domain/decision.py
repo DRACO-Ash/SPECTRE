@@ -301,8 +301,8 @@ LOOKUP_BASES: OutcomeBases = outcome_bases(
     ),
     custody_gap_hours=FigureBasis(
         Basis.LOOKUP,
-        "when custody is lost, the horizon x adversary confidence; against a sensor retask, half its time "
-        "to execute; detection is not modelled",
+        "when custody is lost, the horizon x the row's custody gap share, not its intelligence confidence; "
+        "against a sensor retask, half its time to execute; detection is not modelled",
     ),
     closest_approach_km=FigureBasis(
         Basis.LOOKUP,
@@ -725,24 +725,47 @@ class AdversaryHypothesis:
         return hash(json.dumps(self.recorded(), sort_keys=True))
 
 
+#: A row's custody gap share when none is given: the confidence the page posted by default, which set the rule of
+#: thumb's gap until SPC-161, so a page left at its defaults scores as it did.
+DEFAULT_CUSTODY_GAP_FRACTION = 0.7
+
+#: Beside the adversary rows on the panel: what each of a row's three numbers means and what reads it (SPC-161).
+ADVERSARY_FIELDS_NOTE = (
+    "P: how likely you judge this action, from 0 to 1; the expected-value selector weights each row by it. "
+    "Conf: how sure the intelligence behind P is, from 0 to 1; it is recorded and moves no figure. "
+    "Gap: the share of the horizon we lose custody for if this action is a manoeuvre and our response neither "
+    "manoeuvres nor retasks a sensor, a rule of thumb; a bound red track's custody replaces it once read."
+)
+
+
 @dataclass
 class AdversaryAction:
-    """A single adversary COA to evaluate."""
+    """A single adversary COA to evaluate.
+
+    probability is the operator's likelihood that the action happens, the only weight the expected-value selector
+    reads. confidence is how sure the intelligence behind that likelihood is: recorded, it moves no figure. The rule
+    of thumb's custody gap is custody_gap_fraction of the horizon, a statement about our custody, not about the
+    adversary's likelihood; until SPC-161 it was the horizon x confidence, so a surer row lost custody for longer.
+    """
 
     id:          str
     name:        str
     action_type: ActionType
-    probability: float            # [0, 1] — operator assessment
-    confidence:  float            # [0, 1] — intelligence confidence
+    probability: float            # [0, 1]: the operator's likelihood that this action happens
+    confidence:  float            # [0, 1]: how sure the intelligence behind probability is; moves no figure
     description: str = ""
     # How the adversary might move, and where that came from (SPC-111). Carried
     # and put in provenance; in a scenario bound on both sides, plan_sampling
     # samples this row's closest approach from it (SPC-112).
     hypothesis:  AdversaryHypothesis | None = None
+    # [0, 1]: the share of the horizon the rule of thumb loses custody for when this row is a manoeuvre and the
+    # response neither manoeuvres nor retasks a sensor (SPC-161). A bound red track's read custody replaces it.
+    custody_gap_fraction: float = DEFAULT_CUSTODY_GAP_FRACTION
 
     def __post_init__(self) -> None:
         _require_fraction("AdversaryAction", "probability", self.probability)
         _require_fraction("AdversaryAction", "confidence", self.confidence)
+        _require_fraction("AdversaryAction", "custody_gap_fraction", self.custody_gap_fraction)
         if self.hypothesis is not None and not isinstance(self.hypothesis, AdversaryHypothesis):
             raise TypeError(
                 "AdversaryAction.hypothesis takes an AdversaryHypothesis, which says where the hypothesis came "
@@ -1593,8 +1616,9 @@ def compute_outcome_metrics(
     --------------------------------------------
     - custody: lost when the adversary manoeuvres and the response is
       NO_ACTION or POSTURE_CHANGE; a MANOEUVRE or SENSOR_RETASK response keeps it
-    - custody_gap_hours: when lost, horizon * adversary confidence, a property
-      of the adversary's action alone; against a SENSOR_RETASK response to a
+    - custody_gap_hours: when lost, horizon * the row's custody_gap_fraction,
+      nothing of ours; never its confidence, which until SPC-161 set it, so
+      surer intelligence lengthened our gap; against a SENSOR_RETASK response to a
       manoeuvre, half the response's time to execute. Detection capability is
       not modelled. Friendly reversibility counts only in its own term: it
       used to scale this gap too, so a fully reversible NO_ACTION lost custody
@@ -1668,9 +1692,9 @@ def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scen
 
     if adversary_is_manoeuvre and not friendly_is_active:
         custody_maintained = False
-        # Gap proportional to adversary confidence and horizon, and nothing of
-        # ours: how reversible our response is does not shorten their gap.
-        custody_gap_hours = scenario.horizon_hours * adversary.confidence
+        # The row's share of the horizon, and nothing of ours: how reversible our response is does not shorten
+        # the gap. Not its confidence: how sure the intelligence is says nothing of how long we lose custody.
+        custody_gap_hours = scenario.horizon_hours * adversary.custody_gap_fraction
     elif adversary_is_manoeuvre and friendly.action_type == ActionType.SENSOR_RETASK:
         # Sensor retask reduces gap but doesn't eliminate manoeuvre risk
         custody_maintained = True

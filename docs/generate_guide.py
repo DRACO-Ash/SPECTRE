@@ -1290,14 +1290,17 @@ def _section_13_decision_engine(doc: Document) -> None:
             ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
             ["Probability", "Operator-assessed likelihood [0–1] that this COA is executed"],
             ["Confidence", "Intelligence confidence in the probability estimate [0–1]"],
+            ["Custody gap share", "Share of the horizon [0–1] we lose custody for if the action is a "
+             "manoeuvre and our response neither manoeuvres nor retasks a sensor (default 0.7)"],
             ["Description", "Free-text tactical description for context"],
         ],
     )
     _add_body(doc,
-        "The probability and confidence fields allow the operator to express both the "
-        "likelihood of an action and the quality of the intelligence supporting that "
-        "estimate. Low-confidence high-probability assessments receive reduced weighting "
-        "under the probabilistic selector strategy."
+        "Probability is the likelihood the expected-value selector weights each action by. "
+        "Confidence records how sure the intelligence behind that probability is; it is "
+        "recorded and moves no figure. The custody gap share is a rule of thumb for how long "
+        "we lose custody; once a bound red track's custody status is read, that status "
+        "replaces it."
     )
 
     _add_heading_h2(doc, "Friendly Response Options")

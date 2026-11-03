@@ -169,7 +169,7 @@ Once logged in, the operator console has a collapsible sidebar on the left and a
    - Photometry assessment — paste or upload historical magnitude observations; SPECTRE fits a phase-function baseline and runs a Student's t-test to detect statistically significant brightness changes, correlated with manoeuvre epochs
 
 10. **Decision Engine** — open the **Decision** hero tab:
-    - Define 1–5 adversary action rows (type, probability, confidence)
+    - Define 1–5 adversary action rows (type, probability, confidence, custody gap share)
     - Define 1–5 friendly response rows (type, cost, reversibility, time-to-execute)
     - Click **Evaluate** — the engine computes an N × M outcome matrix with composite scores, custody indicators, and closest-approach estimates
     - Choose selector strategy: **Minimax** (cautious: best worst case), **Expected Value** (probability-weighted), or **Minimin** (optimistic: best best case, not robust)

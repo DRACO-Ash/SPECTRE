@@ -27,9 +27,9 @@ def _epoch() -> datetime:
 
 def _adv(id: str = "A1", name: str = "Proximity approach",
           atype: ActionType = ActionType.MANOEUVRE,
-          prob: float = 0.6, conf: float = 0.8) -> AdversaryAction:
+          prob: float = 0.6, conf: float = 0.8, gap: float = 0.8) -> AdversaryAction:
     return AdversaryAction(id=id, name=name, action_type=atype,
-                            probability=prob, confidence=conf)
+                            probability=prob, confidence=conf, custody_gap_fraction=gap)
 
 
 def _fr(id: str = "R1", name: str = "COLA manoeuvre",
@@ -220,7 +220,7 @@ class TestFindRobustResponse:
         assert r1.id == r2.id
 
     def test_composite_scores_match_the_hand_calculation(self):
-        """A1 (manoeuvre, confidence 0.8) against R1 (manoeuvre, cost 0.4,
+        """A1 (manoeuvre, custody gap share 0.8) against R1 (manoeuvre, cost 0.4,
         reversibility 0.7, 6 h), 72 h horizon, default weights:
         custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
         0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;

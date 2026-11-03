@@ -21,8 +21,10 @@ from spectre.domain import decision
 from spectre.domain.decision import ActionType, AdversaryAction, FriendlyResponse, Scenario
 
 
-def _pair(friendly_type: ActionType, *, confidence: float = 0.8, reversibility: float = 0.25) -> decision.OutcomeMetrics:
-    adv = AdversaryAction("A", "approach", ActionType.MANOEUVRE, 0.6, confidence)
+def _pair(
+    friendly_type: ActionType, *, confidence: float = 0.8, gap: float = 0.8, reversibility: float = 0.25,
+) -> decision.OutcomeMetrics:
+    adv = AdversaryAction("A", "approach", ActionType.MANOEUVRE, 0.6, confidence, custody_gap_fraction=gap)
     fr = FriendlyResponse("F", "resp", friendly_type, 0.3, reversibility, 6.0)
     sc = Scenario("s", datetime(2026, 1, 1, tzinfo=UTC), [adv], [fr], horizon_hours=72.0)
     return decision.compute_outcome_metrics(adv, fr, sc)
@@ -33,9 +35,11 @@ def test_custody_is_lost_unless_the_response_manoeuvres_or_retasks(friendly: Act
     assert _pair(friendly).custody_maintained is False
 
 
-def test_the_gap_is_scaled_by_adversary_confidence() -> None:
-    # Not scaled by our reversibility any more (audit F-035).
+def test_the_gap_is_scaled_by_the_rows_gap_share_and_not_its_confidence() -> None:
+    # Not scaled by our reversibility any more (audit F-035), nor by intelligence confidence (SPC-161).
     assert _pair(ActionType.NO_ACTION).custody_gap_hours == pytest.approx(72.0 * 0.8)
+    assert _pair(ActionType.NO_ACTION, confidence=0.1).custody_gap_hours == pytest.approx(72.0 * 0.8)
+    assert _pair(ActionType.NO_ACTION, gap=0.25).custody_gap_hours == pytest.approx(72.0 * 0.25)
 
 
 def test_no_tle_path_remains() -> None:
@@ -65,5 +69,5 @@ def test_the_docstrings_describe_the_lookup_model() -> None:
     assert "sampled" in module and "P5" in module
     rules = " ".join((decision.compute_outcome_metrics.__doc__ or "").split())
     assert "POSTURE_CHANGE" in rules
-    assert "confidence" in rules
+    assert "custody_gap_fraction" in rules
     assert "epoch separation" not in rules
