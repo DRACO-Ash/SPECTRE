@@ -87,12 +87,14 @@ jobs:
         # The Decision Engine's selectors were tested only for returning some
         # response (audit F-122); its own tests now run every line.
         # The closest-approach helper every later Decision Engine phase calls
-        # is held at every line by its own tests (SPC-102). These are line
+        # is held at every line by its own tests (SPC-102). So is the pure
+        # Threat Understanding model (SPC-162 to SPC-164). These are line
         # floors: [tool.coverage.run] measures no branches.
         run: |
           coverage report --include=spectre/web/routes/threat.py --fail-under=75
           coverage report --include=spectre/domain/decision.py --fail-under=100
           coverage report --include=spectre/astro/closest_approach.py --fail-under=100
+          coverage report --include=spectre/domain/threat_understanding.py --fail-under=100
       - name: Upload coverage report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

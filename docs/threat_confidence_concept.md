@@ -716,6 +716,9 @@ Wiring in `web/routes/threat.py`:
 4. **Decide-by after a declared "Degraded"** (SPC-167). Operators will see more deadlines. Recommendation: ship it live, because it removes the cheapest manufacturable override.
 
 5. **Who owns the seed list and the provider grade table.** Either may become classified. Keep them as data under UK sovereign handling, not in bundled files.
+6. **When a stronger copy arrives with no reading (found building SPC-163).** I1 (adding an item never widens the range) and I2 (a copy never narrows it) meet here. A stronger item from the same source chain, arriving at the same epoch with no reading of its own, folds a weaker member's reading, so the range can widen. As built, I2 wins: only the strongest member of a group applies a reading, and a test pins it. Claude's choice, not a ruling.
+
+7. **What ends a hostile floor (found building SPC-163).** Section 4.4 says any later judged burn. As built, only a later UNUSUAL or UNPRECEDENTED burn ends it, following section 5.3, section 8 ("no downgrade from ROUTINE alone") and I9. The floor's coverage and Understanding still decay, so a stale floor reads as poorly understood. Claude's choice, not a ruling.
 
 ## 10. Build plan
 

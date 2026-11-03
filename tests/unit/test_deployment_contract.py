@@ -1586,6 +1586,11 @@ class TestContinuousIntegrationCanRun:
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "--include=spectre/domain/decision.py --fail-under=100" in ci
 
+    def test_threat_understanding_keeps_its_coverage_floor(self) -> None:
+        """SPC-162 to SPC-164: the pure Threat Understanding model is held at every line by its own tests."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/domain/threat_understanding.py --fail-under=100" in ci
+
     def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
         workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         installs = [
