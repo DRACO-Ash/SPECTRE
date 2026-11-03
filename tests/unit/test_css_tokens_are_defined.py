@@ -15,10 +15,13 @@ each ``{{ }}`` slot, so the text after the slot is checked as well as before.
 A declaration counts as a definition only where one can start, so a BEM
 selector such as ``.btn--x:hover`` defines nothing.
 
-Names already undefined before this test are listed in ``_KNOWN_UNDEFINED``,
-each with what it renders as today. Defining any of them repaints every use in
-both themes, which is a design change of its own; the list may only shrink,
-and an entry that is no longer used, or is now defined, fails the test.
+Names already undefined before this test were listed in ``_KNOWN_UNDEFINED``,
+each with what it rendered as. SPC-029 emptied the list. Four names the Steel
+theme defined until the token bridge (cee0de7) dropped them are restored as
+aliases of theme tokens in style.css, so each follows the theme on its own;
+the other nine, which no stylesheet ever defined, had their uses moved onto an
+existing token. Both sets are pinned below. The list may only shrink, and an
+entry that is no longer used, or is now defined, fails the test.
 """
 
 from __future__ import annotations
@@ -38,21 +41,33 @@ _USED = re.compile(r"var\(\s*(--(?:[A-Za-z0-9_-]|\{\{.*?\}\})+)\s*(,)?")
 _SLOT = re.compile(r"\{\{.*?\}\}")
 
 #: Undefined before SPC-027, with what each use renders as today. Remove an
-#: entry when its uses are fixed or the name is defined in both themes.
-_KNOWN_UNDEFINED = {
-    "--bg-card": "background under a form control; renders transparent, the panel shows through",
-    "--bg-secondary": "background of small buttons and tiles; renders transparent",
-    "--border-subtle": "border-bottom shorthand; the whole declaration drops, so no rule is drawn",
-    "--panel-bg": "background of decision, training, geometry and NOTSO panels; renders transparent",
-    "--spectre-color-accent": "background of the admin badge; renders transparent over the badge class",
-    "--spectre-color-bg": "text colour of the admin badge; inherits the row's colour",
-    "--spectre-color-border": "border-bottom shorthand in the user admin table; no rule is drawn",
-    "--spectre-color-custody-green": "colour of a successful admin flash; inherits the body text colour",
-    "--spectre-color-surface-2": "background of the user edit row; renders transparent",
-    "--spectre-color-text-muted": "colour of user admin notes; inherits the body text colour",
-    "--spectre-size-xsmall": "font size in the user admin table; inherits the table's size",
-    "--text-muted": "colour of secondary figures and notes; inherits the parent's colour",
-    "--text-primary": "colour of primary text in panels; inherits the parent's colour, usually --text",
+#: entry when its uses are fixed or the name is defined in both themes. Empty
+#: since SPC-029; a new entry needs a reason.
+_KNOWN_UNDEFINED: dict[str, str] = {}
+
+#: Restored by SPC-029: the role the Steel theme gave each name before the
+#: token bridge (cee0de7) removed it, stated once in style.css's :root as an
+#: alias of a theme token. --bg-secondary was #edf1f6 beside a #f0f4f8 page,
+#: so it is the page surface: a tile recessed into its panel in both themes.
+_ALIASES = {
+    "--text-primary": "var(--text)",
+    "--text-muted": "var(--text-dim)",
+    "--panel-bg": "var(--surface)",
+    "--bg-secondary": "var(--bg)",
+}
+
+#: Defined by no stylesheet at any point, so SPC-029 moved every use onto the
+#: existing token named here.
+_RETIRED = {
+    "--bg-card": "var(--bg)",
+    "--border-subtle": "var(--border)",
+    "--spectre-color-accent": "var(--spectre-color-intel-blue)",
+    "--spectre-color-bg": "var(--spectre-surface-raised)",
+    "--spectre-color-border": "var(--spectre-border-default)",
+    "--spectre-color-custody-green": "var(--spectre-color-nominal-green)",
+    "--spectre-color-surface-2": "var(--spectre-surface-input)",
+    "--spectre-color-text-muted": "var(--spectre-text-secondary)",
+    "--spectre-size-xsmall": "var(--spectre-size-caption)",
 }
 
 
@@ -134,3 +149,64 @@ def test_ops_gold_is_the_brand_gold() -> None:
     style = (_WEB / "static" / "style.css").read_text(encoding="utf-8")
     assert re.search(r"--gold:\s*#C8A415;", style), "the dark theme's gold"
     assert re.search(r"--gold:\s*#8A5600;", themes), "the light theme's gold, 6.16:1 on white"
+
+
+def _stripped_sources() -> list[str]:
+    return [_COMMENTS.sub("", path.read_text(encoding="utf-8")) for path in _sources()]
+
+
+def _root_block(filename: str) -> str:
+    text = _COMMENTS.sub("", (_WEB / "static" / filename).read_text(encoding="utf-8"))
+    start = text.index(":root {")
+    return text[start:text.index("}", start)]
+
+
+def test_the_restored_names_alias_a_theme_token_in_root() -> None:
+    """One definition each, in style.css's :root, beside --text and --surface.
+
+    An alias resolves on <html>, where data-theme sits, so it takes the Steel
+    value of the token it names without a second definition in themes.css.
+    """
+    block = _root_block("style.css")
+    found = {}
+    for name in _ALIASES:
+        match = re.search(rf"(?<![-\w]){re.escape(name)}\s*:\s*([^;]+);", block)
+        if match:
+            found[name] = match.group(1).strip()
+    assert found == _ALIASES
+
+
+def test_no_other_sheet_or_theme_block_redefines_a_restored_name() -> None:
+    """The alias is the only definition, so no theme can quietly override it.
+
+    A Steel block that set ``--panel-bg: transparent`` or a pale
+    ``--text-muted`` would win on <html> and undo SPC-029 while the :root
+    alias still read correctly.
+    """
+    counts = dict.fromkeys(_ALIASES, 0)
+    for text in _stripped_sources():
+        for a, b in _DEFINED.findall(text):
+            if (a or b) in counts:
+                counts[a or b] += 1
+    assert counts == dict.fromkeys(_ALIASES, 1), f"definitions of each restored name across the console: {counts}"
+
+
+def test_the_names_no_sheet_ever_defined_are_no_longer_used() -> None:
+    texts = _stripped_sources()
+    used = sorted(
+        name for name in _RETIRED
+        if any(re.search(rf"var\(\s*{re.escape(name)}\s*[,)]", text) for text in texts)
+    )
+    assert used == [], f"still used and still defined nowhere: {used}"
+
+
+def test_the_admin_badge_is_an_accent_fill_with_knockout_ink() -> None:
+    """``--spectre-color-accent`` behind ``--spectre-color-bg``: a filled pill.
+
+    The ink is the surface the table sits on, .spectre-panel's raised
+    surface, which is what "the background's colour" means on this page.
+    """
+    row = (_WEB / "templates" / "partials" / "admin_user_row.html").read_text(encoding="utf-8")
+    assert (
+        'style="background:var(--spectre-color-intel-blue); color:var(--spectre-surface-raised)">admin<'
+    ) in row

@@ -16,6 +16,19 @@
   --text-dim:      var(--spectre-text-secondary);
   --text-bright:   var(--spectre-color-pure-white);
 
+  /* ── Names the panels were written against (SPC-029) ──────────
+     Steel defined these four until the token bridge dropped them, and
+     the dark theme never did, so every use fell back to the inherited
+     value: transparent panels and tiles, no emphasis, no muting. Each is
+     restated as the role Steel gave it. They resolve on <html>, where
+     data-theme sits, so they follow the theme with no second definition.
+     --bg-secondary was #edf1f6 beside a #f0f4f8 page: the page surface,
+     a tile recessed into its panel in both themes.                */
+  --text-primary:  var(--text);
+  --text-muted:    var(--text-dim);
+  --panel-bg:      var(--surface);
+  --bg-secondary:  var(--bg);
+
   /* ── Operational status — mapped to spectre-theme tokens ─────── */
   --green:         var(--spectre-color-nominal-green);
   --green-dim:     var(--spectre-color-nominal-green-bg);

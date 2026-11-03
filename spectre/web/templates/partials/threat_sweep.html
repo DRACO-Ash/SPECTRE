@@ -232,7 +232,7 @@
         <span>&#916;V Budget Utilisation</span>
         <span>{{ worst_coa.dv_budget_pct }}% of {{ worst_coa.budget_m_s | m_s }} m/s budget</span>
       </div>
-      <div style="height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden">
+      <div style="height:6px; background:var(--bg); border-radius:3px; overflow:hidden">
         <div style="height:100%; width:{{ worst_coa.dv_budget_pct }}%; background:{{ worst_coa.threat_color }}; border-radius:3px"></div>
       </div>
     </div>
@@ -241,15 +241,15 @@
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Prograde {{ worst_coa.pro_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Normal {{ worst_coa.nor_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Radial {{ worst_coa.rad_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
       </div>
     </div>
 

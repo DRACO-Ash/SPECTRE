@@ -618,19 +618,19 @@
                 Manual Red TLE Override
                 <span style="font-size:0.65rem; font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0">— paste a post-manoeuvre TLE to override the registered track for this sweep</span>
               </summary>
-              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:4px">
+              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:4px">
                 <div style="display:grid; grid-template-columns:1fr auto; gap:0.5rem; align-items:end; margin-bottom:0.4rem">
                   <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
                     TLE (lines 1 &amp; 2)
                     <textarea name="manual_red_tle" id="ts-manual-red-tle"
                               rows="2"
                               placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
-                              style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)"></textarea>
+                              style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg)); color:var(--text-primary)"></textarea>
                   </label>
                   <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); white-space:nowrap">
                     Confidence
                     <select name="manual_red_confidence" id="ts-manual-red-conf"
-                            style="display:block; margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)">
+                            style="display:block; margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg)); color:var(--text-primary)">
                       <option value="HIGH">HIGH</option>
                       <option value="MEDIUM" selected>MEDIUM</option>
                       <option value="LOW">LOW</option>
@@ -682,13 +682,13 @@
                 Manual Asset TLE
                 <span style="font-size:0.65rem; font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0">- screen an asset whose element set is not cached</span>
               </summary>
-              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:4px">
+              <div style="margin-top:0.4rem; padding:0.5rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:4px">
                 <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
                   TLE (lines 1 &amp; 2)
                   <textarea name="manual_asset_tle" id="scr-manual-asset-tle"
                             rows="2"
                             placeholder="1 NNNNNC ...&#10;2 NNNNN ..."
-                            style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)"></textarea>
+                            style="margin-top:0.2rem; font-family:monospace; font-size:0.72rem; width:100%; resize:vertical; padding:0.3rem 0.4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg)); color:var(--text-primary)"></textarea>
                 </label>
                 <p style="margin:0.3rem 0 0; font-size:0.68rem; color:var(--text-dim); font-style:italic">
                   If set, this element set is used <strong>instead of</strong> the selected asset.

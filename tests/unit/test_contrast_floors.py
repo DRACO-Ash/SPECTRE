@@ -606,6 +606,28 @@ def _declared_var(selector: str, prop: str, filename: str = "style.css") -> str:
     return match.group(1)
 
 
+def _aliases(filename: str, selector: str) -> dict[str, str]:
+    """The ``--token: var(--other);`` declarations in *selector*'s own rule."""
+    block = _rule_block(filename, selector)
+    return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*var\(\s*(--[a-z0-9-]+)\s*\)\s*;", block))
+
+
+#: The dark theme's alias chains: style.css's --text-dim names
+#: --spectre-text-secondary, which spectre-theme.css's :root names
+#: --spectre-color-sensor-grey, which carries the hex.
+_DARK_ALIASES = {**_aliases("style.css", ":root"), **_aliases("spectre-theme.css", ":root")}
+
+
+def _chase(name: str, tokens: dict[str, str], aliases: dict[str, str]) -> str:
+    """The hex *name* paints, following ``var()`` aliases until one carries a value."""
+    seen: set[str] = set()
+    while name not in tokens:
+        assert name in aliases and name not in seen, f"{name} resolves to no colour in this theme"
+        seen.add(name)
+        name = aliases[name]
+    return tokens[name]
+
+
 #: Every rule that paints gold onto chrome both themes deliberately keep dark.
 #: Each entry carries the HOST whose background it lands on, and the host's own
 #: rule is re-read for the surface token, so moving a bar off --navy-deep is
@@ -718,3 +740,65 @@ class TestNoGoldDerivedValueIsSplitFromItsParent:
             f"{len(split)} gold-derived token(s) composite a different hue: "
             + ", ".join(f"{n} = rgb{v}" for n, v in sorted(split.items()))
         )
+
+
+class TestTheAdminPageNamesItsColoursOnce:
+    """SPC-029: the user admin page named six tokens no sheet defines.
+
+    Each fell back to the inherited value, so the admin badge was plain row
+    text and the success flash was body text. They now name existing tokens,
+    and the two that put ink on a fill are measured here in both themes and,
+    for Steel, on both of its surface sets (see _STEEL above): themes.css's
+    #e8eef5 overlay is what a browser preferring dark paints.
+    """
+
+    _ADMIN = _STATIC.parent / "templates" / "partials"
+
+    @pytest.mark.parametrize(("theme", "fill", "ink"), [
+        ("dark", _DARK["--spectre-color-intel-blue"], _DARK["--spectre-color-deep-space"]),
+        ("steel", _STEEL["--spectre-color-intel-blue"], _STEEL["--spectre-surface-raised"]),
+    ])
+    def test_the_admin_badge_ink_clears_the_floor_on_its_fill(
+        self, theme: str, fill: str, ink: str
+    ) -> None:
+        row = (self._ADMIN / "admin_user_row.html").read_text(encoding="utf-8")
+        assert "background:var(--spectre-color-intel-blue); color:var(--spectre-surface-raised)" in row
+        ratio = _ratio(ink, fill)
+        assert ratio >= _AA_NORMAL, f"the {theme} admin badge is {ratio:.2f}:1, {ink} on {fill}"
+
+    @pytest.mark.parametrize(("theme", "green", "card"), [
+        ("dark", _DARK["--spectre-color-nominal-green"], _DARK["--spectre-color-orbital-grey"]),
+        ("steel", _STEEL["--spectre-color-nominal-green"], _STEEL["--spectre-surface-overlay"]),
+        ("steel, prefers dark", _STEEL["--spectre-color-nominal-green"],
+         _tokens("themes.css", '[data-theme="steel"]')["--spectre-surface-overlay"]),
+    ])
+    def test_the_success_flash_clears_the_floor_on_its_card(
+        self, theme: str, green: str, card: str
+    ) -> None:
+        flash = (self._ADMIN / "admin_flash.html").read_text(encoding="utf-8")
+        assert "custody-green" not in flash
+        assert "var(--spectre-color-nominal-green)" in flash
+        ratio = _ratio(green, card)
+        assert ratio >= _AA_NORMAL, f"the {theme} success flash is {ratio:.2f}:1, {green} on {card}"
+
+    def test_the_header_caption_takes_the_console_user_label_colour(self) -> None:
+        """The signed-in caption sits on .nav-bar, which Steel keeps dark.
+
+        It named --spectre-color-text-muted and so inherited Steel's dark body
+        ink (#111827 or #1c2b3a) onto #1a2a3a. No theme token serves that bar in both
+        themes, which is why .nav-user carries a Steel override; the caption
+        is the same label as the console's .nav-user, so it takes that class.
+        """
+        page = (_STATIC.parent / "templates" / "admin" / "users.html").read_text(encoding="utf-8")
+        caption = re.search(r'<span class="([^"]*)"([^>]*)>\s*\{\{ current_user\.username \}\}', page)
+        assert caption, "the admin header caption has moved"
+        assert "nav-user" in caption.group(1).split()
+        assert "color:" not in caption.group(2), "an inline colour outranks the Steel .nav-user override"
+        bar = _declared("themes.css", '[data-theme="steel"] .nav-bar', "background")
+        ink = _declared("themes.css", '[data-theme="steel"] .nav-user', "color")
+        ratio = _ratio(ink, bar)
+        assert ratio >= _AA_NORMAL, f"the Steel caption is {ratio:.2f}:1, {ink} on {bar}"
+        dark_bar = _chase(_declared_var(".nav-bar", "background"), _DARK_BRAND, _DARK_ALIASES)
+        dark_ink = _chase(_declared_var(".nav-user", "color"), _DARK_BRAND, _DARK_ALIASES)
+        ratio = _ratio(dark_ink, dark_bar)
+        assert ratio >= _AA_NORMAL, f"the dark caption is {ratio:.2f}:1, {dark_ink} on {dark_bar}"
