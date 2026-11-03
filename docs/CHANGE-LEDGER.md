@@ -1109,3 +1109,12 @@ Feature work from the backlog: computed closest approach, the convergence tolera
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/astro/elset_approach.py`, `spectre/web/decision_custody.py`, custody over the horizon in `custody.py`, the propagator gap in `monte_carlo.py`, computed cells and custody in `decision.py`, one shared custody rule in `routes/pol.py`, and theme tokens | `scripts/check-quality.sh` against 0.14.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A bound evaluation may fetch the red track's element-set history from UDL, as the sweep does, within the per-user limiter. | n/a. |
 
+## 0.16.0
+
+Feature work from the backlog: computed friendly responses, element-set limits on sampling, times of closest approach, and the first Threat Understanding items.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/threat_understanding.py`, confidence in `threat_assessment.py`, response burns, figures and trajectories in new decision modules, burn series in `monte_carlo.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Sizing a response burn adds up to a few seconds of one CPU inside the existing sampled-evaluation job budget. | n/a. |
+

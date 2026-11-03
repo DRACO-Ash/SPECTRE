@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-03
+
+**Operator outputs advanced: 4, the recommended response, now computes what our own manoeuvre buys; and the owner's Threat Understanding concept begins: the more SPECTRE understands a satellite, its capability, manoeuvres and interactions, the more it understands its threat.**
+
+### Added
+- Threat Understanding, the concept (`docs/threat_confidence_concept.md`): researched against how Google builds confidence from many signals and against UK and NATO evidence grading, then judged across three designs. Threat becomes a range that narrows as independent, fresh, reliable evidence is earned, and Understanding (HIGH, MODERATE, LOW) says how well founded it is and what to collect next. SPC-160 to SPC-177 carry the build.
+- The Threat Understanding model, a pure module held at every line by its tests: evidence graded on the Admiralty scale with freshness, copies of one source counted once, declared claims capped, a floor and ceiling set by earned readings, a contradicted impairment voided as possible deception, conflicts that never narrow, and Understanding as the weakest of information base, analytical rigour and volatility. Not yet on screen; the sweep shows it beside today's verdict in SPC-166 (SPC-162, SPC-163, SPC-164).
+- Our response is computed: a friendly manoeuvre's burn is sized by propagation to a target separation, blue is flown after it, and each cell scores what the burn buys and the delta-V it spends, so a row's responses differ (SPC-121).
+- Each cell shows its time of closest approach with an uncertainty from position error over closing speed (about plus or minus 1.2 h on a slow GEO approach), a Show trajectory button for the Hill-frame view, and a histogram of times of closest approach in a sampled cell (SPC-124).
+
+### Changed
+- Sweep confidence counts independent sources, each once, never the orbital geometry, and says what it rests on and what is missing. The four figures from one element-set history count once; an undated assessed record cannot establish identity, so confidence now tops out at MODERATE until dated records arrive; a recorded status is declared, not observed; a recorded impairment contradicted by observed burns is named as possible deception. The verdict band is unchanged (SPC-160).
+- Once any response burns, every computed figure in that result is on RK45 for both objects, so no figure or row mixes propagators; the SGP4 no-burn figure stays as a reference (SPC-121).
+- Sampled runs end where an element set passes its age limit, as computed runs do (SPC-118).
+
+### Out of scope, named
+- Threat Understanding on screen (SPC-166), its adapters from held signals (SPC-165) and the verdict switch, which stays off until the owner signs off (SPC-175).
+
 ## [0.15.0] - 2026-11-03
 
 **Operator output advanced: 4, the recommended response. With both sides bound, closest approach and custody come from the real orbits, not lookups, and custody means what the operator means by it.** Recommendations can change for every bound scenario, because closest approach and custody no longer depend on the response chosen.

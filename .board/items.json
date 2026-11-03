@@ -643,14 +643,18 @@
   "group": "decision",
   "minutes": 360,
   "task": "Phase 3: friendly manoeuvre responses computed from the manoeuvre library",
-  "note": "Response delta-V is cost times 0.05 km/s today. Size the burn to a target separation, propagate the blue asset after it and score what it buys.",
+  "note": "Response delta-V is cost times 0.05 km/s today. Size the burn to a target separation, propagate the blue asset after it and score what it buys. Built in 0.16.0. Once any response burns, every computed figure in that result is on RK45 for both objects; computed means one deterministic propagation on one named propagator (Claude's call, not a ruling).",
   "deps": [
    "SPC-120"
   ],
   "files": [
    "spectre/domain/decision.py",
    "spectre/astro/maneuvers.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-123",
@@ -687,7 +691,11 @@
   "files": [
    "spectre/web/templates/partials/decision_results.html",
    "spectre/web/routes/geometry.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-125",
@@ -1161,7 +1169,11 @@
   ],
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-119",
@@ -1183,14 +1195,18 @@
   "group": "understanding",
   "minutes": 300,
   "task": "Confidence stops counting copies and geometry",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I12 four measured cases. Across all 64 subsets of the 6 inputs, adding one never lowers the level unless it adds a conflict. SYNTHETIC gives LOW. Custody LOST gives LOW. History figures count once Owner priority: the Threat Understanding items lead the backlog from 2026-11-03.",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I12 four measured cases. Across all 64 subsets of the 6 inputs, adding one never lowers the level unless it adds a conflict. SYNTHETIC gives LOW. Custody LOST gives LOW. History figures count once Owner priority: the Threat Understanding items lead the backlog from 2026-11-03. Built in 0.16.0: an undated record cannot establish identity, so sweep confidence tops out at MODERATE until dated records arrive (SPC-165).",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/web/routes/threat.py",
    "threat_sweep.html",
    "tests/unit/test_threat_assessment.py",
    "test_threat_sweep_template.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-161",
@@ -1217,7 +1233,11 @@
   "files": [
    "spectre/domain/threat_understanding.py",
    "tests/unit/test_threat_understanding.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-163",
@@ -1232,7 +1252,11 @@
   ],
   "deps": [
    "SPC-162"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-164",
@@ -1248,7 +1272,11 @@
   "deps": [
    "SPC-162",
    "SPC-163"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
  },
  {
   "ref": "SPC-165",
