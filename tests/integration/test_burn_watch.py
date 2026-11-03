@@ -37,6 +37,25 @@ def _pol(burns: list[Any], newest: datetime) -> SimpleNamespace:
     return SimpleNamespace(manoeuvres=burns, candidate_manoeuvres=[], records=[SimpleNamespace(epoch=newest, tle="after")])
 
 
+@pytest.fixture(autouse=True)
+def _no_live_udl(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """No test here may reach UDL, and the watch's clock is pinned to the fixtures' day.
+
+    The loop tests set their next check a day after _NOW. On the real clock that
+    day arrived, and the loop's probe went to UDL with the test password; the
+    failure was swallowed, so nothing went red. Found by the V0.9 review.
+    """
+    calls: list[Any] = []
+
+    async def refuse(*args: Any, **kwargs: Any) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(udl, "fetch_tle_for_satno", refuse)
+    monkeypatch.setattr(burn_watch, "_utc_now", lambda: _NOW)
+    yield
+    assert calls == [], "a burn-watch test reached UDL"
+
+
 @pytest.fixture
 def owner() -> Iterator[tuple[SessionKey, Any]]:
     """A sign-in of its own, with UDL connected, removed afterwards."""
