@@ -126,7 +126,7 @@ def _burn_when(burns: list[Any]) -> str:
     return f"{latest.burn_epoch:%H:%M} UTC on {latest.burn_epoch.day} {latest.burn_epoch:%b}"
 
 
-class _Stated(Exception):
+class _StatedError(Exception):
     """A check that failed at a known stage, carrying the fixed sentence the operator is shown.
 
     ``unseen`` is whether burns since the last good check may still be unseen;
@@ -167,14 +167,14 @@ async def _new_burns(
     held = await held_history(state, watch.red_satno, now)
     if held.pol is None:
         # held_history's problems are fixed sentences of its own, safe to show as they are.
-        raise _Stated(held.problem or "No element-set history is held for this object.")
+        raise _StatedError(held.problem or "No element-set history is held for this object.")
     loop = asyncio.get_running_loop()
     try:
         assessment, _ = await loop.run_in_executor(
             None, history_evidence, held.pol, reserve_reset_for(state, watch.red_satno),
         )
     except Exception as exc:
-        raise _Stated("The element-set history could not be analysed.") from exc
+        raise _StatedError("The element-set history could not be analysed.") from exc
     limit = limit_hours_for_regime(watch.red_regime)
     burns = [m for m in burns_in_window(held.pol.manoeuvres, now, limit) if is_new_burn(m, watch.accounted_until)]
     return held.pol, assessment, burns
@@ -210,7 +210,7 @@ async def check_once(
         logger.warning("Burn watch check failed for %s: %s", log_safe(watch.red_satno),
                        log_safe(exc.__cause__ or exc))
         times = {"now": _hm(now), "next": _hm(watch.next_check_at)}
-        if isinstance(exc, _Stated):
+        if isinstance(exc, _StatedError):
             sentence, unseen = exc.lead + _STATED_TAIL.format(**times), exc.unseen
         else:
             sentence, unseen = _FETCH_FAILED.format(**times), True
@@ -222,7 +222,7 @@ async def check_once(
 async def _check(
     state: SessionState, key: SessionKey, watch: BurnWatch, now: datetime, compute: Compute,
 ) -> BurnAlert | None:
-    """The body of one check; a failure past the probe raises :class:`_Stated` with its own sentence."""
+    """The body of one check; a failure past the probe raises :class:`_StatedError` with its own sentence."""
     epoch = await _probe(state, watch)
     if still_wanted(state, key, watch):
         return None
@@ -239,7 +239,7 @@ async def _check(
         change = await compute(state, watch, found, now)
     except Exception as exc:
         lead = f"{watch.red_name} burned at {_burn_when(found[2])}, but what it changed could not be computed."
-        raise _Stated(lead, unseen=False) from exc
+        raise _StatedError(lead, unseen=False) from exc
     if still_wanted(state, key, watch):
         return None
     _good(watch, now, epoch)
