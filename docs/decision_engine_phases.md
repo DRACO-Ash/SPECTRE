@@ -114,8 +114,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
    for 49 s. A row whose floor (samples times horizon and set-up) is already over the cap is refused without drawing
    its samples, and an over-cap refusal names the longest horizon, in tenths of an hour, that would fit. The largest
    allowed evaluation measured 6.3 to 9.0 s on one idle thread, from 50 samples over 11.3 h to 3,500 over 0.02 h
-   (the cases are listed in `_cost`). Until SPC-113 the async route calls the evaluation directly, so it blocks the
-   event loop and every session waits with the operator. Sampling converges only in a narrow band under the cap: in
+   (the cases are listed in `_cost`). The route runs the evaluation on a worker thread, so other sessions carry on,
+   but the operator's own request waits for all of it until SPC-113 adds a time budget. Sampling converges only in a narrow band under the cap: in
    the LEO 300 km measurements, 1,000 samples over 0.44 h and more over shorter horizons converged, while every case
    with the burn in or before a window of 1 h or more (50 to 500 samples) was refused as not converged after the
    full wait, so the unconverged refusal says to take more samples with a shorter horizon. Our response is not

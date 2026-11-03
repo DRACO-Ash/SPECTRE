@@ -7,6 +7,7 @@ POST /plan/decision/evaluate → evaluates scenario, returns ranked results part
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import math
@@ -314,7 +315,8 @@ async def decision_evaluate(
     )
 
     try:
-        result = evaluate_scenario(scenario, strategy=strat)
+        # Sampling can take seconds within its cap; on the event loop it would stall every session.
+        result = await asyncio.to_thread(evaluate_scenario, scenario, strategy=strat)
         state.append_log(
             f"[Decision] Evaluated '{scenario_name}': "
             f"{len(adversary_actions)} adversary actions × {len(friendly_responses)} friendly responses. "

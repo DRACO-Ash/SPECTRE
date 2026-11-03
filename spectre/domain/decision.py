@@ -1072,9 +1072,9 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
 #: A sampler: one hypothesis's separation series against the blue track over a window (SPC-110).
 Sampler = Callable[[ManoeuvreHypothesis, BlueTrack, SeparationWindow], SeparationSeries]
 
-#: The most sample-hours one evaluation may run while the operator waits. Until SPC-113 moves it off,
-#: POST /decision/evaluate is an async route that calls evaluate_scenario directly, so a sampled evaluation
-#: blocks the event loop: every session in the process waits with the operator, not only their request. A row
+#: The most sample-hours one evaluation may run while the operator waits. POST /decision/evaluate runs it on a
+#: worker thread, so other sessions are not stalled, but the operator's own request still waits for all of it
+#: until SPC-113 adds a time budget and named refusals. A row
 #: costs the larger of its samples times the horizon and the hours its series integrates
 #: (separation_integration_s, which counts any burn before the window), plus SET_UP_S_PER_SAMPLE for each
 #: sample; the rows that would run are summed before any of them runs. See _cost for the measurements.
