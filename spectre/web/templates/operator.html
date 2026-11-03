@@ -343,6 +343,37 @@
           </div>
         </section>
 
+        <!-- UDL Conjunctions (SPC-031): what UDL holds, not a SPECTRE screen -->
+        <section class="panel">
+          <h2>Conjunctions (UDL)</h2>
+          <div id="conjunction-controls" class="satno-row">
+            <label for="conjunction-satno" class="visually-hidden">NORAD catalogue number for the conjunction lookup</label>
+            <input id="conjunction-satno" name="satno"
+                   placeholder="SATNO" pattern="[0-9]+" inputmode="numeric"
+                   title="NORAD catalogue number: press Enter or click Look up"
+                   hx-get="/udl/conjunction"
+                   hx-trigger="keyup[key=='Enter']"
+                   hx-include="#conjunction-controls [name]"
+                   hx-target="#conjunction-results"
+                   hx-swap="innerHTML"
+                   hx-indicator="#conjunction-indicator" />
+            {% with dm_side = "conjunction" %}{% include "partials/fetch_data_mode_select.html" %}{% endwith %}
+            <button type="button"
+                    hx-get="/udl/conjunction"
+                    hx-include="#conjunction-controls [name]"
+                    hx-target="#conjunction-results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#conjunction-indicator"
+                    hx-disabled-elt="this"
+                    title="List the conjunction records UDL holds for this catalogue number, newest time of closest approach first"
+                    class="btn-secondary btn-sm">Look up</button>
+            <span id="conjunction-indicator" class="htmx-indicator"><span class="spinner"></span>Looking up&hellip;</span>
+          </div>
+          <div id="conjunction-results" style="margin-top:0.5rem">
+            <p class="empty-msg">Enter a SATNO to list the close approaches UDL holds for it.</p>
+          </div>
+        </section>
+
       </div><!-- end sb-intel -->
 
       <!-- ── Log Panel ─────────────────────────────────────── -->

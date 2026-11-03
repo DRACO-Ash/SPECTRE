@@ -36,6 +36,7 @@ from spectre.web.planning_state import (
     set_onorbit_catalog,
 )
 from spectre.web.rate_limit import udl_auth_rate_limit, udl_data_rate_limit, udl_sync_rate_limit
+from spectre.web.udl_conjunction import CONJUNCTION_PATH, CONJUNCTION_SIDE_PARAMS, read_conjunctions
 
 logger = logging.getLogger(__name__)
 
@@ -1245,6 +1246,123 @@ async def search_catalog(
         {"results": results, "q": q,
          "status": status, "total": len(catalog)},
     )
+
+
+# ── Conjunction lookup ─────────────────────────────────────────────────────
+
+
+_CONJUNCTION_TEMPLATE = "partials/conjunction_results.html"
+_CONJUNCTION_CALL = "conjunction lookup"
+_MAX_SATNO_DIGITS = 9
+_BAD_SATNO_MESSAGE = "Enter a NORAD catalogue number (digits only) to look up its conjunctions."
+
+
+def _conjunction_satno(raw: str) -> int | None:
+    """*raw* as a catalogue number, or None. ASCII digits only, so "1e3" and "²" are not one."""
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()) or len(text) > _MAX_SATNO_DIGITS or int(text) == 0:
+        return None
+    return int(text)
+
+
+def _conjunction_precheck(state: SessionState, satno: int | None, data_mode: str | None) -> str | None:
+    """The operator-facing reason a conjunction lookup cannot proceed, or None."""
+    if not state.udl_username or not state.udl_password:
+        return _NOT_CONNECTED_MESSAGE
+    if satno is None:
+        return _BAD_SATNO_MESSAGE
+    if data_mode is None:
+        return _UNKNOWN_DATA_MODE_MESSAGE
+    return None
+
+
+async def _get_conjunction_pages(
+    auth: tuple[str, str], satno: int, dm: str,
+) -> tuple[list[tuple[str, Any]], str | None]:
+    """Ask UDL for the object as sat 1 and as sat 2: ``(replies, None)``, or ``([], the sentence to show)``.
+
+    UDL filters on one side per query, so both are asked. Either failing
+    fails the lookup: half a listing would read as no close approaches on the
+    other side. The detail of a failure goes to the log, never the page.
+    """
+    pages: list[tuple[str, Any]] = []
+    try:
+        async with httpx.AsyncClient() as client:
+            for side in CONJUNCTION_SIDE_PARAMS:
+                resp = await client.get(
+                    f"{_UDL_BASE}{CONJUNCTION_PATH}",
+                    params={side: satno, "dataMode": dm},
+                    auth=auth,
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+                try:
+                    pages.append((side, resp.json()))
+                except ValueError as exc:
+                    logger.warning(
+                        "UDL conjunction reply for SATNO %s was not JSON (%s): %s",
+                        log_safe(satno), log_safe(exc), log_safe(resp.text[:300], limit=500),
+                    )
+                    return [], f"UDL answered the {_CONJUNCTION_CALL} with a body SPECTRE could not read; {_DETAIL_IN_LOG}"
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:300].strip() or "(empty)"
+        logger.warning(
+            "UDL conjunction lookup returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
+        return [], _udl_refused(_CONJUNCTION_CALL, exc.response.status_code)
+    except httpx.TimeoutException as exc:
+        logger.warning("UDL conjunction lookup timed out for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return [], f"UDL did not answer the {_CONJUNCTION_CALL} in time. Try again; {_DETAIL_IN_LOG}"
+    except httpx.RequestError as exc:
+        logger.warning("UDL conjunction lookup failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return [], _udl_unreachable(_CONJUNCTION_CALL)
+    return pages, None
+
+
+@router.get("/conjunction", response_model=None)
+async def udl_conjunction(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
+    satno: Annotated[str, Query(description="NORAD catalogue number")] = "",
+    data_mode: Annotated[str, Query(description="UDL data mode for this lookup only; blank uses the session mode")] = "",
+) -> HTMLResponse:
+    """List the conjunctions UDL holds for *satno*, newest TCA first, at most 50 (SPC-031).
+
+    The miss distance and probability of collision are UDL's figures as
+    filed; SPECTRE computes neither. *data_mode* names the UDL data mode for
+    this lookup alone; blank uses the session mode, which it never changes.
+    """
+    state = get_session_state(current_user)
+    number = _conjunction_satno(satno)
+    dm = _request_data_mode(state, data_mode)
+    context: dict[str, Any] = {
+        "satno": number, "rows": [], "usable": 0, "skipped": 0, "unrelated": 0, "lookup_mode": dm,
+        "data_mode_override": bool(data_mode.strip()), "error": None,
+    }
+    error = _conjunction_precheck(state, number, dm)
+    # number and dm are None only when error is set; named here so mypy sees it.
+    if error is not None or number is None or dm is None:
+        return render(request, _CONJUNCTION_TEMPLATE, {**context, "error": error})
+
+    # Both credentials are set once the precheck has passed; the "or" is for mypy.
+    auth = (state.udl_username or "", state.udl_password or "")
+    pages, error = await _get_conjunction_pages(auth, number, dm)
+    if error is not None:
+        return render(request, _CONJUNCTION_TEMPLATE, {**context, "error": error})
+
+    reading = read_conjunctions(pages, number, dm)
+    state.append_log(f"[UDL] Conjunction lookup for SATNO {number}: {reading.usable} record(s)")
+    logger.info(
+        "Conjunction lookup for SATNO %s dataMode=%s by operator %s: %s usable, %s skipped, %s unrelated",
+        log_safe(number), log_safe(dm), log_safe(current_user.username),
+        log_safe(reading.usable), log_safe(reading.skipped), log_safe(reading.unrelated),
+    )
+    return render(request, _CONJUNCTION_TEMPLATE, {
+        **context, "rows": reading.rows, "usable": reading.usable,
+        "skipped": reading.skipped, "unrelated": reading.unrelated,
+    })
 
 
 #: Output field -> the UDL fields that may carry it, in order of preference.
