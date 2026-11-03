@@ -1310,6 +1310,9 @@ async def _refetch_tles(
     return new_red, new_blue
 
 
+_UDL_DATA_MODES = frozenset({"REAL", "SIMULATED", "EXERCISE", "TEST"})
+
+
 async def _resolve_provenance(
     red_tle: str, blue_tle: str, requested: str, state: object,
 ) -> tuple[str, str, str]:
@@ -1318,11 +1321,17 @@ async def _resolve_provenance(
     The badge used to show the requested mode, defaulting to REAL, even when
     nothing was fetched and the sets were the operator's own (audit F-133).
     """
-    if requested.strip():
-        red, blue = await _refetch_tles(red_tle, blue_tle, requested.strip().upper(), state)
+    mode = requested.strip().upper()
+    if mode in _UDL_DATA_MODES:
+        red, blue = await _refetch_tles(red_tle, blue_tle, mode, state)
     else:
         red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
     label = red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}"
+    if mode and mode not in _UDL_DATA_MODES:
+        # Never sent to UDL (SPC-025), and said, so the held sets are not
+        # mistaken for a fresh fetch in the mode asked for.
+        label = (f"refused data mode {mode[:20]!r}: it must be REAL, SIMULATED, EXERCISE or TEST; "
+                 f"flown with the held sets ({label})")
     return red.tle, blue.tle, label
 
 

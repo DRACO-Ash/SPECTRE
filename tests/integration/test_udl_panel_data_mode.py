@@ -268,3 +268,21 @@ def _set_session_mode(client: Any, cookie: str, mode: str) -> str:
     )
     assert resp.status_code == 200
     return " ".join(resp.text.split())
+
+
+class TestTheSessionModeRefusesAnUnknownValue:
+    """SPC-024: an unknown session mode was silently set to REAL."""
+
+    def test_an_unknown_mode_is_refused_and_the_mode_kept(self, client: Any, auth_cookie: str) -> None:
+        from tests.integration.conftest import session_state
+
+        state = session_state(auth_cookie)
+        saved = state.udl_data_mode
+        try:
+            _set_session_mode(client, auth_cookie, "EXERCISE")
+            page = _set_session_mode(client, auth_cookie, "LIVE")
+            assert state.udl_data_mode == "EXERCISE"
+            assert "Data mode must be REAL, SIMULATED, EXERCISE or TEST; the session mode is still EXERCISE." in page
+            assert "Data Mode: EXERCISE" in page
+        finally:
+            state.udl_data_mode = saved

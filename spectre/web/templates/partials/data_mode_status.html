@@ -1,4 +1,5 @@
 <span class="badge-ok">Data Mode: {{ udl_data_mode }}</span>
+{% if data_mode_error is defined and data_mode_error %}<span class="error-msg" role="alert">{{ data_mode_error }}</span>{% endif %}
 {#- The per-fetch selects name the session mode in their default option. Only
     its text is swapped: replacing the select would drop a per-fetch choice. -#}
 {% for dm_side in ("red", "blue") %}

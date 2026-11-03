@@ -63,6 +63,11 @@ MAX_HORIZON_H = 720.0
 _MIN_HORIZON_H = 1.0
 MAX_PHOTOMETRY_CSV_CHARS = 524_288
 
+# What the panel says when the fetch or the analysis fails; the detail goes to
+# the log, never the page (SPC-023, as SPC-019 did for the UDL routes).
+_FETCH_FAILED = "The element-set history could not be fetched from UDL. Try again; the server log has the detail."
+_ANALYSIS_FAILED = "The element-set history could not be analysed. The server log has the detail."
+
 _NO_ANALYSIS_HTML = (
     '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
 )
@@ -485,8 +490,8 @@ async def pol_analyse(
             )
             logger.info("PoL: %s chars from UDL (direct) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
-            logger.warning("PoL: UDL direct failed: %s", exc)
-            return _panel_error(request, state, f"UDL fetch failed: {exc}")
+            logger.warning("PoL: UDL direct failed: %s", log_safe(exc))
+            return _panel_error(request, state, _FETCH_FAILED)
 
     # ── UDL session credentials ───────────────────────────────────────────────
     else:  # pol_source == "udl"
@@ -503,8 +508,8 @@ async def pol_analyse(
             )
             logger.info("PoL: %s chars from UDL (session) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
-            logger.warning("PoL: UDL session failed: %s", exc)
-            return _panel_error(request, state, f"UDL fetch failed: {exc}")
+            logger.warning("PoL: UDL session failed: %s", log_safe(exc))
+            return _panel_error(request, state, _FETCH_FAILED)
 
     if not merged_text.strip():
         return _panel_error(
@@ -533,9 +538,9 @@ async def pol_analyse(
             f"[POL] Analysed {satno}: {pol.tle_count} TLEs, "
             f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("PoL analysis failed for %s", log_safe(satno))
-        return _panel_error(request, state, f"Analysis error: {exc}")
+        return _panel_error(request, state, _ANALYSIS_FAILED)
 
     return render(request, "partials/pol_results.html", {
         "pol": pol,

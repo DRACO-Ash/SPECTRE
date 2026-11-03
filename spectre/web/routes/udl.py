@@ -471,7 +471,14 @@ async def set_data_mode(
     state = get_session_state(current_user)
     mode = data_mode.strip().upper()
     if mode not in _VALID_DATA_MODES:
-        mode = "REAL"
+        # Refused, never quietly set to REAL (SPC-024): an operator meaning
+        # EXERCISE would otherwise land on live data with no word said.
+        logger.info("Refused session data mode %s", log_safe(mode))
+        return render(request, "partials/data_mode_status.html", {
+            "udl_data_mode": state.udl_data_mode,
+            "data_mode_error": ("Data mode must be REAL, SIMULATED, EXERCISE or TEST; "
+                                f"the session mode is still {state.udl_data_mode}."),
+        })
     state.udl_data_mode = mode
     state.append_log(f"[UDL] Data mode set to {mode}")
     logger.info("UDL data mode set to %s for operator %s", log_safe(mode), log_safe(current_user.username))
