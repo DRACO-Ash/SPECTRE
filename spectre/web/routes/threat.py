@@ -674,7 +674,10 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
     dv_pro = 0.0
     dv_nor = 0.0
     dv_rad = 0.0
+    departure: tuple[float, float, float] | None = None
     if sol.burns:
+        first = sol.burns[0]
+        departure = (from_km_s(first.dv_prograde), from_km_s(first.dv_normal), from_km_s(first.dv_radial))
         tof_s = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds()
         tof_hours = tof_s / 3600.0
         for b in sol.burns:
@@ -696,6 +699,7 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
             from_km_s(abs(sol.total_delta_v)), regime, kind_for_method(method_name),
         ).posture_label,
         arrives=arrives_at_target(method_name),
+        departure_m_s=departure,
     )
 
 
@@ -884,6 +888,24 @@ def _burn_direction_breakdown(
     return (0.0, 0.0, 0.0, "Unknown")
 
 
+def worst_entry_index(entries: list[ThreatSweepEntry], max_dv_m_s: float) -> int | None:
+    """Where in *entries* the worst course of action sits, or ``None`` when nothing arrives.
+
+    Only a solution that reaches the target leaves a warning time to rank, and
+    the worst is the one that leaves the least. The worst case card names this
+    index so it can open a decision scenario from the entry (SPC-150). It
+    travels beside the worst-case dict in the page context, never inside it:
+    that dict is the legacy verdict pinned for the 20 bundled red objects.
+    """
+    arriving = [i for i, e in enumerate(entries) if e.arrives]
+    if not arriving:
+        return None
+    return min(
+        arriving,
+        key=lambda i: warning_time_rank(entries[i].delta_v_m_s, entries[i].tof_hours, max_dv_m_s),
+    )
+
+
 def _compute_worst_coa(
     entries: list[ThreatSweepEntry],
     capability: CapabilityEvidence | None = None,
@@ -907,16 +929,10 @@ def _compute_worst_coa(
 
     Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
     """
-    # Only a solution that reaches the target leaves a warning time to rank.
-    arriving = [e for e in entries if e.arrives]
-    if not arriving:
+    index = worst_entry_index(entries, max_dv_m_s)
+    if index is None:
         return None
-
-    # The entry that leaves the least warning time among the feasible ones.
-    worst = min(
-        arriving,
-        key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s),
-    )
+    worst = entries[index]
     dv = worst.delta_v_m_s
 
     assessment = assess_threat(
@@ -2770,6 +2786,9 @@ async def threat_sweep(
         "grouped": grouped,
         "hrr_count": hrr_count,
         "worst_coa": worst_coa,
+        # Where the worst case sits in the sweep, so its card can open a decision scenario (SPC-150); None
+        # exactly when worst_coa is, since both pick by the same rule.
+        "worst_entry_index": worst_entry_index(entries, max_dv_m_s),
         # Methods that produced nothing, and why. Previously discarded, which
         # hid the fastest approaches: refusals cluster on the aggressive end.
         "method_refusals": method_refusals,
@@ -3184,6 +3203,8 @@ async def refine_entry(
         return render(request, "partials/threat_sweep_row.html", {
             "entry": entry, "index": entry_index, "group_idx": group_idx,
             "red_name": assessment.red_name if assessment else "",
+            # The sweep this row belongs to, so its decision control names it (SPC-150).
+            "sweep_at": assessment.sweep_epoch.isoformat() if assessment else "",
             "error": error, "refine_error": refine_error,
         })
 

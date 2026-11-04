@@ -57,6 +57,17 @@
             data-epoch="{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ entry.method }}"
             onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
             title="Pre-fill the intercept engine with this row's objects, burn epoch and method (TOF is not carried)">Load</button>
+    {# The same decision control as threat_sweep.html (SPC-150), naming the sweep the refine wrote into. #}
+    {% if entry.arrives and sweep_at is defined and sweep_at %}
+    <button class="btn-secondary btn-sm"
+            type="button"
+            hx-get="/plan/decision/from-sweep"
+            hx-vals='{"entry": {{ index }}, "sweep": "{{ sweep_at }}"}'
+            hx-target="#hero-decision" hx-swap="innerHTML"
+            data-opens-decision
+            aria-label="Decide from this entry in the Decision Engine: {{ entry.target.target_name }}, {{ entry.method }}, {{ entry.burn_location }}"
+            title="Open a decision scenario filled from this entry; nothing is evaluated until you press Evaluate">Decide</button>
+    {% endif %}
   </td>
 </tr>
 {% endif %}

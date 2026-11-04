@@ -440,6 +440,11 @@ class ThreatSweepEntry:
     #: only aligns the planes: its single burn "arrives" the moment it fires,
     #: so its flight time is not a warning and it never ranks as one.
     arrives: bool = True
+    #: The first burn alone, m/s, as (prograde, normal, radial): the one burn a
+    #: single-burn decision hypothesis can stand for (SPC-150). The dv_ fields
+    #: above sum every burn of the transfer, which is no one burn. None when
+    #: the solution carried no burn.
+    departure_m_s: tuple[float, float, float] | None = None
 
 
 @dataclass

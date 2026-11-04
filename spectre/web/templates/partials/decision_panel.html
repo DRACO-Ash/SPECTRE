@@ -3,7 +3,13 @@
    binding_note for the bind fields (SPC-100), each optional; archetypes, default_samples, min_samples,
    max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional;
    adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional;
-   default_probability, the engine's own default for P, optional: nothing from Understanding fills P (SPC-171) #}
+   default_probability, the engine's own default for P, optional: nothing from Understanding fills P (SPC-171);
+   prefill (decision_from_sweep.SweepPrefill|None), optional: the fill from a sweep entry and what it says, or its
+   problem; it never carries P, Conf or Gap (SPC-150) #}
+
+{% set fill = prefill if prefill is defined and prefill and not prefill.problem else none %}
+{% set refusal = prefill.problem if prefill is defined and prefill else "" %}
+{% set adv_rows = fill.rows if fill and fill.rows else [none] %}
 
 {% set hyp = {
   "archetypes": archetypes if archetypes is defined else [],
@@ -52,40 +58,56 @@
 {# ── A manoeuvre hypothesis for one adversary row (SPC-114). Every field sits in its label and carries no id,
      because the block is repeated per row, and the row builder below emits this same block. Every row posts all
      eight fields, blanks included, so the columns stay aligned with the adversary rows. ── #}
-{% macro hypothesis_fields(h) -%}
-<details class="adv-hypothesis" style="grid-column:1 / -1; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+{% macro hypothesis_fields(h, row=none) -%}
+{%- set fixed = row is not none and row.burn_at is not none -%}
+{%- set detected = row is not none and row.detected -%}
+<details class="adv-hypothesis" style="grid-column:1 / -1; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem"{% if row is not none and row.archetype %} open{% endif %}>
   <summary style="cursor:pointer">Manoeuvre hypothesis (optional)</summary>
+  {# Hidden, posted by every row (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is the
+     detected burn evaluate builds from the held history. Blank on a row the operator builds. #}
+  <input type="hidden" name="hyp_burn_at" value="{{ row.burn_at_iso if row is not none else '' }}">
+  <input type="hidden" name="hyp_detected" value="{{ '1' if detected else '' }}">
   <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.3rem; margin-top:0.2rem">
     <label>Archetype
       <select name="hyp_archetype" style="width:100%; font-size:0.6rem">
         <option value="">None: this row stays a lookup</option>
         {%- for key, label in h.archetypes %}
-        <option value="{{ key }}">{{ label }}</option>
+        <option value="{{ key }}"{% if row is not none and row.archetype == key %} selected{% endif %}>{{ label }}</option>
         {%- endfor %}
       </select>
     </label>
     <label>Delta-V (m/s)
-      <input type="number" name="hyp_dv" min="0" max="1000" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
+      <input type="number" name="hyp_dv" min="0" max="1000" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.dv_m_s %} value="{{ row.dv_m_s }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
     </label>
     <label>Radial
-      <input type="number" name="hyp_dir_r" min="-1" max="1" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
+      <input type="number" name="hyp_dir_r" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[0] %} value="{{ row.direction[0] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
     </label>
     <label>In-track
-      <input type="number" name="hyp_dir_i" min="-1" max="1" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
+      <input type="number" name="hyp_dir_i" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[1] %} value="{{ row.direction[1] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
     </label>
     <label>Cross-track
-      <input type="number" name="hyp_dir_c" min="-1" max="1" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
+      <input type="number" name="hyp_dir_c" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[2] %} value="{{ row.direction[2] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
     </label>
     <label>Delta-V spread, 1 sigma (m/s)
       <input type="number" name="hyp_sigma" min="0" max="100" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
     </label>
     <label>Samples
-      <input type="number" name="hyp_samples" value="{{ h.default_samples }}" min="{{ h.min_samples }}" max="{{ h.max_samples }}" step="1" style="width:100%; font-size:0.6rem">
+      <input type="number" name="hyp_samples" value="{{ row.samples if row is not none else h.default_samples }}" min="{{ h.min_samples }}" max="{{ h.max_samples }}" step="1" style="width:100%; font-size:0.6rem">
     </label>
     <label>Burn time (hours from the scenario epoch)
+      {%- if fixed %}
+      <input type="number" name="hyp_burn_h" value="" readonly placeholder="fixed at {{ row.burn_label }}" step="any" style="width:100%; font-size:0.6rem">
+      {%- else %}
       <input type="number" name="hyp_burn_h" value="0" min="-72" step="any" style="width:100%; font-size:0.6rem">
+      {%- endif %}
     </label>
   </div>
+  {% if fixed %}
+  <p class="hyp-fixed" style="margin:0.2rem 0 0">Fixed at {{ row.burn_label }} from the sweep, so the burn stays at
+    that time however long this panel is open.{% if detected %} It is the burn detected in the element-set history,
+    started from the element set before it; its delta-V and direction are the detection's.{% endif %} To enter your
+    own burn, set the archetype to None and add a row.</p>
+  {% endif %}
   <p style="margin:0.2rem 0 0">Starts from the bound red track's state at the burn time. 0 is the moment you press
     Evaluate; a negative time is a burn already made since the red element set's epoch. Blank fields take the
     archetype's, and an archetype's direction is assumed in-track.{% if h.longest_horizon %} At most
@@ -110,6 +132,21 @@
     {% if pol %}<em>Active PoL object: SATNO {{ pol.satno }}.</em>{% endif %}
   </p>
 
+  {# Opened from a threat-sweep entry (SPC-150): what was filled, from which sweep, and what was not and why. #}
+  {% if refusal %}
+  <p class="error-msg" role="alert" style="font-size:0.7rem; margin-bottom:0.6rem">{{ refusal }}</p>
+  {% elif fill %}
+  <section class="decision-prefill" aria-label="Pre-filled from the threat sweep"
+           style="border-left:3px solid var(--ops-blue); background:var(--bg); border-radius:4px;
+                  padding:0.4rem 0.6rem; margin-bottom:0.6rem; font-size:0.66rem; color:var(--text-dim)">
+    <div style="font-weight:700">{{ fill.source }}</div>
+    <ul style="margin:0.25rem 0 0.25rem 1rem; padding:0">
+      {% for line in fill.filled %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% for line in fill.left %}<p style="margin:0.15rem 0 0">{{ line }}</p>{% endfor %}
+  </section>
+  {% endif %}
+
   <form hx-post="/plan/decision/evaluate"
         hx-target="#decision-results"
         hx-swap="innerHTML"
@@ -120,12 +157,12 @@
     <div style="display:grid; grid-template-columns:2fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
       <label style="font-size:0.65rem; color:var(--text-dim)">
         Scenario Name
-        <input type="text" name="scenario_name" value="Unnamed Scenario"
+        <input type="text" name="scenario_name" value="{{ fill.scenario_name if fill else 'Unnamed Scenario' }}"
                style="width:100%; font-size:0.65rem; margin-top:0.15rem">
       </label>
       <label style="font-size:0.65rem; color:var(--text-dim)">
         Horizon (h)
-        <input type="number" name="horizon_hours" value="72" min="0.1" max="720" step="0.1"
+        <input type="number" name="horizon_hours" value="{{ fill.horizon_h if fill else 72 }}" min="0.1" max="720" step="0.1"
                style="width:100%; font-size:0.65rem; margin-top:0.15rem">
       </label>
     </div>
@@ -139,11 +176,12 @@
     <div style="font-size:0.65rem; font-weight:700; color:var(--gold); text-transform:uppercase;
                 letter-spacing:0.05em; margin-bottom:0.3rem">Adversary Actions</div>
     <div id="adv-rows">
-      {# Template row — JS duplicates this #}
+      {# Template row: JS duplicates this. A scenario opened from the sweep renders one row per filled row. #}
+      {% for row in adv_rows %}
       <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
                                    gap:0.3rem; margin-bottom:0.25rem; align-items:end">
-        <input type="hidden" name="adv_id" value="A1">
-        <input type="text"   name="adv_name" placeholder="Name (e.g. Proximity approach)"
+        <input type="hidden" name="adv_id" value="A{{ loop.index }}">
+        <input type="text"   name="adv_name"{% if row is not none %} value="{{ row.name }}"{% endif %} placeholder="Name (e.g. Proximity approach)"
                style="font-size:0.63rem">
         <select name="adv_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
@@ -169,8 +207,9 @@
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
         </button>
-        {{ hypothesis_fields(hyp) }}
+        {{ hypothesis_fields(hyp, row) }}
       </div>
+      {% endfor %}
     </div>
     {% if hyp.fields_note %}
     <p class="adv-fields-note hint" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">{{ hyp.fields_note }}</p>
@@ -261,7 +300,7 @@
 <div id="decision-results"></div>
 
 <script>
-var _advCount = 1;
+var _advCount = {{ adv_rows | length }};
 var _frCount  = 1;
 
 function addAdvRow() {

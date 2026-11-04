@@ -273,6 +273,23 @@
 
     {# ── Summary text ── #}
     <p style="margin:0; font-size:0.77rem; color:var(--text-dim); font-style:italic">{{ worst_coa.summary }}</p>
+
+    {# Open this entry as a decision scenario (SPC-150). The server fills the panel from the sweep it holds, named
+       here by its epoch, so a newer sweep is refused rather than mistaken for this one. Nothing is evaluated.
+       worst_entry_index travels beside worst_coa, not in it: that dict is the pinned legacy verdict (SPC-175). #}
+    {% if worst_entry_index is defined and worst_entry_index is not none %}
+    <div style="margin-top:0.5rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
+      <button type="button" class="btn-secondary btn-sm"
+              hx-get="/plan/decision/from-sweep"
+              hx-vals='{"entry": {{ worst_entry_index }}, "sweep": "{{ assessment.sweep_epoch.isoformat() }}"}'
+              hx-target="#hero-decision" hx-swap="innerHTML"
+              data-opens-decision
+              aria-label="Open a decision scenario from the worst case: {{ worst_coa.target_name }}">Open a decision scenario</button>
+      <span class="field-meta" style="font-size:0.68rem">Fills the Decision Engine with this red track, the target
+        when it is held as a blue asset, and this transfer's departure burn. P and Conf are yours to set, and
+        nothing is evaluated until you press Evaluate.</span>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -496,6 +513,16 @@
                     data-epoch="{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ child.entry.method }}"
                     onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
                     title="Pre-fill the intercept engine with this row's objects, burn epoch and method (TOF is not carried)">Load</button>
+            {% if child.entry.arrives %}
+            <button class="btn-secondary btn-sm"
+                    type="button"
+                    hx-get="/plan/decision/from-sweep"
+                    hx-vals='{"entry": {{ child.flat_idx }}, "sweep": "{{ assessment.sweep_epoch.isoformat() }}"}'
+                    hx-target="#hero-decision" hx-swap="innerHTML"
+                    data-opens-decision
+                    aria-label="Decide from this entry in the Decision Engine: {{ child.entry.target.target_name }}, {{ child.entry.method }}, {{ child.entry.burn_location }}"
+                    title="Open a decision scenario filled from this entry; nothing is evaluated until you press Evaluate">Decide</button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -2,6 +2,7 @@
 
 GET  /plan/decision/panel      → scenario builder input form, with a manoeuvre hypothesis per adversary row (SPC-114)
 GET  /plan/decision/bind       → the bind fields, rebuilt from the held objects (SPC-100)
+GET  /plan/decision/from-sweep → the panel filled from an entry of the held threat sweep (SPC-150); nothing evaluated
 POST /plan/decision/evaluate   → the ranked results partial for a scenario that samples nothing; for one that
                                  samples, a job the page polls (SPC-113)
 GET  /plan/decision/job        → the job's progress, or its results once done
@@ -24,6 +25,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
+from spectre.astro.propagator import TLE_ERRORS
 from spectre.astro.response_burn import BurnAxis
 from spectre.domain.decision import (
     ADVERSARY_FIELDS_NOTE,
@@ -49,6 +51,15 @@ from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
 from spectre.web.decision_binding import bind_scenario
 from spectre.web.decision_custody import HISTORY_WAIT_S, history_fetch, red_custody, with_red_custody
+from spectre.web.decision_from_sweep import (
+    DEFAULT_SAMPLES,
+    EARLIEST_BURN_H,
+    MAX_SAMPLES,
+    MIN_SAMPLES,
+    SweepPrefill,
+    detected_burn,
+    open_from_sweep,
+)
 from spectre.web.decision_job import (
     CustodyRead,
     JobState,
@@ -61,6 +72,7 @@ from spectre.web.decision_job import (
 from spectre.web.decision_threat import held_picture
 from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
+from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import SessionState, get_session_state
 
@@ -77,8 +89,8 @@ _MAX_HORIZON_H = 720.0
 # longest staleness limit, so the orbit it starts from would be refused as out of date anyway.
 _MAX_DV_M_S = 1000.0
 _MAX_SIGMA_M_S = 100.0
-_MIN_SAMPLES, _MAX_SAMPLES, _DEFAULT_SAMPLES = 100, 2000, 500
-_EARLIEST_BURN_H = -72.0
+_MIN_SAMPLES, _MAX_SAMPLES, _DEFAULT_SAMPLES = MIN_SAMPLES, MAX_SAMPLES, DEFAULT_SAMPLES
+_EARLIEST_BURN_H = EARLIEST_BURN_H
 _DIRECTION_LABELS = ("radial direction", "in-track direction", "cross-track direction")
 _HYPOTHESIS_RELOAD = "The hypothesis fields do not match the adversary rows; reload the panel."
 _HYPOTHESIS_UNKNOWN = "Choose a listed archetype for row {row}."
@@ -91,6 +103,19 @@ _HYPOTHESIS_NO_RED = (
     "to None."
 )
 _HYPOTHESIS_NO_STATE = "The red element set cannot be propagated to the burn time in row {row}."
+# A burn the sweep fixed at its own UTC time (SPC-150), and the detected burn evaluate builds from the history.
+_BURN_AT_UNREAD = "The burn time in row {row} cannot be read; reload the panel."
+_BURN_AT_OLD = (
+    "The burn time fixed in row {row}, {at}, is more than 72 h before the scenario epoch. Open the scenario from "
+    "the sweep again."
+)
+_BURN_AT_LATE = "The burn time fixed in row {row}, {at}, is after the horizon. Lengthen the horizon to cover it."
+_DETECTED_NO_TIME = "A detected burn in row {row} needs its burn time; reload the panel."
+_DETECTED_GONE = (
+    "The detected burn in row {row}, at {at}, is no longer in the held history for {red}. Open the scenario from "
+    "the sweep again."
+)
+_SECONDS_PER_HOUR = 3600.0
 # Our burn per friendly row (SPC-121): a target separation up to this, km, and a budget up to this, m/s.
 _MAX_TARGET_KM = 100_000.0
 _MAX_BUDGET_M_S = 1000.0
@@ -231,7 +256,11 @@ def _adversary_rows(
 
 
 class _HypothesisColumns(NamedTuple):
-    """The hypothesis section's eight columns as posted, one raw entry per adversary row (SPC-114)."""
+    """The hypothesis section's columns as posted, one raw entry per adversary row (SPC-114).
+
+    The last two are hidden and optional (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is
+    the detected burn to build from the held history. A form without them reads both as blank on every row.
+    """
 
     archetypes: list[str]
     dvs:        list[str]
@@ -241,6 +270,8 @@ class _HypothesisColumns(NamedTuple):
     sigmas:     list[str]
     samples:    list[str]
     burns_h:    list[str]
+    burns_at:   list[str]
+    detected:   list[str]
 
 
 class _HypothesisEntry(NamedTuple):
@@ -252,12 +283,17 @@ class _HypothesisEntry(NamedTuple):
     sigma_m_s: float | None
     samples:   int
     burn_h:    float
+    #: The burn's own UTC time when the sweep fixed it (SPC-150); burn_h is then counted from it, not read.
+    burn_at:   datetime | None = None
+    #: Build from the held history's detected burn at burn_at, from the element set before it (SPC-001).
+    detected:  bool = False
 
 
 def _hypothesis_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> _HypothesisColumns | None:
-    """The eight columns, or None when the form posts none; columns of another length than the rows are refused.
+    """The columns, or None when the form posts none; columns of another length than the rows are refused.
 
-    Every row posts all eight, blanks included, so the columns stay aligned with the adversary rows.
+    Every row posts all eight, blanks included, so the columns stay aligned with the adversary rows. The two
+    hidden columns (SPC-150) may be absent, and are then blank on every row; posted, they align too.
     """
     raw = (
         form.hyp_archetypes, form.hyp_dvs, form.hyp_dir_r, form.hyp_dir_i, form.hyp_dir_c, form.hyp_sigmas,
@@ -265,10 +301,14 @@ def _hypothesis_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> _Hyp
     )
     if all(column is None for column in raw):
         return None
-    if any(len(column or []) != rows for column in raw):
+    optional = (form.hyp_burns_at, form.hyp_detected)
+    if any(len(column or []) != rows for column in raw) or any(
+        column is not None and len(column) != rows for column in optional
+    ):
         inputs.refuse(_HYPOTHESIS_RELOAD)
         return None
-    return _HypothesisColumns(*(list(column or []) for column in raw))
+    filled = [[""] * rows if column is None else list(column) for column in optional]
+    return _HypothesisColumns(*(list(column or []) for column in raw), *filled)
 
 
 def _direction(inputs: _Inputs, parts: Sequence[str], row: int) -> tuple[float, float, float] | None:
@@ -284,7 +324,60 @@ def _direction(inputs: _Inputs, parts: Sequence[str], row: int) -> tuple[float, 
     return (r, i, c)
 
 
-def _entry(inputs: _Inputs, columns: _HypothesisColumns, index: int, horizon: float) -> _HypothesisEntry | None:
+def _when(moment: datetime) -> str:
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def _hours_from(moment: datetime, now: datetime) -> float:
+    return (moment - now).total_seconds() / _SECONDS_PER_HOUR
+
+
+def _read_burn_at(raw: str) -> datetime | None:
+    """A posted UTC burn time, or None when it is not a time with its offset."""
+    try:
+        moment = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def _fixed_burn(
+    inputs: _Inputs, columns: _HypothesisColumns, index: int, now: datetime, horizon: float,
+) -> tuple[datetime | None, bool]:
+    """The burn time the sweep fixed in row *index*, checked against the hypothesis limits, and whether it is the
+    detected burn; (None, False) when the row counts its burn in hours from the scenario epoch (SPC-150)."""
+    raw_at, row = columns.burns_at[index], index + 1
+    detected = bool(columns.detected[index].strip())
+    if not raw_at.strip():
+        if detected:
+            inputs.refuse(_DETECTED_NO_TIME.format(row=row))
+        return None, False
+    moment = _read_burn_at(raw_at.strip())
+    if moment is None:
+        inputs.refuse(_BURN_AT_UNREAD.format(row=row))
+        return None, False
+    hours = _hours_from(moment, now)
+    if hours < _EARLIEST_BURN_H:
+        inputs.refuse(_BURN_AT_OLD.format(row=row, at=_when(moment)))
+    elif hours > horizon:
+        inputs.refuse(_BURN_AT_LATE.format(row=row, at=_when(moment)))
+    return moment, detected
+
+
+def _entered(
+    inputs: _Inputs, columns: _HypothesisColumns, index: int, *, detected: bool,
+) -> tuple[float | None, tuple[float, float, float] | None]:
+    """Row *index*'s entered delta-V and direction; none for a detected burn, which carries its own (SPC-150)."""
+    if detected:
+        return None, None
+    row = index + 1
+    dv = inputs.optional(columns.dvs[index], f"delta-V (m/s) in row {row}", 0.0, _MAX_DV_M_S)
+    return dv, _direction(inputs, (columns.dir_r[index], columns.dir_i[index], columns.dir_c[index]), row)
+
+
+def _entry(
+    inputs: _Inputs, columns: _HypothesisColumns, index: int, horizon: float, now: datetime,
+) -> _HypothesisEntry | None:
     """Row *index*'s checked fields, or None when its archetype is None, so the row stays a lookup."""
     archetype = columns.archetypes[index].strip()
     if not archetype:
@@ -292,34 +385,41 @@ def _entry(inputs: _Inputs, columns: _HypothesisColumns, index: int, horizon: fl
     row = index + 1
     if archetype not in MANOEUVRE_ARCHETYPES:
         inputs.refuse(_HYPOTHESIS_UNKNOWN.format(row=row))
+    burn_at, detected = _fixed_burn(inputs, columns, index, now, horizon)
+    dv_m_s, direction = _entered(inputs, columns, index, detected=detected)
     return _HypothesisEntry(
         archetype=archetype,
-        dv_m_s=inputs.optional(columns.dvs[index], f"delta-V (m/s) in row {row}", 0.0, _MAX_DV_M_S),
-        direction=_direction(inputs, (columns.dir_r[index], columns.dir_i[index], columns.dir_c[index]), row),
+        dv_m_s=dv_m_s,
+        direction=direction,
         sigma_m_s=inputs.optional(
             columns.sigmas[index], f"delta-V spread, 1 sigma (m/s) in row {row}", 0.0, _MAX_SIGMA_M_S,
         ),
         samples=inputs.whole(columns.samples[index], f"samples in row {row}", _MIN_SAMPLES, _MAX_SAMPLES),
-        burn_h=inputs.number(
+        burn_h=_hours_from(burn_at, now) if burn_at is not None else inputs.number(
             columns.burns_h[index], f"burn time (hours from the scenario epoch) in row {row}", horizon,
             low=_EARLIEST_BURN_H,
         ),
+        burn_at=burn_at,
+        detected=detected,
     )
 
 
 def _entries(
-    inputs: _Inputs, form: _ScenarioForm, rows: int, horizon: float,
+    inputs: _Inputs, form: _ScenarioForm, rows: int, horizon: float, now: datetime,
 ) -> list[_HypothesisEntry | None]:
     """Each adversary row's hypothesis fields, checked; empty when the form posts no hypothesis section."""
     columns = _hypothesis_columns(form, rows, inputs)
     if columns is None:
         return []
-    return [_entry(inputs, columns, i, horizon) for i in range(rows)]
+    return [_entry(inputs, columns, i, horizon, now) for i in range(rows)]
 
 
 def _hypothesis(entry: _HypothesisEntry, red_tle: str, now: datetime) -> AdversaryHypothesis | None:
-    """The row's hypothesis from the red track's state at the burn time; None when it cannot be propagated there."""
-    at = pre_manoeuvre_state(red_tle, now + timedelta(hours=entry.burn_h))
+    """The row's hypothesis from the red track's state at the burn time; None when it cannot be propagated there.
+
+    A burn the sweep fixed is at its own UTC time, however long the panel was open before Evaluate (SPC-150).
+    """
+    at = pre_manoeuvre_state(red_tle, entry.burn_at or now + timedelta(hours=entry.burn_h))
     if at is None:
         return None
     if entry.dv_m_s is None:
@@ -340,10 +440,40 @@ class _Hypotheses(NamedTuple):
     problem: str | None
 
 
+def _detected_hypothesis(entry: _HypothesisEntry, burn: Any) -> AdversaryHypothesis | None:
+    """The detected *burn*'s hypothesis, from the element set before it (hypothesis_from_tle_record, SPC-001), with
+    the row's archetype's dispersions; None when that element set cannot be propagated to the burn."""
+    try:
+        built = AdversaryHypothesis.from_detection(
+            burn.tle_before, burn, archetype=entry.archetype, n_samples=entry.samples,
+        )
+    except TLE_ERRORS:
+        logger.warning("Detected-burn hypothesis could not be propagated for %s", log_safe(entry.burn_at))
+        return None
+    return built if entry.sigma_m_s is None else built.with_spread(entry.sigma_m_s)
+
+
+def _row_hypothesis(
+    state: SessionState, entry: _HypothesisEntry, red: BoundElset, row: int, now: datetime,
+) -> AdversaryHypothesis | str:
+    """One row's hypothesis, or the sentence that refuses it: a detected burn from the held history, any other
+    from the bound red track's state at its burn time."""
+    if entry.detected and entry.burn_at is not None:
+        burn = detected_burn(state, red.satno, entry.burn_at)
+        if burn is None:
+            return _DETECTED_GONE.format(row=row, at=_when(entry.burn_at), red=red.stk_name)
+        built = _detected_hypothesis(entry, burn)
+    else:
+        built = _hypothesis(entry, red.tle, now)
+    return _HYPOTHESIS_NO_STATE.format(row=row) if built is None else built
+
+
 def _hypotheses(
     entries: Sequence[_HypothesisEntry | None], binding: ScenarioBinding | None, now: datetime,
+    state: SessionState,
 ) -> _Hypotheses:
-    """Build each row's hypothesis from the bound red track at its burn time (SPC-114)."""
+    """Build each row's hypothesis from the bound red track at its burn time (SPC-114), or from the held history's
+    detected burn (SPC-150)."""
     red = None if binding is None else binding.red
     carried: list[AdversaryHypothesis | None] = []
     for row, entry in enumerate(entries, start=1):
@@ -352,9 +482,9 @@ def _hypotheses(
             continue
         if red is None:
             return _Hypotheses([], _HYPOTHESIS_NO_RED.format(row=row))
-        built = _hypothesis(entry, red.tle, now)
-        if built is None:
-            return _Hypotheses([], _HYPOTHESIS_NO_STATE.format(row=row))
+        built = _row_hypothesis(state, entry, red, row, now)
+        if isinstance(built, str):
+            return _Hypotheses([], built)
         carried.append(built)
     return _Hypotheses(carried, None)
 
@@ -458,22 +588,50 @@ def _bind_context(state: SessionState, red_sat: str = "", blue_sat: str = "") ->
     }
 
 
+def _panel_context(state: SessionState, prefill: SweepPrefill | None = None) -> dict[str, object]:
+    """The scenario builder's context, filled from a sweep entry when *prefill* fills it (SPC-150)."""
+    filled = prefill is not None and not prefill.problem
+    red, blue = (prefill.red, prefill.blue) if filled and prefill is not None else ("", "")
+    return {
+        "pol": getattr(state, "last_pol_analysis", None),
+        "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
+        "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
+        "default_probability": DEFAULT_PROBABILITY,
+        "prefill": prefill,
+        **_bind_context(state, red, blue),
+        **_hypothesis_context(),
+    }
+
+
 @router.get("/panel", response_class=HTMLResponse)
 async def decision_panel(
     request: Request,
     current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the decision engine scenario builder panel."""
+    return render(request, "partials/decision_panel.html", _panel_context(get_session_state(current_user)))
+
+
+@router.get("/from-sweep", response_class=HTMLResponse)
+async def decision_from_sweep(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    entry: Annotated[str, Query()] = "",
+    sweep: Annotated[str, Query()] = "",
+) -> HTMLResponse:
+    """The panel filled from entry *entry* of the held sweep whose epoch is *sweep* (SPC-150).
+
+    It fills the red track, the blue asset when the target is held as one, the departure burn and the latest
+    detected burn, and says so; it fills no probability or confidence and evaluates nothing. A sweep that is no
+    longer the latest, or an entry it does not hold, opens the panel unfilled with the reason.
+    """
     state = get_session_state(current_user)
-    pol   = getattr(state, "last_pol_analysis", None)
-    return render(request, "partials/decision_panel.html", {
-        "pol": pol,
-        "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
-        "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
-        "default_probability": DEFAULT_PROBABILITY,
-        **_bind_context(state),
-        **_hypothesis_context(),
-    })
+    prefill = await asyncio.to_thread(open_from_sweep, state, entry, sweep, _utc_now())
+    logger.info(
+        "decision_from_sweep: entry %s of sweep %s by %s: %s",
+        log_safe(entry), log_safe(sweep), log_safe(current_user.username), log_safe(prefill.problem or "filled"),
+    )
+    return render(request, "partials/decision_panel.html", _panel_context(state, prefill))
 
 
 def _hypothesis_context() -> dict[str, object]:
@@ -565,6 +723,9 @@ class _ScenarioForm(BaseModel):
     hyp_sigmas: list[str] | None = Field(default=None, alias="hyp_sigma")
     hyp_samples: list[str] | None = None
     hyp_burns_h: list[str] | None = Field(default=None, alias="hyp_burn_h")
+    # Hidden and optional (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is the detected burn.
+    hyp_burns_at: list[str] | None = Field(default=None, alias="hyp_burn_at")
+    hyp_detected: list[str] | None = None
 
 
 class _Parsed(NamedTuple):
@@ -578,8 +739,8 @@ class _Parsed(NamedTuple):
     burns:     list[ResponseBurnSpec | None]
 
 
-def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
-    """Every number on the form, checked; the first problem is kept on *inputs*."""
+def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
+    """Every number on the form, checked at scenario epoch *now*; the first problem is kept on *inputs*."""
     inputs.rows(form.adv_ids, form.fr_ids)
     horizon = inputs.number(form.horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
     weights = [
@@ -595,7 +756,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
         inputs.column(form.fr_costs, "cost"), inputs.column(form.fr_revs, "reversibility"),
         inputs.column(form.fr_times, "time to execute (hours)", _MAX_HORIZON_H),
     )
-    entries = _entries(inputs, form, len(adversary.ids), horizon)
+    entries = _entries(inputs, form, len(adversary.ids), horizon, now)
     return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form))
 
 
@@ -618,15 +779,15 @@ async def decision_evaluate(
     (SPC-119). The sweep's Threat picture for the bound red track is read from the session (SPC-171).
     """
     inputs = _Inputs()
-    parsed = _parse(inputs, form)
+    now = _utc_now()
+    parsed = _parse(inputs, form, now)
     if inputs.problem is not None:
         return _err(inputs.problem)
-    now = _utc_now()
     state = get_session_state(current_user)
     bound = bind_scenario(state, form.red_sat.strip(), form.blue_sat.strip(), now)
     if bound.problem is not None:
         return _err(bound.problem)
-    hypotheses = _hypotheses(parsed.entries, bound.binding, now)
+    hypotheses = _hypotheses(parsed.entries, bound.binding, now, state)
     if hypotheses.problem is not None:
         return _err(hypotheses.problem)
     binding, custody = await _with_custody(state, bound.binding, now)

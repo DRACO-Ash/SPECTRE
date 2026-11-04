@@ -725,11 +725,16 @@
       </div><!-- end hero-pol -->
 
       <!-- ── DECISION ENGINE ───────────────────────────────────── -->
-      <div class="hero-panel" id="hero-decision"
-           hx-get="/plan/decision/panel"
-           hx-trigger="intersect once"
-           hx-swap="innerHTML">
-        <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Decision Engine&hellip;</p>
+      {# The lazy load sits on a slot inside the hero, not on the hero itself: a scenario opened from the sweep
+         (SPC-150) is swapped into the hero and replaces the slot, so its trigger can never reload a blank panel
+         over the filled one. #}
+      <div class="hero-panel" id="hero-decision">
+        <div id="decision-panel-slot"
+             hx-get="/plan/decision/panel"
+             hx-trigger="intersect once"
+             hx-swap="outerHTML">
+          <p class="label-dim" style="padding:1rem; font-size:0.72rem">Loading Decision Engine&hellip;</p>
+        </div>
       </div><!-- end hero-decision -->
 
       <!-- ── GCAT ─────────────────────────────────────────────── -->
@@ -899,6 +904,20 @@ function switchToEngine() {
     setTimeout(function() { panel.classList.remove('engine-flash'); }, 1300);
   }
 }
+
+/* Show the Decision Engine once a scenario opened from the sweep has been swapped into it (SPC-150) */
+function openDecisionPanel() {
+  var btn = document.querySelector('.htab[data-panel="hero-decision"]');
+  if (btn) heroTab(btn);
+  var panel = document.getElementById('hero-decision');
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+/* One delegated listener for every control marked data-opens-decision, so none carries an hx-on handler, which
+   htmx compiles with new Function under the CSP's 'unsafe-eval' gap (app.py) */
+document.body.addEventListener('htmx:afterRequest', function (e) {
+  var elt = e.detail && e.detail.elt;
+  if (e.detail.successful && elt && elt.hasAttribute && elt.hasAttribute('data-opens-decision')) openDecisionPanel();
+});
 
 /* Switch to Trade-Space engine sub-tab programmatically */
 function switchToTradeSpace() {
