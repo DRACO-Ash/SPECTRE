@@ -351,9 +351,18 @@ class TestI13OnEveryPanel:
         ("Threat HIGH, Understanding LOW.", "both axes share the sentence"),
         ("It reads CRITICAL.", "bare CRITICAL"),
         ("Threat at 40% CRITICAL.", "a percentage"),
+        # SPC-074: the spelt-out percentage and a band before its axis, which the check also refuses.
+        ("Understanding stands at 60 per cent.", "a percentage"),
+        ("HIGH Threat from SJ-21.", "bare HIGH"),
     ])
     def test_the_check_catches_a_band_under_the_wrong_axis(self, sentence: str, problem: str) -> None:
         assert problem in i13_problems(sentence)
+
+    def test_the_check_reports_every_problem_in_a_sentence_not_only_the_first(self) -> None:
+        assert i13_problems("Threat HIGH at 40%, Understanding LOW.") == [
+            "both axes share the sentence", "a percentage",
+        ]
+        assert i13_problems("It reads LOW, then CRITICAL.") == ["bare LOW", "bare CRITICAL"]
 
     @pytest.mark.parametrize("sentence", [
         "Threat: assessed CRITICAL.", "Threat could be as low as HIGH.", "Understanding MODERATE.",

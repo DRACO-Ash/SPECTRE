@@ -94,11 +94,12 @@ jobs:
         # floors: [tool.coverage.run] measures no branches.
         # Each route floor is its measured figure rounded down to a whole 5,
         # so a test lost shows here before the total moves (SPC-014):
-        # threat.py measured 91.8 at 74d1105; pol.py rose from 69.7 to 100
+        # threat.py rose from 91.8 at 74d1105 to 98.2 with the refusal and
+        # fallback route tests (SPC-010); pol.py rose from 69.7 to 100
         # with the PoL refusal, fallback and failure tests (SPC-012); udl.py
         # from 85.5 to 99.8 with the mocked-UDL route tests (SPC-011).
         run: |
-          coverage report --include=spectre/web/routes/threat.py --fail-under=90
+          coverage report --include=spectre/web/routes/threat.py --fail-under=95
           coverage report --include=spectre/web/routes/pol.py --fail-under=100
           coverage report --include=spectre/web/routes/udl.py --fail-under=95
           coverage report --include=spectre/domain/decision.py --fail-under=100

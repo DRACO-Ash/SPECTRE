@@ -175,3 +175,25 @@ class TestTheDecisionResults:
         assert "Show trajectory" in page
         assert _unlabelled(page) == []
         assert _duplicate_ids(page) == []
+
+
+class TestTheGuardSeesAnUnlabelledField:
+    """SPC-074: the scan, run on markup planted with each defect it exists to catch."""
+
+    def test_a_placeholder_or_a_title_is_not_a_label(self) -> None:
+        planted = '<input type="text" id="satno" placeholder="SATNO"><select name="mode"></select><textarea title="TLE"></textarea>'
+        assert [field.split()[0] for field in _unlabelled(planted)] == ["<input", "<select", "<textarea"]
+
+    def test_a_label_for_another_field_labels_nothing_here(self) -> None:
+        assert _unlabelled('<label for="other">X</label><input id="satno">') == ['<input id="satno">']
+
+    def test_a_closed_label_does_not_wrap_the_field_after_it(self) -> None:
+        assert _unlabelled('<label>SATNO</label><input name="satno">') == ['<input name="satno">']
+
+    def test_each_accepted_form_still_passes(self) -> None:
+        assert _unlabelled('<label for="satno">SATNO</label><input type="text" id="satno">') == []
+        assert _unlabelled('<label>SATNO <input type="text" name="satno"></label>') == []
+        assert _unlabelled('<input type="hidden" name="csrf_token"><input type="submit">') == []
+
+    def test_a_repeated_id_is_seen(self) -> None:
+        assert _duplicate_ids('<input id="a"><select id="a"></select><p id="b">') == ["a"]

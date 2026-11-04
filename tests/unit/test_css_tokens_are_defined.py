@@ -183,21 +183,44 @@ def test_no_other_sheet_or_theme_block_redefines_a_restored_name() -> None:
     ``--text-muted`` would win on <html> and undo SPC-029 while the :root
     alias still read correctly.
     """
-    counts = dict.fromkeys(_ALIASES, 0)
-    for text in _stripped_sources():
-        for a, b in _DEFINED.findall(text):
-            if (a or b) in counts:
-                counts[a or b] += 1
+    counts = _alias_definitions(_stripped_sources())
     assert counts == dict.fromkeys(_ALIASES, 1), f"definitions of each restored name across the console: {counts}"
 
 
-def test_the_names_no_sheet_ever_defined_are_no_longer_used() -> None:
-    texts = _stripped_sources()
-    used = sorted(
+def _alias_definitions(texts: list[str]) -> dict[str, int]:
+    """How many times *texts* define each restored name."""
+    counts = dict.fromkeys(_ALIASES, 0)
+    for text in texts:
+        for a, b in _DEFINED.findall(text):
+            if (a or b) in counts:
+                counts[a or b] += 1
+    return counts
+
+
+def _retired_in_use(texts: list[str]) -> list[str]:
+    """Each retired name *texts* still read through ``var()``."""
+    return sorted(
         name for name in _RETIRED
         if any(re.search(rf"var\(\s*{re.escape(name)}\s*[,)]", text) for text in texts)
     )
+
+
+def test_the_names_no_sheet_ever_defined_are_no_longer_used() -> None:
+    used = _retired_in_use(_stripped_sources())
     assert used == [], f"still used and still defined nowhere: {used}"
+
+
+def test_the_guards_see_a_theme_redefining_an_alias_and_a_retired_name_coming_back() -> None:
+    """SPC-074: both SPC-029 checks, run on planted input that breaks each."""
+    planted = [
+        ":root { --text-primary: var(--text); }",
+        '[data-theme="steel"] { --text-primary: #333333; }',
+        ".x { color: var(--bg-card); border-color: var(--bg-card-edge, #000); }",
+    ]
+    assert _alias_definitions(planted)["--text-primary"] == 2
+    assert _retired_in_use(planted) == ["--bg-card"]
+    # A sheet reading only --bg-card-edge does not read --bg-card: the name must end where the retired one does.
+    assert _retired_in_use([".x { border-color: var(--bg-card-edge, #000); }"]) == []
 
 
 def test_the_admin_badge_is_an_accent_fill_with_knockout_ink() -> None:

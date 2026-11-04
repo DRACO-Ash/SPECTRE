@@ -39,9 +39,17 @@ def _bare_depends(path: Path) -> int:
     return count
 
 
+def _over(paths: list[Path], allowed: dict[str, int]) -> dict[str, int]:
+    """Each file holding more bare ``Depends`` defaults than *allowed* lets it."""
+    return {p.name: n for p in paths if (n := _bare_depends(p)) > allowed.get(p.name, 0)}
+
+
+def _route_files() -> list[Path]:
+    return sorted(_ROUTES.glob("*.py"))
+
+
 def test_no_route_file_adds_a_bare_depends_default() -> None:
-    over = {p.name: n for p in sorted(_ROUTES.glob("*.py"))
-            if (n := _bare_depends(p)) > _ALLOWED.get(p.name, 0)}
+    over = _over(_route_files(), _ALLOWED)
     assert not over, f"use Annotated[..., Depends(...)] in new route parameters: {over}"
 
 
@@ -49,3 +57,25 @@ def test_the_guard_sees_a_bare_depends(tmp_path: Path) -> None:
     probe = tmp_path / "probe.py"
     probe.write_text("@router.get('/x')\nasync def x(user: User = Depends(require_login)) -> None: ...\n")
     assert _bare_depends(probe) == 1
+
+
+def test_the_guard_sees_a_file_grow_past_its_allowance(tmp_path: Path) -> None:
+    """SPC-074: the comparison as well as the count. A keyword-only default is a default too."""
+    probe = tmp_path / "threat.py"
+    probe.write_text(
+        "@router.post('/a')\nasync def a(*, u: User = Depends(require_login)) -> None: ...\n"
+        "@router.post('/b')\nasync def b(u: Annotated[User, Depends(require_login)]) -> None: ...\n"
+        "def helper(u: User = Depends(require_login)) -> None: ...\n"
+    )
+    # One route default; the Annotated parameter and the non-route helper are not counted.
+    assert _bare_depends(probe) == 1
+    assert _over([probe], {"threat.py": 0}) == {"threat.py": 1}
+    assert _over([probe], {"threat.py": 1}) == {}
+
+
+def test_the_guard_reads_every_file_in_its_allowance() -> None:
+    """SPC-074: the comparison passes on no files at all, so the scan must find each file the allowance names."""
+    scanned = {path.name for path in _route_files()}
+    assert set(_ALLOWED) <= scanned, f"the allowance names files the scan no longer finds: {set(_ALLOWED) - scanned}"
+    # And the scan reads real routes: the files still holding bare defaults are counted, not skipped.
+    assert sum(_bare_depends(path) for path in _route_files() if path.name in _ALLOWED) >= 50

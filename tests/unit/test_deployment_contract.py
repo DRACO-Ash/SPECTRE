@@ -792,11 +792,71 @@ class TestClusteringPackageTravels:
         assert ClusteringConfig is not None
 
     def test_clustering_is_not_silently_disabled(self, dockerfile: str) -> None:
-        """The image must copy the package, or the import fails at runtime."""
-        assert "tle_clustering" in dockerfile, (
+        """The image must copy the package, or the import fails at runtime.
+
+        This read ``"tle_clustering" in dockerfile``, which a comment naming
+        the package satisfied as well as a COPY of it (SPC-074).
+        """
+        assert _copies_the_package(dockerfile, "tle_clustering"), (
             "the Dockerfile must COPY tle_clustering, otherwise the guarded import "
             "fails inside the container and clustering is skipped without error"
         )
+
+    def test_the_guard_sees_a_dockerfile_that_only_mentions_the_package(self) -> None:
+        """SPC-074: the committed red case. A mention is not a copy, and a later stage's copy is not local."""
+        mentioned = "# tle_clustering is optional, the import is guarded\nCOPY spectre/ /app/spectre/\n"
+        staged = "COPY --from=build /src/tle_clustering/ /app/tle_clustering/\n"
+        copied = "COPY --chown=1001:0 tle_clustering/ /app/tle_clustering/\n"
+        assert not _copies_the_package(mentioned, "tle_clustering")
+        assert not _copies_the_package(staged, "tle_clustering")
+        assert _copies_the_package(copied, "tle_clustering")
+
+
+def _copy_sources(body: str) -> list[str]:
+    """Local COPY sources only. --from=<stage> reads from an earlier stage."""
+    sources = []
+    for match in re.finditer(r"^\s*COPY\s+(.*)$", body, re.MULTILINE):
+        parts = match.group(1).split()
+        if any(part.startswith("--from=") for part in parts):
+            continue
+        parts = [part for part in parts if not part.startswith("--")]
+        if len(parts) < 2:
+            continue
+        sources.extend(parts[:-1])
+    return sources
+
+
+def _copies_the_package(dockerfile: str, package: str) -> bool:
+    """Whether *dockerfile* copies *package* from the build context."""
+    return any(source.rstrip("/").split("/", 1)[0] == package for source in _copy_sources(dockerfile))
+
+
+def _dockerignore_exclusions(body: str) -> list[str]:
+    """Directory and exact-name exclusions, ignoring negations and globs.
+
+    Only the pattern forms this project actually uses are interpreted. A
+    pattern we cannot evaluate is skipped rather than guessed at, so the
+    test never invents a failure it cannot justify.
+    """
+    patterns = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        if "*" in line or "?" in line:
+            continue
+        patterns.append(line.rstrip("/"))
+    return patterns
+
+
+def _excluded_copies(dockerfiles: dict[str, str], excluded: list[str]) -> list[str]:
+    """Each COPY in *dockerfiles* whose source the build context leaves out."""
+    return [
+        f"{name}: COPY {source} is excluded by .dockerignore"
+        for name, body in dockerfiles.items()
+        for source in _copy_sources(body)
+        if source.rstrip("/").split("/", 1)[0] in excluded
+    ]
 
 
 class TestBuildContextContract:
@@ -818,52 +878,32 @@ class TestBuildContextContract:
 
     _DOCKERFILES = ("Dockerfile", "Dockerfile.docker-only")
 
-    def _exclusions(self) -> list[str]:
-        """Directory and exact-name exclusions, ignoring negations and globs.
-
-        Only the pattern forms this project actually uses are interpreted. A
-        pattern we cannot evaluate is skipped rather than guessed at, so the
-        test never invents a failure it cannot justify.
-        """
-        body = _repo_only(_DOCKERIGNORE).read_text(encoding="utf-8")
-        patterns = []
-        for raw in body.splitlines():
-            line = raw.strip()
-            if not line or line.startswith(("#", "!")):
-                continue
-            if "*" in line or "?" in line:
-                continue
-            patterns.append(line.rstrip("/"))
-        return patterns
-
-    def _copy_sources(self, body: str) -> list[str]:
-        """Local COPY sources only. --from=<stage> reads from an earlier stage."""
-        sources = []
-        for match in re.finditer(r"^\s*COPY\s+(.*)$", body, re.MULTILINE):
-            parts = match.group(1).split()
-            if any(part.startswith("--from=") for part in parts):
-                continue
-            parts = [part for part in parts if not part.startswith("--")]
-            if len(parts) < 2:
-                continue
-            sources.extend(parts[:-1])
-        return sources
-
     def test_no_copy_source_is_excluded_from_the_build_context(self) -> None:
-        excluded = self._exclusions()
-        offenders = []
-        for name in self._DOCKERFILES:
-            path = _REPO_ROOT / name
-            if not path.is_file():
-                continue
-            for source in self._copy_sources(path.read_text(encoding="utf-8")):
-                head = source.rstrip("/").split("/", 1)[0]
-                if head in excluded:
-                    offenders.append(f"{name}: COPY {source} is excluded by .dockerignore")
+        excluded = _dockerignore_exclusions(_repo_only(_DOCKERIGNORE).read_text(encoding="utf-8"))
+        dockerfiles = {
+            name: (_REPO_ROOT / name).read_text(encoding="utf-8")
+            for name in self._DOCKERFILES if (_REPO_ROOT / name).is_file()
+        }
+        offenders = _excluded_copies(dockerfiles, excluded)
         assert not offenders, (
             "the build context cannot supply these, so the build fails at that "
             f"COPY: {offenders}"
         )
+
+    def test_the_guard_sees_an_excluded_copy_in_both_dockerfiles(self) -> None:
+        """SPC-074: the state this class was written for, committed rather than watched by hand.
+
+        tle_clustering/ was listed under "development tooling" in .dockerignore
+        while both Dockerfiles copied it; re-adding the exclusion was seen to
+        fail naming both, and that failing state is now in the tree.
+        """
+        ignore = "# development tooling\ntle_clustering/\n*.pyc\n!spectre/\n"
+        copy = "COPY spectre/ /app/spectre/\nCOPY tle_clustering/ /app/tle_clustering/\n"
+        assert _dockerignore_exclusions(ignore) == ["tle_clustering"]
+        assert _excluded_copies({"Dockerfile": copy, "Dockerfile.docker-only": copy}, ["tle_clustering"]) == [
+            "Dockerfile: COPY tle_clustering/ is excluded by .dockerignore",
+            "Dockerfile.docker-only: COPY tle_clustering/ is excluded by .dockerignore",
+        ]
 
     def test_every_copy_source_exists(self) -> None:
         """A COPY of a path that is not in the repository fails the same way."""
@@ -872,7 +912,7 @@ class TestBuildContextContract:
             path = _REPO_ROOT / name
             if not path.is_file():
                 continue
-            for source in self._copy_sources(path.read_text(encoding="utf-8")):
+            for source in _copy_sources(path.read_text(encoding="utf-8")):
                 if source in (".", "./"):
                     continue
                 if not (_REPO_ROOT / source.rstrip("/")).exists():
@@ -1566,12 +1606,13 @@ class TestContinuousIntegrationCanRun:
 
     _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
 
-    @pytest.mark.parametrize(("route", "floor"), [("threat", 90), ("pol", 100), ("udl", 95)])
+    @pytest.mark.parametrize(("route", "floor"), [("threat", 95), ("pol", 100), ("udl", 95)])
     def test_the_routes_keep_their_coverage_floors(self, route: str, floor: int) -> None:
         """Audit F-042 and SPC-014: a floor far under the measured figure guards nothing.
 
-        threat.py measured 91.8 at 74d1105 against a floor of 75; pol.py and
-        udl.py had none. Each floor is the figure reached, rounded down to 5.
+        threat.py measured 91.8 at 74d1105 against a floor of 75, and 98.2 with
+        the SPC-010 refusal and fallback tests; pol.py and udl.py had none.
+        Each floor is the figure reached, rounded down to 5.
         """
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert f"--include=spectre/web/routes/{route}.py --fail-under={floor}\n" in ci

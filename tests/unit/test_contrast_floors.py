@@ -550,6 +550,47 @@ class TestTheFloorsAreMeasuredNotAsserted:
         assert _ratio("#FFFFFF", "#1D9E75") < _AA_NORMAL
 
 
+class TestTheReadersSeeAPlantedFailure:
+    """SPC-074: the stylesheet readers, run on a sheet planted with a pair below the floor.
+
+    The arithmetic above is half of every check here; the other half is
+    reading the right declaration out of the right block. Each reader joins
+    its filename to the static directory, and an absolute path joined that way
+    is the path itself, so the planted sheet is read by the same code.
+    """
+
+    _SHEET = (
+        ":root {\n  --pale: #9AA5B1;\n  --page: #FFFFFF;\n}\n"
+        ".light {\n  --pale: #222222;\n}\n"
+        ".htab.active { color: var(--pale); }\n"
+        ".htab.active::after { color: #000000; }\n"
+        "/* .htab.active { color: #000000; } quoted in prose, not a rule */\n"
+    )
+
+    def test_a_rule_naming_a_pale_token_measures_below_the_floor(self, tmp_path: Path) -> None:
+        sheet = tmp_path / "planted.css"
+        sheet.write_text(self._SHEET, encoding="utf-8")
+        tokens = _tokens(str(sheet), ":root {")
+        # Block-aware: the :root value, not the later .light one.
+        assert tokens == {"--pale": "#9AA5B1", "--page": "#FFFFFF"}
+        colour = _resolve(_declared(str(sheet), ".htab.active", "color"), tokens)
+        assert colour == "#9AA5B1"
+        assert _ratio(colour, tokens["--page"]) < _AA_NORMAL
+
+    def test_a_second_rule_for_the_selector_is_refused_rather_than_guessed(self, tmp_path: Path) -> None:
+        sheet = tmp_path / "twice.css"
+        sheet.write_text(self._SHEET + ".htab.active { color: #000000; }\n", encoding="utf-8")
+        with pytest.raises(AssertionError, match="exactly one"):
+            _sole_rule_block(str(sheet), ".htab.active")
+
+    @pytest.mark.parametrize(("value", "said"), [
+        ("var(--absent)", "carries no hex value"), ("rgb(1, 2, 3)", "cannot resolve"), ("#FFF", "cannot resolve"),
+    ])
+    def test_a_colour_it_cannot_resolve_is_refused_rather_than_measured(self, value: str, said: str) -> None:
+        with pytest.raises(AssertionError, match=said):
+            _resolve(value, {"--page": "#FFFFFF"})
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Gold is two jobs in the steel theme, and each rule has to name the right one
 # ══════════════════════════════════════════════════════════════════════════
