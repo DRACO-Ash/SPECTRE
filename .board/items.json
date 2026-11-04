@@ -1361,7 +1361,11 @@
   ],
   "deps": [
    "SPC-166"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-169",
@@ -1379,7 +1383,11 @@
   ],
   "deps": [
    "SPC-166"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-170",
@@ -1395,7 +1403,11 @@
   "deps": [
    "SPC-163",
    "SPC-164"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-171",

@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-04
+
+**Operator output: 1, "does it mean anything", now says how well SPECTRE understands the satellite on every panel that shows it, and what to collect next to understand it better.** The verdict word and band are unchanged.
+
+### Added
+- What to collect next. Each threat carries up to three cues, such as holding its conjunctions or pulling a second provider's history, each saying how many steps of the threat range it would remove and how long it takes, ranked by steps per hour (SPC-170).
+- The Threat Understanding display on the sweep, the red track's intel card and the Pattern of Life results: the Threat line first, then the Understanding line with its cues, a four-cell strip for identity, capability, manoeuvres and interactions with each item's grade, age and basis, the Missing list and the evidence ledger, from one shared view so every panel agrees (SPC-168).
+- Screening shows a range and an Understanding column from cached history only, reading "no history held" where none is cached, and names a disagreement when the verdict sits outside the range or the range is wide at LOW (SPC-169).
+
+### Changed
+- The verdict badge is outlined, not filled, unless Understanding is computed and above LOW. All 20 bundled red objects use synthetic element sets, so every badge in a demonstration is outlined: the honest answer, worth briefing first.
+
+### Out of scope, named
+- Collect-first rows in the Decision Engine (SPC-171), interactions (SPC-172 to SPC-174), the verdict switch, off until the owner signs off (SPC-175), the adjudication log (SPC-176) and the doctrine wording gate (SPC-177).
+
 ## [0.17.0] - 2026-11-03
 
 **Operator outputs: 1 and 3 made more honest, and Threat Understanding reaches the sweep.** Beside today's verdict, which is unchanged, the sweep now shows the threat range and how well SPECTRE understands the satellite, with the evidence behind both.

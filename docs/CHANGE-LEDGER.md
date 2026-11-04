@@ -1127,3 +1127,12 @@ Feature work from the backlog: Threat Understanding on the sweep, decide-by from
 | Code Quality | **HYGIENE** | None made for the gate. New code: adapters and the screen text in `threat_understanding.py`, the ledger hash in `provenance.py`, the sweep's evidence gathering in `routes/threat.py` and `routes/gcat.py`, the custody gap share in `decision.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The catalogue row is read from the cache only; the sweep fetches nothing new. | n/a. |
 
+## 0.18.0
+
+Feature work from the backlog: cues, the Threat Understanding display across panels, and screening columns.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: cues in `threat_understanding.py`, `spectre/web/understanding_view.py`, actor ranges in `threat_assessment.py`, wiring in `routes/threat.py` and `routes/pol.py`, two new partials and template sections, one theme rule | `scripts/check-quality.sh` against 0.17.0 before upload passed all five legs, with 98 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Screening reads cached histories only and fetches nothing new. | n/a. |
+
