@@ -1,12 +1,9 @@
 pace 1.00 from settings (nothing measured yet)
 
-tooling: 6 items, 1200 priced min, 20h00 of build; ships no store artefact, so carries no release overhead
-    SPC-013       180m
+tooling: 3 items, 660 priced min, 11h00 of build; ships no store artefact, so carries no release overhead
     SPC-070       180m
     SPC-071       240m
-    SPC-010       240m
     SPC-073       240m
-    SPC-074       120m
 
 waiting: SPC-080 - needs an owner answer
 

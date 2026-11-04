@@ -171,7 +171,11 @@
   "files": [
    "tests/integration/test_threat_sweep_routes.py",
    "tests/integration/test_threat_screen_route.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-011",
@@ -219,7 +223,11 @@
   "note": "Old SEC-05. hypothesis is locked but used in one test file only.",
   "files": [
    "tests/unit/test_astro_properties.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-014",
@@ -381,7 +389,11 @@
   "note": "IMPROVEMENT-PLAN.md item 2 as it applies inside SPECTRE; RETROSPECTIVE.md lists the guards with no committed failing case.",
   "files": [
    "tests/unit/test_deployment_contract.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-080",

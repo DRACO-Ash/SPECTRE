@@ -1191,3 +1191,13 @@ Feature work from the backlog: the game tree's view and the Decision Engine docu
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/tree_view.py`, `partials/decision_tree.html`, depth refusal and the stated observation in `decision_tree.py`, `decision.py`, `tree_selectors.py` and `turn_update.py`, the route and job running the tree, and the guide generator | `scripts/check-quality.sh` against 0.23.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The regenerated operator guide `.docx` ships in the repository, not the image. | n/a. |
 
+## 0.24.1
+
+Test hardening and one template fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. One template change, `partials/sweep_target_config.html`; the rest is tests | `scripts/check-quality.sh` against 0.24.0 before upload passed all five legs. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | The threat route floor rises from 90 to 95 | Measured 98.3 per cent before the floor was set. | Then a platform measure differs from the local one. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

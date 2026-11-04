@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-04
+
+**Test hardening, and one sweep panel fix.**
+
+### Fixed
+- With the interceptor's regime unknown, the sweep's target panel said its list was unfiltered and then offered no target groups, so only manual targets could be swept. Every group is now offered, unfiltered, and the panel says so.
+
+### Changed
+- The threat route is held by tests at each refusal and fallback: coverage rises from 91.8 to 98.3 per cent and its CI floor from 90 to 95 (SPC-010).
+- Each house-rule guard has a committed red case that runs its own detector on planted bad input, so a guard that silently stops detecting anything goes red; the clustering guard now requires the Dockerfile COPY, not just the package's name (SPC-074).
+- Exhaustive invariant tests for Kepler, RK45 and Lambert: round trips, energy and angular momentum, end points and times, and delta-V never negative, with each tolerance justified (SPC-013).
+
 ## [0.24.0] - 2026-11-04
 
 **Operator output: 4, the recommended response, shows its game tree, and the operator guide describes the Decision Engine as it is built.**
