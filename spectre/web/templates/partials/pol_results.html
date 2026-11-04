@@ -61,6 +61,16 @@
 </section>
 {% endif %}
 
+{# What is understood about this object (SPC-168, concept section 7.3): the
+   same strip the sweep shows for it. This panel's custody and normality
+   above set volatility; "no burns" is judged on the history's own window,
+   as on every panel. No intercept is in view here, so the Threat line says
+   where the threat is assessed and the cues quote no Threat steps. #}
+{% if object_understanding is defined and object_understanding %}
+{% set tu = object_understanding %}
+{% include "partials/threat_understanding.html" %}
+{% endif %}
+
 {# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
    ══════════════════════════════════════════════════════════════════════════════ #}

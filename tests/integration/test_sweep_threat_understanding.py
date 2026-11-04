@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from spectre.web.routes import threat
+from spectre.web.routes import pol, threat
 from tests.integration.test_pol_normality_panel import _history
 from tests.integration.test_sweep_red_history import _stub_udl, _sweep, udl  # noqa: F401
 from tests.integration.test_threat_sweep_routes import sweep_state  # noqa: F401
@@ -67,6 +67,30 @@ class TestTheShadowIsOnTheSweep:
         monkeypatch.setattr(threat, "_with_understanding", lambda worst, _u: worst)
         without = _sweep(client, auth_cookie)
         assert 'class="threat-understanding"' not in without
+        # The same verdict word and band; Understanding LOW only outlines it (SPC-168), and with no
+        # Understanding computed the badge is outlined too, as the fill is earned.
         assert _badge(shown) == _badge(without)
+        assert "spectre-band-outline" in _badge(without)
         summary = re.search(r"Least warning: [^<]*", without)
         assert summary is not None and summary.group(0) in shown
+
+
+class TestTheRedTrackCard:
+    """SPC-168: the red track's intel card grades its record and shows the strip, from what is held."""
+
+    def test_the_card_carries_the_record_line_and_the_strip_and_fetches_nothing(
+        self, client: Any, auth_cookie: str, sweep_state: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    ) -> None:
+        async def refused(*_a: Any, **_k: Any) -> None:
+            pytest.fail("the card fetched a history")
+
+        monkeypatch.setattr(pol, "_fetch_and_analyse", refused)
+        monkeypatch.setattr(threat, "get_intel", lambda _s: {
+            "name": "RED-GEO", "assessed_threat": "Inspector", "threat_level": "HIGH", "status": "Operational",
+            "source": "CSIS 2025", "orbit": "GEO", "country": "RUS", "significance": "x"})
+        resp = client.get("/plan/threat/red-orbit-info", params={"red_sat": "RED-GEO"},
+                          cookies={"spectre_session": auth_cookie})
+        page = " ".join(resp.text.split())
+        assert 'class="pair-understanding"' in page
+        assert "This record: undated, single open source [C3]: listed, does not move the Threat range." in page
+        assert 'class="tu-strip"' in page and "Manoeuvres: not earned" in page

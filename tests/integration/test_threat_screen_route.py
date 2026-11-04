@@ -7,10 +7,15 @@ result without a reason, and that the three-click path actually resolves.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from spectre.web.routes import pol, threat
+from spectre.web.routes.pol import HeldHistory
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
+from tests.unit.test_threat_understanding_sweep import _RAISES, _held_history
 
 pytestmark = pytest.mark.anyio
 
@@ -202,3 +207,53 @@ class TestAFailedRefreshIsShown:
             state.hrr_tle_data_mode.pop("41838", None)
         flat = " ".join(resp.text.split())  # type: ignore[attr-defined]
         assert "SJ-17 (41838): live element set not fetched; screened on the set already held" in flat
+
+
+_NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
+
+
+class TestTheRangeAndUnderstandingColumns:
+    """SPC-169: each actor's Threat range and Understanding, read from what is cached, nothing fetched."""
+
+    @pytest.fixture(autouse=True)
+    def _fixed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def refused(*_a: object, **_k: object) -> None:
+            pytest.fail("screening fetched a history")
+
+        monkeypatch.setattr(pol, "_fetch_and_analyse", refused)
+        monkeypatch.setattr(threat, "_utc_now", lambda: _NOW)
+
+    def _one_actor(self, client: object, auth_cookie: str, held: HeldHistory | None) -> str:
+        state = session_state(auth_cookie)
+        saved = (list(state.hrr_objects), dict(state.hrr_tle_cache), dict(state.elset_histories))
+        state.hrr_objects = [{"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"}]
+        state.hrr_tle_cache["41838"] = _RED_TLE
+        if held is not None:
+            state.elset_histories[41838] = held
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.hrr_objects = saved[0]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[1])
+            state.elset_histories.clear()
+            state.elset_histories.update(saved[2])
+        assert resp.status_code == 200  # type: ignore[attr-defined]
+        return " ".join(resp.text.split())  # type: ignore[attr-defined]
+
+    def test_an_uncached_actor_reads_no_history_held_and_nothing_is_fetched(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        flat = self._one_actor(client, auth_cookie, None)
+        assert '<th scope="col">Range</th> <th scope="col">Understanding</th>' in flat
+        assert "Understanding LOW: no history held" in flat
+        assert "Raise it by: pull its element-set history" in flat
+        assert "Behaviour not earned" in flat
+
+    def test_a_cached_history_is_read(self, client: object, auth_cookie: str) -> None:
+        flat = self._one_actor(client, auth_cookie, HeldHistory(41838, _NOW, pol=_held_history(_RAISES).pol))
+        assert '<td class="screen-understanding col-dim"> <details> <summary>Understanding' in flat
+        assert "no history held" not in flat
+        # The history is held, so its cue is no longer to pull it, and its burns are judged.
+        assert "Raise it by: pull its element-set history" not in flat
+        assert "Behaviour not earned" not in flat

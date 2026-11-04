@@ -119,7 +119,10 @@ class TestTheSweepGathersTheEvidence:
         monkeypatch.setattr(threat, "get_intel", lambda _s: {"assessed_threat": "Inspector", "threat_level": "HIGH",
                                                              "status": "Degraded", "source": "CSIS 2025"})
         cache["satcat"] = _satcat([{"Satcat": _SATNO, "Bus": "Luch"}], _FETCHED)
-        items, signals = threat._red_evidence(_SATNO, _held_history(_RAISES), _HELD, 500.0)
+        history = _held_history(_RAISES)
+        held = threat._red_evidence(_SATNO, history, _HELD)
+        assert held is not None
+        items, signals = held.items(history.pol.records[-1].epoch, "LEO", 500.0), held.signals
         assert signals is not None and signals.provider == "18SDS"
         assert sorted({(i.dimension, i.derived_from) for i in items}, key=str) == sorted({
             (Dimension.IDENTITY, f"intel-record:{_SATNO}"), (Dimension.CAPABILITY, f"status:{_SATNO}"),
@@ -129,12 +132,12 @@ class TestTheSweepGathersTheEvidence:
         assert latest.observed_at == signals.burns[-1].epoch
 
     def test_without_a_history_only_the_record_and_catalogue_are_held(self, cache: Any) -> None:
-        items, signals = threat._red_evidence("40258", _NO_HISTORY, _HELD, 9.0)
-        assert signals is None
-        assert {i.derived_from for i in items} == {"intel-record:40258", "status:40258"}
+        held = threat._red_evidence("40258", _NO_HISTORY, _HELD)
+        assert held is not None and held.signals is None
+        assert {i.derived_from for i in held.items(_NOW, "GEO", 9.0)} == {"intel-record:40258", "status:40258"}
 
     def test_an_object_with_no_number_has_nothing_to_look_up(self, cache: Any) -> None:
-        assert threat._red_evidence(None, _NO_HISTORY, _HELD, 9.0) == ((), None)
+        assert threat._red_evidence(None, _NO_HISTORY, _HELD) is None
 
 
 # ── SPC-167: a recorded status is evidence; decide-by is withheld only on an earned MINIMAL ceiling ──
@@ -280,9 +283,9 @@ class TestTheModelIsGivenWhatTheSweepHolds:
         seen: dict[str, Any] = {}
         assess, history_items = tu.assess, tu.history_items
 
-        def spy_assess(items: Any, situation: tu.Situation) -> ThreatUnderstanding:
+        def spy_assess(items: Any, situation: tu.Situation, **kw: Any) -> ThreatUnderstanding:
             seen["situation"] = situation
-            return assess(items, situation)
+            return assess(items, situation, **kw)
 
         def spy_history(signals: tu.HistorySignals, **kw: Any) -> tuple[tu.EvidenceItem, ...]:
             seen["history"] = kw
@@ -306,7 +309,11 @@ class TestTheModelIsGivenWhatTheSweepHolds:
             _NOW, Band.HIGH, Band.MEDIUM, Custody.DEGRADED, "LEO")
         assert (situation.data_mode, situation.manual_confidence) == ("MANUAL", "MEDIUM")
         assert situation.burns
-        assert seen["history"] == {"access_delta_v_m_s": 7.5, "custody": Custody.DEGRADED}
+        # "No burns" is judged on the history's own window, not on the worst case's custody (section 5.3).
+        history = red.history
+        signals = tu.history_signals(history.pol, history.assessment)
+        assert seen["history"] == {"access_delta_v_m_s": 7.5,
+                                   "custody": tu.window_custody(signals, _NOW, threat.limit_hours_for_regime("LEO"))}
 
     def test_an_unassessed_capability_gives_the_model_no_legacy_verdict(
             self, cache: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -525,6 +532,10 @@ def _base_badge(level: str) -> str:
     return f'<span class="spectre-band-badge spectre-band-{level.lower()}">&#9888; {level} THREAT</span>'
 
 
+def _outlined_badge(level: str) -> str:
+    return _base_badge(level).replace(f"spectre-band-{level.lower()}", f"spectre-band-{level.lower()} spectre-band-outline")
+
+
 def _digest(worst: dict[str, Any]) -> str:
     plain = {k: v for k, v in worst.items() if k not in _NEW_KEYS}
     return hashlib.sha256(json.dumps(plain, sort_keys=True, default=str).encode()).hexdigest()
@@ -558,7 +569,10 @@ class TestTheTwentyBundledRedObjects:
         assert shadowed is not None
         assert (before["access_level"], before["threat_level"]) == ("CRITICAL", _LEGACY[satno])
         assert {k: v for k, v in shadowed.items() if k != "understanding"} == before
-        assert _badge(shadowed) == _badge(before) == _base_badge(_LEGACY[satno])
+        # The verdict word and band are the legacy ones. Understanding LOW outlines the badge (SPC-168), no
+        # more; with no Understanding computed it is outlined too, because the fill is earned.
+        assert _badge(before).replace(" spectre-band-outline", "") == _base_badge(_LEGACY[satno])
+        assert _badge(before) == _badge(shadowed) == _outlined_badge(_LEGACY[satno])
         assert _digest(shadowed) == _BASE_DIGEST[_LEGACY[satno]]
         # Every bundled set is SYNTHETIC, so the shadow reads Understanding LOW and the access ceiling.
         assert understanding.understanding.level is tu.Understanding.LOW

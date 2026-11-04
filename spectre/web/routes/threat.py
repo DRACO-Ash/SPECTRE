@@ -61,9 +61,9 @@ from spectre.domain.models import (
 )
 from spectre.domain.normality import BurnNormality
 from spectre.domain.pol_assessment import PolAssessment
-from spectre.domain.provenance import ledger_input
 from spectre.domain.threat_assessment import (
     AccessEvidence,
+    ActorRange,
     ActorVerdict,
     Band,
     CapabilityEvidence,
@@ -106,6 +106,7 @@ from spectre.web.routes.pol import (
     reserve_reset_for,
 )
 from spectre.web.routes.udl import spawn_session_task
+from spectre.web.understanding_view import HeldObject, object_view, understanding_view
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,7 @@ async def red_orbit_info(
 
         satno = satno_from_tle(track.tle)
         pair = get_intel(satno)
+        now = _utc_now()
 
         return render(request, "partials/red_orbit_info.html", {
             "name": track.name,
@@ -195,6 +197,7 @@ async def red_orbit_info(
             "ecc": ecc,
             "a_km": a_km,
             "pair": pair,
+            "pair_tu": _red_object_view(state, str(satno), track.tle, track.data_mode, now) if pair else None,
         })
     except TLE_ERRORS as exc:
         # red_sat is a query parameter and the exception text is built from an
@@ -1602,28 +1605,22 @@ def _red_capability_from(red_satno: str | None, history: _RedHistory) -> Capabil
     return _red_capability(red_satno, history.assessment, history.pol.span_days if history.pol else None)
 
 
-def _red_evidence(
-    red_satno: str | None, history: _RedHistory, custody: CustodyStatus, access_dv_m_s: float,
-) -> tuple[tuple[tu.EvidenceItem, ...], tu.HistorySignals | None]:
-    """What the sweep holds about the red object, as Threat Understanding evidence (SPC-165).
+def _red_evidence(red_satno: str | None, history: _RedHistory, custody: CustodyStatus) -> HeldObject | None:
+    """What the sweep holds about the red object, for Threat Understanding (SPC-165), or None with no number.
 
     Its intel record, its GCAT entry if the catalogue is already cached, and
     its element-set history if one arrived, with the history read once. No
-    new fetch is made for any of them. *access_dv_m_s* is what the worst
-    case costs, against which "no burns" is judged.
+    new fetch is made for any of them.
     """
-    if not red_satno:
-        return (), None
+    return _held_object(red_satno, history, custody.state) if red_satno else None
+
+
+def _held_object(satno: str, history: _RedHistory, custody: Custody) -> HeldObject:
+    """What the sweep holds about *satno*: its record, its cached GCAT row and its history, read once."""
     signals = (tu.history_signals(history.pol, history.assessment)
                if history.pol is not None and history.assessment is not None else None)
-    entry = catalogue_entry(red_satno)
-    items = [
-        *tu.intel_items(get_intel(red_satno), red_satno),
-        *(tu.gcat_items(entry[0], entry[1], red_satno) if entry is not None else ()),
-        *(tu.history_items(signals, access_delta_v_m_s=access_dv_m_s, custody=custody.state)
-          if signals is not None else ()),
-    ]
-    return tuple(items), signals
+    return HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
+                      custody=custody)
 
 
 class _Red(NamedTuple):
@@ -1657,8 +1654,12 @@ def _red_understanding(red: _Red, worst_coa: dict[str, Any] | None, now: datetim
 
 
 def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.ThreatUnderstanding:
-    """The model over what the sweep holds about *red*, against the worst case's ACCESS."""
-    items, signals = _red_evidence(red.satno, red.history, red.custody, float(worst_coa["dv"]))
+    """The model over what the sweep holds about *red*, against the worst case's ACCESS.
+
+    "No burns" is judged against what the worst case costs.
+    """
+    held = _red_evidence(red.satno, red.history, red.custody)
+    items = held.items(now, red.regime, float(worst_coa["dv"])) if held is not None else ()
     age = elset_age(red.tle, now)
     assessed = worst_coa["capability_level"] != "UNASSESSED"
     situation = tu.Situation(
@@ -1668,53 +1669,71 @@ def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.Threa
         elset_limit_hours=age.limit_hours if age is not None else limit_hours_for_regime(red.regime),
         data_mode=red.context.data_mode, manual_confidence=red.context.manual_confidence,
     )
-    return tu.assess(items, tu.with_history(situation, signals))
+    return tu.assess(items, held.situate(situation) if held is not None else situation, with_cues=True)
 
 
-#: The understanding strip's four cells, in the operator's words: Behaviour is how it manoeuvres.
-_STRIP_NAMES: dict[tu.Dimension, str] = {
-    tu.Dimension.IDENTITY: "Identity", tu.Dimension.CAPABILITY: "Capability",
-    tu.Dimension.BEHAVIOUR: "Manoeuvres", tu.Dimension.INTERACTIONS: "Interactions",
-}
-_STRIP_FILL: dict[tu.Depth, str] = {tu.Depth.EARNED: "full", tu.Depth.PARTIAL: "half", tu.Depth.NONE: "empty"}
-_LEDGER_LABEL = "threat understanding ledger"
+def _red_object_view(state: object, satno: str | None, tle: str, data_mode: str | None,
+                     now: datetime) -> dict[str, Any] | None:
+    """The red track's understanding for its intel card (SPC-168), from what is held: nothing is fetched.
 
-
-def _age(row: tu.LedgerRow) -> str:
-    return "undated" if row.age_days is None else age_text(row.age_days * 24.0)
-
-
-def _ledger_view(row: tu.LedgerRow) -> dict[str, str]:
-    """One row of "What it rests on", every figure as the operator reads it.
-
-    The note says what the item is ("declared, not observed") before what
-    became of it, so a declaration never reads as an observation.
+    The history is the one the sweep holds for it, if any; custody is judged
+    by the sweep's own rule, so the card's strip matches the sweep's.
     """
-    return {
-        "dimension": _STRIP_NAMES[row.item.dimension], "claim": row.item.label,
-        "reading": tu.reading_text(row.item), "grade": row.item.grade, "age": _age(row),
-        "basis": row.item.basis.value, "q": f"{row.q:.2f}", "status": row.status.value,
-        "note": "; ".join(note for note in (row.item.note, row.note) if note),
-    }
+    if not satno:
+        return None
+    history, custody = _cached_history(state, satno, tle, now)
+    regime = history.pol.regime if history.pol is not None else _regime_of_tle(tle)
+    return object_view(_held_object(satno, history, custody.state), now, regime=regime, data_mode=data_mode)
+
+
+_NO_HISTORY_HELD = "No element-set history is held."
+
+
+def _cached_history(state: object, satno: str, tle: str, now: datetime) -> tuple[_RedHistory, CustodyStatus]:
+    """The object's history if one is already held, read once, and its custody by the sweep's rule.
+
+    Only what Pattern of Life or a sweep has already cached is read; nothing
+    is fetched, so a panel that shows understanding costs UDL nothing.
+    """
+    held = state.elset_histories.get(int(satno)) if satno.isdigit() else None  # type: ignore[attr-defined]
+    pol = held.pol if held is not None else None
+    assessment, normality = history_evidence(pol, reserve_reset_for(state, int(satno))) if pol else (None, None)
+    history = _RedHistory(pol, assessment, normality, "" if pol else _NO_HISTORY_HELD, None)
+    return history, custody_from_history(tle, now, pol=pol, normality=normality, problem=history.problem)
+
+
+def _actor_range(state: object, verdict: ActorVerdict, regime: str, actor_tle: str,
+                 now: datetime) -> ActorRange | None:
+    """One screened actor's Threat range and Understanding (SPC-169, in shadow), from what is cached.
+
+    The actor's own verdict supplies ACCESS and the legacy reading, so the
+    range sits beside the verdict the column already shows. An actor with no
+    cached history reads "no history held", and its first cue is to pull it.
+    """
+    satno = verdict.actor_satno
+    history, custody = _cached_history(state, satno, actor_tle, now)
+    mode = state.hrr_tle_data_mode.get(satno)  # type: ignore[attr-defined]
+    red = _Red(satno, actor_tle, regime, history, custody, ConfidenceContext(data_mode=mode, custody=custody.state))
+    assessment = verdict.assessment
+    worst = {"dv": verdict.delta_v_m_s, "access_level": assessment.access_label,
+             "threat_level": assessment.verdict_label, "capability_level": assessment.capability_label}
+    understanding = _red_understanding(red, worst, now)
+    if understanding is None:
+        return None
+    span, rating, held = understanding.range, understanding.understanding, history.pol is not None
+    # With no history held, the cue named is to pull it (section 7.2); otherwise the most steps per hour
+    # among the cues SPECTRE can read the result of.
+    cue = next((c for c in understanding.cues if c.fed and (held or c.observation == tu.PULL_HISTORY)), None)
+    return ActorRange(
+        floor=span.floor, ceiling=span.ceiling, understanding=rating.level.name, history_held=held,
+        at_ceiling=understanding.verdict.at_ceiling, statement=rating.statement,
+        cue=tu.cue_text(cue) if cue is not None else "",
+    )
 
 
 def _understanding_view(understanding: tu.ThreatUnderstanding) -> dict[str, Any]:
-    """Section 6.4, in shadow: the Threat line, the Understanding line, the strip and the ledger with its hash."""
-    span = understanding.range
-    strip = []
-    for dimension, name in _STRIP_NAMES.items():
-        depth = tu.depth(span.coverage[dimension])
-        held = [f"{r.item.label}: {r.item.grade}, {_age(r)}, {r.item.basis.value}"
-                for r in span.ledger if r.item.dimension is dimension]
-        strip.append({"name": name, "depth": depth.value, "fill": _STRIP_FILL[depth], "detail": "; ".join(held)})
-    return {
-        "threat": tu.threat_sentence(understanding),
-        "band": understanding.verdict.band.name.lower(),
-        "understanding": understanding.understanding.statement,
-        "strip": strip,
-        "ledger": [_ledger_view(r) for r in span.ledger],
-        "ledger_hash": ledger_input(_LEDGER_LABEL, span.ledger).sha256,
-    }
+    """Section 6.4 on the sweep, in shadow: the view every panel shares, with an intercept in view."""
+    return understanding_view(understanding)
 
 
 def _with_understanding(
@@ -2703,7 +2722,8 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
                 f"{budget_m_s:g} m/s"
             )
             continue
-        verdicts.append(verdict)
+        regime = actor.regime or _regime_of_tle(actor_tle)
+        verdicts.append(replace(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now)))
 
     return _ScreenRun(verdicts=verdicts, entries=entries, refusals=refusals, notes=notes)
 
@@ -2878,7 +2898,7 @@ async def threat_screen(
     """
     t0 = time.monotonic()
     state = get_session_state(current_user)
-    now = datetime.now(tz=UTC)
+    now = _utc_now()
     errors: list[str] = []
 
     def _fail(message: str) -> HTMLResponse:

@@ -73,12 +73,14 @@ __all__ = [
     "MANUAL_EXTRACTION",
     "MANUFACTURABLE_CAP",
     "PARTIAL",
+    "PULL_HISTORY",
     "PROVIDER_GRADES",
     "RECORD_DATE_FIELD",
     "ROUTINE_CAP",
     "SOURCE_RELIABILITY",
     "UNATTRIBUTED",
     "BurnSignal",
+    "Cue",
     "Depth",
     "Dimension",
     "EvidenceItem",
@@ -96,6 +98,8 @@ __all__ = [
     "assess",
     "burn_extraction",
     "coverage",
+    "cue_text",
+    "cues",
     "depth",
     "earned_incapacity",
     "freshness",
@@ -105,6 +109,7 @@ __all__ = [
     "history_signals",
     "intel_items",
     "manual_extraction",
+    "missing",
     "provider_grade",
     "reading_text",
     "record_date",
@@ -113,7 +118,9 @@ __all__ = [
     "threat_sentence",
     "understand",
     "verdict_for",
+    "window_custody",
     "with_history",
+    "with_record",
 ]
 
 _SECONDS_PER_DAY = 86400.0
@@ -457,6 +464,9 @@ class Situation:
     elset_limit_hours: float = 72.0
     data_mode: str | None = None
     manual_confidence: str | None = None
+    #: The floor the intel record would set once an analyst dates and sources
+    #: it (section 5.1): MEDIUM when its threat level is HIGH or CRITICAL.
+    record_prior: Band | None = None
 
 
 @dataclass(frozen=True)
@@ -1019,20 +1029,27 @@ def understand(result: ThreatRange, situation: Situation) -> UnderstandingRating
 
 @dataclass(frozen=True)
 class ThreatUnderstanding:
-    """Threat as a range, Understanding as a rating, and the verdict they give."""
+    """Threat as a range, Understanding as a rating, and the verdict they give.
+
+    *cues* are what to collect next, most steps of range per hour first
+    (SPC-170); empty unless they were asked for.
+    """
 
     range: ThreatRange
     understanding: UnderstandingRating
     verdict: Verdict
+    cues: tuple[Cue, ...] = ()
 
 
-def assess(items: Iterable[EvidenceItem], situation: Situation) -> ThreatUnderstanding:
-    """The threat range the evidence earns, how well founded it is, and the verdict."""
-    result = threat_range(items, situation)
+def assess(items: Iterable[EvidenceItem], situation: Situation, *, with_cues: bool = False) -> ThreatUnderstanding:
+    """The threat range the evidence earns, how well founded it is, and the verdict; the cues on request."""
+    held = tuple(items)
+    result = threat_range(held, situation)
     rating = understand(result, situation)
     legacy = situation.access if situation.legacy is None else situation.legacy
     return ThreatUnderstanding(range=result, understanding=rating,
-                               verdict=verdict_for(legacy, result.floor, result.ceiling, rating.level))
+                               verdict=verdict_for(legacy, result.floor, result.ceiling, rating.level),
+                               cues=cues(held, situation) if with_cues else ())
 
 
 # ── Adapters: what SPECTRE holds, as evidence items (SPC-165) ─────────────────
@@ -1354,6 +1371,26 @@ def history_items(signals: HistorySignals, *, access_delta_v_m_s: float, custody
     return tuple(items)
 
 
+def window_custody(signals: HistorySignals, now: datetime, elset_limit_hours: float) -> Custody:
+    """Section 5.3: whether custody was held across the history's own window, judged on its own sets.
+
+    The absence rule asks this of the history, not of whichever element set a
+    panel is looking at, so one object reads one strip on every panel. Held
+    while the newest set is within the regime's limit, degraded when UDL's
+    record cap cut the history short, and lost past the limit.
+    """
+    if now - signals.newest_at > timedelta(hours=elset_limit_hours):
+        return Custody.LOST
+    return Custody.DEGRADED if signals.truncated else Custody.HELD
+
+
+def with_record(situation: Situation, record: Mapping[str, Any] | None) -> Situation:
+    """*situation* with the floor its intel record would set once dated and sourced, for the record's cue."""
+    level = str((record or {}).get("threat_level") or "").strip()
+    band = CapabilityEvidence(intel_threat_level=level).recognised_threat_level()
+    return replace(situation, record_prior=_PRIOR_FLOOR_CAP if band is not None and band >= Band.HIGH else None)
+
+
 def with_history(situation: Situation, signals: HistorySignals | None) -> Situation:
     """*situation* with what the history says: its burns, newest set, detection floor and truncation."""
     if signals is None:
@@ -1465,6 +1502,253 @@ def earned_incapacity(result: ThreatUnderstanding) -> LedgerRow | None:
     if row is None or not row.applied or result.understanding.level is Understanding.LOW:
         return None
     return row
+
+
+# ── Cues and the value of information (SPC-170) ───────────────────────────────
+#
+# Section 4.10. For each dimension not yet earned, the range is re-run twice
+# with one hypothetical group of the collection's typical grade: once with the
+# most benign reading the dimension admits, once with the most hostile. The
+# steps of range the collection would remove are
+#     (ceiling now - ceiling benign) + (floor hostile - floor now),
+# each half no less than nothing, the whole no more than the range has, and
+# the cues are ranked by steps per hour to collect. One cue is not tied to an
+# unearned dimension: an undated intel record can be dated and sourced by an
+# analyst whatever Identity's coverage, as contrast B of section 4.12 ranks it.
+# Every cue is worked out and ranked, but only a fed one can deliver what it
+# names today: nothing turns a conjunction into evidence until SPC-172 and
+# SPC-173, and the sweep holds one merged history per object (section 9,
+# decision 8), so a second provider's history has nowhere to go yet.
+
+#: The roots the held signals arrive under, as the adapters above name them.
+_HISTORY_ROOT = "elset-history:"
+_RECORD_ROOT = "intel-record:"
+_GCAT_ROOT = "gcat:"
+_PHOTOMETRY_ROOT = "photometry:"
+_NOTSO_ROOT = "notso:"
+#: A hypothetical group's root, so it is independent of everything held.
+_PROBE_ROOT = "hypothetical:"
+# Hours each collection takes. Holding conjunctions and pulling a catalogue
+# entry are a lookup inside SPECTRE; a history is one more UDL query; dating
+# and sourcing a record needs an analyst. Tuned, not sourced.
+_CONJUNCTION_HOURS: float = 0.25
+_GCAT_HOURS: float = 0.25
+_HISTORY_HOURS: float = 0.5
+_RECORD_HOURS: float = 4.0
+_MINUTES_PER_HOUR = 60.0
+#: The cue when no element-set history is held: the one screening names for an actor without one (section 7.2).
+PULL_HISTORY = "pull its element-set history"
+
+
+@dataclass(frozen=True)
+class _Probe:
+    """What one collection could show in one dimension: its grade and its most hostile and benign readings."""
+
+    dimension: Dimension
+    root: str
+    source_grade: str
+    credibility: int
+    extraction: float
+    basis: Basis
+    controlled: bool = False
+    hostile_floor: Band | None = None
+    benign_ceiling: Band | None = None
+
+    def item(self, now: datetime, *, hostile: bool) -> EvidenceItem:
+        """The hypothetical group, observed now. A benign burn is a routine one: coverage only."""
+        return EvidenceItem(
+            dimension=self.dimension, label=f"hypothetical {self.dimension.value}", derived_from=self.root,
+            source_grade=self.source_grade, credibility=self.credibility, extraction=self.extraction,
+            basis=self.basis, observed_at=now, controlled=self.controlled,
+            floor_to=self.hostile_floor if hostile else None, ceiling_to=None if hostile else self.benign_ceiling,
+            routine=not hostile and self.dimension is Dimension.BEHAVIOUR,
+        )
+
+
+@dataclass(frozen=True)
+class _Collection:
+    observation: str
+    hours: float
+    probes: tuple[_Probe, ...]
+    record: bool = False
+    fed: bool = True
+
+
+@dataclass(frozen=True)
+class Cue:
+    """One observation that would narrow the range: what to collect, what it could do and how long it takes.
+
+    *steps* are the band steps of range it would remove (section 4.10).
+    *benign* and *hostile* are the (floor, ceiling) the range would read on
+    each outcome. *record* marks the one cue that improves a held record
+    rather than closing an unearned dimension. *fed* is whether SPECTRE can
+    take what it collects into the model today; the screen names only fed cues.
+    """
+
+    observation: str
+    dimensions: tuple[Dimension, ...]
+    steps: int
+    hours: float
+    effect: str
+    benign: tuple[Band, Band]
+    hostile: tuple[Band, Band]
+    record: bool = False
+    fed: bool = True
+
+    @property
+    def steps_per_hour(self) -> float:
+        return self.steps / self.hours
+
+
+def _roots(result: ThreatRange) -> set[str]:
+    return {row.item.derived_from for row in result.ledger}
+
+
+def _held(roots: Iterable[str], prefix: str) -> list[str]:
+    return sorted(root for root in roots if root.startswith(prefix))
+
+
+def _identity_collection(roots: set[str]) -> _Collection:
+    """The GCAT entry: Identity coverage only, a refresh of the held entry when there is one."""
+    held = _held(roots, _GCAT_ROOT)
+    verb = "refresh" if held else "pull"
+    probe = _Probe(Dimension.IDENTITY, held[0] if held else f"{_PROBE_ROOT}gcat", _GCAT_GRADE, _GCAT_CREDIBILITY,
+                   CATALOGUE_FIELD_EXTRACTION, Basis.LOOKUP)
+    return _Collection(f"{verb} its GCAT catalogue entry", _GCAT_HOURS, (probe,))
+
+
+def _history_collection(roots: set[str], unearned: set[Dimension]) -> _Collection | None:
+    """An element-set history: the first, from the 18 SDS catalogue, or a second provider's, commercial.
+
+    In Capability it could read a spent tank (the most benign: ceiling
+    MINIMAL); in Behaviour an unprecedented burn (the most hostile: floor
+    HIGH). Only its unearned dimensions are probed.
+    """
+    second = bool(_held(roots, _HISTORY_ROOT))
+    grade = _UNLISTED_PROVIDER_GRADE if second else PROVIDER_GRADES[_18SDS]
+    root = f"{_PROBE_ROOT}{'second provider' if second else 'history'}"
+    shared: dict[str, Any] = {"root": root, "source_grade": grade, "credibility": _PROVIDER_CREDIBILITY,
+                              "basis": Basis.COMPUTED, "controlled": grade in _CONTROLLED_GRADES}
+    probes = tuple(probe for probe in (
+        _Probe(Dimension.CAPABILITY, extraction=ASSUMED_FIGURE_EXTRACTION, benign_ceiling=Band.MINIMAL, **shared),
+        _Probe(Dimension.BEHAVIOUR, extraction=DETECTION_EXTRACTION["HIGH"],
+               hostile_floor=_HOSTILE_FLOOR[Normality.UNPRECEDENTED], **shared),
+    ) if probe.dimension in unearned)
+    if not probes:
+        return None
+    observation = "pull a second provider's element-set history" if second else PULL_HISTORY
+    return _Collection(observation, _HISTORY_HOURS, probes, fed=not second)
+
+
+def _conjunction_collection() -> _Collection:
+    """UDL conjunctions held for the object: an approach caused by a burn reads floor HIGH (section 5.4)."""
+    probe = _Probe(Dimension.INTERACTIONS, f"{_PROBE_ROOT}conjunctions", PROVIDER_GRADES[_18SDS],
+                   _PROVIDER_CREDIBILITY, DETECTION_EXTRACTION["HIGH"], Basis.COMPUTED, controlled=True,
+                   hostile_floor=Band.HIGH)
+    return _Collection("hold UDL conjunctions for it", _CONJUNCTION_HOURS, (probe,), fed=False)
+
+
+def _record_collections(result: ThreatRange, prior: Band | None) -> list[_Collection]:
+    """An undated intel record, dated and sourced by an analyst (section 7.3).
+
+    *prior* is the floor it would then set: MEDIUM for a HIGH or CRITICAL
+    threat level, None for any other, which dated firms up Identity alone (section 5.1).
+    """
+    undated = sorted({row.item.derived_from for row in result.ledger
+                      if row.item.derived_from.startswith(_RECORD_ROOT) and row.item.observed_at is None})
+    return [_Collection("analyst to date and source the intel record", _RECORD_HOURS, (_Probe(
+        Dimension.IDENTITY, root, _INTEL_GRADE, _INTEL_CREDIBILITY, ASSESSED_LABEL_EXTRACTION, Basis.LOOKUP,
+        hostile_floor=prior),), record=True) for root in undated]
+
+
+def _collections(result: ThreatRange, situation: Situation) -> list[_Collection]:
+    """What could be collected: one collection per unearned dimension's source, and the record cue."""
+    unearned = {d for d, u in result.coverage.items() if depth(u) is not Depth.EARNED}
+    roots = _roots(result)
+    history = _history_collection(roots, unearned)
+    return [
+        *([_identity_collection(roots)] if Dimension.IDENTITY in unearned else []),
+        *([history] if history is not None else []),
+        *([_conjunction_collection()] if Dimension.INTERACTIONS in unearned else []),
+        *_record_collections(result, situation.record_prior),
+    ]
+
+
+def _effect(now: ThreatRange, benign: ThreatRange, hostile: ThreatRange, dimensions: tuple[Dimension, ...]) -> str:
+    parts = [
+        *([f"raise the Threat floor to {hostile.floor.name}"] if hostile.floor > now.floor else []),
+        *([f"lower the Threat ceiling to {benign.ceiling.name}"] if benign.ceiling < now.ceiling else []),
+    ]
+    if parts:
+        return "could " + " or ".join(parts)
+    return f"would firm up {' and '.join(d.value for d in dimensions)} and move no Threat band"
+
+
+def _cue(items: tuple[EvidenceItem, ...], situation: Situation, now: ThreatRange, collection: _Collection) -> Cue:
+    """Section 4.10 for one collection: the range on each outcome, and the steps it would remove."""
+    benign, hostile = (
+        threat_range((*items, *(p.item(situation.now, hostile=h) for p in collection.probes)), situation)
+        for h in (False, True))
+    swing = max(0, int(now.ceiling) - int(benign.ceiling)) + max(0, int(hostile.floor) - int(now.floor))
+    dimensions = tuple(p.dimension for p in collection.probes)
+    return Cue(
+        observation=collection.observation, dimensions=dimensions, hours=collection.hours,
+        steps=min(int(now.ceiling) - int(now.floor), swing), effect=_effect(now, benign, hostile, dimensions),
+        benign=(benign.floor, benign.ceiling), hostile=(hostile.floor, hostile.ceiling), record=collection.record,
+        fed=collection.fed,
+    )
+
+
+def cues(items: Iterable[EvidenceItem], situation: Situation) -> tuple[Cue, ...]:
+    """What to collect next, the most steps of range per hour first (section 4.10 and I11)."""
+    held = tuple(items)
+    now = threat_range(held, situation)
+    found = [_cue(held, situation, now, collection) for collection in _collections(now, situation)]
+    return tuple(sorted(found, key=lambda c: (-c.steps_per_hour, c.hours, c.observation)))
+
+
+def _duration(hours: float) -> str:
+    return f"{hours * _MINUTES_PER_HOUR:.0f} min" if hours < 1.0 else age_text(hours)
+
+
+def cue_text(cue: Cue, *, threat: bool = True) -> str:
+    """A cue as the operator reads it: the observation, what it could do, the steps and the time.
+
+    With *threat* False, on a panel with no intercept and so no ACCESS to
+    bound the range by, it names the dimensions it would firm up instead of
+    Threat bands and steps worked out against a ceiling no geometry has set.
+    """
+    if not threat:
+        firms = " and ".join(d.value for d in cue.dimensions)
+        return f"{cue.observation}: would firm up {firms}, about {_duration(cue.hours)}"
+    steps = "step" if cue.steps == 1 else "steps"
+    return f"{cue.observation}: {cue.effect}, {cue.steps} Threat {steps}, about {_duration(cue.hours)}"
+
+
+#: The signals the Missing list names when none is held, each by the root its items arrive under.
+_SIGNALS: tuple[tuple[str, str], ...] = (
+    (_RECORD_ROOT, "no intel record held"),
+    (_GCAT_ROOT, "no GCAT catalogue entry held"),
+    (_HISTORY_ROOT, "no element-set history held"),
+)
+
+
+def missing(result: ThreatRange) -> tuple[str, ...]:
+    """Section 6.4's Missing list: the dimensions not earned, then the signals not held."""
+    held = [row.item for row in result.ledger]
+    roots = _roots(result)
+    capability_chains = {i.derived_from for i in held
+                         if i.dimension is Dimension.CAPABILITY and i.derived_from.startswith(_HISTORY_ROOT)}
+    history = bool(_held(roots, _HISTORY_ROOT))
+    return (
+        *(f"{d.value} {depth(u).value}" for d, u in result.coverage.items() if depth(u) is not Depth.EARNED),
+        *(text for root, text in _SIGNALS if not _held(roots, root)),
+        *(["no second provider's history"] if history and len(capability_chains) < _MIN_SOURCE_CHAINS else []),
+        *([] if any(i.source_grade == "A" for i in held) else ["no own or allied sensor track"]),
+        *([] if any(i.dimension is Dimension.INTERACTIONS for i in held) else ["no approaches or conjunctions held"]),
+        *([] if _held(roots, _PHOTOMETRY_ROOT) else ["photometry not uploaded"]),
+        *([] if _held(roots, _NOTSO_ROOT) else ["no NOTSO filing held"]),
+    )
 
 
 # ── Words for the screen (SPC-166) ────────────────────────────────────────────

@@ -63,6 +63,19 @@
     {{ pair.significance }}
   </div>
 
+  {# ── What is understood about the object (SPC-168, concept section 7.3):
+     the record's own grade and what it does to the range, the cue to date
+     and source it, the Understanding line and the strip every panel shows. #}
+  {% if pair_tu is defined and pair_tu %}
+  {% set tu = pair_tu %}
+  <div class="pair-understanding" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.2rem">
+    {% if tu.record %}<div>{{ tu.record }}.</div>{% endif %}
+    {% if tu.record_cue %}<div>Raise it by: {{ tu.record_cue }}.</div>{% endif %}
+    <div>{{ tu.understanding }}</div>
+    {% include "partials/understanding_strip.html" %}
+  </div>
+  {% endif %}
+
   {# ── Source footnote ── #}
   <div style="font-size:0.57rem; color:var(--text-muted);
               border-top:1px solid var(--border); padding-top:0.18rem; margin-top:0.18rem">

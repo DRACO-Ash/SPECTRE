@@ -24,7 +24,8 @@ from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_his
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
-from spectre.domain.custody import CustodyStatus, assess_custody
+from spectre.domain import threat_understanding as tu
+from spectre.domain.custody import Custody, CustodyStatus, assess_custody
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
 from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import PolAssessment, assess_pattern_of_life
@@ -36,6 +37,8 @@ from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, udl_data_rate_limit
+from spectre.web.routes.gcat import catalogue_entry
+from spectre.web.understanding_view import HeldObject, object_view
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
@@ -634,6 +637,33 @@ def _pol_custody(pol: Any, latest_burn: BurnNormality | None, now: datetime) -> 
     )
 
 
+def _utc_now() -> datetime:
+    """The panel's clock, a seam so tests can stand at a chosen moment."""
+    return datetime.now(tz=UTC)
+
+
+def _object_understanding(pol: Any, assessment: PolAssessment, custody: CustodyStatus | None,
+                          now: datetime) -> dict[str, object] | None:
+    """What is understood about the analysed object (SPC-168): the strip the sweep shows for it, and more.
+
+    Built from this panel's own reading of the history, its custody and its
+    normality, the values that set volatility, and from the record and the
+    GCAT row already held. Nothing is fetched.
+    """
+    satno = str(getattr(pol, "satno", "") or "")
+    try:
+        signals = tu.history_signals(pol, assessment)
+        records = getattr(pol, "records", None) or []
+        data_mode = str(getattr(records[-1], "data_mode", "") or "") or None
+    # BLE001: a history the model cannot read leaves the panel standing.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Threat Understanding failed for %s: %s", log_safe(satno), log_safe(exc))
+        return None
+    held = HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
+                      custody=custody.state if custody is not None else Custody.LOST)
+    return object_view(held, now, regime=str(getattr(pol, "regime", "") or ""), data_mode=data_mode)
+
+
 def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
@@ -656,6 +686,8 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
     assessment = assess_pattern_of_life(pol, reserve_reset)
     normality = _burn_normality(pol, assessment.manoeuvres)
     latest_burn = max(normality, key=lambda n: n.burn.epoch, default=None)
+    now = _utc_now()
+    custody = _pol_custody(pol, latest_burn, now)
 
     return {
         "assessment": assessment,
@@ -680,7 +712,8 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
         "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s, "normal": n}
                            for v, n in zip(assessment.manoeuvres, normality, strict=True)],
         "latest_burn": latest_burn,
-        "custody": _pol_custody(pol, latest_burn, datetime.now(tz=UTC)),
+        "custody": custody,
+        "object_understanding": _object_understanding(pol, assessment, custody, now),
         "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
                            for v in assessment.candidates],
         "detection": _detection_view(pol),

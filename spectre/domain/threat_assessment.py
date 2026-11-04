@@ -56,6 +56,7 @@ from spectre.domain.provenance import Provenance, provenance, value_input
 
 __all__ = [
     "AccessEvidence",
+    "ActorRange",
     "ActorVerdict",
     "Band",
     "CapabilityEvidence",
@@ -753,12 +754,59 @@ def warning_time_rank(
 
 
 @dataclass(frozen=True)
+class ActorRange:
+    """One actor's Threat range and Understanding, beside its legacy verdict (SPC-169, in shadow).
+
+    Read by Threat Understanding from what is already held, the intel record,
+    the GCAT row and a cached history; *history_held* says whether there was
+    one. *at_ceiling* is whether the new rule would read the ceiling, as it
+    does at Understanding LOW or across a range too wide to call. Every band
+    in the words below is labelled "Threat" or "Understanding" (I13).
+    """
+
+    floor: Band
+    ceiling: Band
+    understanding: str
+    history_held: bool
+    at_ceiling: bool
+    statement: str = ""
+    cue: str = ""
+
+    def __post_init__(self) -> None:
+        if self.floor > self.ceiling:
+            raise ValueError("a Threat range with its floor above its ceiling")
+        if self.understanding not in _UNDERSTANDING_LEVELS:
+            raise ValueError(f"Understanding must be one of {', '.join(_UNDERSTANDING_LEVELS)}")
+
+    @property
+    def span_text(self) -> str:
+        """The bands the range runs between, "HIGH to CRITICAL", or the one band it holds."""
+        if self.floor == self.ceiling:
+            return self.floor.label
+        return f"{self.floor.label} to {self.ceiling.label}"
+
+    @property
+    def range_label(self) -> str:
+        return f"Threat {self.span_text}"
+
+    @property
+    def understanding_label(self) -> str:
+        held = "" if self.history_held else ": no history held"
+        return f"Understanding {self.understanding}{held}"
+
+
+#: Understanding as Threat Understanding rates it, weakest first.
+_UNDERSTANDING_LEVELS: tuple[str, ...] = ("LOW", "MODERATE", "HIGH")
+
+
+@dataclass(frozen=True)
 class ActorVerdict:
     """One candidate actor's assessment against the asset being screened.
 
     ``assessment`` is the composed verdict. ``warning_hours`` and
     ``delta_v_m_s`` describe the entry that produced it, so the screen can show
-    what the verdict was built from without re-deriving it.
+    what the verdict was built from without re-deriving it. ``understanding``
+    is its Threat range and Understanding, when they could be read (SPC-169).
     """
 
     actor_name: str
@@ -768,6 +816,7 @@ class ActorVerdict:
     delta_v_m_s: float
     method: str = ""
     country: str = ""
+    understanding: ActorRange | None = None
 
     @property
     def verdict(self) -> Band:
@@ -793,6 +842,9 @@ class ScreeningResult:
     earliest_arrival: ActorVerdict | None
     #: Set when those two are different objects.
     disagreement: str = ""
+    #: Set when an actor's legacy verdict sits outside the Threat range its
+    #: evidence earns, or below a ceiling the range would be read at (SPC-169).
+    understanding_disagreement: str = ""
 
 
 def _actor_rank_key(v: ActorVerdict) -> tuple[int, float, float]:
@@ -846,4 +898,32 @@ def rank_actors(verdicts: list[ActorVerdict]) -> ScreeningResult:
         most_dangerous=most_dangerous,
         earliest_arrival=earliest_arrival,
         disagreement=disagreement,
+        understanding_disagreement=_understanding_disagreement(verdicts),
     )
+
+
+def _range_disagreement(v: ActorVerdict) -> str:
+    """The new case for one actor, in words, or "" when its verdict and its range agree.
+
+    The legacy verdict outside the range comes first; then a range read at
+    its ceiling, at Understanding LOW or too wide to call, above the verdict.
+    Threat and Understanding each take a sentence of their own (I13).
+    """
+    span = v.understanding
+    if span is None:
+        return ""
+    arrives = f"it could arrive in {v.warning_hours:.1f} h"
+    if not span.floor <= v.verdict <= span.ceiling:
+        return (f"{v.actor_name}'s Threat is assessed {v.verdict_label} by the current rule, outside the Threat "
+                f"range its evidence earns, {span.span_text}, and {arrives}.")
+    if span.at_ceiling and span.ceiling > v.verdict:
+        held = "" if span.history_held else ": no history held"
+        return (f"{v.actor_name}'s Threat is assessed {v.verdict_label}, but its Threat ceiling is "
+                f"{span.ceiling.label} and {arrives}. {v.actor_name} reads Understanding {span.understanding}{held}.")
+    return ""
+
+
+def _understanding_disagreement(verdicts: list[ActorVerdict]) -> str:
+    """Concept section 7.2: the soonest actor whose verdict its own Threat range does not bear out."""
+    flagged = sorted((v for v in verdicts if _range_disagreement(v)), key=lambda v: (v.warning_hours, v.delta_v_m_s))
+    return _range_disagreement(flagged[0]) if flagged else ""

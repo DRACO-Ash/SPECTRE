@@ -1087,6 +1087,25 @@ a:hover,
 .spectre-band-low      { background: var(--spectre-status-low-fill);      }
 .spectre-band-minimal  { background: var(--spectre-status-minimal-fill);  }
 
+/* The verdict badge outlined, not filled, when Understanding is LOW
+   (Threat Understanding, concept section 6.4): the content advisory. The
+   band word stays; the fill goes, so the verdict reads as not yet earned.
+   The text takes the band's panel text colour on the panel's own opaque
+   surface, not on the banner's band wash beneath it: on the wash, CRITICAL
+   measured 4.48:1 in the dark theme, and on --surface it is 4.72:1. */
+.spectre-band-badge.spectre-band-outline {
+  background: var(--surface);
+  color: var(--spectre-status-unknown);
+  border: 1px solid currentColor;
+  padding: calc(0.2rem - 1px) calc(0.5rem - 1px);
+}
+
+.spectre-band-outline.spectre-band-critical { color: var(--spectre-status-critical); }
+.spectre-band-outline.spectre-band-high     { color: var(--spectre-status-high);     }
+.spectre-band-outline.spectre-band-medium   { color: var(--spectre-status-medium);   }
+.spectre-band-outline.spectre-band-low      { color: var(--spectre-status-low);      }
+.spectre-band-outline.spectre-band-minimal  { color: var(--spectre-status-minimal);  }
+
 /* Pulsing dot for live status indicators */
 .spectre-status-dot {
   display: inline-block;
