@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-04
+
+**Operator outputs: the Threat Understanding concept is now built end to end, with its verdict switch off pending the owner's sign-off; analysts can record their judgement of it; and the Decision Engine offers a probability from NOTSO history.**
+
+### Added
+- The verdict switch, behind `SPECTRE_THREAT_VERDICT_SWITCH`, off in every shipped configuration. On, the verdict shown is the Threat ceiling when Understanding is LOW or the range spans four bands or more, otherwise the current reading held inside the range, each with a visible reason. The sign-off sheet, `docs/threat_verdict_reference.md`, gives old against new verdict for all 20 bundled red objects, and a test fails if the sheet and the code ever disagree: 11 of 20 change, all to the access ceiling, because every bundled element set is synthetic (SPC-175).
+- The adjudication log. An analyst records agreement or disagreement with an object's Threat range and Understanding, with a reason; it never moves a band, a form for another object or an older picture is refused, and the coverage rate shows only once 30 judgements exist. Judgements are held per sign-in (SPC-176).
+- A probability and confidence suggested from the object's NOTSO history beside each adversary row, with its basis: the notices counted, the periods the cache covers and the gaps it does not. Gaps and time before launch are never read as quiet, nothing is offered below the sample floor or under 0.01, and nothing is written in unasked; the result records whether each value was the operator's own or an accepted suggestion (SPC-130).
+
+### Fixed
+- The scenario binding fields refresh in a browser again. Inside the evaluate form they took the form's htmx settings, threw, and never sent their request, from 0.11.0 until now.
+
+### Out of scope, named
+- Turning the verdict switch on, which is the owner's decision (SPC-175). Verifying the doctrine citations before any PHIA or ICD 203 wording appears, which needs network access (SPC-177). The live check of the UDL conjunction contract (SPC-033).
+
 ## [0.20.0] - 2026-11-04
 
 **Operator outputs: the sweep's answer becomes a decision in one step, and Threat Understanding reads interactions from conjunctions and from known hostile objects.** The threat verdict word and band are unchanged.

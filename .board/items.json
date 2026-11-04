@@ -731,7 +731,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/astro/notso.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-131",
@@ -1511,7 +1515,7 @@
   "group": "understanding",
   "minutes": 240,
   "task": "Verdict switch behind a setting, with a reference table",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3).",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3). Built in 0.21.0 behind SPECTRE_THREAT_VERDICT_SWITCH, off. Turning it on needs the owner's sign-off on docs/threat_verdict_reference.md (11 of 20 demonstration verdicts change, all to the access ceiling, because the bundled data is synthetic).",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/config/constants.py"
@@ -1521,7 +1525,12 @@
    "SPC-167",
    "SPC-168",
    "SPC-169"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists",
+  "needs_owner": true
  },
  {
   "ref": "SPC-176",
@@ -1537,7 +1546,11 @@
   ],
   "deps": [
    "SPC-166"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-177",

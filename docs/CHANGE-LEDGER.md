@@ -1154,3 +1154,12 @@ Feature work from the backlog: opening a decision from the sweep, interactions f
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_from_sweep.py`, `spectre/web/interaction_store.py`, misses and seeds in `interaction_graph.py`, burn approaches in `elset_approach.py`, conjunction misses in `udl_conjunction.py`, a seed path in `config/settings.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 99 to 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_HOSTILE_SEEDS`, a path the deployment sets; nothing is read when it is unset. No new handler attribute, so the Content Security Policy gap does not widen. | n/a. |
 
+## 0.21.0
+
+Feature work from the backlog: the verdict switch (off) and its sign-off sheet, the adjudication log, the NOTSO-based suggestion, and a binding fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/adjudication.py`, `spectre/web/adjudication_log.py`, `spectre/domain/notso_prior.py`, `spectre/web/decision_prior.py`, the switch in `threat_assessment.py` and `config/settings.py`, and template sections | `scripts/check-quality.sh` against 0.20.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_THREAT_VERDICT_SWITCH`, unset in every shipped configuration. | n/a. |
+
