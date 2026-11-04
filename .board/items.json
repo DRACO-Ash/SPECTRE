@@ -752,7 +752,11 @@
    "spectre/web/templates/partials/decision_panel.html",
    "spectre/web/templates/partials/decision_results.html",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.22.0",
+  "actualNote": "not measured: built by workflow agents (build, review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-132",
@@ -768,7 +772,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.22.0",
+  "actualNote": "not measured: built by workflow agents (build, review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-140",

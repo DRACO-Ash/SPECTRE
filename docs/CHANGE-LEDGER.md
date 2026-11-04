@@ -1163,3 +1163,12 @@ Feature work from the backlog: the verdict switch (off) and its sign-off sheet, 
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/adjudication.py`, `spectre/web/adjudication_log.py`, `spectre/domain/notso_prior.py`, `spectre/web/decision_prior.py`, the switch in `threat_assessment.py` and `config/settings.py`, and template sections | `scripts/check-quality.sh` against 0.20.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_THREAT_VERDICT_SWITCH`, unset in every shipped configuration. | n/a. |
 
+## 0.22.0
+
+Feature work from the backlog: loading NOTSO suggestions per row, the NOTSO timeline, and the probability interval in expected value.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the interval and timeline in `notso_prior.py`, interval and joint picks in `decision.py`, loading in `decision_prior.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against 0.21.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the interval uses scipy, already a runtime dependency. | n/a. |
+

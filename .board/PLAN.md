@@ -1,11 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.22: 2 items, 420 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 7h00 to 7h00 (middle 7h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-131       240m  priority med; anchors the release
-    SPC-132       180m  priority med
-  lane 1 (420m): SPC-131, SPC-132
-
 V0.23: 2 items, 840 priced min, gates container, lint, quality, sast, tests
   forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-140       480m  priority med; anchors the release

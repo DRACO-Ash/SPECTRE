@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-04
+
+**Operator output advanced: 4, the recommended response, now says whether it holds across the uncertainty in a NOTSO-based probability, not just at its centre.**
+
+### Added
+- Load from NOTSO on each adversary row: it shows that row's suggestion, its basis and an unticked apply box, and writes nothing into P or Conf (SPC-131).
+- A NOTSO timeline in the results for each applied suggestion: the periods the cache covers, the gaps, time before launch and the time since the cache's last cover, each named as not counted, and each counted notice dated, readable without colour (SPC-131).
+- An exact 95 in 100 Poisson interval on each suggested probability, edges rounded outward. Under expected value the results say whether the recommendation holds across each row's interval, naming the probability where it would change, and with two or more rows across every corner of their joint range. Minimax and minimin say they do not use probability and show no interval (SPC-132).
+
+### Changed
+- A row's NOTSO suggestion is worked out only once the operator loads it, not on every change to the form.
+
 ## [0.21.0] - 2026-11-04
 
 **Operator outputs: the Threat Understanding concept is now built end to end, with its verdict switch off pending the owner's sign-off; analysts can record their judgement of it; and the Decision Engine offers a probability from NOTSO history.**
