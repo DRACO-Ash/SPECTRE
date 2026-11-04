@@ -389,6 +389,16 @@ class Settings:
     hostile_seeds_path: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_HOSTILE_SEEDS", "").strip()
     )
+    # The verdict switch (SPC-175, threat concept section 4.8): on, the
+    # verdict shown is the Threat ceiling at Understanding LOW or across a
+    # wide range, else the current rule's reading clamped into the range.
+    # Off unless set explicitly, and set by no shipped configuration: the
+    # owner signs off docs/threat_verdict_reference.md first (concept
+    # section 9, decisions 2 and 3).
+    threat_verdict_switch: bool = field(
+        default_factory=lambda: os.environ.get("SPECTRE_THREAT_VERDICT_SWITCH", "").strip().lower()
+        in _TRUTHY
+    )
 
 
 def get_settings() -> Settings:

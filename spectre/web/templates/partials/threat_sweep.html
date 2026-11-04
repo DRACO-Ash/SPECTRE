@@ -152,6 +152,11 @@
       <span style="font-size:0.78rem; font-weight:600; color:var(--gold)">MOST DANGEROUS COURSE OF ACTION</span>
       {% if worst_coa.behaviour_label is defined %}<span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.behaviour_label }}</span>{% endif %}
     </div>
+    {# Only with the verdict switch on (SPC-175): why the badge reads the band
+       it does, and what the current rule reads, in one line (I13). #}
+    {% if worst_coa.verdict_reason is defined %}
+    <div class="verdict-switch">{{ worst_coa.verdict_reason }}</div>
+    {% endif %}
 
     {# The two findings the single word used to conflate. Geometric access and
        assessed capability are different questions with different answers, and
@@ -183,6 +188,8 @@
        (concept section 6.4, I13). #}
     {% set tu = worst_coa.understanding %}
     {% include "partials/threat_understanding.html" %}
+    {# The analyst's agree or disagree with it, logged and never applied (SPC-176). #}
+    {% if adjudication is defined and adjudication %}{% include "partials/adjudication.html" %}{% endif %}
     {% endif %}
 
     {# What the cost says about how the actor would have to behave.

@@ -1,0 +1,51 @@
+{# Adjudicating the sweep's Threat range and Understanding (SPC-176,
+   concept section 7.6). The form records agree or disagree with each, what
+   the analyst judges when they disagree, and a reason, against the picture
+   the sweep holds: the bands come from it, never from the form. Recording
+   changes no band. The coverage report is a count, shown only once 30
+   adjudications exist (section 8: no percentage). Every option names its
+   axis, Threat or Understanding (I13). No handler attribute and no inline
+   script (Content Security Policy): HTMX posts the form and swaps the panel.
+   Context: adjudication (spectre.web.adjudication_log.view). #}
+<section class="adjudication" id="adjudication" aria-label="Adjudicate this Threat range">
+  <div class="adjudication-report">{{ adjudication.report }}</div>
+  {% if adjudication.message %}<div class="adjudication-message" role="status">{{ adjudication.message }}</div>{% endif %}
+  {% if adjudication.subject %}
+  <details class="adjudication-details"{% if adjudication.message %} open{% endif %}>
+    <summary>Adjudicate: {{ adjudication.range_text }}</summary>
+    <form class="adjudication-form" hx-post="/plan/threat/adjudicate" hx-target="#adjudication" hx-swap="outerHTML">
+      <input type="hidden" name="ledger_hash" value="{{ adjudication.ledger_hash }}">
+      <input type="hidden" name="satno" value="{{ adjudication.satno }}">
+      <fieldset>
+        <legend>{{ adjudication.range_text }}</legend>
+        <label><input type="radio" name="on_range" value="agree" checked> Agree</label>
+        <label><input type="radio" name="on_range" value="disagree"> Disagree</label>
+        <label for="adj-threat">If you disagree, the Threat you judge</label>
+        <select id="adj-threat" name="analyst_threat">
+          <option value="">Not set</option>
+          {% for band in adjudication.bands %}<option value="{{ band }}">Threat {{ band }}</option>{% endfor %}
+        </select>
+      </fieldset>
+      <fieldset>
+        <legend>{{ adjudication.understanding_text }}</legend>
+        <label><input type="radio" name="on_understanding" value="agree" checked> Agree</label>
+        <label><input type="radio" name="on_understanding" value="disagree"> Disagree</label>
+        <label for="adj-understanding">If you disagree, the Understanding you judge</label>
+        <select id="adj-understanding" name="analyst_understanding">
+          <option value="">Not set</option>
+          {% for level in adjudication.levels %}<option value="{{ level }}">Understanding {{ level }}</option>{% endfor %}
+        </select>
+      </fieldset>
+      <label for="adj-reason">Reason</label>
+      <textarea id="adj-reason" name="reason" rows="2" maxlength="{{ adjudication.max_reason }}" required></textarea>
+      <button type="submit" class="btn btn-secondary">Record</button>
+      <div class="adjudication-note">Held for this sign-in only. It never changes the Threat range or the verdict.</div>
+    </form>
+  </details>
+  {% endif %}
+  {% if adjudication.recent %}
+  <ol class="adjudication-recent">
+    {% for line in adjudication.recent %}<li>{{ line }}</li>{% endfor %}
+  </ol>
+  {% endif %}
+</section>

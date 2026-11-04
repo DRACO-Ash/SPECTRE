@@ -37,6 +37,7 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
+from spectre.config.settings import get_settings
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain import interaction_graph as ig
 from spectre.domain import threat_understanding as tu
@@ -73,6 +74,7 @@ from spectre.domain.threat_assessment import (
     arrives_at_target,
     assess_threat,
     rank_actors,
+    read_verdict,
     warning_time_rank,
 )
 from spectre.domain.warning_change import (
@@ -89,7 +91,7 @@ from spectre.domain.warning_change import (
     when_burned,
     worst_change,
 )
-from spectre.web import interaction_store
+from spectre.web import adjudication_log, interaction_store
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
@@ -1786,6 +1788,42 @@ def _with_understanding(
     return worst_coa
 
 
+def _verdict_switch_on() -> bool:
+    """Whether the deployment has turned the verdict switch on (SPC-175); off unless set, and no shipped file sets it."""
+    return get_settings().threat_verdict_switch
+
+
+def _with_verdict_switch(
+    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None, *, switch_on: bool,
+) -> dict[str, Any] | None:
+    """The worst case with concept section 4.8's verdict shown, when the switch is on (SPC-175).
+
+    Off, or with no Threat Understanding, the worst case is returned exactly as
+    it was, so the pinned legacy verdicts hold. On, the verdict word and its
+    colours are the new band; the current rule's band and the reason in one
+    line are carried beside it, and every other key is left as it was.
+    """
+    if worst_coa is None or understanding is None or not switch_on:
+        return worst_coa
+    span = understanding.range
+    reading = read_verdict(Band[worst_coa["threat_level"]], Band[worst_coa["access_level"]],
+                           (span.floor, span.ceiling), understanding.understanding.level.name)
+    worst_coa["threat_color"], worst_coa["threat_bg"] = _BAND_COLOURS[reading.new.label]
+    worst_coa.update(threat_level=reading.new.label, legacy_threat_level=reading.old.label,
+                     verdict_reason=reading.reason)
+    return worst_coa
+
+
+def _switched_actor(verdict: ActorVerdict, *, switch_on: bool) -> ActorVerdict:
+    """One screened actor with concept section 4.8's verdict, when the switch is on and its range was read."""
+    span = verdict.understanding
+    if span is None or not switch_on:
+        return verdict
+    reading = read_verdict(verdict.assessment.verdict, verdict.assessment.access, (span.floor, span.ceiling),
+                           span.understanding)
+    return replace(verdict, switched=reading)
+
+
 def _worst_coa_in_context(
     state: object, entries: list[ThreatSweepEntry], evidence: tuple[CapabilityEvidence, ConfidenceContext],
     max_dv_m_s: float, red: tuple[_RedHistory, str],
@@ -2765,7 +2803,11 @@ async def threat_sweep(
     decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
     # The engine reads this picture, so its range and deadline cannot disagree with the sweep's (SPC-171).
     hold_threat_picture(state, red_sat.strip(), understanding, decide, now)
+    # What it showed, held so an analyst can adjudicate exactly that range (SPC-176).
+    adjudication_log.hold_subject(state, red_sat.strip(), red_satno, understanding, now)
     worst_coa = _with_understanding(worst_coa, understanding, held.notes)
+    # After decide-by, the engine's picture and the model, which all read the current rule's verdict (SPC-175).
+    worst_coa = _with_verdict_switch(worst_coa, understanding, switch_on=_verdict_switch_on())
     worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
     state.last_threat_assessment = assessment
@@ -2800,6 +2842,7 @@ async def threat_sweep(
         "red_history": red_history,
         "warning_change": warning_change,
         "decide_by": decide,
+        "adjudication": adjudication_log.sweep_panel(state),
         **watch_view(state, current_user.session_key, now),
         "epoch_note": _epoch_note(red_tle),
         "error": None,
@@ -2880,6 +2923,7 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
     entries: list[ThreatSweepEntry] = []
     refusals: list[tuple[str, str, str]] = []
     notes: list[str] = []
+    switch_on = _verdict_switch_on()
 
     for actor in actors:
         actor_tle = _resolve_hrr_tle(state, actor.actor_satno)
@@ -2897,7 +2941,8 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
             )
             continue
         regime = actor.regime or _regime_of_tle(actor_tle)
-        verdicts.append(replace(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now)))
+        spanned = replace(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now))
+        verdicts.append(_switched_actor(spanned, switch_on=switch_on))
 
     return _ScreenRun(verdicts=verdicts, entries=entries, refusals=refusals, notes=notes)
 
@@ -3053,6 +3098,40 @@ async def screen_config(
         "red_total": red_total,
         "synthetic_elements": bool(modes - {"REAL"}),
     })
+
+
+@router.post("/adjudicate", response_model=None)
+async def threat_adjudicate(  # noqa: PLR0913, PLR0917 - one argument per field of the adjudication form
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    ledger_hash: Annotated[str, Form(max_length=64)] = "",
+    satno: Annotated[str, Form(max_length=16)] = "",
+    on_range: Annotated[str, Form(max_length=16)] = "",
+    analyst_threat: Annotated[str, Form(max_length=16)] = "",
+    on_understanding: Annotated[str, Form(max_length=16)] = "",
+    analyst_understanding: Annotated[str, Form(max_length=16)] = "",
+    reason: Annotated[str, Form(max_length=4000)] = "",
+) -> HTMLResponse:
+    """Record an analyst's agree or disagree with the sweep's Threat range and Understanding (SPC-176).
+
+    Recorded against the picture the sweep holds for this sign-in, and only
+    when the form names that picture's ledger hash. It changes no band. The
+    panel comes back with what was recorded or why not, and the coverage report.
+    """
+    state = get_session_state(current_user)
+    form = adjudication_log.AdjudicationForm(
+        ledger_hash=ledger_hash.strip(), satno=satno.strip(), on_range=on_range.strip().lower(), analyst_threat=analyst_threat.strip(),
+        on_understanding=on_understanding.strip().lower(), analyst_understanding=analyst_understanding.strip(),
+        reason=reason,
+    )
+    entry, message = adjudication_log.take(state, form, current_user.username, _utc_now())
+    if entry is None:
+        logger.info("Threat adjudication not recorded for %s", log_safe(current_user.username))
+    else:
+        logger.info("Threat adjudication recorded for %s by %s: range %s, Understanding %s",
+                    log_safe(entry.subject.satno), log_safe(current_user.username), log_safe(entry.on_range.value),
+                    log_safe(entry.on_understanding.value))
+    return render(request, "partials/adjudication.html", {"adjudication": adjudication_log.view(state, message)})
 
 
 @router.post("/screen", response_model=None)

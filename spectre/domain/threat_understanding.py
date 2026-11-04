@@ -66,7 +66,7 @@ from spectre.domain.manoeuvre_calibration import Posture
 from spectre.domain.normality import Normality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import STANDARD_GRAVITY_M_S2, anomaly_risk_level
 from spectre.domain.provenance import Basis, weakest
-from spectre.domain.threat_assessment import PROPELLANT_SPENT_PCT, Band, CapabilityEvidence
+from spectre.domain.threat_assessment import PROPELLANT_SPENT_PCT, Band, CapabilityEvidence, range_verdict
 from spectre.domain.warning_change import Change
 
 __all__ = [
@@ -205,8 +205,8 @@ _PRIOR_FLOOR_CAP: Band = Band.MEDIUM
 # Everything the adversary controls is declared by one source, the object's operator,
 # so manufacturable items share this root whatever chain they arrived by (section 2.4).
 _OPERATOR_ROOT = "declared by the operator"
-# A range spanning this many bands or more is too wide to call a point inside it. Tuned, not sourced.
-_WIDE_RANGE_BANDS: int = 4
+# A range spanning threat_assessment.WIDE_RANGE_BANDS or more is too wide to call a point inside it (SPC-175 moved
+# the rule there, so the switch and this verdict read one rule).
 
 
 class Dimension(Enum):
@@ -577,8 +577,8 @@ def verdict_for(legacy: Band, floor: Band, ceiling: Band, understanding: Underst
     """The legacy reading clamped to the range; the ceiling when Understanding is LOW or the range is wide."""
     if floor > ceiling:
         raise ValueError("a range with its floor above the ceiling")
-    assessed = Band(min(max(legacy, floor), ceiling))
-    at_ceiling = understanding is Understanding.LOW or int(ceiling) - int(floor) + 1 >= _WIDE_RANGE_BANDS
+    # The one rule of section 4.8, which the verdict switch reads too (SPC-175).
+    assessed, at_ceiling = range_verdict(legacy, floor, ceiling, understanding_low=understanding is Understanding.LOW)
     return Verdict(assessed=assessed, band=ceiling if at_ceiling else assessed, at_ceiling=at_ceiling)
 
 

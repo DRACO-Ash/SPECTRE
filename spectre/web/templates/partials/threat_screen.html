@@ -41,6 +41,12 @@
       <strong style="font-size:0.82rem">{{ worst.actor_name }}</strong>
       <span style="font-size:0.72rem; color:var(--text-muted)">[{{ worst.actor_satno }}]{% if worst.country %} &#183; {{ worst.country }}{% endif %}</span>
     </div>
+    {# Only with the verdict switch on (SPC-175): why the badge reads the band
+       it does, and what the current rule reads, in one line (I13). The
+       rationale below is the current rule's, which this line names. #}
+    {% if worst.switched %}
+    <div class="verdict-switch">{{ worst.switched.reason }}</div>
+    {% endif %}
 
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
       <div class="stat-card">
@@ -133,10 +139,17 @@
           <td><strong>{{ v.actor_name }}</strong>{% if badge_mode not in ("REAL", "MANUAL") %}{% include "partials/_provenance_badge.html" %}{% endif %}</td>
           <td class="col-dim">{{ v.actor_satno }}</td>
           <td class="col-dim">{{ v.country or "-" }}</td>
+          {# With the verdict switch on (SPC-175) the verdict is concept section
+             4.8's, and the cell opens on why and what the current rule reads:
+             a details element, so a keyboard or touch user reaches it too. #}
+          {% if v.switched %}
+          <td class="screen-verdict"><details><summary><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></summary>
+            <div>{{ v.switched.reason }}</div></details></td>
+          {% else %}
           <td><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></td>
-          {# Threat Understanding beside the verdict, in shadow (SPC-169): the
-             range the actor's held evidence earns and how well founded it is.
-             The verdict column itself is unchanged until the switch (SPC-175). #}
+          {% endif %}
+          {# Threat Understanding beside the verdict (SPC-169): the range the
+             actor's held evidence earns and how well founded it is. #}
           {% if v.understanding %}
           <td class="screen-range" style="color:var(--spectre-status-{{ v.understanding.ceiling.label | lower }})">{{ v.understanding.range_label }}</td>
           {# The statement and the cue in a details element, so a keyboard or

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
+from spectre.domain.adjudication import Adjudication, Subject
 from spectre.domain.models import (
     BlueAsset,
     InterceptResult,
@@ -128,6 +129,14 @@ class SessionState:
     # Response times set for named targets, by target name (SPC-022). A target
     # here takes its own; any other takes response_time_h, else the default.
     response_time_by_target: dict[str, float] = field(default_factory=dict)
+    # The Threat range and Understanding the sweep last showed, as an analyst
+    # may adjudicate them, and the adjudications this sign-in recorded
+    # (spectre.domain.adjudication, SPC-176). Per sign-in, like every other
+    # operational record: the database holds accounts and per-account
+    # training only, and why adjudications are not kept there is in
+    # spectre.web.adjudication_log.
+    adjudication_subject: Subject | None = None
+    adjudications: tuple[Adjudication, ...] = ()
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""

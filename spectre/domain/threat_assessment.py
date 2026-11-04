@@ -63,8 +63,12 @@ __all__ = [
     "ConfidenceContext",
     "ScreeningResult",
     "ThreatAssessment",
+    "VerdictReading",
+    "WIDE_RANGE_BANDS",
     "assess_threat",
+    "range_verdict",
     "rank_actors",
+    "read_verdict",
     "warning_time_rank",
     "NON_ARRIVING_METHODS",
     "arrives_at_target",
@@ -799,6 +803,101 @@ class ActorRange:
 _UNDERSTANDING_LEVELS: tuple[str, ...] = ("LOW", "MODERATE", "HIGH")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The verdict switch (SPC-175, concept section 4.8)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# One rule, read by Threat Understanding's verdict and by the switch alike, so
+# the band the switch would show and the band the shadow display reads cannot
+# disagree. The switch itself is a deployment setting the web layer reads; this
+# module only says what each verdict is and why.
+
+#: A Threat range spanning this many bands or more is too wide to call a point inside it, so the verdict reads its
+#: ceiling. Tuned, not sourced.
+WIDE_RANGE_BANDS: int = 4
+
+
+def range_verdict(legacy: Band, floor: Band, ceiling: Band, *, understanding_low: bool) -> tuple[Band, bool]:
+    """The current reading clamped into [floor, ceiling], and whether the verdict reads the ceiling instead.
+
+    It reads the ceiling when Understanding is LOW or the range spans WIDE_RANGE_BANDS or more bands.
+    """
+    assessed = Band(min(max(legacy, floor), ceiling))
+    at_ceiling = understanding_low or int(ceiling) - int(floor) + 1 >= WIDE_RANGE_BANDS
+    return assessed, at_ceiling
+
+
+@dataclass(frozen=True)
+class VerdictReading:
+    """One object's verdict by the current rule and by concept section 4.8, and why the new one is what it is.
+
+    *old* is the current rule's ``min(ACCESS, capability)``, or ACCESS with no
+    capability evidence. *new* is the Threat ceiling when *at_ceiling*, else
+    *assessed*, the old reading clamped into the range. *reason* is one plain
+    line, Threat and Understanding each in sentences of their own (I13).
+    """
+
+    old: Band
+    new: Band
+    assessed: Band
+    at_ceiling: bool
+    understanding: str
+    reason: str
+
+    def shown(self, *, switch_on: bool) -> Band:
+        """The verdict the operator sees: the new one only with the switch on."""
+        return self.new if switch_on else self.old
+
+
+def _span_words(floor: Band, ceiling: Band) -> str:
+    return floor.label if floor == ceiling else f"{floor.label} to {ceiling.label}"
+
+
+def _ceiling_words(ceiling: Band, access: Band) -> str:
+    if ceiling == access:
+        return f"set by access at {access.label}"
+    return f"set by the evidence at {ceiling.label}, below access at {access.label}"
+
+
+def _threat_reason(old: Band, access: Band, span: tuple[Band, Band], understanding_low: bool) -> str:
+    """The Threat sentence of the reason: why the new verdict is the band it is."""
+    floor, ceiling = span
+    assessed, at_ceiling = range_verdict(old, floor, ceiling, understanding_low=understanding_low)
+    range_words = f"Threat range {_span_words(floor, ceiling)}"
+    if at_ceiling:
+        reads = f"Threat reads its ceiling, {_ceiling_words(ceiling, access)}"
+        if understanding_low:
+            return f"{reads}."
+        bands = int(ceiling) - int(floor) + 1
+        return f"{range_words} spans {bands} bands, too wide to call a point, so {reads}."
+    if floor <= old <= ceiling:
+        return f"{range_words} holds the current rule's reading, so Threat stays {assessed.label}."
+    if old < floor:
+        return f"{range_words} sits above the current rule's reading, so Threat rises to its floor, {assessed.label}."
+    return f"{range_words} sits below the current rule's reading, so Threat falls to its ceiling, {assessed.label}."
+
+
+def read_verdict(old: Band, access: Band, span: tuple[Band, Band], understanding: str) -> VerdictReading:
+    """The verdict by the current rule and by concept section 4.8, side by side, with the reason in one line.
+
+    *span* is the Threat range (floor, ceiling) the evidence earns, which never
+    exceeds *access*; *understanding* is LOW, MODERATE or HIGH.
+    """
+    floor, ceiling = span
+    if floor > ceiling:
+        raise ValueError("a Threat range with its floor above its ceiling")
+    if ceiling > access:
+        raise ValueError("a Threat ceiling above access, which no evidence can raise")
+    if understanding not in _UNDERSTANDING_LEVELS:
+        raise ValueError(f"Understanding must be one of {', '.join(_UNDERSTANDING_LEVELS)}")
+    low = understanding == _UNDERSTANDING_LEVELS[0]
+    assessed, at_ceiling = range_verdict(old, floor, ceiling, understanding_low=low)
+    reason = (f"Understanding {understanding}. {_threat_reason(old, access, span, low)} "
+              f"The current rule reads Threat {old.label}.")
+    return VerdictReading(old=old, new=ceiling if at_ceiling else assessed, assessed=assessed, at_ceiling=at_ceiling,
+                          understanding=understanding, reason=reason)
+
+
 @dataclass(frozen=True)
 class ActorVerdict:
     """One candidate actor's assessment against the asset being screened.
@@ -807,6 +906,9 @@ class ActorVerdict:
     ``delta_v_m_s`` describe the entry that produced it, so the screen can show
     what the verdict was built from without re-deriving it. ``understanding``
     is its Threat range and Understanding, when they could be read (SPC-169).
+    ``switched`` is set only with the verdict switch on (SPC-175): the
+    verdict is then concept section 4.8's, and the assessment keeps the
+    current rule's.
     """
 
     actor_name: str
@@ -817,14 +919,15 @@ class ActorVerdict:
     method: str = ""
     country: str = ""
     understanding: ActorRange | None = None
+    switched: VerdictReading | None = None
 
     @property
     def verdict(self) -> Band:
-        return self.assessment.verdict
+        return self.assessment.verdict if self.switched is None else self.switched.new
 
     @property
     def verdict_label(self) -> str:
-        return self.assessment.verdict_label
+        return self.verdict.label
 
 
 @dataclass(frozen=True)
