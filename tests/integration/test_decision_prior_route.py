@@ -93,6 +93,8 @@ def _region(client: Any, cookie: str, **params: Any) -> str:
     query: dict[str, Any] = {"horizon_hours": "72", "adv_id": ["A1"], "adv_name": ["Approach"],
                              "adv_type": ["manoeuvre"], "red_sat": "RX"}
     query.update(params)
+    # Each row as the operator loaded it from NOTSO (SPC-131): nothing is worked out for a row until it is.
+    query.setdefault("adv_loaded", query["adv_id"])
     resp = client.get("/plan/decision/prior", params=query, cookies={"spectre_session": cookie})
     assert resp.status_code == 200
     return resp.text

@@ -109,12 +109,13 @@ Typical use::
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import json
 import logging
 import math
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
@@ -1650,6 +1651,13 @@ class ScenarioResult:
     def row_sources(self) -> tuple[str, ...]:
         """Per adversary row, whose P and Conf they are: the operator's own, or a NOTSO suggestion applied (SPC-130)."""
         return tuple(_row_source(a) for a in self.scenario.adversary_actions)
+
+    @property
+    def interval_lines(self) -> tuple[str, ...]:
+        """Per row holding an applied NOTSO suggestion, whether expected value's pick holds across its P's interval,
+        and the P at which it changes if it does; under minimax or minimin, that the rule reads no probability, with
+        no interval shown (SPC-132)."""
+        return interval_lines(self.scenario, self.outcome_matrix, self.robust_strategy)
 
     @property
     def objective_guidance(self) -> str | None:
@@ -3523,15 +3531,7 @@ def find_robust_response(
         best_j = min(range(n_friendly), key=lambda j: scores[j])
 
     elif strategy == SelectorStrategy.EXPECTED_VALUE:
-        total_p = sum(a.probability for a in scenario.adversary_actions)
-        if total_p <= 0:
-            total_p = 1.0
-        for j in range(n_friendly):
-            scores[j] = sum(
-                (scenario.adversary_actions[i].probability / total_p) * outcome_matrix[i][j].composite_score
-                for i in range(n_adversary)
-            )
-        best_j = min(range(n_friendly), key=lambda j: scores[j])
+        best_j = _expected_value_pick([a.probability for a in scenario.adversary_actions], outcome_matrix)
 
     else:  # MINIMIN: minimise the best-case score, the optimistic rule
         for j in range(n_friendly):
@@ -3539,6 +3539,191 @@ def find_robust_response(
         best_j = min(range(n_friendly), key=lambda j: scores[j])
 
     return scenario.friendly_responses[best_j]
+
+
+def _expected_value_pick(probabilities: Sequence[float], outcome_matrix: Sequence[Sequence[OutcomeMetrics]]) -> int:
+    """The index of the response with the least expected score, each row weighed by its share of *probabilities*.
+
+    The first such response wins a tie.
+    """
+    total_p = sum(probabilities)
+    if total_p <= 0:
+        total_p = 1.0
+    scores = [
+        sum((probabilities[i] / total_p) * outcome_matrix[i][j].composite_score for i in range(len(probabilities)))
+        for j in range(len(outcome_matrix[0]))
+    ]
+    return min(range(len(scores)), key=lambda j: scores[j])
+
+
+# ── The interval on a NOTSO-derived P, carried into the pick (SPC-132) ─────────
+
+_INTERVAL_HOLDS = (
+    "{row}: expected value recommends {pick} at every P across its NOTSO interval, {low} to {high:.2f}, with the "
+    "other rows held at their P."
+)
+_INTERVAL_MOVES = (
+    "{row}: expected value recommends {pick} at P {p:.2f}, but not across its NOTSO interval, {low} to {high:.2f}: "
+    "{changes}, with the other rows held at their P."
+)
+_BELOW = "below P {at:.3f} it recommends {pick}"
+_ABOVE = "above P {at:.3f} it recommends {pick}"
+_JOINT_HOLDS = "Moved together across their NOTSO intervals, {rows} P keep expected value at {pick} throughout{held}."
+_JOINT_MOVES = (
+    "Moved together across their NOTSO intervals, {rows} P do not keep expected value at {pick}: with {corner}, it "
+    "recommends {other}{held}."
+)
+_JOINT_HELD = ", with the other rows held at their P"
+#: The finest step a P is shown to.
+_HUNDREDTH = 0.01
+_PROBABILITY_IGNORED = (
+    "{rule} does not use probability, so the NOTSO interval on {rows} P cannot move its pick and is not shown."
+)
+
+
+class IntervalPick(NamedTuple):
+    """Where expected value's pick changes as one row's P moves across its interval, the others held.
+
+    *below* and *above* are each the P nearest the row's own at which the pick changes, with the response it
+    changes to, or None when it does not change on that side.
+    """
+
+    row:    int
+    pick:   int
+    below:  tuple[float, int] | None
+    above:  tuple[float, int] | None
+
+
+def _crossings(row: int, probabilities: Sequence[float], matrix: Sequence[Sequence[OutcomeMetrics]]) -> list[float]:
+    """Each P for *row* at which two responses' expected scores are equal, the other rows held.
+
+    Every response's expected score shares the one total, so each is ordered by its weighted sum, which is a line
+    in the row's P: B_j + p s_j. Two lines cross at (B_k - B_j) / (s_j - s_k).
+    """
+    n = len(matrix[0])
+    held = [sum(probabilities[i] * matrix[i][j].composite_score for i in range(len(probabilities)) if i != row)
+            for j in range(n)]
+    slope = [matrix[row][j].composite_score for j in range(n)]
+    return [(held[k] - held[j]) / (slope[j] - slope[k])
+            for j in range(n) for k in range(j + 1, n) if not math.isclose(slope[j], slope[k])]
+
+
+def _first_change(
+    pick_at: Callable[[float], int], pick: int, steps: Sequence[float],
+) -> tuple[float, int] | None:
+    """The first of *steps*, walked from the row's own P, past which the pick is no longer *pick*, and the new one.
+
+    The pick holds between two crossings, so it is read halfway along each step.
+    """
+    for near, far in itertools.pairwise(steps):
+        found = pick_at((near + far) / 2.0)
+        if found != pick:
+            return near, found
+    return None
+
+
+def interval_pick(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], row: int, span: tuple[float, float],
+) -> IntervalPick:
+    """Expected value's pick as *row*'s P moves across *span*, low and high, the other rows held at their P."""
+    probabilities = [a.probability for a in scenario.adversary_actions]
+    centre = probabilities[row]
+
+    def pick_at(p: float) -> int:
+        return _expected_value_pick([*probabilities[:row], p, *probabilities[row + 1:]], matrix)
+
+    low, high = span
+    points = sorted({low, high, centre, *(c for c in _crossings(row, probabilities, matrix) if low < c < high)})
+    pick = pick_at(centre)
+    below = [p for p in points if p <= centre][::-1]
+    above = [p for p in points if p >= centre]
+    return IntervalPick(row, pick, _first_change(pick_at, pick, below), _first_change(pick_at, pick, above))
+
+
+def joint_pick(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], spans: Mapping[int, tuple[float, float]],
+) -> tuple[int, tuple[tuple[float, ...], int] | None]:
+    """Expected value's pick with each row in *spans* moved across its span, low and high, together, the other rows
+    held at their P; and the first corner of that box, one P per row in row order, at which the pick changes, with
+    the response it changes to, or None when it holds.
+
+    Each response's region of the box, where it is the pick, is the set of P at which its weighted sum is no more
+    than each other's, every one a line in the P: an intersection of half-spaces, so convex. A convex region that
+    holds every corner of the box holds the whole box, so the corners alone say whether the pick changes anywhere.
+    """
+    probabilities = [a.probability for a in scenario.adversary_actions]
+    pick = _expected_value_pick(probabilities, matrix)
+    rows = sorted(spans)
+    for corner in itertools.product(*(spans[r] for r in rows)):
+        moved = list(probabilities)
+        for r, p in zip(rows, corner, strict=True):
+            moved[r] = p
+        found = _expected_value_pick(moved, matrix)
+        if found != pick:
+            return pick, (corner, found)
+    return pick, None
+
+
+def _edge(value: float) -> str:
+    """An interval edge a pick was checked at: to the hundredth, or the thousandth when it is under the hundredth."""
+    return f"{value:.2f}" if value >= _HUNDREDTH else f"{value:.3f}"
+
+
+def _joint_line(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], rows: Sequence[int]) -> str:
+    """Whether expected value's pick holds with *rows* moved together across their NOTSO intervals."""
+    intervals = {r: cast("NotsoPrior", scenario.adversary_actions[r].accepted_prior).interval for r in rows}
+    pick, change = joint_pick(scenario, matrix, {r: (i.checked_low, i.high) for r, i in intervals.items()})
+    names = [r.name for r in scenario.friendly_responses]
+    common = {"rows": _rows_named(rows), "pick": names[pick],
+              "held": _JOINT_HELD if len(rows) < len(scenario.adversary_actions) else ""}
+    if change is None:
+        return _JOINT_HOLDS.format(**common)
+    corner, other = change
+    first, *rest = [_edge(p) for p in corner]
+    at = [f"row {rows[0] + 1}'s P at {first}", *(f"row {r + 1}'s at {p}" for r, p in zip(rows[1:], rest, strict=True))]
+    joined = at[0] if len(at) == 1 else f"{', '.join(at[:-1])} and {at[-1]}"
+    return _JOINT_MOVES.format(corner=joined, other=names[other], **common)
+
+
+def _row_label(action: AdversaryAction, row: int) -> str:
+    return f"Row {row + 1}, {action.name}" if action.name else f"Row {row + 1}"
+
+
+def _interval_line(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], row: int) -> str:
+    """What expected value recommends across *row*'s NOTSO interval, and the P at which it changes, if it does."""
+    action = scenario.adversary_actions[row]
+    interval = cast("NotsoPrior", action.accepted_prior).interval
+    found = interval_pick(scenario, matrix, row, (interval.checked_low, interval.high))
+    names = [r.name for r in scenario.friendly_responses]
+    low = f"{interval.low:.2f}" if interval.low > 0.0 else "under 0.01"
+    common = {"row": _row_label(action, row), "pick": names[found.pick], "low": low, "high": interval.high}
+    changes = [line.format(at=side[0], pick=names[side[1]])
+               for line, side in ((_BELOW, found.below), (_ABOVE, found.above)) if side is not None]
+    if not changes:
+        return _INTERVAL_HOLDS.format(**common)
+    return _INTERVAL_MOVES.format(p=action.probability, changes="; ".join(changes), **common)
+
+
+def _rows_named(rows: Sequence[int]) -> str:
+    numbers = [str(r + 1) for r in rows]
+    if len(numbers) == 1:
+        return f"row {numbers[0]}'s"
+    return f"rows {', '.join(numbers[:-1])} and {numbers[-1]}'s"
+
+
+def interval_lines(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], strategy: SelectorStrategy,
+) -> tuple[str, ...]:
+    """Per row holding an applied NOTSO suggestion, whether expected value's pick holds across its P's interval, and
+    with two or more such rows, whether it holds with them moved together; under a rule that reads no probability,
+    one line saying so in place of an interval it ignores."""
+    rows = [i for i, a in enumerate(scenario.adversary_actions) if a.accepted_prior is not None]
+    if not rows:
+        return ()
+    if strategy is not SelectorStrategy.EXPECTED_VALUE:
+        return (_PROBABILITY_IGNORED.format(rule=strategy.value.capitalize(), rows=_rows_named(rows)),)
+    alone = tuple(_interval_line(scenario, matrix, row) for row in rows)
+    return alone if len(rows) == 1 else (*alone, _joint_line(scenario, matrix, rows))
 
 
 # ── Top-level evaluation ───────────────────────────────────────────────────────

@@ -214,7 +214,9 @@
     </div>
     {# ── The NOTSO suggestion for each adversary row (SPC-130): asked for on load and on every change in the form,
          which sends the red track, the horizon, each row's id, name and type, and any tick, so a tick still matching
-         stays ticked. Nothing fills P or Conf; a ticked suggestion is applied at Evaluate. It sets its own target,
+         stays ticked. Each row is listed with a labelled Load from NOTSO control (SPC-131); only a row loaded reads
+         its NOTSO history, and it stays loaded through later changes. Nothing fills P or Conf, loading included; a
+         ticked suggestion is applied at Evaluate. It sets its own target,
          indicator and disabled element, since htmx would otherwise take the form's: its reply would land in the
          results, outside the form, and the form's submit button, which it does not hold, makes htmx throw. ── #}
     <div class="adv-priors" hx-get="/plan/decision/prior" hx-trigger="load, change from:closest form"

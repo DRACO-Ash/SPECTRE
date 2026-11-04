@@ -645,6 +645,9 @@ class _PriorQuery(BaseModel):
     adv_names:     list[str] = Field(default_factory=list, alias="adv_name")
     adv_types:     list[str] = Field(default_factory=list, alias="adv_type")
     adv_priors:    list[str] = Field(default_factory=list, alias="adv_prior")
+    # The rows loaded from NOTSO (SPC-131): each loaded row's hidden field, and the id of the row whose Load from
+    # NOTSO control sent this request.
+    adv_loaded:    list[str] = Field(default_factory=list, alias="adv_loaded")
 
 
 def _prior_context(state: SessionState, query: _PriorQuery, now: datetime) -> dict[str, object]:
@@ -658,7 +661,8 @@ def _prior_context(state: SessionState, query: _PriorQuery, now: datetime) -> di
     red = None if bound.binding is None else bound.binding.red
     if red is None:
         return {"note": bound.problem or NO_RED, "rows": []}
-    asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors)
+    asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors,
+                      query.adv_loaded)
     return {"note": "", "rows": row_views(state, asked, red, (hours, now))}
 
 

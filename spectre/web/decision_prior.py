@@ -1,9 +1,11 @@
 """The NOTSO prior beside each adversary row, and applying the ones the operator ticked (SPC-130).
 
-The panel shows, for each adversary row, the P and Conf the bound red track's
-NOTSO history suggests, with what they rest on and a labelled control to apply
-them; or why none is offered. Nothing is filled in on the operator's behalf
-(Threat Understanding concept, section 7.5, items 2 and 3).
+The panel lists each adversary row with a labelled "Load from NOTSO" control
+(SPC-131). A row loaded shows the P and Conf the bound red track's NOTSO
+history suggests, with what they rest on, P's interval (SPC-132) and a
+labelled control to apply them; or why none is offered. Loading is not
+applying, and nothing is filled in on the operator's behalf (Threat
+Understanding concept, section 7.5, items 2 and 3).
 
 The suggestion is read from the NOTSO cache the operator syncs and, for Conf,
 from the red object's element-set history only when one is already held; no
@@ -91,7 +93,7 @@ def offered_prior(
     # The one grammar the NOTSO panel parses its cached records with.
     notices = notsos_from_cache_records(cache.get_for_satno(red.satno), red.satno)
     return notso_prior(red.stk_name, action_type, notices, cover=cover, horizon_hours=horizon_hours,
-                       profile=_profile(state, red.satno, notices), launched=launch_year(red.tle))
+                       profile=_profile(state, red.satno, notices), launched=launch_year(red.tle), until=now)
 
 
 def horizon(raw: str) -> float | None:
@@ -181,7 +183,8 @@ def apply_priors(
 
 
 class RowView(NamedTuple):
-    """One adversary row as the region lists it: its number, id, name and action, and its prior or why none."""
+    """One adversary row as the region lists it: its number, id, name and action, and, once the operator has loaded
+    it from NOTSO, its prior or why none (SPC-131); an unloaded row holds neither."""
 
     row:    int
     row_id: str
@@ -190,6 +193,7 @@ class RowView(NamedTuple):
     prior:  NotsoPrior | None
     reason: str
     ticked: bool
+    loaded: bool = True
 
 
 def _action_type(raw: str) -> ActionType:
@@ -200,26 +204,40 @@ def _action_type(raw: str) -> ActionType:
 
 
 class RowsAsked(NamedTuple):
-    """The adversary rows the panel posts, as parallel columns, and the ticks it holds."""
+    """The adversary rows the panel posts, as parallel columns, the ticks it holds and the rows loaded from NOTSO."""
 
-    ids:   Sequence[str]
-    names: Sequence[str]
-    types: Sequence[str]
-    ticks: Sequence[str]
+    ids:    Sequence[str]
+    names:  Sequence[str]
+    types:  Sequence[str]
+    ticks:  Sequence[str]
+    loaded: Sequence[str] = ()
+
+
+def _unloaded(row: int, row_id: str, name: str, action: ActionType) -> RowView:
+    return RowView(row=row, row_id=row_id, name=name, action=action.value.replace("_", " "), prior=None, reason="",
+                   ticked=False, loaded=False)
 
 
 def row_views(
     state: Any, asked: RowsAsked, red: BoundElset, when: tuple[float, datetime],
 ) -> list[RowView]:
-    """Each posted row with its prior; a tick stays ticked only while it is the suggestion shown now."""
-    shown = {(t.row_id, t.token) for t in (ticks(asked.ticks) or [])}
+    """Each posted row, with its prior once loaded from NOTSO; a tick stays ticked only while it is the suggestion
+    shown now. A row ticked counts as loaded, since its suggestion was shown to tick it; no other row's NOTSO
+    history is read until the operator loads it (SPC-131)."""
+    read = ticks(asked.ticks) or []
+    shown = {(t.row_id, t.token) for t in read}
+    loaded = {*asked.loaded, *(t.row_id for t in read)}
     views: list[RowView] = []
     for i, row_id in enumerate(asked.ids):
         action = _action_type(asked.types[i] if i < len(asked.types) else "")
+        name = asked.names[i] if i < len(asked.names) else ""
+        if row_id not in loaded:
+            views.append(_unloaded(i + 1, row_id, name, action))
+            continue
         offered = offered_prior(state, red, action, *when)
         prior = offered if isinstance(offered, NotsoPrior) else None
         views.append(RowView(
-            row=i + 1, row_id=row_id, name=asked.names[i] if i < len(asked.names) else "",
+            row=i + 1, row_id=row_id, name=name,
             action=action.value.replace("_", " "), prior=prior,
             reason=offered.reason if isinstance(offered, NoPrior) else "",
             ticked=prior is not None and (row_id, prior.token) in shown,

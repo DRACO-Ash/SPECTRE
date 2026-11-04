@@ -151,6 +151,14 @@
     Reversibility: <strong>{{ result.robust_best_response.reversibility }}</strong> ·
     Time to execute: <strong>{{ result.robust_best_response.time_to_execute_hours }}h</strong>
   </div>
+  {# Whether the pick holds across each applied NOTSO suggestion's interval on P (SPC-132); under a rule that reads
+     no probability, the one line that says so, and no interval. Guarded, so an older result renders. #}
+  {% set interval_lines = result.interval_lines if result.interval_lines is defined else () %}
+  {% if interval_lines %}
+  <div role="note" class="prior-interval" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem">
+    {% for line in interval_lines %}<p style="margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  </div>
+  {% endif %}
 </div>
 
 {# ── Outcome Matrix ────────────────────────────────────────────────────────── #}
@@ -320,6 +328,50 @@
   {% endif %}
 
 </div>
+
+{# ── NOTSO timeline (SPC-131): for each applied suggestion, the notices behind it, dated, the periods the cache
+     covers and the gaps it holds no notice for any object in, the last of them running to the time evaluated, each
+     an entry named in words. The bar above each list
+     tells them apart by shape and pattern as well as colour: a solid band is covered, a hatched and outlined band a
+     gap, a full-height tick a notice. Guarded, so an older result renders. ── #}
+{% set timelines = [] %}
+{% for a in adv %}{% if a.accepted_prior is defined and a.accepted_prior is not none and a.accepted_prior.timeline is defined and a.accepted_prior.timeline %}{% set _ = timelines.append((loop.index, a)) %}{% endif %}{% endfor %}
+{% if timelines %}
+<section class="notso-timeline" aria-labelledby="notso-timeline-heading"
+         style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem">
+  <h3 id="notso-timeline-heading" style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 0.4rem">NOTSO timeline</h3>
+  <p style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">Solid: covered. Hatched: a gap, not counted. Tick: a notice.</p>
+  {% for n, a in timelines %}
+  {% set entries = a.accepted_prior.timeline %}
+  <div class="tl-row" style="margin-bottom:0.5rem">
+    <h4 style="font-size:0.63rem; font-weight:700; color:var(--gold); margin:0 0 0.2rem">NOTSO timeline for row {{ n }}{% if a.name %}, {{ a.name }}{% endif %}</h4>
+  {% set n_cov = entries | selectattr('kind', 'equalto', 'covered') | list | length %}
+  {% set n_gap = entries | selectattr('kind', 'equalto', 'gap') | list | length %}
+  {% set n_not = entries | selectattr('kind', 'equalto', 'notice') | list | length %}
+    <svg viewBox="0 0 1000 24" preserveAspectRatio="none" width="100%" height="24" role="img"
+         aria-label="Row {{ n }}: {{ n_cov }} covered period{{ '' if n_cov == 1 else 's' }}, {{ n_gap }} gap{{ '' if n_gap == 1 else 's' }} and {{ n_not }} notice{{ '' if n_not == 1 else 's' }}; the list below dates each">
+      <defs>
+        <pattern id="tl-hatch-{{ n }}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke-width="3" style="stroke:var(--text-dim)"/>
+        </pattern>
+      </defs>
+      {% for e in entries %}
+      {% if e.kind == "covered" %}
+      <rect class="tl-covered" x="{{ '%.1f' | format(e.left) }}" y="8" width="{{ '%.1f' | format([e.width, 1] | max) }}" height="8" style="fill:var(--ops-blue)"/>
+      {% elif e.kind == "gap" %}
+      <rect class="tl-gap" x="{{ '%.1f' | format(e.left) }}" y="6" width="{{ '%.1f' | format([e.width, 2] | max) }}" height="12" fill="url(#tl-hatch-{{ n }})" style="stroke:var(--text-dim)"/>
+      {% elif e.kind == "notice" %}
+      <line class="tl-notice" x1="{{ '%.1f' | format(e.left) }}" y1="0" x2="{{ '%.1f' | format(e.left) }}" y2="24" stroke-width="4" style="stroke:var(--gold)"/>
+      {% endif %}
+      {% endfor %}
+    </svg>
+    <ol class="tl-entries" style="font-size:0.6rem; color:var(--text-dim); margin:0.2rem 0 0 1rem; padding:0">
+      {% for e in entries %}<li class="tl-{{ e.kind | replace(' ', '-') }}-entry">{{ e.text }}</li>{% endfor %}
+    </ol>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 
 {# ── TCA histogram (SPC-124): a sampled cell's times of closest approach, binned no finer than each sample's TCA
      is known. The data is numbers only, through tojson; Chart.js is the vendored copy base.html loads. ── #}
