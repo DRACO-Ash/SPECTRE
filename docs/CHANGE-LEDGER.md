@@ -1136,3 +1136,12 @@ Feature work from the backlog: cues, the Threat Understanding display across pan
 | Code Quality | **HYGIENE** | None made for the gate. New code: cues in `threat_understanding.py`, `spectre/web/understanding_view.py`, actor ranges in `threat_assessment.py`, wiring in `routes/threat.py` and `routes/pol.py`, two new partials and template sections, one theme rule | `scripts/check-quality.sh` against 0.17.0 before upload passed all five legs, with 98 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Screening reads cached histories only and fetches nothing new. | n/a. |
 
+## 0.19.0
+
+Feature work from the backlog: collect first in the Decision Engine, interactions evidence, lookup constants retired where computed figures exist, and wording.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/interaction_graph.py`, `spectre/web/decision_threat.py`, collect-first and picture types in `decision.py`, landing cues in `threat_understanding.py`, the custody read in `decision_custody.py` and `decision_job.py`, the picture hand-off in `routes/threat.py`, and template sections | `scripts/check-quality.sh` against 0.18.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The engine reads the sweep's held picture and fetches nothing new. | n/a. |
+

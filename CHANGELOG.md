@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-04
+
+**Operator outputs advanced: 4, the recommended response, now says when to collect before acting; and Threat Understanding gains its first interaction evidence.** The threat verdict word and band are unchanged.
+
+### Added
+- Collect first. The Decision Engine reads the sweep's Threat picture for the bound red track while it is under 30 minutes old, and its decide-by only for the blue asset it was set for, so the two never disagree. When the threat range straddles the line where the recommended response changes and a collection that could move it off that line lands before decide-by, the guidance says collect first and names it; with decide-by passed, it says act on the ceiling. Collections are listed beside the ranking, never scored against the operator's responses, so the recommendation is always one of the operator's own rows (SPC-171).
+- Interactions evidence. An approach to one of our assets counts only when a confirmed burn caused it within 7 days and brought the target into reach sooner. Newly in reach after a hostile burn raises the threat floor to HIGH once Interactions is earned; a pass with no burn behind it adds nothing, and one resting only on routine burns is coverage only (SPC-172).
+
+### Changed
+- Lookup distances, the rule-of-thumb custody and the response delta-V lookup now serve only scenarios not bound to real objects, labelled as lookups, so no bound figure rests on one (SPC-125).
+- A red-bound operator is no longer told to bind red; an element-set limit reached as the horizon ends reads so on either side of float tolerance; a bound evaluation says when it is waiting on a first or a fresh UDL history fetch (SPC-119).
+
+### Out of scope, named
+- Interactions from UDL conjunctions and held closest approaches (SPC-173), hostile seeds and propagation (SPC-174), the verdict switch, off until the owner signs off (SPC-175), the adjudication log (SPC-176) and the doctrine wording gate (SPC-177).
+
 ## [0.18.0] - 2026-11-04
 
 **Operator output: 1, "does it mean anything", now says how well SPECTRE understands the satellite on every panel that shows it, and what to collect next to understand it better.** The verdict word and band are unchanged.

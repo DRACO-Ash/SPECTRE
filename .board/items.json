@@ -711,7 +711,11 @@
   ],
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-130",
@@ -1186,7 +1190,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/decision_custody.py"
-  ]
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-160",
@@ -1416,7 +1424,7 @@
   "group": "understanding",
   "minutes": 300,
   "task": "Decision Engine: collect-first rows and the MINIMAX guidance",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A straddle with time gives COLLECT_FIRST. The same range with decide-by PASSED gives ACT_ON_CEILING. Bases stay LOOKUP. Probability is never prefilled",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A straddle with time gives COLLECT_FIRST. The same range with decide-by PASSED gives ACT_ON_CEILING. Bases stay LOOKUP. Probability is never prefilled Built in 0.19.0. Collections are listed beside the ranking, not scored as SENSOR_RETASK rows (concept decision 12, Claude's choice): scored, an invented zero-cost row became the top recommendation. The sweep hands its picture to the engine (hold_threat_picture).",
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py",
@@ -1426,7 +1434,11 @@
   "deps": [
    "SPC-170",
    "SPC-161"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-172",
@@ -1442,7 +1454,11 @@
   ],
   "deps": [
    "SPC-165"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
  },
  {
   "ref": "SPC-173",
