@@ -183,7 +183,7 @@ class TestTheJobSaysItWaits:
         key, state = owner
         gate = _Gate()
         seen: list[Any] = []
-        monkeypatch.setattr(decision_job, "evaluate_scenario", lambda *a, **kw: seen.append(a))
+        monkeypatch.setattr(decision_job, "evaluate_tree", lambda *a, **kw: seen.append(a))
         monkeypatch.setattr(decision_job, "needs_a_run", lambda _s: False)
         job = _custody_job(gate)
         decision_job.start_job(state, key, job)
@@ -207,7 +207,7 @@ class TestTheJobSaysItWaits:
             seen.append(kw)
             return evaluate_scenario(scenario, strategy)
 
-        monkeypatch.setattr(decision_job, "evaluate_scenario", evaluate)
+        monkeypatch.setattr(decision_job, "evaluate_tree", evaluate)
         monkeypatch.setattr(decision_job, "needs_a_run", lambda _s: False)
         job = _custody_job(gate)
         state.decision_job = job
@@ -228,7 +228,7 @@ class TestTheJobSaysItWaits:
             seen.append(kw)
             return evaluate_scenario(scenario, strategy)
 
-        monkeypatch.setattr(decision_job, "evaluate_scenario", evaluate)
+        monkeypatch.setattr(decision_job, "evaluate_tree", evaluate)
         monkeypatch.setattr(decision_job, "needs_a_run", lambda _s: True)
         job = _custody_job(gate)
         state.decision_job = job

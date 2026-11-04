@@ -25,7 +25,7 @@ from typing import NamedTuple, Protocol, cast
 
 from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s
 from spectre.domain.provenance import Basis, FigureBasis
-from spectre.domain.turn_update import Posterior, Seen, likelihood, model_lines, posteriors, seen_after
+from spectre.domain.turn_update import Posterior, Seen, likelihood, model_lines, posteriors, seen_after, seen_lines
 
 # ── What the result says (SPC-141; the view is SPC-142) ──────────────────────
 
@@ -61,6 +61,20 @@ PROBABILITY_IGNORED = (
     "{rule} does not use probability, so no update after turn 1 is shown; its later picks rest only on what each "
     "turn lets us see."
 )
+# What the operator stated turn 1 showed (SPC-142): the update for it alone, or why nothing was updated.
+NO_OBSERVATION = (
+    "No observation of turn 1 was stated, so nothing was updated: each row keeps the P it was given. State what "
+    "turn 1 shows to see the update after it."
+)
+OBSERVED = "You stated that turn 1 shows {seen}."
+OBSERVED_NOT_GIVEN = (
+    "You stated that turn 1 shows {seen}, which no row gives under this likelihood model, so nothing was updated."
+)
+OBSERVED_NO_LATER_TURN = (
+    "You stated that turn 1 shows {seen}, but no turn after it was built in full, so nothing was updated."
+)
+OBSERVED_UNUSED = "You stated that turn 1 shows {seen}; {rule} does not use probability, so it updated nothing."
+OBSERVED_NO_PICK = "You stated that turn 1 shows {seen}, but the tree gives no pick, so nothing was updated."
 _SHOWS = "turn {m} shows {seen} after {response}"
 _SPAN_ONE = "turn 1"
 _SPAN = "the {turns} turns"
@@ -68,7 +82,8 @@ _SPAN = "the {turns} turns"
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
     *RULES.values(), PARTIAL, PICK_FIRST, PICK_LATER, NO_PICK_FIRST, NO_PICK, MATRIX_DIFFERS, SCORE_LINE,
-    PROBABILITY_IGNORED,
+    PROBABILITY_IGNORED, NO_OBSERVATION, OBSERVED, OBSERVED_NOT_GIVEN, OBSERVED_NO_LATER_TURN, OBSERVED_UNUSED,
+    OBSERVED_NO_PICK,
 )
 
 
@@ -104,15 +119,24 @@ class TurnPick(NamedTuple):
 @dataclass(frozen=True)
 class TreeSelection:
     """A rule's picks over a tree: turn 1's, then each later turn's after each thing it may have seen, following our
-    own picks; what turn 1 shows under each row; the update after turn 1, under expected value only; and the lines."""
+    own picks; what turn 1 shows under each row; the update after turn 1 for each thing it may show, under expected
+    value only; the lines of the recommendation, then of the update; and the update for what the operator stated
+    turn 1 showed, None when nothing was stated or nothing was updated (SPC-142)."""
 
-    strategy:   SelectorStrategy
-    turns:      int
-    picks:      tuple[TurnPick, ...]
-    likelihood: tuple[Seen, ...]
-    posteriors: tuple[Posterior, ...]
-    lines:      tuple[str, ...]
-    basis:      FigureBasis
+    strategy:       SelectorStrategy
+    turns:          int
+    picks:          tuple[TurnPick, ...]
+    likelihood:     tuple[Seen, ...]
+    posteriors:     tuple[Posterior, ...]
+    recommendation: tuple[str, ...]
+    update:         tuple[str, ...]
+    basis:          FigureBasis
+    stated:         Posterior | None = None
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        """Every line, the recommendation's then the update's."""
+        return (*self.recommendation, *self.update)
 
 
 # ── Backward induction over what we have seen ────────────────────────────────
@@ -205,14 +229,29 @@ def _matrix_line(scenario: Scenario, strategy: SelectorStrategy, turns: int, pic
     return (MATRIX_DIFFERS.format(turns=turns, rule=rule, tree=names[tree_pick], matrix=names[matrix_pick]),)
 
 
-def _update_lines(scenario: Scenario, strategy: SelectorStrategy, gives: Sequence[Seen], posts: Sequence[Posterior]) -> tuple[str, ...]:
+def _stated(observed: Seen | None, posts: Sequence[Posterior]) -> Posterior | None:
+    """The update for what the operator stated turn 1 showed; None when nothing was stated or no row gives it."""
+    return next((p for p in posts if p.seen is observed), None)
+
+
+def _update_lines(
+    scenario: Scenario, strategy: SelectorStrategy, gives: Sequence[Seen], stated: Posterior | None,
+) -> tuple[str, ...]:
+    """Under expected value, the likelihood model, then the update for what the operator stated, or why nothing was
+    updated; under minimax and minimin, what each turn lets us see and that nothing was updated (SPC-142)."""
+    observed = scenario.observed
     if not gives:
-        return ()
+        return () if observed is None else (OBSERVED_NO_LATER_TURN.format(seen=observed.value),)
+    if strategy is not SelectorStrategy.EXPECTED_VALUE:
+        rule = strategy.value.capitalize()
+        unused = () if observed is None else (OBSERVED_UNUSED.format(seen=observed.value, rule=rule),)
+        return (*seen_lines(scenario, gives), PROBABILITY_IGNORED.format(rule=rule), *unused)
     model = model_lines(scenario, gives)
-    if strategy is SelectorStrategy.EXPECTED_VALUE:
-        return (*model, *(p.line for p in posts))
-    rule = strategy.value.capitalize()
-    return (*model, PROBABILITY_IGNORED.format(rule=rule))
+    if observed is None:
+        return (*model, NO_OBSERVATION)
+    if stated is None:
+        return (*model, OBSERVED_NOT_GIVEN.format(seen=observed.value))
+    return (*model, OBSERVED.format(seen=observed.value), stated.line)
 
 
 def select(
@@ -226,11 +265,28 @@ def select(
     picks = selector.own()
     gives = likelihood(scenario, turn_s) if turns > 1 else ()
     posts = posteriors(scenario, gives) if gives and strategy is SelectorStrategy.EXPECTED_VALUE else ()
+    stated = _stated(scenario.observed, posts)
     span = _SPAN_ONE if turns == 1 else _SPAN.format(turns=turns)
     partial = (PARTIAL.format(k=turns, turns=scenario.turns),) if turns < scenario.turns else ()
-    lines = (
+    recommendation = (
         RULES[strategy].format(span=span), *partial, *(_pick_line(scenario, p) for p in picks),
         *_matrix_line(scenario, strategy, turns, picks, matrix_pick), SCORE_LINE,
-        *_update_lines(scenario, strategy, gives, posts),
     )
-    return TreeSelection(strategy, turns, picks, gives, posts, lines, FigureBasis(Basis.LOOKUP, SCORE_NOTE))
+    update = _update_lines(scenario, strategy, gives, stated)
+    return TreeSelection(
+        strategy, turns, picks, gives, posts, recommendation, update, FigureBasis(Basis.LOOKUP, SCORE_NOTE), stated,
+    )
+
+
+def follows_picks(scenario: Scenario, selection: TreeSelection, steps: Sequence[tuple[int, int]]) -> bool:
+    """Whether every response on the sequence *steps*, (red's move, our response) per turn, is the rule's pick for
+    its turn after what the turns before it showed: the plan the recommendation follows, whatever red does
+    (SPC-142). False where the rule has no pick."""
+    turn_s = _searched_span_s(scenario) / scenario.turns
+    picks = {p.after: p.pick for p in selection.picks}
+    after: After = ()
+    for k, (_, response) in enumerate(steps, start=1):
+        if picks.get(after) != response:
+            return False
+        after = (*after, (response, seen_after(scenario, [a for a, _ in steps[:k]], turn_s)))
+    return True

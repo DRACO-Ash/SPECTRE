@@ -1437,6 +1437,21 @@ def _require_threat(scenario: Scenario) -> None:
         raise ValueError(f"a threat picture belongs to the bound red track it was assessed for, {picture.red}")
 
 
+class Seen(StrEnum):
+    """What a game tree's turn lets us see of red under the likelihood model (SPC-141), in the words the result
+    uses; spectre.domain.turn_update reads it, and the operator may state it for turn 1 (SPC-142)."""
+
+    BURN = "a burn"
+    NO_BURN = "no burn"
+    NOTHING = "nothing"
+
+
+def _require_observed(observed: object) -> None:
+    """A stated observation is one of the likelihood model's own, or none."""
+    if observed is not None and not isinstance(observed, Seen):
+        raise ValueError(f"Scenario.observed must be a Seen or None; got {observed!r}")
+
+
 @dataclass
 class Scenario:
     """A what-if scenario: N adversary actions × M friendly responses."""
@@ -1464,6 +1479,9 @@ class Scenario:
     # How many turns the game tree runs (SPC-140): red moves and we respond, then red may move again. One turn is the
     # outcome matrix alone; evaluate_tree builds 2 or 3 over the span searched, split equally.
     turns:              int = 1
+    # What the operator states turn 1 of the tree showed of red (SPC-142). Under expected value the update after
+    # turn 1 is shown for it alone; None when nothing was stated, and then nothing is updated. It moves no figure.
+    observed:           Seen | None = None
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -1473,6 +1491,7 @@ class Scenario:
             _require_fraction("Scenario", name, getattr(self, name))
         _require_threat(self)
         _require_turns(self.turns)
+        _require_observed(self.observed)
 
 
 #: The most turns a game tree runs (SPC-140): a fourth would multiply the branches past what one evaluation builds.

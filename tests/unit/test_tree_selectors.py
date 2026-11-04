@@ -24,6 +24,7 @@ from spectre.domain.decision import AdversaryAction, Scenario, SelectorStrategy
 from spectre.domain.provenance import Basis
 from spectre.domain.tree_selectors import (
     MATRIX_DIFFERS,
+    NO_OBSERVATION,
     NO_PICK,
     NO_PICK_FIRST,
     PARTIAL,
@@ -149,8 +150,9 @@ class TestExpectedValueWithTheUpdate:
         burn, quiet = selection.posteriors
         assert (burn.seen, burn.shares) == (Seen.BURN, (None, 1.0))
         assert (quiet.seen, quiet.shares) == (Seen.NO_BURN, (1.0, None))
-        assert burn.line in selection.lines
-        assert quiet.line in selection.lines
+        # With no observation stated, neither update is shown (SPC-142): only the one for what was stated.
+        assert burn.line not in selection.lines
+        assert quiet.line not in selection.lines
 
     def test_seeing_nothing_keeps_the_prior_across_both_branches(self) -> None:
         """35: custody not read: 0.25 x 0.725 + 0.75 x 0.25 holding, 0.25 x 0.45 + 0.75 x 0.55 avoiding."""
@@ -287,9 +289,10 @@ class TestTiesAndTheMatrix:
 
 class TestTheLines:
     def test_the_lines_in_order(self) -> None:
-        """41: the rule, each pick, the scores' basis, then the likelihood model and the update."""
+        """41: the rule, each pick, the scores' basis, then the likelihood model and the update, which with no
+        observation stated says nothing was updated (SPC-142)."""
         selection = select(_scenario(), _tree(2, 2, 2, _two_turn_score), 2, _EV, matrix_pick=0)
-        rule, first, burnt, quiet, basis, model, independent, *posts = selection.lines
+        rule, first, burnt, quiet, basis, model, independent, said = selection.lines
         assert rule == RULES[_EV].format(span="the 2 turns")
         assert first == PICK_FIRST.format(pick="Hold")
         assert burnt == PICK_LATER.format(k=2, history="turn 1 shows a burn after Hold", pick="Hold")
@@ -297,7 +300,7 @@ class TestTheLines:
         assert basis == SCORE_LINE
         assert "likelihood model" in model
         assert "nothing sourced" in independent
-        assert posts == [p.line for p in selection.posteriors]
+        assert said == NO_OBSERVATION
         assert selection.basis.kind is Basis.LOOKUP
 
     @pytest.mark.parametrize("sentence", SENTENCES)

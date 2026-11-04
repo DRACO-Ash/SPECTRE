@@ -1,0 +1,64 @@
+{# The game tree (SPC-142), included by decision_results.html. Context: tree (web.tree_view.TreeView), built by the
+   route; every figure arrives written, in its unit, with its basis kind and rule, so nothing here does a sum.
+   Server-rendered as nested details and summary elements: D3 is not vendored, and none is needed. Each node says its
+   basis kind in words and its place on the plan in words, so nothing rests on colour alone; long words wrap, so it
+   reads at phone width. No handler attribute and no script. #}
+<section class="decision-tree" aria-labelledby="decision-tree-heading"
+         style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem; overflow-wrap:anywhere">
+  <h3 id="decision-tree-heading" style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 0.4rem">{{ tree.heading }}</h3>
+
+  {% if tree.deepest is not none %}
+  <p class="tree-deepest" role="note" style="font-size:0.64rem; font-weight:700; color:var(--gold); margin:0 0 0.3rem">{{ tree.deepest }}</p>
+  {% endif %}
+  <div class="tree-lines" style="font-size:0.6rem; color:var(--text-dim)">
+    {% for line in tree.lines %}<p style="margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  </div>
+
+  {% if tree.recommendation %}
+  <div class="tree-recommendation" role="note" style="margin-top:0.4rem">
+    <h4 style="font-size:0.64rem; font-weight:700; color:var(--ops-blue); margin:0 0 0.2rem">Recommendation per turn, {{ tree.rule }}</h4>
+    {% for line in tree.recommendation %}<p style="font-size:0.62rem; color:var(--text-primary); margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if tree.update %}
+  <div class="tree-update" role="note" style="margin-top:0.4rem">
+    <h4 style="font-size:0.64rem; font-weight:700; color:var(--ops-blue); margin:0 0 0.2rem">{{ tree.update_heading }}</h4>
+    {% for line in tree.update %}<p style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0">{{ line }}</p>{% endfor %}
+    {% if tree.update_basis is not none %}
+    <p class="tree-update-basis" style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0">Basis of the update <span class="figure-basis" data-basis="{{ tree.update_basis.kind }}">({{ tree.update_basis.kind }}):</span> {{ tree.update_basis.note }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if tree.nodes %}
+  <p style="font-size:0.6rem; color:var(--text-dim); margin:0.4rem 0 0.2rem">Open a branch to see its figures, what each rests on, and the branches after it. Lower scores are better.</p>
+  <ul class="tree-nodes" style="list-style:none; margin:0; padding:0">
+    {% for node in tree.nodes recursive %}
+    <li style="margin:0.15rem 0 0.15rem {{ '0' if node.turn == 1 else '0.6rem' }}">
+      <details class="tree-node" data-turn="{{ node.turn }}" style="border-left:2px solid var(--border); padding-left:0.4rem">
+        <summary style="cursor:pointer; font-size:0.62rem; color:var(--text-primary)">
+          <strong>{{ node.heading }}</strong>{% if node.on_plan %} <span class="tree-plan" style="color:var(--ops-blue); font-weight:700">&#9733; {{ node.plan }}</span>{% endif %}:
+          <span style="color:var(--text-dim)">{{ node.summary }}</span>
+        </summary>
+        <p class="tree-path" style="font-size:0.6rem; color:var(--text-dim); margin:0.15rem 0">{{ node.path }}</p>
+        <ul class="tree-figures" style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0 0.2rem 0.9rem; padding:0">
+          {% for f in node.figures %}
+          <li class="tree-figure" data-basis="{{ f.kind }}">{{ f.label }}: {{ f.value }} <span class="figure-basis" data-basis="{{ f.kind }}">({{ f.kind }})</span></li>
+          {% endfor %}
+        </ul>
+        <details class="tree-bases" style="font-size:0.58rem; color:var(--text-dim); margin:0 0 0.2rem 0.9rem">
+          <summary style="cursor:pointer">What these figures rest on</summary>
+          <ul style="margin:0.1rem 0 0 0.9rem; padding:0">
+            {% for f in node.figures %}<li>{{ f.label }} ({{ f.kind }}): {{ f.note }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% if node.children %}
+        <ul class="tree-children" style="list-style:none; margin:0; padding:0">{{ loop(node.children) }}</ul>
+        {% endif %}
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

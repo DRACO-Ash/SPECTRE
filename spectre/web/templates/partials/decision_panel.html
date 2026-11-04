@@ -300,6 +300,40 @@
       </select>
     </label>
 
+    {# ── The game tree (SPC-142): how many turns, and what turn 1 showed of red for the update after it. Plain
+         fields: no htmx region, no handler, no script. A depth that cannot fit is refused when Evaluate is pressed,
+         naming the largest that would; nothing is worked out until then. ── #}
+    {% set max_turns_shown = max_turns if max_turns is defined else 3 %}
+    {% set observation_choices = observations if observations is defined else [
+      ("burn", "A burn: custody lost at a burn in turn 1"),
+      ("no_burn", "No burn: custody held through turn 1"),
+      ("nothing", "Nothing: custody lost for another reason, or not read")
+    ] %}
+    <div class="tree-fields" style="margin-bottom:0.5rem; font-size:0.65rem; color:var(--text-dim)">
+      <label class="tree-depth" style="display:block; margin-bottom:0.3rem">
+        Turn depth
+        <select name="turns" style="display:block; font-size:0.65rem; margin-top:0.15rem; max-width:100%; box-sizing:border-box">
+          {%- for k in range(1, max_turns_shown + 1) %}
+          <option value="{{ k }}"{% if k == 1 %} selected{% endif %}>{% if k == 1 %}1 turn: the outcome matrix alone{% else %}{{ k }} turns: red may move again after each response{% endif %}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      <label class="tree-observed" style="display:block; margin-bottom:0.3rem">
+        Turn 1 shows (for the update)
+        <select name="observed" style="display:block; font-size:0.65rem; margin-top:0.15rem; max-width:100%; box-sizing:border-box">
+          <option value="">Not stated: nothing is updated</option>
+          {%- for value, label in observation_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      <p class="tree-hint" style="margin:0; font-size:0.6rem">A tree of 2 or 3 turns needs a red
+        track and a blue asset bound, both current, and a propagated orbit from every row, so a manoeuvre row needs a
+        hypothesis. A depth whose branches or cost the evaluation cannot fit is refused when you press Evaluate,
+        naming the largest that would. What turn 1 shows is read through the bound red track's custody, needs a
+        depth of 2 or 3, and only expected value reads it: it moves no figure and writes no P.</p>
+    </div>
+
     <div class="submit-row">
       <button type="submit" class="btn-primary">Evaluate</button>
       <span id="decision-indicator" class="htmx-indicator">

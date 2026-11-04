@@ -21,7 +21,7 @@ def test_the_evaluation_does_not_run_on_the_event_loop(
     client: Any, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[bool] = []
-    real = decision.evaluate_scenario
+    real = decision.evaluate_tree
 
     def spy(*args: Any, **kwargs: Any) -> Any:
         try:
@@ -31,7 +31,7 @@ def test_the_evaluation_does_not_run_on_the_event_loop(
             seen.append(False)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(decision, "evaluate_scenario", spy)
+    monkeypatch.setattr(decision, "evaluate_tree", spy)
     resp = _evaluate(client, auth_cookie, _form())
     assert resp.status_code == 200
     assert seen == [False], "the evaluation ran on the event loop"

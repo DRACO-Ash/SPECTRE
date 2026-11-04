@@ -1603,6 +1603,15 @@ class TestContinuousIntegrationCanRun:
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "--include=spectre/domain/decision.py --fail-under=100" in ci
 
+    @pytest.mark.parametrize(
+        "module",
+        ["domain/decision_tree.py", "domain/tree_selectors.py", "domain/turn_update.py", "web/tree_view.py"],
+    )
+    def test_the_game_tree_keeps_its_coverage_floor(self, module: str) -> None:
+        """SPC-140 to SPC-142: the tree, its selectors, the update after turn 1 and its view, each at every line."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert f"--include=spectre/{module} --fail-under=100\n" in ci
+
     def test_threat_understanding_keeps_its_coverage_floor(self) -> None:
         """SPC-162 to SPC-164: the pure Threat Understanding model is held at every line by its own tests."""
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")

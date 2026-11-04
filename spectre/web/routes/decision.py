@@ -5,7 +5,8 @@ GET  /plan/decision/bind       → the bind fields, rebuilt from the held object
 GET  /plan/decision/from-sweep → the panel filled from an entry of the held threat sweep (SPC-150); nothing evaluated
 GET  /plan/decision/prior      → the NOTSO suggestion beside each adversary row, with its basis (SPC-130)
 POST /plan/decision/evaluate   → the ranked results partial for a scenario that samples nothing; for one that
-                                 samples, a job the page polls (SPC-113)
+                                 samples, a job the page polls (SPC-113); with a game tree of 2 or 3 turns beside
+                                 the matrix when asked for (SPC-142)
 GET  /plan/decision/job        → the job's progress, or its results once done
 POST /plan/decision/job/cancel → stop the job; nothing is scored
 """
@@ -34,6 +35,7 @@ from spectre.domain.decision import (
     DEFAULT_CUSTODY_GAP_FRACTION,
     DEFAULT_PROBABILITY,
     MAX_SAMPLE_HOURS,
+    MAX_TURNS,
     ActionType,
     AdversaryAction,
     AdversaryHypothesis,
@@ -41,13 +43,15 @@ from spectre.domain.decision import (
     FriendlyResponse,
     Scenario,
     ScenarioBinding,
+    ScenarioResult,
+    Seen,
     SelectorStrategy,
-    evaluate_scenario,
     longest_horizon_h,
     needs_a_run,
     pre_manoeuvre_state,
 )
 from spectre.domain.decision_figures import ResponseBurnSpec
+from spectre.domain.decision_tree import depth_refusal, evaluate_tree
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
 from spectre.web.decision_binding import bind_scenario
@@ -77,6 +81,7 @@ from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import SessionState, get_session_state
+from spectre.web.tree_view import tree_view
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +129,18 @@ _MAX_BUDGET_M_S = 1000.0
 _DEFAULT_BUDGET_M_S = 50.0
 _RESPONSE_RELOAD = "The response fields do not match the friendly rows; reload the panel."
 _AXIS_UNKNOWN = "Choose a listed axis for row {row}."
+# The game tree (SPC-142): what the operator states turn 1 showed of red, by the form's names.
+_OBSERVED_UNKNOWN = "Choose a listed observation for turn 1."
+_OBSERVED_ONE_TURN = (
+    "What turn 1 shows is read only by a tree: set a turn depth of 2 or 3, or leave turn 1's observation not "
+    "stated. With one turn there is no later pick for it to update."
+)
+_OBSERVATIONS: dict[str, Seen] = {seen.name.lower(): seen for seen in Seen}
+_OBSERVATION_LABELS: dict[Seen, str] = {
+    Seen.BURN: "A burn: custody lost at a burn in turn 1",
+    Seen.NO_BURN: "No burn: custody held through turn 1",
+    Seen.NOTHING: "Nothing: custody lost for another reason, or not read",
+}
 _AXIS_LABELS: dict[BurnAxis, str] = {
     BurnAxis.CHEAPEST: "Cheapest, from the manoeuvre library",
     BurnAxis.RADIAL: "Radial",
@@ -700,6 +717,9 @@ def _hypothesis_context() -> dict[str, object]:
         "default_budget": f"{_DEFAULT_BUDGET_M_S:g}",
         "max_budget": f"{_MAX_BUDGET_M_S:g}",
         "max_target": f"{_MAX_TARGET_KM:g}",
+        # The game tree's fields (SPC-142).
+        "max_turns": MAX_TURNS,
+        "observations": [(seen.name.lower(), _OBSERVATION_LABELS[seen]) for seen in Seen],
     }
 
 
@@ -757,6 +777,9 @@ class _ScenarioForm(BaseModel):
     w_time: str = "0.10"
     w_rev: str = "0.10"
     strategy: str = "minimax"
+    # The game tree (SPC-142): its turn depth, 1 to 3, and what the operator states turn 1 showed, blank for none.
+    turns: str = "1"
+    observed: str = ""
     # The held objects the scenario is about (SPC-100), by stk_name; blank is not bound.
     # These are the intercept engine's field names; the sweep posts only red_sat.
     red_sat: str = ""
@@ -778,7 +801,8 @@ class _ScenarioForm(BaseModel):
 
 
 class _Parsed(NamedTuple):
-    """The form's checked numbers: horizon, weights, both sides' columns and each row's hypothesis fields."""
+    """The form's checked numbers: horizon, weights, both sides' columns, each row's hypothesis fields, our burns,
+    and the game tree's turn depth and stated observation (SPC-142)."""
 
     horizon:   float
     weights:   list[float]
@@ -786,6 +810,19 @@ class _Parsed(NamedTuple):
     friendly:  _ResponseColumns
     entries:   list[_HypothesisEntry | None]
     burns:     list[ResponseBurnSpec | None]
+    turns:     int = 1
+    observed:  Seen | None = None
+
+
+def _observed(inputs: _Inputs, raw: str) -> Seen | None:
+    """What the operator states turn 1 showed, by its listed name; None when blank, and anything else refused."""
+    key = raw.strip()
+    if not key:
+        return None
+    seen = _OBSERVATIONS.get(key)
+    if seen is None:
+        inputs.refuse(_OBSERVED_UNKNOWN)
+    return seen
 
 
 def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
@@ -806,7 +843,12 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
         inputs.column(form.fr_times, "time to execute (hours)", _MAX_HORIZON_H),
     )
     entries = _entries(inputs, form, len(adversary.ids), horizon, now)
-    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form))
+    turns = inputs.whole(form.turns, "the turn depth", 1, MAX_TURNS)
+    observed = _observed(inputs, form.observed)
+    if observed is not None and turns == 1:
+        # One turn has no later pick for it to update, and no tree to say so on: refused, not dropped unsaid.
+        inputs.refuse(_OBSERVED_ONE_TURN)
+    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form), turns, observed)
 
 
 def _utc_now() -> datetime:
@@ -851,6 +893,10 @@ async def decision_evaluate(
     if applied.problem is not None:
         return _err(applied.problem)
     scenario = dataclasses.replace(scenario, adversary_actions=applied.actions)
+    # A turn depth whose tree cannot fit is refused here, naming the largest that would, before anything runs (SPC-142).
+    too_deep = await asyncio.to_thread(depth_refusal, scenario)
+    if too_deep is not None:
+        return _err(too_deep)
     return await _answer(request, current_user, scenario, _strategy(form.strategy), custody)
 
 
@@ -897,6 +943,8 @@ def _scenario(
         w_time_to_exec=w_time_n,
         w_reversibility=w_rev_n,
         binding=binding,
+        turns=parsed.turns,
+        observed=parsed.observed,
     )
 
 
@@ -924,13 +972,18 @@ async def _evaluate_inline(
 ) -> HTMLResponse:
     """Evaluate on a worker thread, so no other session waits on it, and render the results."""
     try:
-        result = await asyncio.to_thread(evaluate_scenario, scenario, strategy=strat)
+        result = await asyncio.to_thread(evaluate_tree, scenario, strat)
         state.append_log(evaluated_line(scenario, result))
     # The traceback goes to the log; the page says only that it failed.
     except Exception:
         logger.exception("Decision evaluation failed")
         return _err("Evaluation error: the scenario could not be evaluated; the server log has the detail.")
-    return render(request, "partials/decision_results.html", {"result": result, "links": trajectory_links(result)})
+    return render(request, "partials/decision_results.html", _results_context(result))
+
+
+def _results_context(result: ScenarioResult) -> dict[str, Any]:
+    """The results partial's context: the result, each cell's Show trajectory values, and the tree's view (SPC-142)."""
+    return {"result": result, "links": trajectory_links(result), "tree": tree_view(result)}
 
 
 @router.get("/job", response_class=HTMLResponse)
@@ -947,9 +1000,7 @@ def _job_page(request: Request, view: dict[str, Any]) -> HTMLResponse:
     """The results of a finished job, else the job partial for *view*."""
     job = view["job"]
     if job is not None and job.state is JobState.DONE and job.result is not None:
-        return render(
-            request, "partials/decision_results.html", {"result": job.result, "links": trajectory_links(job.result)},
-        )
+        return render(request, "partials/decision_results.html", _results_context(job.result))
     return render(request, "partials/decision_job.html", view)
 
 

@@ -181,7 +181,7 @@ def _add_body(doc: Document, text: str) -> None:
 def _add_bullet(doc: Document, text: str, level: int = 0) -> None:
     """Add a bullet point with alternating blue/gold markers."""
     colour = OPS_BLUE if level % 2 == 0 else COMMAND_GOLD
-    marker = "\u2022 " if level == 0 else "  \u25E6 "
+    marker = "\u25CF " if level == 0 else "  \u25A0 "
     indent = "    " * level
     p = doc.add_paragraph()
     p.paragraph_format.space_after = Pt(2)
@@ -1253,136 +1253,179 @@ def _section_12_scenario_planning(doc: Document) -> None:
 
 
 def _section_13_decision_engine(doc: Document) -> None:
-    """Section 13: Decision Engine & Scenario Evaluation."""
+    """Section 13: Decision Engine & Scenario Evaluation, as built at 0.24.0 (SPC-152)."""
     _add_page_break(doc)
     _add_eyebrow(doc, "Section 13")
     _add_heading_h1(doc, "Decision Engine & Scenario Evaluation")
 
     _add_body(doc,
-        "The SPECTRE Decision Engine applies game-theoretic analysis to space control "
-        "scenarios. Operators define a grid of adversary courses of action (COAs) against "
-        "a set of friendly response options, and the engine evaluates every combination "
-        "using deterministic SGP4 propagation and a weighted composite scoring function. "
-        "The result is a ranked response recommendation with an expected utility score "
-        "and risk-adjusted analysis."
+        "Something moved. The sweep tells you whether it can reach one of yours, how long you have and whether "
+        "it means anything. The Decision Engine answers the last part of the question: what you need to decide, "
+        "and by when. You set out what red might do next and what you could do in reply; the engine scores every "
+        "pairing, ranks your responses and recommends one under the rule you choose."
     )
     _add_body(doc,
-        "The Decision Engine panel is accessible from the Intelligence column of the main "
-        "dashboard. It is designed for commander-level use after the initial threat "
-        "assessment is complete — it answers the question 'Given what the adversary might "
-        "do, what is our best response?' rather than 'How do we intercept?'"
-    )
-    _add_body(doc,
-        "A scenario may be bound to a held red track and blue asset under 'Bind to real "
-        "objects'. The result then names them, with each orbit's epoch and age at "
-        "evaluation, but every figure is still a lookup and none is computed from these orbits."
+        "The recommendation is a modelled estimate, not a computed solution, and the page says so. Every figure "
+        "behind it states what it rests on, so you can see how much of the answer is physics and how much is rule "
+        "of thumb."
     )
 
-    _add_heading_h2(doc, "Adversary Action Modelling")
+    _add_heading_h2(doc, "What Each Figure Rests On")
     _add_body(doc,
-        "The operator defines up to four adversary actions, each representing a distinct "
-        "course of action the adversary could take. Each action is characterised by:"
+        "Each figure in the results is marked with its basis in words, with the rule behind it beside it:"
+    )
+    _add_data_table(doc,
+        ["Basis", "What it means"],
+        [
+            ["Computed", "Propagated from the real element sets of the bound red track and blue asset, both on one "
+             "propagator, with no randomness."],
+            ["Sampled", "The P5 of many propagated runs of a hypothesised red burn, the miss only 1 run in 20 came "
+             "closer than, with its spread and how well it is known."],
+            ["Lookup", "A fixed rule of thumb or table value. It moves the ranking but rests on no orbit."],
+        ],
+    )
+    _add_body(doc,
+        "The composite score is always a lookup. Its weights are not yet cited (SPC-151), so read a cell's figures, "
+        "not only its rank."
+    )
+
+    _add_heading_h2(doc, "Bind the Scenario to Real Objects")
+    _add_body(doc,
+        "Under 'Bind to real objects', choose a held red track and a held blue asset. The results then name them, "
+        "show each element set's epoch and its age against its limit (72 hours at GEO and in deep space, 24 hours "
+        "otherwise), and record both in the result's provenance. Unbound, every figure is a lookup. Bound, the "
+        "engine computes or samples what it can, and never falls back on a lookup constant where a computed or "
+        "sampled figure exists."
+    )
+    _add_body(doc,
+        "In the threat sweep, each entry that arrives has a Decide control. It opens the panel already bound to the "
+        "red track, with the blue asset when the target is held as one of yours, a hypothesis from that entry's own "
+        "departure burn, and a second row from the latest confirmed burn in the red track's held element-set "
+        "history when there is one. Nothing is evaluated for you, and P and Conf are never filled."
+    )
+
+    _add_heading_h2(doc, "Adversary Actions")
+    _add_body(doc,
+        "Enter up to five adversary actions. Each row has:"
     )
     _add_data_table(doc,
         ["Field", "Description"],
         [
-            ["Action ID / Name", "Short identifier and descriptive label"],
-            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
-            ["Probability", "Operator-assessed likelihood [0–1] that this COA is executed"],
-            ["Confidence", "Intelligence confidence in the probability estimate [0–1]"],
-            ["Custody gap share", "Share of the horizon [0–1] we lose custody for if the action is a "
-             "manoeuvre and our response neither manoeuvres nor retasks a sensor (default 0.7)"],
-            ["Description", "Free-text tactical description for context"],
+            ["Name and type", "A label, and Manoeuvre, Sensor Retask, Posture Change or No Action"],
+            ["P", "Your assessed likelihood [0 to 1] that red takes this action; expected value weighs by it"],
+            ["Conf", "How sure the intelligence behind P is [0 to 1]; it is recorded and moves no figure"],
+            ["Custody gap share", "Wherever custody is not read: the share of the horizon [0 to 1] custody is "
+             "lost after an unanswered manoeuvre (default 0.7), a rule of thumb. A bound red track's custody "
+             "replaces it once read"],
+            ["Manoeuvre hypothesis", "Optional: an archetype, delta-V in m/s, direction, spread, samples (100 to "
+             "2,000) and burn time in hours from the moment you press Evaluate"],
         ],
     )
     _add_body(doc,
-        "Probability is the likelihood the expected-value selector weights each action by. "
-        "Confidence records how sure the intelligence behind that probability is; it is "
-        "recorded and moves no figure. The custody gap share is a rule of thumb for how long "
-        "we lose custody; once a bound red track's custody status is read, that status "
-        "replaces it."
+        "P and Conf are yours. Load from NOTSO, on each row, shows a suggested P and Conf from the red track's "
+        "NOTSO history with its basis and an interval on P. It writes nothing: tick it to apply it at Evaluate, "
+        "and it is applied only while it is still the one shown. Gaps in the NOTSO cache are never read as quiet, "
+        "and nothing is offered below 3 events."
     )
 
-    _add_heading_h2(doc, "Friendly Response Options")
+    _add_heading_h2(doc, "Friendly Responses and Our Burns")
     _add_body(doc,
-        "Up to four friendly response options are defined in parallel. Each response "
-        "describes what the blue force would do in reaction to the adversary action:"
-    )
-    _add_data_table(doc,
-        ["Field", "Description"],
-        [
-            ["Response ID / Name", "Short identifier and descriptive label"],
-            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
-            ["Cost", "Normalised resource cost [0–1] — propellant, ops tempo, personnel"],
-            ["Reversibility", "How easily the action can be undone [0–1]; 1 = fully reversible"],
-            ["Time to Execute (h)", "Latency from decision to execution in hours"],
-            ["Description", "Tactical description of the friendly action"],
-        ],
+        "Enter up to five friendly responses, each with a type, a cost and reversibility [0 to 1] and a time to "
+        "execute in hours. A manoeuvre response may carry a target separation in km, a delta-V budget in m/s "
+        "(50 m/s unless given) and an axis. With both sides bound, the engine sizes our burn to reach the target "
+        "within the budget, applies it to the blue asset and shows what the burn buys. A burn that cannot reach "
+        "the target within the budget flies the whole budget, and the cell says how far short it falls. A burn "
+        "that would come after the closest approach or the span searched, or whose arc fails, is refused in its cell "
+        "and its delta-V stays a lookup."
     )
 
-    _add_heading_h2(doc, "Scoring Weights")
+    _add_heading_h2(doc, "How the Figures Are Worked Out")
+    _add_bullet(doc, "Closest approach, computed: for a red action that does not move red, both orbits are "
+                "propagated from their element sets with no burn, searched every 60 s and refined to 0.01 s.")
+    _add_bullet(doc, "Closest approach, sampled: for a row with a hypothesis, each sample's burn is drawn and "
+                "propagated beside the blue asset. The row scores on P5. It is refused, and says why, for fewer "
+                "than 50 samples, an out-of-date orbit, a red element set newer than the burn, or a cost over the "
+                "cap. The row counts as converged when P5, P50 and P95 are each known to within 1 km, or 5 per "
+                "cent of P5 where larger.")
+    _add_bullet(doc, "A manoeuvre with no hypothesis is refused a closest approach: where red goes if it does not "
+                "move is not the outcome of a manoeuvre. Add a hypothesis.")
+    _add_bullet(doc, "Time of closest approach carries an uncertainty from both element sets' errors, and is "
+                "printed no finer than that uncertainty.")
+    _add_bullet(doc, "Custody is read from the bound red track as the sweep reads it and carried over the horizon, "
+                "assuming no newer element set arrives. Degraded custody counts as lost. Your response is not "
+                "applied to custody.")
+    _add_bullet(doc, "Show trajectory opens the Hill-frame view of a cell's pair, which shows the shape of the "
+                "approach, not the cell's figures. A sampled cell also has a histogram of its sampled times.")
     _add_body(doc,
-        "The composite outcome score for each (adversary action, friendly response) pair "
-        "is computed from five weighted components. The default weights reflect a "
-        "balanced space control posture; operators can adjust them before running the "
-        "evaluation:"
+        "A scenario that samples or sizes a burn runs as a job inside a 120 s budget, capped at 4,800 "
+        "sample-hours. The page shows progress and a Cancel button; a stopped evaluation scores nothing."
     )
+
+    _add_heading_h2(doc, "Collect First and the Sweep's Threat Picture")
+    _add_body(doc,
+        "When the sweep has assessed the bound red track within the last 30 minutes, the results show its Threat "
+        "range, its Understanding and decide-by, each in its own sentence. If the Threat range straddles the line "
+        "where the recommendation changes and a collection that could settle it lands before decide-by, the "
+        "guidance says collect first and names it; otherwise it says act on the ceiling. Collections are listed "
+        "beside the ranking and never scored, so the recommendation is always one of your own responses."
+    )
+
+    _add_heading_h2(doc, "Selector Rules")
     _add_data_table(doc,
-        ["Weight", "Default", "Meaning"],
+        ["Rule", "How it picks", "When to use it"],
         [
-            ["w_custody", "0.35", "Penalty for losing track custody of the adversary asset"],
-            ["w_closest_approach", "0.25", "Reward for maximising closest-approach distance"],
-            ["w_dv_cost", "0.20", "Penalty for friendly ΔV expenditure"],
-            ["w_time_to_exec", "0.10", "Penalty for slow response latency"],
-            ["w_reversibility", "0.10", "Reward for selecting reversible, de-escalatory actions"],
+            ["Minimax", "The response whose worst case scores least", "The default and the cautious rule: use "
+             "it when P is not well founded"],
+            ["Expected value", "The response whose probability-weighted score is least", "When P rests on "
+             "evidence; the results say whether the pick holds across a NOTSO interval"],
+            ["Minimin", "The response whose best case scores least", "The optimistic rule, not a robust one"],
         ],
     )
+    _add_body(doc,
+        "Under expected value, a bound row whose Understanding is LOW, or whose P is the untouched default, "
+        "carries a line saying expected value rests on a probability the evidence has not earned, and recommends "
+        "minimax. The rule is never switched for you."
+    )
+
+    _add_heading_h2(doc, "Looking Further Ahead: the Game Tree")
+    _add_body(doc,
+        "Turn depth, on the panel, sets how many turns the engine looks ahead: 1 is the outcome matrix alone; 2 "
+        "or 3 let red move again after each of your responses. A tree needs a red track and a blue asset bound "
+        "and current, and an orbit from every row, so give each manoeuvre row a hypothesis."
+    )
+    _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
+                "most) or by cost, is refused as soon as you press Evaluate, naming the largest depth that would "
+                "fit. A tree missing what it needs still evaluates as one turn, and the results say why.")
+    _add_bullet(doc, "Each later turn starts where the last one left both orbits, after red's burn and yours. "
+                "Every figure in a tree is propagated by RK45 for both orbits.")
+    _add_bullet(doc, "The results show the recommendation per turn for the rule in use: turn 1's pick, then the "
+                "pick for turn 2 after each thing turn 1 may show, and in a 3-turn tree the pick for turn 3 after "
+                "what turns 1 and 2 showed.")
+    _add_bullet(doc, "The tree itself is a set of collapsible branches. Each names its turn, red's move and your "
+                "response, and the path of moves it rests on; opened, it shows its figures in m/s and km, each "
+                "with its basis. A branch on the recommended plan says so in words.")
+    _add_bullet(doc, "A tree that runs out of budget shows the deepest turn built in full and says so.")
+    _add_body(doc,
+        "What turn 1 shows of red is read through the red track's custody: lost at a burn shows a burn, held "
+        "shows no burn, anything else shows nothing. You may state what turn 1 showed. Under expected value the "
+        "results then show the update after turn 1 for that observation, with its likelihood model; with none "
+        "stated they say nothing was updated. The update moves no figure and writes no P. One turn has no later "
+        "pick to update, so an observation stated with a depth of 1 is refused beside the form. Minimax and "
+        "minimin do not use probability: in place of the update the results show 'What each turn lets us see', "
+        "the same custody rule that sets what each later pick may depend on, and say nothing was updated."
+    )
+
+    _add_heading_h2(doc, "What It Does Not Do")
+    _add_bullet(doc, "It does not cite its scoring weights yet (SPC-151); the score is a weighted heuristic.")
+    _add_bullet(doc, "It does not sample element-set error, so a sampled band can be narrower than the orbit is known.")
+    _add_bullet(doc, "It does not model a sensor's line of sight to red.")
+    _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
+                "P as entered.")
+    _add_bullet(doc, "It models one impulsive burn per adversary row per turn.")
     _add_callout(doc,
-        "Increasing w_custody above 0.5 reflects a high-value asset protection posture "
-        "where losing track of the adversary is unacceptable. Increasing w_reversibility "
-        "reflects a de-escalation preference — the engine will favour manoeuvres that can "
-        "be recalled or reversed if the threat assessment changes."
-    )
-
-    _add_heading_h2(doc, "Selector Strategies")
-    _add_body(doc,
-        "After the outcome matrix is computed, SPECTRE applies a selector strategy to "
-        "identify the recommended response:"
-    )
-    _add_data_table(doc,
-        ["Strategy", "Logic", "Best For"],
-        [
-            ["MINIMAX", "Minimise worst-case composite score across all adversary actions",
-             "Conservative — guarantees a floor on worst-case outcome"],
-            ["MAXIMIN", "Maximise worst-case benefit (minimum gain across all actions)",
-             "Optimistic — focuses on preserving upside in best case"],
-            ["EXPECTED_VALUE", "Minimise expected composite score weighted by adversary action probabilities",
-             "Probabilistic — optimal when probability estimates are trustworthy"],
-        ],
-    )
-    _add_body(doc,
-        "The MINIMAX strategy is the default and is appropriate when intelligence "
-        "confidence is low and the operator wants to hedge against the worst plausible "
-        "adversary action. Switch to EXPECTED_VALUE when high-confidence probability "
-        "estimates are available from all-source intelligence."
-    )
-
-    _add_heading_h2(doc, "Output & Recommended Response")
-    _add_body(doc,
-        "The Decision Engine produces an outcome matrix table showing the composite score "
-        "for every (adversary, friendly) cell. Lower scores are better for the friendly "
-        "force. The recommended response is highlighted with its strategy label and "
-        "rationale. Key outputs include:"
-    )
-    _add_bullet(doc, "Recommended response — the friendly COA selected by the chosen strategy.")
-    _add_bullet(doc, "Robust strategy label — which decision rule was applied (MINIMAX / MAXIMIN / EXPECTED_VALUE).")
-    _add_bullet(doc, "Per-adversary ranking — for each adversary action, the friendly responses are ranked best-to-worst.")
-    _add_bullet(doc, "Computation time — confirms the engine ran to completion.")
-    _add_callout(doc,
-        "The Decision Engine output is a recommendation, not an order. Operators retain "
-        "full authority over response selection. The engine is a structured decision-support "
-        "tool — it enforces analytical rigour and surfaces non-obvious trade-offs, but "
-        "context, rules of engagement, and commander intent always take precedence."
+        "The Decision Engine output is a recommendation, not an order. Operators retain full authority over "
+        "response selection. It shows its working so you can challenge it; context, rules of engagement and "
+        "commander intent always take precedence."
     )
 
 
@@ -1417,7 +1460,7 @@ def _section_14_training(doc: Document) -> None:
             ["1", "Observer", "Default — available on first login", "Basic TLE handling, orbital events, Lambert transfers"],
             ["2", "Analyst", "Complete the introductory tutorial", "Threat assessment, manoeuvre classification, PoL basics"],
             ["3", "Planner", "100+ points in manoeuvre_planning axis", "Tactical manoeuvres, COLA, evasion, trade-space analysis"],
-            ["4", "Commander", "5 scenarios completed + 50+ decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
+            ["4", "Commander", "5 scenarios completed and at least 50 decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
             ["5", "Strategist", "3 challenge scenarios completed", "Full capability — all methods, gauntlet challenges, adversary modelling"],
         ],
     )
@@ -1470,7 +1513,7 @@ def _section_14_training(doc: Document) -> None:
     _add_bullet(doc, "Correct manoeuvre method selection — base 50 pts, 80% manoeuvre_planning, 20% system_proficiency.")
     _add_bullet(doc, "ΔV within 5% of optimal — base 100 pts with speed multiplier, 100% manoeuvre_planning.")
     _add_bullet(doc, "Correct threat classification — base 75 pts, 80% threat_assessment, 20% situational_awareness.")
-    _add_bullet(doc, "Decision Engine response selection matching recommended COA — base 100 pts, 100% decision_quality.")
+    _add_bullet(doc, "Decision Engine response selection matching recommended COA: base 100 pts, 100% decision_quality.")
     _add_callout(doc,
         "Tutorial completion is a prerequisite for Level 2 unlock. The introductory "
         "tutorial walks through adding assets, fetching TLEs from the synthetic UDL "
@@ -1859,11 +1902,12 @@ def _section_18_glossary(doc: Document) -> None:
         ["Consistent Notifier", "Operator behavioural flag: notification rate above 90% — reliable pre-manoeuvre notification behaviour."],
         ["Stealth Operator", "Operator behavioural flag: notification rate below 30% — significant intelligence indicator."],
         ["Predictable Timing", "Operator behavioural flag: lead-time standard deviation below 6 hours — highly regular notification pattern."],
-        ["Decision Engine", "SPECTRE's game-theoretic scenario evaluation module; computes outcome matrices for adversary × friendly COA grids."],
-        ["MINIMAX", "Decision strategy that selects the friendly response minimising the worst-case composite score across all adversary actions."],
-        ["MAXIMIN", "Decision strategy that selects the response maximising the worst-case benefit."],
-        ["Expected Value", "Decision strategy that selects the response minimising the expected composite score weighted by adversary action probabilities."],
-        ["Composite Score", "Weighted sum of custody, closest-approach, ΔV cost, time-to-execute, and reversibility metrics — lower is better for blue force."],
+        ["Decision Engine", "SPECTRE's scenario evaluation module: scores every pairing of adversary action and friendly response, recommends a response, and can look up to three turns ahead."],
+        ["Minimax", "Decision rule that selects the friendly response whose worst-case composite score is least: the cautious rule and the default."],
+        ["Minimin", "Decision rule that selects the friendly response whose best-case composite score is least: the optimistic rule, not a robust one."],
+        ["Expected Value", "Decision rule that selects the response minimising the expected composite score weighted by adversary action probabilities."],
+        ["Composite Score", "Weighted sum of custody, closest approach, our delta-V, time to execute and reversibility; lower is better for the blue force. A lookup while its weights are uncited."],
+        ["Game Tree", "The Decision Engine's look ahead of 2 or 3 turns, in which red may move again after each friendly response."],
         ["Photometry", "Measurement of the brightness of a space object over time; used to detect attitude changes, physical alterations, or reflectivity anomalies."],
         ["Reduced Magnitude", "Apparent magnitude corrected for range and atmospheric extinction; enables like-for-like comparison across different observing geometries."],
         ["Phase Function Baseline", "Quadratic model of brightness vs solar phase angle fitted to historical observations; the reference against which changes are detected."],

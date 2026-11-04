@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import NamedTuple, cast
@@ -191,6 +191,21 @@ TREE_BRANCH_REFUSED = (
     "No {turns}-turn pick: the branch {path} {why}, and a pick over a tree missing a branch could miss its worst "
     "case."
 )
+# The panel refuses a turn depth that cannot fit before anything runs, naming the largest that would (SPC-142).
+TREE_DEPTH_BRANCHES = (
+    "Turn depth {turns} does not fit: {rows} red moves and {responses} responses make {nodes:,} branches over "
+    "{turns} turns, more than the {cap:,} one evaluation builds. {largest}"
+)
+TREE_DEPTH_COST = (
+    "Turn depth {turns} does not fit: it would cost about {total:,} sample-hours against a cap of {cap:,.0f}, what "
+    "the {budget:.0f} s budget covers at the slowest rate measured. {largest}"
+)
+_LARGEST = "The largest turn depth that fits at these sizes is {k}."
+_LARGEST_ONE = (
+    "The largest turn depth that fits at these sizes is 1, the outcome matrix alone: take fewer samples, rows or "
+    "responses for a tree."
+)
+TREE_DEEPEST = "Built in full to turn {k} of {turns}: no figure or pick is shown below turn {k}."
 _WHY_TURN_ONE = "is refused in turn 1, as its cell says"
 _WHY_FAILED = "lost {k} of {n} samples, which failed to propagate"
 _WHY_UNCONVERGED = "did not converge: its P5, P50 and P95 are known only to within {hw:.1f} km"
@@ -202,7 +217,7 @@ _WHY_RK45 = "could not be put on RK45 within the budget"
 SENTENCES: tuple[str, ...] = (
     TREE_HEADER, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, TREE_RED_AGAIN, TREE_RESPONSE_AGAIN,
     TREE_UNBOUND, TREE_LOOKUP_ROW, TREE_REFUSED_ROW, TREE_BUDGET_TURN_ONE, TREE_BURN_OUTSIDE, TREE_OVER_BRANCHES, TREE_OVER_CAP, TREE_BUDGET,
-    TREE_BRANCH_REFUSED,
+    TREE_BRANCH_REFUSED, TREE_DEPTH_BRANCHES, TREE_DEPTH_COST, TREE_DEEPEST,
 )
 
 _NODE_LABEL = "Turn {k} of {turns}, {path}: "
@@ -334,6 +349,13 @@ class GameTree:
     def nodes(self) -> Iterator[GameNode]:
         for root in self.roots:
             yield from root.walk()
+
+    @property
+    def deepest(self) -> str | None:
+        """The deepest turn built in full, for a tree built in part (SPC-142); None for a whole tree or none."""
+        if 0 < self.complete_turns < self.turns:
+            return TREE_DEEPEST.format(k=self.complete_turns, turns=self.turns)
+        return None
 
 
 # ── Counting before anything runs ────────────────────────────────────────────
@@ -494,12 +516,47 @@ def _over_cap(scenario: Scenario) -> str | None:
     )
 
 
-def refused_before_run(scenario: Scenario) -> str | None:
-    """Why a tree of *scenario.turns* turns is not built, checked in order before anything runs; None to build it."""
-    for check in (_unbound, _lookup_row, _burn_outside, _over_branches, _over_cap):
+#: What a tree needs before its size is counted: both sides bound and current, an orbit from every row, every burn
+#: inside its turn. Then what it fits: the branch cap and the cost cap.
+_SHAPE_CHECKS = (_unbound, _lookup_row, _burn_outside)
+_FIT_CHECKS = (_over_branches, _over_cap)
+
+
+def _first_problem(scenario: Scenario, checks: Sequence[Callable[[Scenario], str | None]]) -> str | None:
+    for check in checks:
         refusal = check(scenario)
         if refusal is not None:
             return refusal
+    return None
+
+
+def refused_before_run(scenario: Scenario) -> str | None:
+    """Why a tree of *scenario.turns* turns is not built, checked in order before anything runs; None to build it."""
+    return _first_problem(scenario, (*_SHAPE_CHECKS, *_FIT_CHECKS))
+
+
+def depth_refusal(scenario: Scenario) -> str | None:
+    """Why the turn depth asked for does not fit, for the panel to refuse before anything runs (SPC-142).
+
+    It names the largest depth that would fit at the same sizes. None when it fits, for one turn, and when the
+    tree is refused for another reason first: the result then states that reason beside the one-turn matrix.
+    """
+    if scenario.turns == 1 or _first_problem(scenario, _SHAPE_CHECKS) is not None:
+        return None
+    k = largest_tree(scenario)
+    largest = _LARGEST.format(k=k) if k > 1 else _LARGEST_ONE
+    rows, responses = len(scenario.adversary_actions), len(scenario.friendly_responses)
+    nodes = branches(rows, responses, scenario.turns)
+    if nodes > MAX_TREE_BRANCHES:
+        return TREE_DEPTH_BRANCHES.format(
+            turns=scenario.turns, rows=rows, responses=responses, nodes=nodes, cap=MAX_TREE_BRANCHES, largest=largest,
+        )
+    total = tree_cost(scenario)
+    if total > MAX_SAMPLE_HOURS:
+        return TREE_DEPTH_COST.format(
+            turns=scenario.turns, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+            largest=largest,
+        )
     return None
 
 

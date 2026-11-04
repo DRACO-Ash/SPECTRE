@@ -47,16 +47,16 @@ from spectre.domain.decision import (
     Scenario,
     ScenarioResult,
     SelectorStrategy,
-    evaluate_scenario,
     needs_a_run,
 )
+from spectre.domain.decision_tree import evaluate_tree
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
 from spectre.web.planning_state import SessionState, session_alive
 
 logger = logging.getLogger(__name__)
 
-#: What the job evaluates with: evaluate_scenario, or a test's stand-in.
+#: What the job evaluates with: evaluate_tree, which is evaluate_scenario for one turn (SPC-142), or a test's stand-in.
 Evaluate = Callable[..., ScenarioResult]
 #: What a job does before it evaluates (SPC-119): read the bound red track's custody, which may wait on a UDL
 #: history fetch, and return the scenario with it.
@@ -193,7 +193,7 @@ async def _prepared(state: SessionState, key: SessionKey, job: DecisionJob) -> b
         if await asyncio.to_thread(needs_a_run, job.scenario):
             job.state = JobState.QUEUED
             return True
-        result = await asyncio.to_thread(evaluate_scenario, job.scenario, job.strategy)
+        result = await asyncio.to_thread(evaluate_tree, job.scenario, job.strategy)
     except Exception:
         logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
         job.state = JobState.FAILED
@@ -206,11 +206,12 @@ async def run_job(state: SessionState, key: SessionKey, job: DecisionJob, *, eva
     """Read custody when the job must, then wait for the sampling slot and evaluate on a worker thread under the
     budget; end DONE, STOPPED or FAILED.
 
-    *evaluate* defaults to this module's evaluate_scenario, read when the job runs.
+    *evaluate* defaults to this module's evaluate_tree, read when the job runs: one turn is evaluate_scenario
+    exactly, and more build the game tree under the same budget (SPC-142).
     """
     if not await _prepared(state, key, job):
         return
-    run_with = evaluate or evaluate_scenario
+    run_with = evaluate or evaluate_tree
 
     def progress(seen: SamplingProgress) -> None:
         job.progress = seen

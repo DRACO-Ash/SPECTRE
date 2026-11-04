@@ -88,7 +88,9 @@ jobs:
         # response (audit F-122); its own tests now run every line.
         # The closest-approach helper every later Decision Engine phase calls
         # is held at every line by its own tests (SPC-102). So is the pure
-        # Threat Understanding model (SPC-162 to SPC-164). These are line
+        # Threat Understanding model (SPC-162 to SPC-164), and so are the game
+        # tree, its selectors, the update after turn 1 and the tree's view
+        # (SPC-140 to SPC-142). These are line
         # floors: [tool.coverage.run] measures no branches.
         # Each route floor is its measured figure rounded down to a whole 5,
         # so a test lost shows here before the total moves (SPC-014):
@@ -102,6 +104,10 @@ jobs:
           coverage report --include=spectre/domain/decision.py --fail-under=100
           coverage report --include=spectre/astro/closest_approach.py --fail-under=100
           coverage report --include=spectre/domain/threat_understanding.py --fail-under=100
+          coverage report --include=spectre/domain/decision_tree.py --fail-under=100
+          coverage report --include=spectre/domain/tree_selectors.py --fail-under=100
+          coverage report --include=spectre/domain/turn_update.py --fail-under=100
+          coverage report --include=spectre/web/tree_view.py --fail-under=100
       - name: Upload coverage report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

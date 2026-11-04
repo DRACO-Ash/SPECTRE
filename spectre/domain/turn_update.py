@@ -15,7 +15,7 @@ range it takes over those intervals, and every share is shown rounded down, so n
 The rule is the custody rule, not calibrated against any outcome, so the posterior is a lookup.
 
 Nothing here writes a probability into a row; the selectors show the posterior only under expected value, the one
-rule that reads P. Imports the Decision Engine, never the reverse; nothing here imports the web layer.
+rule that reads P. Under minimax and minimin the same model says only what each turn lets us see (SPC-142). Imports the Decision Engine, never the reverse; nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -23,25 +23,22 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from enum import StrEnum
 from typing import NamedTuple, cast
 
 from spectre.domain.custody import Horizon, LossCause, custody_over_horizon
-from spectre.domain.decision import AdversaryAction, Scenario, _untouched
+from spectre.domain.decision import AdversaryAction, Scenario, Seen, _untouched
 from spectre.domain.provenance import Basis, FigureBasis
+
+__all__ = [
+    "INDEPENDENT_TURNS", "LIKELIHOOD_MODEL", "POSTERIOR_EVERY_ROW", "POSTERIOR_NO_WEIGHT", "POSTERIOR_NOTE",
+    "POSTERIOR_ONE_ROW", "POSTERIOR_SHARES", "SEEN_MODEL", "SENTENCES", "Posterior", "Seen", "burns_on", "likelihood",
+    "model_lines", "posteriors", "seen_after", "seen_lines", "share_ranges",
+]
 
 _SECONDS_PER_HOUR = 3600.0
 #: A moment within this of a turn's boundary is on it: burn times are kept to the microsecond.
 _ON_THE_BOUNDARY_H = 1e-3 / _SECONDS_PER_HOUR
 _HUNDREDTHS = 100
-
-
-class Seen(StrEnum):
-    """What a turn lets us see of red, in the words the result uses."""
-
-    BURN = "a burn"
-    NO_BURN = "no burn"
-    NOTHING = "nothing"
 
 
 # ── What the result says (SPC-141; the view is SPC-142) ──────────────────────
@@ -53,6 +50,14 @@ LIKELIHOOD_MODEL = (
     "for any other reason, or not read, shows nothing. {rows}. Each row gives what it gives for certain, so rows "
     "that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome, so "
     "the update is a lookup; the same rule reads turn 2 in a 3-turn tree."
+)
+# Under minimax and minimin (SPC-142): the same model sets what each later pick may see, but nothing is updated.
+SEEN_MODEL = (
+    "Each later pick may rest only on what the turns before it let us see of red: the bound red track's custody, "
+    "as the sweep judges it, carried over each turn with each row's burn. Custody lost at a burn in the turn shows "
+    "that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other "
+    "reason, or not read, shows nothing. In turn 1: {rows}. Each row gives what it gives for certain, so branches "
+    "that show the same thing share one pick. It is the custody rule, not calibrated against any outcome."
 )
 INDEPENDENT_TURNS = (
     "The update says which turn-1 branch we are on, not what red does next: red's move in each later turn is "
@@ -78,7 +83,7 @@ POSTERIOR_NOTE = (
 
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
-    LIKELIHOOD_MODEL, INDEPENDENT_TURNS, POSTERIOR_SHARES, POSTERIOR_ONE_ROW, POSTERIOR_EVERY_ROW, POSTERIOR_NO_WEIGHT,
+    LIKELIHOOD_MODEL, SEEN_MODEL, INDEPENDENT_TURNS, POSTERIOR_SHARES, POSTERIOR_ONE_ROW, POSTERIOR_EVERY_ROW, POSTERIOR_NO_WEIGHT,
 )
 
 
@@ -210,10 +215,19 @@ def posteriors(scenario: Scenario, gives: Sequence[Seen]) -> tuple[Posterior, ..
     return tuple(_posterior(scenario, seen, gives) for seen in Seen if seen in gives)
 
 
-def model_lines(scenario: Scenario, gives: Sequence[Seen]) -> tuple[str, str]:
-    """The likelihood model, naming what each row gives, and that the update leaves red's later moves at their P."""
-    rows = "; ".join(
-        _GIVES.format(lead="Row" if i == 0 else "row", row=i + 1, name=a.name, seen=g.value)
+def _rows_give(scenario: Scenario, gives: Sequence[Seen], first: str) -> str:
+    return "; ".join(
+        _GIVES.format(lead=first if i == 0 else "row", row=i + 1, name=a.name, seen=g.value)
         for i, (a, g) in enumerate(zip(scenario.adversary_actions, gives, strict=True))
     )
-    return LIKELIHOOD_MODEL.format(rows=rows), INDEPENDENT_TURNS
+
+
+def model_lines(scenario: Scenario, gives: Sequence[Seen]) -> tuple[str, str]:
+    """The likelihood model, naming what each row gives, and that the update leaves red's later moves at their P."""
+    return LIKELIHOOD_MODEL.format(rows=_rows_give(scenario, gives, "Row")), INDEPENDENT_TURNS
+
+
+def seen_lines(scenario: Scenario, gives: Sequence[Seen]) -> tuple[str]:
+    """What each turn lets us see, naming what each row gives in turn 1, for a rule that reads no probability: the
+    model sets what each later pick may depend on, but nothing is updated and no P weighs red (SPC-142)."""
+    return (SEEN_MODEL.format(rows=_rows_give(scenario, gives, "row")),)

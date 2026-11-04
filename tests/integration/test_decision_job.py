@@ -141,7 +141,7 @@ def fake_evaluate(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[_Fake]]:
     def next_fake(scenario: Scenario, strategy: SelectorStrategy, *, run: RunControl) -> ScenarioResult:
         return fakes.pop(0)(scenario, strategy, run=run)
 
-    monkeypatch.setattr(decision_job, "evaluate_scenario", next_fake)
+    monkeypatch.setattr(decision_job, "evaluate_tree", next_fake)
     yield fakes
 
 
