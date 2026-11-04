@@ -732,6 +732,10 @@ Wiring in `web/routes/threat.py`:
 
 13. **What a scenario opened from the sweep can carry (found building SPC-150).** The sweep's entry sums every burn of a transfer into its prograde, normal and radial figures, which is no one burn, and the engine models one impulsive burn per adversary row. As built, the sweep keeps each entry's first burn (`ThreatSweepEntry.departure_m_s`) and the scenario's first row is that departure burn, at its own UTC time, so it does not move along the orbit while the panel is open. A detected burn is built from the element set before it through `hypothesis_from_tle_record`, as asked, but the engine refuses to sample any burn older than the bound red element set, which may already include it (`decision._after_burn`); a detection is found from the element set after it, so on a current red track its row is nearly always carried for its burn time, which sets when custody is lost, with its closest approach a lookup, and the panel says so before Evaluate. The target binds as the blue asset only by catalogue number, never by name, and a red track binds only while the set the sweep flew is the one held. Claude's choice, not a ruling.
 
+14. **Which UDL conjunctions count as Interactions (found building SPC-173).** Only REAL-mode rows count, whatever data mode the red track came from, and a conjunction counts as closer only by more than 8 km, the smallest element-set error the SPC-118 model allows at epoch, since a UDL record carries no element-set age we read. An exercise sweep therefore refuses exercise conjunctions, and says so. Claude's choice, not a ruling; tuned, not sourced.
+
+15. **What the screen says about a hostile seed (found reviewing SPC-174).** A propagated path reads "1 hop from a hostile seed, through X": the seed itself is named only when it is the object the operator already sees approached, and the ledger never lists the seed count. Whether operators may see seed identities at all belongs with decision 5. Claude's choice, not a ruling.
+
 ## 10. Build plan
 
 Each item is test-first: write the failing case or invariant, write the code, then run the full unit suite. The first item ships alone in 0.16.

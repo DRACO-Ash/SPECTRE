@@ -1,13 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.20: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-150       180m  priority high
-    SPC-173       300m  priority med; anchors the release
-    SPC-174       300m  priority med
-  lane 1 (600m): SPC-173, SPC-174
-  lane 2 (180m): SPC-150
-
 V0.21: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-176       300m  priority med, adds gate browser

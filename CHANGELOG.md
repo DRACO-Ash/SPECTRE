@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-04
+
+**Operator outputs: the sweep's answer becomes a decision in one step, and Threat Understanding reads interactions from conjunctions and from known hostile objects.** The threat verdict word and band are unchanged.
+
+### Added
+- Open a decision from the sweep. A Decide control on the worst case, and on each arriving target row, opens the Decision Engine panel with the red track, the blue asset when the target is a held one matched by catalogue number (or a sentence saying why it cannot be bound), and a hypothesis from the worst course of action or the detected burn. The panel says what was filled and from which sweep; nothing is evaluated on the operator's behalf, and probability and confidence are never filled (SPC-150).
+- Interactions from held UDL conjunctions and the sweep's closest approaches, kept per object between sweeps. A conjunction counts only from REAL data and only when it came closer after a confirmed burn by more than the element-set error; a malformed miss distance or a stale element set is refused and stated, and UDL rows are graded as the unverified probe they are (SPC-173).
+- Suspicion from a hostile seed list over one and two hops, never a third; a benign seed clears nothing, and one edge never lifts the floor past MEDIUM through propagation. The list is owner data read only from the `SPECTRE_HOSTILE_SEEDS` path, validated strictly, and none is shipped (SPC-174).
+
+### Out of scope, named
+- The verdict switch, off until the owner signs off against the reference table (SPC-175), the adjudication log (SPC-176), the doctrine wording gate, which needs network access to verify citations (SPC-177), and the live check of the UDL conjunction contract (SPC-033).
+
 ## [0.19.0] - 2026-11-04
 
 **Operator outputs advanced: 4, the recommended response, now says when to collect before acting; and Threat Understanding gains its first interaction evidence.** The threat verdict word and band are unchanged.

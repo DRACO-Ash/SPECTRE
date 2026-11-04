@@ -1145,3 +1145,12 @@ Feature work from the backlog: collect first in the Decision Engine, interaction
 | Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/interaction_graph.py`, `spectre/web/decision_threat.py`, collect-first and picture types in `decision.py`, landing cues in `threat_understanding.py`, the custody read in `decision_custody.py` and `decision_job.py`, the picture hand-off in `routes/threat.py`, and template sections | `scripts/check-quality.sh` against 0.18.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The engine reads the sweep's held picture and fetches nothing new. | n/a. |
 
+## 0.20.0
+
+Feature work from the backlog: opening a decision from the sweep, interactions from conjunctions, and hostile seeds.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_from_sweep.py`, `spectre/web/interaction_store.py`, misses and seeds in `interaction_graph.py`, burn approaches in `elset_approach.py`, conjunction misses in `udl_conjunction.py`, a seed path in `config/settings.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 99 to 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_HOSTILE_SEEDS`, a path the deployment sets; nothing is read when it is unset. No new handler attribute, so the Content Security Policy gap does not widen. | n/a. |
+

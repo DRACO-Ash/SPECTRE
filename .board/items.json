@@ -833,7 +833,11 @@
    "spectre/web/routes/threat.py",
    "spectre/web/routes/decision.py",
    "spectre/web/templates/partials/threat_sweep.html"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
  },
  {
   "ref": "SPC-151",
@@ -1475,7 +1479,11 @@
   ],
   "deps": [
    "SPC-172"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
  },
  {
   "ref": "SPC-174",
@@ -1484,13 +1492,17 @@
   "group": "understanding",
   "minutes": 300,
   "task": "Hostile seeds and propagation",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: 1-hop and 2-hop values. A third hop adds nothing. A benign seed has no effect. One edge never lifts the floor past MEDIUM through propagation",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: 1-hop and 2-hop values. A third hop adds nothing. A benign seed has no effect. One edge never lifts the floor past MEDIUM through propagation Built in 0.20.0: the seed list is read only from SPECTRE_HOSTILE_SEEDS and none ships (concept decision 5 still open for the owner: who holds the list).",
   "files": [
    "interaction_graph.py"
   ],
   "deps": [
    "SPC-172"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
  },
  {
   "ref": "SPC-175",
