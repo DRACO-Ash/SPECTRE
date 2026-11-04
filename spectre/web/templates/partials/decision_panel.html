@@ -211,6 +211,17 @@
       </div>
       {% endfor %}
     </div>
+    {# ── The NOTSO suggestion for each adversary row (SPC-130): asked for on load and on every change in the form,
+         which sends the red track, the horizon, each row's id, name and type, and any tick, so a tick still matching
+         stays ticked. Nothing fills P or Conf; a ticked suggestion is applied at Evaluate. It sets its own target,
+         indicator and disabled element, since htmx would otherwise take the form's: its reply would land in the
+         results, outside the form, and the form's submit button, which it does not hold, makes htmx throw. ── #}
+    <div class="adv-priors" hx-get="/plan/decision/prior" hx-trigger="load, change from:closest form"
+         hx-include="closest form" hx-target="this" hx-swap="innerHTML" hx-indicator="this"
+         hx-disabled-elt="this" aria-live="polite"
+         style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">
+      <p class="adv-prior-note">Bind a red track to be offered a NOTSO suggestion for each row's P and Conf.</p>
+    </div>
     {% if hyp.fields_note %}
     <p class="adv-fields-note hint" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">{{ hyp.fields_note }}</p>
     {% endif %}

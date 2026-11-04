@@ -193,6 +193,7 @@ from spectre.domain.threat_understanding import (
 
 if TYPE_CHECKING:
     from spectre.astro.pattern_of_life import Manoeuvre, TLERecord
+    from spectre.domain.notso_prior import NotsoPrior
 
 logger = logging.getLogger(__name__)
 
@@ -799,6 +800,9 @@ class AdversaryAction:
     # [0, 1]: the share of the horizon the rule of thumb loses custody for when this row is a manoeuvre and the
     # response neither manoeuvres nor retasks a sensor (SPC-161). A bound red track's read custody replaces it.
     custody_gap_fraction: float = DEFAULT_CUSTODY_GAP_FRACTION
+    # The NOTSO suggestion the operator applied to this row (SPC-130), whose P, and Conf when it offers one, are the
+    # row's; None when both are the operator's own. Recorded in the scenario's provenance; it moves no figure.
+    accepted_prior: NotsoPrior | None = None
 
     def __post_init__(self) -> None:
         _require_fraction("AdversaryAction", "probability", self.probability)
@@ -809,6 +813,30 @@ class AdversaryAction:
                 "AdversaryAction.hypothesis takes an AdversaryHypothesis, which says where the hypothesis came "
                 f"from; got {type(self.hypothesis).__name__}"
             )
+        if self.accepted_prior is not None:
+            _require_accepted(self)
+
+
+def _require_accepted(action: AdversaryAction) -> None:
+    """An accepted NOTSO suggestion is for the row's action type and holds the row's P, and its Conf if it offers one."""
+    from spectre.domain.notso_prior import NotsoPrior
+
+    prior = action.accepted_prior
+    if not isinstance(prior, NotsoPrior):
+        raise TypeError(f"AdversaryAction.accepted_prior takes a NotsoPrior; got {type(prior).__name__}")
+    if prior.action_type is not action.action_type:
+        raise ValueError(
+            f"an accepted NOTSO suggestion for a {prior.action_type.value} cannot set a "
+            f"{action.action_type.value} row's action type"
+        )
+    if not math.isclose(prior.probability, action.probability):
+        raise ValueError(
+            f"an accepted NOTSO suggestion's probability, {prior.probability}, is not the row's, {action.probability}"
+        )
+    if prior.confidence is not None and not math.isclose(prior.confidence, action.confidence):
+        raise ValueError(
+            f"an accepted NOTSO suggestion's confidence, {prior.confidence}, is not the row's, {action.confidence}"
+        )
 
 
 @dataclass
@@ -1437,6 +1465,28 @@ class Scenario:
         _require_threat(self)
 
 
+def _untouched(action: AdversaryAction) -> bool:
+    """A row still at the default probability that applied no suggestion: the form cannot tell it from 0.5 typed again
+    (concept section 9, decision 11), but an accepted NOTSO suggestion is never untouched (SPC-130)."""
+    return math.isclose(action.probability, DEFAULT_PROBABILITY) and action.accepted_prior is None
+
+
+#: A row whose P and Conf are both the operator's (SPC-130).
+OWN_VALUES = "P and Conf are your own."
+
+
+def _row_source(action: AdversaryAction) -> str:
+    """Whose P and Conf a row holds, with what an applied NOTSO suggestion rests on."""
+    prior = action.accepted_prior
+    if prior is None:
+        return OWN_VALUES
+    if prior.confidence is None:
+        lead = f"P {prior.probability:.2f} is the NOTSO suggestion you applied; Conf is your own."
+    else:
+        lead = f"P {prior.probability:.2f} and Conf {prior.confidence:.2f} are the NOTSO suggestion you applied."
+    return f"{lead} {prior.basis_line} {prior.confidence_line}"
+
+
 def _bound_sides(binding: ScenarioBinding | None) -> tuple[bool, bool]:
     """Whether the red track and the blue asset are bound."""
     return (False, False) if binding is None else (binding.red is not None, binding.blue is not None)
@@ -1592,9 +1642,14 @@ class ScenarioResult:
         if red is not None and picture is None:
             return EXPECTED_VALUE_NO_PICTURE.format(red=red)
         low = picture is not None and picture.understanding is Understanding.LOW
-        if low or any(math.isclose(a.probability, DEFAULT_PROBABILITY) for a in self.scenario.adversary_actions):
+        if low or any(_untouched(a) for a in self.scenario.adversary_actions):
             return EXPECTED_VALUE_UNEARNED
         return None
+
+    @property
+    def row_sources(self) -> tuple[str, ...]:
+        """Per adversary row, whose P and Conf they are: the operator's own, or a NOTSO suggestion applied (SPC-130)."""
+        return tuple(_row_source(a) for a in self.scenario.adversary_actions)
 
     @property
     def objective_guidance(self) -> str | None:
@@ -3507,6 +3562,18 @@ def _hypothesis_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
     )
 
 
+def _prior_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
+    """Each NOTSO suggestion the operator applied, as a lookup input dated at the end of its span (SPC-130)."""
+    return tuple(
+        dataclasses.replace(
+            value_input(f"NOTSO suggestion applied to {a.id} ({a.accepted_prior.basis.kind.value})", a.accepted_prior),
+            epoch=a.accepted_prior.span_end,
+        )
+        for a in scenario.adversary_actions
+        if a.accepted_prior is not None
+    )
+
+
 def evaluate_scenario(
     scenario: Scenario,
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
@@ -3577,7 +3644,8 @@ def evaluate_scenario(
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
         provenance=provenance(
-            [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario)],
+            [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario),
+             *_prior_inputs(scenario)],
         ),
         row_notes=_row_notes(scenario, plan),
         propagator_gap_km=_propagator_gap(scenario, outcome_matrix),

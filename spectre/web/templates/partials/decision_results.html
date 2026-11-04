@@ -193,6 +193,9 @@
             P={{ a.probability }} · Conf={{ a.confidence }}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
               and (result.row_custody is not defined or result.row_custody | length <= i or result.row_custody[i] is none) %} · <span class="row-gap" title="The rule of thumb loses custody for this share of the horizon when the response neither manoeuvres nor retasks a sensor; Conf moves no figure">Gap={{ a.custody_gap_fraction }}</span>{% endif %}
           </div>
+          {% if result.row_sources is defined and result.row_sources | length > i %}
+          <div class="row-source" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_sources[i] }}</div>
+          {% endif %}
           {% if a.hypothesis is defined and a.hypothesis is not none %}
           <div class="row-hypothesis" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.sentence }}</div>
           {% if a.hypothesis.burn_line is defined %}

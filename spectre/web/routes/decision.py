@@ -3,6 +3,7 @@
 GET  /plan/decision/panel      → scenario builder input form, with a manoeuvre hypothesis per adversary row (SPC-114)
 GET  /plan/decision/bind       → the bind fields, rebuilt from the held objects (SPC-100)
 GET  /plan/decision/from-sweep → the panel filled from an entry of the held threat sweep (SPC-150); nothing evaluated
+GET  /plan/decision/prior      → the NOTSO suggestion beside each adversary row, with its basis (SPC-130)
 POST /plan/decision/evaluate   → the ranked results partial for a scenario that samples nothing; for one that
                                  samples, a job the page polls (SPC-113)
 GET  /plan/decision/job        → the job's progress, or its results once done
@@ -69,6 +70,7 @@ from spectre.web.decision_job import (
     new_job,
     start_job,
 )
+from spectre.web.decision_prior import NO_HORIZON, NO_RED, RowsAsked, apply_priors, horizon, row_views
 from spectre.web.decision_threat import held_picture
 from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
@@ -634,6 +636,47 @@ async def decision_from_sweep(
     return render(request, "partials/decision_panel.html", _panel_context(state, prefill))
 
 
+class _PriorQuery(BaseModel):
+    """The panel's fields the NOTSO suggestion reads, sent with every change (SPC-130); the rest are ignored."""
+
+    red_sat:       str = ""
+    horizon_hours: str = ""
+    adv_ids:       list[str] = Field(default_factory=list, alias="adv_id")
+    adv_names:     list[str] = Field(default_factory=list, alias="adv_name")
+    adv_types:     list[str] = Field(default_factory=list, alias="adv_type")
+    adv_priors:    list[str] = Field(default_factory=list, alias="adv_prior")
+
+
+def _prior_context(state: SessionState, query: _PriorQuery, now: datetime) -> dict[str, object]:
+    """The region's context: each adversary row's NOTSO suggestion for the bound red track, or the one note why none
+    can be worked out yet."""
+    hours = horizon(query.horizon_hours)
+    red_sat = query.red_sat.strip()
+    if not red_sat or hours is None:
+        return {"note": NO_HORIZON if red_sat else NO_RED, "rows": []}
+    bound = bind_scenario(state, red_sat, "", now)
+    red = None if bound.binding is None else bound.binding.red
+    if red is None:
+        return {"note": bound.problem or NO_RED, "rows": []}
+    asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors)
+    return {"note": "", "rows": row_views(state, asked, red, (hours, now))}
+
+
+@router.get("/prior", response_class=HTMLResponse)
+async def decision_prior_region(
+    request: Request,
+    query: Annotated[_PriorQuery, Query()],
+    current_user: Annotated[User, Depends(require_login)],
+) -> HTMLResponse:
+    """The NOTSO suggestion beside each adversary row, with its basis and a labelled control to apply it (SPC-130).
+
+    The panel asks again on every change, sending its fields, so the suggestion follows the red track, the horizon
+    and each row's type. Nothing fills P or Conf here; a tick is applied at Evaluate, and only while it still matches.
+    """
+    context = await asyncio.to_thread(_prior_context, get_session_state(current_user), query, _utc_now())
+    return render(request, "partials/decision_prior.html", context)
+
+
 def _hypothesis_context() -> dict[str, object]:
     """The hypothesis section's choices and hint (SPC-114): each archetype with its typical delta-V in m/s."""
     return {
@@ -726,6 +769,8 @@ class _ScenarioForm(BaseModel):
     # Hidden and optional (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is the detected burn.
     hyp_burns_at: list[str] | None = Field(default=None, alias="hyp_burn_at")
     hyp_detected: list[str] | None = None
+    # Each NOTSO suggestion the operator ticked to apply (SPC-130): the row's id and the P and Conf it showed.
+    adv_priors: list[str] | None = Field(default=None, alias="adv_prior")
 
 
 class _Parsed(NamedTuple):
@@ -794,6 +839,14 @@ async def decision_evaluate(
     # The sweep's picture for this red track, beside the rows: its collect-first rows are listed, never scored (SPC-171).
     scenario = _scenario(form, parsed, hypotheses.carried, binding, now)
     scenario = dataclasses.replace(scenario, threat=held_picture(state, binding, now))
+    # Each NOTSO suggestion the operator ticked, applied only while it is the one shown (SPC-130).
+    applied = await asyncio.to_thread(
+        apply_priors, state, scenario.adversary_actions, form.adv_priors or [],
+        None if binding is None else binding.red, (parsed.horizon, now),
+    )
+    if applied.problem is not None:
+        return _err(applied.problem)
+    scenario = dataclasses.replace(scenario, adversary_actions=applied.actions)
     return await _answer(request, current_user, scenario, _strategy(form.strategy), custody)
 
 

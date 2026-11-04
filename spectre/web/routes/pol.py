@@ -1211,13 +1211,14 @@ async def pol_notso_panel(
     })
 
 
-def _notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
+def notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
     """Cached NOTSO dicts as ``NOTSORecord`` objects, for one satellite.
 
     The cache holds raw dicts, so they go back through the same text parser the
     pasted-text path uses. One grammar, one set of results, whichever source
     the operator correlated from. A JCO record can name several objects, so
-    its text is built for the satellite under analysis (audit F-046).
+    its text is built for the satellite under analysis (audit F-046). The
+    Decision Engine's NOTSO prior reads its records through this too (SPC-130).
     """
     from spectre.astro.notso import parse_notso_text
     from spectre.data.notso_cache import message_text
@@ -1293,13 +1294,36 @@ def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list
         )
     # Each cache record carries a msgText field (the full notification text),
     # or the text is reconstructed from its fields.
-    notsos = _notsos_from_cache_records(raw_records, pol.satno)
+    notsos = notsos_from_cache_records(raw_records, pol.satno)
     if not notsos:
         return HTMLResponse(
             f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
             f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
         )
     return notsos, [], f"local cache ({len(raw_records)} records)"
+
+
+def notso_behaviour_profile(pol: Any, notsos: list[Any]) -> tuple[list[Any], Any | None]:
+    """*notsos* correlated with every detection in the analysed history *pol*, and the behaviour profile over its
+    window, None when the history spans no window.
+
+    One rule for the NOTSO panel and the Decision Engine's NOTSO prior (SPC-130). A NOTSO follows human analysis and
+    is deliberately withheld for small routine burns, so the routine per-burn ceiling for the object's regime is the
+    line below which no notice is expected.
+    """
+    from spectre.astro.notso import correlate_notsos_with_manoeuvres, extract_behaviour_profile
+
+    reportable_m_s, _ = per_event_station_keeping_m_s(str(getattr(pol, "regime", "") or ""))
+    # notso.py is an astro module and works in km/s; the calibration is m/s.
+    # This is the conversion, in that direction, and it is the only one on this path.
+    reportable_km_s = reportable_m_s / 1000.0
+    correlations = correlate_notsos_with_manoeuvres(notsos, _all_detections(pol), pol.satno)
+    start, end = _analysis_window(pol)
+    if not (start and end):
+        return correlations, None
+    return correlations, extract_behaviour_profile(
+        pol.satno, correlations, start, end, reportable_threshold_km_s=reportable_km_s,
+    )
 
 
 @router.post("/notso-correlate", response_class=HTMLResponse)
@@ -1313,11 +1337,6 @@ async def pol_notso_correlate(
       1. Operator-pasted text (``notso_text`` form field, if non-empty).
       2. Local NOTSO cache for the current satno (automatic if text is empty).
     """
-    from spectre.astro.notso import (
-        correlate_notsos_with_manoeuvres,
-        extract_behaviour_profile,
-    )
-
     state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
@@ -1335,28 +1354,7 @@ async def pol_notso_correlate(
     notsos, rejects, source_label = loaded
 
     try:
-        # A NOTSO follows human analysis and is deliberately withheld for
-        # small routine burns, so the routine per-burn ceiling for this
-        # object's regime is the line below which no notice is expected.
-        reportable_m_s, _ = per_event_station_keeping_m_s(
-            str(getattr(pol, "regime", "") or ""),
-        )
-        # notso.py is an astro module and works in km/s; the calibration is
-        # m/s. This is the conversion, in that direction, and it is the only
-        # one on this path.
-        reportable_km_s = reportable_m_s / 1000.0
-        correlations = correlate_notsos_with_manoeuvres(
-            notsos, _all_detections(pol), pol.satno
-        )
-
-        start, end = _analysis_window(pol)
-        profile = (
-            extract_behaviour_profile(
-                pol.satno, correlations, start, end,
-                reportable_threshold_km_s=reportable_km_s,
-            )
-            if (start and end) else None
-        )
+        correlations, profile = notso_behaviour_profile(pol, notsos)
 
         state.append_log(
             f"[NOTSO] Correlated {len(notsos)} NOTSOs ({source_label}) for {pol.satno}: "
