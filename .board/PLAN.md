@@ -1,15 +1,9 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.24: 1 items, 300 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 5h00 to 5h00 (middle 5h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-142       300m  priority med; anchors the release
-  lane 1 (300m): SPC-142
-
-tooling: 7 items, 1320 priced min, 22h00 of build; ships no store artefact, so carries no release overhead
+tooling: 6 items, 1200 priced min, 20h00 of build; ships no store artefact, so carries no release overhead
     SPC-013       180m
     SPC-070       180m
     SPC-071       240m
-    SPC-152       120m
     SPC-010       240m
     SPC-073       240m
     SPC-074       120m

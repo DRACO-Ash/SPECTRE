@@ -797,7 +797,7 @@
   "group": "decision",
   "minutes": 480,
   "task": "Phase 4: multi-turn game tree, 1 to 3 turns",
-  "note": "GameNode and recursive evaluation. Turn 2 starts from the propagated states turn 1 left, so it needs computed responses and custody first. Branch count capped and inside the time budget. Built in 0.23.0; the design's 11 choices (D1 to D11) are recorded in docs/decision_engine_phases.md for the owner.",
+  "note": "GameNode and recursive evaluation. Turn 2 starts from the propagated states turn 1 left, so it needs computed responses and custody first. Branch count capped and inside the time budget. Built in 0.23.0; the choices are numbered D1 to D15 (from 0.24.0) and recorded in docs/decision_engine_phases.md for the owner.",
   "deps": [
    "SPC-121",
    "SPC-123",
@@ -846,7 +846,11 @@
    "spectre/web/templates/partials/decision_panel.html",
    "spectre/web/templates/partials/decision_results.html",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.24.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-150",
@@ -899,7 +903,11 @@
    "docs/decision_engine_phases.md",
    "docs/generate_guide.py"
   ],
-  "track": "tooling"
+  "track": "tooling",
+  "state": "built",
+  "est": 120,
+  "version": "0.24.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-009",

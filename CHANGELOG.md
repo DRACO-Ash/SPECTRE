@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-04
+
+**Operator output: 4, the recommended response, shows its game tree, and the operator guide describes the Decision Engine as it is built.**
+
+### Added
+- The game tree's view. The decision panel takes a turn depth of 1 to 3, refused inline when the tree would not fit, naming the largest that would, and an optional statement of what turn 1 shows (a burn, no burn or nothing), refused on a one-turn evaluation. The results show the tree as nested sections: each branch with its figures and their basis in words, the path it rests on, times no finer than their uncertainty, and whether it is on the recommended plan; the per-turn recommendation for the rule in use; under expected value the update with its likelihood model and the stated observation, or a line saying none was stated; under minimax and minimin what each turn lets us see, and that the rule reads no probability. A partial tree names the deepest turn built in full (SPC-142).
+
+### Changed
+- The Decision Engine section of the operator guide and `docs/decision_engine_phases.md` are rewritten to describe the engine as built, with its design choices numbered D1 to D15. The guide no longer lists MAXIMIN, adds Minimin and Game Tree, and its bullets are ● and ■ throughout (SPC-152).
+
+### Fixed
+- The 0.23.0 entry above described the game tree's design, not its code: the selectors pick over information sets, and the update reads custody at each turn's end with likelihoods of 1 or 0. It is corrected.
+
 ## [0.23.0] - 2026-11-04
 
 **Operator output advanced: 4, the recommended response, can now look up to three turns ahead; and two defects found by new tests are fixed.**
