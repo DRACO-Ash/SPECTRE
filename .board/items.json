@@ -181,10 +181,14 @@
   "minutes": 240,
   "track": "tooling",
   "task": "UDL route integration tests with mocked httpx: login, TLE, state vector, NOTSO",
-  "note": "Old TODO P2-D. Measured 66.5% on 2026-10-28, second lowest module. The live data path.",
+  "note": "Old TODO P2-D. Measured 66.5% on 2026-10-28, second lowest module. The live data path. Built: 85.5 to 99.8 per cent; found a refused state vector fetch giving no advice or log detail.",
   "files": [
    "tests/integration/test_udl_routes.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-012",
@@ -194,11 +198,15 @@
   "minutes": 240,
   "track": "tooling",
   "task": "Lift test coverage on the pattern-of-life route",
-  "note": "Measured 59.9% on 2026-10-28, the lowest module in spectre/.",
+  "note": "Measured 59.9% on 2026-10-28, the lowest module in spectre/. Built: 69.7 to 100 per cent; found the Pattern of Life chart returning a 500 whenever an analysis was loaded.",
   "files": [
    "tests/integration/test_pol_routes.py"
   ],
-  "distinctFrom": "SPC-010"
+  "distinctFrom": "SPC-010",
+  "state": "built",
+  "est": 240,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-013",
@@ -224,7 +232,11 @@
   "note": "Measured 92.05% total on 2026-10-28 against fail_under 74: the floor no longer guards anything. 90 leaves headroom for SQLite and PostgreSQL differences.",
   "files": [
    "pyproject.toml"
-  ]
+  ],
+  "state": "built",
+  "est": 30,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-020",

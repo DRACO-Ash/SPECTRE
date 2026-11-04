@@ -11,10 +11,7 @@ V0.24: 1 items, 300 priced min, gates browser, container, lint, quality, sast, t
     SPC-142       300m  priority med; anchors the release
   lane 1 (300m): SPC-142
 
-tooling: 10 items, 1830 priced min, 30h30 of build; ships no store artefact, so carries no release overhead
-    SPC-014        30m
-    SPC-011       240m
-    SPC-012       240m
+tooling: 7 items, 1320 priced min, 22h00 of build; ships no store artefact, so carries no release overhead
     SPC-013       180m
     SPC-070       180m
     SPC-071       240m
