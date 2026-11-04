@@ -37,7 +37,9 @@ is LOW or the range too wide to call.
 The adapters at the end (SPC-165) read what SPECTRE already holds, the
 intel record, the GCAT entry and the element-set history with its Pattern
 of Life reading, and build the items of section 5; a manoeuvre-attributable
-approach from ``interaction_graph`` becomes Interactions evidence (SPC-172).
+approach from ``interaction_graph`` becomes Interactions evidence: a warning
+change (SPC-172), a closest approach or a UDL conjunction (SPC-173), and a
+path to a hostile seed, floor MEDIUM at most (SPC-174).
 The sweep runs the model beside the legacy verdict, in shadow (SPC-166),
 and lets it move one thing live: decide-by is withheld only on a computed
 MINIMAL ceiling the evidence has earned (SPC-167), never on a recorded
@@ -59,7 +61,7 @@ from enum import Enum, IntEnum
 from typing import Any
 
 from spectre.domain.custody import Custody, age_text
-from spectre.domain.interaction_graph import Edge
+from spectre.domain.interaction_graph import MAX_HOPS, Edge, MissEdge, MissSource, SeedPath
 from spectre.domain.manoeuvre_calibration import Posture
 from spectre.domain.normality import Normality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import STANDARD_GRAVITY_M_S2, anomaly_risk_level
@@ -120,6 +122,7 @@ __all__ = [
     "landing_cues",
     "manual_extraction",
     "missing",
+    "propagation_items",
     "provider_grade",
     "reading_text",
     "record_date",
@@ -242,8 +245,12 @@ class EvidenceItem:
     *floor_to* is the floor this item would raise the threat to, *ceiling_to*
     the ceiling it would lower it to; at most one is set. *derived_from* is
     the root of its source chain: items sharing a dimension and a root are
-    one group and count once. What an item may claim is refused at
-    construction (section 4.6, 5.1 and 5.2), so no adapter can build a wrong one.
+    one group and count once. *counts_with* is the root of another chain
+    this item derives from: its coverage counts once with that chain's, so a
+    derivative never earns a dimension the evidence it rests on could not,
+    while its own reading still leads its own group. What an item may claim
+    is refused at construction (section 4.6, 5.1 and 5.2), so no adapter can
+    build a wrong one.
     """
 
     dimension: Dimension
@@ -261,6 +268,7 @@ class EvidenceItem:
     routine: bool = False             # a ROUTINE normality verdict: coverage only
     impaired_status: bool = False     # a status saying the object cannot manoeuvre
     note: str = ""
+    counts_with: str = ""             # the chain its coverage counts once with; "" for its own
 
     def __post_init__(self) -> None:
         problems = (
@@ -300,6 +308,11 @@ class EvidenceItem:
         source, so together they count once and can never earn a dimension.
         """
         return self.dimension, _OPERATOR_ROOT if self.manufacturable else self.derived_from
+
+    @property
+    def cover_group(self) -> tuple[Dimension, str]:
+        """The group its coverage counts in: its own, or the chain it derives from (*counts_with*)."""
+        return (self.dimension, self.counts_with) if self.counts_with else self.group
 
     @property
     def has_reading(self) -> bool:
@@ -393,7 +406,7 @@ def _noisy_or(values: Iterable[float]) -> float:
 def _group_bests(qs: Iterable[tuple[EvidenceItem, float]]) -> dict[tuple[Dimension, str], float]:
     best: dict[tuple[Dimension, str], float] = {}
     for item, q in qs:
-        best[item.group] = max(q, best.get(item.group, 0.0))
+        best[item.cover_group] = max(q, best.get(item.cover_group, 0.0))
     return best
 
 
@@ -575,7 +588,7 @@ def _canonical(item: EvidenceItem) -> tuple[object, ...]:
     return (
         list(Dimension).index(item.dimension), item.derived_from, item.label, epoch, item.source_grade,
         item.credibility, item.extraction, item.basis.value, _band_key(item.floor_to), _band_key(item.ceiling_to),
-        item.manufacturable, item.controlled, item.routine, item.impaired_status, item.note,
+        item.manufacturable, item.controlled, item.routine, item.impaired_status, item.note, item.counts_with,
     )
 
 
@@ -645,10 +658,10 @@ class _Engine:
         return self._leaders[at]
 
     def bests(self, members: frozenset[int]) -> dict[tuple[Dimension, str], int]:
-        """The strongest item of each group now, for coverage; the first in canonical order on a tie."""
+        """The strongest item of each coverage group now; the first in canonical order on a tie."""
         best: dict[tuple[Dimension, str], int] = {}
         for i in sorted(members):
-            group = self.items[i].group
+            group = self.items[i].cover_group
             if group not in best or self.q(i, self.now) > self.q(best[group], self.now):
                 best[group] = i
         return best
@@ -792,7 +805,11 @@ class _Ledger:
     def coverage_status(self, index: int) -> tuple[Status, str]:
         if index in self.counted:
             return Status.COUNTED, ""
-        best = self.outcome.bests[self.engine.items[index].group]
+        item = self.engine.items[index]
+        best = self.outcome.bests[item.cover_group]
+        if item.counts_with and index in self.outcome.in_effect:
+            # Its reading applies; only its coverage folds into the chain it derives from.
+            return Status.COUNTED, f"its coverage counts once, with {self.label(best)}"
         return Status.FOLDED, f"same source chain as {self.label(best)}; not counted again"
 
     def unapplied(self, index: int) -> tuple[Status, str]:
@@ -916,7 +933,7 @@ def _information_base(result: ThreatRange) -> tuple[Understanding, str]:
     # A chain, or a grade, stands only on an item that covers its dimension at least
     # partially now: a rejected detection or a long-decayed figure is held, not founded on.
     held = [r for r in result.ledger if r.status not in _REMOVED and r.q >= PARTIAL]
-    chains = {r.item.group[1] for r in held}
+    chains = {r.item.cover_group[1] for r in held}
     graded = any(r.item.dimension in _RESET_DIMENSIONS and r.item.source_grade in _WELL_GRADED for r in held)
     needs = [Dimension.CAPABILITY, Dimension.BEHAVIOUR]
     if not earned & {Dimension.IDENTITY, Dimension.INTERACTIONS}:
@@ -1137,6 +1154,21 @@ _APPROACH_ROOT = "approach:"
 _APPROACH_OURS = "one of yours: a confirmed burn within 7 days brought it in reach sooner"
 _APPROACH_NOT_OURS = "not one of yours: coverage only"
 _APPROACH_ROUTINE = "one of yours, but every burn it rests on was judged routine: coverage only"
+#: A manoeuvre-attributable closest approach under 50 km reads floor MEDIUM (section 4.6), to any target.
+_MISS_FLOOR: Band = Band.MEDIUM
+_MISS_OURS = "one of yours: a confirmed burn within 7 days brought it closer than before"
+_MISS_NOT_OURS = "not one of yours: a confirmed burn within 7 days brought it closer than before"
+_MISS_ROUTINE = "every burn it rests on was judged routine: coverage only"
+# A UDL conjunction is a probe: the field names SPECTRE reads are inferred from UDL's
+# published API and unverified (SPC-033), and the record's originator is not read.
+# So it is graded C3 with half extraction, below a reading's threshold even fresh,
+# and all from one lookup count once. Tuned, not sourced.
+_CONJUNCTION_GRADE = "C"
+_CONJUNCTION_CREDIBILITY = 3
+_PROBE_EXTRACTION = 0.5
+_CONJUNCTION_ROOT = "conjunction:"
+_PROBE_NOTE = ("a UDL conjunction probe: its field names are inferred and unverified (SPC-033), so it is graded "
+               "as a probe")
 
 
 @dataclass(frozen=True)
@@ -1417,8 +1449,7 @@ def _approach_item(edge: Edge, grades: Mapping[str, str], judged: Mapping[dateti
     judged ROUTINE is coverage only (I9); a routine burn beside a hostile
     one lowers nothing, as ROUTINE never does.
     """
-    provider = min((b.provider for b in edge.burns),
-                   key=lambda p: (SOURCE_RELIABILITY[provider_grade(p, grades)], source_chain(p)))
+    provider = _weakest_provider(edge, grades)
     grade = provider_grade(provider, grades)
     routine = all(judged.get(b.epoch) is Normality.ROUTINE for b in edge.burns)
     return EvidenceItem(
@@ -1432,20 +1463,125 @@ def _approach_item(edge: Edge, grades: Mapping[str, str], judged: Mapping[dateti
     )
 
 
-def interaction_items(edges: Iterable[Edge], grades: Mapping[str, str] = PROVIDER_GRADES, *,
+def _weakest_provider(edge: Edge | MissEdge, grades: Mapping[str, str]) -> str:
+    return min((b.provider for b in edge.burns),
+               key=lambda p: (SOURCE_RELIABILITY[provider_grade(p, grades)], source_chain(p)))
+
+
+def _miss_note(edge: MissEdge, routine: bool) -> str:
+    whose = _MISS_ROUTINE if routine else (_MISS_OURS if edge.ours else _MISS_NOT_OURS)
+    if edge.source is not MissSource.UDL:
+        return whose
+    return f"{'one of yours' if edge.ours else 'not one of yours'}; {_PROBE_NOTE}"
+
+
+def _miss_item(edge: MissEdge, grades: Mapping[str, str], judged: Mapping[datetime, Normality]) -> EvidenceItem:
+    """One close approach under 50 km, closer than before its burn: floor MEDIUM (section 4.6).
+
+    A computed one is graded as a warning change is and shares its source
+    chain, the burns it rests on. A UDL conjunction is no stronger than the
+    probe it came from, nor than the burns it rests on.
+    """
+    provider = _weakest_provider(edge, grades)
+    grade = provider_grade(provider, grades)
+    extraction = min(burn_extraction(_grade_of(b.detection), long_gap=b.long_gap) for b in edge.burns)
+    routine = all(judged.get(b.epoch) is Normality.ROUTINE for b in edge.burns)
+    shared: dict[str, Any] = {"source_grade": grade, "credibility": _PROVIDER_CREDIBILITY, "basis": Basis.COMPUTED,
+                              "derived_from": f"{_APPROACH_ROOT}{edge.actor}:{source_chain(provider)}"}
+    if edge.source is MissSource.UDL:
+        shared = {"source_grade": min((grade, _CONJUNCTION_GRADE), key=lambda g: SOURCE_RELIABILITY[g]),
+                  "credibility": _CONJUNCTION_CREDIBILITY, "basis": Basis.LOOKUP,
+                  "derived_from": f"{_CONJUNCTION_ROOT}{edge.actor}"}
+        extraction = min(extraction, _PROBE_EXTRACTION)
+    return EvidenceItem(
+        dimension=Dimension.INTERACTIONS,
+        label=f"{_MISS_LABEL[edge.source]} {edge.target} {edge.after_km:,.1f} km after its burn, "
+              f"{edge.before_km:,.1f} km before",
+        extraction=extraction, observed_at=edge.burn_at, floor_to=None if routine else _MISS_FLOOR,
+        controlled=shared["source_grade"] in _CONTROLLED_GRADES, routine=routine, note=_miss_note(edge, routine),
+        **shared,
+    )
+
+
+_MISS_LABEL: dict[MissSource, str] = {
+    MissSource.COMPUTED: "closest approach to", MissSource.UDL: "UDL conjunction with",
+}
+#: Propagation from a hostile seed reads floor MEDIUM at most (section 4.6 and 4.9).
+_SEED_FLOOR: Band = Band.MEDIUM
+#: Every path from one object counts once, so a seed cluster reached through one edge is not counted once per seed.
+_SEED_ROOT = "seed:"
+#: Each hop halves the q of the weakest edge on the path (section 4.9). Tuned, not sourced.
+_HOP_FACTOR = 0.5
+_SEED_WHOSE = {1: "it approached", 2: "an object it approached approached"}
+_SEED_NOTE = "an analyst-adjudicated hostile seed {whose}; propagation sets the Threat floor to MEDIUM at most"
+_SEED_ROUTINE = "every burn its own approach rests on was judged routine: coverage only"
+
+
+def interaction_items(edges: Iterable[Edge | MissEdge], grades: Mapping[str, str] = PROVIDER_GRADES, *,
                       judged: Iterable[HeldBurn] = (),
                       hours: Callable[[float], str] = age_text) -> tuple[EvidenceItem, ...]:
     """Section 5.4: each manoeuvre-attributable approach (``domain/interaction_graph.py``) as Interactions evidence.
 
-    One that brought one of ours in reach, or in reach sooner, reads floor
-    HIGH; one to any other target is coverage only. Either is a reading only
-    once Interactions is earned, as any reading is (section 4.6). *judged*
-    are the held history's burns with their normality verdicts: an approach
-    resting only on ROUTINE burns moves no band (I9). *hours* writes a
-    warning; a panel passes the format its warning section uses.
+    A warning change that brought one of ours in reach, or in reach sooner,
+    reads floor HIGH; one to any other target is coverage only. A close
+    approach under 50 km and closer than before its burn reads floor MEDIUM
+    to any target, as section 4.6 reads it; a UDL conjunction is graded as
+    the probe it is. Each is a reading only once Interactions is earned, as
+    any reading is (section 4.6). *judged* are the held history's burns with
+    their normality verdicts: an approach resting only on ROUTINE burns moves
+    no band (I9). *hours* writes a warning; a panel passes the format its
+    warning section uses.
     """
     verdicts = {b.epoch: b.normality for b in judged}
-    return tuple(_approach_item(edge, grades, verdicts, hours) for edge in edges)
+    return tuple(_edge_item(edge, grades, verdicts, hours) for edge in edges)
+
+
+def _edge_item(edge: Edge | MissEdge, grades: Mapping[str, str], judged: Mapping[datetime, Normality],
+               hours: Callable[[float], str]) -> EvidenceItem:
+    if isinstance(edge, MissEdge):
+        return _miss_item(edge, grades, judged)
+    return _approach_item(edge, grades, judged, hours)
+
+
+def _propagation_item(path: SeedPath, at: datetime, grades: Mapping[str, str],
+                      judged: Mapping[datetime, Normality], hours: Callable[[float], str]) -> EvidenceItem:
+    """One path to a hostile seed: the weakest edge's grades, its extraction halved for each hop, floor MEDIUM.
+
+    The label names the edge the object flew, not the seed: the seed list may
+    be classified (section 9, decision 5), so the page names no seed beyond
+    the object the operator already sees approached.
+    """
+    items = [_edge_item(edge, grades, judged, hours) for edge in path.edges]
+    weakest = min(items, key=lambda item: reliability(item, at))
+    routine = items[0].routine
+    plural = "" if path.hops == 1 else "s"
+    return replace(
+        weakest,
+        label=f"{path.hops} hop{plural} from a hostile seed, through {path.edges[0].target}",
+        derived_from=f"{_SEED_ROOT}{path.edges[0].actor}", counts_with=items[0].derived_from,
+        extraction=weakest.extraction * _HOP_FACTOR ** path.hops,
+        floor_to=None if routine else _SEED_FLOOR, routine=routine,
+        note=_SEED_ROUTINE if routine else _SEED_NOTE.format(whose=_SEED_WHOSE[path.hops]),
+    )
+
+
+def propagation_items(paths: Iterable[SeedPath], at: datetime, grades: Mapping[str, str] = PROVIDER_GRADES, *,
+                      judged: Iterable[HeldBurn] = (),
+                      hours: Callable[[float], str] = age_text) -> tuple[EvidenceItem, ...]:
+    """Section 4.9: each path to a hostile seed (``interaction_graph.seed_paths``) as Interactions evidence.
+
+    Its q is the weakest edge's on the path at *at*, halved for each hop, so
+    q = q_edge x 0.5^hops; it ages with that edge. Its reading is floor MEDIUM
+    at most, so one edge never lifts the floor past MEDIUM through
+    propagation, and like any reading it applies only in an earned
+    dimension with its own q high enough. Every path from one object is one
+    group, and its coverage counts once with its first edge's, the object's
+    own: the path rests on that edge's burns, so it earns nothing the edge
+    could not. A path whose first edge rests only on burns judged ROUTINE is
+    coverage only (I9). A benign seed makes no path, so it adds nothing.
+    """
+    verdicts = {b.epoch: b.normality for b in judged}
+    return tuple(_propagation_item(path, at, grades, verdicts, hours) for path in paths if path.hops <= MAX_HOPS)
 
 
 def window_custody(signals: HistorySignals, now: datetime, elset_limit_hours: float) -> Custody:
@@ -1594,9 +1730,11 @@ def earned_incapacity(result: ThreatUnderstanding) -> LedgerRow | None:
 # analyst whatever Identity's coverage, as contrast B of section 4.12 ranks it.
 # Every cue is worked out and ranked, but only a fed one can deliver what it
 # names today: the sweep's warning change is Interactions evidence since
-# SPC-172, but nothing turns a UDL conjunction into evidence until SPC-173,
-# and the sweep holds one merged history per object (section 9, decision 8),
-# so a second provider's history has nowhere to go yet.
+# SPC-172. A UDL conjunction is evidence since SPC-173, but only as a probe
+# (C3, half extraction: it can move no band), so the conjunction cue, which
+# models a confirmed conjunction reading, stays unfed until SPC-033 verifies
+# the contract. The sweep holds one merged history per object (section 9,
+# decision 8), so a second provider's history has nowhere to go yet.
 
 #: The roots the held signals arrive under, as the adapters above name them.
 _HISTORY_ROOT = "elset-history:"

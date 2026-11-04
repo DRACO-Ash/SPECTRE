@@ -11,6 +11,12 @@ objects and not this one. A figure that is not a finite number in range is
 shown as unreadable rather than guessed, and a reply of any other shape
 yields nothing rather than an exception. Names arrive from UDL and are untrusted (audit
 F-038); they are kept as plain text here and escaped by the template.
+
+Interactions (SPC-173) reads the miss distance a second way, as a figure in
+kilometres: a number, or a string holding nothing but a number, in metres or
+a stated unit of metres or kilometres. Anything else is refused with a reason
+that never repeats UDL's text. The field names are inferred and unverified
+(SPC-033), so Interactions grades a conjunction as a probe.
 """
 
 from __future__ import annotations
@@ -47,6 +53,14 @@ _NESTED_PREFIXES = ("sat", "stateVector")
 # its own unit overrides that, and the panel shows whichever applies.
 _DEFAULT_MISS_UNIT = "m"
 _UNIT_LIMIT = 16
+#: The units Interactions reads a miss distance in, as kilometres per unit; any other is refused.
+_KM_PER_UNIT: dict[str, float] = {
+    "m": 0.001, "metre": 0.001, "metres": 0.001, "meter": 0.001, "meters": 0.001,
+    "km": 1.0, "kilometre": 1.0, "kilometres": 1.0, "kilometer": 1.0, "kilometers": 1.0,
+}
+_NO_MISS = "UDL filed no miss distance"
+_NOT_A_MISS = "the miss distance UDL filed is not a finite, non-negative number"
+_UNKNOWN_UNIT = "the miss distance UDL filed is in a unit SPECTRE does not read"
 
 NOT_GIVEN = "not given"
 UNREADABLE = "unreadable"
@@ -62,6 +76,9 @@ class ConjunctionRow:
     miss_distance: str
     collision_prob: str
     data_mode: str
+    #: The miss distance as a figure for Interactions, None when refused, and *miss_problem* says why.
+    miss_km: float | None = None
+    miss_problem: str = ""
 
     @property
     def tca_text(self) -> str:
@@ -147,6 +164,22 @@ def _miss_distance(rec: dict[str, Any]) -> str:
     return f"{value:,.{places}f} {unit}"
 
 
+def _miss_km(rec: dict[str, Any]) -> tuple[float | None, str]:
+    """The miss distance in kilometres, or None and why: unfiled, not a number, or in a unit not read."""
+    raw = _first(rec, _MISS_KEYS)
+    if raw is None:
+        return None, _NO_MISS
+    value = _finite(raw)
+    if value is None or value < 0:
+        return None, _NOT_A_MISS
+    stated = _first(rec, _MISS_UNIT_KEYS)
+    # A blank unit is no unit, as the panel reads it: one figure, one reading.
+    unit = ("" if stated is None else str(stated).strip().lower()) or _DEFAULT_MISS_UNIT
+    if unit not in _KM_PER_UNIT:
+        return None, _UNKNOWN_UNIT
+    return value * _KM_PER_UNIT[unit], ""
+
+
 def _collision_prob(rec: dict[str, Any]) -> str:
     raw = _first(rec, _PROB_KEYS)
     if raw is None:
@@ -206,6 +239,7 @@ def _other_side(rec: dict[str, Any], satno: int, found_by: str) -> int | None:
 
 def _row(rec: dict[str, Any], tca: datetime, other: int, fallback_mode: str) -> ConjunctionRow:
     name = _first(_nested(rec, other), _NAME_KEYS)
+    miss_km, miss_problem = _miss_km(rec)
     return ConjunctionRow(
         other_satno=_side_satno(rec, other),
         other_name="" if name is None else str(name).strip(),
@@ -213,6 +247,8 @@ def _row(rec: dict[str, Any], tca: datetime, other: int, fallback_mode: str) -> 
         miss_distance=_miss_distance(rec),
         collision_prob=_collision_prob(rec),
         data_mode=str(rec.get("dataMode") or fallback_mode).strip().upper(),
+        miss_km=miss_km,
+        miss_problem=miss_problem,
     )
 
 

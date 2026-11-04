@@ -118,6 +118,15 @@ class TestInformationBase:
         assert rating.information_base is Understanding.MODERATE
         assert _why(rating, "information base") == "one source chain only"
 
+    def test_an_item_that_counts_with_a_chain_is_not_a_second_source_chain(self) -> None:
+        """SPC-174 review finding 1: a propagation item rests on its edge's burns, so it adds no chain of its own."""
+        one_chain = [replace(i, derived_from="elset-history:UDL") for i in (_IDENTITY, _CAPABILITY, _BEHAVIOUR)]
+        derived = _item(dimension=Dimension.INTERACTIONS, label="1 hop from a hostile seed", derived_from="seed:1",
+                        counts_with="elset-history:UDL")
+        rating = _assess([*one_chain, derived]).understanding
+        assert rating.information_base is Understanding.MODERATE
+        assert _why(rating, "information base") == "one source chain only"
+
     def test_an_a_grade_with_no_standing_is_not_a_well_graded_source(self) -> None:
         graded_c = [_IDENTITY, *(replace(i, source_grade="C", credibility=1, extraction=1.0)
                                  for i in (_CAPABILITY, _BEHAVIOUR))]

@@ -33,6 +33,7 @@ from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.elsets import elset_age, limit_hours_for_regime
 from spectre.web.format_units import to_m_s
+from spectre.web.interaction_store import held_interactions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
@@ -216,7 +217,7 @@ async def pol_panel(
         "error": None,
     }
     if pol is not None:
-        context.update(_pol_view(pol, reserve_reset_for(state, pol.satno)))
+        context.update(_pol_view(pol, reserve_reset_for(state, pol.satno), state=state))
         context.setdefault("source", "UDL")
         context.setdefault("pair", get_intel(pol.satno))
     return render(request, _POL_PANEL_TEMPLATE, context)
@@ -549,7 +550,7 @@ async def pol_analyse(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol, reserve_reset_for(state, satno)),
+        **_pol_view(pol, reserve_reset_for(state, satno), state=state),
     })
 
 
@@ -643,28 +644,32 @@ def _utc_now() -> datetime:
 
 
 def _object_understanding(pol: Any, assessment: PolAssessment, custody: CustodyStatus | None,
-                          now: datetime) -> dict[str, object] | None:
+                          now: datetime, state: object = None) -> dict[str, object] | None:
     """What is understood about the analysed object (SPC-168): the strip the sweep shows for it, and more.
 
     Built from this panel's own reading of the history, its custody and its
     normality, the values that set volatility, and from the record and the
-    GCAT row already held. Nothing is fetched.
+    GCAT row already held. The approaches and seed paths are the ones the
+    session holds for it (SPC-173, SPC-174), as the sweep and the intel card
+    read them, so the object reads the same on every panel. Nothing is fetched.
     """
     satno = str(getattr(pol, "satno", "") or "")
     try:
         signals = tu.history_signals(pol, assessment)
         records = getattr(pol, "records", None) or []
         data_mode = str(getattr(records[-1], "data_mode", "") or "") or None
+        interactions = held_interactions(state, satno, now)
     # BLE001: a history the model cannot read leaves the panel standing.
     except Exception as exc:  # noqa: BLE001
         logger.warning("Threat Understanding failed for %s: %s", log_safe(satno), log_safe(exc))
         return None
     held = HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
-                      custody=custody.state if custody is not None else Custody.LOST)
+                      custody=custody.state if custody is not None else Custody.LOST,
+                      interactions=interactions.edges, notes=interactions.notes, seed_paths=interactions.paths)
     return object_view(held, now, regime=str(getattr(pol, "regime", "") or ""), data_mode=data_mode)
 
 
-def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
+def _pol_view(pol: object, reserve_reset: datetime | None = None, *, state: object = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
     THIS IS THE UNIT BOUNDARY for the pattern-of-life panel. ``pol`` is an
@@ -713,7 +718,7 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
                            for v, n in zip(assessment.manoeuvres, normality, strict=True)],
         "latest_burn": latest_burn,
         "custody": custody,
-        "object_understanding": _object_understanding(pol, assessment, custody, now),
+        "object_understanding": _object_understanding(pol, assessment, custody, now, state),
         "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
                            for v in assessment.candidates],
         "detection": _detection_view(pol),
@@ -991,7 +996,7 @@ async def pol_reserve_reset(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol, resets.get(satno)),
+        **_pol_view(pol, resets.get(satno), state=state),
     })
 
 

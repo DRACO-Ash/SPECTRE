@@ -120,3 +120,46 @@ def elset_closest_approach(red_tle: str, blue_tle: str, window: SeparationWindow
     except _SideFailedError as failed:
         return ElsetFailure(failed.side, "propagation")
     return ElsetApproach(approach=approach, closing_speed_km_s=speed, window=window)
+
+
+class BurnApproach(NamedTuple):
+    """The red object's closest approach to one blue set from before a burn and from after it (SPC-173).
+
+    *margin_km* is the position error the two misses carry between them: for each, the sweep's assumed error of
+    the red set and of the blue set aged to that TCA (SPC-118), added as the worst case. A miss that shrank by
+    no more than this is not shown to be closer.
+    """
+
+    before: ElsetApproach
+    after: ElsetApproach
+    margin_km: float
+
+    @property
+    def after_tca(self) -> datetime:
+        """When the approach after the burn happens."""
+        return _tca(self.after)
+
+
+def _tca(found: ElsetApproach) -> datetime:
+    return found.window.start_utc + timedelta(seconds=found.approach.tca_s)
+
+
+def _separation_error_km(red: tuple[str, datetime], blue: tuple[str, datetime], at: datetime) -> float:
+    return elset_position_error_km(red[0], red[1], at) + elset_position_error_km(blue[0], blue[1], at)
+
+
+def burn_approach(red_before: tuple[str, datetime], red_after: tuple[str, datetime], blue: tuple[str, datetime],
+                  window: SeparationWindow) -> BurnApproach | ElsetFailure:
+    """The closest approach of the red set from before a burn, and of the one from after it, to *blue* over *window*.
+
+    Each argument is an element set and its epoch. Before is flown across the window as if the burn had not
+    happened. Refused, naming the side, as elset_closest_approach refuses either search.
+    """
+    before = elset_closest_approach(red_before[0], blue[0], window)
+    if isinstance(before, ElsetFailure):
+        return before
+    after = elset_closest_approach(red_after[0], blue[0], window)
+    if isinstance(after, ElsetFailure):
+        return after
+    margin = _separation_error_km(red_before, blue, _tca(before)) + _separation_error_km(red_after, blue, _tca(after))
+    return BurnApproach(before=before, after=after, margin_km=margin)

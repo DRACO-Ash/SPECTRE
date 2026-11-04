@@ -64,7 +64,7 @@ class TestTheShadowIsOnTheSweep:
     ) -> None:
         _stub_udl(monkeypatch, [25.0] * 7 + [150.0])
         shown = _sweep(client, auth_cookie)
-        monkeypatch.setattr(threat, "_with_understanding", lambda worst, _u: worst)
+        monkeypatch.setattr(threat, "_with_understanding", lambda worst, _u, _notes=(): worst)
         without = _sweep(client, auth_cookie)
         assert 'class="threat-understanding"' not in without
         # The same verdict word and band; Understanding LOW only outlines it (SPC-168), and with no

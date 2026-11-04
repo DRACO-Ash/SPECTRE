@@ -13,6 +13,7 @@ import logging
 import math
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
@@ -88,6 +89,7 @@ from spectre.domain.warning_change import (
     when_burned,
     worst_change,
 )
+from spectre.web import interaction_store
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
@@ -1608,24 +1610,26 @@ def _red_capability_from(red_satno: str | None, history: _RedHistory) -> Capabil
 
 
 def _red_evidence(red_satno: str | None, history: _RedHistory, custody: CustodyStatus,
-                  interactions: tuple[ig.Edge, ...] = ()) -> HeldObject | None:
+                  held: interaction_store.HeldInteractions | None = None) -> HeldObject | None:
     """What the sweep holds about the red object, for Threat Understanding (SPC-165), or None with no number.
 
     Its intel record, its GCAT entry if the catalogue is already cached, its
     element-set history if one arrived, with the history read once, and the
-    approaches its warning change attributes to a burn (SPC-172). No new
-    fetch is made for any of them.
+    approaches the session holds for it (SPC-172, SPC-173). No new fetch is
+    made for any of them.
     """
-    return _held_object(red_satno, history, custody.state, interactions) if red_satno else None
+    return _held_object(red_satno, history, custody.state, held) if red_satno else None
 
 
 def _held_object(satno: str, history: _RedHistory, custody: Custody,
-                 interactions: tuple[ig.Edge, ...] = ()) -> HeldObject:
+                 held: interaction_store.HeldInteractions | None = None) -> HeldObject:
     """What the sweep holds about *satno*: its record, its cached GCAT row, its history and its approaches."""
     signals = (tu.history_signals(history.pol, history.assessment)
                if history.pol is not None and history.assessment is not None else None)
+    interactions = held or interaction_store.HeldInteractions()
     return HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
-                      custody=custody, interactions=interactions)
+                      custody=custody, interactions=interactions.edges, notes=interactions.notes,
+                      seed_paths=interactions.paths)
 
 
 class _Red(NamedTuple):
@@ -1637,8 +1641,16 @@ class _Red(NamedTuple):
     history: _RedHistory
     custody: CustodyStatus
     context: ConfidenceContext
-    #: The approaches the sweep's warning change attributes to a burn of its own (SPC-172).
-    interactions: tuple[ig.Edge, ...] = ()
+    #: The approaches the session holds for it, each attributed to a burn of its own (SPC-172, SPC-173).
+    interactions: tuple[ig.Edge | ig.MissEdge, ...] = ()
+    #: What the ledger states about them: refusals, the UDL probe grade, the seed list (SPC-173, SPC-174).
+    notes: tuple[str, ...] = ()
+    #: Its paths to hostile seeds through the edges the session holds (SPC-174).
+    paths: tuple[ig.SeedPath, ...] = ()
+
+    @property
+    def held(self) -> interaction_store.HeldInteractions:
+        return interaction_store.HeldInteractions(edges=self.interactions, paths=self.paths, notes=self.notes)
 
 
 def _red_understanding(red: _Red, worst_coa: dict[str, Any] | None, now: datetime) -> tu.ThreatUnderstanding | None:
@@ -1665,7 +1677,7 @@ def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.Threa
 
     "No burns" is judged against what the worst case costs.
     """
-    held = _red_evidence(red.satno, red.history, red.custody, red.interactions)
+    held = _red_evidence(red.satno, red.history, red.custody, red.held)
     items = held.items(now, red.regime, float(worst_coa["dv"])) if held is not None else ()
     age = elset_age(red.tle, now)
     assessed = worst_coa["capability_level"] != "UNASSESSED"
@@ -1690,7 +1702,8 @@ def _red_object_view(state: object, satno: str | None, tle: str, data_mode: str 
         return None
     history, custody = _cached_history(state, satno, tle, now)
     regime = history.pol.regime if history.pol is not None else _regime_of_tle(tle)
-    return object_view(_held_object(satno, history, custody.state), now, regime=regime, data_mode=data_mode)
+    held = interaction_store.held_interactions(state, satno, now)
+    return object_view(_held_object(satno, history, custody.state, held), now, regime=regime, data_mode=data_mode)
 
 
 _NO_HISTORY_HELD = "No element-set history is held."
@@ -1720,7 +1733,9 @@ def _actor_range(state: object, verdict: ActorVerdict, regime: str, actor_tle: s
     satno = verdict.actor_satno
     history, custody = _cached_history(state, satno, actor_tle, now)
     mode = state.hrr_tle_data_mode.get(satno)  # type: ignore[attr-defined]
-    red = _Red(satno, actor_tle, regime, history, custody, ConfidenceContext(data_mode=mode, custody=custody.state))
+    interactions = interaction_store.held_interactions(state, satno, now)
+    red = _Red(satno, actor_tle, regime, history, custody, ConfidenceContext(data_mode=mode, custody=custody.state),
+               interactions.edges, interactions.notes, interactions.paths)
     assessment = verdict.assessment
     worst = {"dv": verdict.delta_v_m_s, "access_level": assessment.access_label,
              "threat_level": assessment.verdict_label, "capability_level": assessment.capability_label}
@@ -1738,17 +1753,20 @@ def _actor_range(state: object, verdict: ActorVerdict, regime: str, actor_tle: s
     )
 
 
-def _understanding_view(understanding: tu.ThreatUnderstanding) -> dict[str, Any]:
+def _understanding_view(understanding: tu.ThreatUnderstanding, notes: Sequence[str] = ()) -> dict[str, Any]:
     """Section 6.4 on the sweep, in shadow: the view every panel shares, with an intercept in view."""
-    return understanding_view(understanding)
+    return understanding_view(understanding, notes=notes)
 
 
 def _with_understanding(
-    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None,
+    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None, notes: Sequence[str] = (),
 ) -> dict[str, Any] | None:
-    """The worst case with the Threat Understanding beside it (SPC-166); every other key is left as it was."""
+    """The worst case with the Threat Understanding beside it (SPC-166); every other key is left as it was.
+
+    *notes* are what its ledger states about the red object's interactions (SPC-173, SPC-174).
+    """
     if worst_coa is not None and understanding is not None:
-        worst_coa["understanding"] = _understanding_view(understanding)
+        worst_coa["understanding"] = _understanding_view(understanding, notes)
     return worst_coa
 
 
@@ -2149,15 +2167,113 @@ def _interactions(change: WarningChange, history: _RedHistory, basis: _SweepBasi
     if change.status is not Status.FIGURES or history.pol is None or not red_satno:
         return ()
     try:
-        burns = [ig.Burn(epoch=m.burn_epoch, earliest=m.burn_window[0], latest=m.burn_window[1], confirmed=True,
-                         detection=str(m.confidence), provider=tu.source_chain(m.tle_after.source),
-                         long_gap=m.long_gap)
-                 for m in _window_burns(history.pol, basis)]
-        return ig.warning_edges(red_satno, change.rows, burns, basis.now)
+        satnos = {t.target_name: t.target_satno for t in basis.targets}
+        return tuple(replace(e, target_satno=satnos.get(e.target, ""))
+                     for e in ig.warning_edges(red_satno, change.rows, _flown_burns(history.pol, basis), basis.now))
     # BLE001: the shadow model's evidence must never take the sweep down with it.
     except Exception as exc:  # noqa: BLE001
         logger.warning("Interactions could not be read for %s: %s", log_safe(red_satno), log_safe(exc))
         return ()
+
+
+def _flown_burns(pol: Any, basis: _SweepBasis) -> list[ig.Burn]:
+    """The confirmed burns in the window as the edge rule reads them: the ones the warning change flew across."""
+    return [ig.Burn(epoch=m.burn_epoch, earliest=m.burn_window[0], latest=m.burn_window[1], confirmed=True,
+                    detection=str(m.confidence), provider=tu.source_chain(m.tle_after.source), long_gap=m.long_gap)
+            for m in _window_burns(pol, basis)]
+
+
+def _flown_tle(basis: _SweepBasis, target: ThreatTarget | None) -> str | None:
+    """The element set the sweep flew *target* with, from the sets it froze; None for a target it did not sweep."""
+    if target is None:
+        return None
+    if target.target_source == "manual":
+        return basis.manual_tle_by_name.get(target.target_name)
+    return basis.frozen.hrr_tle_cache.get(target.target_satno)
+
+
+def _computed_targets(change: WarningChange, basis: _SweepBasis) -> list[interaction_store.Target]:
+    """The targets in reach after the burn, soonest first, each with the element set it was flown with."""
+    by_name = {t.target_name: t for t in basis.targets}
+    rows = sorted((r for r in change.rows if r.after_h is not None), key=lambda r: (r.after_h, r.name))
+    return [interaction_store.Target(r.name, by_name[r.name].target_satno if r.name in by_name else "", r.ours,
+                                     _flown_tle(basis, by_name.get(r.name)))
+            for r in rows]
+
+
+_NOT_SEARCHED = "Closest approaches could not be computed on this sweep; the server log has the detail."
+
+
+def _red_computed(change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                  red_tle: str) -> tuple[tuple[ig.Miss, ...], tuple[str, ...]] | None:
+    """The closest approach to each target in reach, before and after the burns, or None with no figures (SPC-173).
+
+    Before is the red set from before the first burn the warning change flew
+    across; after is the set the sweep flew. Only sets the sweep already
+    holds are read; nothing is fetched. A failure is logged, and stated
+    without its detail, so the sweep stands.
+    """
+    if change.status is not Status.FIGURES or history.pol is None:
+        return None
+    flown = _window_burns(history.pol, basis)
+    if not flown:
+        return None
+    try:
+        return interaction_store.computed_misses(_flown_burns(history.pol, basis), flown[0].tle_before.tle, red_tle,
+                                                 _computed_targets(change, basis), basis.now)
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Closest approaches could not be computed: %s", log_safe(exc))
+        return (), (_NOT_SEARCHED,)
+
+
+def _history_burns(pol: Any) -> interaction_store.HistoryBurns | None:
+    """The confirmed burns the held history shows and when it starts, or None when it holds no element set."""
+    records = getattr(pol, "records", None) or []
+    if not records:
+        return None
+    return interaction_store.HistoryBurns(confirmed=frozenset(m.burn_epoch for m in pol.manoeuvres),
+                                          since=min(r.epoch for r in records))
+
+
+class _Learnt(NamedTuple):
+    """What the sweep learnt about the red object's approaches: its warning change and the closest approaches."""
+
+    change: WarningChange
+    computed: tuple[tuple[ig.Miss, ...], tuple[str, ...]] | None
+
+
+async def _sweep_interactions(state: object, change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                              red: tuple[str | None, str]) -> interaction_store.HeldInteractions:
+    """The sweep's one call for Interactions: search the closest approaches off the event loop, then hold them."""
+    red_satno, red_tle = red
+    computed = await asyncio.get_running_loop().run_in_executor(None, _red_computed, change, history, basis, red_tle)
+    return _hold_red_interactions(state, history, basis, red_satno, _Learnt(change, computed))
+
+
+def _hold_red_interactions(state: object, history: _RedHistory, basis: _SweepBasis, red_satno: str | None,
+                           learnt: _Learnt) -> interaction_store.HeldInteractions:
+    """Hold what this sweep learnt about the red object, and read back all the session holds for it (SPC-173).
+
+    Without a history there is nothing to judge, but edges an earlier sweep
+    held still count. A failure is logged and reads as none held, so the
+    sweep stands; the detail never reaches the page.
+    """
+    if not red_satno:
+        return interaction_store.HeldInteractions()
+    try:
+        if history.pol is None:
+            return interaction_store.held_interactions(state, red_satno, basis.now)
+        found = interaction_store.SweepFindings(
+            burns=tuple(_flown_burns(history.pol, basis)),
+            warning=_interactions(learnt.change, history, basis, red_satno), computed=learnt.computed,
+            blue_satnos=basis.blue_satnos, history=_history_burns(history.pol),
+        )
+        return interaction_store.sweep_interactions(state, red_satno, found, basis.now)
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Interactions could not be held for %s: %s", log_safe(red_satno), log_safe(exc))
+        return interaction_store.HeldInteractions()
 
 
 def _with_notso_cue(
@@ -2622,15 +2738,18 @@ async def threat_sweep(
     _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history=history,
                        history_task=history_task, flown=(custody, _flown_epoch(red_tle, now)))
     # Threat Understanding beside the verdict (SPC-166, shadow); it moves only decide-by (SPC-167).
-    # The approaches the warning change attributes to a burn are its Interactions evidence (SPC-172).
-    interactions = _interactions(warning_change, history, basis, red_satno)
+    # The approaches attributed to its burns are its Interactions evidence (SPC-172, SPC-173): held per object,
+    # so an edge from an earlier sweep still counts. The closest approaches run off the event loop.
+    held = await _sweep_interactions(state, warning_change, history, basis, (red_satno, red_tle))
     understanding = _red_understanding(
-        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context, interactions), worst_coa, now,
+        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context, held.edges, held.notes,
+             held.paths),
+        worst_coa, now,
     )
     decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
     # The engine reads this picture, so its range and deadline cannot disagree with the sweep's (SPC-171).
     hold_threat_picture(state, red_sat.strip(), understanding, decide, now)
-    worst_coa = _with_understanding(worst_coa, understanding)
+    worst_coa = _with_understanding(worst_coa, understanding, held.notes)
     worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
     state.last_threat_assessment = assessment

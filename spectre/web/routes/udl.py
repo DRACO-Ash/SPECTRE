@@ -25,6 +25,7 @@ from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.elsets import refresh_held_elsets
+from spectre.web.interaction_store import hold_conjunctions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import (
@@ -1353,6 +1354,8 @@ async def udl_conjunction(
         return render(request, _CONJUNCTION_TEMPLATE, {**context, "error": error})
 
     reading = read_conjunctions(pages, number, dm)
+    # Held for Interactions (SPC-173): the sweep judges these and never fetches them itself.
+    hold_conjunctions(state, number, reading, dm, datetime.now(UTC))
     state.append_log(f"[UDL] Conjunction lookup for SATNO {number}: {reading.usable} record(s)")
     logger.info(
         "Conjunction lookup for SATNO %s dataMode=%s by operator %s: %s usable, %s skipped, %s unrelated",

@@ -119,6 +119,9 @@ class SessionState:
     # for its red track (spectre.web.decision_threat, SPC-171), read by the
     # Decision Engine when it is bound to that red track.
     threat_picture: Any | None = None
+    # Interactions held per object between sweeps, and the conjunctions the
+    # operator looked up (spectre.web.interaction_store, SPC-173).
+    interaction_store: Any | None = None
     # The operator's response time in hours, for decide-by (SPC-008); None
     # until they set it, when the default is used and said to be the default.
     response_time_h: float | None = None

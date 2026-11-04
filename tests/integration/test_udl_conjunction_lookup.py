@@ -362,3 +362,25 @@ class TestTheConsole:
             '<option id="conjunction-tle-data-mode-session" value="" hx-swap-oob="innerHTML">'
             "Session mode (EXERCISE)</option>"
         ) in resp.text
+
+
+class TestTheLookupIsHeldForInteractions:
+    """SPC-173: the sweep judges conjunctions only as the operator looked them up; it never fetches."""
+
+    def test_what_was_read_is_held_for_the_object(self, client: Any, auth_cookie: str, udl: Any) -> None:
+        from spectre.web.interaction_store import interaction_store
+
+        udl_client, state = udl
+        state.interaction_store = None
+        udl_client.get = _by_side(_ok([_AS_SAT1]), _ok([_AS_SAT2]))
+        _get(client, auth_cookie, satno=_SATNO)
+        held = interaction_store(state).conjunctions[str(_SATNO)]
+        assert sorted(r.other_satno for r in held.rows) == ["33591", "48274"]
+        assert held.data_mode == "REAL"
+
+    def test_a_failed_lookup_holds_nothing_new(self, client: Any, auth_cookie: str, udl: Any) -> None:
+        udl_client, state = udl
+        state.interaction_store = None
+        udl_client.get = _by_side(_failing(500), _ok([]))
+        _get(client, auth_cookie, satno=_SATNO)
+        assert state.interaction_store is None

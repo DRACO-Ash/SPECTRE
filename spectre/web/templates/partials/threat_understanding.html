@@ -5,6 +5,8 @@
    would remove (or, with no intercept in view, what it would firm up) and
    the time it takes. Every band is labelled, no percentage is written, the
    ledger is collapsed and the Missing list names what is not held (I13).
+   Beneath the ledger's rows, one line each, is what it states about
+   interactions: refusals, the UDL probe grade and the seed list (SPC-173/4).
    Context: tu (spectre.web.understanding_view). #}
 <section class="threat-understanding" aria-label="{{ tu.heading | capitalize }}"
          style="border-left:3px solid var(--spectre-status-{{ tu.band }}); padding:0.35rem 0.6rem; margin:-0.2rem 0 0.5rem; font-size:0.72rem">
@@ -31,6 +33,11 @@
         {% endfor %}
       </tbody>
     </table>
+    {% if tu.ledger_notes %}
+    <ul class="tu-ledger-notes" style="margin:0.2rem 0 0 1.1rem; padding:0; font-size:0.62rem; color:var(--text-dim)">
+      {% for note in tu.ledger_notes %}<li>{{ note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
     <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem">Ledger hash {{ tu.ledger_hash[:16] }}</div>
   </details>
   {% if tu.missing %}<div class="tu-missing" style="font-size:0.62rem; color:var(--text-dim); margin-top:0.2rem">Missing: {{ tu.missing | join("; ") }}.</div>{% endif %}

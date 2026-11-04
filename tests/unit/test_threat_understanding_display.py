@@ -260,6 +260,39 @@ class TestTheIntelCard:
         assert threat._red_object_view(state, None, "", "REAL", _FETCHED) is None
 
 
+def _with_held_edge(held: Any) -> Any:
+    """A session holding one sweep's approach for the object, and its history, as the card and the panel read it."""
+    from spectre.domain.interaction_graph import Burn, Edge
+    from spectre.domain.warning_change import Change
+    from spectre.web import interaction_store
+
+    burn_at = held.now - timedelta(hours=6)
+    burn = Burn(epoch=burn_at, earliest=burn_at, latest=burn_at, confirmed=True, detection="HIGH", provider="18SDS")
+    state = SimpleNamespace(elset_histories={int(_SATNO): HeldHistory(int(_SATNO), held.now, pol=held.history.pol)},
+                            pol_reserve_resets={}, interaction_store=None)
+    edge = Edge(_SATNO, "BLUE-1", True, Change.NEWLY_IN_REACH, None, 3.0, held.now, (burn,), target_satno="40001")
+    interaction_store.hold_edges(state, _SATNO, (edge,), held.now,
+                                 interaction_store.Evaluated((burn,), interaction_store.SWEPT_KINDS))
+    return state
+
+
+class TestPatternOfLifeReadsTheHeldInteractions:
+    """Review finding 6, concept 7.3: one object reads the same on every panel, its held approaches included."""
+
+    def test_the_card_and_pattern_of_life_read_the_same_strip_and_notes(self, held: Any) -> None:
+        state = _with_held_edge(held)
+        card = threat._red_object_view(state, _SATNO, "", "REAL", held.now)
+        assert card is not None
+        pattern = pol._pol_view(held.history.pol, state=state)["object_understanding"]
+        assert pattern is not None
+        page = _render("partials/pol_results.html", {"pol": held.history.pol, "source": "UDL", "pair": None,
+                                                     **pol._pol_view(held.history.pol, state=state)})
+        assert _strip(page) == _strip(_card_page(card))
+        assert "BLUE-1 put in reach by its burn" in _strip(page)
+        assert pattern["ledger_notes"] == card["ledger_notes"]
+        assert "no hostile seed list configured" in pattern["ledger_notes"]
+
+
 class TestPatternOfLife:
     def test_the_panel_shows_the_section_with_the_threat_line_first(self, held: Any) -> None:
         section = _block(_pol_page(held.history), '<section class="threat-understanding"', "section")

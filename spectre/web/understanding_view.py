@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from spectre.domain import threat_understanding as tu
 from spectre.domain.custody import Custody, age_text
-from spectre.domain.interaction_graph import Edge
+from spectre.domain.interaction_graph import Edge, MissEdge, SeedPath
 from spectre.domain.provenance import ledger_input
 from spectre.domain.threat_assessment import Band
 from spectre.web.elsets import limit_hours_for_regime
@@ -54,8 +54,13 @@ class HeldObject:
     held history, read once. *custody* is judged by the panel's own rule and
     sets volatility; "no burns" is judged on the history's own window instead,
     so the strip does not depend on which element set the panel reads.
-    *interactions* are the approaches a warning change attributes to a burn
-    of its own; only the sweep flies one, so only the sweep holds any (SPC-172).
+    *interactions* are the approaches attributed to a burn of its own: the
+    warning changes a sweep flew (SPC-172) and the close approaches it judged
+    (SPC-173), held per object in the session so every panel reads the same.
+    *notes* are what the ledger states about them: each refusal, the probe
+    grade of a UDL conjunction and whether a hostile seed list is configured.
+    *seed_paths* lead from it to hostile seeds through the edges the session
+    holds for every object (SPC-174).
     """
 
     satno: str
@@ -63,7 +68,9 @@ class HeldObject:
     catalogue: tuple[Mapping[str, str], datetime] | None
     signals: tu.HistorySignals | None
     custody: Custody
-    interactions: tuple[Edge, ...] = ()
+    interactions: tuple[Edge | MissEdge, ...] = ()
+    notes: tuple[str, ...] = ()
+    seed_paths: tuple[SeedPath, ...] = ()
 
     def items(self, now: datetime, regime: str, access_dv_m_s: float = math.inf) -> tuple[tu.EvidenceItem, ...]:
         """The evidence items. With no intercept in view, "no burns" is judged against any burn the floor resolves.
@@ -72,15 +79,15 @@ class HeldObject:
         element-set limit of *regime* (section 5.3), the same on every panel.
         """
         signals = self.signals
+        judged = tuple(tu.HeldBurn(b.epoch, b.normality) for b in (signals.burns if signals is not None else ()))
         return (
             *tu.intel_items(self.record, self.satno),
             *(tu.gcat_items(self.catalogue[0], self.catalogue[1], self.satno) if self.catalogue is not None else ()),
             *(tu.history_items(signals, access_delta_v_m_s=access_dv_m_s,
                                custody=tu.window_custody(signals, now, limit_hours_for_regime(regime)))
               if signals is not None else ()),
-            *tu.interaction_items(self.interactions, judged=(
-                tu.HeldBurn(b.epoch, b.normality) for b in (signals.burns if signals is not None else ())),
-                hours=format_tof_label),
+            *tu.interaction_items(self.interactions, judged=judged, hours=format_tof_label),
+            *tu.propagation_items(self.seed_paths, now, judged=judged, hours=format_tof_label),
         )
 
     def situate(self, situation: tu.Situation) -> tu.Situation:
@@ -151,12 +158,14 @@ def _record(understanding: tu.ThreatUnderstanding, *, intercept: bool) -> tuple[
     return record, cue
 
 
-def understanding_view(understanding: tu.ThreatUnderstanding, *, intercept: bool = True) -> dict[str, Any]:
+def understanding_view(understanding: tu.ThreatUnderstanding, *, intercept: bool = True,
+                       notes: Sequence[str] = ()) -> dict[str, Any]:
     """Section 6.4: the Threat line, the Understanding line and its cues, the strip, the ledger and what is missing.
 
     *intercept* is whether an intercept is in view: without one there is no
     ACCESS, so the Threat line says where the threat is assessed instead,
     and the cues name what they would firm up rather than Threat steps.
+    *notes* are what the ledger states beside its rows (SPC-173, SPC-174).
     """
     span = understanding.range
     record, record_cue = _record(understanding, intercept=intercept)
@@ -169,6 +178,7 @@ def understanding_view(understanding: tu.ThreatUnderstanding, *, intercept: bool
         "strip": _strip(span),
         "ledger": [ledger_view(r) for r in span.ledger],
         "ledger_hash": ledger_input(LEDGER_LABEL, span.ledger).sha256,
+        "ledger_notes": list(notes),
         "missing": list(tu.missing(span)),
         "record": record,
         "record_cue": record_cue,
@@ -180,4 +190,4 @@ def understanding_view(understanding: tu.ThreatUnderstanding, *, intercept: bool
 def object_view(held: HeldObject, now: datetime, *, regime: str, data_mode: str | None) -> dict[str, Any] | None:
     """The view of an object with no intercept in view, or None when its understanding could not be read."""
     understanding = object_understanding(held, now, regime=regime, data_mode=data_mode)
-    return None if understanding is None else understanding_view(understanding, intercept=False)
+    return None if understanding is None else understanding_view(understanding, intercept=False, notes=held.notes)
