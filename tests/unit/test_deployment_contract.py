@@ -1566,10 +1566,27 @@ class TestContinuousIntegrationCanRun:
 
     _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
 
-    def test_the_threat_routes_keep_their_coverage_floor(self) -> None:
-        """Audit F-042: the sweep routes were untested at 48 per cent."""
+    @pytest.mark.parametrize(("route", "floor"), [("threat", 90), ("pol", 100), ("udl", 95)])
+    def test_the_routes_keep_their_coverage_floors(self, route: str, floor: int) -> None:
+        """Audit F-042 and SPC-014: a floor far under the measured figure guards nothing.
+
+        threat.py measured 91.8 at 74d1105 against a floor of 75; pol.py and
+        udl.py had none. Each floor is the figure reached, rounded down to 5.
+        """
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
+        assert f"--include=spectre/web/routes/{route}.py --fail-under={floor}\n" in ci
+
+    def test_the_whole_repository_ratchet_sits_near_what_is_measured(self) -> None:
+        """SPC-014: 74 against 95.9 measured let twenty points of tests go unnoticed."""
+        pyproject = _repo_only("pyproject.toml").read_text(encoding="utf-8")
+        assert re.search(r"^fail_under = 90$", pyproject, re.MULTILINE)
+
+    def test_the_quality_gate_accepts_a_ratchet_above_the_house_standard(self) -> None:
+        """The gate refused any floor over 80, so raising the ratchet (SPC-014) failed it."""
+        gate = _repo_only("scripts/check-quality.sh").read_text(encoding="utf-8")
+        refusal = re.search(r'-gt "\$HOUSE_COVERAGE_STANDARD".*?\nfi\n', gate, re.DOTALL)
+        assert refusal is not None, "the comparison with the house standard has moved"
+        assert "fail " not in refusal.group(0), "a floor above the house standard fails the gate"
 
     def test_no_test_runs_only_where_the_suite_is_absent(self) -> None:
         """Audit F-179: a test skipped unless in the docker-only archive never

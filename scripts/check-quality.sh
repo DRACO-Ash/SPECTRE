@@ -106,8 +106,11 @@ import re, pathlib
 m = re.search(r'^fail_under\s*=\s*(\d+)', pathlib.Path('pyproject.toml').read_text(), re.M)
 print(m.group(1) if m else -1)
 ")
+# A floor above the standard is the ratchet holding more than the standard
+# asks, not a contradiction. This refused it, which made raising the ratchet
+# to the measured figure (SPC-014) fail the gate it exists to tighten.
 if [ "$DECLARED" -gt "$HOUSE_COVERAGE_STANDARD" ] 2>/dev/null; then
-    fail "the declared floor (${DECLARED}%) is above the house standard; one of them is wrong"
+    printf '  NOTE  the project floor (%s%%) is above the house standard; the floor is the bar held\n' "$DECLARED"
 fi
 printf '  measured %s%%, project floor %s%%, house standard %s%%\n' \
     "$OVERALL" "$DECLARED" "$HOUSE_COVERAGE_STANDARD"

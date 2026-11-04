@@ -947,11 +947,16 @@ async def fetch_statevector(
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as exc:
-        error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
-        logger.warning("%s", log_safe(error))
+        # It showed "UDL returned 503 for SATNO ..." with no advice and logged
+        # no body, the one call SPC-019's two sentences had not reached.
+        body = exc.response.text[:300].strip() or "(empty)"
+        logger.warning(
+            "UDL state vector fetch returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
-            {"sv": None, "error": error},
+            {"sv": None, "error": _udl_refused("state vector fetch", exc.response.status_code)},
         )
     except httpx.TimeoutException:
         return render(request,

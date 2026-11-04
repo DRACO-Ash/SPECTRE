@@ -1117,6 +1117,29 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     })
 
 
+#: The PoL chart legend: Station Keeping, Plane Change, Repositioning, Unknown.
+_CHART_TYPE_COLOURS = {
+    "station_keeping": "#3b8beb",
+    "plane_change": "#f59e0b",
+    "repositioning": "#ef4444",
+    "unknown": "#6b7280",
+}
+
+
+def _chart_type(classification: str) -> str:
+    """The legend type for an assessed manoeuvre's operator label.
+
+    Every label above the station-keeping ceiling other than a plane change
+    moves the object somewhere, so the legend reads it as repositioning; a
+    manoeuvre the assessment did not label is unknown.
+    """
+    if not classification:
+        return "unknown"
+    return {"station keeping": "station_keeping", "plane change": "plane_change"}.get(
+        classification, "repositioning",
+    )
+
+
 @router.get("/chart-data/{satno}", response_class=JSONResponse)
 async def pol_chart_data(
     satno: int,
@@ -1129,12 +1152,12 @@ async def pol_chart_data(
     if pol is None or pol.satno != satno:
         return JSONResponse({"error": "No PoL analysis available"}, status_code=404)
 
-    TYPE_COLORS = {
-        "station_keeping": "#3b8beb",
-        "plane_change": "#f59e0b",
-        "repositioning": "#ef4444",
-        "unknown": "#6b7280",
-    }
+    # Each bar takes its type from the assessment the manoeuvre table reads.
+    # PolAnalysis carries no type of its own: reading one raised on every
+    # request, so no PoL chart drew (SPC-012).
+    assessment = assess_pattern_of_life(pol, reserve_reset_for(state, satno))
+    labels = {id(v.manoeuvre): v.classification for v in assessment.manoeuvres}
+    types = [_chart_type(labels.get(id(m), "")) for m in pol.manoeuvres]
 
     drift_phase_data = [
         {
@@ -1172,8 +1195,8 @@ async def pol_chart_data(
         "manoeuvres": {
             "epochs": pol.manoeuvre_epochs,
             "dvs_ms": pol.manoeuvre_dvs,
-            "types": pol.manoeuvre_types,
-            "colors": [TYPE_COLORS.get(t, "#6b7280") for t in pol.manoeuvre_types],
+            "types": types,
+            "colors": [_CHART_TYPE_COLOURS[t] for t in types],
             "alts": pol.manoeuvre_alts,
             "drift_deltas": pol.manoeuvre_drift_deltas,
             "lons": man_lons,

@@ -90,8 +90,15 @@ jobs:
         # is held at every line by its own tests (SPC-102). So is the pure
         # Threat Understanding model (SPC-162 to SPC-164). These are line
         # floors: [tool.coverage.run] measures no branches.
+        # Each route floor is its measured figure rounded down to a whole 5,
+        # so a test lost shows here before the total moves (SPC-014):
+        # threat.py measured 91.8 at 74d1105; pol.py rose from 69.7 to 100
+        # with the PoL refusal, fallback and failure tests (SPC-012); udl.py
+        # from 85.5 to 99.8 with the mocked-UDL route tests (SPC-011).
         run: |
-          coverage report --include=spectre/web/routes/threat.py --fail-under=75
+          coverage report --include=spectre/web/routes/threat.py --fail-under=90
+          coverage report --include=spectre/web/routes/pol.py --fail-under=100
+          coverage report --include=spectre/web/routes/udl.py --fail-under=95
           coverage report --include=spectre/domain/decision.py --fail-under=100
           coverage report --include=spectre/astro/closest_approach.py --fail-under=100
           coverage report --include=spectre/domain/threat_understanding.py --fail-under=100
