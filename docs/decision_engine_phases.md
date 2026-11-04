@@ -454,6 +454,24 @@ draw no figure the cell does not already state.
 3. D3.js tree partial (`decision_gametree.html`)
 4. Route: add `turns` form field to `POST /plan/decision/evaluate`
 
+### As built: SPC-140 (the tree)
+
+● `Scenario.turns` (1 to `MAX_TURNS`, 3) and `ScenarioResult.tree`, None for one turn. `spectre/domain/decision_tree.py` builds the tree through `evaluate_tree`; `evaluate_scenario` is unchanged.
+● Turn 1 is the outcome matrix, one root per cell. Every computed cell goes on RK45 for both orbits in a tree, even when nothing burns, with the SGP4 figure shown beside it, and no node or cell names SGP4.
+● Each later turn starts from the arcs the turn before left: red sample by sample (`run_separation_series(keep_at_s=...)`, then `continue_series`), blue after our burn sized again against red's nominal burn. The span searched is split into equal turns, and every nominal burn must fall inside its own turn. A sample whose drawn timing puts its burn after its turn ends keeps that burn (`Kept.pending`), and the turn after makes it then, so no sample loses a burn at a boundary.
+● A node runs from its turn's start to the span's end. A sequence's closest approach is P5 of each sample's own minimum along it, its delta-V our burns added up, its custody the bound red track's with the earliest red burn on it, and its score a lookup. Each carries its basis (`PathFigures.bases`, `custody_bases`): the delta-V is a lookup, naming the turns, when any turn's is, and the closest approach says where no burn was sized.
+● Before anything runs, the tree is refused, keeping the one-turn result, when a side is unbound or out of date, a row leaves no orbit, a burn falls outside its turn, the branches pass 1,000, or `tree_cost` passes the cap. A row leaves no orbit when its closest approach is a lookup (add a hypothesis) or refused (its cell says why). Once running, a spent budget keeps the deepest turn built in full, naming the run's own budget; a budget spent before turn 1's row was sampled says so, not that the row is a lookup; and a failed or unconverged branch keeps the turns built and names the branch.
+● The cost model charges 16 sizing trials for every sizing, so coplanar_leo at 50 samples over three 2 h turns costs about 6,700 sample-hours and is refused, though its prototype ran in 33 s idle. Recalibrating the cap for trees is the owner's decision (D6).
+● The view is SPC-142.
+
+### As built: SPC-141 (selectors over the tree and the update after turn 1)
+
+● `GameTree.selection` holds the result's rule over the turns built in full (`spectre/domain/tree_selectors.py`): turn 1's pick, then each later turn's pick after each thing the turns before may show, following our own picks, with each response's value there; what turn 1 shows under each row; the update after turn 1, under expected value only; and its lines. None when no turn was built. The matrix's own pick is unchanged, and a turn-1 pick that differs from it says so.
+● The likelihood model (`spectre/domain/turn_update.py`) is the bound red track's custody, as the sweep judges it, carried over the horizon with the red burns on the path and read at each turn's end: lost at a burn in the turn shows a burn, not which; held through it shows no burn; lost otherwise, or not read, shows nothing. Each row gives one of these for certain, so rows that give the same thing are one information set, and a pick must serve every branch in it.
+● Recursive minimax takes the worst sequence over every red move and every branch in the set, minimin the best, and expected value the mean, each red move weighed by its row's share of P and each branch by the product of its moves' shares: Bayes' rule with that likelihood. A set with no weight has no pick and says so. Checked against every policy over three turns.
+● The posterior after turn 1 is each row's P restricted to the rows that give what turn 1 shows, renormalised, a lookup. A row's applied NOTSO suggestion carries its interval into a range on every share it touches; shares are shown rounded down and ranges outward; each names its source (your P, the default left untouched, or the NOTSO suggestion); one row alone says the certainty is the model's assumption. Under minimax or minimin it is not shown, and nothing writes a P.
+● Decisions taken here, Claude's choice, not a ruling: (a) the observation is the engine's own custody rule rather than a new detection model with made-up rates; (b) red's move in each later turn is weighed by the rows' P as entered, since nothing sourced says how its turn-1 move bears on its next, so the update says which branch we are on, not what red does next; a persistent-intent model needs a stated prior strength, an owner decision; (c) the same rule reads turn 2 in a 3-turn tree.
+
 ---
 
 ## Phase 5: NOTSO-Informed Priors

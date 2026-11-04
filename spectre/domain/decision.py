@@ -94,6 +94,10 @@ analyst or a sensor; it is shown beside the probability and confidence,
 which it never fills; and under expected value it says when the probability
 has not been earned and what minimax would recommend.
 
+A scenario may run 2 or 3 turns (SPC-140): spectre/domain/decision_tree.py's evaluate_tree builds the game tree
+beside the matrix, which is its turn 1, and puts every computed cell on RK45 for both orbits even when nothing burns,
+so no figure in a tree is SGP4. evaluate_scenario evaluates one turn, as before, and carries no tree.
+
 Typical use::
 
     scenario = Scenario(
@@ -194,6 +198,7 @@ from spectre.domain.threat_understanding import (
 
 if TYPE_CHECKING:
     from spectre.astro.pattern_of_life import Manoeuvre, TLERecord
+    from spectre.domain.decision_tree import GameTree
     from spectre.domain.notso_prior import NotsoPrior
 
 logger = logging.getLogger(__name__)
@@ -1456,6 +1461,9 @@ class Scenario:
     # The bound red track's Threat range, Understanding, cues and decide-by as the sweep held them (SPC-171): shown
     # beside the rows and read by the collect-first advice; it moves no figure.
     threat:             ThreatPicture | None = None
+    # How many turns the game tree runs (SPC-140): red moves and we respond, then red may move again. One turn is the
+    # outcome matrix alone; evaluate_tree builds 2 or 3 over the span searched, split equally.
+    turns:              int = 1
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -1464,6 +1472,17 @@ class Scenario:
         for name in ("w_custody", "w_closest_approach", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
             _require_fraction("Scenario", name, getattr(self, name))
         _require_threat(self)
+        _require_turns(self.turns)
+
+
+#: The most turns a game tree runs (SPC-140): a fourth would multiply the branches past what one evaluation builds.
+MAX_TURNS = 3
+
+
+def _require_turns(turns: object) -> None:
+    """A whole number of turns from 1 to MAX_TURNS; True is not a turn count, though Python counts it as 1."""
+    if isinstance(turns, bool) or not isinstance(turns, int) or not 1 <= turns <= MAX_TURNS:
+        raise ValueError(f"Scenario.turns must be a whole number from 1 to {MAX_TURNS}; got {turns!r}")
 
 
 def _untouched(action: AdversaryAction) -> bool:
@@ -1527,6 +1546,8 @@ class ScenarioResult:
     # The pair's closest approach with no burn on SGP4 and on RK45, once our burn put every computed cell on RK45
     # (SPC-121): shown so the operator sees what the propagators alone move.
     rk45_reference:         tuple[ElsetApproach, ElsetApproach] | None = None
+    # The multi-turn game tree (SPC-140), or why none was built; None for one turn, whose result is this matrix alone.
+    tree:                   GameTree | None = None
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -2035,12 +2056,13 @@ class Sampler(Protocol):
     """One hypothesis's separation series against the blue track over a window (SPC-110).
 
     *tick* is passed only when the evaluation runs under a RunControl (SPC-113), so a sampler that takes three
-    arguments still serves an evaluation without one.
+    arguments still serves an evaluation without one; *keep_at_s* only when a game tree asks for its turn boundary
+    (SPC-140).
     """
 
     def __call__(
         self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
-        tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ...,
+        tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ..., keep_at_s: Sequence[float] = ...,
     ) -> SeparationSeries: ...
 
 
@@ -2193,11 +2215,13 @@ class RowSampling(NamedTuple):
     """One eligible row's separation series, or why it was not sampled; never both.
 
     *sized* holds each response's burn sized on the hypothesis's nominal burn, or why it was not (SPC-121).
+    *spent* is True when the refusal is the evaluation's budget running out, so a game tree can say so (SPC-140).
     """
 
     series:  SeparationSeries | None
     refusal: str | None
     sized:   tuple[SizedBurn | BurnRefusal, ...] = ()
+    spent:   bool = False
 
 
 class _Row(NamedTuple):
@@ -2613,18 +2637,29 @@ def _size_row(
 
 def _sample(
     row: _Row, sampler: Sampler, sized: tuple[SizedBurn | BurnRefusal, ...], tick: Tick | None,
+    keep_at_s: Sequence[float] = (),
 ) -> SeparationSeries:
-    """Run the row's series, passing *tick* and our sized burns only when there are any (SPC-113, SPC-121)."""
-    burns = tuple(s.burn for s in sized if isinstance(s, SizedBurn) and s.burn is not None)
+    """Run the row's series, passing *tick*, our sized burns and a tree's turn boundary only when there are any
+    (SPC-113, SPC-121, SPC-140)."""
     kwargs: dict[str, Any] = {}
     if tick is not None:
         kwargs["tick"] = tick
-    if burns:
+    if burns := sized_burns(sized):
         kwargs["blue_burns"] = burns
+    if keep_at_s:
+        kwargs["keep_at_s"] = tuple(keep_at_s)
     return sampler(row.hypothesis, cast("BlueTrack", row.blue_track), row.window, **kwargs)
 
 
-def _run(row: _Row, sampler: Sampler, budget: _Budget | None, responses: _Responses | None = None) -> RowSampling:
+def sized_burns(sized: Sequence[SizedBurn | BurnRefusal]) -> tuple[BlueBurn, ...]:
+    """The burns a sampled row applies, in the order its series searches them (SPC-121)."""
+    return tuple(s.burn for s in sized if isinstance(s, SizedBurn) and s.burn is not None)
+
+
+def _run(
+    row: _Row, sampler: Sampler, budget: _Budget | None, responses: _Responses | None = None,
+    keep_at_s: Sequence[float] = (),
+) -> RowSampling:
     """Run a row's series, under *budget* when there is one: a row it does not cover is refused, naming it.
 
     Our burns are sized first, on the row's nominal burn, and applied in every sample (SPC-121).
@@ -2633,18 +2668,20 @@ def _run(row: _Row, sampler: Sampler, budget: _Budget | None, responses: _Respon
     wanted = responses is not None and bool(responses.requests)
     if budget is None:
         sized = _size_row(row, blue, cast("_Responses", responses), None) if wanted else ()
-        return _checked(_sample(row, sampler, sized, None), sized)
+        return _checked(_sample(row, sampler, sized, None, keep_at_s), sized)
     budget_s = budget.run.budget_s
     if not budget.begin_row():
-        return RowSampling(None, _refusal(_BUDGET_NONE.format(budget=budget_s)))
+        return RowSampling(None, _refusal(_BUDGET_NONE.format(budget=budget_s)), spent=True)
     try:
         sized = _size_row(row, blue, cast("_Responses", responses), budget) if wanted else ()
     except _BudgetSpentError:
-        return RowSampling(None, _refusal(_BUDGET_SIZING.format(budget=budget_s)))
+        return RowSampling(None, _refusal(_BUDGET_SIZING.format(budget=budget_s)), spent=True)
     try:
-        series = _sample(row, sampler, sized, budget.sampling())
+        series = _sample(row, sampler, sized, budget.sampling(), keep_at_s)
     except _BudgetSpentError as spent:
-        return RowSampling(None, _refusal(_BUDGET_PART.format(budget=budget_s, k=spent.done, n=spent.total)))
+        return RowSampling(
+            None, _refusal(_BUDGET_PART.format(budget=budget_s, k=spent.done, n=spent.total)), spent=True,
+        )
     return _checked(series, sized)
 
 
@@ -2681,6 +2718,8 @@ class _PrePlan(NamedTuple):
     responses: _Responses
     sizing:    bool
     sizing_refusal: str | None
+    # A game tree's first turn (SPC-140): the computed rows go on RK45 for both orbits even when nothing burns.
+    rk45:      bool = False
 
     @property
     def ready(self) -> int:
@@ -2696,7 +2735,7 @@ def _computes_rows(scenario: Scenario) -> bool:
     return any(a.action_type in _STILL_ACTIONS and a.hypothesis is None for a in scenario.adversary_actions)
 
 
-def _pre_plan(scenario: Scenario) -> _PrePlan:
+def _pre_plan(scenario: Scenario, *, rk45: bool = False) -> _PrePlan:
     """Each row as checked before anything runs, and why it is refused (the cap included); None where it is not.
 
     The cap counts our burns to size, in the sampled rows and against the computed rows (SPC-121); over it, the
@@ -2706,8 +2745,10 @@ def _pre_plan(scenario: Scenario) -> _PrePlan:
     responses = _responses_to_size(scenario)
     refusals = [None if row is None else _first_refusal(row, _PRE_RUN_CHECKS) for row in rows]
     ready = [row for row, refusal in zip(rows, refusals, strict=True) if row is not None and refusal is None]
-    sizing = bool(responses.requests) and _computes_rows(scenario)
-    work = _Work(ready, len(responses.requests), _searched_span_s(scenario) if sizing else None)
+    computes = (bool(responses.requests) or rk45) and _computes_rows(scenario)   # the binding is read only then
+    sizing = bool(responses.requests) and computes
+    forced = rk45 and computes
+    work = _Work(ready, len(responses.requests), _searched_span_s(scenario) if sizing or forced else None)
     over = _over_cap(work)
     row_over = None if over is None else _cap_refusal(work, over)
     sizing_refusal = None
@@ -2715,9 +2756,20 @@ def _pre_plan(scenario: Scenario) -> _PrePlan:
         sizing_refusal = _RESPONSE_OVER_CAP.format(
             total=math.ceil(over.total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
         ) + over.advice + _DV_LOOKUP
-        sizing = False
+    if over is not None:
+        sizing = forced = False
     checked = [None if row is None else refusal or row_over for row, refusal in zip(rows, refusals, strict=True)]
-    return _PrePlan(rows, checked, responses, sizing, sizing_refusal)
+    return _PrePlan(rows, checked, responses, sizing, sizing_refusal, forced)
+
+
+def _turn_one_cost_h(scenario: Scenario) -> float:
+    """What a game tree's first turn costs as one evaluation, sample-hours, with the computed rows on RK45 for both
+    orbits whether or not anything burns (SPC-140); the rows refused before anything runs cost nothing."""
+    rows = [row for row in _eligible_rows(scenario) if row is not None]
+    ready = [row for row in rows if _first_refusal(row, _PRE_RUN_CHECKS) is None]
+    requests = _responses_to_size(scenario).requests
+    work = _Work(ready, len(requests), _searched_span_s(scenario) if _computes_rows(scenario) else None)
+    return 0.0 if work.empty else _cost(work)
 
 
 def longest_horizon_h(n_samples: int, rows: int = 1, burns: int = 0) -> float:
@@ -2737,13 +2789,24 @@ def longest_horizon_h(n_samples: int, rows: int = 1, burns: int = 0) -> float:
 
 def needs_a_run(scenario: Scenario) -> bool:
     """Whether evaluating *scenario* would sample or size anything: some row passes every check before the run and
-    the cap, or the computed rows' burns will be sized (SPC-121).
+    the cap, or the computed rows' burns will be sized (SPC-121), or it is a bound game tree (SPC-140).
 
     False for a lookup scenario and for one whose every eligible row is refused before anything runs; those
     evaluate in milliseconds, so the route can answer them on the request.
     """
+    if scenario.turns > 1 and _tree_bound(scenario):
+        return True
     pre = _pre_plan(scenario)
     return pre.ready > 0 or pre.sizing
+
+
+def _tree_bound(scenario: Scenario) -> bool:
+    """Whether a game tree could start (SPC-140): both sides bound and current, so it propagates every branch even
+    when nothing is sampled or sized. Its other checks refuse it in milliseconds, in the job."""
+    binding = scenario.binding
+    if binding is None or binding.red is None or binding.blue is None:
+        return False
+    return _unearned_side(binding.red, binding.blue) is None
 
 
 def plan_sampling(
@@ -2771,21 +2834,22 @@ def plan_sampling(
 
 
 def _plan_sampling(
-    scenario: Scenario, sampler: Sampler, budget: _Budget | None, pre: _PrePlan,
+    scenario: Scenario, sampler: Sampler, budget: _Budget | None, pre: _PrePlan, keep_at_s: Sequence[float] = (),
 ) -> tuple[RowSampling | None, ...]:
     if not pre.rows:
         return (None,) * len(scenario.adversary_actions)
     return tuple(
-        None if row is None else _plan_row(row, refusal, sampler, budget, pre.responses)
+        None if row is None else _plan_row(row, refusal, sampler, budget, pre.responses, keep_at_s)
         for row, refusal in zip(pre.rows, pre.refusals, strict=True)
     )
 
 
 def _plan_row(
     row: _Row, refusal: str | None, sampler: Sampler, budget: _Budget | None, responses: _Responses,
+    keep_at_s: Sequence[float] = (),
 ) -> RowSampling:
     """A row refused before anything runs, or its series run and checked."""
-    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget, responses)
+    return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget, responses, keep_at_s)
 
 
 def _sampled_bases(series: SeparationSeries, horizon_hours: float, *, burnt: bool = False) -> OutcomeBases:
@@ -3251,19 +3315,23 @@ def _plan_computed(scenario: Scenario, pre: _PrePlan, budget: _Budget | None) ->
     found = elset_closest_approach(red.tle, blue.tle, window)
     if isinstance(found, ElsetFailure):
         return ComputedPlan(None, _refusal(_NOT_COMPUTED_SGP4.format(side=found.side)))
-    if not pre.sizing:
+    if not (pre.sizing or pre.rk45):
         return ComputedPlan(found, None, response_refusal=pre.sizing_refusal)
-    return _with_burns(found, _size_computed(scenario, window, pre.responses, budget), pre.responses)
+    sized = _size_computed(scenario, window, pre.responses, budget)
+    return _with_burns(found, sized, pre.responses, rk45=pre.rk45)
 
 
-def _with_burns(found: ElsetApproach, sized: Rk45Plan | ElsetFailure | str, responses: _Responses) -> ComputedPlan:
-    """The computed plan once the burns were sized: on RK45 when any was, else the SGP4 figure with why not."""
+def _with_burns(
+    found: ElsetApproach, sized: Rk45Plan | ElsetFailure | str, responses: _Responses, *, rk45: bool = False,
+) -> ComputedPlan:
+    """The computed plan once the burns were sized: on RK45 when any was, or always in a game tree's first turn
+    (SPC-140), else the SGP4 figure with why not."""
     if isinstance(sized, str):
         return ComputedPlan(found, None, response_refusal=sized)
     if isinstance(sized, ElsetFailure):
         failed = tuple(BurnRefusal(request.key, "propagation", 0) for request in responses.requests)
         return ComputedPlan(found, None, responses=failed)
-    if not any(isinstance(result, SizedBurn) for result in sized.responses):
+    if not rk45 and not any(isinstance(result, SizedBurn) for result in sized.responses):
         return ComputedPlan(found, None, responses=sized.responses)   # nothing burns, so SGP4 stands
     return ComputedPlan(sized.before, None, responses=sized.responses, sgp4_reference=found)
 
@@ -3787,6 +3855,27 @@ def evaluate_scenario(
     ScenarioResult with full outcome matrix, per-adversary rankings, and the
     robust best response.
     """
+    return _evaluate(scenario, strategy, sampler, run)[0]
+
+
+class TurnOne(NamedTuple):
+    """What a game tree's first turn is built from besides its matrix (SPC-140): each row as checked, its sampling
+    with the turn boundary kept, the pair's computed plan, and the one budget the later turns go on spending."""
+
+    pre:      _PrePlan
+    plan:     tuple[RowSampling | None, ...]
+    computed: ComputedPlan | None
+    budget:   _Budget | None
+
+
+def _evaluate(
+    scenario: Scenario, strategy: SelectorStrategy, sampler: Sampler, run: RunControl | None,
+    tree_turn_s: float | None = None,
+) -> tuple[ScenarioResult, TurnOne]:
+    """evaluate_scenario, with what a game tree's first turn needs when *tree_turn_s* is given (SPC-140): each sampled
+    row keeps its state at the end of the turn, and every computed cell is RK45 for both orbits even when nothing
+    burns."""
+    keep_at_s = () if tree_turn_s is None else (tree_turn_s,)
     if not scenario.adversary_actions:
         raise ValueError("Scenario must have at least one adversary action")
     if not scenario.friendly_responses:
@@ -3795,10 +3884,10 @@ def evaluate_scenario(
     t0 = time.monotonic()
 
     # Build outcome matrix: a lookup in every cell but those of a row sampled, computed or refused. One budget
-    # covers the sampled rows and the computed rows' burns (SPC-113, SPC-121).
-    pre = _pre_plan(scenario)
+    # covers the sampled rows and the computed rows' burns (SPC-113, SPC-121), and a tree's later turns (SPC-140).
+    pre = _pre_plan(scenario, rk45=tree_turn_s is not None)
     budget = None if run is None else _Budget(run, pre.ready)
-    plan = _plan_sampling(scenario, sampler, budget, pre)
+    plan = _plan_sampling(scenario, sampler, budget, pre, keep_at_s)
     computed = _plan_computed(scenario, pre, budget)
     custody = _custody_plan(scenario)
     outcome_matrix = [
@@ -3821,7 +3910,7 @@ def evaluate_scenario(
 
     wall_time = time.monotonic() - t0
 
-    return ScenarioResult(
+    result = ScenarioResult(
         scenario=scenario,
         outcome_matrix=outcome_matrix,
         ranked_per_adversary=ranked_per_adversary,
@@ -3837,6 +3926,7 @@ def evaluate_scenario(
         row_custody=tuple(None if c is None else c.sentence for c in custody),
         rk45_reference=_rk45_reference(computed),
     )
+    return result, TurnOne(pre, plan, computed, budget)
 
 
 def _rk45_reference(computed: ComputedPlan | None) -> tuple[ElsetApproach, ElsetApproach] | None:

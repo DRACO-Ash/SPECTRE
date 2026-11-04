@@ -39,7 +39,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple, cast
 
@@ -946,6 +946,30 @@ class BurnSeries(NamedTuple):
     stats: MissStats
 
 
+class Kept(NamedTuple):
+    """Each sample's red state and B* at a game tree's turn boundaries, in sample order, and its smallest separation
+    from each blue between the window start and the first boundary (SPC-140). NaN where a sample failed.
+
+    ``red`` is (samples, boundaries, 6), km and km/s; ``bstar`` the B* each sample flies at the first boundary;
+    ``slice_min_km`` is (blues, samples), the blues in the order the series searched them; ``pending`` holds, per
+    sample, the burns its draw puts after the first boundary, timed from it, for the turn after to make.
+    """
+
+    at_s: tuple[float, ...]
+    red: np.ndarray
+    bstar: np.ndarray
+    slice_min_km: np.ndarray
+    pending: tuple[tuple[RedBurn, ...], ...]
+
+
+class RedBurn(NamedTuple):
+    """One of a red sample's burns: *at_s* seconds after its window start, its RIC delta-V and the B* after it."""
+
+    at_s: float
+    delta_v_ric_km_s: np.ndarray
+    bstar_after: float
+
+
 @dataclass(frozen=True)
 class SeparationSeries:
     """Each sample's closest approach to the blue track in one window, and their statistics.
@@ -980,6 +1004,9 @@ class SeparationSeries:
     closing_speeds_km_s: tuple[float, ...] = ()
     # Each of our burns on the blue asset, against the same samples (SPC-121); empty when none was asked for.
     after_burns: tuple[BurnSeries, ...] = ()
+    # Each sample's red state and B* at a game tree's turn boundary, and its smallest separation from each blue
+    # within the turn (SPC-140); None unless a boundary was asked for. Arrays, so never compared.
+    kept: Kept | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.closing_speeds_km_s and len(self.closing_speeds_km_s) != len(self.approaches):
@@ -1041,7 +1068,7 @@ _REENTERED = "re-entered"
 
 def run_separation_series(
     hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, *, tick: Tick | None = None,
-    blue_burns: Sequence[BlueBurn] = (),
+    blue_burns: Sequence[BlueBurn] = (), keep_at_s: Sequence[float] = (),
 ) -> SeparationSeries:
     """Each sample's closest approach to *blue* in *window*, with P5, P50 and P95 of the misses.
 
@@ -1077,43 +1104,67 @@ def run_separation_series(
     one by sample and one model sits on both sides of the difference. A burnt
     arc that fails, or a search against it that fails, fails that sample for
     that burn alone.
+
+    With *keep_at_s* (SPC-140), passed only when not empty, the series also keeps each sample's red state and B* at
+    those times, seconds after the window start, and its smallest separation from each blue between the window
+    start and the first of them, so a game tree's next turn can start where this one left each sample. Keeping
+    changes no figure.
     """
     _check_window(window, blue)
     _check_burns(blue_burns)
     t_start = time.monotonic()
     samples = generate_samples(hypothesis)
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
-    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns))
-    main = [outcome[0] for outcome in outcomes]
-    sampled = [a for a in main if isinstance(a, Sampled)]
+    keeper = _Keeper(keep_at_s, len(samples), 1 + len(blue_burns), window) if keep_at_s else None
+    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns, keeper))
     seed = hypothesis.random_seed or 0
-    stats = _miss_stats([a.approach.miss_km for a in sampled], seed)
-    series = SeparationSeries(
-        window=window,
-        approaches=tuple(a.approach for a in sampled),
-        n_samples_run=hypothesis.n_samples,
-        n_failed=hypothesis.n_samples - len(sampled),
-        n_reentered=main.count(_REENTERED),
-        miss_km_p5=stats.p5,
-        miss_km_p50=stats.p50,
-        miss_km_p95=stats.p95,
-        miss_km_std=stats.std,
-        percentile_half_width_km=stats.half_width_km,
-        converged=stats.converged,
-        random_seed=hypothesis.random_seed,
+    series = _series_of(
+        window, [outcome[0] for outcome in outcomes], _Ran(hypothesis.random_seed, t_start, keeper),
         integration_s=_integration_s(burn_s + samples[:, 3], burn_s, window.span_s),
-        wall_time_seconds=time.monotonic() - t_start,
-        tolerance_km=stats.tolerance_km,
-        closing_speeds_km_s=tuple(a.closing_speed_km_s for a in sampled),
         after_burns=tuple(
             _burn_series(burn, [outcome[k + 1] for outcome in outcomes], seed) for k, burn in enumerate(blue_burns)
         ),
     )
     logger.info(
         "Separation series: %d/%d samples in %.1fs over %.0f s",
-        len(sampled), hypothesis.n_samples, series.wall_time_seconds, window.span_s,
+        len(series.approaches), hypothesis.n_samples, series.wall_time_seconds, window.span_s,
     )
     return series
+
+
+class _Ran(NamedTuple):
+    """What a series records of how it ran: its seed, when it started, and what it kept, if anything."""
+
+    seed: int
+    started: float
+    keeper: _Keeper | None = None
+
+
+def _series_of(
+    window: SeparationWindow, outcomes: Sequence[Sampled | str], ran: _Ran, **extra: Any,
+) -> SeparationSeries:
+    """A series from each sample's outcome against one blue, in sample order, with its statistics."""
+    sampled = [a for a in outcomes if isinstance(a, Sampled)]
+    stats = _miss_stats([a.approach.miss_km for a in sampled], ran.seed or 0)
+    return SeparationSeries(
+        window=window,
+        approaches=tuple(a.approach for a in sampled),
+        n_samples_run=len(outcomes),
+        n_failed=len(outcomes) - len(sampled),
+        n_reentered=list(outcomes).count(_REENTERED),
+        miss_km_p5=stats.p5,
+        miss_km_p50=stats.p50,
+        miss_km_p95=stats.p95,
+        miss_km_std=stats.std,
+        percentile_half_width_km=stats.half_width_km,
+        converged=stats.converged,
+        random_seed=ran.seed,
+        wall_time_seconds=time.monotonic() - ran.started,
+        tolerance_km=stats.tolerance_km,
+        closing_speeds_km_s=tuple(a.closing_speed_km_s for a in sampled),
+        kept=None if ran.keeper is None else ran.keeper.kept,
+        **extra,
+    )
 
 
 def _miss_stats(misses: Sequence[float], seed: int) -> MissStats:
@@ -1216,6 +1267,16 @@ def _earliest_s(burns_s: np.ndarray) -> float:
 
 def _check_window(window: SeparationWindow, blue: BlueTrack) -> None:
     """Raise ValueError for a window closest_approach would refuse, or a blue track from another instant."""
+    _check_span(window)
+    if blue.epoch_utc != window.start_utc:
+        raise ValueError(
+            f"separation window: the blue track holds at {blue.epoch_utc.isoformat()}, "
+            f"not at the window start {window.start_utc.isoformat()}"
+        )
+
+
+def _check_span(window: SeparationWindow) -> None:
+    """Raise ValueError for a window closest_approach would refuse."""
     span, step = window.span_s, window.step_s
     if not (math.isfinite(span) and span > 0.0 and math.isfinite(step) and step > 0.0):
         raise ValueError(f"separation window: span {span!r} s and step {step!r} s must be finite and > 0")
@@ -1224,11 +1285,6 @@ def _check_window(window: SeparationWindow, blue: BlueTrack) -> None:
             f"separation window: {span:,.0f} s at {step:g} s steps needs more than the "
             f"{MAX_SAMPLES:,} samples the closest-approach helper takes"
         )
-    if blue.epoch_utc != window.start_utc:
-        raise ValueError(
-            f"separation window: the blue track holds at {blue.epoch_utc.isoformat()}, "
-            f"not at the window start {window.start_utc.isoformat()}"
-        )
 
 
 class _Hooks(NamedTuple):
@@ -1236,6 +1292,8 @@ class _Hooks(NamedTuple):
 
     tick: Tick | None = None
     blue_burns: Sequence[BlueBurn] = ()
+    # Keeps each sample's state at a game tree's turn boundary (SPC-140); None when none was asked for.
+    keeper: _Keeper | None = None
 
 
 def _approaches(
@@ -1248,7 +1306,7 @@ def _approaches(
     so its excepts never swallow what a tick raises; the exception propagates and no result is returned. When the
     shared arcs fail, no sample runs and no tick is called.
     """
-    tick, blue_burns = hooks
+    tick, blue_burns, keeper = hooks
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     earliest = _earliest_s(burn_s + samples[:, 3])
     try:
@@ -1261,8 +1319,9 @@ def _approaches(
     arcs = _Arcs(blue=blue_arc, unburnt=unburnt, burn_s=burn_s)
     blues = (blue_arc, *(_burnt_blue(blue_arc, burn, window, blue.bstar) for burn in blue_burns))
     outcomes: list[tuple[Sampled | str, ...]] = []
-    for sample in samples:
-        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window, blues))
+    for k, sample in enumerate(samples):
+        keep = None if keeper is None else functools.partial(keeper.keep, k, blues)
+        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window, blues, keep))
         if tick is not None:
             tick(len(outcomes), len(samples))
     return outcomes
@@ -1331,12 +1390,12 @@ def _spliced(before: _Trajectory, after: _Trajectory, at_s: float) -> _Trajector
 
 def _try_sample(
     sample: np.ndarray, arcs: _Arcs, bstar_post: float, window: SeparationWindow,
-    blues: Sequence[_Trajectory | str],
+    blues: Sequence[_Trajectory | str], keep: Callable[[_RedArc], None] | None = None,
 ) -> tuple[Sampled | str, ...]:
     """One sample's red, built once, searched against each of *blues*: its approach to each, or why there is none.
 
     A red that cannot be had fails the sample against every blue; a blue that cannot be had, or a search against
-    it that fails, fails the sample against that blue alone.
+    it that fails, fails the sample against that blue alone. *keep*, when given, hears the sample's red (SPC-140).
     """
     try:
         red = _sample_red(sample, arcs.unburnt, arcs.burn_s, bstar_post, window)
@@ -1346,6 +1405,9 @@ def _try_sample(
         return (_FAILED,) * len(blues)
     if red is None:
         return (_FAILED,) * len(blues)
+    if keep is not None:
+        burn = RedBurn(arcs.burn_s + float(sample[3]), sample[:3].copy(), bstar_post + float(sample[4]))
+        keep(_RedArc(red, bstar_post, (burn,)))
     return tuple(_search_or_fail(red, blue, window) for blue in blues)
 
 
@@ -1435,3 +1497,180 @@ def _propagator_gap_km(
         return None
     except TLE_ERRORS:   # a failed SGP4 instant, or a failed solve (numpy's LinAlgError is a ValueError)
         return None
+
+
+# ── A separation series carried from turn to turn (SPC-140) ──────────────────
+
+class _RedArc(NamedTuple):
+    """One sample's red over a window: the B* it starts on and its burns in time order, made or still to come."""
+
+    arc: _Trajectory
+    bstar: float
+    burns: tuple[RedBurn, ...]
+
+    def bstar_at(self, t_s: float) -> float:
+        """The B* red flies at *t_s*: after its latest burn by then, as the spliced arc is from the burn on."""
+        made = [burn.bstar_after for burn in self.burns if burn.at_s <= t_s]
+        return made[-1] if made else self.bstar
+
+    def pending(self, t_s: float) -> tuple[RedBurn, ...]:
+        """The burns after *t_s*, timed from it: what the turn starting at *t_s* still has to make."""
+        return tuple(burn._replace(at_s=burn.at_s - t_s) for burn in self.burns if burn.at_s > t_s)
+
+
+class _Keeper:
+    """Collects each sample's red state and B* at the turn boundaries, and its smallest separation from each blue
+    from the window start to the first boundary, for a game tree's next turn (SPC-140)."""
+
+    def __init__(self, at_s: Sequence[float], samples: int, blues: int, window: SeparationWindow) -> None:
+        self.at_s = tuple(float(t) for t in at_s)
+        self.red = np.full((samples, len(self.at_s), 6), np.nan)
+        self.bstar = np.full(samples, np.nan)
+        self.slice_min_km = np.full((blues, samples), np.nan)
+        self.pending: list[tuple[RedBurn, ...]] = [()] * samples
+        self.slice_window = SeparationWindow(window.start_utc, self.at_s[0], window.step_s)
+
+    def keep(self, k: int, blues: Sequence[_Trajectory | str], red: _RedArc) -> None:
+        self.red[k] = [red.arc(t) for t in self.at_s]
+        self.bstar[k] = red.bstar_at(self.at_s[0])
+        self.pending[k] = red.pending(self.at_s[0])
+        for b, blue in enumerate(blues):
+            found = _search_or_fail(red.arc, blue, self.slice_window)
+            if isinstance(found, Sampled):
+                self.slice_min_km[b, k] = found.approach.miss_km
+
+    @property
+    def kept(self) -> Kept:
+        return Kept(self.at_s, self.red, self.bstar, self.slice_min_km, tuple(self.pending))
+
+
+class TurnBurn(NamedTuple):
+    """Red's burn again in a later turn of a game tree (SPC-140), *at_s* after the turn's start.
+
+    The hypothesis gives the nominal delta-V and its RIC direction, the spreads, the B* after the burn and the seed;
+    its own epoch and pre-manoeuvre state are not read, since each sample burns from where its last turn left it.
+    """
+
+    hypothesis: ManoeuvreHypothesis
+    at_s: float
+
+
+class ContinuedRed(NamedTuple):
+    """Red where each sample's last turn left it: its states (samples, 6) and B*s at the window start, the burn it
+    makes again in this turn, if any, and per sample the burns its last turn drew past its end, timed from this
+    turn's start (Kept.pending), empty for none."""
+
+    states: np.ndarray
+    bstars: np.ndarray
+    burn: TurnBurn | None = None
+    pending: tuple[tuple[RedBurn, ...], ...] = ()
+
+
+class ContinuedSeries(NamedTuple):
+    """One series per blue, over the same samples in the same order, and what was kept at the next boundary."""
+
+    series: tuple[SeparationSeries, ...]
+    kept: Kept | None
+
+
+def _nominal_draw(hypothesis: ManoeuvreHypothesis) -> np.ndarray:
+    """The hypothesis's burn as stated, undispersed, as a sample row: its RIC delta-V, no timing or B* offset."""
+    parts = np.array([hypothesis.delta_v_radial, hypothesis.delta_v_in_track, hypothesis.delta_v_cross_track])
+    norm = float(np.linalg.norm(parts))
+    unit = parts / norm if norm >= _ZERO_DV_KM_S else np.array([0.0, 1.0, 0.0])
+    return np.array([*(hypothesis.delta_v_magnitude_km_s * unit), 0.0, 0.0])
+
+
+def _drawn_burns(burn: TurnBurn | None, draw: np.ndarray | None) -> tuple[RedBurn, ...]:
+    """This turn's burn as *draw* says, at its time plus the draw's timing offset, clamped to the window start:
+    before it, red was in the turn before, whose figures are already taken."""
+    if burn is None or draw is None:
+        return ()
+    at_s = max(burn.at_s + float(draw[3]), 0.0)
+    return (RedBurn(at_s, draw[:3].copy(), burn.hypothesis.bstar_post + float(draw[4])),)
+
+
+def _continued_red(state: np.ndarray, bstar: float, burns: Sequence[RedBurn], span_s: float) -> _RedArc | None:
+    """Red from *state* at the window start over *span_s*, making each of *burns* that falls inside the window, in
+    time order, in the RIC frame of its state then. None when a solve fails; ReenteredError below the floor."""
+    ordered = tuple(sorted(burns, key=lambda burn: burn.at_s))
+    arc: _Trajectory | None = None
+    t_s, at, flying = 0.0, state, bstar
+    for burn in (b for b in ordered if b.at_s < span_s):
+        leg = _dense_arc(at, t_s, burn.at_s, flying)
+        if leg is None:
+            return None
+        arc = leg if arc is None else _spliced(arc, leg, t_s)
+        at = leg(burn.at_s).copy()
+        at[3:] += _ric_to_eci_rotation(at[:3], at[3:]) @ burn.delta_v_ric_km_s
+        t_s, flying = burn.at_s, burn.bstar_after
+    last = _dense_arc(at, t_s, span_s, flying)
+    if last is None:
+        return None
+    return _RedArc(last if arc is None else _spliced(arc, last, t_s), bstar, ordered)
+
+
+def nominal_continued_arc(
+    state: np.ndarray, bstar: float, burn: TurnBurn | None, span_s: float,
+) -> tuple[_Trajectory, float] | None:
+    """Red from *state* with the burn as stated, undispersed, and the B* it ends on; what our burn is sized
+    against in a later turn (SPC-140), as nominal_red_arc is in the first. None when a solve fails."""
+    try:
+        draw = None if burn is None else _nominal_draw(burn.hypothesis)
+        red = _continued_red(state, bstar, _drawn_burns(burn, draw), span_s)
+    except (ReenteredError, ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
+        return None
+    return None if red is None else (red.arc, red.bstar_at(span_s))
+
+
+def _continue_sample(
+    start: tuple[np.ndarray, float], burns: Sequence[RedBurn], window: SeparationWindow,
+    blues: Sequence[_Trajectory], keep: Callable[[_RedArc], None] | None,
+) -> tuple[Sampled | str, ...]:
+    """One sample carried on from its state and B*, making *burns*, and searched against each blue, or why it has
+    no approach."""
+    state, bstar = start
+    try:
+        red = _continued_red(state, bstar, burns, window.span_s)
+    except ReenteredError:
+        return (_REENTERED,) * len(blues)
+    except (ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
+        return (_FAILED,) * len(blues)
+    if red is None:
+        return (_FAILED,) * len(blues)
+    if keep is not None:
+        keep(red)
+    return tuple(_search_or_fail(red.arc, blue, window) for blue in blues)
+
+
+def continue_series(
+    red: ContinuedRed, blues: Sequence[_Trajectory], window: SeparationWindow, *, tick: Tick | None = None,
+    keep_at_s: Sequence[float] = (),
+) -> ContinuedSeries:
+    """Each sample carried on from where its last turn left it, searched against each of *blues* (SPC-140).
+
+    Sample k starts from ``red.states[k]`` at the window start, flying ``red.bstars[k]``. With a burn, it burns again with
+    the spread drawn afresh, draw k for sample k, in the RIC frame of its own state at its burn, and flies the
+    hypothesis's B* after it plus its draw's offset. A burn its last turn drew past that turn's end
+    (``red.pending``) is made first, when it falls. Each blue is a trajectory from the window start, as the
+    tree carried it. Sample order is kept, so turn k's sample is turn 1's. *tick* and *keep_at_s* serve as in
+    run_separation_series. Raises ValueError for a window the helper would refuse.
+    """
+    _check_span(window)
+    started = time.monotonic()
+    n, burn = len(red.states), red.burn
+    draws = None if burn is None else generate_samples(replace(burn.hypothesis, n_samples=n))
+    keeper = _Keeper(keep_at_s, n, len(blues), window) if keep_at_s else None
+    outcomes: list[tuple[Sampled | str, ...]] = []
+    for k in range(n):
+        keep = None if keeper is None else functools.partial(keeper.keep, k, blues)
+        burns = (*(red.pending[k] if red.pending else ()), *_drawn_burns(burn, None if draws is None else draws[k]))
+        outcomes.append(_continue_sample((red.states[k], float(red.bstars[k])), burns, window, blues, keep))
+        if tick is not None:
+            tick(k + 1, n)
+    ran = _Ran(0 if burn is None else burn.hypothesis.random_seed, started, keeper)
+    series = tuple(
+        _series_of(window, [outcome[b] for outcome in outcomes], ran, integration_s=(n + len(blues)) * window.span_s)
+        for b in range(len(blues))
+    )
+    return ContinuedSeries(series, None if keeper is None else keeper.kept)
