@@ -115,6 +115,10 @@ class SessionState:
     # This sign-in's sampled Decision Engine evaluation, queued, running or
     # finished (spectre.web.decision_job, SPC-113).
     decision_job: Any | None = None
+    # The Threat range, Understanding, cues and decide-by the sweep last held
+    # for its red track (spectre.web.decision_threat, SPC-171), read by the
+    # Decision Engine when it is bound to that red track.
+    threat_picture: Any | None = None
     # The operator's response time in hours, for decide-by (SPC-008); None
     # until they set it, when the default is used and said to be the default.
     response_time_h: float | None = None

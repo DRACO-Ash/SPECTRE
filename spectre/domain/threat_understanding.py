@@ -68,6 +68,7 @@ from spectre.domain.threat_assessment import PROPELLANT_SPENT_PCT, Band, Capabil
 from spectre.domain.warning_change import Change
 
 __all__ = [
+    "ACTION_LINE",
     "ASSESSED_LABEL_EXTRACTION",
     "ASSUMED_FIGURE_EXTRACTION",
     "CATALOGUE_FIELD_EXTRACTION",
@@ -83,7 +84,9 @@ __all__ = [
     "ROUTINE_CAP",
     "SOURCE_RELIABILITY",
     "UNATTRIBUTED",
+    "Advice",
     "BurnSignal",
+    "CollectionAdvice",
     "Cue",
     "Depth",
     "Dimension",
@@ -101,6 +104,7 @@ __all__ = [
     "Verdict",
     "assess",
     "burn_extraction",
+    "collection_advice",
     "coverage",
     "cue_text",
     "cues",
@@ -113,6 +117,7 @@ __all__ = [
     "history_signals",
     "intel_items",
     "interaction_items",
+    "landing_cues",
     "manual_extraction",
     "missing",
     "provider_grade",
@@ -1672,6 +1677,12 @@ class Cue:
     def steps_per_hour(self) -> float:
         return self.steps / self.hours
 
+    @property
+    def inside_spectre(self) -> bool:
+        """Whether SPECTRE collects it itself, a query it runs. The record cue needs an analyst; no cue yet needs a
+        sensor, since no collection here tasks one (SPC-171)."""
+        return not self.record
+
 
 def _roots(result: ThreatRange) -> set[str]:
     return {row.item.derived_from for row in result.ledger}
@@ -1772,16 +1783,123 @@ def _cue(items: tuple[EvidenceItem, ...], situation: Situation, now: ThreatRange
     )
 
 
+def _rank(cue: Cue) -> tuple[float, float, str]:
+    """Most steps of range per hour first, then the quicker, then by name, so the order is the same every time."""
+    return -cue.steps_per_hour, cue.hours, cue.observation
+
+
 def cues(items: Iterable[EvidenceItem], situation: Situation) -> tuple[Cue, ...]:
     """What to collect next, the most steps of range per hour first (section 4.10 and I11)."""
     held = tuple(items)
     now = threat_range(held, situation)
     found = [_cue(held, situation, now, collection) for collection in _collections(now, situation)]
-    return tuple(sorted(found, key=lambda c: (-c.steps_per_hour, c.hours, c.observation)))
+    return tuple(sorted(found, key=_rank))
 
 
 def _duration(hours: float) -> str:
     return f"{hours * _MINUTES_PER_HOUR:.0f} min" if hours < 1.0 else age_text(hours)
+
+
+# ── Collect first (section 4.10, read by the Decision Engine, SPC-171) ────────
+
+#: The action line A: the Threat band at which the operator's recommended response changes. The operator's to set;
+#: HIGH until they do. Tuned, not sourced.
+ACTION_LINE: Band = Band.HIGH
+
+
+class Advice(Enum):
+    """What the threat range says to do before deciding, against the action line."""
+
+    COLLECT_FIRST = "collect first"
+    ACT_ON_CEILING = "act on the ceiling"
+    BELOW_ACTION_LINE = "below the action line"
+
+
+@dataclass(frozen=True)
+class CollectionAdvice:
+    """The advice, the cue it names when it is to collect first, and the sentence the operator reads."""
+
+    advice: Advice
+    cue: Cue | None
+    sentence: str
+
+
+def _when(moment: datetime) -> str:
+    """A moment as decide-by writes it: "15:00 UTC on 4 Nov"."""
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def _narrows(cue: Cue) -> bool:
+    """A cue that could move a band, whose result SPECTRE can read: anything else leaves the range on screen as it is."""
+    return cue.steps > 0 and cue.fed
+
+
+def _decides(cue: Cue, action_line: Band) -> bool:
+    """A cue with an outcome that takes the range off the action line: its benign ceiling falls under it, or its
+    hostile floor reaches it. One that leaves the range across the line either way cannot change the decision."""
+    return cue.benign[1] < action_line or cue.hostile[0] >= action_line
+
+
+def landing_cues(cues: Iterable[Cue], *, now: datetime, decide_at: datetime | None,
+                 action_line: Band = ACTION_LINE) -> tuple[Cue, ...]:
+    """The cues that could move the range off *action_line*, whose result SPECTRE can read, landing by *decide_at*,
+    best first.
+
+    None with no decide-by: no cue can be shown to land in time.
+    """
+    if decide_at is None:
+        return ()
+    return tuple(sorted(
+        (c for c in cues if _narrows(c) and _decides(c, action_line) and now + timedelta(hours=c.hours) <= decide_at),
+        key=_rank,
+    ))
+
+
+def _no_cue_in_time(narrowing: list[Cue], deciding: list[Cue], decide_at: datetime | None, now: datetime) -> str:
+    """Why nothing is collected first, though the range straddles the line."""
+    if decide_at is None:
+        return "no decide-by is set to collect against"
+    if decide_at <= now:
+        return "decide-by has passed"
+    if not narrowing:
+        return "no collection SPECTRE can read would narrow it"
+    if not deciding:
+        return "no collection SPECTRE can read could move it off that line"
+    return f"no collection SPECTRE can read lands before decide-by at {_when(decide_at)}"
+
+
+def collection_advice(span: tuple[Band, Band], cues: Iterable[Cue], *, now: datetime, decide_at: datetime | None,
+                      action_line: Band = ACTION_LINE) -> CollectionAdvice:
+    """Section 4.10: collect first, act on the ceiling, or below the action line, for the range *span*, its
+    (floor, ceiling).
+
+    Collect first only when the range straddles the line (floor below it, ceiling at or above it) and a cue that
+    could move the range off the line on one of its outcomes, whose result SPECTRE can read, lands by decide-by: the
+    best such cue by steps per hour is named. *decide_at* is the sweep's decide-by, which already subtracts the
+    response time, so nothing is taken off again; with none set, no cue can be shown to land in time, so the cautious
+    reading acts on the ceiling.
+    """
+    floor, ceiling = span
+    line = f"Threat {action_line.name}, where your response changes"
+    if ceiling < action_line:
+        return CollectionAdvice(Advice.BELOW_ACTION_LINE, None,
+                                f"Below the action line: the Threat ceiling is {ceiling.name}, under {line}.")
+    act = f"Act on the ceiling: treat it as Threat {ceiling.name}."
+    if floor >= action_line:
+        return CollectionAdvice(Advice.ACT_ON_CEILING, None, f"{act} The Threat floor is already {floor.name}, at or "
+                                f"above {line}, so no collection changes the decision.")
+    runs = f"The Threat range runs from {floor.name} to {ceiling.name}, across {line}"
+    held = tuple(cues)
+    landing = landing_cues(held, now=now, decide_at=decide_at, action_line=action_line)
+    if not landing or decide_at is None:
+        narrowing = [c for c in held if _narrows(c)]
+        why = _no_cue_in_time(narrowing, [c for c in narrowing if _decides(c, action_line)], decide_at, now)
+        return CollectionAdvice(Advice.ACT_ON_CEILING, None, f"{act} {runs}, and {why}.")
+    cue = landing[0]
+    return CollectionAdvice(Advice.COLLECT_FIRST, cue, (
+        f"Collect first: {cue.observation}, about {_duration(cue.hours)}, lands before decide-by at "
+        f"{_when(decide_at)}. {runs}, and this {cue.effect}."
+    ))
 
 
 def cue_text(cue: Cue, *, threat: bool = True) -> str:

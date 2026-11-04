@@ -6,7 +6,9 @@ read here, where the sweep reads it: the red object's element-set history
 through the one held copy every panel shares (``held_history``), waiting a
 bounded time for a first fetch as the sweep does, and judged by the sweep's
 own rule (``custody_from_history``). The route reads it after binding, so the
-evaluation itself, and any job it runs as, does no I/O.
+evaluation itself does no I/O. When the read would wait on a fetch
+(``history_fetch``), it is the first stage of the evaluation's job instead,
+so the page can say what it waits for (SPC-119).
 
 Never raises: no catalogue number, UDL not connected, a fetch still running
 and a failed fetch each come back as the history problem custody states, so
@@ -23,7 +25,14 @@ from typing import Any
 from spectre.domain.custody import CustodyStatus
 from spectre.domain.decision import BoundElset, ScenarioBinding
 from spectre.domain.normality import BurnNormality
-from spectre.web.routes.pol import HeldHistory, custody_from_history, held_history, history_evidence, reserve_reset_for
+from spectre.web.routes.pol import (
+    HELD_HISTORY_MAX_AGE,
+    HeldHistory,
+    custody_from_history,
+    held_history,
+    history_evidence,
+    reserve_reset_for,
+)
 
 #: How long an evaluation waits for a first fetch of the red track's history, as the sweep waits.
 HISTORY_WAIT_S: float = 20.0
@@ -48,6 +57,25 @@ async def _history(state: Any, satno: int | None, now: datetime, wait_s: float) 
         return None, None, held.problem
     _assessment, normality = await asyncio.to_thread(history_evidence, held.pol, reserve_reset_for(state, satno))
     return held.pol, normality, ""
+
+
+#: The fetch a custody read waits on, as the job's progress names it (SPC-119).
+FIRST_FETCH = "a first fetch from UDL"
+REFETCH = "a fresh fetch from UDL, as the copy held is 30 min old or more"
+
+
+def history_fetch(state: Any, red: BoundElset, now: datetime) -> str:
+    """The UDL fetch reading *red*'s custody would wait on, FIRST_FETCH or REFETCH; empty when it waits on none.
+
+    It waits with a catalogue number and UDL connected, when no history is held, or the one held is as old as
+    held_history fetches again at (SPC-119). Then the evaluation runs as a job whose progress says it waits.
+    """
+    if red.satno is None or not state.udl_username or not state.udl_password:
+        return ""
+    held = state.elset_histories.get(red.satno)
+    if held is None:
+        return FIRST_FETCH
+    return REFETCH if now - held.fetched_at >= HELD_HISTORY_MAX_AGE else ""
 
 
 async def red_custody(state: Any, red: BoundElset, now: datetime, *, wait_s: float = HISTORY_WAIT_S) -> CustodyStatus:

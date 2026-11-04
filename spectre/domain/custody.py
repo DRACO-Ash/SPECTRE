@@ -32,6 +32,7 @@ Pure functions over plain data. No I/O, no framework.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
@@ -147,6 +148,12 @@ _THROUGH = (
     "Custody {state} through the {h:g} h horizon: its newest element set stays within its {limit} limit until "
     "{until:%Y-%m-%d %H:%M} UTC, after the horizon ends."
 )
+#: _THROUGH when the newest element set reaches its limit exactly as the horizon ends: it is still within it then,
+#: since custody is lost only once its age is strictly past the limit (SPC-119).
+_THROUGH_TO_THE_END = (
+    "Custody {state} through the {h:g} h horizon: its newest element set reaches its {limit} limit at "
+    "{until:%Y-%m-%d %H:%M} UTC, as the horizon ends, and passes it only after."
+)
 _ALREADY_LOST = (
     "Custody lost for the whole {h:g} h horizon: its newest element set is already past its limit or has no "
     "readable epoch, so whether a burn is normal and how it changes your warning time cannot be judged until a "
@@ -236,14 +243,17 @@ def custody_over_horizon(
     if status.state is Custody.DEGRADED:
         return CustodyOverHorizon(status.state, 0.0, h, LossCause.DEGRADED, _DEGRADED.format(h=h))
     limit = f"{limit_hours:.0f} h"
-    causes = [(limit_hours - elset_hours, LossCause.AGES_OUT)]
+    # A limit within float tolerance of the end, on either side, is reached as the horizon ends (SPC-119).
+    at_end = math.isclose(limit_hours - elset_hours, h)
+    causes = [(h if at_end else limit_hours - elset_hours, LossCause.AGES_OUT)]
     burn_h = _burn_h(horizon, elset_hours)
     if burn_h is not None:
         causes.append((burn_h, LossCause.BURN))
     from_h, cause = min(causes, key=lambda c: c[0])
     if from_h >= h:
         until = horizon.start_utc + timedelta(hours=limit_hours - elset_hours)
-        sentence = _THROUGH.format(state=status.state.value, h=h, limit=limit, until=until)
+        template = _THROUGH_TO_THE_END if at_end else _THROUGH
+        sentence = template.format(state=status.state.value, h=h, limit=limit, until=until)
         return CustodyOverHorizon(status.state, None, 0.0, None, sentence)
     at = horizon.start_utc + timedelta(hours=from_h)
     if from_h < 0.0:

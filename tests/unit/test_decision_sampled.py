@@ -320,7 +320,9 @@ class TestASampledCell:
         assert bases.delta_v_cost_km_s == FigureBasis(
             Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. Enter a target separation to size this burn.",
         )
-        assert _cells(sampled, 0)[1].figure_bases.delta_v_cost_km_s == LOOKUP_BASES.delta_v_cost_km_s
+        # A response that does not burn spends 0 m/s against the no-burn blue orbit, not the lookup's rule (SPC-125).
+        still = _cells(sampled, 0)[1].figure_bases.delta_v_cost_km_s
+        assert still.kind is Basis.COMPUTED and still.note.startswith("this response does not burn")
 
     def test_the_score_basis_stays_lookup(self, sampled: ScenarioResult) -> None:
         """D6."""

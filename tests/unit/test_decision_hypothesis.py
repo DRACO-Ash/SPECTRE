@@ -143,9 +143,11 @@ class TestTheLookupPathNeverReadsTheHypothesis:
             _ = _Tripwire() == None  # noqa: E711 - the comparison is what must trip
 
     def test_the_lookup_path_never_reads_the_hypothesis_of_a_bound_scenario(self) -> None:
-        """D19's mirror: binding the scenario does not make the lookup path read a hypothesis; sampling does."""
+        """D19's mirror: the lookup path never reads a hypothesis; sampling a bound scenario does.
+
+        SPC-125: the lookup model refuses a bound scenario, so it runs unbound here and the scenario is bound after.
+        """
         scenario = _four_by_four(hypotheses=True)
-        scenario.binding = _binding()
         for adversary in scenario.adversary_actions:
             adversary.hypothesis = _Tripwire()  # type: ignore[assignment]
         matrix = [
@@ -153,6 +155,7 @@ class TestTheLookupPathNeverReadsTheHypothesis:
             for a in scenario.adversary_actions
         ]
         assert all(find_robust_response(scenario, matrix, s) in scenario.friendly_responses for s in SelectorStrategy)
+        scenario.binding = _binding()
         with pytest.raises(AssertionError, match="the lookup path read hypothesis.hypothesis"):
             plan_sampling(scenario, _never)
 

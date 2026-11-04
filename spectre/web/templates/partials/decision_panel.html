@@ -2,7 +2,8 @@
 {# Context: pol (PolAnalysis|None); red_tracks, blue_assets, selected_red, selected_blue and
    binding_note for the bind fields (SPC-100), each optional; archetypes, default_samples, min_samples,
    max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional;
-   adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional #}
+   adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional;
+   default_probability, the engine's own default for P, optional: nothing from Understanding fills P (SPC-171) #}
 
 {% set hyp = {
   "archetypes": archetypes if archetypes is defined else [],
@@ -19,6 +20,7 @@
   "max_target": max_target if max_target is defined else "100000",
   "fields_note": adversary_fields_note if adversary_fields_note is defined else "",
   "default_gap": default_gap if default_gap is defined else 0.7,
+  "default_probability": default_probability if default_probability is defined else 0.5,
 } %}
 
 {# ── Our burn for one friendly row (SPC-121). Read only for a manoeuvre response; a blank target leaves its delta-V
@@ -150,7 +152,7 @@
           <option value="no_action">No Action</option>
         </select>
         {# SPC-161: Conf no longer sets the custody gap; Gap does, and the note under the rows says what each means. #}
-        <label style="font-size:0.6rem; color:var(--text-dim)">P<input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
+        <label style="font-size:0.6rem; color:var(--text-dim)">P<input type="number" name="adv_prob" value="{{ hyp.default_probability }}" min="0" max="1" step="0.05"
                style="width:100%; font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
         <label style="font-size:0.6rem; color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
                style="width:100%; font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
@@ -277,7 +279,7 @@ function addAdvRow() {
       <option value="posture_change">Posture Change</option>
       <option value="no_action">No Action</option>
     </select>
-    <label style="font-size:0.6rem;color:var(--text-dim)">P<input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
+    <label style="font-size:0.6rem;color:var(--text-dim)">P<input type="number" name="adv_prob" value="{{ hyp.default_probability }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
     <label style="font-size:0.6rem;color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
     <label style="font-size:0.6rem;color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
     <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>

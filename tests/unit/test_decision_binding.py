@@ -107,8 +107,12 @@ def _four_by_four(binding: ScenarioBinding | None = None) -> Scenario:
 
 class TestTheLookupPathNeverReadsTheBinding:
     def test_the_lookup_path_never_reads_the_binding(self) -> None:
+        """SPC-125: the lookup model refuses a bound scenario, reading no more of the binding than that it is there."""
         scenario = _four_by_four()
-        scenario.binding = _Tripwire()  # type: ignore[assignment]
+        bound = dataclasses.replace(scenario)
+        bound.binding = _Tripwire()  # type: ignore[assignment]
+        with pytest.raises(ValueError, match="evaluate_scenario"):
+            compute_outcome_metrics(bound.adversary_actions[0], bound.friendly_responses[0], bound)
         matrix = [
             [compute_outcome_metrics(a, f, scenario) for f in scenario.friendly_responses]
             for a in scenario.adversary_actions
@@ -265,11 +269,12 @@ class TestWhatTheBindingSays:
         assert "a manoeuvre with no hypothesis names no burn and stays a lookup" in BINDING_NOTE
         # Inverted by SPC-123: with a red track bound, custody is computed too, so not every other figure is a lookup.
         assert "Every other figure is still a lookup." not in BINDING_NOTE
-        # Inverted by SPC-121: a manoeuvre response given a target separation has its burn sized.
+        # Inverted by SPC-121: a manoeuvre response given a target separation has its burn sized; and by SPC-125: a
+        # response that does not burn spends 0 m/s against the no-burn orbit, not a lookup.
         assert (
             "With a red track bound, custody is its custody as the sweep judges it at evaluation, carried over the "
-            "horizon. Our delta-V is computed for a manoeuvre response given a target separation, and otherwise a "
-            "lookup." in BINDING_NOTE
+            "horizon. Our delta-V is computed for a manoeuvre response given a target separation, and is 0 m/s for a "
+            "response that does not burn wherever the closest approach is computed or sampled" in BINDING_NOTE
         )
         assert "km (lookup)" not in BINDING_NOTE and "custody (lookup)" not in BINDING_NOTE
         assert ScenarioBinding(red=_elset()).note is BINDING_NOTE

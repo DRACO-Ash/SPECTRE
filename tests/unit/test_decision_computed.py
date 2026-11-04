@@ -299,7 +299,9 @@ class TestTheEdgesAndTheNotes:
         assert bases.delta_v_cost_km_s == FigureBasis(
             Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. Enter a target separation to size this burn.",
         )
-        assert _cells(computed, _NO_ACTION)[1].figure_bases.delta_v_cost_km_s == LOOKUP_BASES.delta_v_cost_km_s
+        # A response that does not burn spends 0 m/s against the no-burn blue orbit, not the lookup's rule (SPC-125).
+        still = _cells(computed, _NO_ACTION)[1].figure_bases.delta_v_cost_km_s
+        assert still.kind is Basis.COMPUTED and still.note.startswith("this response does not burn")
         assert bases.composite_score.kind is Basis.LOOKUP
 
     def test_the_basis_note_names_each_sides_own_epoch(self) -> None:
@@ -501,11 +503,13 @@ class TestWhatTheResultSays:
         assert computed.propagator_line is None
         assert evaluate_scenario(_scenario()).propagator_line is None
 
-    @pytest.mark.parametrize("binding", [_binding(blue=False), _binding(red=False)], ids=["red only", "blue only"])
-    def test_one_side_bound_says_bind_both_to_compute(self, binding: ScenarioBinding) -> None:
-        """D17."""
+    @pytest.mark.parametrize(("binding", "side"), [
+        (_binding(blue=False), "a blue asset"), (_binding(red=False), "a red track"),
+    ], ids=["red only", "blue only"])
+    def test_one_side_bound_says_bind_the_other_to_compute(self, binding: ScenarioBinding, side: str) -> None:
+        """D17; SPC-119: only the side still to bind is named."""
         result = evaluate_scenario(_scenario(binding=binding))
-        line = "Closest approach not computed: bind a red track and a blue asset to compute it."
+        line = f"Closest approach not computed: bind {side} to compute it."
         assert result.computed_binding_note == line
         assert line in _page(result)
         assert result.n_computed_cells == 0
@@ -575,15 +579,17 @@ class TestPlanComputed:
 
 class TestTheNotesSayWhatIsComputed:
     def test_the_all_lookup_basis_says_how_to_earn_a_computed_closest_approach(self) -> None:
-        """Unbound, or bound on one side, the all-lookup basis says what binding would earn."""
+        """Unbound, or bound on one side, the all-lookup basis says what binding would earn: only the side still to
+        bind (SPC-119)."""
         assert "Phase 1" not in decision.MODELLED_BASIS
         bind = (
             "Bind a red track and a blue asset to compute the closest approach of a row whose action does not move "
             "the red track, or to sample one that carries a manoeuvre hypothesis."
         )
-        for binding in (None, _binding(blue=False), _binding(red=False)):
+        for binding, line in ((None, bind), (_binding(blue=False), decision.BIND_BLUE_TO_EARN),
+                              (_binding(red=False), decision.BIND_RED_TO_EARN)):
             result = evaluate_scenario(_scenario(binding=binding))
-            assert result.basis == f"{decision.MODELLED_BASIS} {bind}"
+            assert result.basis == f"{decision.MODELLED_BASIS} {line}"
             assert result.basis in _page(result)
 
     def test_bound_with_every_row_refused_it_does_not_ask_to_bind(self) -> None:

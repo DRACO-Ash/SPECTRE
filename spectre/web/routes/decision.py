@@ -11,6 +11,7 @@ POST /plan/decision/job/cancel → stop the job; nothing is scored
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import html
 import logging
 import math
@@ -28,10 +29,12 @@ from spectre.domain.decision import (
     ADVERSARY_FIELDS_NOTE,
     BINDING_NOTE,
     DEFAULT_CUSTODY_GAP_FRACTION,
+    DEFAULT_PROBABILITY,
     MAX_SAMPLE_HOURS,
     ActionType,
     AdversaryAction,
     AdversaryHypothesis,
+    BoundElset,
     FriendlyResponse,
     Scenario,
     ScenarioBinding,
@@ -45,8 +48,17 @@ from spectre.domain.decision_figures import ResponseBurnSpec
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
 from spectre.web.decision_binding import bind_scenario
-from spectre.web.decision_custody import red_custody, with_red_custody
-from spectre.web.decision_job import JobState, cancel_job, evaluated_line, job_view, new_job, start_job
+from spectre.web.decision_custody import HISTORY_WAIT_S, history_fetch, red_custody, with_red_custody
+from spectre.web.decision_job import (
+    CustodyRead,
+    JobState,
+    cancel_job,
+    evaluated_line,
+    job_view,
+    new_job,
+    start_job,
+)
+from spectre.web.decision_threat import held_picture
 from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
 from spectre.web.models import SessionKey, User
@@ -209,7 +221,7 @@ def _adversary_rows(
             id=columns.ids[i],
             name=_at(columns.names, i, f"ADV-{i+1}"),
             action_type=_action_type(columns.types, i),
-            probability=float(_at(columns.probs, i, 0.5)),
+            probability=float(_at(columns.probs, i, DEFAULT_PROBABILITY)),
             confidence=float(_at(columns.confs, i, 0.5)),
             hypothesis=_at(hypotheses, i, None),
             custody_gap_fraction=_at(columns.gaps, i, DEFAULT_CUSTODY_GAP_FRACTION),
@@ -458,6 +470,7 @@ async def decision_panel(
         "pol": pol,
         "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
         "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
+        "default_probability": DEFAULT_PROBABILITY,
         **_bind_context(state),
         **_hypothesis_context(),
     })
@@ -586,6 +599,11 @@ def _parse(inputs: _Inputs, form: _ScenarioForm) -> _Parsed:
     return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form))
 
 
+def _utc_now() -> datetime:
+    """The scenario epoch's clock, a seam so a test can stand at a chosen moment."""
+    return datetime.now(UTC)
+
+
 @router.post("/evaluate", response_class=HTMLResponse)
 async def decision_evaluate(
     request: Request,
@@ -595,13 +613,15 @@ async def decision_evaluate(
     """Evaluate a decision scenario and return the ranked results partial, or the job that will.
 
     The scenario epoch is now, the moment Evaluate is pressed; a hypothesis's burn time counts from it (SPC-114).
-    A bound red track's custody is read here, as the sweep reads it (SPC-123), so the evaluation does no I/O.
+    A bound red track's custody is read here, as the sweep reads it (SPC-123), so the evaluation does no I/O; when
+    that would wait on a UDL history fetch, the read is the first stage of a job whose progress says so
+    (SPC-119). The sweep's Threat picture for the bound red track is read from the session (SPC-171).
     """
     inputs = _Inputs()
     parsed = _parse(inputs, form)
     if inputs.problem is not None:
         return _err(inputs.problem)
-    now = datetime.now(UTC)
+    now = _utc_now()
     state = get_session_state(current_user)
     bound = bind_scenario(state, form.red_sat.strip(), form.blue_sat.strip(), now)
     if bound.problem is not None:
@@ -609,11 +629,34 @@ async def decision_evaluate(
     hypotheses = _hypotheses(parsed.entries, bound.binding, now)
     if hypotheses.problem is not None:
         return _err(hypotheses.problem)
-    binding = bound.binding
-    if binding is not None and binding.red is not None:
-        binding = with_red_custody(binding, await red_custody(state, binding.red, now))
+    binding, custody = await _with_custody(state, bound.binding, now)
+    # The sweep's picture for this red track, beside the rows: its collect-first rows are listed, never scored (SPC-171).
     scenario = _scenario(form, parsed, hypotheses.carried, binding, now)
-    return await _answer(request, current_user, scenario, _strategy(form.strategy))
+    scenario = dataclasses.replace(scenario, threat=held_picture(state, binding, now))
+    return await _answer(request, current_user, scenario, _strategy(form.strategy), custody)
+
+
+async def _with_custody(
+    state: SessionState, binding: ScenarioBinding | None, now: datetime,
+) -> tuple[ScenarioBinding | None, CustodyRead | None]:
+    """The binding with the red track's custody read now, or, when that would wait on a UDL history fetch, the
+    binding as it is and the read for the job to make first, so its progress can say what it waits on (SPC-119)."""
+    red = None if binding is None else binding.red
+    if binding is None or red is None:
+        return binding, None
+    fetch = history_fetch(state, red, now)
+    if fetch:
+        return binding, _custody_reader(state, now, fetch)
+    return with_red_custody(binding, await red_custody(state, red, now)), None
+
+
+def _custody_reader(state: SessionState, now: datetime, fetch: str) -> CustodyRead:
+    """The job's first stage: read the bound red track's custody, waiting at most HISTORY_WAIT_S on *fetch*."""
+    async def read(scenario: Scenario) -> Scenario:
+        binding = cast("ScenarioBinding", scenario.binding)
+        status = await red_custody(state, cast("BoundElset", binding.red), now)
+        return dataclasses.replace(scenario, binding=with_red_custody(binding, status))
+    return CustodyRead(read, HISTORY_WAIT_S, fetch)
 
 
 def _scenario(
@@ -639,18 +682,21 @@ def _scenario(
     )
 
 
-async def _answer(request: Request, user: User, scenario: Scenario, strat: SelectorStrategy) -> HTMLResponse:
+async def _answer(
+    request: Request, user: User, scenario: Scenario, strat: SelectorStrategy, custody: CustodyRead | None = None,
+) -> HTMLResponse:
     """The results at once for a scenario that samples nothing; otherwise a job, and the partial that polls it.
 
     Lookups and rows refused before running evaluate in milliseconds. A scenario that samples can take up to the
-    budget, so it runs as this sign-in's job (SPC-113), replacing any other.
+    budget, so it runs as this sign-in's job (SPC-113), replacing any other. So does one whose custody must first
+    wait on a UDL history fetch, *custody*, whatever it samples (SPC-119).
     """
     state = get_session_state(user)
     key = cast("SessionKey", user.session_key)   # require_login admits only a sign-in
-    if not await asyncio.to_thread(needs_a_run, scenario):
+    if custody is None and not await asyncio.to_thread(needs_a_run, scenario):
         state.decision_job = None   # an answer here replaces any job, whose poll would overwrite it
         return await _evaluate_inline(request, state, scenario, strat)
-    job = new_job(scenario, strat)
+    job = new_job(scenario, strat, custody=custody)
     start_job(state, key, job)
     return render(request, "partials/decision_job.html", job_view(state, job.job_id))
 

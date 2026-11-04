@@ -7,7 +7,9 @@
    custody of SPC-123: the red track's status at evaluation, each row's custody sentence, a degraded cell and the
    result's custody notes. The Show trajectory forms (SPC-124) read "links", which only the route passes, and the
    TCA histogram reads each cell's tca_histogram; both are guarded too. A row's custody gap share (SPC-161) is
-   guarded, and shown only on a manoeuvre row whose custody is the rule of thumb, the one place it sets a figure. #}
+   guarded, and shown only on a manoeuvre row whose custody is the rule of thumb, the one place it sets a figure.
+   The sweep's Threat picture for the bound red track (SPC-171): its lines, the collect-first advice, the
+   expected-value guidance, each row's Understanding and the collect-first rows, each guarded too. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -47,6 +49,27 @@
   Scenario not bound to a red track or blue asset.
   {% endif %}
 </div>
+
+{# ── The sweep's Threat picture for the bound red track (SPC-171): the range, Understanding and decide-by, each a
+     sentence of its own (I13), the collect-first advice and the rows it lists, never scored, and the expected-value
+     guidance. Context only: nothing here moves a figure or fills P or Conf. One div with no div inside. ── #}
+{% set threat_lines = result.threat_lines if result.threat_lines is defined else () %}
+{% set collection = result.collection if result.collection is defined else none %}
+{% set guidance = result.objective_guidance if result.objective_guidance is defined else none %}
+{% if threat_lines or collection is not none or guidance is not none %}
+<div role="note" class="threat-context" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.4rem">
+  {% for line in threat_lines %}<p class="threat-line" style="margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  {% if collection is not none %}
+  <p class="collection-advice" data-advice="{{ collection.advice.name | lower }}" style="margin:0.1rem 0; font-weight:700; color:var(--gold)">{{ collection.sentence }}</p>
+  {% endif %}
+  {% for row in (result.collection_rows if result.collection_rows is defined else ()) %}
+  <p class="collection-row" style="margin:0.1rem 0">{{ row.sentence }}</p>
+  {% endfor %}
+  {% if guidance is not none %}
+  <p class="objective-guidance" style="margin:0.1rem 0; color:var(--gold)">{{ guidance }}</p>
+  {% endif %}
+</div>
+{% endif %}
 
 {# ── Recommendation Banner: a modelled estimate, and it says so ─────────────────────────────────────────── #}
 <div style="background:rgba(59,139,235,0.10); border:1px solid rgba(59,139,235,0.45);
@@ -178,6 +201,9 @@
           {% endif %}
           {% if result.row_custody is defined and result.row_custody | length > i and result.row_custody[i] is not none %}
           <div class="row-custody" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_custody[i] }}</div>
+          {% endif %}
+          {% if result.row_understanding is defined and result.row_understanding | length > i and result.row_understanding[i] is not none %}
+          <div class="row-understanding" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_understanding[i] }}</div>
           {% endif %}
           {% if result.row_notes is defined and result.row_notes | length > i and result.row_notes[i] is not none %}
           <div class="row-note" style="font-size:0.56rem; color:var(--gold)">{{ result.row_notes[i] }}</div>

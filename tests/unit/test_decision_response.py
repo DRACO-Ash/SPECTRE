@@ -118,7 +118,7 @@ class TestAComputedRowAppliesOurBurn:
         hold, avoid = leo.outcome_matrix[0]
         assert hold.closest_approach_km == 10.0
         assert avoid.closest_approach_km >= 20.0
-        assert hold.figure_bases.delta_v_cost_km_s.kind is Basis.LOOKUP and hold.delta_v_cost_km_s == 0.0
+        assert hold.figure_bases.delta_v_cost_km_s.kind is Basis.COMPUTED and hold.delta_v_cost_km_s == 0.0   # SPC-125
 
     def test_every_computed_cell_names_rk45_once_any_response_burns(self, leo: ScenarioResult) -> None:
         """29: the Hold cells too, so no row is ranked across two propagators."""
@@ -445,11 +445,13 @@ class TestWhatTheResultSays:
         )
 
     def test_the_binding_note_says_when_our_delta_v_is_computed(self) -> None:
-        """45."""
+        """45; SPC-125: a response that does not burn spends 0 m/s against the no-burn orbit, not a lookup."""
         assert BINDING_NOTE.endswith(
-            "Our delta-V is computed for a manoeuvre response given a target separation, and otherwise a lookup."
+            "Our delta-V is computed for a manoeuvre response given a target separation, and is 0 m/s for a response "
+            "that does not burn wherever the closest approach is computed or sampled; a manoeuvre response with no "
+            "target keeps the lookup."
         )
-        assert "our delta-V is computed only for a manoeuvre response given a target separation" in decision.HYPOTHESIS_NOTE
+        assert "our burn is sized only for a manoeuvre response given a target separation" in decision.HYPOTHESIS_NOTE
 
     def test_no_gap_is_measured_when_every_figure_is_rk45(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """45: computed rows on RK45 beside a sampled row compare like with like."""

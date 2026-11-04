@@ -91,6 +91,7 @@ from spectre.domain.warning_change import (
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
+from spectre.web.decision_threat import hold_threat_picture
 from spectre.web.deps import render
 from spectre.web.elsets import elset_age, limit_hours_for_regime
 from spectre.web.format_units import format_tof_label
@@ -2627,6 +2628,8 @@ async def threat_sweep(
         _Red(red_satno, red_tle, red_regime, history, custody, confidence_context, interactions), worst_coa, now,
     )
     decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
+    # The engine reads this picture, so its range and deadline cannot disagree with the sweep's (SPC-171).
+    hold_threat_picture(state, red_sat.strip(), understanding, decide, now)
     worst_coa = _with_understanding(worst_coa, understanding)
     worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 

@@ -34,7 +34,7 @@ import logging
 import secrets
 import threading
 import weakref
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -48,6 +48,7 @@ from spectre.domain.decision import (
     ScenarioResult,
     SelectorStrategy,
     evaluate_scenario,
+    needs_a_run,
 )
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
@@ -57,11 +58,26 @@ logger = logging.getLogger(__name__)
 
 #: What the job evaluates with: evaluate_scenario, or a test's stand-in.
 Evaluate = Callable[..., ScenarioResult]
+#: What a job does before it evaluates (SPC-119): read the bound red track's custody, which may wait on a UDL
+#: history fetch, and return the scenario with it.
+Prepare = Callable[[Scenario], Awaitable[Scenario]]
+
+
+@dataclass(frozen=True)
+class CustodyRead:
+    """A job's first stage (SPC-119): the read, how long it waits at most, and the fetch it waits on, in the words
+    its progress uses."""
+
+    read: Prepare
+    wait_s: float
+    fetch: str
 
 
 class JobState(StrEnum):
-    """Where a job is: waiting for the server's sampling slot, sampling, or finished one of three ways."""
+    """Where a job is: reading custody, waiting for the server's sampling slot, sampling, or finished one of three
+    ways."""
 
+    CUSTODY = "custody"
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -87,11 +103,18 @@ class DecisionJob:
     result: ScenarioResult | None = None
     cancelled: threading.Event = field(default_factory=threading.Event, repr=False)
     task: asyncio.Task[None] | None = field(default=None, repr=False)
+    #: Read before the evaluation (SPC-119): the bound red track's custody, which waits on a UDL history fetch.
+    #: None when custody is read already.
+    custody: CustodyRead | None = field(default=None, repr=False)
 
 
-def new_job(scenario: Scenario, strategy: SelectorStrategy) -> DecisionJob:
-    """A queued job for *scenario*, with an id the page cannot guess."""
-    return DecisionJob(job_id=secrets.token_urlsafe(8), scenario=scenario, strategy=strategy)
+def new_job(scenario: Scenario, strategy: SelectorStrategy, *, custody: CustodyRead | None = None) -> DecisionJob:
+    """A job for *scenario*, with an id the page cannot guess: reading custody first when *custody* is given, else
+    queued."""
+    return DecisionJob(
+        job_id=secrets.token_urlsafe(8), scenario=scenario, strategy=strategy,
+        state=JobState.QUEUED if custody is None else JobState.CUSTODY, custody=custody,
+    )
 
 
 # ── Server-wide: the sampling slot, the shutdown stop and the tasks held ──
@@ -153,11 +176,40 @@ def _stop(job: DecisionJob, reason: str) -> None:
     job.state, job.stopped = JobState.STOPPED, reason
 
 
+async def _prepared(state: SessionState, key: SessionKey, job: DecisionJob) -> bool:
+    """Read custody first, when the job must (SPC-119): True to go on, False once it has stopped or failed.
+
+    A scenario that samples nothing then evaluates on a worker thread at once, without the sampling slot, as the
+    route answers it when no read is needed, and the job ends here.
+    """
+    if job.custody is None:
+        return True
+    try:
+        job.scenario = await job.custody.read(job.scenario)
+        reason = still_wanted(state, key, job)
+        if reason:
+            _stop(job, reason)
+            return False
+        if await asyncio.to_thread(needs_a_run, job.scenario):
+            job.state = JobState.QUEUED
+            return True
+        result = await asyncio.to_thread(evaluate_scenario, job.scenario, job.strategy)
+    except Exception:
+        logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
+        job.state = JobState.FAILED
+        return False
+    _finish(state, key, job, result)
+    return False
+
+
 async def run_job(state: SessionState, key: SessionKey, job: DecisionJob, *, evaluate: Evaluate | None = None) -> None:
-    """Wait for the sampling slot, then evaluate on a worker thread under the budget; end DONE, STOPPED or FAILED.
+    """Read custody when the job must, then wait for the sampling slot and evaluate on a worker thread under the
+    budget; end DONE, STOPPED or FAILED.
 
     *evaluate* defaults to this module's evaluate_scenario, read when the job runs.
     """
+    if not await _prepared(state, key, job):
+        return
     run_with = evaluate or evaluate_scenario
 
     def progress(seen: SamplingProgress) -> None:
@@ -217,10 +269,14 @@ def start_job(
     job.task = spawn(run_job(state, key, job))
 
 
+#: The states a job is still underway in: the page polls them, and Cancel stops them.
+_UNDERWAY = (JobState.CUSTODY, JobState.QUEUED, JobState.RUNNING)
+
+
 def cancel_job(state: SessionState, job_id: str) -> None:
     """Stop this sign-in's job if *job_id* names it and it has not finished; its thread stops at its next sample."""
     job = held_job(state, job_id)
-    if job is not None and job.state in (JobState.QUEUED, JobState.RUNNING):
+    if job is not None and job.state in _UNDERWAY:
         job.cancelled.set()
         _stop(job, "you cancelled it")
 
@@ -256,13 +312,26 @@ _SIZING = (
     "Sizing our burn for {label}: trial {p.done} of at most {p.total}, {p.elapsed_s:.0f} s of the {budget:g} s "
     "budget used. Scenario epoch {epoch:%H:%M} UTC."
 )
+_CUSTODY = (
+    "Reading custody: waiting up to {wait:g} s for {red}'s element-set history, {fetch}, so its custody is judged "
+    "as the sweep judges it. The evaluation starts when the history arrives or the wait ends; if "
+    "it has not arrived by then, custody reads degraded, which counts as lost, and the next evaluation uses it."
+)
 _STOPPED = "Evaluation stopped: {reason}. Nothing was scored; evaluate again to see the figures."
 _FAILED = "The evaluation failed; the server log has the detail. Nothing was scored."
 _DONE = "The evaluation finished."
 
 
+def _red_name(job: DecisionJob) -> str:
+    binding = job.scenario.binding
+    red = None if binding is None else binding.red
+    return "the red track" if red is None else red.stk_name
+
+
 def _message(job: DecisionJob) -> str:
     epoch, budget = job.scenario.epoch_utc, EVALUATION_BUDGET_S
+    if job.state is JobState.CUSTODY and job.custody is not None:   # the red track's name is escaped where rendered
+        return _CUSTODY.format(wait=job.custody.wait_s, red=_red_name(job), fetch=job.custody.fetch)
     if job.state is JobState.QUEUED:
         return (_QUEUED if job.waiting else _STARTING_SOON).format(budget=budget)
     if job.state is JobState.RUNNING:
@@ -285,6 +354,6 @@ def job_view(state: SessionState, job_id: str) -> dict[str, Any]:
     return {
         "job": job,
         "message": _message(job),
-        "polling": job.state in (JobState.QUEUED, JobState.RUNNING),
+        "polling": job.state in _UNDERWAY,
         "progress": job.progress if job.state is JobState.RUNNING else None,
     }

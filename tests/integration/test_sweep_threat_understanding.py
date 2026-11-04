@@ -94,3 +94,21 @@ class TestTheRedTrackCard:
         assert 'class="pair-understanding"' in page
         assert "This record: undated, single open source [C3]: listed, does not move the Threat range." in page
         assert 'class="tu-strip"' in page and "Manoeuvres: not earned" in page
+
+
+class TestTheSweepHandsItsPictureToTheEngine:
+    """SPC-171: the sweep holds its Threat picture so the Decision Engine reads the same range and deadline."""
+
+    def test_a_sweep_holds_its_picture_for_the_red_track_it_swept(
+        self, client: Any, auth_cookie: str, udl: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    ) -> None:
+        from spectre.domain.decision import ThreatPicture
+
+        udl.threat_picture = None
+        _stub_udl(monkeypatch, [25.0] * 7 + [150.0])
+        _sweep(client, auth_cookie)
+        picture = udl.threat_picture
+        assert isinstance(picture, ThreatPicture), "the sweep held no picture for the engine"
+        assert picture.red == "RED-GEO"
+        assert picture.assessed_at == threat._utc_now()
+        assert picture.floor <= picture.ceiling

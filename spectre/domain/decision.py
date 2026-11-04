@@ -78,6 +78,22 @@ judge the warning time but not whether a burn is normal, and the operator's
 custody needs both, so it counts as lost. Without a red status the rule of
 thumb stays.
 
+The lookup constants retire wherever a computed or sampled figure exists
+(SPC-125): beside a computed or sampled closest approach, a response that
+does not burn spends 0 m/s against the same no-burn blue orbit, not the
+cost x 0.05 rule, and the lookup model's public entry, compute_outcome_metrics,
+refuses a bound scenario. The per-type distances, 0.4 of the horizon, the
+rule-of-thumb custody and the cost x 0.05 delta-V stay for an unbound
+scenario, and wherever nothing is computed or sampled, labelled as lookups.
+
+A scenario bound to a red track may carry the Threat picture the sweep held
+for it (SPC-171): its range, Understanding, cues and decide-by. It moves no
+figure. It gives the collect-first advice of the Threat Understanding
+concept, section 4.10, and a collect-first row for each cue that needs an
+analyst or a sensor; it is shown beside the probability and confidence,
+which it never fills; and under expected value it says when the probability
+has not been earned and what minimax would recommend.
+
 Typical use::
 
     scenario = Scenario(
@@ -165,6 +181,15 @@ from spectre.domain.provenance import (
     value_input,
     weakest,
 )
+from spectre.domain.threat_assessment import Band
+from spectre.domain.threat_understanding import (
+    Advice,
+    CollectionAdvice,
+    Cue,
+    Understanding,
+    collection_advice,
+    landing_cues,
+)
 
 if TYPE_CHECKING:
     from spectre.astro.pattern_of_life import Manoeuvre, TLERecord
@@ -205,10 +230,20 @@ WORST_CASE_BASIS = _MODELLED.format(
 WORST_CASE_CELL_BASIS = _MODELLED.format(
     custody="takes the worst case, a burn at the scenario epoch, since this manoeuvre names no burn time",
 )
-#: Follows MODELLED_BASIS on the result when the scenario is not bound on both sides: what binding would earn.
+#: Follows MODELLED_BASIS on the result when neither side is bound: what binding would earn.
 BIND_TO_EARN = (
     "Bind a red track and a blue asset to compute the closest approach of a row whose action does not move the "
     "red track, or to sample one that carries a manoeuvre hypothesis."
+)
+#: BIND_TO_EARN once the red track is bound: only the blue asset is still to bind (SPC-119).
+BIND_BLUE_TO_EARN = (
+    "Bind a blue asset to compute the closest approach of a row whose action does not move the red track, or to "
+    "sample one that carries a manoeuvre hypothesis."
+)
+#: BIND_TO_EARN once the blue asset is bound: only the red track is still to bind (SPC-119).
+BIND_RED_TO_EARN = (
+    "Bind a red track to compute the closest approach of a row whose action does not move it, or to sample one "
+    "that carries a manoeuvre hypothesis."
 )
 #: Follows MODELLED_BASIS on the result when both sides are bound and every row was refused: binding is done.
 EVERY_ROW_REFUSED = "Both orbits are bound, but no closest approach could be computed or sampled: each cell says why."
@@ -363,7 +398,7 @@ def _require_fraction(owner: str, field_name: str, value: float) -> None:
 HYPOTHESIS_NOTE: str = (
     "A manoeuvre hypothesis records how the adversary might move and where that came from. With a red track "
     "bound, its burn time sets when custody is lost; with both sides bound, the closest approach of its row and "
-    "its time are sampled from it, and our delta-V is computed only for a manoeuvre response given a target "
+    "its time are sampled from it, and our burn is sized only for a manoeuvre response given a target "
     "separation; without one, a manoeuvre row's closest approach "
     "stays a lookup and its custody takes the worst case, a burn at the scenario epoch, since it names no burn."
 )
@@ -724,6 +759,9 @@ class AdversaryHypothesis:
     def __hash__(self) -> int:
         return hash(json.dumps(self.recorded(), sort_keys=True))
 
+
+#: A row's probability when none is given, and the panel's default: a row still at it reads as untouched (SPC-171).
+DEFAULT_PROBABILITY = 0.5
 
 #: A row's custody gap share when none is given: the confidence the page posted by default, which set the rule of
 #: thumb's gap until SPC-161, so a page left at its defaults scores as it did.
@@ -1162,8 +1200,9 @@ BINDING_NOTE: str = (
     "its time are computed from these orbits by SGP4, with no burn, for every row whose action does not move the "
     "red track, and sampled for a row whose action carries a hypothesis; a manoeuvre with no hypothesis names no "
     "burn and stays a lookup. With a red track bound, custody is its custody as the sweep judges it at evaluation, "
-    "carried over the horizon. Our delta-V is computed for a manoeuvre response given a target separation, and "
-    "otherwise a lookup."
+    "carried over the horizon. Our delta-V is computed for a manoeuvre response given a target separation, and is "
+    "0 m/s for a response that does not burn wherever the closest approach is computed or sampled; a manoeuvre "
+    "response with no target keeps the lookup."
 )
 
 _SIDES = frozenset({"red", "blue"})
@@ -1280,6 +1319,90 @@ class ScenarioBinding:
         return BINDING_NOTE
 
 
+# ── Threat Understanding beside the scenario (SPC-171) ───────────────────────
+
+#: A collect-first row's time-to-execute note: the cue's duration is a tuned lookup, not a measured time.
+COLLECTION_NOTE = "collection to narrow the threat range: the cue's tuned duration, a lookup"
+#: Where the expected-value selector's weight has not been earned (concept section 7.5, item 4).
+EXPECTED_VALUE_UNEARNED = "Expected value rests on a probability the evidence has not earned."
+#: The same, for a bound red track the engine holds no current picture for: it says only what the engine holds.
+EXPECTED_VALUE_NO_PICTURE = "Expected value rests on a probability no current Threat picture for {red} supports."
+
+
+def _when(moment: datetime) -> str:
+    """A moment as the sweep writes decide-by: "15:00 UTC on 4 Nov"."""
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+@dataclass(frozen=True)
+class CollectionRow:
+    """A collect-first row (concept section 7.5, item 1): a cue that needs someone outside SPECTRE, named by the cue
+    and timed by its lookup duration.
+
+    Listed beside the ranking, never scored in it: no collection here tasks a sensor, and collecting moves no figure
+    until what it finds is in the sweep, so as a friendly row it would win on a custody credit and a cost and
+    reversibility made up for it.
+    """
+
+    name:  str
+    hours: float
+    basis: FigureBasis = FigureBasis(Basis.LOOKUP, COLLECTION_NOTE)
+
+    @property
+    def sentence(self) -> str:
+        return (
+            f"{self.name}, {self.hours:g} h: {self.basis.note}. Not ranked against your responses: collecting moves "
+            "no figure until what it finds is in the sweep."
+        )
+
+
+@dataclass(frozen=True)
+class ThreatPicture:
+    """The bound red track's Threat range, Understanding, cues and decide-by, as the sweep assessed them (SPC-171).
+
+    Context for the operator and the collect-first advice only: it moves no figure, no score and no field of an
+    adversary row. *red* names the red track it was assessed for; *decide_at* is the sweep's decide-by, None when it
+    set none, *decide_by* its sentence and *target* the blue asset it was set for.
+    """
+
+    red:           str
+    floor:         Band
+    ceiling:       Band
+    understanding: Understanding
+    cues:          tuple[Cue, ...] = ()
+    decide_at:     datetime | None = None
+    decide_by:     str = ""
+    assessed_at:   datetime | None = None
+    target:        str = ""
+
+    def __post_init__(self) -> None:
+        if self.floor > self.ceiling:
+            raise ValueError(f"a threat range with its floor {self.floor.name} above its ceiling {self.ceiling.name}")
+
+    def advice(self, now: datetime) -> CollectionAdvice:
+        """Collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10)."""
+        return collection_advice((self.floor, self.ceiling), self.cues, now=now, decide_at=self.decide_at)
+
+    def collection_rows(self, now: datetime) -> tuple[CollectionRow, ...]:
+        """One row per cue that needs someone outside SPECTRE, when the advice at *now* is to collect first.
+
+        Only a cue that could move the range off the action line, whose result SPECTRE can read, landing by
+        decide-by, is listed. A cue SPECTRE runs itself is named by the advice and lists no row.
+        """
+        if self.advice(now).advice is not Advice.COLLECT_FIRST:
+            return ()
+        landing = landing_cues(self.cues, now=now, decide_at=self.decide_at)
+        return tuple(CollectionRow(c.observation, c.hours) for c in landing if not c.inside_spectre)
+
+
+def _require_threat(scenario: Scenario) -> None:
+    """A threat picture is about the bound red track it was assessed for, and no other."""
+    picture = scenario.threat
+    red = None if scenario.binding is None else scenario.binding.red
+    if picture is not None and (red is None or red.stk_name != picture.red):
+        raise ValueError(f"a threat picture belongs to the bound red track it was assessed for, {picture.red}")
+
+
 @dataclass
 class Scenario:
     """A what-if scenario: N adversary actions × M friendly responses."""
@@ -1301,6 +1424,9 @@ class Scenario:
     # in provenance; read by plan_sampling, for a row with a hypothesis, and by
     # plan_computed, for the pair's closest approach with no burn (SPC-120).
     binding:            ScenarioBinding | None = None
+    # The bound red track's Threat range, Understanding, cues and decide-by as the sweep held them (SPC-171): shown
+    # beside the rows and read by the collect-first advice; it moves no figure.
+    threat:             ThreatPicture | None = None
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -1308,6 +1434,21 @@ class Scenario:
             raise ValueError(f"Scenario.horizon_hours must be finite and > 0; got {self.horizon_hours!r}")
         for name in ("w_custody", "w_closest_approach", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
             _require_fraction("Scenario", name, getattr(self, name))
+        _require_threat(self)
+
+
+def _bound_sides(binding: ScenarioBinding | None) -> tuple[bool, bool]:
+    """Whether the red track and the blue asset are bound."""
+    return (False, False) if binding is None else (binding.red is not None, binding.blue is not None)
+
+
+#: What the all-lookup line asks for, by which sides are bound (red, blue): only what is still to bind (SPC-119).
+_TO_EARN: dict[tuple[bool, bool], str] = {
+    (False, False): BIND_TO_EARN,
+    (True, False): BIND_BLUE_TO_EARN,
+    (False, True): BIND_RED_TO_EARN,
+    (True, True): EVERY_ROW_REFUSED,
+}
 
 
 @dataclass
@@ -1359,11 +1500,9 @@ class ScenarioResult:
         bases = self._bases()
         if not all(_all_lookup(b) for b in bases):
             return MIXED_BASIS
-        binding = getattr(self.scenario, "binding", None)
-        bound = binding is not None and binding.red is not None and binding.blue is not None
         worst_case = bool(bases) and not self.custody_rule_of_thumb   # every row a manoeuvre naming no burn time
         modelled = WORST_CASE_BASIS if worst_case else MODELLED_BASIS
-        return f"{modelled} {EVERY_ROW_REFUSED if bound else BIND_TO_EARN}"
+        return f"{modelled} {_TO_EARN[_bound_sides(getattr(self.scenario, 'binding', None))]}"
 
     @property
     def custody_rule_of_thumb(self) -> bool:
@@ -1392,6 +1531,82 @@ class ScenarioResult:
         """
         computed = any(b.custody_maintained.kind is Basis.COMPUTED for b in self._bases())
         return CUSTODY_NOTE if computed else None
+
+    # ── Threat Understanding beside the result (SPC-171): context, never a figure ──
+
+    def _picture(self) -> ThreatPicture | None:
+        return getattr(self.scenario, "threat", None)
+
+    def _red_name(self) -> str | None:
+        binding = getattr(self.scenario, "binding", None)
+        red = None if binding is None else binding.red
+        return None if red is None else red.stk_name
+
+    @property
+    def collection(self) -> CollectionAdvice | None:
+        """Collect first, act on the ceiling, or below the action line, at the scenario epoch; None with no picture."""
+        picture = self._picture()
+        return None if picture is None else picture.advice(self.scenario.epoch_utc)
+
+    @property
+    def collection_rows(self) -> tuple[CollectionRow, ...]:
+        """The collect-first rows at the scenario epoch, listed beside the ranking; none with no picture."""
+        picture = self._picture()
+        return () if picture is None else picture.collection_rows(self.scenario.epoch_utc)
+
+    @property
+    def threat_lines(self) -> tuple[str, ...]:
+        """The sweep's Threat range, its Understanding and its decide-by, each its own sentence (I13)."""
+        picture = self._picture()
+        if picture is None:
+            return ()
+        at = "" if picture.assessed_at is None else f" at {_when(picture.assessed_at)}"
+        return (
+            f"Threat range for {picture.red}: from {picture.floor.name} to {picture.ceiling.name}, as the sweep "
+            f"assessed it{at}.",
+            f"Understanding {picture.understanding.name}: the sweep's rating of {picture.red}.",
+            *([picture.decide_by] if picture.decide_by else []),
+        )
+
+    @property
+    def row_understanding(self) -> tuple[str | None, ...]:
+        """Each adversary row's Understanding, carried into the result: the bound red track's, or not assessed.
+
+        Shown beside P and Conf as context only (concept section 7.5, items 2 and 3): nothing fills either.
+        """
+        red, picture = self._red_name(), self._picture()
+        rows = len(self.scenario.adversary_actions)
+        if red is None:
+            return (None,) * rows
+        if picture is None:
+            return (
+                f"Understanding not assessed: the engine holds no current picture from the sweep for {red}, so "
+                "nothing fills P or Conf.",
+            ) * rows
+        return (f"Understanding {picture.understanding.name}: shown beside P and Conf as context; it fills neither.",) * rows
+
+    def _unearned(self) -> str | None:
+        """Why expected value's weights are not earned: a bound red track with no current picture, a picture at
+        Understanding LOW, or any row still at the default probability; None when none holds."""
+        red, picture = self._red_name(), self._picture()
+        if red is not None and picture is None:
+            return EXPECTED_VALUE_NO_PICTURE.format(red=red)
+        low = picture is not None and picture.understanding is Understanding.LOW
+        if low or any(math.isclose(a.probability, DEFAULT_PROBABILITY) for a in self.scenario.adversary_actions):
+            return EXPECTED_VALUE_UNEARNED
+        return None
+
+    @property
+    def objective_guidance(self) -> str | None:
+        """Under expected value, when its weights are not earned: say so, and name what minimax recommends.
+
+        The selector chosen is kept: the guidance recommends, it never switches (concept section 7.5, item 4).
+        """
+        why = self._unearned() if self.robust_strategy is SelectorStrategy.EXPECTED_VALUE else None
+        if why is None:
+            return None
+        minimax = find_robust_response(self.scenario, self.outcome_matrix, SelectorStrategy.MINIMAX)
+        return f"{why} Minimax, the cautious rule, needs no probability: it recommends {minimax.name}."
 
     @property
     def basis_lines(self) -> tuple[str, ...]:
@@ -1505,11 +1720,9 @@ class ScenarioResult:
 
     @property
     def computed_binding_note(self) -> str | None:
-        """COMPUTED_BINDING_NOTE when only one side is bound, so no closest approach can be computed."""
-        binding = getattr(self.scenario, "binding", None)
-        if binding is None or (binding.red is None) == (binding.blue is None):
-            return None
-        return COMPUTED_BINDING_NOTE
+        """The binding note naming the side still to bind, when only one side is bound, so no closest approach can
+        be computed (SPC-119: it asked for both, so an operator whose red track was bound was told to bind one)."""
+        return _COMPUTED_BINDING_NOTES.get(_bound_sides(getattr(self.scenario, "binding", None)))
 
     @property
     def converged_means(self) -> str | None:
@@ -1630,11 +1843,18 @@ def compute_outcome_metrics(
     - delta_v_cost_km_s: friendly.cost * 0.05 for a MANOEUVRE response, else 0
     - composite_score: weighted sum of the normalised terms (higher = worse)
 
-    It never reads the scenario's binding or the action's hypothesis: a
-    sampled row is filled by evaluate_scenario from plan_sampling (SPC-112),
-    a computed one from plan_computed (SPC-120), and custody from the bound
-    red track's status (SPC-123).
+    It never reads the action's hypothesis: a sampled row is filled by
+    evaluate_scenario from plan_sampling (SPC-112), a computed one from
+    plan_computed (SPC-120), and custody from the bound red track's status
+    (SPC-123). It refuses a bound scenario (SPC-125): its constants stand
+    only where nothing is computed, and a consumer reading them for a bound
+    scenario would take a lookup for the figure binding earns.
     """
+    if scenario.binding is not None:
+        raise ValueError(
+            "compute_outcome_metrics is the lookup model, for an unbound scenario; a bound scenario's cells come from "
+            "evaluate_scenario, which computes or samples what binding earns"
+        )
     return _lookup_cell(adversary, friendly, scenario, None)
 
 
@@ -2710,7 +2930,7 @@ class _ResponseCell(NamedTuple):
         elif self.friendly.action_type is ActionType.MANOEUVRE:
             delta_v = FigureBasis(Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. {_ENTER_TARGET}")
         else:
-            return bases
+            delta_v = FigureBasis(Basis.COMPUTED, _NO_BURN_DV_NOTE)
         return outcome_bases(
             custody_maintained=bases.custody_maintained, custody_gap_hours=bases.custody_gap_hours,
             closest_approach_km=bases.closest_approach_km, time_to_closest_hours=bases.time_to_closest_hours,
@@ -2822,6 +3042,12 @@ BURN_SCORE_NOTE = (
     "cell, not from the ranking."
 )
 _DV_LOOKUP = " This cell's delta-V is a lookup."
+#: Our delta-V in a computed or sampled cell for a response that does not burn (SPC-125): the cost x 0.05 rule does
+#: not apply, since the blue asset is flown with no burn of ours, as the cell's closest approach is.
+_NO_BURN_DV_NOTE = (
+    "this response does not burn, so our delta-V is 0 m/s: the blue asset is flown with no burn of ours, as this "
+    "cell's closest approach is"
+)
 _ENTER_TARGET = "Enter a target separation to size this burn."
 _RESPONSE_AFTER_TCA = (
     "Our burn is not sized: at {at:%Y-%m-%d %H:%M} UTC, the response's time to execute after the scenario epoch, it "
@@ -2873,7 +3099,11 @@ _PROPAGATORS_UNCOMPARED = (
     "row."
 )
 #: Shown with a scenario bound on one side only (SPC-120).
-COMPUTED_BINDING_NOTE = "Closest approach not computed: bind a red track and a blue asset to compute it."
+COMPUTED_BINDING_NOTE = "Closest approach not computed: bind {side} to compute it."
+_COMPUTED_BINDING_NOTES: dict[tuple[bool, bool], str] = {
+    (True, False): COMPUTED_BINDING_NOTE.format(side="a blue asset"),
+    (False, True): COMPUTED_BINDING_NOTE.format(side="a red track"),
+}
 
 
 class ComputedPlan(NamedTuple):

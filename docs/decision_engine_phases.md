@@ -30,7 +30,9 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
     unless a red track is bound and its custody read: SPC-123, Phase 3 below)
   - `closest_approach_km` (a fixed 200, 3,000, 5,000 or 10,000 km per adversary action type, raised by response cost;
     no orbit propagated)
-  - `time_to_closest_hours` (0.4 of the horizon) and `delta_v_cost_km_s` (response cost x 0.05 km/s for a manoeuvre)
+  - `time_to_closest_hours` (0.4 of the horizon) and `delta_v_cost_km_s` (response cost x 0.05 km/s for a manoeuvre;
+    beside a computed or sampled closest approach, a response that does not burn spends 0 m/s, computed against the
+    same no-burn blue orbit, SPC-125)
 - Every figure states its own basis (SPC-101): `OutcomeMetrics.figure_bases` holds a `FigureBasis` per figure, of kind
   lookup, sampled or computed, with the rule behind it. In Phase 1 every figure is a lookup. The score's basis is
   derived from the figures its formula uses and is held at lookup by its scoring rule, so the modelled badge stays
@@ -39,7 +41,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 - A scenario may be bound to one held red track and one held blue asset (SPC-100). The binding records which real
   objects the scenario is about, puts their element sets in the result's provenance and shows each orbit's epoch and
   age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) in a "Bound to" block.
-  `compute_outcome_metrics` and `find_robust_response` never read it, and a test pins that. `plan_sampling` reads it
+  `find_robust_response` never reads it, and `compute_outcome_metrics`, the lookup model, refuses a bound scenario
+  (SPC-125), so its constants are never read for one; tests pin both. `plan_sampling` reads it
   for a row whose action carries a hypothesis (SPC-112, below), and `plan_computed` reads it for the pair's closest
   approach with no burn, which every row whose action does not move red takes when both sides are bound (SPC-120,
   Phase 3 below). The red track's custody, read by the route as the sweep reads it, replaces the custody rule of
@@ -55,7 +58,8 @@ Phase 1 evaluates a user-defined grid of adversary actions × friendly responses
 | `spectre/domain/decision.py` | Core data model + `evaluate_scenario()` |
 | `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `GET /plan/decision/bind`, `POST /plan/decision/evaluate` |
 | `spectre/web/decision_binding.py` | Binds a scenario to held objects and reads each element set's age (SPC-100) |
-| `spectre/web/decision_custody.py` | Reads the bound red track's custody as the sweep does, before evaluation (SPC-123) |
+| `spectre/web/decision_custody.py` | Reads the bound red track's custody as the sweep does, before evaluation, or as a job's first stage while a UDL history fetch, first or fresh, is awaited (SPC-123, SPC-119) |
+| `spectre/web/decision_threat.py` | Holds the sweep's Threat range, Understanding, cues and decide-by for its red track, and gives them to an evaluation bound to it while under 30 min old, with the deadline only for the blue asset it was set for (SPC-171) |
 | `spectre/web/templates/partials/decision_panel.html` | Scenario builder form |
 | `spectre/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
 
