@@ -15,6 +15,7 @@ import html
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 from typing import Any
 
 import pytest
@@ -308,3 +309,40 @@ class TestTheResult:
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
         assert _UNBOUND in text
         assert "Every figure in every cell is a lookup." in text
+
+
+class TestTheBindRegionStandsAlone:
+    """Found building SPC-130: inside the evaluate form, htmx 1.9.12 gives the bind region the form's target and
+    disabled element; it cannot find that submit button, throws, and the region never refreshes."""
+
+    def test_the_bind_region_takes_nothing_from_the_evaluate_form_around_it(
+        self, client: Any, auth_cookie: str,
+    ) -> None:
+        from tests.integration.test_decision_prior_route import _INHERITED, _VOID
+
+        class _ById(HTMLParser):
+            def __init__(self) -> None:
+                super().__init__()
+                self.stack: list[tuple[str, dict[str, str]]] = []
+                self.found: list[tuple[str, dict[str, str]]] | None = None
+
+            def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+                here = (tag, {k: v or "" for k, v in attrs})
+                if self.found is None and here[1].get("id") == "decision-bind":
+                    self.found = [*self.stack, here]
+                if tag not in _VOID:
+                    self.stack.append(here)
+
+            def handle_endtag(self, tag: str) -> None:
+                while self.stack and self.stack.pop()[0] != tag:
+                    pass
+
+        parser = _ById()
+        parser.feed(client.get("/plan/decision/panel", cookies={"spectre_session": auth_cookie}).text)
+        assert parser.found is not None
+        *around, (_, region) = parser.found
+        assert any(tag == "form" for tag, _ in around)
+        taken = {name for _, attrs in around for name in attrs if name in _INHERITED}
+        assert taken
+        assert sorted(name for name in taken if name not in region) == []
+        assert (region["hx-target"], region["hx-swap"]) == ("this", "innerHTML")

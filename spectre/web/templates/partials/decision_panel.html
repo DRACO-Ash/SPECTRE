@@ -170,6 +170,7 @@
     {# ── Bind to real objects (SPC-100). Rebuilt from the session each time it comes into view;
          the fragment never emits this wrapper's id, so the swap does not re-trigger itself. ── #}
     <div id="decision-bind" hx-get="/plan/decision/bind" hx-trigger="intersect" hx-swap="innerHTML"
+         hx-target="this" hx-indicator="this" hx-disabled-elt="this"
          hx-include="#dec-red-sat, #dec-blue-sat">{% include "partials/decision_bind_fields.html" %}</div>
 
     {# ── Adversary Actions ── #}
