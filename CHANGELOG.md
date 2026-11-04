@@ -9,6 +9,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-04
+
+**Operator output advanced: 4, the recommended response, can now look up to three turns ahead; and two defects found by new tests are fixed.**
+
+### Added
+- A game tree of one to three turns. Turn 2 starts from where turn 1's burns left both objects, every figure in a tree is RK45 for both objects, and each node's figures carry their basis and the path they rest on. A tree runs as one evaluation inside the 120 s budget, capped at 1,000 branches, and is refused before it runs when it would not fit, naming the largest that would; a run that overruns shows the deepest turn built in full and says so (SPC-140).
+- Selectors over the tree: minimax and minimin pick open loop, expected value picks turn by turn. When the operator states that a newer element set of red will arrive by a turn's end, expected value updates which turn-1 branch we are on through the engine's own custody rule, with a floor so no report moves the odds more than 19 times. The update is shown with its likelihood model and never written into a field. No view yet (SPC-142) (SPC-141).
+
+### Fixed
+- The Pattern of Life chart now draws once an analysis is loaded; its route read a field that no longer exists and returned a 500, which the panel swallowed (found by SPC-012).
+- A refused state vector fetch now gives the same advice as the other UDL calls, and logs the detail (found by SPC-011).
+
+### Changed
+- Coverage floors that guard something: the whole suite at 90 per cent (it was 74 against 95.9 measured), and floors of their own for the Pattern of Life route (100), the UDL route (95) and the threat route (90, from 75). Tests now pin the refusals, data modes, rate limits and error sentences at every exit of the Pattern of Life and UDL routes, raising them from 69.7 and 85.5 per cent to 100 and 99.8 (SPC-012, SPC-011, SPC-014).
+- The quality gate accepts a coverage floor above the house standard instead of refusing it.
+
 ## [0.22.0] - 2026-11-04
 
 **Operator output advanced: 4, the recommended response, now says whether it holds across the uncertainty in a NOTSO-based probability, not just at its centre.**

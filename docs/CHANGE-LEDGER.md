@@ -1172,3 +1172,13 @@ Feature work from the backlog: loading NOTSO suggestions per row, the NOTSO time
 | Code Quality | **HYGIENE** | None made for the gate. New code: the interval and timeline in `notso_prior.py`, interval and joint picks in `decision.py`, loading in `decision_prior.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against 0.21.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the interval uses scipy, already a runtime dependency. | n/a. |
 
+## 0.23.0
+
+Feature work from the backlog: the game tree and its selectors; and test hardening with two defects fixed.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/decision_tree.py`, `spectre/domain/tree_selectors.py`, `spectre/domain/turn_update.py`, tree support in `decision.py` and `decision_job.py`, two fixes in `routes/pol.py` and `routes/udl.py`, and new tests | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines; whole-repository coverage 97 per cent. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | The coverage floor rises from 74 to 90 per cent, with per-route floors in CI | Measured 97.2 per cent total, 100 for the Pattern of Life route and 99.8 for the UDL route before the floors were set. | Then a platform measure differs from the local one, and the floor should be set to the platform's figure. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
