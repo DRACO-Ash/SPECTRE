@@ -10,6 +10,7 @@ the physics test flies the real solvers with no stub.
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -1060,3 +1061,50 @@ class TestTheSweepsConfidenceReadsItsDataModeAndCustody:
         page = self._post(client, auth_cookie)
         assert "the element set's data mode is not recorded" in page
         assert "Confidence HIGH." not in page
+
+
+class TestTheInteractionsCellFillsWhenEarned:
+    """SPC-172: a burn that cut the warning on one of ours is an attributable approach, Interactions evidence.
+
+    The 18 SDS catalogue is B and the burn's own detection grade sets the
+    rest, so the cell fills only as far as that evidence earns. The legacy
+    verdict does not move: its switch is SPC-175.
+    """
+
+    @staticmethod
+    def _page(client: Any, cookie: str, hrr: Any, monkeypatch: pytest.MonkeyPatch,
+              hours: tuple[float, float]) -> str:
+        """Sweep one blue asset after the latest burn, its warning *hours* before and after it."""
+        before_h, after_h = hours
+        records = _events_history(_RECENT_RAISE)
+        before = _confirmed(records)[-1].tle_before.tle
+        _arrange(hrr, monkeypatch, records)
+        hrr.manual_sweep_tles = []
+        hrr.hrr_objects = [{"name": "BLUE-1", "satno": "77001", "country": "GBR", "rank": 1}]
+        hrr.hrr_tle_cache.update({"77001": _target_tle()})
+        _no_fetch(monkeypatch)
+        _spy(monkeypatch, {before: before_h, records[-1].tle: after_h})
+        return _sweep_group(client, cookie, "blue:1")
+
+    @staticmethod
+    def _cell(page: str) -> str:
+        cells = re.findall(r'<summary title="([^"]*)"[^>]*>Interactions: ([a-z ]+)</summary>', page)
+        assert len(cells) == 1, cells
+        title, depth = cells[0]
+        return f"{depth} | {html.unescape(title)}"
+
+    def test_a_burn_that_cut_your_warning_fills_the_cell(self, client: Any, auth_cookie: str, hrr: Any,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+        page = self._page(client, auth_cookie, hrr, monkeypatch, (14.0, 3.0))
+        assert "cut your warning on BLUE-1 from 14h to 3h" in page
+        cell = self._cell(page)
+        assert cell.startswith("earned | warning on BLUE-1 cut 11h by its burn, 14h to 3h: B2, "), cell
+        assert "no approaches or conjunctions held" not in page
+
+    def test_a_lengthened_warning_leaves_it_empty_and_the_verdict_is_the_same(
+            self, client: Any, auth_cookie: str, hrr: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        cut = self._page(client, auth_cookie, hrr, monkeypatch, (14.0, 3.0))
+        lengthened = self._page(client, auth_cookie, hrr, monkeypatch, (3.0, 14.0))
+        assert self._cell(lengthened) == "not earned | nothing held"
+        badge = re.compile(r'<span class="spectre-band-badge[^"]*">[^<]*</span>')
+        assert badge.findall(cut) == badge.findall(lengthened) != []

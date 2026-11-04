@@ -33,6 +33,8 @@ from spectre.domain.normality import Normality
 from spectre.domain.provenance import ledger_input
 from spectre.domain.threat_assessment import AccessEvidence, Band, CapabilityEvidence, assess_threat
 from spectre.domain.threat_understanding import Dimension, ThreatUnderstanding
+from spectre.domain.warning_change import Change, TargetWarning, WarningChange
+from spectre.domain.warning_change import Status as WarningStatus
 from spectre.web.routes import gcat, threat
 from spectre.web.routes.pol import history_evidence
 from tests.unit.test_dv_estimation import _AP0, _E0, _I0, _MA0, _N0, _RA0, _burn, _coast, _Elements, _rec, _tle
@@ -656,3 +658,123 @@ class TestTheRenderedSection:
         from tests.unit.test_threat_sweep_template import _context, _render
 
         assert 'class="threat-understanding"' not in _render(_context())
+
+
+# ── SPC-172: the warning change the sweep flies becomes Interactions evidence ──
+
+def _basis(now: datetime, *, regime: str = "LEO") -> Any:
+    return threat._SweepBasis(targets=[], manual_tle_by_name={}, frozen=threat._FrozenTargets({}), red_regime=regime,
+                              max_dv_m_s=500.0, blue_satnos=frozenset(), now=now)
+
+
+def _figures(*rows: TargetWarning) -> WarningChange:
+    return WarningChange(WarningStatus.FIGURES, "That burn put BLUE-1 in reach with 3h warning.", rows=rows)
+
+
+_IN_REACH = TargetWarning("BLUE-1", True, None, 3.0, Change.NEWLY_IN_REACH)
+_ALL_CRITICAL = {"dv": 120.0, "access_level": "CRITICAL", "threat_level": "CRITICAL", "capability_level": "CRITICAL"}
+
+
+def _after_raises() -> tuple[threat._RedHistory, datetime]:
+    history = _held_history(_RAISES)
+    return history, history.pol.records[-1].epoch + timedelta(hours=1)
+
+
+class TestTheSweepReadsInteractionsFromItsWarningChange:
+    def test_a_burn_that_put_one_of_ours_in_reach_is_an_edge_resting_on_the_flown_burns(self) -> None:
+        history, now = _after_raises()
+        flown = threat._window_burns(history.pol, _basis(now))
+        assert flown
+        (edge,) = threat._interactions(_figures(_IN_REACH), history, _basis(now), _SATNO)
+        assert (edge.actor, edge.target, edge.ours, edge.approach_at) == (_SATNO, "BLUE-1", True, now)
+        assert [(b.epoch, b.earliest, b.latest, b.detection, b.provider, b.long_gap, b.confirmed)
+                for b in edge.burns] == [
+            (m.burn_epoch, *m.burn_window, str(m.confidence), "18SDS", m.long_gap, True) for m in flown]
+
+    @pytest.mark.parametrize("change", [
+        WarningChange(WarningStatus.NO_BURN, "No confirmed burn in its element sets."),
+        WarningChange(WarningStatus.NOT_COMPUTED, "What the burn changed is not shown: custody is lost."),
+        WarningChange(WarningStatus.CANNOT_SAY, "What the burn changed: cannot say."),
+    ])
+    def test_no_figures_no_edge(self, change: WarningChange) -> None:
+        history, now = _after_raises()
+        assert threat._interactions(change, history, _basis(now), _SATNO) == ()
+
+    def test_each_flown_burn_maps_onto_the_edge_rule_field_by_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Every burn in the window, its own detection, gap and after-burn provider: nothing read as a constant."""
+        history, now = _after_raises()
+
+        def flown(epoch: datetime, confidence: str, long_gap: bool, before: str, after: str) -> Any:
+            return SimpleNamespace(burn_epoch=epoch, burn_window=(epoch - timedelta(hours=2), epoch),
+                                   confidence=confidence, long_gap=long_gap,
+                                   tle_before=SimpleNamespace(source=before), tle_after=SimpleNamespace(source=after))
+
+        first = flown(now - timedelta(hours=10), "MODERATE", True, "18SDS", "LEO LABS")
+        second = flown(now - timedelta(hours=4), "HIGH", False, "LEO LABS", "18 SDS")
+        monkeypatch.setattr(threat, "_window_burns", lambda _pol, _basis: [first, second])
+        (edge,) = threat._interactions(_figures(_IN_REACH), history, _basis(now), _SATNO)
+        assert [(b.epoch, b.earliest, b.latest, b.detection, b.provider, b.long_gap) for b in edge.burns] == [
+            (first.burn_epoch, *first.burn_window, "MODERATE", "LEOLABS", True),
+            (second.burn_epoch, *second.burn_window, "HIGH", "18SDS", False),
+        ]
+        (item,) = tu.interaction_items((edge,))
+        # The weakest burn governs: MODERATE, halved for its long gap, so it cannot earn the dimension alone.
+        assert (item.extraction, item.source_grade) == (0.3, "C")
+
+    @pytest.mark.parametrize("change", [
+        WarningChange(WarningStatus.NOT_COMPUTED, "What the burn changed is not shown: custody is lost.",
+                      rows=(_IN_REACH,)),
+        WarningChange(WarningStatus.CANNOT_SAY, "What the burn changed: cannot say.", rows=(_IN_REACH,)),
+    ])
+    def test_rows_without_figures_make_no_edge(self, change: WarningChange,
+                                               caplog: pytest.LogCaptureFixture) -> None:
+        """Only figures the operator was shown carry an approach, whatever rows a refusal holds."""
+        history, now = _after_raises()
+        with caplog.at_level("WARNING", logger=threat.logger.name):
+            assert threat._interactions(change, history, _basis(now), _SATNO) == ()
+        assert caplog.records == []
+
+    def test_no_history_is_refused_before_it_is_read(self, caplog: pytest.LogCaptureFixture) -> None:
+        """No held history is no approach, said by the guard, not by a failure swallowed in the log."""
+        _history, now = _after_raises()
+        with caplog.at_level("WARNING", logger=threat.logger.name):
+            assert threat._interactions(_figures(_IN_REACH), _NO_HISTORY, _basis(now), _SATNO) == ()
+        assert caplog.records == []
+
+    def test_no_history_or_no_number_no_edge(self) -> None:
+        history, now = _after_raises()
+        assert threat._interactions(_figures(_IN_REACH), _NO_HISTORY, _basis(now), _SATNO) == ()
+        assert threat._interactions(_figures(_IN_REACH), history, _basis(now), None) == ()
+
+    def test_the_model_is_given_the_edges(self, cache: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(threat, "get_intel", lambda _s: None)
+        history, now = _after_raises()
+        edges = threat._interactions(_figures(_IN_REACH), history, _basis(now), _SATNO)
+        context = threat.ConfidenceContext(data_mode="REAL", custody=Custody.HELD)
+        understanding = threat._red_understanding(
+            threat._Red(_SATNO, "", "LEO", history, _HELD, context, edges), _ALL_CRITICAL, now)
+        assert understanding is not None
+        (row,) = [r for r in understanding.range.ledger if r.item.dimension is Dimension.INTERACTIONS]
+        assert row.item.label == "BLUE-1 put in reach by its burn, 3h warning"
+        assert row.item.derived_from == f"approach:{_SATNO}:18SDS"
+
+    def test_without_edges_the_model_holds_no_interaction(self, cache: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(threat, "get_intel", lambda _s: None)
+        history, now = _after_raises()
+        context = threat.ConfidenceContext(data_mode="REAL", custody=Custody.HELD)
+        understanding = threat._red_understanding(
+            threat._Red(_SATNO, "", "LEO", history, _HELD, context), _ALL_CRITICAL, now)
+        assert understanding is not None
+        assert not [r for r in understanding.range.ledger if r.item.dimension is Dimension.INTERACTIONS]
+
+    def test_a_failure_reading_them_leaves_the_sweep_standing_and_stays_in_the_log(
+            self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+        def broken(*_a: Any, **_k: Any) -> None:
+            raise RuntimeError("internal detail\nforged line")
+
+        monkeypatch.setattr(threat.ig, "warning_edges", broken)
+        history, now = _after_raises()
+        with caplog.at_level("WARNING", logger=threat.logger.name):
+            assert threat._interactions(_figures(_IN_REACH), history, _basis(now), _SATNO) == ()
+        (record,) = [r for r in caplog.records if "Interactions" in r.getMessage()]
+        assert "\nforged line" not in record.getMessage()

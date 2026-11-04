@@ -2,8 +2,8 @@
 
 Each adapter reads what SPECTRE already holds (the intel record, the GCAT
 entry, the element-set history and its Pattern of Life reading) and builds
-the items of sections 5.1 to 5.3 of docs/threat_confidence_concept.md. The
-worked example of section 4.12, rows 1 to 6, is rebuilt here from these
+the items of sections 5.1 to 5.4 of docs/threat_confidence_concept.md. The
+worked example of section 4.12, rows 1 to 7, is rebuilt here from these
 adapters, not from hand-built items, and must give the concept's figures.
 """
 
@@ -19,6 +19,7 @@ import pytest
 
 from spectre.domain import threat_understanding as tu
 from spectre.domain.custody import Custody
+from spectre.domain.interaction_graph import Burn, warning_edges
 from spectre.domain.manoeuvre_calibration import Posture
 from spectre.domain.normality import Normality
 from spectre.domain.provenance import Basis
@@ -33,6 +34,7 @@ from spectre.domain.threat_understanding import (
     Status,
     Understanding,
 )
+from spectre.domain.warning_change import Change, TargetWarning
 
 _NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 _BURN = datetime(2026, 11, 2, 3, 10, tzinfo=UTC)
@@ -522,7 +524,7 @@ class TestTheTankWalk:
                                              propellant=_propellant(reserve_reset=reset))).tank_spent
 
 
-# ── The worked example of section 4.12, rows 1 to 6, from the adapters ──
+# ── The worked example of section 4.12, rows 1 to 7, from the adapters ──
 
 _RECORD = {"name": "RED-GEO-1", "assessed_threat": "Inspector", "threat_level": "CRITICAL",
            "source": "Secure World Foundation 2025"}
@@ -543,9 +545,16 @@ def _rows() -> list[tuple[EvidenceItem, ...]]:
     own = tuple(i for i in udl if i.dimension is Dimension.BEHAVIOUR and i.derived_from == "elset-history:18SDS")
     allied = tuple(i for i in udl if i.derived_from == "elset-history:ALLIEDOPTICAL")
     rows = [tu.intel_items(_RECORD, "RED-GEO-1")]
-    for added in (tu.gcat_items(*_GCAT, "RED-GEO-1"), capability, own, allied, _items(_COMMERCIAL)):
+    for added in (tu.gcat_items(*_GCAT, "RED-GEO-1"), capability, own, allied, _items(_COMMERCIAL), _warning()):
         rows.append(rows[-1] + added)
     return rows
+
+
+def _warning() -> tuple[EvidenceItem, ...]:
+    """Row 7: the 2 Nov burn put BLUE-COMSAT, one of ours, in reach with 31 hours' warning (SPC-172)."""
+    burn = Burn(epoch=_BURN, earliest=_BURN, latest=_BURN, confirmed=True, detection="HIGH", provider="18SDS")
+    row = TargetWarning("BLUE-COMSAT", True, None, 31.0, Change.NEWLY_IN_REACH)
+    return tu.interaction_items(warning_edges("RED-GEO-1", [row], [burn], _NOW))
 
 
 #: Row: (coverage I C B X, floor, ceiling, Understanding, governing categories), as in section 4.12.
@@ -556,6 +565,7 @@ _EXPECTED = {
     4: ((0.67, 0.34, 0.60, 0), Band.HIGH, Understanding.MODERATE, ("information base", "volatility")),
     5: ((0.67, 0.34, 0.92, 0), Band.HIGH, Understanding.MODERATE, ("information base", "volatility")),
     6: ((0.67, 0.51, 0.92, 0), Band.HIGH, Understanding.MODERATE, ("volatility",)),
+    7: ((0.67, 0.51, 0.92, 0.59), Band.HIGH, Understanding.MODERATE, ("volatility",)),
 }
 
 
@@ -572,12 +582,21 @@ class TestTheWorkedExampleFromTheAdapters:
         assert result.verdict.assessed is Band.CRITICAL
 
     def test_the_q_of_each_item_added(self) -> None:
-        ledger = {r.item.label: r.q for r in tu.assess(_rows()[5], _base()).range.ledger}
+        ledger = {r.item.label: r.q for r in tu.assess(_rows()[6], _base()).range.ledger}
         labels = ["intel record, role Inspector", "GCAT entry: bus Luch, launched 2014 Sep 27, owner RVSN",
                   "reserve 72 of 120 m/s", "latest burn, unprecedented",
-                  "latest burn, unprecedented, corroborated by ALLIED OPTICAL", "reserve 66 of 120 m/s"]
+                  "latest burn, unprecedented, corroborated by ALLIED OPTICAL", "reserve 66 of 120 m/s",
+                  "BLUE-COMSAT put in reach by its burn, 1.3 d warning"]
         # The concept prints 0.255 rounded half up as 0.26.
-        assert [ledger[label] for label in labels] == pytest.approx([0.09, 0.64, 0.34, 0.60, 0.80, 0.255], abs=0.005)
+        assert [ledger[label] for label in labels] == pytest.approx(
+            [0.09, 0.64, 0.34, 0.60, 0.80, 0.255, 0.59], abs=0.005)
+
+    def test_row_7_sets_no_new_bound_the_floor_being_high_already(self) -> None:
+        """Section 4.12, row 7: "unchanged (floor HIGH already)". The approach is applied beside the burn."""
+        result = tu.assess(_rows()[6], tu.with_history(_base(), _UDL))
+        row = next(r for r in result.range.ledger if r.item.dimension is Dimension.INTERACTIONS)
+        assert (row.item.floor_to, row.applied, row.status) == (Band.HIGH, True, Status.COUNTED)
+        assert result.range.bands == 2
 
     def test_the_anomaly_index_rides_in_the_burns_group_and_is_folded(self) -> None:
         result = tu.assess(_rows()[3], tu.with_history(_base(), _UDL))

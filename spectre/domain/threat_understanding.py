@@ -36,10 +36,12 @@ is LOW or the range too wide to call.
 
 The adapters at the end (SPC-165) read what SPECTRE already holds, the
 intel record, the GCAT entry and the element-set history with its Pattern
-of Life reading, and build the items of section 5. The sweep runs the model
-beside the legacy verdict, in shadow (SPC-166), and lets it move one thing
-live: decide-by is withheld only on a computed MINIMAL ceiling the evidence
-has earned (SPC-167), never on a recorded status alone.
+of Life reading, and build the items of section 5; a manoeuvre-attributable
+approach from ``interaction_graph`` becomes Interactions evidence (SPC-172).
+The sweep runs the model beside the legacy verdict, in shadow (SPC-166),
+and lets it move one thing live: decide-by is withheld only on a computed
+MINIMAL ceiling the evidence has earned (SPC-167), never on a recorded
+status alone.
 
 Every weight and threshold here is tuned, not sourced, and says so.
 
@@ -57,11 +59,13 @@ from enum import Enum, IntEnum
 from typing import Any
 
 from spectre.domain.custody import Custody, age_text
+from spectre.domain.interaction_graph import Edge
 from spectre.domain.manoeuvre_calibration import Posture
 from spectre.domain.normality import Normality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import STANDARD_GRAVITY_M_S2, anomaly_risk_level
 from spectre.domain.provenance import Basis, weakest
 from spectre.domain.threat_assessment import PROPELLANT_SPENT_PCT, Band, CapabilityEvidence
+from spectre.domain.warning_change import Change
 
 __all__ = [
     "ASSESSED_LABEL_EXTRACTION",
@@ -108,6 +112,7 @@ __all__ = [
     "history_items",
     "history_signals",
     "intel_items",
+    "interaction_items",
     "manual_extraction",
     "missing",
     "provider_grade",
@@ -1120,6 +1125,13 @@ _HOSTILE_FLOOR: dict[Normality, Band] = {Normality.UNPRECEDENTED: Band.HIGH, Nor
 _AGGRESSIVE_POSTURES = frozenset({Posture.AGGRESSIVE, Posture.BEYOND_PLATFORM})
 _POSTURE_FLOOR: Band = Band.MEDIUM
 _DAY = timedelta(days=1)
+#: A manoeuvre-attributable warning change against one of ours reads floor HIGH (section 4.6).
+_APPROACH_FLOOR: Band = Band.HIGH
+#: The root an approach's items arrive under, with the object after it.
+_APPROACH_ROOT = "approach:"
+_APPROACH_OURS = "one of yours: a confirmed burn within 7 days brought it in reach sooner"
+_APPROACH_NOT_OURS = "not one of yours: coverage only"
+_APPROACH_ROUTINE = "one of yours, but every burn it rests on was judged routine: coverage only"
 
 
 @dataclass(frozen=True)
@@ -1292,8 +1304,12 @@ def _reserve_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[E
                           extraction=ASSUMED_FIGURE_EXTRACTION, ceiling_to=ceiling, note=note),)
 
 
+def _grade_of(detection: str) -> str:
+    return detection if detection in DETECTION_EXTRACTION else _UNASSESSED_DETECTION
+
+
 def _detection(burn: BurnSignal) -> str:
-    return burn.detection if burn.detection in DETECTION_EXTRACTION else _UNASSESSED_DETECTION
+    return _grade_of(burn.detection)
 
 
 def _seen_by(burn: BurnSignal, provider: str, credibility: int, grades: Mapping[str, str], **kw: Any) -> EvidenceItem:
@@ -1369,6 +1385,62 @@ def history_items(signals: HistorySignals, *, access_delta_v_m_s: float, custody
             signals, grades, dimension=Dimension.BEHAVIOUR, label=f"no burns in {signals.span_days:.0f} days",
             extraction=_ABSENCE_EXTRACTION, routine=True, note="an absence: adds coverage and moves no band"))
     return tuple(items)
+
+
+def _approach_label(edge: Edge, hours: Callable[[float], str]) -> str:
+    """The approach in the operator's words; a cut states its size, since a rounded pair can read the same."""
+    after = edge.after_h or 0.0
+    if edge.change is Change.NEWLY_IN_REACH:
+        return f"{edge.target} put in reach by its burn, {hours(after)} warning"
+    before = edge.before_h or 0.0
+    return f"warning on {edge.target} cut {hours(before - after)} by its burn, {hours(before)} to {hours(after)}"
+
+
+def _approach_note(edge: Edge, routine: bool) -> str:
+    if not edge.ours:
+        return _APPROACH_NOT_OURS
+    return _APPROACH_ROUTINE if routine else _APPROACH_OURS
+
+
+def _approach_item(edge: Edge, grades: Mapping[str, str], judged: Mapping[datetime, Normality],
+                   hours: Callable[[float], str]) -> EvidenceItem:
+    """One approach, as reliable as the weakest burn it rests on: its provider's grade and its detection.
+
+    Every approach one burn explains derives from that one detection, so its
+    items share one source chain and count once (section 2.4): the group is
+    the object and the provider, not the pair. One resting only on burns
+    judged ROUTINE is coverage only (I9); a routine burn beside a hostile
+    one lowers nothing, as ROUTINE never does.
+    """
+    provider = min((b.provider for b in edge.burns),
+                   key=lambda p: (SOURCE_RELIABILITY[provider_grade(p, grades)], source_chain(p)))
+    grade = provider_grade(provider, grades)
+    routine = all(judged.get(b.epoch) is Normality.ROUTINE for b in edge.burns)
+    return EvidenceItem(
+        dimension=Dimension.INTERACTIONS, label=_approach_label(edge, hours),
+        derived_from=f"{_APPROACH_ROOT}{edge.actor}:{source_chain(provider)}", source_grade=grade,
+        credibility=_PROVIDER_CREDIBILITY,
+        extraction=min(burn_extraction(_grade_of(b.detection), long_gap=b.long_gap) for b in edge.burns),
+        basis=Basis.COMPUTED, observed_at=edge.burn_at,
+        floor_to=_APPROACH_FLOOR if edge.ours and not routine else None,
+        controlled=grade in _CONTROLLED_GRADES, routine=routine, note=_approach_note(edge, routine),
+    )
+
+
+def interaction_items(edges: Iterable[Edge], grades: Mapping[str, str] = PROVIDER_GRADES, *,
+                      judged: Iterable[HeldBurn] = (),
+                      hours: Callable[[float], str] = age_text) -> tuple[EvidenceItem, ...]:
+    """Section 5.4: each manoeuvre-attributable approach (``domain/interaction_graph.py``) as Interactions evidence.
+
+    One that brought one of ours in reach, or in reach sooner, reads floor
+    HIGH; one to any other target is coverage only. Either is a reading only
+    once Interactions is earned, as any reading is (section 4.6). *judged*
+    are the held history's burns with their normality verdicts: an approach
+    resting only on ROUTINE burns moves no band (I9). *hours* writes a
+    warning; a panel passes the format its warning section uses.
+    """
+    verdicts = {b.epoch: b.normality for b in judged}
+    return tuple(_approach_item(edge, grades, verdicts, hours) for edge in edges)
 
 
 def window_custody(signals: HistorySignals, now: datetime, elset_limit_hours: float) -> Custody:
@@ -1516,9 +1588,10 @@ def earned_incapacity(result: ThreatUnderstanding) -> LedgerRow | None:
 # unearned dimension: an undated intel record can be dated and sourced by an
 # analyst whatever Identity's coverage, as contrast B of section 4.12 ranks it.
 # Every cue is worked out and ranked, but only a fed one can deliver what it
-# names today: nothing turns a conjunction into evidence until SPC-172 and
-# SPC-173, and the sweep holds one merged history per object (section 9,
-# decision 8), so a second provider's history has nowhere to go yet.
+# names today: the sweep's warning change is Interactions evidence since
+# SPC-172, but nothing turns a UDL conjunction into evidence until SPC-173,
+# and the sweep holds one merged history per object (section 9, decision 8),
+# so a second provider's history has nowhere to go yet.
 
 #: The roots the held signals arrive under, as the adapters above name them.
 _HISTORY_ROOT = "elset-history:"

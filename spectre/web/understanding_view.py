@@ -23,9 +23,11 @@ from typing import Any
 
 from spectre.domain import threat_understanding as tu
 from spectre.domain.custody import Custody, age_text
+from spectre.domain.interaction_graph import Edge
 from spectre.domain.provenance import ledger_input
 from spectre.domain.threat_assessment import Band
 from spectre.web.elsets import limit_hours_for_regime
+from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,8 @@ class HeldObject:
     held history, read once. *custody* is judged by the panel's own rule and
     sets volatility; "no burns" is judged on the history's own window instead,
     so the strip does not depend on which element set the panel reads.
+    *interactions* are the approaches a warning change attributes to a burn
+    of its own; only the sweep flies one, so only the sweep holds any (SPC-172).
     """
 
     satno: str
@@ -59,6 +63,7 @@ class HeldObject:
     catalogue: tuple[Mapping[str, str], datetime] | None
     signals: tu.HistorySignals | None
     custody: Custody
+    interactions: tuple[Edge, ...] = ()
 
     def items(self, now: datetime, regime: str, access_dv_m_s: float = math.inf) -> tuple[tu.EvidenceItem, ...]:
         """The evidence items. With no intercept in view, "no burns" is judged against any burn the floor resolves.
@@ -73,6 +78,9 @@ class HeldObject:
             *(tu.history_items(signals, access_delta_v_m_s=access_dv_m_s,
                                custody=tu.window_custody(signals, now, limit_hours_for_regime(regime)))
               if signals is not None else ()),
+            *tu.interaction_items(self.interactions, judged=(
+                tu.HeldBurn(b.epoch, b.normality) for b in (signals.burns if signals is not None else ())),
+                hours=format_tof_label),
         )
 
     def situate(self, situation: tu.Situation) -> tu.Situation:

@@ -37,6 +37,7 @@ from spectre.astro.maneuvers import (
 from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain import interaction_graph as ig
 from spectre.domain import threat_understanding as tu
 from spectre.domain.custody import Custody, CustodyStatus, age_text
 from spectre.domain.decide_by import (
@@ -1605,22 +1606,25 @@ def _red_capability_from(red_satno: str | None, history: _RedHistory) -> Capabil
     return _red_capability(red_satno, history.assessment, history.pol.span_days if history.pol else None)
 
 
-def _red_evidence(red_satno: str | None, history: _RedHistory, custody: CustodyStatus) -> HeldObject | None:
+def _red_evidence(red_satno: str | None, history: _RedHistory, custody: CustodyStatus,
+                  interactions: tuple[ig.Edge, ...] = ()) -> HeldObject | None:
     """What the sweep holds about the red object, for Threat Understanding (SPC-165), or None with no number.
 
-    Its intel record, its GCAT entry if the catalogue is already cached, and
-    its element-set history if one arrived, with the history read once. No
-    new fetch is made for any of them.
+    Its intel record, its GCAT entry if the catalogue is already cached, its
+    element-set history if one arrived, with the history read once, and the
+    approaches its warning change attributes to a burn (SPC-172). No new
+    fetch is made for any of them.
     """
-    return _held_object(red_satno, history, custody.state) if red_satno else None
+    return _held_object(red_satno, history, custody.state, interactions) if red_satno else None
 
 
-def _held_object(satno: str, history: _RedHistory, custody: Custody) -> HeldObject:
-    """What the sweep holds about *satno*: its record, its cached GCAT row and its history, read once."""
+def _held_object(satno: str, history: _RedHistory, custody: Custody,
+                 interactions: tuple[ig.Edge, ...] = ()) -> HeldObject:
+    """What the sweep holds about *satno*: its record, its cached GCAT row, its history and its approaches."""
     signals = (tu.history_signals(history.pol, history.assessment)
                if history.pol is not None and history.assessment is not None else None)
     return HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
-                      custody=custody)
+                      custody=custody, interactions=interactions)
 
 
 class _Red(NamedTuple):
@@ -1632,6 +1636,8 @@ class _Red(NamedTuple):
     history: _RedHistory
     custody: CustodyStatus
     context: ConfidenceContext
+    #: The approaches the sweep's warning change attributes to a burn of its own (SPC-172).
+    interactions: tuple[ig.Edge, ...] = ()
 
 
 def _red_understanding(red: _Red, worst_coa: dict[str, Any] | None, now: datetime) -> tu.ThreatUnderstanding | None:
@@ -1658,7 +1664,7 @@ def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.Threa
 
     "No burns" is judged against what the worst case costs.
     """
-    held = _red_evidence(red.satno, red.history, red.custody)
+    held = _red_evidence(red.satno, red.history, red.custody, red.interactions)
     items = held.items(now, red.regime, float(worst_coa["dv"])) if held is not None else ()
     age = elset_age(red.tle, now)
     assessed = worst_coa["capability_level"] != "UNASSESSED"
@@ -2128,6 +2134,31 @@ async def _warning_change(
     return _with_notso_cue(change, red_name, red_satno, history.pol, basis.now)
 
 
+def _interactions(change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                  red_satno: str | None) -> tuple[ig.Edge, ...]:
+    """The approaches the warning change attributes to the red object's own burns: Interactions (SPC-172).
+
+    Only a change with figures has any: its rows were flown across every
+    confirmed burn in the window, the same burns read here, so each edge
+    rests on what the operator was shown. Every burn in Pattern of Life's
+    ``manoeuvres`` is a confirmed one; unconfirmed detections are kept apart.
+    A failure is logged and reads as no approach held, so the sweep stands;
+    the detail never reaches the page.
+    """
+    if change.status is not Status.FIGURES or history.pol is None or not red_satno:
+        return ()
+    try:
+        burns = [ig.Burn(epoch=m.burn_epoch, earliest=m.burn_window[0], latest=m.burn_window[1], confirmed=True,
+                         detection=str(m.confidence), provider=tu.source_chain(m.tle_after.source),
+                         long_gap=m.long_gap)
+                 for m in _window_burns(history.pol, basis)]
+        return ig.warning_edges(red_satno, change.rows, burns, basis.now)
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Interactions could not be read for %s: %s", log_safe(red_satno), log_safe(exc))
+        return ()
+
+
 def _with_notso_cue(
     change: WarningChange, red_name: str, red_satno: str | None, pol: Any, now: datetime,
 ) -> WarningChange:
@@ -2590,8 +2621,10 @@ async def threat_sweep(
     _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history=history,
                        history_task=history_task, flown=(custody, _flown_epoch(red_tle, now)))
     # Threat Understanding beside the verdict (SPC-166, shadow); it moves only decide-by (SPC-167).
+    # The approaches the warning change attributes to a burn are its Interactions evidence (SPC-172).
+    interactions = _interactions(warning_change, history, basis, red_satno)
     understanding = _red_understanding(
-        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context), worst_coa, now,
+        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context, interactions), worst_coa, now,
     )
     decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
     worst_coa = _with_understanding(worst_coa, understanding)
