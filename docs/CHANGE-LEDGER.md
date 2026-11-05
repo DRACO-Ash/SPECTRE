@@ -1201,3 +1201,13 @@ Test hardening and one template fix.
 | Test | **HYGIENE** | The threat route floor rises from 90 to 95 | Measured 98.3 per cent before the floor was set. | Then a platform measure differs from the local one. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.24.2
+
+Test hardening and one race fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. One product change, the cluster reduction in `routes/threat.py`; the rest is tests, `scripts/mutate.py` and reports | `scripts/check-quality.sh` against 0.24.1 before upload passed all five legs. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | A PostgreSQL 16 job joins the SQLite one in CI | The suite was run green on PostgreSQL 16 here before the job was added. | Then the runner's PostgreSQL service differs from the one used here, and its log names the test. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

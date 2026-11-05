@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-05
+
+**Test hardening: a mutation run, concurrency tests, PostgreSQL in CI, and one race fixed.**
+
+### Fixed
+- The sweep's cluster reduction could overwrite an element set another fetch had just refreshed; it now writes a cluster's representative only over an entry still holding the value it read (found by SPC-073).
+
+### Changed
+- A committed mutation runner and report. Every kill is re-checked by running its test alone. The security core (465 mutants) scores 417 killed or timed out, and every remaining survivor has a written reason in `docs/MUTATION-REPORT.md`; 103 survivors were killed by new tests. The astro figures were not re-checked this way, and the report says so (SPC-071).
+- Concurrency tests with barriers and events, no sleeps: many sign-ins at once, sign-out during a job, a newer evaluation replacing a running one, the one sampled slot under contention and the login budget (SPC-073).
+- The suite runs on PostgreSQL 16 in CI as well as SQLite, proven green first; a PostgreSQL test proves the admin row lock stops two concurrent demotions removing the last admin (SPC-070).
+
 ## [0.24.1] - 2026-11-04
 
 **Test hardening, and one sweep panel fix.**

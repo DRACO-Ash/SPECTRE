@@ -340,7 +340,11 @@
   "files": [
    ".github/workflows/ci.yml",
    "tests/conftest.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
  },
  {
   "ref": "SPC-071",
@@ -350,10 +354,14 @@
   "minutes": 240,
   "track": "tooling",
   "task": "Full mutation run on spectre/astro and the web security core",
-  "note": "audit/GAPS.md section 3: the audit sample was 22 mutants across 5 modules.",
+  "note": "audit/GAPS.md section 3: the audit sample was 22 mutants across 5 modules. Built in 0.24.2 for the security core with solo-verified kills; the astro run was not re-verified with the solo check (docs/MUTATION-REPORT.md says so).",
   "files": [
    "scripts/mutation-run.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
  },
  {
   "ref": "SPC-072",
@@ -376,7 +384,11 @@
   "note": "audit/GAPS.md section 2: thread-safety findings rest on code reading.",
   "files": [
    "tests/load/test_concurrency.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
  },
  {
   "ref": "SPC-074",
