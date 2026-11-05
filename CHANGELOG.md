@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `scripts/udl_conjunction_probe.py` (SPC-033): checks the assumed UDL conjunction field names against live UDL and prints
+  field names, types and value shapes only, for the owner to run where UDL is reachable.
+- `docs/analyst-session-agenda.md` (SPC-080): the agenda and questions for the analyst session the owner is arranging.
+
 ## [0.24.2] - 2026-11-05
 
 **Test hardening: a mutation run, concurrency tests, PostgreSQL in CI, and one race fixed.**
