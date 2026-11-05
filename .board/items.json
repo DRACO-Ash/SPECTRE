@@ -416,7 +416,7 @@
   "needs_owner": true,
   "human_minutes": 240,
   "task": "One afternoon with a practising analyst to rank the Phase 3 capabilities",
-  "note": "Deferred by the owner on 2026-10-28. An operator has since confirmed the core question and ranked the outputs (see .board/README.md), so this session is now only about the Phase 3 capability items."
+  "note": "Deferred by the owner on 2026-10-28. An operator has since confirmed the core question and ranked the outputs (see .board/README.md), so this session is now only about the Phase 3 capability items. Owner ruling 2026-11-05: the owner arranges the session; Claude prepares the agenda (docs/analyst-session-agenda.md)."
  },
  {
   "ref": "SPC-081",
@@ -1133,7 +1133,7 @@
   "needs_owner": true,
   "human_minutes": 30,
   "task": "Check the UDL conjunction contract against live UDL",
-  "note": "SPC-031 reads /conjunction with satNo1 and satNo2, and the fields named in spectre/web/udl_conjunction.py's module comment. Metres is assumed when no unit is given. This needs a UDL account and network access the build environment lacks.",
+  "note": "SPC-031 reads /conjunction with satNo1 and satNo2, and the fields named in spectre/web/udl_conjunction.py's module comment. Metres is assumed when no unit is given. This needs a UDL account and network access the build environment lacks. Owner ruling 2026-11-05: Claude writes a probe (scripts/udl_conjunction_probe.py); the owner runs it where UDL is reachable and returns the output.",
   "files": [
    "spectre/web/udl_conjunction.py"
   ]
@@ -1575,7 +1575,7 @@
   "group": "understanding",
   "minutes": 240,
   "task": "Verdict switch behind a setting, with a reference table",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3). Built in 0.21.0 behind SPECTRE_THREAT_VERDICT_SWITCH, off. Turning it on needs the owner's sign-off on docs/threat_verdict_reference.md (11 of 20 demonstration verdicts change, all to the access ceiling, because the bundled data is synthetic).",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3). Built in 0.21.0 behind SPECTRE_THREAT_VERDICT_SWITCH, off. Turning it on needs the owner's sign-off on docs/threat_verdict_reference.md (11 of 20 demonstration verdicts change, all to the access ceiling, because the bundled data is synthetic). Owner ruling 2026-11-05: keep the switch off.",
   "files": [
    "spectre/domain/threat_assessment.py",
    "spectre/config/constants.py"
@@ -1590,7 +1590,7 @@
   "est": 240,
   "version": "0.21.0",
   "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists",
-  "needs_owner": true
+  "needs_owner": false
  },
  {
   "ref": "SPC-176",
@@ -1619,12 +1619,188 @@
   "group": "understanding",
   "minutes": 120,
   "task": "Citation check gate for doctrine wording",
-  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A test fails if any yardstick or ICD 203 term renders while the `VERIFIED` flag is false Needs network access to gov.uk and dni.gov, and MOD channels for AJP-2.1, to verify the doctrine citations.",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A test fails if any yardstick or ICD 203 term renders while the `VERIFIED` flag is false Needs network access to gov.uk and dni.gov, and MOD channels for AJP-2.1, to verify the doctrine citations. Closed: Owner ruling 2026-11-05, doctrine words stay off screen. The page keeps its plain HIGH, MODERATE and LOW.",
   "files": [
    "docs/threat_confidence_concept.md",
    "spectre/domain/threat_understanding.py"
   ],
-  "needs_owner": true,
-  "human_minutes": 60
+  "needs_owner": false,
+  "human_minutes": 60,
+  "state": "closed"
+ },
+ {
+  "ref": "SPC-178",
+  "priority": "med",
+  "order": 1,
+  "group": "decision",
+  "minutes": 60,
+  "task": "Evaluation budget 300 s, cost cap 12,000 sample-hours",
+  "note": "Owner ruling 2026-11-05. D6 budget ruling. EVALUATION_BUDGET_S 120 to 300; MAX_SAMPLE_HOURS follows at the measured 40 sample-hours a second. Panel and refusal wording, guide and phases doc updated.",
+  "files": [
+   "spectre/domain/decision.py",
+   "docs/decision_engine_phases.md"
+  ]
+ },
+ {
+  "ref": "SPC-179",
+  "priority": "high",
+  "order": 2,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Degraded custody carries one quarter of the custody penalty",
+  "note": "Owner ruling 2026-11-05. Was scored as LOST. Degraded (orbit current, no history to judge burns) now sits between held and lost at 0.25 of the penalty; the basis line names the weight as the owner's.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-180",
+  "priority": "med",
+  "order": 8,
+  "group": "understanding",
+  "minutes": 90,
+  "task": "Name hostile seeds on screen and in the ledger",
+  "note": "Owner ruling 2026-11-05. Concept decisions 5 and 15. The seed list never becomes classified, so a propagated path names its seed by catalogue number and name; the classified caveats are dropped from the docs.",
+  "files": [
+   "spectre/domain/interaction_graph.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ]
+ },
+ {
+  "ref": "SPC-181",
+  "priority": "high",
+  "order": 9,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "Engine reads the Threat picture at any age, with its age shown",
+  "note": "Owner ruling 2026-11-05. Concept decision 9. THREAT_PICTURE_MAX_AGE removed; every figure fed by the picture carries its age in words.",
+  "files": [
+   "spectre/web/decision_threat.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ]
+ },
+ {
+  "ref": "SPC-182",
+  "priority": "med",
+  "order": 10,
+  "group": "understanding",
+  "minutes": 90,
+  "task": "Any cue with value above 0 may trigger collect first",
+  "note": "Owner ruling 2026-11-05. Concept decision 10. Drops the off-the-line test; section 4.10 as first written. Cues whose result SPECTRE cannot read still never count (Claude's call: their result never lands).",
+  "files": [
+   "spectre/domain/threat_understanding.py",
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-183",
+  "priority": "med",
+  "order": 3,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Track whether each P was edited",
+  "note": "Owner ruling 2026-11-05. Concept decision 11. The form records an edited flag per adversary row, so a deliberate 0.5 is not read as untouched.",
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-184",
+  "priority": "med",
+  "order": 4,
+  "group": "decision",
+  "minutes": 480,
+  "task": "Carry every burn of a transfer from the sweep",
+  "note": "Owner ruling 2026-11-05. Concept decision 13. A scenario opened from the sweep carries each burn of the transfer, not only its departure burn, never applying a burn the bound red element set already includes.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-185",
+  "priority": "med",
+  "order": 5,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Load NOTSO suggestions for every row when the panel opens",
+  "note": "Owner ruling 2026-11-05. Concept decision 16. Every row's suggestion shows at once; applying stays the operator's tick, honoured at Evaluate.",
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-186",
+  "priority": "med",
+  "order": 11,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "The strongest reading in a source chain counts once",
+  "note": "Owner ruling 2026-11-05. Concept decision 6. Any reading from a chain counts once at the chain's best reliability, so a new copy never widens the range. The 20 pinned legacy verdicts are untouched.",
+  "files": [
+   "spectre/domain/threat_understanding.py"
+  ]
+ },
+ {
+  "ref": "SPC-187",
+  "priority": "med",
+  "order": 6,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Unequal turns, set by the engine",
+  "note": "Owner ruling 2026-11-05. D3. Turn boundaries are placed by the engine from the rows' burn times so every burn falls inside its own turn; the operator never sets a length.",
+  "files": [
+   "spectre/domain/decision_tree.py",
+   "spectre/domain/turn_update.py"
+  ]
+ },
+ {
+  "ref": "SPC-188",
+  "priority": "med",
+  "order": 7,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Measure trees and set their own cost cap",
+  "note": "Owner ruling 2026-11-05. D6. Time trees under load at the 300 s budget and set a tree cap from the measurements, stated with its basis.",
+  "files": [
+   "spectre/domain/decision_tree.py",
+   "scripts/measure_tree_cost.py"
+  ],
+  "deps": [
+   "SPC-178"
+  ]
+ },
+ {
+  "ref": "SPC-189",
+  "priority": "med",
+  "order": 8,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Mark the best branch under each response",
+  "note": "Owner ruling 2026-11-05. D14. A recommended continuation after every response, including responses the rule would not pick, marked in words apart from the plan itself.",
+  "files": [
+   "spectre/domain/tree_selectors.py",
+   "spectre/web/tree_view.py"
+  ]
+ },
+ {
+  "ref": "SPC-190",
+  "priority": "low",
+  "order": 9,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Interactive tree diagram",
+  "note": "Owner ruling 2026-11-05. D15. A drawn, collapsible, zoomable tree beside the plain sections, which stay as the text alternative. Claude's call: drawn as server-rendered SVG with a first-party script file under the CSP, so no third-party library joins the supply chain; the owner may still ask for a vendored one.",
+  "files": [
+   "spectre/web/tree_view.py",
+   "spectre/web/static/js/tree_diagram.js",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "deps": [
+   "SPC-189"
+  ]
  }
 ]

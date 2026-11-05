@@ -220,78 +220,84 @@ NOTSO-derived P) and decision 18 (how the interval reaches the pick).
 
 ### Design decisions D1 to D11 (SPC-140, SPC-141)
 
-These are the design's choices, recorded for the owner. Each is Claude's choice, not a ruling, except where it names
-the owner's decision.
+These are the design's choices, recorded for the owner. The owner ruled on each on 2026-11-05 (`.board/README.md`,
+owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SPC-188).
 
 ● **D1. Turn 1 is the matrix.** One root per cell; `evaluate_scenario` is unchanged and one turn has no tree. The
-  matrix's own pick is unchanged by the tree.
+  matrix's own pick is unchanged by the tree. Owner ruling, 2026-11-05: keep.
 ● **D2. One propagator.** Every figure in a tree is RK45 with J2 and exponential drag for both orbits, from their
   SGP4 states at the scenario epoch, since no element set exists for an orbit after a burn. Turn 1's computed cells
-  go on RK45 too, with the SGP4 figure shown beside them, and no node or cell names SGP4.
+  go on RK45 too, with the SGP4 figure shown beside them, and no node or cell names SGP4. Owner ruling, 2026-11-05: keep.
 ● **D3. Equal turns, every burn inside its own.** The span searched is split into equal turns. Each row's red burn
   falls at the same offset after each turn starts, and each response executes its time to execute after each turn
   starts, with a target separation sized again against red's nominal burn in that turn. A burn that falls outside
-  its turn refuses the tree.
+  its turn refuses the tree. Owner ruling, 2026-11-05: accept unequal turns, with their lengths determined by the engine, never set
+  by the operator (SPC-187).
 ● **D4. Samples carried as themselves.** Sample k is carried from turn to turn as sample k. Each turn's draws are
   seeded from the row's seed, the turn and the red path, so the same evaluation gives the same tree. A sample whose
-  drawn timing puts its burn after its turn ends keeps that burn, and the turn after makes it then.
+  drawn timing puts its burn after its turn ends keeps that burn, and the turn after makes it then. Owner ruling, 2026-11-05: keep.
 ● **D5. What a figure means.** Each node's closest approach runs from its turn's start to the span's end, as if no
   one moves again. A sequence's closest approach is the smallest along it, P5 of each sample's own minimum where red
   was sampled; its delta-V is our burns added up, a lookup when any turn's is; its custody is the bound red track's
-  with the earliest red burn on it; its score is the one-turn weighted sum on those figures, a lookup.
+  with the earliest red burn on it; its score is the one-turn weighted sum on those figures, a lookup. Owner ruling, 2026-11-05: keep.
 ● **D6. The caps.** At most 1,000 branches, the sum over turns k of (rows times responses) to the k, and the same
   4,800 sample-hour cost cap, with 16 sizing trials charged for every sizing. So coplanar_leo at 50 samples over three
   2 h turns costs about 6,700 sample-hours and is refused, though its prototype ran in 33 s idle. Recalibrating the
-  cap for trees is the owner's decision.
+  cap for trees is the owner's decision. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178), then measure trees
+  under load and set their own cap from the measurements (SPC-188).
 ● **D7. Refused before anything runs, the matrix kept.** An unbound or out-of-date side, a row with no orbit to carry
   on, a burn outside its turn, too many branches or too high a cost refuses the tree, in that order, and the one-turn
-  result stands with the reason.
+  result stands with the reason. Owner ruling, 2026-11-05: keep.
 ● **D8. Never cut short silently.** A spent budget keeps the deepest turn built in full, naming the run's own budget;
   a failed or unconverged branch keeps the turns built and names the branch, since a pick over a tree missing a
-  branch could miss its worst case.
+  branch could miss its worst case. Owner ruling, 2026-11-05: keep.
 ● **D9. Picks over what we could have seen.** A turn's pick may depend only on what the turns before it showed, so
   red moves that show the same thing are one information set and one pick must serve every branch in it. Minimax
   takes the worst sequence over every red move and every branch in the set, minimin the best, and expected value the
   mean weighted by P and by the update. A set with no weight has no pick and says so. The first response wins a tie.
+  Owner ruling, 2026-11-05: keep.
 ● **D10. The likelihood model is the engine's own custody rule.** Custody lost at a burn in the turn shows a burn,
   not which; held through it shows no burn; lost for another reason, or not read, shows nothing. Each row gives one
   of these for certain. This was chosen over a new detection model with made-up rates. The update is a lookup.
+  Owner ruling, 2026-11-05: keep.
 ● **D11. Red's next move is weighed by P as entered.** Nothing sourced says how red's turn-1 move bears on its next,
   so the update says which turn-1 branch we are on, not what red does next, and the same rule reads turn 2 in a
   3-turn tree. A persistent-intent model needs a stated prior strength, which is the owner's decision. A row's
-  applied NOTSO suggestion carries its interval into a range on every share it touches.
+  applied NOTSO suggestion carries its interval into a range on every share it touches. Owner ruling, 2026-11-05: keep P as entered
+  each turn.
 
 ### Decisions taken building the view (SPC-142)
 
-Each is Claude's choice, not a ruling.
+The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC-189, SPC-190).
 
 ● **D12. The operator states the observation.** The update is shown for the one observation the operator states
   for turn 1, held on the scenario and in its provenance, and for none otherwise. Showing every possible update at
-  once read as if each had happened.
+  once read as if each had happened. Owner ruling, 2026-11-05: keep.
 ● **D13. Refused at once only when it cannot fit.** The panel refuses a depth over the branch cap or the cost cap
   before anything runs, naming the largest that would fit, since only a smaller depth or a smaller scenario helps.
   A tree refused for another reason (a side unbound, a row with no orbit, a burn outside its turn) still evaluates,
-  and the result states the reason beside the one-turn matrix, since the matrix is still worth having.
+  and the result states the reason beside the one-turn matrix, since the matrix is still worth having. Owner ruling, 2026-11-05: keep.
 ● **D14. The plan, marked in words.** A branch is marked when every response on it is the rule's pick for what the
   turns before it showed. The selector picks in every information set, but the recommendation and its marks follow
-  our own picks: a branch reached only through a response the rule would not choose carries no mark.
+  our own picks: a branch reached only through a response the rule would not choose carries no mark. Owner ruling, 2026-11-05: mark
+  the best branch under each response, including responses the rule would not pick (SPC-189).
 ● **D15. Plain details and summary.** The tree is server-rendered with no script and no new library, so nothing is
-  added to track or scan.
+  added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190).
 
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
   ranking a weighted heuristic.
-● **Recalibrating the cost cap for trees** (D6) and **a persistent-intent model for red** (D11) are the owner's
-  decisions.
+● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
 ● **Element-set error is not sampled.** A sampled band can be narrower than element-set error; a per-cell comparison
   needs the regime on the bound element set and is a follow-up.
 ● **A sensor's line of sight to red is not modelled.** Custody is about information, not geometry, and our response
   is not applied to it.
-● **Doctrine wording** (SPC-177): no probability or yardstick word appears until the citations are verified, which
-  needs network access.
-● **The verdict switch** stays off until the owner signs off the reference sheet (concept section 9, decision 3).
-● **One impulsive burn per adversary row per turn.** A transfer of several burns is carried as its first burn.
+● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
+  doctrine words stay off screen, and SPC-177 is closed.
+● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
+● **One impulsive burn per adversary row per turn.** A transfer of several burns is carried as its first burn. The
+  owner ruled on 2026-11-05 to carry every burn of the transfer (SPC-184).
 
 ## Summary
 

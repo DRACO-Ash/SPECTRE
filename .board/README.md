@@ -76,6 +76,30 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-10-28 | The operator's question, output ranking and custody definition | Confirmed with an operator; see the acceptance test above |
 | 2026-11-02 | Stop asking; carry on through the versions | Recorded. Claude's own calls are marked as such, never as rulings |
 | 2026-11-03 | Default response time for decide-by | 12 hours, Claude's choice, not a ruling: conservative, and every sentence says it is the default |
+| 2026-11-05 | Verdict switch (SPC-175) | Keep it off. Nothing changes for operators |
+| 2026-11-05 | Decision Engine evaluation budget | Raise from 120 s to 300 s, so the cost cap rises from 4,800 to 12,000 sample-hours (SPC-178) |
+| 2026-11-05 | Degraded custody in the Decision Engine | Scored between held and lost, carrying one quarter of the custody penalty (SPC-179) |
+| 2026-11-05 | Spent tank read from one provider (concept decision 8) | Keep: decide-by stays visible |
+| 2026-11-05 | Hostile seed list and provider grade table (concept decision 5) | This never becomes classified |
+| 2026-11-05 | Naming hostile seeds on screen (concept decision 15) | Always name seeds (SPC-180) |
+| 2026-11-05 | UDL conjunctions as Interactions (concept decision 14) | Keep REAL-mode rows only |
+| 2026-11-05 | Doctrine wording (SPC-177) | Keep PHIA and ICD 203 words off screen. SPC-177 closed |
+| 2026-11-05 | UDL contract check (SPC-033) | Claude writes a probe; the owner runs it where UDL is reachable and returns the output |
+| 2026-11-05 | Analyst session (SPC-080) | The owner arranges it; Claude prepares the agenda |
+| 2026-11-05 | Copies in one source chain (concept decision 6) | The strongest reading in the chain counts once, at the chain's best reliability (SPC-186) |
+| 2026-11-05 | What ends a hostile floor (concept decision 7) | Keep: only a later UNUSUAL or UNPRECEDENTED burn |
+| 2026-11-05 | Age of the Threat picture the engine reads (concept decision 9) | Any age, with the age shown beside every figure it feeds (SPC-181) |
+| 2026-11-05 | Collect first (concept decision 10) | Any cue with value above 0 may trigger it (SPC-182) |
+| 2026-11-05 | Untouched probability (concept decision 11) | Track whether each P was edited (SPC-183) |
+| 2026-11-05 | Collections beside the ranking (concept decision 12) | Keep: listed, not scored |
+| 2026-11-05 | Scenario opened from the sweep (concept decision 13) | Carry every burn of the transfer (SPC-184) |
+| 2026-11-05 | Load from NOTSO (concept decision 16) | Load every row automatically; applying stays a tick (SPC-185) |
+| 2026-11-05 | NOTSO interval (concept decisions 17 and 18) | Keep the exact 95 in 100 interval and the corner check |
+| 2026-11-05 | Game tree D1, D2, D4, D5, D7 to D13 | Keep as built |
+| 2026-11-05 | Game tree D3, turn lengths | Accept unequal turns, set by the engine, never by the operator (SPC-187) |
+| 2026-11-05 | Game tree D6, cost cap | Measure trees and set their own cap (SPC-188) |
+| 2026-11-05 | Game tree D14, the plan's marks | Mark the best branch under each response (SPC-189) |
+| 2026-11-05 | Game tree D15, the view | An interactive tree diagram (SPC-190) |
 
 ## Decision Engine plan
 
