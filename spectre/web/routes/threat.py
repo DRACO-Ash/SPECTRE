@@ -1361,13 +1361,19 @@ async def _fetch_missing_target_tles(
     )
 
 
-def _reduce_tle_clusters(state: object) -> Any | None:
-    """Reduce multi-provider element sets to one representative per object.
+def _cluster_tle_sets(state: object) -> tuple[dict[str, str], Any, dict[str, str]] | None:
+    """Cluster the multi-provider element sets, on a worker thread; write nothing.
 
-    Returns the clustering summary for display, or None when there was
-    nothing to cluster. The cache update stays inside the try: a summary
-    computed before a failed update is still the summary that was computed,
-    and reporting None there would understate what the sweep actually ran on.
+    Returns the representatives, the clustering summary and the cache as it
+    stood when the work began, or None when there was nothing to cluster or
+    the clustering failed (logged: clustering is an optimisation, never a gate).
+
+    It works on copies taken before the long work starts. The loop goes on
+    serving the same sign-in meanwhile, and a target fetch clears and refills
+    the multi-provider set. Iterated in place, the set changed size under the
+    clustering, which then failed as a whole and the sweep went ahead
+    unreduced with only a warning in the log (SPC-073). Copying a dict is one
+    step under the GIL, so each copy is consistent.
     """
     # Imported before the guard, as they were when this sat inline in the
     # handler: the sweep resolved these names on every request, whether or
@@ -1377,21 +1383,39 @@ def _reduce_tle_clusters(state: object) -> Any | None:
 
     if not state.hrr_tle_multiset:  # type: ignore[attr-defined]
         return None
-
-    clustering_summary = None
+    multiset = dict(state.hrr_tle_multiset)  # type: ignore[attr-defined]
+    cache = dict(state.hrr_tle_cache)  # type: ignore[attr-defined]
     try:
-        reduced, clustering_summary = cluster_and_reduce_tle_cache(
-            state.hrr_tle_multiset,  # type: ignore[attr-defined]
-            state.hrr_tle_cache,  # type: ignore[attr-defined]
-            TLE_CLUSTERING,
-        )
-        state.hrr_tle_cache.update(reduced)  # type: ignore[attr-defined]
+        reduced, summary = cluster_and_reduce_tle_cache(multiset, cache, TLE_CLUSTERING)
     # BLE001: clustering is an optimisation, never a gate.
     except Exception as _cl_exc:  # noqa: BLE001
         logger.warning(
             "TLE clustering step failed: %s, proceeding without reduction", log_safe(_cl_exc),
         )
-    return clustering_summary
+        return None
+    return reduced, summary, cache
+
+
+async def _reduce_tle_clusters(state: object) -> Any | None:
+    """Reduce multi-provider element sets to one representative per object.
+
+    The clustering runs off the event loop (audit F-235); its result is
+    written back here, on the loop. Returns the clustering summary for
+    display, or None when there was nothing to cluster.
+
+    A target fetch for the same sign-in can land while the clustering runs,
+    and what it wrote is newer than the history the clustering worked from. A
+    representative is written only over the entry the clustering started
+    from, so the fetch's element set stands (SPC-073). The check and the write
+    have no await between them, so nothing on the loop comes between them.
+    """
+    clustered = await asyncio.get_running_loop().run_in_executor(None, _cluster_tle_sets, state)
+    if clustered is None:
+        return None
+    reduced, summary, started_from = clustered
+    live = state.hrr_tle_cache  # type: ignore[attr-defined]
+    live.update({satno: tle for satno, tle in reduced.items() if live.get(satno) == started_from.get(satno)})
+    return summary
 
 
 # PLR0913, PLR0917: the inputs of one pass over the sweep's target list.
@@ -2729,7 +2753,7 @@ async def threat_sweep(
     loop = asyncio.get_running_loop()
     # Cluster multi-provider TLEs and reduce to best representative per object,
     # off the event loop like the sweep itself (audit F-235).
-    clustering_summary = await loop.run_in_executor(None, _reduce_tle_clusters, state)
+    clustering_summary = await _reduce_tle_clusters(state)
 
     # Count total targets (HRR + manual).
     hrr_count = len(targets)

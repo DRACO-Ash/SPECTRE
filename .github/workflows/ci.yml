@@ -116,6 +116,53 @@ jobs:
           path: coverage.xml
           if-no-files-found: error
 
+  # ── The same suite against PostgreSQL ───────────────────────────────────────
+  test-postgres:
+    name: Tests (pytest, PostgreSQL)
+    # Production attaches the POSTGRESQL add-on; every other job runs on
+    # SQLite. Two things only PostgreSQL has went untested: row locks (the
+    # last-admin guard's SELECT ... FOR UPDATE, which tests/integration/
+    # test_postgres_admin_lock.py runs only here) and asyncpg, which binds a
+    # connection to the event loop that opened it (SPC-070). The suite's
+    # conftest gives the engine a pool that never hands a connection to a
+    # second loop; nothing else differs from the SQLite job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          POSTGRES_DB: spectre_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history, as in the SQLite job: the cognitive-complexity
+          # meter's calibration test replays a commit a depth-1 checkout lacks.
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install the locked runtime, test and tooling sets
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate tools are present
+        run: pytest --version
+      - name: Run tests against PostgreSQL
+        env:
+          SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+          DATABASE_URL: postgresql+asyncpg://postgres:ci-only-postgres-password@localhost:5432/spectre_test
+        run: pytest tests/ -q
+
   # ── SAST — bandit ────────────────────────────────────────────────────────────
   sast:
     name: SAST (bandit)

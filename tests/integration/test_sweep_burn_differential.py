@@ -567,7 +567,7 @@ class TestTheSnapshot:
         calls = _spy(monkeypatch, {before: 14.0, records[-1].tle: 3.0})
         seen: list[str] = []
 
-        def clustered(state: Any) -> None:
+        async def clustered(state: Any) -> None:
             state.hrr_tle_cache["CLUSTER-MARK"] = "rewritten"
             seen.append("clustered")
 

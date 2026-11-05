@@ -273,7 +273,7 @@ class TestClusterReduction:
     """Clustering is an optimisation, never a gate."""
 
     def test_nothing_to_cluster_is_no_summary(self) -> None:
-        assert threat._reduce_tle_clusters(SimpleNamespace(hrr_tle_multiset={}, hrr_tle_cache={})) is None
+        assert asyncio.run(threat._reduce_tle_clusters(SimpleNamespace(hrr_tle_multiset={}, hrr_tle_cache={}))) is None
 
     def test_a_failure_leaves_the_cache_as_it_was_and_is_logged(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
@@ -286,7 +286,7 @@ class TestClusterReduction:
         monkeypatch.setattr(tle_preprocessing, "cluster_and_reduce_tle_cache", broken)
         held = SimpleNamespace(hrr_tle_multiset={"90002": [_BLUE_GEO, _RED_GEO]}, hrr_tle_cache={"90002": "kept"})
         with caplog.at_level(logging.WARNING, logger=threat.logger.name):
-            assert threat._reduce_tle_clusters(held) is None
+            assert asyncio.run(threat._reduce_tle_clusters(held)) is None
         assert held.hrr_tle_cache == {"90002": "kept"}
         assert any("DBSCAN fell over" in r.getMessage() for r in caplog.records)
 

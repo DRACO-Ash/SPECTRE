@@ -375,7 +375,7 @@ spectre/                           ← repo root
 │   └── integration/            ← FastAPI TestClient + TLE clustering pipeline tests
 ├── docs/                       ← Architecture notes, planning docs, reference PDFs
 ├── .github/
-│   ├── workflows/ci.yml        ← lint / test / sast / sca / secrets / container / quality jobs
+│   ├── workflows/ci.yml        ← lint / test / test-postgres / sast / sca / secrets / container / quality jobs
 │   └── dependabot.yml          ← Weekly pip + Actions dependency updates
 ├── .pre-commit-config.yaml     ← gitleaks, ruff, bandit, mypy on every commit
 ├── CODEOWNERS                  ← Security-path review gates

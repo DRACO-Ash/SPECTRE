@@ -37,7 +37,9 @@ async def initialized_app() -> object:
     """Return the FastAPI app with its tables created."""
     from spectre.web.app import app
     from spectre.web.database import init_db
+    from tests.conftest import keep_each_connection_on_its_own_loop
 
+    keep_each_connection_on_its_own_loop()
     await init_db()
     return app
 
