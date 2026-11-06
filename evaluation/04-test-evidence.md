@@ -1,0 +1,29 @@
+# 04. Test evidence: probes
+
+**Subject:** commit `ddba577`. Probes live in `evaluation/probes/`; raw output in `evaluation/evidence/probes.log` (all probes), with the decision probes also in `evidence/probes-decision.log` and the physics probes in `evidence/physics/`. Every probe uses the repository's test framework (pytest) and installed packages only, drives the engine through its own functions, and prints its measured numbers so the evidence holds whether it passes or fails.
+
+"Pass" means the engine shows the property the framework expects. Where a probe confirms a weakness, it is written to assert the weakness and its row reads "fail (weakness confirmed)", so the suite's green run is not mistaken for the engine passing.
+
+## Decision probes (written and run by the assessor)
+
+| Probe | Framework reference | Expected | Observed | Result | Finding |
+|:-|:-|:-|:-|:-|:-|
+| P-01 reference matrices | §1c; probe 1 | Minimax, minimin and expected value match hand-computed picks | Matrix A: R2, R0, R0; matrix B: R2, R3, R3; all equal to the hand computation | Pass | none |
+| P-02 matching pennies | §1a, §1c; probe 2 | Pure minimax and mixed value differ, and the engine says so | Pure minimax value 1.0, mixed value 0.5; the engine computes only the pure value and picks R0 by order; no statement of the limitation anywhere | Fail (weakness confirmed) | F-15, F-13 |
+| P-03 dominated response | §1b; probe 3 | Adding a dominated response changes no pick | Unchanged under all three rules on both reference matrices and end to end through `evaluate_scenario` | Pass | none |
+| P-03b P renormalised | §1a, §1b; assessor's probe | P means a likelihood; a row at P 0.1 differs from one at P 1.0 | A single row at P 0.1 and at P 1.0 give the same pick and expected scores (0.2, 0.6, 0.4 against 0.02, 0.06, 0.04 if read as stated); 0.9 and 0.9 equal 0.5 and 0.5; a P 0 row changes nothing | Fail (weakness confirmed) | F-12 |
+| P-04 positive scaling | §2 table; probe 4 | Scaling every payoff by k > 0 changes no choice | Unchanged for k 0.01, 3 and 1,000; weights times 7 normalise to the same weights | Pass | none |
+| P-05 permutation | §2 table; probe 5 | Row and column order change no result | Every permutation of both reference matrices gives the same picks. A minimax tie between two different responses (X: 0.5 and 0.1; Y: 0.2 and 0.5) is resolved by entry order: X when entered first, Y when entered first, with no tie shown | Fail on ties (weakness confirmed) | F-13 |
+| P-06 veto | §1b, G4; probe 6 | A constraint-violating response is never recommended | Cannot be written as specified: no field on `FriendlyResponse` or `Scenario` can mark a response unacceptable (fields listed in the log); the best score is recommended whatever it is | Fail (absent; testability) | F-04 |
+| P-07 depth 1 and pruning | §1d; probe 7 | Depth 1 equals the matrix; pruned equals unpruned | Depth 1 gives the same scores and pick as the matrix under all three rules; an unbound 2-turn tree is refused with a sentence and the one-turn pick stands; no pruning exists (full enumeration: 42 branches at 2 rows, 3 responses, 2 turns; 819 at 3, 3, 3; cap 1,000) | Pass | none |
+| P-08 posterior | §1e; probe 8 | Posterior matches a hand computation; no underflow or NaN | P 0.5, 0.3, 0.2 seeing a burn: 0.625 and 0.375 (hand: 0.625 and 0.375), shown rounded down as 0.62 and 0.37; priors 1e-300 give finite shares 0.5 and 0.5 | Pass | none |
+| P-09 duplicated observation | §1e; probe 9 | The posterior does not move twice for one event | A second copy cannot be entered: `Scenario.observed` refuses a list (ValueError) | Pass (by construction) | none |
+| P-10 value of information | §1f; probe 10, recast | VOI never negative; never above the bound; responds to delay | Cue steps lie in [0, range width] on all 25 cues of the worked-example cases; a 4 h cue is collected first with decide-by 10 h away and not with 3 h away (hard cut-off, no continuous delay cost). Under opposite threat pictures (collect first against act on the ceiling) the matrix and the pick are identical | Pass on the bound; fail on decision relevance (weakness confirmed) | F-14 |
+| P-15 reproducibility | G2; probe 15 | Same stored inputs and seed reproduce the recommendation | Lookup, computed and sampled scenarios evaluated twice: identical picks, scores, sampled bands and input hashes; only the timestamp differs. Nothing is stored to replay from | Pass on repeatability; G2 unmet | F-02 |
+| P-16 weight sensitivity | §1b, §1h; probe 16 | Report the smallest single weight change that flips the pick, for 3 scenarios | Lookup (3 rows, 4 responses; pick: retask sensor): custody −0.306 (EV) and −0.323 (minimax); closest approach 0.348; reversibility 0.516. Computed and sampled (plane-change pair; pick: sensor retask): delta-V weight −0.089 (0.20 to 0.111) flips minimax and expected value to manoeuvre; reversibility 0.082 (0.10 to 0.18) flips both. Every flip confirmed by a full re-evaluation. None of this is shown to the operator | Measured; fragility undisclosed | F-16 |
+| P-17 closest-approach weight | §1b; assessor's probe | A response that moves a 1 km miss to 100 km for 1 m/s ranks first | It ranks second: score 0.252889 against 0.251384 for no burn; 1 m/s of delta-V weighs the same as 400 km of miss; a 100 m/s and a 500 m/s burn score the same (0.450889) | Fail (weakness confirmed) | F-10 |
+| P-18 page uncertainty | G6; assessor's probe | Every figure carries a basis or a "not quantified" flag | Lookup page: 12 cells, 24 basis marks, 12 score spread lines; computed page: 16 cells, 32 marks, 16 spread lines; "Modelled estimate" banner on both; no recommendation-stability wording | Pass for G6; stability absent (L3) | F-16 |
+
+## Physics probes (delegated, bounded deliverable in `evidence/physics/`)
+
+To be completed from `evidence/physics/SUMMARY.md` when the delegated run reports.
