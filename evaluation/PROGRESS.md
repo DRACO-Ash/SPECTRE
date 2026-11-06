@@ -11,7 +11,7 @@
 ● Inventory: Python 3.13.17; 559 Python files tracked; engine and supporting modules listed in `01-architecture-map.md` section 1. Pins in `requirements-runtime.txt` match installed versions (sgp4 2.27, scipy 1.17.1, numpy 2.4.6, FastAPI 0.162.0). Tests: `tests/unit` (271 files), `tests/integration` (74 files), `tests/reference`. Data: `spectre/data/hrr_default.json` (bundled element sets), `notso_cache.json`, `adversary_intel.json`. Configuration: weights and rule are per-evaluation form inputs; constants in `decision.py`.
 ● Baseline: `PYTHONPATH=. python -m pytest -p no:cacheprovider -q -rfEs tests`, serial (no pytest-xdist installed). Log: `evidence/baseline-tests.log`. Result: 8,351 passed, 0 failed, 15 skipped (3 PostgreSQL-only, 12 training slots with no longitude), exit 0. A clean baseline: no finding.
 
-## Phase 1: Architecture map (checkpoint, awaiting confirmation)
+## Phase 1: Architecture map (complete; confirmed by the owner, 2026-11-06)
 
 ● Written: `01-architecture-map.md`.
 ● Key facts established:
@@ -27,3 +27,11 @@
 
 ● Confirm the map before Phase 2.
 ● Framework deviations already visible: probe 11 (Pc) recast to the P5 miss estimate; framework 1f (EVPI and EVSI) assessed against the range-narrowing measure actually built; framework 1e's correlated-observation concern is out of scope by construction.
+
+## Phase 2: Gate assessment (complete)
+
+● Written: `02-gate-assessment.md`.
+● Result: 9 Red, 0 Amber, 1 Green (G6, provisional). Gate result: **Fail**.
+● Rating rule: "substantially met, no dated and owned plan" is rated Red and labelled, since the framework leaves that case undefined and the repository holds no dated, owned plan (deviation, to record in the report).
+● Re-check in Phase 4: G2 (probe 15), G6 (probe 14 and a rendered page), G7 (probes 12 and 13), G10 (probe 14), G9 (UDL element-set checksum, probe 14).
+● Open: whether operators can record a decision anywhere outside the engine (none found in code).
