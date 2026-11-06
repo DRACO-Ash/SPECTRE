@@ -56,3 +56,12 @@
 ## Phase 6: Rubric self-test (complete)
 
 ● `06-rubric-sensitivity.md`; output in `evidence/score-sensitivity.txt`. Verdict and band unchanged in all 20 weight runs (1.62 to 1.74); L5 drives the extremes. A uniform one-level shift would move the band to Conditional (2.68). Inter-assessor reliability not tested; second assessor recommended.
+
+## Phase 7: Remediation backlog (complete)
+
+● `07-remediation-backlog.md`: 36 findings in three groups (gate, operational trial, accreditation), ordered by severity then effort.
+
+## Phase 8: Report (complete)
+
+● `EVALUATION.md`: bottom line (224 words; verdict first), scope and method, gate table, scorecard, full findings register (36 findings), deviations, limitations, final git status.
+● Verdict: **Fail**. Score **1.68**, band Not ready. 9 gates Red, 0 Amber, 1 Green.
