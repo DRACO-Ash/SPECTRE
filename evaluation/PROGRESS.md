@@ -42,3 +42,9 @@
 ● Most material: F-10 (Critical), the closest-approach term is nearly flat at operational ranges; F-11 (High), element-set error never reaches the miss payoff; F-12 (High), expected-value shares renormalise over the rows entered; F-14 (High), collect-first is not tied to the matrix; F-16 (High), no weight sensitivity.
 ● Deviations: rank reversal does not apply to responses (fixed scales) but an adversary-side analogue does; no Pc anywhere (probe 11 recast); no EVPI or EVSI (probe 10 recast); single-observation update (framework 1e double-counting not applicable).
 ● Probes added beyond the brief's list: P-03b (adding a row with P 0 under expected value) and P-17 (closest-approach insensitivity).
+
+## Phase 4: Probe testing (complete)
+
+● Probes: `probes/test_p01_p05_rules.py`, `test_p06_p10_model.py`, `test_p15_p18_reproducibility_sensitivity.py` (lead assessor; 38 passed, of which 6 assert a confirmed weakness), `test_p11_*.py` to `test_p14_*.py` (delegated; 8 passed, 8 failed). Raw output: `evidence/probes.log`; physics detail: `evidence/physics/`.
+● Summary table: `04-test-evidence.md`. Gate file revised with probe results; no rating changed.
+● New from the physics probes: F-25 (UDL element sets never checksum-checked; a one-digit corruption moved a computed miss from 10.4 to 13.4 km), F-26 (half-width labelled as P5's is the widest of three), F-27 (unstated RK45 error up to 0.65 km at 72 h), F-29 (deep-space objects silently take LEO limits), F-30 (decayed object can yield a computed miss), F-31 (zero weights or zero P give a pick by row order), F-32 to F-36 (Low).

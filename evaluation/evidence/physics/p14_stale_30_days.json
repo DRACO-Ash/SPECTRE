@@ -1,0 +1,106 @@
+{
+  "red_age_hours": 720.0,
+  "red_limit_hours": 24.0,
+  "red_freshness": "out of date",
+  "recommendation": "manoeuvre",
+  "strategy": "minimax",
+  "composite_scores": [
+    [
+      0.321333,
+      0.329,
+      0.599867,
+      0.627333
+    ],
+    [
+      0.223333,
+      0.28,
+      0.266667,
+      0.333333
+    ],
+    [
+      0.293333,
+      0.315,
+      0.329667,
+      0.368333
+    ],
+    [
+      0.273333,
+      0.305,
+      0.311667,
+      0.358333
+    ]
+  ],
+  "closest_approach_km": [
+    [
+      400.0,
+      200.0,
+      360.0,
+      200.0
+    ],
+    [
+      20000.0,
+      10000.0,
+      18000.0,
+      10000.0
+    ],
+    [
+      6000.0,
+      3000.0,
+      5400.0,
+      3000.0
+    ],
+    [
+      10000.0,
+      5000.0,
+      9000.0,
+      5000.0
+    ]
+  ],
+  "bases": [
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ]
+  ],
+  "modelled_banner": true,
+  "basis_lines": [
+    "Every figure in every cell is a lookup."
+  ],
+  "row_notes": [],
+  "cell_refusals": [
+    "Not computed: the red orbit is out of date or its age is unknown, so a miss computed from it would not be earned. This cell's closest approach is a lookup.",
+    "Not sampled: the red orbit is out of date, at its limit already or of unknown age, so a miss sampled from it would not be earned. This cell's closest approach is a lookup."
+  ],
+  "binding_sentences": [
+    "Orbit out of date: 30.0 d old at evaluation against a 24 h limit, so a burn since its epoch would not be seen.",
+    "Orbit current: 0.0 h old at evaluation, limit 24 h."
+  ],
+  "computed_caveat": null,
+  "searched_span_note": null,
+  "objective_guidance": null,
+  "page_mentions": {
+    "out of date": true,
+    "Modelled estimate": true,
+    "lookup": true
+  }
+}

@@ -26,4 +26,18 @@
 
 ## Physics probes (delegated, bounded deliverable in `evidence/physics/`)
 
-To be completed from `evidence/physics/SUMMARY.md` when the delegated run reports.
+Full table and deviations: `evidence/physics/SUMMARY.md`. The lead assessor re-checked the UDL checksum path, the decayed-object output and the half-width label against code and raw output.
+
+| Probe | Framework reference | Expected | Observed | Result | Finding |
+|:-|:-|:-|:-|:-|:-|
+| P-11 P5 stability | §1g; probe 11, recast | Spread falls as 1/sqrt(N); half-width covers it | No Pc computed anywhere, so a zero-hit Pc cannot arise. Case A: P5 SD 0.170 to 0.063 km for N 50 to 400, slope −0.49; 79 of 80 runs covered by their own half-width. The half-width labelled as P5's is the widest of P5, P50 and P95 (`monte_carlo.py:1170-1179`; `decision.py:2169-2170`); with the seed fixed at 42, convergence at N 50 is one draw (15 of 20 seeds in case B, 1 of 6 in case C) | Pass, with labelling defect | F-26, F-35 |
+| P-12 SGP4 vectors | §1g; probe 12; G7 | Matches the published vectors | 33 cases (24 SDP4), 666 vectors: wrapper within 9.8e-6 km and 1.0e-8 km/s (1 µs time quantisation); 7 error cases raise at the library's instants; WGS-72, while RK45 uses WGS-84 constants. Run from `evaluation/` only: not part of the repository's suite | Pass | F-06, F-36 |
+| P-13 RK45 tolerance | §1g; probe 13; G7 | Under 0.1 km at 72 h | LEO 0.285 km at 48 h and 0.652 km at 72 h; GEO 0.004 and 0.015 km; separation error up to 0.353 km; against 5 to 7 km of modelled element-set error. RK45 and SDP4 part by 11 to 18 km at GEO (no third bodies) | Fail | F-27, F-19 |
+| P-14 edge inputs | §2 table; probe 14; G9, G10 | Fail loudly or flag | Flagged: 30-day stale set, NaN in any of 8 inputs, decay inside the window, contradictory observation. Silent: deep-space objects (89.3 km and 18,031.6 km computed with LEO limits and error model); a decayed object between perigee passes ("Computed: 643.1 km", altitude 5 to 320 km); all weights 0 and every P 0 under expected value (pick by row order); an injected NaN lookup ("nan" in cells). UDL element sets never checksum-checked: a one-digit corruption moved a computed miss from 10.4 km to 13.4 km unflagged and replaced a good held set | Fail (mixed) | F-25, F-29, F-30, F-31, F-32, F-33, F-34 |
+
+## Summary
+
+● 54 probe tests across 18 probes. Decision: 38 passed (of which 6 assert a confirmed weakness). Physics: 8 passed, 8 failed.
+● Properties the engine has: correct rule orientation and arithmetic (P-01), invariance to dominated responses, scaling and permutation without ties (P-03 to P-05), depth-1 consistency (P-07), correct posterior arithmetic (P-08), repeatability (P-15), basis marks on every figure (P-18), SGP4 to the published vectors (P-12), Monte Carlo spread behaving as 1/sqrt(N) (P-11).
+● Properties it lacks: a closest-approach term that registers operational misses (P-17), P meaning a likelihood (P-03b), tie disclosure (P-05), vetoes (P-06), collect-first advice that can change the decision (P-10), weight-stability disclosure (P-16), input integrity on the main ingest path and an operating envelope for deep-space and decayed objects (P-14).
+● Testability: P-06 could not be written as specified because no constraint input exists (recorded as F-04).

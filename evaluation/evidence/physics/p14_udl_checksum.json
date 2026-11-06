@@ -1,0 +1,46 @@
+{
+  "fake_http_calls": [
+    "https://unifieddatalibrary.com/udl/elset/current",
+    "https://unifieddatalibrary.com/udl/elset/current"
+  ],
+  "genuine_line2": "2 90002  97.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19",
+  "fetched_line2": "2 90002  98.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19",
+  "fetched_checksums_valid": [
+    true,
+    false
+  ],
+  "bound_red_tle_equals_fetched": true,
+  "bound_red_checksums_valid": [
+    true,
+    false
+  ],
+  "computed_closest_approach_km_corrupted": 13.4,
+  "computed_closest_approach_km_genuine": 10.4,
+  "recommendation_corrupted": "sensor_retask",
+  "recommendation_genuine": "sensor_retask",
+  "cell_refusals_corrupted": [
+    "Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."
+  ],
+  "page_mentions": {
+    "checksum": false
+  },
+  "refresh_replaced_held_set": true,
+  "refresh_outcome": {
+    "updated": [
+      "red HELD_RED"
+    ],
+    "failed": []
+  },
+  "refreshed_checksums_valid": [
+    true,
+    false
+  ],
+  "side_observation_inclination_597_line2": "2 90002 597.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19",
+  "side_observation_inclination_597_bases": [
+    "computed",
+    "computed",
+    "computed",
+    "computed"
+  ],
+  "side_observation_inclination_597_closest_approach_km": 356.0
+}
