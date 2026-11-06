@@ -48,3 +48,11 @@
 ● Probes: `probes/test_p01_p05_rules.py`, `test_p06_p10_model.py`, `test_p15_p18_reproducibility_sensitivity.py` (lead assessor; 38 passed, of which 6 assert a confirmed weakness), `test_p11_*.py` to `test_p14_*.py` (delegated; 8 passed, 8 failed). Raw output: `evidence/probes.log`; physics detail: `evidence/physics/`.
 ● Summary table: `04-test-evidence.md`. Gate file revised with probe results; no rating changed.
 ● New from the physics probes: F-25 (UDL element sets never checksum-checked; a one-digit corruption moved a computed miss from 10.4 to 13.4 km), F-26 (half-width labelled as P5's is the widest of three), F-27 (unstated RK45 error up to 0.65 km at 72 h), F-29 (deep-space objects silently take LEO limits), F-30 (decayed object can yield a computed miss), F-31 (zero weights or zero P give a pick by row order), F-32 to F-36 (Low).
+
+## Phase 5: Scoring (complete)
+
+● `scorecard.json`, `score.py` (standard library only), `05-scorecard.md`. Score **1.68**, band Not ready, gate Fail, verdict **Fail**. Output in `evidence/score.txt`.
+
+## Phase 6: Rubric self-test (complete)
+
+● `06-rubric-sensitivity.md`; output in `evidence/score-sensitivity.txt`. Verdict and band unchanged in all 20 weight runs (1.62 to 1.74); L5 drives the extremes. A uniform one-level shift would move the band to Conditional (2.68). Inter-assessor reliability not tested; second assessor recommended.

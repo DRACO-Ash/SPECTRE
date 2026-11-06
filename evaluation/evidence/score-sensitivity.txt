@@ -1,0 +1,22 @@
+Gates: 9 Red ['G1', 'G2', 'G3', 'G4', 'G5', 'G7', 'G8', 'G9', 'G10']; 0 Amber []; 1 Green ['G6']
+Gate result: Fail
+as written       score 1.68  score band Not ready                          verdict Fail
+equal weights    score 1.67  score band Not ready                          verdict Fail
+L1 x1.5          score 1.71  score band Not ready                          verdict Fail
+L1 x0.5          score 1.65  score band Not ready                          verdict Fail
+L2 x1.5          score 1.70  score band Not ready                          verdict Fail
+L2 x0.5          score 1.66  score band Not ready                          verdict Fail
+L3 x1.5          score 1.70  score band Not ready                          verdict Fail
+L3 x0.5          score 1.66  score band Not ready                          verdict Fail
+L4 x1.5          score 1.71  score band Not ready                          verdict Fail
+L4 x0.5          score 1.65  score band Not ready                          verdict Fail
+L5 x1.5          score 1.62  score band Not ready                          verdict Fail
+L5 x0.5          score 1.74  score band Not ready                          verdict Fail
+L6 x1.5          score 1.64  score band Not ready                          verdict Fail
+L6 x0.5          score 1.72  score band Not ready                          verdict Fail
+L7 x1.5          score 1.69  score band Not ready                          verdict Fail
+L7 x0.5          score 1.67  score band Not ready                          verdict Fail
+L8 x1.5          score 1.65  score band Not ready                          verdict Fail
+L8 x0.5          score 1.71  score band Not ready                          verdict Fail
+L9 x1.5          score 1.69  score band Not ready                          verdict Fail
+L9 x0.5          score 1.67  score band Not ready                          verdict Fail
