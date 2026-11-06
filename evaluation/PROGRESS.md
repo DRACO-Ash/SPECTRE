@@ -35,3 +35,10 @@
 ● Rating rule: "substantially met, no dated and owned plan" is rated Red and labelled, since the framework leaves that case undefined and the repository holds no dated, owned plan (deviation, to record in the report).
 ● Re-check in Phase 4: G2 (probe 15), G6 (probe 14 and a rendered page), G7 (probes 12 and 13), G10 (probe 14), G9 (UDL element-set checksum, probe 14).
 ● Open: whether operators can record a decision anywhere outside the engine (none found in code).
+
+## Phase 3: Conceptual scrutiny (complete)
+
+● Written: `03-conceptual-scrutiny.md`, sections 1a to 1h as evidenced questions; findings F-10 to F-23 (F-17 and F-18 reserved for Phase 4 and L5 findings).
+● Most material: F-10 (Critical), the closest-approach term is nearly flat at operational ranges; F-11 (High), element-set error never reaches the miss payoff; F-12 (High), expected-value shares renormalise over the rows entered; F-14 (High), collect-first is not tied to the matrix; F-16 (High), no weight sensitivity.
+● Deviations: rank reversal does not apply to responses (fixed scales) but an adversary-side analogue does; no Pc anywhere (probe 11 recast); no EVPI or EVSI (probe 10 recast); single-observation update (framework 1e double-counting not applicable).
+● Probes added beyond the brief's list: P-03b (adding a row with P 0 under expected value) and P-17 (closest-approach insensitivity).
