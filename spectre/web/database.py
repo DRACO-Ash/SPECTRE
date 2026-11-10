@@ -179,6 +179,13 @@ async def _apply_migrations(conn: Any) -> None:
         ("training_progress", "user_id", "INTEGER"),
         ("training_sessions", "user_id", "INTEGER"),
         ("training_challenge_results", "user_id", "INTEGER"),
+        # The decision record's primary rule and whether the rule used differed (SPC-194): a record written by
+        # 0.27.0 takes the empty rule and no answer, which the records page reads as not recorded.
+        ("decision_records", "primary_rule", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        ("decision_records", "rule_differed", "BOOLEAN"),
+        # The evaluation's canonical inputs and their SHA-256 (SPC-193): none on a record written by 0.27.0.
+        ("decision_records", "inputs", "TEXT"),
+        ("decision_records", "inputs_sha256", "VARCHAR(64)"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

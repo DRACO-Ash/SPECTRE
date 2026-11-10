@@ -1721,6 +1721,9 @@ class ScenarioResult:
     row_starts:             tuple[str | None, ...] = ()
     # Per adversary row: what it applies (SPC-184), None for a row with no hypothesis. Read by the trajectory view.
     row_burns:              tuple[RowBurns | None, ...] = field(default=(), compare=False, repr=False)
+    # Whether the evaluation's time budget ran out (SPC-113, SPC-140): a row it refused for want of time, a burn it
+    # left unsized, or a tree it stopped part-way. A replay runs in full, so it says so (SPC-193, evaluation F-02).
+    budget_ran_out:         bool = False
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -1859,7 +1862,7 @@ class ScenarioResult:
 
     @property
     def objective_guidance(self) -> str | None:
-        """Under expected value, when its weights are not earned: say so, and name what minimax recommends.
+        """Under expected value, when its weights are not earned: say so, and name what minimax picks.
 
         The selector chosen is kept: the guidance recommends, it never switches (concept section 7.5, item 4).
         """
@@ -1867,7 +1870,7 @@ class ScenarioResult:
         if why is None:
             return None
         minimax = find_robust_response(self.scenario, self.outcome_matrix, SelectorStrategy.MINIMAX)
-        return f"{why} Minimax, the cautious rule, needs no probability: it recommends {minimax.name}."
+        return f"{why} Minimax, the cautious rule, needs no probability: it picks {minimax.name}."
 
     @property
     def basis_lines(self) -> tuple[str, ...]:
@@ -4342,8 +4345,14 @@ def _evaluate(
         row_transfers=tuple(None if burns is None else transfer_sentence(burns, end) for burns in transfers),
         row_starts=tuple(_start_line(burns, scenario.epoch_utc) for burns in transfers),
         row_burns=transfers,
+        budget_ran_out=_ran_out(budget),
     )
     return result, TurnOne(pre, plan, computed, budget)
+
+
+def _ran_out(budget: _Budget | None) -> bool:
+    """Whether *budget* was spent: something was refused or left out for want of time; never with no budget."""
+    return budget is not None and budget.spent
 
 
 def _rk45_reference(computed: ComputedPlan | None) -> tuple[ElsetApproach, ElsetApproach] | None:

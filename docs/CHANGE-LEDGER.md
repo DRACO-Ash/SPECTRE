@@ -1238,3 +1238,12 @@ A decision record (evaluation F-01), propagator checks in the suite (F-06), the 
 | Code Quality | **HYGIENE** | None made for the gate. A new table `decision_records`, a new module `web/decision_record.py`, two routes and a page | `scripts/check-quality.sh` against 0.26.0 passed all five legs. The full suite (8,756 passed) and every CI coverage floor are green on the same tree; the record's tests also passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The new table is created by `create_all` at start. | n/a. |
 
+## 0.28.0
+
+All three rules side by side (evaluation F-03) and replay from a stored record (F-02).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New modules `domain/rule_comparison.py`, `domain/decision_inputs.py`, `domain/decision_replay.py` and `scripts/replay_decision.py`; four columns on `decision_records` | `scripts/check-quality.sh` against 0.27.0 passed all five legs. The full suite (8,974 passed) and every CI coverage floor are green on the same tree; the record, upgrade, replay and admin tests (170) passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. `.env.example` documents `SPECTRE_PRIMARY_RULE`. | n/a. |
+

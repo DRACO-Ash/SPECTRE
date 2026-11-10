@@ -371,7 +371,7 @@ class TestTheMinimaxGuidance:
         minimax = evaluate_scenario(scenario, SelectorStrategy.MINIMAX).robust_best_response
         assert result.objective_guidance == (
             f"Expected value rests on a probability the evidence has not earned ({_AGE}). Minimax, the cautious "
-            f"rule, needs no probability: it recommends {minimax.name}."
+            f"rule, needs no probability: it picks {minimax.name}."
         )
         assert result.robust_strategy is SelectorStrategy.EXPECTED_VALUE   # recommended, never switched
 
@@ -400,7 +400,7 @@ class TestTheMinimaxGuidance:
         minimax = evaluate_scenario(_scenario(), SelectorStrategy.MINIMAX).robust_best_response
         assert result.objective_guidance == (
             "Expected value rests on a probability no Threat picture for RED_X supports. Minimax, the cautious "
-            f"rule, needs no probability: it recommends {minimax.name}."
+            f"rule, needs no probability: it picks {minimax.name}."
         )
         for sentence in result.objective_guidance.split(". "):
             assert i13_problems(sentence) == [], sentence

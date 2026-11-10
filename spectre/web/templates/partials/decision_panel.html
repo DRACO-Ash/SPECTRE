@@ -317,15 +317,22 @@
       </div>
     </details>
 
-    {# ── Strategy selector ── #}
-    <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.5rem">
+    {# ── Strategy selector: it defaults to the deployment's primary rule, SPECTRE_PRIMARY_RULE (SPC-194), and the
+         results show every rule's pick with the primary rule's as the headline, whichever is chosen here. ── #}
+    {% set primary = primary_rule if primary_rule is defined else "minimax" %}
+    <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
       Selector Strategy
       <select name="strategy" style="font-size:0.65rem; margin-left:0.4rem">
-        <option value="minimax">Minimax: cautious, best worst case</option>
-        <option value="expected_value">Expected Value: probability-weighted cost</option>
-        <option value="minimin">Minimin: optimistic, best best case (not robust)</option>
+        {%- for value, label in (("minimax", "Minimax: cautious, best worst case"),
+                                 ("expected_value", "Expected Value: probability-weighted cost"),
+                                 ("minimin", "Minimin: optimistic, best best case (not robust)")) %}
+        <option value="{{ value }}"{% if value == primary %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
       </select>
     </label>
+    <p class="primary-rule-note" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.5rem">This deployment's
+      primary rule is {{ primary | replace('_', ' ') }}: its pick heads the results, beside every rule's pick, whichever
+      rule you choose here.</p>
 
     {# ── The game tree (SPC-142): how many turns, and what turn 1 showed of red for the update after it. Plain
          fields: no htmx region, no handler, no script. A depth that cannot fit is refused when Evaluate is pressed,

@@ -7,12 +7,14 @@ rules on the same matrix, the code version and every input hash, the turns and t
 page then asks for the operator's decision, which a record accepts once, from the operator who ran it.
 
 The three rules' picks are the engine's own find_robust_response on the result's matrix, read and never written:
-no figure and no recommendation changes. No element-set text and no raw input is stored; replay is SPC-193.
+no figure and no recommendation changes. Since 0.28.0 a record also keeps the deployment's primary rule and whether
+the rule used differed (SPC-194), and the evaluation's canonical inputs with their SHA-256, element-set text included
+(SPC-193, evaluation F-02), from which replay_record evaluates the scenario again and sets the result against the
+record.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import re
@@ -22,16 +24,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from spectre.domain.decision import FriendlyResponse, ScenarioResult, SelectorStrategy, find_robust_response
+from spectre.config.settings import get_settings
+from spectre.domain.decision import FriendlyResponse, ScenarioResult, SelectorStrategy
+from spectre.domain.decision_inputs import InputsRefusedError, StoredInputs, read_inputs, store_inputs
+from spectre.domain.decision_replay import Evaluate, Named, Recorded, Replay, input_hashes, replay
+from spectre.domain.rule_comparison import RULE_WORDS, RULES, expected_value_caveat, matrix_picks
 from spectre.web.log_safety import log_safe
 from spectre.web.models import DecisionRecord, User
 
 logger = logging.getLogger(__name__)
-
-#: The three rules, in the order every record and page lists them.
-RULES: tuple[SelectorStrategy, ...] = (
-    SelectorStrategy.MINIMAX, SelectorStrategy.MINIMIN, SelectorStrategy.EXPECTED_VALUE,
-)
 
 
 #: The two decisions that are not one of the scenario's responses, by the value the select posts.
@@ -70,19 +71,25 @@ class Operator:
     username: str
 
 
-def rule_picks(result: ScenarioResult) -> dict[SelectorStrategy, FriendlyResponse]:
-    """Each rule's pick on *result*'s matrix, by find_robust_response; nothing on *result* is changed."""
-    return {rule: find_robust_response(result.scenario, result.outcome_matrix, rule) for rule in RULES}
+def rule_picks(result: ScenarioResult) -> dict[SelectorStrategy, FriendlyResponse | None]:
+    """Each rule's pick on *result*'s matrix: the results page's own, rule_comparison.matrix_picks (SPC-194); None for
+    expected value when every row has P 0."""
+    return matrix_picks(result)
+
+
+def _held(pick: FriendlyResponse | None) -> tuple[str, str]:
+    """A pick as a record holds it, (id, name) kept; ("", "") for none, which the records page says in words."""
+    return ("", "") if pick is None else (_kept(pick.id), _kept(pick.name))
+
+
+def primary_rule() -> SelectorStrategy:
+    """The deployment's primary rule, SPECTRE_PRIMARY_RULE, read now (SPC-194); minimax when it is not set."""
+    return SelectorStrategy(get_settings().primary_rule)
 
 
 def _hashes(result: ScenarioResult) -> list[dict[str, str | None]]:
-    """Every input hash in *result*'s provenance, in its order; none when it carries no provenance."""
-    if result.provenance is None:
-        return []
-    return [
-        {"label": ref.label, "sha256": ref.sha256, "epoch": None if ref.epoch is None else ref.epoch.isoformat()}
-        for ref in result.provenance.inputs
-    ]
+    """Every input hash in *result*'s provenance, in its order: the replay's own, input_hashes (SPC-193)."""
+    return input_hashes(result)
 
 
 def _sessions() -> AsyncSession:
@@ -147,24 +154,26 @@ def _tree_lines(result: ScenarioResult) -> list[str]:
     return list(tree.lines if tree.selection is None else tree.selection.recommendation)
 
 
-def expected_value_caveat(result: ScenarioResult) -> str | None:
-    """The guidance the results show under expected value when its probability is not earned, whatever rule ran;
-    None when it is earned. Read from a copy of *result* under expected value, so nothing on *result* changes."""
-    return dataclasses.replace(result, robust_strategy=SelectorStrategy.EXPECTED_VALUE).objective_guidance
-
-
-def new_record(result: ScenarioResult, operator: Operator, now: datetime) -> DecisionRecord:
+def new_record(
+    result: ScenarioResult, operator: Operator, now: datetime, *, primary: SelectorStrategy | None = None,
+) -> DecisionRecord:
     """The record of *result*, run by *operator* and finished at *now*, with no decision yet.
 
-    Every name the operator typed is kept with U+0000 as U+FFFD, so both databases take it alike.
+    Every name the operator typed is kept with U+0000 as U+FFFD, so both databases take it alike. *primary* is the
+    deployment's primary rule when the evaluation ran, read from the settings when not given (SPC-194).
     """
     scenario, provenance = result.scenario, result.provenance
-    picks = {rule: (_kept(pick.id), _kept(pick.name)) for rule, pick in rule_picks(result).items()}
+    primary = primary_rule() if primary is None else primary
+    inputs, inputs_sha256 = store_inputs(result)
+    found = rule_picks(result)
+    picks = {rule: _held(pick) for rule, pick in found.items()}
+    # The rule used's pick is the engine's own, unless that rule has no pick: expected value with every row at P 0.
+    used = _held(None if found[result.robust_strategy] is None else result.robust_best_response)
     tree_pick, caveat = _tree_pick(result), expected_value_caveat(result)
     return DecisionRecord(
         created_at=now, user_id=operator.user_id, username=operator.username,
         scenario_name=_kept(scenario.name), rule=result.robust_strategy.value,
-        recommended_id=_kept(result.robust_best_response.id), recommended_name=_kept(result.robust_best_response.name),
+        recommended_id=used[0], recommended_name=used[1],
         minimax_id=picks[SelectorStrategy.MINIMAX][0], minimax_name=picks[SelectorStrategy.MINIMAX][1],
         minimin_id=picks[SelectorStrategy.MINIMIN][0], minimin_name=picks[SelectorStrategy.MINIMIN][1],
         expected_value_id=picks[SelectorStrategy.EXPECTED_VALUE][0],
@@ -178,7 +187,55 @@ def new_record(result: ScenarioResult, operator: Operator, now: datetime) -> Dec
         input_hashes=json.dumps(_hashes(result)),
         responses=json.dumps([{"id": _kept(r.id), "name": _kept(r.name)} for r in scenario.friendly_responses]),
         turns=scenario.turns, keep_out_km=scenario.keep_out_km,
+        primary_rule=primary.value, rule_differed=result.robust_strategy is not primary,
+        inputs=inputs, inputs_sha256=inputs_sha256,
     )
+
+
+# ── Replay from the record alone (SPC-193, evaluation F-02) ──
+
+#: Why a record written before inputs were stored cannot be replayed. No version is named: the running code may not
+#: yet carry the number of the release that began storing them.
+NO_INPUTS = "This record holds no stored inputs: it was written by a version of SPECTRE that did not store them."
+
+
+def _pick_of(response_id: str | None, name: str | None) -> Named:
+    """A pick as a record holds it; None for none: no tree pick, or a rule with no pick, held as an empty id."""
+    return None if not response_id and not name else (response_id or "", name or "")
+
+
+def recorded_of(row: DecisionRecord) -> Recorded:
+    """What *row* holds beside its stored inputs: the rule used's pick, each rule's and a tree's turn-1 pick, its rule
+    and code version columns, its input hashes and the deployment's primary rule, None when it holds none."""
+    primary = next((rule for rule in RULES if rule.value == row.primary_rule), None)
+    return Recorded(
+        recommended=_pick_of(row.recommended_id, row.recommended_name),
+        picks={rule: _pick_of(getattr(row, f"{rule.value}_id"), getattr(row, f"{rule.value}_name")) for rule in RULES},
+        tree_pick=_pick_of(row.tree_pick_id, row.tree_pick_name),
+        rule=row.rule, code_version=row.code_version, input_hashes=tuple(json.loads(row.input_hashes)),
+        primary=primary,
+    )
+
+
+def stored_of(row: DecisionRecord) -> StoredInputs:
+    """*row*'s stored inputs, read strictly; InputsRefusedError when it holds none or the reader refuses them."""
+    if row.inputs is None:
+        raise InputsRefusedError(NO_INPUTS)
+    return read_inputs(row.inputs, row.inputs_sha256 or "")
+
+
+def replay_record(
+    row: DecisionRecord, *, stored: StoredInputs | None = None, evaluate: Evaluate | None = None,
+    running: str | None = None,
+) -> Replay:
+    """Rebuild *row*'s scenario from its stored inputs, evaluate it again under its stored rule, and set the result
+    against the record; InputsRefusedError when it holds no inputs or the strict reader refuses them. *stored* is
+    stored_of(row) when the caller has read it already, to say what it holds before evaluating.
+
+    Names are compared as the record keeps them, with U+0000 as U+FFFD, so a name holding one compares alike.
+    """
+    inputs = stored_of(row) if stored is None else stored
+    return replay(inputs, recorded_of(row), evaluate=evaluate, running=running, kept=_kept)
 
 
 # ── What the page shows of a record ──
@@ -315,8 +372,27 @@ async def records_for(db: AsyncSession, operator: Operator, *, every: bool) -> l
     return list((await db.execute(query)).scalars().all())
 
 
-#: Each rule in the words the records page uses.
-_RULE_WORDS: dict[str, str] = {rule.value: rule.value.replace("_", " ") for rule in SelectorStrategy}
+#: Each rule in the words the records page uses, by the value a record stores.
+_RULE_WORDS: dict[str, str] = {rule.value: words for rule, words in RULE_WORDS.items()}
+#: What the records page says of the primary rule (SPC-194): its pick was the recommendation shown, whether the rule
+#: used was the same rule or not; no recommendation when it had no pick; or none recorded. No version is named: the
+#: running code may not yet carry the number of the release that began recording it.
+_PRIMARY_USED = "Primary rule: {primary}, the rule used; {shown}"
+_PRIMARY_DIFFERED = "Primary rule: {primary}; {shown} The rule used, {rule}, differed from it."
+_SHOWN = "the recommendation shown was its pick, {pick}."
+_SHOWN_NONE = "it had no pick, since every row had P 0, so no recommendation was shown."
+_PRIMARY_UNRECORDED = (
+    "Primary rule: not recorded; this record was written by a version of SPECTRE that did not record one."
+)
+#: How the records page names a pick a record holds as none: expected value's, with every row at P 0.
+_NO_PICK = "nothing, since every row had P 0"
+#: The rule used and its pick, on a record that holds a primary rule, whose results named the primary's pick the
+#: recommendation; and on one from before, whose results recommended the rule used's pick alone.
+_USED = "Rule used: {rule}, picking {pick}."
+_USED_NONE = "Rule used: {rule}, with no pick, since every row had P 0."
+_USED_TREE = "Rule used: {rule}; on the one-turn matrix it picks {pick}."
+_USED_BEFORE = "Rule used: {rule}. Recommended: {pick}."
+_USED_BEFORE_TREE = "Rule used: {rule}. The one-turn matrix recommends {pick}."
 
 
 @dataclass(frozen=True)
@@ -328,7 +404,6 @@ class ListedRecord:
     username: str
     scenario_name: str
     rule: str
-    recommended: str
     picks: tuple[tuple[str, str], ...]
     turns: int
     keep_out_km: str
@@ -342,6 +417,15 @@ class ListedRecord:
     caveat: str
     #: Whether the viewer may decide it here: their own record, not yet decided.
     decidable: bool
+    #: The deployment's primary rule when it ran, its pick, and whether the rule used differed (SPC-194).
+    primary: str
+    #: The rule used and its pick, in the words that fit what the results showed when it ran.
+    used: str
+
+    @property
+    def primary_recorded(self) -> bool:
+        """Whether the record holds a primary rule: one written since 0.28.0, whose results showed all three picks."""
+        return self.primary != _PRIMARY_UNRECORDED
 
 
 def as_entered(km: float) -> str:
@@ -349,20 +433,51 @@ def as_entered(km: float) -> str:
     return repr(km).removesuffix(".0")
 
 
+def _pick_text(response_id: str, name: str) -> str:
+    """A pick a record holds, as the records page names it: its name and id, or that there was none."""
+    return _NO_PICK if not response_id and not name else f"{name} ({response_id})"
+
+
+def _primary_text(row: DecisionRecord) -> str:
+    """What the records page says of *row*'s primary rule: its pick, the recommendation shown, or that it had none,
+    and whether the rule used differed from it."""
+    if row.primary_rule not in _RULE_WORDS:
+        return _PRIMARY_UNRECORDED
+    pick = _pick_of(getattr(row, f"{row.primary_rule}_id"), getattr(row, f"{row.primary_rule}_name"))
+    words = {
+        "primary": _RULE_WORDS[row.primary_rule],
+        "shown": _SHOWN_NONE if pick is None else _SHOWN.format(pick=f"{pick[1]} ({pick[0]})"),
+    }
+    if row.primary_rule == row.rule:
+        return _PRIMARY_USED.format(**words)
+    return _PRIMARY_DIFFERED.format(**words, rule=_RULE_WORDS.get(row.rule, row.rule))
+
+
+def _used_text(row: DecisionRecord) -> str:
+    """The rule used and its pick: since a record holds a primary rule, the primary's pick was the recommendation, so
+    the rule used's is only its pick; on a record from before, it was the recommendation."""
+    rule, pick = _RULE_WORDS.get(row.rule, row.rule), _pick_of(row.recommended_id, row.recommended_name)
+    said = _pick_text(row.recommended_id, row.recommended_name)
+    if row.primary_rule not in _RULE_WORDS:
+        return (_USED_BEFORE_TREE if row.turns > 1 else _USED_BEFORE).format(rule=rule, pick=said)
+    if pick is None:
+        return _USED_NONE.format(rule=rule)
+    return (_USED_TREE if row.turns > 1 else _USED).format(rule=rule, pick=said)
+
+
 def listed(row: DecisionRecord, viewer: Operator) -> ListedRecord:
     """*row* as the records page lists it to *viewer*."""
     view = row_view(row)
     return ListedRecord(
         id=row.id, created=utc_text(row.created_at), username=row.username, scenario_name=row.scenario_name,
-        rule=_RULE_WORDS.get(row.rule, row.rule), recommended=f"{row.recommended_name} ({row.recommended_id})",
-        picks=(
-            ("minimax", f"{row.minimax_name} ({row.minimax_id})"),
-            ("minimin", f"{row.minimin_name} ({row.minimin_id})"),
-            ("expected value", f"{row.expected_value_name} ({row.expected_value_id})"),
+        rule=_RULE_WORDS.get(row.rule, row.rule),
+        picks=tuple(
+            (RULE_WORDS[rule], _pick_text(getattr(row, f"{rule.value}_id"), getattr(row, f"{rule.value}_name")))
+            for rule in RULES
         ),
         turns=row.turns, keep_out_km=as_entered(row.keep_out_km), code_version=row.code_version or "not recorded",
         inputs=len(json.loads(row.input_hashes)), decision=view,
         tree_pick="" if row.tree_pick_id is None else f"{row.tree_pick_name} ({row.tree_pick_id})",
         tree_lines=tuple(json.loads(row.tree_recommendation)), caveat=row.expected_value_caveat or "",
-        decidable=_owns(row, viewer) and not view.decided,
+        decidable=_owns(row, viewer) and not view.decided, primary=_primary_text(row), used=_used_text(row),
     )

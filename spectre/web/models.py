@@ -6,7 +6,7 @@ import secrets
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text, event, func
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
@@ -138,8 +138,10 @@ class DecisionRecord(Base):
     are listed by id and name, so a decision is checked against the scenario's own rows. The decision, its
     rationale and its own UTC time are set once, by the operator who ran the evaluation.
 
-    It holds no element-set text and no raw inputs: replaying a recommendation from a record is SPC-193 (F-02).
-    No retention is applied; how long records are kept and who may read them is the owner's decision.
+    Since 0.28.0 it also holds the deployment's primary rule and whether the rule used differed (SPC-194), and the
+    evaluation's canonical inputs with their SHA-256, element-set text included, so the recommendation can be replayed
+    from the record alone (SPC-193, F-02). No retention is applied; how long records are kept and who may read them
+    is the owner's decision (SPC-228), and it covers the stored inputs too.
 
     Only generic types, so the table is the same on SQLite and PostgreSQL. Operator text is Text, never
     String(n): PostgreSQL enforces a length SQLite ignores, so a name one database stored the other would refuse.
@@ -190,3 +192,13 @@ class DecisionRecord(Base):
     decision_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: The deployment's primary rule when the evaluation ran, SPECTRE_PRIMARY_RULE (SPC-194); "" on a record written
+    #: before 0.28.0 set one, which init_db upgrades in place.
+    primary_rule: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    #: Whether the rule used differed from the primary rule; None on a record written before 0.28.0.
+    rule_differed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    #: The evaluation's canonical inputs (SPC-193, evaluation F-02): the whole scenario, element-set text included, the
+    #: rule and the composite scores, as canonical JSON (spectre.domain.decision_inputs), and its SHA-256. None on a
+    #: record written before 0.28.0, which cannot be replayed.
+    inputs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    inputs_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)

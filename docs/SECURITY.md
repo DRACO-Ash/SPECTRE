@@ -112,6 +112,27 @@ read them beyond the operator and admins, is the owner's decision as data
 protection lead. A deleted account's records are kept under its username; that
 is Claude's design choice, awaiting the owner's ruling.
 
+● Since 0.28.0 each decision record also holds the evaluation's stored inputs
+(SPC-193, evaluation finding F-02), so a recommendation can be replayed from
+the record alone: the whole scenario, with the full text of each bound element
+set as it was read (UDL data included, with its data mode), its epoch, age,
+limit and custody, every manoeuvre hypothesis with its seed, each applied NOTSO
+suggestion and the sweep's Threat picture, with the rule and every composite
+score, as one canonical JSON document and its SHA-256. This reverses 0.27.0's
+"no element-set text" and is Claude's choice, not a ruling: the record is held
+in the deployment's own database, as the NOTSO cache is already held, under the
+owner's rulings of 24 and 28 October 2026 that holding cached data is
+acceptable. A record also keeps the deployment's primary rule
+(`SPECTRE_PRIMARY_RULE`, SPC-194) and whether the rule used differed. The
+owner's open retention ruling (SPC-228) now covers the stored inputs too.
+`scripts/replay_decision.py` reads a record from the configured database and
+writes nothing: it opens a SQLite database read-only and does not create one
+that is not there. Each stored document's SHA-256 sits in the same row as its
+text, so it shows accidental change only; the replay also sets the document
+against the record's own rule, code version and input hash columns, so an edit
+that rehashes the document still shows, unless every column is edited to
+match.
+
 ● UDL credentials are held in memory for one sign-in only, never shared with
 another sign-in of the same account, cleared on logout, password change and
 account deletion, dropped when the session cookie expires, and never written
@@ -133,7 +154,7 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Property-based tests | None; `hypothesis` is not used |
 | Structured JSON logging | `spectre/app_logging/config.py` defines it, but the web application never calls it |
 | CONTRIBUTING.md | Absent |
-| Data protection | Operator accounts, sign-in logs and decision records are personal data; a DPIA screening, a retention period for logs and for decision records, and a ruling on keeping a deleted account's decision records are due |
+| Data protection | Operator accounts, sign-in logs and decision records are personal data; a DPIA screening, a retention period for logs and for decision records, their stored inputs included (SPC-228), and a ruling on keeping a deleted account's decision records are due |
 
 ## Incident response
 

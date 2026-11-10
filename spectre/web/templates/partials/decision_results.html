@@ -81,7 +81,7 @@
         Heuristic ranking
       </span>{% if result.modelled is not defined or result.modelled %}{{ modelled.badge(result.basis if result.basis is defined else "") }}{% endif %}
       <span style="font-size:0.62rem; color:var(--text-dim); margin-left:0.5rem">
-        {{ result.robust_strategy.value | replace('_',' ') | title }} strategy ·
+        {{ result.robust_strategy.value | replace('_',' ') | title }} strategy chosen ·
         {{ result.computation_time_s }}s
       </span>
     </div>
@@ -146,15 +146,40 @@
     <div class="scenario-epoch">Scenario epoch {{ result.scenario.epoch_utc.strftime('%Y-%m-%d %H:%M') }} UTC; times to closest approach count from it.</div>
   </div>
 
-  <div style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
-    {{ result.robust_best_response.name }}
+  {# The headline is the deployment's primary rule's pick (SPC-194), read from "rules", which only the route passes;
+     an older caller renders the rule used. A primary rule with no pick, expected value with every row at P 0, shows
+     no recommendation, and the primary line below says why. #}
+  {% set rules_shown = rules if rules is defined else none %}
+  {% set headline = rules_shown.headline if rules_shown is not none else result.robust_best_response %}
+  <div class="headline-pick" style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
+    {% if headline is none %}No recommendation{% else %}{{ headline.name }}{% endif %}
   </div>
+  {% if headline is not none %}
   <div style="font-size:0.63rem; color:var(--text-dim); margin-top:0.1rem">
-    Type: <strong>{{ result.robust_best_response.action_type.value | replace('_',' ') | title }}</strong> ·
-    Cost: <strong>{{ result.robust_best_response.cost }}</strong> ·
-    Reversibility: <strong>{{ result.robust_best_response.reversibility }}</strong> ·
-    Time to execute: <strong>{{ result.robust_best_response.time_to_execute_hours }}h</strong>
+    Type: <strong>{{ headline.action_type.value | replace('_',' ') | title }}</strong> ·
+    Cost: <strong>{{ headline.cost }}</strong> ·
+    Reversibility: <strong>{{ headline.reversibility }}</strong> ·
+    Time to execute: <strong>{{ headline.time_to_execute_hours }}h</strong>
   </div>
+  {% endif %}
+  {# ── Every rule's pick side by side (SPC-194, evaluation F-03): each rule with its meaning, whether they agree,
+       a tree's turn-1 pick under each rule, and the primary rule beside the rule chosen. One div with no div inside.
+       The theme sets every p and li to the body size, so each line sets its own, smaller than the headline above. ── #}
+  {% if rules_shown is not none %}
+  <div role="note" class="rule-picks" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.3rem">
+    <p class="primary-rule" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:var(--text-primary)">{{ rules_shown.primary_line }}</p>
+    <ul style="margin:0.15rem 0; padding-left:1rem">
+      {% for pick in rules_shown.picks %}
+      <li class="rule-pick" data-rule="{{ pick.rule.value }}" style="font-size:0.6rem"><strong>{{ pick.words | capitalize }}: {{ pick.pick_text }}</strong>. {{ pick.meaning }}{% if pick.rule.value == "expected_value" and rules_shown.caveat is not none %} <span class="rule-caveat" style="color:var(--gold)">{{ rules_shown.caveat }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    <p class="rules-agreement" data-agree="{{ 'yes' if rules_shown.agree else 'no' }}" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:{{ 'var(--text-primary)' if rules_shown.agree else 'var(--gold)' }}">{{ rules_shown.line }}</p>
+    {% if rules_shown.tree_line is not none %}
+    <p class="tree-rules-agreement" data-agree="{{ 'yes' if rules_shown.tree_agree else 'no' }}" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:{{ 'var(--text-primary)' if rules_shown.tree_agree else 'var(--gold)' }}">{{ rules_shown.tree_line }}</p>
+    {% endif %}
+    <p class="rules-basis" style="margin:0.1rem 0; font-size:0.6rem">{{ rules_shown.basis }}</p>
+  </div>
+  {% endif %}
   {# Whether the pick holds across each applied NOTSO suggestion's interval on P (SPC-132); under a rule that reads
      no probability, the one line that says so, and no interval. Guarded, so an older result renders. #}
   {% set interval_lines = result.interval_lines if result.interval_lines is defined else () %}
@@ -174,6 +199,10 @@
     Outcome Matrix — Composite Score
     <span style="font-weight:400; font-size:0.6rem">(lower = better for friendly)</span>
   </div>
+  {# What the star and the blue highlights mark: the rule chosen's pick, which can differ from the headline (SPC-194). #}
+  {% if rules_shown is not none %}
+  <p class="star-legend" style="margin:0 0 0.2rem; font-size:0.6rem; color:var(--text-dim)">{{ rules_shown.star_line }}</p>
+  {% endif %}
 
   <div style="overflow-x:auto">
   <table style="width:100%; font-size:0.62rem; border-collapse:collapse">

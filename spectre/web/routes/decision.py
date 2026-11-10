@@ -62,6 +62,7 @@ from spectre.domain.decision_figures import ResponseBurnSpec
 from spectre.domain.decision_transfer import MAX_BURN_M_S, MAX_TRANSFER_BURNS, TransferBurn
 from spectre.domain.decision_tree import depth_refusal, evaluate_tree
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
+from spectre.domain.rule_comparison import compare_rules
 from spectre.web.auth import require_login
 from spectre.web.database import get_db
 from spectre.web.decision_binding import bind_scenario
@@ -101,6 +102,7 @@ from spectre.web.decision_record import (
     decide,
     fresh_view,
     listed,
+    primary_rule,
     records_for,
     row_view,
     stored_view,
@@ -683,11 +685,11 @@ def _burns(inputs: _Inputs, form: _ScenarioForm) -> list[ResponseBurnSpec | None
 
 
 def _strategy(raw: str) -> SelectorStrategy:
-    """Parse the selector, falling back to minimax, the cautious rule."""
+    """Parse the selector, falling back to the deployment's primary rule (SPC-194), minimax unless it is set."""
     try:
         return SelectorStrategy(raw)
     except ValueError:
-        return SelectorStrategy.MINIMAX
+        return primary_rule()
 
 
 def _normalised_weights(*weights: float) -> tuple[float, ...]:
@@ -726,6 +728,8 @@ def _panel_context(state: SessionState, prefill: SweepPrefill | None = None) -> 
             "note": KEEP_OUT_NOTE,
         },
         "prefill": prefill,
+        # The deployment's primary rule (SPC-194): the selector's default, and the rule whose pick heads the results.
+        "primary_rule": primary_rule().value,
         **_bind_context(state, red, blue),
         **_hypothesis_context(),
     }
@@ -892,7 +896,8 @@ class _ScenarioForm(BaseModel):
     # The miss at or inside which closest approach scores its full penalty (SPC-191). No default, as for the horizon:
     # FastAPI reads a blank field as absent, and a default would turn a cleared distance into a silent 10 km.
     keep_out_km: str | None = None
-    strategy: str = "minimax"
+    # The rule chosen; absent or naming no rule, the deployment's primary rule (SPC-194).
+    strategy: str = ""
     # The game tree (SPC-142): its turn depth, 1 to 3, and what the operator states turn 1 showed, blank for none.
     turns: str = "1"
     observed: str = ""
@@ -1129,6 +1134,8 @@ def _results_context(result: ScenarioResult, record: RecordView | None, *, unrec
     return {
         "result": result, "links": trajectory_links(result), "tree": tree_view(result),
         "record": record, "record_note": UNRECORDED if unrecorded else "",
+        # Every rule's pick side by side, and the primary rule's as the headline (SPC-194, evaluation F-03).
+        "rules": compare_rules(result, primary_rule()),
     }
 
 

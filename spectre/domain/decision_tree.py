@@ -100,6 +100,7 @@ from spectre.domain.decision import (
     _Figures,
     _first_refusal,
     _lookup_figures,
+    _ran_out,
     _response_of,
     _response_refusal,
     _ResponseCell,
@@ -1206,4 +1207,4 @@ def evaluate_tree(
         matrix = scenario.friendly_responses.index(result.robust_best_response)
         picked = select(scenario, tree.roots, tree.complete_turns, strategy, matrix_pick=matrix)
         tree = dataclasses.replace(tree, selection=picked)
-    return dataclasses.replace(result, tree=tree)
+    return dataclasses.replace(result, tree=tree, budget_ran_out=_ran_out(one.budget))

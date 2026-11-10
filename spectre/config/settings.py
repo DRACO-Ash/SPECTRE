@@ -341,6 +341,38 @@ def _resolve_pool_recycle() -> int:
     return seconds if seconds >= _MIN_POOL_RECYCLE else DEFAULT_POOL_RECYCLE_SECONDS
 
 
+#: The rules a deployment may name as its primary rule (SPC-194, evaluation F-03): the Decision Engine's three, by
+#: the values SelectorStrategy carries. Listed here, not imported, so settings stay free of the domain.
+PRIMARY_RULES: tuple[str, ...] = ("minimax", "minimin", "expected_value")
+#: The primary rule when none is set, or one is set that names no rule: minimax, the cautious rule (Claude's choice,
+#: awaiting the owner's ruling).
+DEFAULT_PRIMARY_RULE = "minimax"
+
+
+@lru_cache(maxsize=16)
+def primary_rule_of(raw: str) -> str:
+    """The primary rule SPECTRE_PRIMARY_RULE's value *raw* names, read without case or surrounding space.
+
+    Unset or blank, it is minimax. A value that names no rule is not refused at boot: the primary rule is minimax,
+    the cautious rule, and a warning names the value, logged once per value rather than on every request that reads
+    the settings (Claude's choice: a typing slip leaves the console running on the cautious rule).
+    """
+    rule = raw.strip().lower()
+    if not rule:
+        return DEFAULT_PRIMARY_RULE
+    if rule in PRIMARY_RULES:
+        return rule
+    logger.warning(
+        "SPECTRE_PRIMARY_RULE=%r names no rule (minimax, minimin or expected_value); the primary rule is %s, "
+        "the cautious rule", raw, DEFAULT_PRIMARY_RULE,
+    )
+    return DEFAULT_PRIMARY_RULE
+
+
+def _resolve_primary_rule() -> str:
+    return primary_rule_of(os.environ.get("SPECTRE_PRIMARY_RULE", ""))
+
+
 @dataclass
 class Settings:
     """Runtime configuration for a SPECTRE session.
@@ -399,6 +431,9 @@ class Settings:
         default_factory=lambda: os.environ.get("SPECTRE_THREAT_VERDICT_SWITCH", "").strip().lower()
         in _TRUTHY
     )
+    # The deployment's primary rule for the Decision Engine (SPC-194, evaluation F-03): its pick is the headline
+    # recommendation and the panel's default, set before use so no rule can be chosen after a result is seen.
+    primary_rule: str = field(default_factory=_resolve_primary_rule)
 
 
 def get_settings() -> Settings:

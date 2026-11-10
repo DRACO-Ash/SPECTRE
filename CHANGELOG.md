@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-11
+
+**Operator output: 4, the recommended response, shows all three rules side by side (evaluation F-03) and can be replayed from its record (F-02).**
+
+### Added
+- Every result shows the picks under minimax, minimin and expected value side by side, each with its meaning, and says whether they agree or which differ; where a tree was built, each rule's turn-1 pick on it too. A deployment sets its primary rule (`SPECTRE_PRIMARY_RULE`, default minimax, Claude's choice as the cautious rule; an unknown value is read as minimax with a logged warning). The panel defaults to it, the headline is its pick, and when the operator chose another rule both answers stay on screen. The decision record stores the primary rule and whether the chosen rule differed (SPC-194).
+- Each decision record stores the evaluation's canonical inputs: the whole scenario, including each bound element set's text, the rule and the score matrix, as one canonical JSON document with its SHA-256. `scripts/replay_decision.py` rebuilds and re-evaluates a record and reports whether every pick, score and input hash matches, saying first when the code version differs; the reader refuses tampered, unknown or incomplete documents (SPC-193). Storing element-set text reverses 0.27.0's "no element-set text": it is Claude's choice, held in the deployment's own database as the NOTSO cache is, and the owner's open retention ruling (SPC-228) now covers it.
+
+### Changed
+- An existing 0.27.0 database gains the record's four new columns in place at start.
+
 ## [0.27.0] - 2026-11-10
 
 **Operator output: 4, the recommended response, is now recorded with the operator's decision (evaluation finding F-01).**

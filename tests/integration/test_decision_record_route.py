@@ -272,7 +272,7 @@ class TestAJob:
         assert json.loads(row.tree_recommendation) == list(job.result.tree.selection.recommendation)
         text = _flat(_page(client, cookie))
         matrix = job.result.robust_best_response
-        assert f"The one-turn matrix recommends {matrix.name} ({matrix.id})." in text
+        assert f"Rule used: minimax; on the one-turn matrix it picks {matrix.name} ({matrix.id})." in text
         assert f"Over the 2 turns, minimax picks {row.tree_pick_name} ({row.tree_pick_id}) for turn 1." in text
         assert "Turn 1: Hold." in text
 
@@ -592,7 +592,9 @@ class TestTheRecordsPage:
         cookie = _sign_in(client, "page_rules")
         record = _evaluated(client, cookie, "page_rules")
         text = _flat(_page(client, cookie))
-        assert f"Rule used: minimax. Recommended: {record.recommended_name} ({record.recommended_id})." in text
+        assert f"Rule used: minimax, picking {record.recommended_name} ({record.recommended_id})." in text
+        assert (f"Primary rule: minimax, the rule used; the recommendation shown was its pick, {record.minimax_name} "
+                f"({record.minimax_id}).") in text
         assert f"Minimax picks {record.minimax_name} ({record.minimax_id})" in text
         assert f"minimin picks {record.minimin_name} ({record.minimin_id})" in text
         assert f"expected value picks {record.expected_value_name} ({record.expected_value_id})" in text
@@ -855,7 +857,7 @@ class TestResponseNamesAreEscapedWhereverARecordShowsThem:
         resp = _page(client, cookie)
         _assert_inert(resp)
         text = _flat(resp)
-        assert "Recommended: &lt;script&gt;" in text
+        assert "Rule used: minimax, picking &lt;script&gt;" in text
         assert "Minimax picks &lt;script&gt;" in text
         assert "minimin picks &lt;script&gt;" in text
         assert "expected value picks &lt;script&gt;" in text
@@ -891,14 +893,28 @@ class TestDecidingFromTheRecordsPage:
 
 
 class TestWhatTheRecordsPageSaysOfEachPick:
-    def test_it_says_the_results_showed_one_rules_pick_and_the_others_were_worked_out_for_the_record(
-        self, client: TestClient,
-    ) -> None:
+    def test_it_says_the_results_showed_every_rules_pick_side_by_side(self, client: TestClient) -> None:
+        """Since SPC-194 the results show all three picks; a record from before says the results showed one alone."""
         cookie = _sign_in(client, "basis_rules")
         _evaluated(client, cookie, "basis_rules")
         text = _flat(_page(client, cookie))
+        assert "All three rules on the same matrix, as the results showed them side by side:" in text
+        assert "pick alone" not in text
+
+        async def unrecord(session: Any) -> None:
+            await session.execute(
+                update(DecisionRecord).where(DecisionRecord.username == "basis_rules")
+                .values(primary_rule="", rule_differed=None)
+            )
+            await session.commit()
+
+        _db(client, unrecord)
+        text = _flat(_page(client, cookie))
         assert ("All three rules on the same matrix, worked out for this record; the results showed minimax's pick "
                 "alone:") in text
+        assert ("Primary rule: not recorded; this record was written by a version of SPECTRE that did not record "
+                "one.") in text
+        assert "Recommended: " in text
 
     def test_expected_values_unearned_probability_is_said_beside_its_pick(
         self, client: TestClient, captured: list[ScenarioResult],

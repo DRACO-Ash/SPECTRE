@@ -1264,7 +1264,8 @@ def _section_13_decision_engine(doc: Document) -> None:
         "Something moved. The sweep tells you whether it can reach one of yours, how long you have and whether "
         "it means anything. The Decision Engine answers the last part of the question: what you need to decide, "
         "and by when. You set out what red might do next and what you could do in reply; the engine scores every "
-        "pairing, ranks your responses and recommends one under the rule you choose."
+        "pairing, ranks your responses, shows the pick of each of its three rules side by side, and recommends "
+        "the pick of your deployment's primary rule, whichever rule you choose."
     )
     _add_body(doc,
         "The recommendation is a modelled estimate, not a computed solution, and the page says so. Every figure "
@@ -1414,8 +1415,8 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_data_table(doc,
         ["Rule", "How it picks", "When to use it"],
         [
-            ["Minimax", "The response whose worst case scores least", "The default and the cautious rule: use "
-             "it when P is not well founded"],
+            ["Minimax", "The response whose worst case scores least", "The default primary rule and the cautious "
+             "rule: use it when P is not well founded"],
             ["Expected value", "The response whose probability-weighted score is least", "When P rests on "
              "evidence; the results say whether the pick holds across a NOTSO interval"],
             ["Minimin", "The response whose best case scores least", "The optimistic rule, not a robust one"],
@@ -1430,9 +1431,29 @@ def _section_13_decision_engine(doc: Document) -> None:
         "response, and the engine does not look for one."
     )
     _add_body(doc,
+        "Every result shows all three rules' picks side by side, each with its rule's meaning in one line, worked "
+        "out on the same scores, and a line saying whether they agree or, where they do not, which picks differ. "
+        "For a game tree it also shows each rule's pick for turn 1 over the tree already built. The headline "
+        "recommendation is the deployment's primary rule's pick, set by the administrator with "
+        "SPECTRE_PRIMARY_RULE before use (minimax unless set; a value naming no rule is logged and read as "
+        "minimax). The panel's Selector Strategy starts on the primary rule; if you choose another, the results "
+        "name the primary rule and its pick beside your rule's, so no rule chosen after seeing a result can hide "
+        "the primary rule's answer. Your decision record keeps the primary rule and whether your rule differed. "
+        "This answers finding F-03 of the independent evaluation, gate G3 (all rules' results available, "
+        "disagreement flagged); the gate's Red rating stands until the evaluation is repeated."
+    )
+    _add_bullet(doc, "The evaluation still runs under the rule you chose: the matrix's star and the ranking's blue "
+                "highlights mark that rule's pick, and a line above the matrix says so, naming the primary rule's "
+                "pick beside it when the two rules differ.")
+    _add_bullet(doc, "With every row at P 0, expected value has no weight to pick on: the results say it has no "
+                "pick, and never count it as agreeing with another rule. If it is the primary rule, the headline "
+                "reads No recommendation.")
+    _add_bullet(doc, "When the time budget stopped a game tree before its last turn, the line on each rule's turn-1 "
+                "pick names the turns you asked for and the turns built in full.")
+    _add_body(doc,
         "Under expected value, a bound row whose Understanding is LOW, or any row whose P you never edited, "
-        "carries a line saying expected value rests on a probability the evidence has not earned, and recommends "
-        "minimax. The rule is never switched for you. The form records a P once you change it from the panel's "
+        "carries a line saying expected value rests on a probability the evidence has not earned, and names "
+        "minimax's pick. The rule is never switched for you. The form records a P once you change it from the panel's "
         "0.5, and keeps the record if you set it back, so to choose 0.5 deliberately, change P and then set it "
         "to 0.5; leaving 0.5 in place, or typing 0.5 over it, is not recorded. A P from a NOTSO suggestion you "
         "applied counts as edited. Each row says whose P and Conf it holds: a P never edited is the panel's "
@@ -1475,12 +1496,24 @@ def _section_13_decision_engine(doc: Document) -> None:
         "SPECTRE keeps one record for each finished evaluation, whether it was answered at once or ran as a job. "
         "This is the record half of gate G1 in the independent evaluation (finding F-01); the advisory half and "
         "the gate's Red rating were not reassessed. The record holds when it finished, in UTC, your username, the "
-        "scenario's name, the rule you used and the one-turn matrix's recommendation under it, the picks of all "
+        "scenario's name, the rule you used and the one-turn matrix's pick under it, the picks of all "
         "three rules (minimax, minimin and expected value) on the same figures, the code version and a hash of "
-        "every input, the turn depth and the keep-out distance. It holds "
-        "no element-set text and no raw input, so it cannot yet replay a recommendation; that is SPC-193. An "
-        "evaluation that is refused, cancelled, replaced, ended by sign-out or that fails before its sampling "
-        "finished writes no record."
+        "every input, the turn depth and the keep-out distance, the deployment's primary rule and whether your "
+        "rule differed. Since 0.28.0 it also holds the evaluation's inputs in full (finding F-02, gate G2, SPC-193; "
+        "the gate's Red rating stands until the evaluation is repeated): the whole "
+        "scenario, each bound element set's text with its epoch, age, limit, data mode and custody, every "
+        "hypothesis with its seed, any NOTSO suggestion applied and the Threat picture, with the rule and every "
+        "composite score, as one document with its SHA-256. An administrator can replay a record with "
+        "scripts/replay_decision.py and the record's number: it evaluates the stored scenario again under the "
+        "stored rule and reports whether the recommendation, every rule's pick and every score match exactly. "
+        "It also sets the record's own rule, code version and input hashes against the stored inputs, so an "
+        "edit to them shows even when their SHA-256 was worked out again. Before replaying it says which code "
+        "version wrote the inputs, when that is another code version than the one running, and when the "
+        "evaluation ran out of "
+        "its time budget, since the replay runs in full and what the budget left out may differ. It opens the "
+        "database to read only and writes nothing. A record written before 0.28.0 "
+        "holds no element-set text and no raw input, so it cannot be replayed. An evaluation that is refused, "
+        "cancelled, replaced, ended by sign-out or that fails before its sampling finished writes no record."
     )
     _add_bullet(doc, "The results end with Your decision: choose one of the scenario's own responses, None of "
                 "these, or Decision deferred, and give a rationale of at most 2,000 characters. The rationale is "
@@ -1494,18 +1527,22 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "Decide it on the Decision records page. If the record cannot be written the results say so, and "
                 "no decision can be recorded against them.")
     _add_bullet(doc, "Decision records, linked from the top of the panel, opens in a new tab and lists your own "
-                "records newest first: when, the scenario, the rule, its recommendation, all three rules' picks, "
+                "records newest first: when, the scenario, the rule you used and its pick, the primary rule and its "
+                "pick, which was the recommendation shown, all three rules' picks, "
                 "and your decision, rationale and its time, or No decision recorded with the form to record it. "
                 "An admin sees every record and whose it is. Records are kept by account, so they are there after "
                 "you sign out and in again.")
     _add_bullet(doc, "For a game tree the record names the one-turn matrix pick and the tree's own pick for turn 1, "
-                "which can differ, with the tree's recommendation lines. The page says that the results showed only "
-                "the rule you used, and repeats the warning when expected value rests on a probability not earned.")
+                "which can differ, with the tree's recommendation lines. The page names the primary rule and its "
+                "pick, "
+                "says whether the rule you used differed, and repeats the warning when expected value rests on a "
+                "probability not earned. A record written before 0.28.0 says the results showed only the rule used.")
     _add_bullet(doc, "A name holding the NUL control character, which PostgreSQL cannot store, is recorded with the "
                 "replacement character in its place.")
     _add_bullet(doc, "No retention is applied: records stay until the owner decides otherwise. A record holds a "
-                "username and free text, so retention and access are the owner's decision, "
-                "as data protection lead.")
+                "username, free text and the evaluation's stored inputs, element sets included, so "
+                "retention and access are the owner's decision, as data protection lead; the open ruling "
+                "(SPC-228) covers the stored inputs too.")
     _add_bullet(doc, "Claude's design choice, awaiting the owner's ruling: a deleted account's records are kept, "
                 "and the page has no pagination.")
 

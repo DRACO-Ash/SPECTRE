@@ -1,11 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.28: 2 items, 720 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-193       360m  fills the release to its floor
-    SPC-194       360m  fills the release to its floor
-  lane 1 (720m): SPC-193, SPC-194
-
 V0.29: 2 items, 720 priced min, gates browser, container, lint, quality, sast, tests
   forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-196       360m  fills the release to its floor

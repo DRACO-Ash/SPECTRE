@@ -54,6 +54,8 @@ from spectre.domain.decision import (
 )
 from spectre.domain.decision_transfer import ledger_sentence
 from spectre.domain.decision_tree import evaluate_tree
+from spectre.domain.rule_comparison import RULE_WORDS, label, matrix_picks
+from spectre.web.decision_record import primary_rule
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
 from spectre.web.planning_state import SessionState, session_alive
@@ -181,9 +183,23 @@ def evaluated_line(scenario: Scenario, result: ScenarioResult) -> str:
     return (
         f"[Decision] Evaluated '{log_safe(scenario.name)}': "
         f"{len(scenario.adversary_actions)} adversary actions × {len(scenario.friendly_responses)} friendly "
-        f"responses. Modelled recommendation: {result.robust_best_response.name} ({result.robust_strategy.value})"
-        f"{bound}{_transfers_line(scenario, result)}"
+        f"responses. Modelled recommendation: {_recommendation(result)}{bound}{_transfers_line(scenario, result)}"
     )
+
+
+def _recommendation(result: ScenarioResult) -> str:
+    """The recommendation as the results showed it: the deployment's primary rule's pick (SPC-194), with the rule
+    chosen's beside it when that was another rule."""
+    primary, chosen, picks = primary_rule(), result.robust_strategy, matrix_picks(result)
+
+    def said(rule: SelectorStrategy) -> str:
+        pick = picks[rule]
+        return "no pick, since every row has P 0" if pick is None else log_safe(label(pick))
+
+    if chosen is primary:
+        return f"{said(primary)}, the pick of {RULE_WORDS[primary]}, the primary rule and the rule chosen."
+    return (f"{said(primary)}, the pick of {RULE_WORDS[primary]}, the primary rule; the rule chosen, "
+            f"{RULE_WORDS[chosen]}, picks {said(chosen)}.")
 
 
 def _transfers_line(scenario: Scenario, result: ScenarioResult) -> str:

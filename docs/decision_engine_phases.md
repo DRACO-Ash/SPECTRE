@@ -3,8 +3,9 @@
 *Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release, and updated for
 three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
 lost (SPC-179) and the record of whether each P was edited (SPC-183); for the score scales of SPC-191, which are
-Claude's design choices, not rulings; and for the decision record of SPC-192. The history of each step is in CHANGELOG.md
-and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
+Claude's design choices, not rulings; for the decision record of SPC-192; and for every rule's pick side by side
+with a primary rule (SPC-194) and replay from the stored record (SPC-193). The history of each step is in
+CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
 
 **Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
 SPC-100 to SPC-152, summarised in `.board/README.md`. Three points of the original plan were corrected before the
@@ -25,8 +26,8 @@ recommended response: given what red might do next, which of our responses holds
 behind that ranking rests on.
 
 The operator enters up to five adversary actions and up to five friendly responses. The engine fills an outcome
-matrix, one cell per pair, ranks the responses for each adversary action, and picks one response under the chosen
-rule. With a turn depth of 2 or 3 it also builds a game tree in which red may move again after each of our
+matrix, one cell per pair, ranks the responses for each adversary action, and picks one response under each of the
+three rules, the deployment's primary rule's pick heading the result. With a turn depth of 2 or 3 it also builds a game tree in which red may move again after each of our
 responses. The result is a modelled recommendation, never an order, and the page says so.
 
 ## Every figure states its basis
@@ -450,10 +451,13 @@ evaluation, in the `decision_records` table beside the accounts.
   `find_robust_response` on the same matrix, which reads the figures and changes none; when expected value's
   probability is not earned, the guidance the results give for it, whichever rule ran; the code version, the
   calibration source and every input hash from the result's provenance; the turns; the keep-out distance; and the
-  scenario's responses by id and name, so a decision is checked against them.
-● **What it does not hold.** No element-set text and no raw input: the hashes say which inputs were used but cannot
-  rebuild them, so a record cannot yet replay a recommendation. Storing the inputs and a replay command is SPC-193
-  (evaluation finding F-02).
+  scenario's responses by id and name, so a decision is checked against them. Since 0.28.0 it also holds the
+  deployment's primary rule and whether the rule used differed from it (SPC-194), and the evaluation's stored inputs
+  with their SHA-256 (SPC-193); both are set out in the next two sections.
+● **What 0.27.0 did not hold.** A record written by 0.27.0 holds no element-set text and no raw input, and no primary
+  rule: its hashes say which inputs were used but cannot rebuild them, so it cannot be replayed. init_db adds the new
+  columns to a 0.27.0 database in place; such a record reads "Primary rule: not recorded" and the replay command says
+  it holds no stored inputs.
 ● **Text both databases take alike.** PostgreSQL's text refuses U+0000, which SQLite stores. A name holding it is kept
   with the replacement character, U+FFFD, in its place, so the record is still written; a rationale holding any
   control character other than tab, line feed and carriage return is refused with a sentence.
@@ -476,18 +480,119 @@ evaluation, in the `decision_records` table beside the accounts.
   operator's is refused with the same sentence as one that does not exist. An admin reads every record but decides
   only their own.
 ● **Decision records.** A page reached from the Decision Engine panel lists the operator's own records, newest first,
-  each with when, the scenario, the rule, its recommendation (for a tree, the one-turn matrix's pick and the tree's
-  own), all three rules' picks, saying the results showed only the rule used and when expected value's probability
-  is not earned, and the decision, its rationale and its time, or "No decision recorded". An admin sees every record
+  each with when, the scenario, the rule used and its pick (for a tree, the one-turn matrix's pick and the tree's
+  own), the primary rule and its pick, the recommendation shown, and whether the rule used differed, all three
+  rules' picks (a record from before 0.28.0 says "Recommended:" for the rule used's pick and that the results showed
+  only that rule), when expected value's probability is not earned, and
+  the decision, its rationale and its time, or "No decision recorded". An admin sees every record
   and whose it is. Records are kept by account, so they are there after signing out and in again.
 ● **Retention and access.** No retention is applied: records are kept until the owner decides otherwise. A record
-  holds a username and free text (the scenario's name, the response names and the rationale), so retention and
-  access are the owner's decision, as data protection lead.
+  holds a username, free text (the scenario's name, the response names and the rationale) and, since 0.28.0, the
+  evaluation's stored inputs, element-set text included, so retention and access are the owner's decision, as data
+  protection lead. The owner's open retention ruling (SPC-228) now covers the stored inputs too.
 ● **Claude's design choices, awaiting the owner's ruling.** The recommendation stored is the one-turn matrix's pick,
   with a tree's own turn-1 pick beside it. A job's record is written in a RECORDING state that Cancel cannot stop.
   A record is kept when its account is deleted, under the username it was made with, readable by an admin and
   decided by no one; erasing it with the account instead is the data protection lead's call. The Decision records
   page has no pagination and no limit.
+
+## Every rule side by side, and the primary rule (SPC-194)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-03 (Critical, gate G3) found one rule per evaluation, chosen on the panel
+and changeable after a result was seen, with no side-by-side result and no flag when the rules disagree. Gate G3
+("All rules' results available; disagreement flagged") was rated Red; that rating stands until the evaluation is
+repeated.
+
+● **Three picks on every result.** The results show the picks of minimax, minimin and expected value side by side,
+  each with its rule's one-line meaning, each the engine's own `find_robust_response` on the result's own matrix: the
+  same function, `rule_comparison.matrix_picks`, gives the record its three picks, so the page and the record have one
+  source. The picks rest on the composite scores, a lookup, and the results say so.
+● **Agreement in words.** When the three picks agree, a line says "All three rules agree: each picks" the response.
+  When they do not, a line says "The rules disagree:" and names each pick with the rules that make it, as in
+  "minimax and expected value pick Avoid (F1); minimin picks Hold (F0)". Under expected value, when its probability
+  is not earned, the existing guidance stays beside its pick, whichever rule ran; it says what minimax picks, not
+  what it recommends, since the recommendation is the primary rule's. With every row at P 0, expected value has no
+  weight to pick on: it has no pick, on the matrix as on the tree, the page says so, and it is never counted as
+  agreeing with another rule. (`find_robust_response` alone would name the first response, a tie it has not earned.)
+● **A tree's turn-1 pick under each rule.** Where a game tree was built, each rule's turn-1 pick is
+  `tree_selectors.select` over the tree already built, turns built in full only; nothing is sampled again. A second
+  line says whether the rules agree on turn 1, flagged in the same colour as a disagreement on the matrix. It names
+  the turns asked and, when the budget stopped the tree sooner, the turns built in full, as in "Over the 2 turns,
+  built in full to turn 1 only". Expected value can have no pick when every row has P 0, and the line says so.
+● **The deployment's primary rule.** `SPECTRE_PRIMARY_RULE` names it: minimax, minimin or expected_value, read where
+  the other settings are read (`spectre/config/settings.py`). Unset, it is minimax, the cautious rule. The panel's
+  selector starts on it. The headline recommendation is the primary rule's pick. When the operator chose another
+  rule, the result says the primary rule and its pick beside the chosen rule's, so no rule chosen after the fact can
+  hide the primary's answer. With the primary rule having no pick, the headline reads "No recommendation" and the
+  primary line says why. The evaluation itself still runs under the rule chosen: the matrix's star, the ranking's
+  blue highlights, the interval lines of SPC-132 and a tree's lines and update follow it, and a line above the
+  matrix says the star marks the rule chosen's pick and, when that is not the primary rule, names the primary's
+  beside it. Every line under the headline is set smaller than the headline.
+● **The session log** names the recommendation as the results showed it: the primary rule's pick, with the rule
+  chosen's beside it when it was another rule.
+● **On the record.** Each record keeps the primary rule when it ran and whether the rule used differed from it, in
+  two new columns that init_db adds to a 0.27.0 database in place. The record's `recommended_*` columns keep the
+  rule used's pick, as in 0.27.0; the records page calls it the rule used's pick, and says the primary rule's pick
+  was the recommendation shown, so "recommendation" means one thing on every page. A rule with no pick is held as an
+  empty id and name and listed as picking nothing, since every row had P 0. A record from before says its primary
+  rule was not recorded, and keeps its old wording, "Recommended:".
+● **Claude's design choices, awaiting the owner's ruling.** Minimax as the default primary rule, being the cautious
+  rule. A value of `SPECTRE_PRIMARY_RULE` that names no rule is not refused at boot: it is logged as a warning, once
+  per value, and read as minimax, so a typing slip leaves the console running on the cautious rule. A posted rule
+  that names none, or none posted, falls back to the primary rule. The primary rule is read when the results are
+  shown and when the record is written, so a change to the setting applies to the next evaluation.
+
+## Replay from the stored record (SPC-193)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-02 (Critical, gate G2) found that provenance hashed the inputs and
+stored none, so a recommendation could not be reproduced once the sign-in ended; identical inputs already repeated
+exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evaluation is repeated.
+
+● **What is stored.** With each record, one canonical JSON document and its SHA-256: the whole Scenario (rows,
+  responses, weights, horizon, turns, keep-out distance and observation; every hypothesis with its dispersions,
+  sample count and seed, and a transfer's later burns; each accepted NOTSO prior with its cover and counted notices;
+  the Threat picture with its cues; and the binding, each bound element set's text as read, its epoch, age, limit,
+  data mode and custody), the rule the evaluation ran under, the composite score matrix, the code version, and
+  whether the evaluation's time budget ran out. The text is canonical: keys sorted, no spaces, ASCII with every other character escaped, no NaN. A name holding U+0000
+  is stored exactly, escaped, which both databases take.
+● **Written and read strictly.** `spectre/domain/decision_inputs.py` writes every dataclass field by field from its
+  own declaration, so a field added later cannot be left out unseen, and reads strictly: it refuses text whose
+  SHA-256 does not match, a repeated key, text not in canonical form, a schema or version it does not know, an
+  unknown or a missing field at any depth, a value of the wrong kind, a scenario the engine's own checks refuse, and
+  scores that do not fit the scenario. Each refusal names where in the document it is.
+● **Replay.** `scripts/replay_decision.py RECORD_ID` reads the record from the configured database, rebuilds the
+  Scenario from its stored inputs, evaluates it again under the stored rule with `evaluate_tree`, as the console
+  does, and reports whether the recommendation (the primary rule's pick), the rule used's pick, each rule's pick, a
+  tree's turn-1 pick and every composite score match the record exactly, compared at full precision.
+● **Set against the record's own columns.** The SHA-256 sits in the same row as the text it covers, so on its own it
+  shows only accidental change: an edit that rehashes the text passes it. The replay therefore also sets the record's
+  own columns against the hashed inputs: its rule and code version columns against those inside the document, and
+  every input hash the record holds, from the original result's provenance, against the replay's own. An edit to the
+  stored inputs that is rehashed, such as a bound element set renamed, cannot match the input hashes held apart, and
+  the report names each one that differs.
+● **Versions and the time budget, said first.** Before replaying, the command says which code version wrote the
+  hashed inputs, read from inside the document, not from the unhashed column; when that is another code version than
+  the one running, it says the comparison is across versions, and the verdict says so too. When the evaluation recorded ran out of its
+  300 s budget, a sampled row refused, a burn left unsized or a tree built in part, the stored inputs say so; the
+  replay runs in full with no budget, so it says before comparing that what the budget left out may differ, and the
+  verdict says so again if the replay differs. A record with no stored inputs is said to hold none, with no version
+  line. It exits 0 when the replay matches, 1 when it differs, 2 for a usage error and 3 when there is nothing to
+  replay, or no database at the configured SQLite path.
+● **It writes nothing.** A SQLite database is opened read-only, and one that is not at the configured path is not
+  created: the command says there is none and exits 3. A PostgreSQL database is only read.
+● **Element-set text is held.** Storing it reverses 0.27.0's "no element-set text". This is Claude's choice: the
+  record is held in the deployment's own database, as the NOTSO cache already is, under the owner's rulings of
+  24 and 28 October 2026 that holding cached data is acceptable. docs/SECURITY.md lists it, and the owner's open
+  retention ruling (SPC-228) now covers the stored inputs too.
+● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, and no reader for any other.
+  Replay runs with no wall-time budget, so an evaluation the 300 s budget cut short, a sampled row refused or a tree
+  built in part, is replayed in full and the comparison may then differ; the stored inputs record whether the budget
+  ran out, so the report says why, and names where. The code version is stored in the document, so it is covered by
+  the hash, and it is the one the report says first. A record whose inputs could not be encoded is not written, and the
+  results say no decision can be recorded, as for any record the database will not take. The replay is a command
+  for an administrator with access to the database; no route or page offers it.
 
 ## What remains out of scope
 
@@ -501,8 +606,6 @@ evaluation, in the `decision_records` table beside the accounts.
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
   doctrine words stay off screen, and SPC-177 is closed.
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
-● **Replaying a recommendation from its record** (SPC-193, evaluation finding F-02): the record keeps input hashes,
-  not inputs.
 ● **A game tree over a transfer of several burns.** The matrix carries every burn of the transfer (SPC-184), but
   the tree's equal turns cannot place them, so such a row refuses the tree. Unequal turns, set by the engine, are
   SPC-187.

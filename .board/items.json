@@ -1870,7 +1870,11 @@
    "spectre/domain/decision.py",
    "spectre/domain/provenance.py",
    "spectre/web/planning_state.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.28.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-194",
@@ -1884,7 +1888,11 @@
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py",
    "spectre/web/templates/partials/decision_panel.html"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.28.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-195",
@@ -2318,7 +2326,7 @@
   "needs_owner": true,
   "human_minutes": 60,
   "task": "Rule on retention, access and erasure of decision records (data protection lead)",
-  "note": "SPC-192 stores each operator's username, scenario and response names and free-text rationale, with no retention applied; a deleted account's records are kept, readable by an admin. docs/SECURITY.md and docs/decision_engine_phases.md list this as open.",
+  "note": "SPC-192 stores each operator's username, scenario and response names and free-text rationale, with no retention applied; a deleted account's records are kept, readable by an admin. docs/SECURITY.md and docs/decision_engine_phases.md list this as open. From 0.28.0 the record also holds the evaluation's canonical inputs, including element-set text (SPC-193).",
   "files": [
    "docs/SECURITY.md",
    "docs/decision_engine_phases.md"

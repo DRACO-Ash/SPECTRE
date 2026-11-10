@@ -192,6 +192,37 @@ class TestTheDecisionRecord:
         for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
             assert claim.lower() in text.lower(), claim
 
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            "SPECTRE_PRIMARY_RULE", "side by side", "primary rule", "scripts/replay_decision.py", "SHA-256",
+            "another code version", "SPC-228", "element set", "SPC-193",
+        ],
+    )
+    def test_both_say_every_rule_is_shown_and_a_record_can_be_replayed(self, claim: str) -> None:
+        """SPC-194 (F-03) and SPC-193 (F-02): every rule's pick beside the primary rule's, and replay from a record."""
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    @pytest.mark.parametrize(
+        "claim",
+        ["gate G2", "gate G3", "F-03", "F-02", "time budget", "writes nothing", "input hash", "star",
+         "every row at P 0", "built in full"],
+    )
+    def test_both_name_the_gates_and_what_a_replay_sets_against_the_record(self, claim: str) -> None:
+        """The review of 0.28.0's draft: both name gates G2 and G3, the budget, the read-only command, the columns a
+        replay checks, the star's rule and expected value with no pick."""
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_the_guide_no_longer_says_the_rule_chosen_gives_the_recommendation(self) -> None:
+        assert "recommends one under the rule you choose" not in _guide_section()
+
+    def test_the_phase_document_no_longer_lists_replay_as_out_of_scope(self) -> None:
+        doc = _read("docs/decision_engine_phases.md")
+        out_of_scope = doc[doc.index("## What remains out of scope"):doc.index("## Summary")]
+        assert "Replaying a recommendation" not in out_of_scope
+
     def test_the_phase_document_no_longer_says_only_the_session_holds_a_result(self) -> None:
         doc = _flat(_read("docs/decision_engine_phases.md"))
         assert "nothing records what the operator decided" not in doc.lower()

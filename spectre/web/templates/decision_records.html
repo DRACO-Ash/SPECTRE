@@ -35,9 +35,11 @@
   </p>
   <p style="font-size:var(--spectre-size-small); color:var(--text-dim); margin:0 0 var(--spectre-space-4)">
     A record holds the operator's username, the scenario's name, the response names and the rationale typed, with
-    the code version and the hash of every input; it holds no element set and no raw input, so it cannot yet replay a
-    recommendation. No retention is applied: how long records are kept, and who may read them, is the owner's
-    decision.
+    the code version and the hash of every input. A record written since SPECTRE began storing them also holds the
+    deployment's primary rule, whose pick the results showed as the recommendation, and the evaluation's inputs in
+    full, element sets included, so an administrator can replay it with scripts/replay_decision.py; an older record
+    holds neither. No retention is applied: how long records are
+    kept, and who may read them, is the owner's decision.
   </p>
 
   {% if not records %}
@@ -52,7 +54,7 @@
       {{ r.turns }} turn{% if r.turns != 1 %}s{% endif %}, keep-out distance {{ r.keep_out_km }} km as entered.
       Code version {{ r.code_version }}; {{ r.inputs }} input hash{% if r.inputs != 1 %}es{% endif %} held.</p>
     {% if r.turns > 1 %}
-    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">Rule used: {{ r.rule }}. The one-turn matrix recommends {{ r.recommended }}.{% if r.tree_pick %} Over the {{ r.turns }} turns, {{ r.rule }} picks {{ r.tree_pick }} for turn 1.{% endif %}</p>
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">{{ r.used }}{% if r.tree_pick %} Over the {{ r.turns }} turns, {{ r.rule }} picks {{ r.tree_pick }} for turn 1.{% endif %}</p>
     {% if r.tree_lines %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">The game tree, as the results said it:</p>
     <ul style="margin:0.1rem 0 0; padding-left:1.1rem; font-size:0.72rem; color:var(--text-dim)">
@@ -60,9 +62,10 @@
     </ul>
     {% endif %}
     {% else %}
-    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">Rule used: {{ r.rule }}. Recommended: {{ r.recommended }}.</p>
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">{{ r.used }}</p>
     {% endif %}
-    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">All three rules on the same matrix, worked out for this record; the results showed {{ r.rule }}'s pick alone: {% for rule, pick in r.picks %}{% if loop.first %}{{ rule | capitalize }}{% else %}{{ rule }}{% endif %} picks {{ pick }}{% if not loop.last %}, {% else %}.{% endif %}{% endfor %}</p>
+    <p class="record-primary" style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-primary)">{{ r.primary }}</p>
+    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">All three rules on the same matrix, {% if r.primary_recorded %}as the results showed them side by side{% else %}worked out for this record; the results showed {{ r.rule }}'s pick alone{% endif %}: {% for rule, pick in r.picks %}{% if loop.first %}{{ rule | capitalize }}{% else %}{{ rule }}{% endif %} picks {{ pick }}{% if not loop.last %}, {% else %}.{% endif %}{% endfor %}</p>
     {% if r.caveat %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--gold)">{{ r.caveat }}</p>
     {% endif %}
