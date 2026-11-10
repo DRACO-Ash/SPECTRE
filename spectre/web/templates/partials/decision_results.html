@@ -206,9 +206,16 @@
           {% endif %}
           {% if a.hypothesis is defined and a.hypothesis is not none %}
           <div class="row-hypothesis" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.sentence }}</div>
-          {% if a.hypothesis.burn_line is defined %}
+          {% if result.row_starts is defined and result.row_starts | length > i and result.row_starts[i] is not none %}
+          {# A row of several burns whose series starts at a later burn (SPC-184): that burn, not burn 1. #}
+          <div class="row-burn" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_starts[i] }}</div>
+          {% elif a.hypothesis.burn_line is defined %}
           <div class="row-burn" style="font-size:0.56rem; color:var(--text-dim)">{{ a.hypothesis.burn_line(result.scenario.epoch_utc) }}</div>
           {% endif %}
+          {% endif %}
+          {# Every burn of the row's transfer, which it applies and which it drops and why (SPC-184). #}
+          {% if result.row_transfers is defined and result.row_transfers | length > i and result.row_transfers[i] is not none %}
+          <div class="row-transfer" style="font-size:0.56rem; color:var(--text-dim); overflow-wrap:anywhere">{{ result.row_transfers[i] }}</div>
           {% endif %}
           {% if result.row_custody is defined and result.row_custody | length > i and result.row_custody[i] is not none %}
           <div class="row-custody" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_custody[i] }}</div>
@@ -248,8 +255,8 @@
               <span class="figure" data-figure="closest_approach_km"{% if band is none %} title="{{ om.ca_title if om.ca_title is defined else 'Lookup: a fixed figure, with no distribution.' }}"{% endif %}
                     data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.closest_approach_km) }}{% else %}lookup{% endif %}">{{ ("%.1f" if band is not none or computed is not none else "%.0f") | format(om.closest_approach_km) }} km {% if fbs is not none %}{{ modelled.mark(fbs.closest_approach_km) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span> ·
               <span class="figure" data-figure="custody_maintained"
-                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% if om.custody_maintained %}<span style="color:#22c55e">✓</span>{% else %}<span style="color:#ef4444">✗</span>{% endif %}
-              custody{% if om.custody_state is defined and om.custody_state is not none and om.custody_state.value == "degraded" %} degraded{% endif %} {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
+                    data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.custody_maintained) }}{% else %}lookup{% endif %}">{% set reading = om.custody_reading if om.custody_reading is defined else ("held" if om.custody_maintained else "lost") %}{% if reading == "held" %}<span style="color:#22c55e">✓</span>{% elif reading == "lost" %}<span style="color:#ef4444">✗</span>{% else %}<span style="color:var(--spectre-color-caution-amber-text)">◐</span>{% endif %}
+              custody{% if reading not in ("held", "lost") %} {{ reading }}{% endif %} {% if fbs is not none %}{{ modelled.mark(fbs.custody_maintained) }}{% else %}{{ modelled.mark_unrecorded() }}{% endif %}</span>
               </span>
             </div>
             {% set tca_title = om.tca_title if om.tca_title is defined else none %}

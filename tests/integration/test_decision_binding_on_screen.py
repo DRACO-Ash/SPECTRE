@@ -213,7 +213,8 @@ class TestTheResult:
     def test_a_bound_red_tracks_custody_is_computed_on_screen(
         self, client: Any, auth_cookie: str, held: Any,
     ) -> None:
-        """K10, SPC-123: UDL is not connected in this session, so custody is degraded, counts as lost, and says so."""
+        """K10, SPC-123: UDL is not connected in this session, so custody is degraded, shown as degraded and never
+        as held or lost (SPC-179), and says so."""
         _hold(held)
         form = _form(red_sat="RX", blue_sat="BY", adv_type=["no_action"], horizon_hours="24")
         resp = _evaluate(client, auth_cookie, form)
@@ -223,11 +224,12 @@ class TestTheResult:
             "Custody at evaluation: Custody degraded: its orbit is current (5.0 h old, limit 72 h), but whether its "
             "burns are normal cannot be judged. UDL is not connected, so no element-set history is held."
         ) in text
+        assert "Custody degraded through the 24 h horizon: its newest element set stays within its 72 h limit" in text
         assert (
-            "Custody degraded for the whole 24 h horizon, which counts as lost: its orbit is current, so how a burn "
-            "changes your warning time can be judged, but whether it is normal cannot, and custody needs both."
+            "Degraded, neither held nor lost: how a burn changes your warning time can be judged, but whether it is "
+            "normal cannot."
         ) in text
-        assert "✗ custody degraded (computed)" in text and "✓ custody" not in text
+        assert "◐ custody degraded (computed)" in text and "✓ custody" not in text and "✗ custody" not in text
         assert CUSTODY_NOTE in text
         assert "Custody here is a rule of thumb" not in text
         assert "Basis: Custody: computed in every cell." in text

@@ -139,7 +139,9 @@ class TestTheBasesAreTyped:
             "tca_histogram",   # the samples' TCAs, binned no finer than each is known (SPC-124)
         }
         about_the_score = {"score_percentiles", "score_std"}
-        about_custody = {"custody_state"}   # the status at the scenario epoch qualifies custody (SPC-123)
+        # The status at the scenario epoch qualifies custody (SPC-123), and so do the hours it is degraded, which
+        # the custody figure and its basis carry (SPC-179).
+        about_custody = {"custody_state", "custody_degraded_hours"}
         about_delta_v = {"ca_response", "response_refusal"}   # our sized burn, or why not, qualifies it (SPC-121)
         qualifiers = about_closest_approach | about_the_score | about_custody | about_delta_v
         assert qualifiers <= {f.name for f in fields(OutcomeMetrics)}

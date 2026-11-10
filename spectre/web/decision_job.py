@@ -1,7 +1,8 @@
 """A sampled Decision Engine evaluation, run as a session job the page polls (SPC-113).
 
-A scenario whose rows sample a closest approach can take up to two minutes,
-and no request should wait that long. POST /plan/decision/evaluate starts a
+A scenario whose rows sample a closest approach can take up to five minutes,
+the 300 s budget the owner ruled on 2026-11-05 (SPC-178), and no request
+should wait that long. POST /plan/decision/evaluate starts a
 job here and returns a partial that polls GET /plan/decision/job every 2 s,
 showing which hypothesis is being sampled and how much of the budget is used,
 until the result replaces it.
@@ -12,10 +13,10 @@ Bounded on purpose, after the burn watch (spectre.web.burn_watch):
   stops at its next sample.
 * One sampled evaluation at a time on the server. Two threads sampling at once
   ran about four times slower, because the equations of motion hold Python's
-  global interpreter lock, so a second job waits, QUEUED, and its 120 s budget
-  starts only when it runs.
-* It stops within one sample, at most about 2 s at the longest horizons the
-  cap admits, when the operator cancels it, the sign-in ends, a newer
+  global interpreter lock, so a second job waits, QUEUED, and its 300 s budget
+  starts only when it runs: behind a full run it can wait up to five minutes.
+* It stops within one sample, a few seconds at most at the longest spans an
+  element set's limit and a burn 72 h back admit, when the operator cancels it, the sign-in ends, a newer
   evaluation replaces it, or the server shuts down. The asyncio task is never
   cancelled for these: cancelling it would free the slot while the worker
   thread kept sampling.
@@ -49,6 +50,7 @@ from spectre.domain.decision import (
     SelectorStrategy,
     needs_a_run,
 )
+from spectre.domain.decision_transfer import ledger_sentence
 from spectre.domain.decision_tree import evaluate_tree
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
@@ -168,8 +170,18 @@ def evaluated_line(scenario: Scenario, result: ScenarioResult) -> str:
         f"[Decision] Evaluated '{log_safe(scenario.name)}': "
         f"{len(scenario.adversary_actions)} adversary actions × {len(scenario.friendly_responses)} friendly "
         f"responses. Modelled recommendation: {result.robust_best_response.name} ({result.robust_strategy.value})"
-        f"{bound}"
+        f"{bound}{_transfers_line(scenario, result)}"
     )
+
+
+def _transfers_line(scenario: Scenario, result: ScenarioResult) -> str:
+    """Each row of several burns, with the burns it applied and those it dropped (SPC-184); empty for none."""
+    said = [
+        f" Row {log_safe(action.id)} ({log_safe(action.name)}): {sentence}"
+        for action, burns in zip(scenario.adversary_actions, result.row_burns, strict=False)
+        if burns is not None and (sentence := ledger_sentence(burns)) is not None
+    ]
+    return "".join(said)
 
 
 def _stop(job: DecisionJob, reason: str) -> None:
@@ -316,7 +328,8 @@ _SIZING = (
 _CUSTODY = (
     "Reading custody: waiting up to {wait:g} s for {red}'s element-set history, {fetch}, so its custody is judged "
     "as the sweep judges it. The evaluation starts when the history arrives or the wait ends; if "
-    "it has not arrived by then, custody reads degraded, which counts as lost, and the next evaluation uses it."
+    "it has not arrived by then, custody reads degraded, which scores between held and lost, and the next evaluation "
+    "uses it."
 )
 _STOPPED = "Evaluation stopped: {reason}. Nothing was scored; evaluate again to see the figures."
 _FAILED = "The evaluation failed; the server log has the detail. Nothing was scored."

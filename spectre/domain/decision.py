@@ -75,8 +75,11 @@ manoeuvre with no hypothesis names no burn time, so its custody takes the
 worst case, a burn at the scenario epoch, as a lookup, unless custody is lost
 from the epoch already, which no burn time can change. Degraded custody can
 judge the warning time but not whether a burn is normal, and the operator's
-custody needs both, so it counts as lost. Without a red status the rule of
-thumb stays.
+custody needs both, so it is neither held nor lost: it stays degraded until
+held custody would be lost, and each hour of it carries
+DEGRADED_CUSTODY_WEIGHT of the custody penalty an hour lost carries, the
+owner's ruling of 2026-11-05 (SPC-179). The custody gap counts lost hours
+only. Without a red status the rule of thumb stays.
 
 The lookup constants retire wherever a computed or sampled figure exists
 (SPC-125): beside a computed or sampled closest approach, a response that
@@ -120,7 +123,7 @@ import math
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
@@ -166,14 +169,30 @@ from spectre.astro.response_burn import (
     hypothesis_response_plan,
 )
 from spectre.domain.custody import BASIS as CUSTODY_BASIS
-from spectre.domain.custody import Custody, CustodyStatus, Horizon, age_text, custody_over_horizon
+from spectre.domain.custody import (
+    Custody,
+    CustodyOverHorizon,
+    CustodyStatus,
+    Horizon,
+    age_text,
+    custody_over_horizon,
+    span_text,
+)
 from spectre.domain.decision_figures import (
+    NOMINAL_BURN,
     ResponseBurnSpec,
     ResponseFigure,
     TcaHistogram,
     TcaUncertainty,
     tca_histogram,
     tca_uncertainty,
+)
+from spectre.domain.decision_transfer import (
+    RowBurns,
+    TransferBurn,
+    require_transfer,
+    row_burns,
+    transfer_sentence,
 )
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.domain.provenance import (
@@ -259,7 +278,8 @@ EVERY_ROW_REFUSED = "Both orbits are bound, but no closest approach could be com
 # ── Figure bases ──────────────────────────────────────────────────────────────
 
 #: The figures composite_score is built from, read off its formula: norm_custody uses custody_maintained and
-#: custody_gap_hours, norm_ca closest_approach_km, norm_dv delta_v_cost_km_s. time_to_closest_hours is not used.
+#: custody_gap_hours, and the hours custody is degraded (SPC-179), which are not a figure of their own but share
+#: custody's basis; norm_ca closest_approach_km, norm_dv delta_v_cost_km_s. time_to_closest_hours is not used.
 _SCORE_INPUTS: tuple[str, ...] = ("custody_maintained", "custody_gap_hours", "closest_approach_km", "delta_v_cost_km_s")
 #: The weights and the normalisations (50,000 km; 0.1 km/s, i.e. 100 m/s) are rules of thumb, so the score
 #: is never stronger than lookup, whatever its figures are. Citing the weights (SPC-151) does not change this.
@@ -640,12 +660,17 @@ class AdversaryHypothesis:
     frame:         str = "RIC"
     # The delta-V spread was entered by the operator, not taken from the archetype (SPC-114); set by with_spread.
     spread_entered: bool = False
+    # The transfer's burns after this one, in time order (SPC-184): with it, one action with one P, never
+    # alternatives. Empty for a single burn; set by with_transfer.
+    then: tuple[TransferBurn, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.hypothesis, ManoeuvreHypothesis):
             raise TypeError(f"AdversaryHypothesis holds a ManoeuvreHypothesis; got {type(self.hypothesis).__name__}")
         _require_origin(self)
         _require_burn(self.hypothesis)
+        object.__setattr__(self, "then", tuple(self.then))
+        require_transfer(self.hypothesis.epoch_utc, self.then)
         object.__setattr__(self, "hypothesis", _sealed_copy(self.hypothesis))
 
     @classmethod
@@ -685,6 +710,10 @@ class AdversaryHypothesis:
         """This hypothesis with a delta-V spread the operator entered, in m/s (1 sigma); the other spreads stay."""
         spread = dataclasses.replace(self.hypothesis, delta_v_magnitude_1sigma_km_s=to_km_s(delta_v_1sigma_m_s))
         return dataclasses.replace(self, hypothesis=spread, spread_entered=True)
+
+    def with_transfer(self, then: Sequence[TransferBurn]) -> AdversaryHypothesis:
+        """This hypothesis as the first burn of a transfer whose later burns are *then*, in time order (SPC-184)."""
+        return dataclasses.replace(self, then=tuple(then))
 
     @classmethod
     def from_detection(
@@ -753,10 +782,13 @@ class AdversaryHypothesis:
         inner = dataclasses.asdict(self.hypothesis)
         inner["epoch_utc"] = self.hypothesis.epoch_utc.isoformat()
         inner["pre_manoeuvre_state_eci_km"] = [float(x) for x in self.hypothesis.pre_manoeuvre_state_eci_km]
-        return {
+        recorded: dict[str, object] = {
             "source": self.source.value, "archetype_key": self.archetype_key, "frame": self.frame,
             "spread_entered": self.spread_entered, "hypothesis": inner,
         }
+        if self.then:   # a single burn records as it did before SPC-184
+            recorded["then"] = [burn.recorded() for burn in self.then]
+        return recorded
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AdversaryHypothesis):
@@ -767,7 +799,8 @@ class AdversaryHypothesis:
         return hash(json.dumps(self.recorded(), sort_keys=True))
 
 
-#: A row's probability when none is given, and the panel's default: a row still at it reads as untouched (SPC-171).
+#: A row's probability when none is given, and the value the panel gives every row. A row reads as untouched when the
+#: form records that its P was never edited (SPC-183), not because it holds this value (SPC-171 read it so).
 DEFAULT_PROBABILITY = 0.5
 
 #: A row's custody gap share when none is given: the confidence the page posted by default, which set the rule of
@@ -809,9 +842,17 @@ class AdversaryAction:
     # The NOTSO suggestion the operator applied to this row (SPC-130), whose P, and Conf when it offers one, are the
     # row's; None when both are the operator's own. Recorded in the scenario's provenance; it moves no figure.
     accepted_prior: NotsoPrior | None = None
+    # Whether P was stated rather than left at the panel's default: the form records each edit (the owner's ruling
+    # of 2026-11-05, concept section 9, decision 11, SPC-183), so a deliberate 0.5 is the operator's own. A row
+    # built in code states its P, so it is True unless the form says otherwise.
+    probability_edited: bool = True
 
     def __post_init__(self) -> None:
         _require_fraction("AdversaryAction", "probability", self.probability)
+        if not self.probability_edited and not math.isclose(self.probability, DEFAULT_PROBABILITY):
+            raise ValueError(
+                f"a probability not edited is the panel's default, {DEFAULT_PROBABILITY}; got {self.probability}"
+            )
         _require_fraction("AdversaryAction", "confidence", self.confidence)
         _require_fraction("AdversaryAction", "custody_gap_fraction", self.custody_gap_fraction)
         if self.hypothesis is not None and not isinstance(self.hypothesis, AdversaryHypothesis):
@@ -929,6 +970,9 @@ class OutcomeMetrics:
     # The bound red track's custody at the scenario epoch, held, degraded or lost (SPC-123). Set exactly when
     # custody's basis is computed; custody_maintained and custody_gap_hours then carry it over the horizon.
     custody_state:        Custody | None = None
+    # Hours of the horizon the bound red track's custody is degraded, neither held nor lost (SPC-179): never in
+    # custody_gap_hours, which counts lost hours only. Non-zero only on custody computed as degraded at the epoch.
+    custody_degraded_hours: float = 0.0
     # How closely the time of closest approach is known (SPC-118); only on a computed or sampled closest approach.
     tca_uncertainty:      TcaUncertainty | None = None
     # The sampled TCA and its spread across samples (SPC-118); only on a sampled closest approach.
@@ -1065,6 +1109,16 @@ class OutcomeMetrics:
         return _is_modelled(self.figure_bases)
 
     @property
+    def custody_reading(self) -> str:
+        """Custody over the horizon in the cell's words: held, lost, degraded, or degraded then lost. Degraded is
+        never shown as held or lost (SPC-179)."""
+        if self.custody_maintained:
+            return "held"
+        if self.custody_degraded_hours == 0.0:
+            return "lost"
+        return "degraded, then lost" if self.custody_gap_hours > 0.0 else "degraded"
+
+    @property
     def basis(self) -> str:
         if _all_lookup(self.figure_bases):
             worst_case = self.figure_bases.custody_maintained.note == _WORST_CASE_NOTE
@@ -1072,7 +1126,7 @@ class OutcomeMetrics:
         return "; ".join(f"{FIGURE_LABELS[name]}: {fb.kind.value}, {fb.note}" for name, fb in self.figure_bases.items())
 
     def __str__(self) -> str:
-        cust = "✓" if self.custody_maintained else "✗"
+        cust = {"held": "✓", "lost": "✗"}.get(self.custody_reading, "◐")
         return (
             f"Custody:{cust}  CA:{self.closest_approach_km:.1f}km  "
             f"ΔV:{self.delta_v_cost_km_s*1000:.1f}m/s  "
@@ -1197,6 +1251,8 @@ def _require_custody(cell: OutcomeMetrics) -> None:
         raise ValueError("custody and its gap share one basis")
     if (cell.custody_state is not None) != (kind is Basis.COMPUTED):
         raise ValueError("custody_state is set exactly when custody's basis is computed")
+    if cell.custody_degraded_hours != 0.0 and cell.custody_state is not Custody.DEGRADED:
+        raise ValueError("only custody computed as degraded at the scenario epoch has degraded hours")
     if cell.custody_state is None:
         return
     if cell.custody_maintained and cell.custody_gap_hours != 0.0:
@@ -1357,7 +1413,9 @@ class ScenarioBinding:
 
 #: A collect-first row's time-to-execute note: the cue's duration is a tuned lookup, not a measured time.
 COLLECTION_NOTE = "collection to narrow the threat range: the cue's tuned duration, a lookup"
-#: Where the expected-value selector's weight has not been earned (concept section 7.5, item 4).
+#: Where the expected-value selector's weight has not been earned (concept section 7.5, item 4): Understanding LOW, or
+#: a row whose P the form records as never edited, not one merely holding 0.5 (the owner's ruling of 2026-11-05 on
+#: concept section 9, decision 11, SPC-183).
 EXPECTED_VALUE_UNEARNED = "Expected value rests on a probability the evidence has not earned."
 #: The same, for a bound red track the engine holds no current picture for: it says only what the engine holds.
 EXPECTED_VALUE_NO_PICTURE = "Expected value rests on a probability no current Threat picture for {red} supports."
@@ -1505,20 +1563,25 @@ def _require_turns(turns: object) -> None:
 
 
 def _untouched(action: AdversaryAction) -> bool:
-    """A row still at the default probability that applied no suggestion: the form cannot tell it from 0.5 typed again
-    (concept section 9, decision 11), but an accepted NOTSO suggestion is never untouched (SPC-130)."""
-    return math.isclose(action.probability, DEFAULT_PROBABILITY) and action.accepted_prior is None
+    """A row whose P the form records as never edited and that applied no suggestion. The record, not the value, is
+    read: the owner ruled on 2026-11-05 that a deliberate 0.5 is not untouched (concept section 9, decision 11,
+    SPC-183), and an accepted NOTSO suggestion counts as edited (SPC-130)."""
+    return not action.probability_edited and action.accepted_prior is None
 
 
 #: A row whose P and Conf are both the operator's (SPC-130).
 OWN_VALUES = "P and Conf are your own."
+#: A row whose P the form records as never edited (SPC-183): its P is the panel's default, only its Conf the
+#: operator's.
+DEFAULT_P_VALUES = f"P {DEFAULT_PROBABILITY} is the panel's default, never edited; Conf is your own."
 
 
 def _row_source(action: AdversaryAction) -> str:
-    """Whose P and Conf a row holds, with what an applied NOTSO suggestion rests on."""
+    """Whose P and Conf a row holds, with what an applied NOTSO suggestion rests on. A P the form records as never
+    edited is the panel's default, not the operator's (SPC-183)."""
     prior = action.accepted_prior
     if prior is None:
-        return OWN_VALUES
+        return DEFAULT_P_VALUES if _untouched(action) else OWN_VALUES
     if prior.confidence is None:
         lead = f"P {prior.probability:.2f} is the NOTSO suggestion you applied; Conf is your own."
     else:
@@ -1567,6 +1630,14 @@ class ScenarioResult:
     rk45_reference:         tuple[ElsetApproach, ElsetApproach] | None = None
     # The multi-turn game tree (SPC-140), or why none was built; None for one turn, whose result is this matrix alone.
     tree:                   GameTree | None = None
+    # Per adversary row: the burns of its transfer, which it applies and which it drops and why, when it carries
+    # more than one (SPC-184); None for a single burn or none.
+    row_transfers:          tuple[str | None, ...] = ()
+    # Per adversary row: when its series starts at a later burn than its first, the burn line in place of the
+    # hypothesis's own, which names burn 1 (SPC-184); None otherwise.
+    row_starts:             tuple[str | None, ...] = ()
+    # Per adversary row: what it applies (SPC-184), None for a row with no hypothesis. Read by the trajectory view.
+    row_burns:              tuple[RowBurns | None, ...] = field(default=(), compare=False, repr=False)
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -1678,7 +1749,7 @@ class ScenarioResult:
 
     def _unearned(self) -> str | None:
         """Why expected value's weights are not earned: a bound red track with no current picture, a picture at
-        Understanding LOW, or any row still at the default probability; None when none holds."""
+        Understanding LOW, or any row whose P the form records as never edited (SPC-183); None when none holds."""
         red, picture = self._red_name(), self._picture()
         if red is not None and picture is None:
             return EXPECTED_VALUE_NO_PICTURE.format(red=red)
@@ -1900,12 +1971,20 @@ def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
 # ── Scoring ────────────────────────────────────────────────────────────────────
 
 class _Figures(NamedTuple):
-    """The figures a score is built from, unrounded: custody, its gap, closest approach and our delta-V."""
+    """The figures a score is built from, unrounded: custody, its gap, closest approach, our delta-V and the hours
+    custody is degraded, which are not in the gap (SPC-179)."""
 
     custody_maintained:  bool
     custody_gap_hours:   float
     closest_approach_km: float
     delta_v_km_s:        float
+    custody_degraded_hours: float = 0.0
+
+
+#: The share of the custody penalty an hour of degraded custody carries, against 1 for an hour lost and 0 for an
+#: hour held. It is the owner's ruling of 2026-11-05 (SPC-179), not a sourced figure: degraded custody can judge
+#: how a burn changes the warning time but not whether it is normal, so it scores between held and lost.
+DEGRADED_CUSTODY_WEIGHT: float = 0.25
 
 
 #: The lookup closest approach per adversary action type, km; any other type is 3,000 km.
@@ -1983,6 +2062,8 @@ def _outcome(
         composite_score=round(_score(scenario, friendly, figures), 6),
         figure_bases=_custody_bases(built.bases, custody),
         custody_state=None if custody is None else custody.state,
+        # Not rounded: a degraded span under 0.005 h is still degraded, and the cell's reading is read off it.
+        custody_degraded_hours=figures.custody_degraded_hours,
         **extra,
     )
 
@@ -2050,11 +2131,13 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
     """The composite score (higher = worse), unrounded.
 
     Each component is normalised to [0, 1] with domain assumptions:
-    custody loss 0 when maintained, 1 for a full-horizon gap; closest approach
+    custody loss 0 when maintained, 1 for a full-horizon gap, each hour degraded
+    counting DEGRADED_CUSTODY_WEIGHT of an hour lost (SPC-179); closest approach
     inverted, 0 km to 50,000 km; delta-V 0 to 0.1 km/s (100 m/s); time to
     execute 0 to the full horizon; reversibility inverted, a reward.
     """
-    norm_custody  = 0.0 if figures.custody_maintained else min(figures.custody_gap_hours / scenario.horizon_hours, 1.0)
+    custody_h     = figures.custody_gap_hours + DEGRADED_CUSTODY_WEIGHT * figures.custody_degraded_hours
+    norm_custody  = 0.0 if figures.custody_maintained else min(custody_h / scenario.horizon_hours, 1.0)
     norm_ca       = _norm_ca(figures.closest_approach_km)   # high CA = low score (good)
     norm_dv       = min(figures.delta_v_km_s / _DV_NORMALISATION_KM_S, 1.0)
     norm_time     = min(friendly.time_to_execute_hours / scenario.horizon_hours, 1.0)
@@ -2076,22 +2159,25 @@ class Sampler(Protocol):
 
     *tick* is passed only when the evaluation runs under a RunControl (SPC-113), so a sampler that takes three
     arguments still serves an evaluation without one; *keep_at_s* only when a game tree asks for its turn boundary
-    (SPC-140).
+    (SPC-140); *red_then* only when the row carries later burns of a transfer (SPC-184).
     """
 
-    def __call__(
+    def __call__(  # noqa: PLR0913 - the series' own keywords, each passed only when used
         self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
         tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ..., keep_at_s: Sequence[float] = ...,
+        red_then: Sequence[ManoeuvreHypothesis] = ...,
     ) -> SeparationSeries: ...
 
 
 #: The wall time one sampled evaluation may take, in seconds (SPC-113). It runs as a session job the page polls,
-#: holding the server's only sampling slot, so this bounds how long a second operator waits too.
-EVALUATION_BUDGET_S: float = 120.0
+#: holding the server's only sampling slot, so this bounds how long a second operator waits too. 300 s is the
+#: owner's ruling of 2026-11-05 (SPC-178), raised from 120 s so that larger scenarios and game trees fit.
+EVALUATION_BUDGET_S: float = 300.0
 #: The rate the cap assumes, in sample-hours per second of wall time: about a fifth under the slowest measured,
 #: 51 (plane_change Evasive, 500 samples over 11.7 h, 115.7 s, with other work on the machine; the same case ran
-#: at 74 and 75 idle). At 50 that case left 4.3 s of the budget, so a loaded server would refuse it part-way after holding
-#: the only sampling slot for 2 minutes; at 40 the cap's worst case takes about 94 s at 51. See _cost for the table.
+#: at 74 and 75 idle). 40 was chosen under the 120 s budget, when a rate of 50 left that case 4.3 s to spare, too
+#: little for a loaded server not to refuse it part-way after holding the only sampling slot for the whole budget.
+#: Under the 300 s budget, at 40 the cap's worst case takes about 235 s at 51, leaving 65 s. See _cost for the table.
 _SLOWEST_SAMPLE_HOURS_PER_S = 40.0
 #: The most sample-hours one evaluation may run: what EVALUATION_BUDGET_S covers at _SLOWEST_SAMPLE_HOURS_PER_S.
 #: A row costs the larger of its samples times the horizon and the hours its series integrates
@@ -2141,6 +2227,11 @@ _BURN_PAST_SPAN = (
 _AFTER_BURN = (
     "Not sampled: the red element set dates from {epoch:%Y-%m-%d %H:%M} UTC, after the burn at "
     "{burn:%Y-%m-%d %H:%M} UTC, so it may already include the burn, and sampling would apply it twice."
+)
+#: _AFTER_BURN for a row of several burns each at or before the red set's epoch, the first at it (SPC-184).
+_AT_EVERY_BURN = (
+    "Not sampled: the red element set dates from {epoch:%Y-%m-%d %H:%M} UTC, at or after every burn of this row's "
+    "transfer, so it may already include each, and sampling would apply them twice."
 )
 _NO_STATE = "Not sampled: the {side} element set cannot be propagated to {when:%Y-%m-%d %H:%M} UTC."
 _START_MISMATCH = (
@@ -2253,6 +2344,10 @@ class _Row(NamedTuple):
     red_track:  BlueTrack | None   # red's SGP4 state at the hypothesis's burn
     window:     SeparationWindow   # from the scenario epoch over the span searched (SPC-118)
     horizon_s:  float
+    # The later burns of the row's transfer it applies, after *hypothesis*, its first applied (SPC-184).
+    then:       tuple[ManoeuvreHypothesis, ...] = ()
+    # Every burn of the row's transfer is at or before the red element set's epoch, so none is applied (SPC-184).
+    none_applied: bool = False
 
 
 def _refusal(sentence: str) -> str:
@@ -2289,7 +2384,10 @@ def _after_burn(row: _Row) -> str | None:
     that includes the burn sits where the pre-burn track does at the burn time.
     """
     epoch, burn = row.red.epoch, row.hypothesis.epoch_utc
-    return _AFTER_BURN.format(epoch=epoch, burn=burn) if epoch is not None and epoch > burn else None
+    if epoch is not None and epoch > burn:
+        return _AFTER_BURN.format(epoch=epoch, burn=burn)
+    # A transfer whose burns all sit at or before the set's epoch, the first exactly at it (SPC-184).
+    return _AT_EVERY_BURN.format(epoch=epoch) if row.none_applied else None
 
 
 def _no_state(row: _Row) -> str | None:
@@ -2648,7 +2746,8 @@ def _size_row(
 ) -> tuple[SizedBurn | BurnRefusal, ...]:
     """Each response's burn sized on the row's nominal burn; refused for propagation when an arc fails."""
     tick = None if budget is None else budget.sizing(responses.labels)
-    sized = hypothesis_response_plan(row.hypothesis, blue, row.window, responses.requests, tick=tick)
+    later: dict[str, Any] = {"then": row.then} if row.then else {}
+    sized = hypothesis_response_plan(row.hypothesis, blue, row.window, responses.requests, tick=tick, **later)
     if sized is None:
         return tuple(BurnRefusal(request.key, "propagation", 0) for request in responses.requests)
     return sized
@@ -2667,6 +2766,8 @@ def _sample(
         kwargs["blue_burns"] = burns
     if keep_at_s:
         kwargs["keep_at_s"] = tuple(keep_at_s)
+    if row.then:
+        kwargs["red_then"] = row.then
     return sampler(row.hypothesis, cast("BlueTrack", row.blue_track), row.window, **kwargs)
 
 
@@ -2718,14 +2819,38 @@ def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
         return []
     window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
     blue_track = elset_state(blue.tle, window.start_utc)
-    return [
-        None if a.hypothesis is None else _Row(
-            hypothesis=a.hypothesis.hypothesis, red=red, blue=blue, blue_track=blue_track,
-            red_track=elset_state(red.tle, a.hypothesis.hypothesis.epoch_utc), window=window,
-            horizon_s=scenario.horizon_hours * _SECONDS_PER_HOUR,
-        )
-        for a in scenario.adversary_actions
-    ]
+    return [_eligible_row(a, red, blue, blue_track, window, scenario) for a in scenario.adversary_actions]
+
+
+# PLR0913, PLR0917: one row's action, the two bound sides, blue's state and the window, all shared by the scenario.
+def _eligible_row(  # noqa: PLR0913, PLR0917
+    action: AdversaryAction, red: BoundElset, blue: BoundElset, blue_track: BlueTrack | None,
+    window: SeparationWindow, scenario: Scenario,
+) -> _Row | None:
+    """The row as sampled from its first applied burn, with its later burns (SPC-184); None with no hypothesis."""
+    burns = _row_burns(action, red)
+    if burns is None:
+        return None
+    end = window.start_utc + timedelta(seconds=window.span_s)
+    return _Row(
+        hypothesis=burns.first, red=red, blue=blue, blue_track=blue_track,
+        red_track=elset_state(red.tle, burns.first.epoch_utc), window=window,
+        horizon_s=scenario.horizon_hours * _SECONDS_PER_HOUR, none_applied=burns.all_dropped,
+        # A burn due after the span searched ends is handed to no sample, so no figure flies it.
+        then=tuple(h for h in burns.then if h.epoch_utc < end),
+    )
+
+
+def _row_burns(action: AdversaryAction, red: BoundElset | None) -> RowBurns | None:
+    """What *action*'s row applies against the bound red element set (SPC-184); None with no hypothesis.
+
+    With no red track bound, or an epoch it cannot read, nothing is dropped.
+    """
+    carried = action.hypothesis
+    if carried is None:
+        return None
+    epoch, tle = (None, "") if red is None else (red.epoch, red.tle)
+    return row_burns(carried.hypothesis, carried.then, epoch, tle)
 
 
 class _PrePlan(NamedTuple):
@@ -3011,8 +3136,9 @@ def _sampled_response_cell(
     if spec is None or result is None:
         return _sampled_cell(adversary, scenario, series, plan.custody, _ResponseCell(friendly, None, None))
     at = _burn_at(scenario, friendly)
+    nominal, tca_basis = _nominal_words(adversary, scenario)
     if isinstance(result, BurnRefusal):
-        sentence = _response_refusal(result, at, series.window, _NOMINAL_TCA)
+        sentence = _response_refusal(result, at, series.window, tca_basis)
         return _sampled_cell(adversary, scenario, series, plan.custody, _ResponseCell(friendly, None, sentence))
     if result.burn is None:
         figure = ResponseFigure(
@@ -3028,8 +3154,21 @@ def _sampled_response_cell(
     figure = ResponseFigure(
         result, at, spec.target_km, spec.budget_km_s, sampled_before_p5_km=series.miss_km_p5,
         sampled_after_p5_km=burnt.miss_km_p5, sampled_under_target=_under_target(burnt, spec.target_km),
+        nominal=nominal,
     )
     return _sampled_cell(adversary, scenario, burnt, plan.custody, _ResponseCell(friendly, figure, None))
+
+
+def _nominal_words(adversary: AdversaryAction, scenario: Scenario) -> tuple[str, str]:
+    """What a sampled row's burn is sized against and the TCA it is decided on rests on: red's nominal burn, or for
+    a row of several burns its nominal transfer, naming how many of them it flies (SPC-184)."""
+    red = None if scenario.binding is None else scenario.binding.red
+    burns = _row_burns(adversary, red)
+    if burns is None or not burns.several:
+        return NOMINAL_BURN, _NOMINAL_TCA
+    flown = burns.applied_by(scenario.epoch_utc + timedelta(seconds=_searched_span_s(scenario)))
+    return (_NOMINAL_TRANSFER.format(k=flown, n=burns.carried),
+            _NOMINAL_TRANSFER_TCA.format(k=flown, n=burns.carried))
 
 
 def _under_target(series: SeparationSeries, target_km: float) -> tuple[int, int]:
@@ -3089,6 +3228,45 @@ def _refused_cell(metrics: OutcomeMetrics, refusal: str | None) -> OutcomeMetric
     note = f"{LOOKUP_BASES.closest_approach_km.note}. {refusal}"
     bases = dataclasses.replace(metrics.figure_bases, closest_approach_km=FigureBasis(Basis.LOOKUP, note))
     return dataclasses.replace(metrics, figure_bases=bases, ca_refusal=refusal)
+
+
+#: The custody figures, which read one burn of a row: the earliest it applies (SPC-184).
+_CUSTODY_FIGURES = frozenset({"custody_maintained", "custody_gap_hours"})
+#: The figures a sampled row propagates with red making its burns.
+_FLOWN_FIGURES = frozenset({"closest_approach_km", "time_to_closest_hours"})
+
+
+def _burns_suffix(name: str, basis: FigureBasis, cell: OutcomeMetrics, burns: RowBurns, flown: int) -> str:
+    """How many of the row's burns one figure applies, in its basis's words (SPC-184)."""
+    n = burns.carried
+    if name == "composite_score":
+        return f"; it applies none of this row's {n} burns itself"
+    if basis.kind is Basis.LOOKUP:
+        return f"; it applies none of this row's {n} burns"
+    if name in _CUSTODY_FIGURES:
+        if burns.all_dropped:
+            return f"; it reads none of this row's {n} burns, since none is newer than the red element set"
+        return f"; it reads burn {burns.applied[0]} of this row's {n}, the earliest applied"
+    if name in _FLOWN_FIGURES:
+        return (f"; red flies the {flown} of this row's {n} burns due before the span searched ends, each at its own "
+                "drawn time if that is inside the span")
+    sized = cell.ca_response is not None and cell.ca_response.sized.burn is not None
+    return f"; sized against red flying {flown} of this row's {n} burns" if sized else (
+        f"; it applies none of this row's {n} burns")
+
+
+def _burns_named(cell: OutcomeMetrics, burns: RowBurns | None, end: datetime) -> OutcomeMetrics:
+    """*cell* with each figure's basis naming how many of the row's burns it applies, for a row of several burns
+    (SPC-184); a single burn's cell unchanged. A burn applied after *end*, when the span searched ends, is flown
+    by no figure."""
+    if burns is None or not burns.several:
+        return cell
+    flown = burns.applied_by(end)
+    named = {
+        name: FigureBasis(basis.kind, basis.note + _burns_suffix(name, basis, cell, burns, flown))
+        for name, basis in cell.figure_bases.items()
+    }
+    return dataclasses.replace(cell, figure_bases=OutcomeBases(**named))
 
 
 def _row_notes(scenario: Scenario, plan: Sequence[RowSampling | None]) -> tuple[str | None, ...]:
@@ -3203,6 +3381,9 @@ _RESPONSE_AFTER_TCA = (
 #: What an after-TCA refusal's closest approach rests on, in a computed and in a sampled row.
 _RK45_TCA = "RK45 for both orbits, no burn"
 _NOMINAL_TCA = "RK45, red with the hypothesis's nominal burn"
+#: What our burn is sized against, and the TCA it is decided on, in a sampled row of several burns (SPC-184).
+_NOMINAL_TRANSFER = "red's nominal transfer ({k} of its {n} burns)"
+_NOMINAL_TRANSFER_TCA = "RK45, red flying its nominal transfer, {k} of its {n} burns"
 #: Follows the lookup delta-V of a cell whose response names a target but whose closest approach is a lookup.
 _TARGET_UNUSED = (
     "No burn is shown for the {target:g} km target: it is sized against this cell's closest approach computed or "
@@ -3433,16 +3614,17 @@ def _propagator_gap(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics
 
     Red is measured on each sampled row's own arc, from its burn, which may be days before the window.
     """
+    binding = scenario.binding
+    red = None if binding is None else binding.red
     sampled = [
-        cast("AdversaryHypothesis", action.hypothesis).hypothesis
+        cast("RowBurns", _row_burns(action, red)).first
         for action, row in zip(scenario.adversary_actions, matrix, strict=True)
         if any(c.ca_percentiles is not None for c in row)
     ]
     computed = [c.ca_computed for row in matrix for c in row if c.ca_computed is not None]
     if not (sampled and computed) or computed[0].propagator == RESPONSE_PROPAGATOR:
         return None   # nothing to compare, or every figure is RK45 already (SPC-121)
-    binding = cast("ScenarioBinding", scenario.binding)
-    red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
+    red, blue = cast("BoundElset", red), cast("BoundElset", cast("ScenarioBinding", binding).blue)
     window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
     return rk45_sgp4_gap_km(red.tle, blue.tle, window, tuple(sampled))
 
@@ -3484,12 +3666,22 @@ def _cell(
 _CUSTODY_COMPUTED_NOTE = (
     "the bound red track {red}'s custody as the sweep judges it at the scenario epoch, {state}, carried over the "
     "{h:g} h horizon on the assumption that no newer element set arrives: lost once its newest element set passes "
-    "its limit or a hypothesised burn is newer than it; degraded counts as lost, since it cannot judge whether a "
-    "burn is normal; our response is not applied"
+    "its limit or a hypothesised burn is newer than it{degraded}; our response is not applied"
+)
+#: Inserted in _CUSTODY_COMPUTED_NOTE for custody degraded for some of the horizon (SPC-179).
+_DEGRADED_SPAN_NOTE = (
+    "; degraded, neither held nor lost, for {span} of the horizon, each such hour carrying {w:g} of the custody "
+    "penalty an hour lost carries (the owner's ruling of 2026-11-05), since degraded custody can judge the warning "
+    "time but not whether a burn is normal"
 )
 _CUSTODY_GAP_NOTE = (
     "hours of the horizon custody is lost from then, an upper bound, since a newer element set may arrive sooner; "
     "our response is not applied"
+)
+#: _CUSTODY_GAP_NOTE for custody degraded for some of the horizon: its degraded hours are not lost hours (SPC-179).
+_DEGRADED_GAP_NOTE = (
+    "hours of the horizon custody is lost, an upper bound, since a newer element set may arrive sooner; the hours "
+    "it is degraded, {span}, are not lost hours and are not in this gap; our response is not applied"
 )
 _WORST_CASE_NOTE = (
     "worst case: this manoeuvre names no burn time, so the burn is taken at the scenario epoch and custody is lost "
@@ -3506,7 +3698,11 @@ CUSTODY_NOTE = (
     "the assumption that no newer element set arrives, so each custody gap is an upper bound. Our response is not "
     "applied to custody yet: a sensor retask that would bring a newer element set sooner is not modelled, so every "
     "response in a row has the same custody. Degraded custody can judge the warning time but not whether a burn "
-    "is normal, so it counts as lost. " + CUSTODY_BASIS
+    "is normal, so the hours it is degraded are shown as degraded, neither held nor lost: each carries "
+    f"{DEGRADED_CUSTODY_WEIGHT:g} of the custody penalty an hour lost carries, the owner's ruling of 2026-11-05 "
+    "rather than a sourced figure, and the custody gap counts only the hours lost. Like held custody, it is lost "
+    "once its newest element set passes its limit or a burn is newer than it, and a manoeuvre that names no burn "
+    "time takes the worst case. " + CUSTODY_BASIS
 )
 #: Follows the rule-of-thumb line when no red track is bound (SPC-123).
 CUSTODY_BIND_RED = "Bind a red track to compute it from its element set and history."
@@ -3522,12 +3718,28 @@ class _RowCustody(NamedTuple):
     state:      Custody | None   # at the scenario epoch when computed; None for the worst case, a lookup
     bases:      tuple[FigureBasis, FigureBasis]
     sentence:   str
+    degraded_hours: float = 0.0  # not in gap_hours (SPC-179)
 
 
 def _custodial(figures: _Figures, custody: _RowCustody | None) -> _Figures:
     if custody is None:
         return figures
-    return figures._replace(custody_maintained=custody.maintained, custody_gap_hours=custody.gap_hours)
+    return figures._replace(
+        custody_maintained=custody.maintained, custody_gap_hours=custody.gap_hours,
+        custody_degraded_hours=custody.degraded_hours,
+    )
+
+
+def custody_bases(red: str, over: CustodyOverHorizon, note: str, horizon_h: float) -> tuple[FigureBasis, FigureBasis]:
+    """Custody and its gap, computed from *over*, with *note* formatted for *red*: each says so where custody is
+    degraded for some of the horizon, and the gap counts its lost hours only (SPC-179). The game tree's sequences
+    share it with the matrix's rows."""
+    d = over.degraded_hours
+    span = span_text(d)
+    degraded = _DEGRADED_SPAN_NOTE.format(span=span, w=DEGRADED_CUSTODY_WEIGHT) if d > 0.0 else ""
+    gap = _DEGRADED_GAP_NOTE.format(span=span) if d > 0.0 else _CUSTODY_GAP_NOTE
+    custody = note.format(red=red, state=over.at_epoch.value, h=horizon_h, degraded=degraded)
+    return FigureBasis(Basis.COMPUTED, custody), FigureBasis(Basis.COMPUTED, gap)
 
 
 def _custody_bases(bases: OutcomeBases, custody: _RowCustody | None) -> OutcomeBases:
@@ -3546,7 +3758,9 @@ def _row_custody(action: AdversaryAction, red: BoundElset, scenario: Scenario) -
     Custody lost from the epoch already is lost whatever the burn time, so it is computed for every row.
     """
     h = scenario.horizon_hours
-    burn = None if action.hypothesis is None else action.hypothesis.hypothesis.epoch_utc
+    burns = _row_burns(action, red)
+    # The earliest burn the row applies (SPC-184); its first, which custody passes over, when it applies none.
+    burn = None if burns is None else burns.first.epoch_utc
     over = custody_over_horizon(
         cast("CustodyStatus", red.custody), elset_hours=red.age_hours, limit_hours=red.limit_hours,
         horizon=Horizon(scenario.epoch_utc, h, burn),
@@ -3554,9 +3768,8 @@ def _row_custody(action: AdversaryAction, red: BoundElset, scenario: Scenario) -
     if action.hypothesis is None and action.action_type is ActionType.MANOEUVRE and not over.lost_from_epoch:
         worst = (FigureBasis(Basis.LOOKUP, _WORST_CASE_NOTE), FigureBasis(Basis.LOOKUP, _WORST_CASE_GAP_NOTE))
         return _RowCustody(False, h, None, worst, _WORST_CASE.format(h=h))
-    note = _CUSTODY_COMPUTED_NOTE.format(red=red.stk_name, state=over.at_epoch.value, h=h)
-    computed = (FigureBasis(Basis.COMPUTED, note), FigureBasis(Basis.COMPUTED, _CUSTODY_GAP_NOTE))
-    return _RowCustody(over.maintained, over.lost_hours, over.at_epoch, computed, over.sentence)
+    computed = custody_bases(red.stk_name, over, _CUSTODY_COMPUTED_NOTE, h)
+    return _RowCustody(over.maintained, over.lost_hours, over.at_epoch, computed, over.sentence, over.degraded_hours)
 
 
 def _custody_plan(scenario: Scenario) -> tuple[_RowCustody | None, ...]:
@@ -3834,6 +4047,30 @@ def _hypothesis_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
     )
 
 
+_STARTS_LATER = (
+    "Starts at burn {k}, {at:%Y-%m-%d %H:%M} UTC, {h:+.1f} h from the scenario epoch, from the bound red track's "
+    "state then: {before} not applied."
+)
+
+
+def _start_line(burns: RowBurns | None, scenario_epoch: datetime) -> str | None:
+    """The burn line of a row whose series starts at a later burn than its first, burn 1 dropped (SPC-184)."""
+    if burns is None or burns.all_dropped or burns.applied[0] == 1:
+        return None
+    k, at = burns.applied[0], burns.first.epoch_utc
+    before = "the burn before it is" if k == 2 else "the burns before it are"   # noqa: PLR2004 - burn 1 alone
+    return _STARTS_LATER.format(k=k, at=at, h=(at - scenario_epoch).total_seconds() / 3600.0, before=before)
+
+
+def _transfer_inputs(scenario: Scenario, transfers: Sequence[RowBurns | None]) -> tuple[InputRef, ...]:
+    """Each row of several burns, as every burn it applies and every burn it drops (SPC-184)."""
+    return tuple(
+        value_input(f"transfer {action.id}", burns.recorded())
+        for action, burns in zip(scenario.adversary_actions, transfers, strict=True)
+        if burns is not None and burns.several
+    )
+
+
 def _prior_inputs(scenario: Scenario) -> tuple[InputRef, ...]:
     """Each NOTSO suggestion the operator applied, as a lookup input dated at the end of its span (SPC-130)."""
     return tuple(
@@ -3909,12 +4146,15 @@ def _evaluate(
     plan = _plan_sampling(scenario, sampler, budget, pre, keep_at_s)
     computed = _plan_computed(scenario, pre, budget)
     custody = _custody_plan(scenario)
+    red = None if scenario.binding is None else scenario.binding.red
+    transfers = tuple(_row_burns(action, red) for action in scenario.adversary_actions)
+    end = scenario.epoch_utc + timedelta(seconds=_searched_span_s(scenario))
     outcome_matrix = [
         [
-            _cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held), j)
+            _burns_named(_cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held), j), burns, end)
             for j, friendly in enumerate(scenario.friendly_responses)
         ]
-        for adversary, sampling, held in zip(scenario.adversary_actions, plan, custody, strict=True)
+        for adversary, sampling, held, burns in zip(scenario.adversary_actions, plan, custody, transfers, strict=True)
     ]
     _require_one_propagator(outcome_matrix)
 
@@ -3938,12 +4178,15 @@ def _evaluate(
         computation_time_s=round(wall_time, 4),
         provenance=provenance(
             [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario),
-             *_prior_inputs(scenario)],
+             *_transfer_inputs(scenario, transfers), *_prior_inputs(scenario)],
         ),
         row_notes=_row_notes(scenario, plan),
         propagator_gap_km=_propagator_gap(scenario, outcome_matrix),
         row_custody=tuple(None if c is None else c.sentence for c in custody),
         rk45_reference=_rk45_reference(computed),
+        row_transfers=tuple(None if burns is None else transfer_sentence(burns, end) for burns in transfers),
+        row_starts=tuple(_start_line(burns, scenario.epoch_utc) for burns in transfers),
+        row_burns=transfers,
     )
     return result, TurnOne(pre, plan, computed, budget)
 

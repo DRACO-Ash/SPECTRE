@@ -39,7 +39,9 @@ from spectre.astro.response_burn import RESPONSE_PROPAGATOR, BurnAxis, SizedBurn
 from spectre.domain import decision
 from spectre.domain.decision import (
     BINDING_NOTE,
+    EVALUATION_BUDGET_S,
     MAX_SAMPLE_HOURS,
+    SET_UP_S_PER_SAMPLE,
     ActionType,
     AdversaryAction,
     AdversaryHypothesis,
@@ -384,20 +386,23 @@ class TestTheCost:
         )
 
     def test_the_cap_counts_burns(self) -> None:
-        """39: 500 samples over 3.5 h fit with no burn and not with five."""
-        assert needs_a_run(self._five(3.5, 0))
-        scenario = self._five(3.5, 5)
+        """39: 500 samples over 9 h fit with no burn and not with five; with five, 8.8 h is the longest that fits."""
+        assert longest_horizon_h(500, burns=5) < 9.0 <= longest_horizon_h(500)
+        assert needs_a_run(self._five(9.0, 0))
+        scenario = self._five(9.0, 5)
         assert not needs_a_run(scenario)
         refusal = evaluate_scenario(scenario, sampler=_Fake()).outcome_matrix[0][0].ca_refusal
         assert refusal is not None and "with 5 of our burns to size" in refusal
-        assert "the longest horizon that fits is 3.4 h" in refusal
+        assert f"the longest horizon that fits is {longest_horizon_h(500, burns=5)} h" in refusal
         assert f"{MAX_SAMPLE_HOURS:,.0f}" in refusal
 
-    def test_the_longest_horizon_counts_burns(self) -> None:
-        """40."""
-        assert longest_horizon_h(500) == pytest.approx(9.4)
-        assert longest_horizon_h(500, burns=1) == pytest.approx(7.0)
-        assert longest_horizon_h(500, burns=5) == pytest.approx(3.4)
+    @pytest.mark.parametrize("burns", [0, 1, 5])
+    def test_the_longest_horizon_counts_burns(self, burns: int) -> None:
+        """40: each burn adds 0.3 of a search per sample, 16 sizing trials and blue's burnt arc to every row."""
+        m = 500 * (1.0 + 0.3 * burns) + 16 * burns
+        hours = (MAX_SAMPLE_HOURS - m * SET_UP_S_PER_SAMPLE / 3600.0) / (m + 2 + burns)
+        assert longest_horizon_h(500, burns=burns) == pytest.approx(math.floor(hours * 10) / 10)
+        assert longest_horizon_h(500, burns=5) < longest_horizon_h(500, burns=1) < longest_horizon_h(500)
 
     def test_computed_rows_with_a_burning_response_need_a_run(self) -> None:
         """41."""
@@ -413,7 +418,7 @@ class TestTheBudget:
         def stop() -> str | None:
             return "you cancelled it" if seen else None
 
-        run = RunControl(budget_s=120.0, stop=stop, progress=seen.append, clock=lambda: 0.0)
+        run = RunControl(budget_s=EVALUATION_BUDGET_S, stop=stop, progress=seen.append, clock=lambda: 0.0)
         with pytest.raises(EvaluationStoppedError, match="cancelled"):
             evaluate_scenario(_computed_scenario(_hold(), _avoid()), run=run)
         assert len(seen) == 1
@@ -422,11 +427,12 @@ class TestTheBudget:
 
     def test_a_spent_budget_refuses_the_burn_by_name(self) -> None:
         ticks = iter(range(1000))
-        run = RunControl(budget_s=120.0, stop=lambda: None, clock=lambda: 200.0 * next(ticks))
+        past = 2 * EVALUATION_BUDGET_S   # each reading of the clock is past the budget after the first
+        run = RunControl(budget_s=EVALUATION_BUDGET_S, stop=lambda: None, clock=lambda: past * next(ticks))
         result = evaluate_scenario(_computed_scenario(_hold(), _avoid()), run=run)
         cell = _cell(result)
         assert cell.ca_response is None
-        assert cell.response_refusal is not None and "120 s budget ran out" in cell.response_refusal
+        assert cell.response_refusal is not None and f"{EVALUATION_BUDGET_S:g} s budget ran out" in cell.response_refusal
 
 
 class TestWhatTheResultSays:

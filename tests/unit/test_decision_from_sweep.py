@@ -216,12 +216,15 @@ class TestWhatCannotBeBound:
         ) in prefill.left
 
     def test_a_transfer_too_long_for_the_budget_at_the_fewest_samples_says_the_engine_will_refuse_it(self) -> None:
-        # Burn at +1 h and 60 h of flight: a 62 h horizon, past the 46.9 h that 100 samples on one row fit.
-        prefill = _open(_state(_entry(tof_hours=60.0)))
-        assert prefill.horizon_h == "62"
+        # Burn at +1 h and 120 h of flight: a 122 h horizon, past what 100 samples on one row fit (117.5 h under
+        # the 300 s budget, SPC-178).
+        fits = decision.longest_horizon_h(100)
+        assert fits < 122
+        prefill = _open(_state(_entry(tof_hours=120.0)))
+        assert prefill.horizon_h == "122"
         assert prefill.rows[0].samples == 100
         assert (
-            "At 100 samples a row the evaluation's budget covers about 46.9 h, short of the 62 h this scenario "
+            f"At 100 samples a row the evaluation's budget covers about {fits} h, short of the 122 h this scenario "
             "needs, so the engine will refuse it as over its budget: remove a row, or shorten the horizon, which "
             "then ends before the arrival."
         ) in prefill.left
@@ -330,10 +333,11 @@ class TestTheDetectedBurn:
         assert not any("element-set history was fetched" in s for s in prefill.left)
 
     def test_two_sampled_rows_take_fewer_samples_to_fit_the_budget(self) -> None:
-        state = _state(elset_histories={50322: _history(_burn(_NOW - timedelta(hours=4)))})
+        state = _state(_entry(tof_hours=20.0), elset_histories={50322: _history(_burn(_NOW - timedelta(hours=4)))})
         prefill = _open(state)
-        # A burn after the held red set's epoch is sampled. Two rows over 7 h of horizon plus the 4 h since the
-        # detected burn: 200 samples fit 11.7 h.
+        # A burn after the held red set's epoch is sampled. Two rows over 22 h of horizon plus the 4 h since the
+        # detected burn: 26 h, which 250 samples a row do not fit and 200 do.
+        assert decision.longest_horizon_h(250, rows=2) < 26 <= decision.longest_horizon_h(200, rows=2)
         assert [row.sampled for row in prefill.rows] == [True, True]
         assert [row.samples for row in prefill.rows] == [200, 200]
 

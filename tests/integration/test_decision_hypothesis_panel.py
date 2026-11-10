@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
-from spectre.domain.decision import AdversaryHypothesis, Scenario, pre_manoeuvre_state
+from spectre.domain.decision import AdversaryHypothesis, Scenario, longest_horizon_h, pre_manoeuvre_state
 from spectre.domain.manoeuvre_calibration import from_km_s
 from spectre.web.decision_job import DecisionJob
 from spectre.web.routes import decision as decision_routes
@@ -127,11 +127,11 @@ class TestThePanel:
     def test_the_hint_names_the_longest_horizon_that_fits(self, client: Any, auth_cookie: str) -> None:
         """H14."""
         flat = " ".join(_panel(client, auth_cookie).split())
-        assert "a horizon up to about 9.4 h fits" in flat
+        assert f"a horizon up to about {longest_horizon_h(500)} h fits" in flat
         assert "Starts from the bound red track's state at the burn time." in flat
 
     def test_the_horizon_field_takes_the_tenths_the_hint_names(self, client: Any, auth_cookie: str) -> None:
-        """A step of 1 h made the browser refuse the 9.4 h the hint offers; the server takes any positive horizon.
+        """A step of 1 h made the browser refuse the tenths the hint offers; the server takes any positive horizon.
 
         The hint and the cap's refusal name tenths (0.3 h at 2,000 samples over 5 rows), so the field steps in tenths
         from 0.1 h.

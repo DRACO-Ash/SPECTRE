@@ -1066,9 +1066,11 @@ _FAILED = "failed"
 _REENTERED = "re-entered"
 
 
-def run_separation_series(
+# PLR0913: three positional inputs, then one keyword per thing a caller may ask of the series, each optional.
+def run_separation_series(  # noqa: PLR0913
     hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, *, tick: Tick | None = None,
     blue_burns: Sequence[BlueBurn] = (), keep_at_s: Sequence[float] = (),
+    red_then: Sequence[ManoeuvreHypothesis] = (),
 ) -> SeparationSeries:
     """Each sample's closest approach to *blue* in *window*, with P5, P50 and P95 of the misses.
 
@@ -1109,6 +1111,13 @@ def run_separation_series(
     those times, seconds after the window start, and its smallest separation from each blue between the window
     start and the first of them, so a game tree's next turn can start where this one left each sample. Keeping
     changes no figure.
+
+    Each of *red_then* (SPC-184) is a later burn of the same transfer, one action with the first: each sample makes
+    it after the first, in time order, at its own time plus its own drawn timing offset, with its own drawn delta-V
+    and B* after it, in the RIC frame of the sample's own state then, from the burn's own seed. Its epoch, delta-V,
+    direction, spreads and seed are read; its pre-manoeuvre state is not. A later burn whose drawn time falls before
+    the sample's first burn is made at the first. The series integrates red from its first burn on, as with one
+    burn, so its cost does not grow with the burns.
     """
     _check_window(window, blue)
     _check_burns(blue_burns)
@@ -1116,7 +1125,8 @@ def run_separation_series(
     samples = generate_samples(hypothesis)
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     keeper = _Keeper(keep_at_s, len(samples), 1 + len(blue_burns), window) if keep_at_s else None
-    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns, keeper))
+    later = _later_draws(red_then, len(samples), window)
+    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns, keeper, later))
     seed = hypothesis.random_seed or 0
     series = _series_of(
         window, [outcome[0] for outcome in outcomes], _Ran(hypothesis.random_seed, t_start, keeper),
@@ -1212,21 +1222,26 @@ def burnt_arc(arc: _Trajectory, burn: BlueBurn, end_s: float, bstar: float) -> _
     return None if after is None else _spliced(arc, after, burn.at_s)
 
 
-def nominal_red_arc(hypothesis: ManoeuvreHypothesis, window: SeparationWindow) -> _Trajectory | None:
+def nominal_red_arc(
+    hypothesis: ManoeuvreHypothesis, window: SeparationWindow, then: Sequence[ManoeuvreHypothesis] = (),
+) -> _Trajectory | None:
     """Red with the hypothesis's nominal burn, undispersed, over *window*; None when it cannot be integrated.
 
     What our burn is sized against in a sampled row (SPC-121): the burn of the hypothesis as stated, before any
-    spread is drawn.
+    spread is drawn. *then* holds the later burns of the same transfer (SPC-184), each made as stated after it.
     """
-    parts = np.array([hypothesis.delta_v_radial, hypothesis.delta_v_in_track, hypothesis.delta_v_cross_track])
-    norm = float(np.linalg.norm(parts))
-    unit = parts / norm if norm >= _ZERO_DV_KM_S else np.array([0.0, 1.0, 0.0])
-    nominal = np.array([*(hypothesis.delta_v_magnitude_km_s * unit), 0.0, 0.0])
+    nominal = _nominal_draw(hypothesis)
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     try:
         unburnt = _unburnt_arc(hypothesis, min(0.0, burn_s), window.span_s, burn_s)
         if unburnt is None:
             return None
+        if then:
+            burns = [RedBurn(burn_s, nominal[:3], hypothesis.bstar_post)] + [
+                RedBurn((h.epoch_utc - window.start_utc).total_seconds(), _nominal_draw(h)[:3], h.bstar_post)
+                for h in then
+            ]
+            return _chained_red(unburnt, burns, hypothesis.bstar_post, window)
         return _sample_red(nominal, unburnt, burn_s, hypothesis.bstar_post, window)
     except (ReenteredError, ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
         return None
@@ -1294,6 +1309,8 @@ class _Hooks(NamedTuple):
     blue_burns: Sequence[BlueBurn] = ()
     # Keeps each sample's state at a game tree's turn boundary (SPC-140); None when none was asked for.
     keeper: _Keeper | None = None
+    # Per sample, the later burns of its transfer as drawn (SPC-184); empty for a single burn.
+    later: tuple[tuple[RedBurn, ...], ...] = ()
 
 
 def _approaches(
@@ -1306,7 +1323,7 @@ def _approaches(
     so its excepts never swallow what a tick raises; the exception propagates and no result is returned. When the
     shared arcs fail, no sample runs and no tick is called.
     """
-    tick, blue_burns, keeper = hooks
+    tick, blue_burns, keeper, later = hooks
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     earliest = _earliest_s(burn_s + samples[:, 3])
     try:
@@ -1321,7 +1338,8 @@ def _approaches(
     outcomes: list[tuple[Sampled | str, ...]] = []
     for k, sample in enumerate(samples):
         keep = None if keeper is None else functools.partial(keeper.keep, k, blues)
-        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window, blues, keep))
+        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window, blues, keep,
+                                    later[k] if later else ()))
         if tick is not None:
             tick(len(outcomes), len(samples))
     return outcomes
@@ -1388,17 +1406,23 @@ def _spliced(before: _Trajectory, after: _Trajectory, at_s: float) -> _Trajector
     return lambda t: before(t) if t < at_s else after(t)
 
 
-def _try_sample(
+def _try_sample(  # noqa: PLR0913, PLR0917 - one sample's draw, its shared arcs and what it is searched against
     sample: np.ndarray, arcs: _Arcs, bstar_post: float, window: SeparationWindow,
     blues: Sequence[_Trajectory | str], keep: Callable[[_RedArc], None] | None = None,
+    later: tuple[RedBurn, ...] = (),
 ) -> tuple[Sampled | str, ...]:
     """One sample's red, built once, searched against each of *blues*: its approach to each, or why there is none.
 
     A red that cannot be had fails the sample against every blue; a blue that cannot be had, or a search against
     it that fails, fails the sample against that blue alone. *keep*, when given, hears the sample's red (SPC-140).
+    *later* holds the sample's later burns of the same transfer, as drawn (SPC-184).
     """
+    first = RedBurn(arcs.burn_s + float(sample[3]), sample[:3].copy(), bstar_post + float(sample[4]))
     try:
-        red = _sample_red(sample, arcs.unburnt, arcs.burn_s, bstar_post, window)
+        if later:
+            red = _chained_red(arcs.unburnt, (first, *later), bstar_post, window)
+        else:
+            red = _sample_red(sample, arcs.unburnt, arcs.burn_s, bstar_post, window)
     except ReenteredError:
         return (_REENTERED,) * len(blues)
     except (ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
@@ -1406,8 +1430,7 @@ def _try_sample(
     if red is None:
         return (_FAILED,) * len(blues)
     if keep is not None:
-        burn = RedBurn(arcs.burn_s + float(sample[3]), sample[:3].copy(), bstar_post + float(sample[4]))
-        keep(_RedArc(red, bstar_post, (burn,)))
+        keep(_RedArc(red, bstar_post, (first, *later)))
     return tuple(_search_or_fail(red, blue, window) for blue in blues)
 
 
@@ -1432,6 +1455,45 @@ def _sample_red(
     state[3:] += _ric_to_eci_rotation(state[:3], state[3:]) @ sample[:3]
     burnt = _dense_arc(state, burn_s, window.span_s, bstar_post + float(sample[4]))
     return None if burnt is None else _spliced(unburnt, burnt, burn_s)
+
+
+def _later_draws(
+    later: Sequence[ManoeuvreHypothesis], n: int, window: SeparationWindow,
+) -> tuple[tuple[RedBurn, ...], ...]:
+    """Per sample, each later burn of the transfer as drawn from its own spreads and seed (SPC-184); empty for none.
+
+    Each burn's draws come from generate_samples at the series' sample count, so sample k's draw of burn j is the
+    same whichever other burns the row carries.
+    """
+    if not later:
+        return ()
+    timed = [
+        ((h.epoch_utc - window.start_utc).total_seconds(), h.bstar_post, generate_samples(replace(h, n_samples=n)))
+        for h in later
+    ]
+    return tuple(
+        tuple(RedBurn(at_s + float(draws[k, 3]), draws[k, :3].copy(), bstar + float(draws[k, 4]))
+              for at_s, bstar, draws in timed)
+        for k in range(n)
+    )
+
+
+def _chained_red(
+    unburnt: _Trajectory, burns: Sequence[RedBurn], bstar: float, window: SeparationWindow,
+) -> _Trajectory | None:
+    """Red unburnt until the first of *burns*, then making each in time order to the window end (SPC-184).
+
+    A later burn drawn before the first is made at the first, so red never burns before its transfer starts. None
+    when a solve fails; ReenteredError below the floor.
+    """
+    first, *rest = burns
+    start = first.at_s
+    if start >= window.span_s:
+        return unburnt
+    # _continued_red makes them in time order; the first stays first, since none is made before it.
+    clamped = (first, *(b._replace(at_s=max(b.at_s, start)) for b in rest))
+    red = _continued_red(unburnt(start).copy(), bstar, clamped, window.span_s, start_s=start)
+    return None if red is None else _spliced(unburnt, red.arc, start)
 
 
 def searched_approach(red: _Trajectory, blue: _Trajectory, window: SeparationWindow) -> Sampled:
@@ -1590,12 +1652,15 @@ def _drawn_burns(burn: TurnBurn | None, draw: np.ndarray | None) -> tuple[RedBur
     return (RedBurn(at_s, draw[:3].copy(), burn.hypothesis.bstar_post + float(draw[4])),)
 
 
-def _continued_red(state: np.ndarray, bstar: float, burns: Sequence[RedBurn], span_s: float) -> _RedArc | None:
-    """Red from *state* at the window start over *span_s*, making each of *burns* that falls inside the window, in
-    time order, in the RIC frame of its state then. None when a solve fails; ReenteredError below the floor."""
+def _continued_red(
+    state: np.ndarray, bstar: float, burns: Sequence[RedBurn], span_s: float, *, start_s: float = 0.0,
+) -> _RedArc | None:
+    """Red from *state* at *start_s* (the window start unless given) to *span_s*, making each of *burns* that falls
+    before *span_s*, in time order, in the RIC frame of its state then. None when a solve fails; ReenteredError
+    below the floor."""
     ordered = tuple(sorted(burns, key=lambda burn: burn.at_s))
     arc: _Trajectory | None = None
-    t_s, at, flying = 0.0, state, bstar
+    t_s, at, flying = start_s, state, bstar
     for burn in (b for b in ordered if b.at_s < span_s):
         leg = _dense_arc(at, t_s, burn.at_s, flying)
         if leg is None:

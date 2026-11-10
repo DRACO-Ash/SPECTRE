@@ -21,6 +21,7 @@ import pytest
 
 from spectre.astro.monte_carlo import BlueTrack, ManoeuvreHypothesis, SeparationSeries, SeparationWindow, Tick
 from spectre.domain.decision import (
+    EVALUATION_BUDGET_S,
     EvaluationStoppedError,
     RunControl,
     SamplingProgress,
@@ -68,7 +69,7 @@ class _Ticking:
 
 
 def _run(
-    clock: _Clock, *, budget_s: float = 120.0, stop: Callable[[], str | None] = lambda: None,
+    clock: _Clock, *, budget_s: float = EVALUATION_BUDGET_S, stop: Callable[[], str | None] = lambda: None,
     progress: Callable[[SamplingProgress], None] | None = None,
 ) -> RunControl:
     if progress is None:
@@ -80,12 +81,19 @@ def _refusals(result: Any, row: int) -> set[str | None]:
     return {cell.ca_refusal for cell in _cells(result, row)}
 
 
+#: The product's budget as the refusal names it, and the samples done within it at 10 s a sample, fewer than 50.
+_BUDGET = f"{EVALUATION_BUDGET_S:g}"
+_DONE_AT_10_S = int(EVALUATION_BUDGET_S // 10.0)
+
+
 def test_a_row_that_runs_past_the_budget_names_the_samples_done_within_it() -> None:
-    """B3: at 10 s a sample, the 13th finishes at 130 s, past 120 s, so 12 were done when the budget ran out."""
+    """B3: at 10 s a sample, the one after EVALUATION_BUDGET_S / 10 finishes past the budget, so that many were
+    done when the budget ran out (30 of 50 at 300 s)."""
+    assert _DONE_AT_10_S < 50
     sampler = _Ticking()
     result = evaluate_scenario(_bound(), sampler=sampler, run=_run(_Clock(10.0)))
     assert sampler.calls == 1
-    assert _refusals(result, 0) == {_PART.format(budget=120, k=12, n=50)}
+    assert _refusals(result, 0) == {_PART.format(budget=_BUDGET, k=_DONE_AT_10_S, n=50)}
     assert all(cell.ca_percentiles is None for cell in _cells(result, 0))
 
 
@@ -94,8 +102,8 @@ def test_rows_after_a_spent_budget_are_refused_without_starting() -> None:
     sampler = _Ticking()
     result = evaluate_scenario(_bound({0: _evasive(), 1: _evasive()}), sampler=sampler, run=_run(_Clock(10.0)))
     assert sampler.calls == 1
-    assert _refusals(result, 0) == {_PART.format(budget=120, k=12, n=50)}
-    assert _refusals(result, 1) == {_NONE.format(budget=120)}
+    assert _refusals(result, 0) == {_PART.format(budget=_BUDGET, k=_DONE_AT_10_S, n=50)}
+    assert _refusals(result, 1) == {_NONE.format(budget=_BUDGET)}
 
 
 def test_a_first_row_inside_the_budget_is_sampled_and_a_second_past_it_refused() -> None:
@@ -199,7 +207,7 @@ class TestNeedsARun:
         assert needs_a_run(_bound({0: _evasive(49)})) is False
 
     def test_a_scenario_over_the_cap_needs_no_run(self) -> None:
-        assert needs_a_run(_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=4.7)) is False
+        assert needs_a_run(_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=11.9)) is False
 
     def test_an_unbound_hypothesis_needs_no_run(self) -> None:
         assert needs_a_run(_scenario({0: _evasive()})) is False

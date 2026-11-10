@@ -25,6 +25,7 @@ from spectre.astro.along_track import position_error_km, shift_along_track
 from spectre.astro.constants import normalise_regime, regimes_compatible
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
+    Burn,
     InterceptSolution,
     bielliptic_intercept,
     hbar_hop_intercept,
@@ -57,6 +58,7 @@ from spectre.domain.manoeuvre_calibration import (
     to_km_s,
 )
 from spectre.domain.models import (
+    SweepBurn,
     ThreatActor,
     ThreatAssessment,
     ThreatSweepEntry,
@@ -653,6 +655,15 @@ def _phase_label(red_tle: str, target_tle: str | None, epoch: datetime) -> str:
     return f"{abs(angle):.1f}\u00b0 {side} the interceptor"
 
 
+def _sweep_burn(burn: Burn, departure: bool) -> SweepBurn:
+    """One burn of a transfer in m/s (SPC-184): the departure's VNB parts, as departure_m_s, or a later burn's parts
+    in red's own radial, in-track and cross-track frame, read as prograde, normal and radial."""
+    if departure or burn.own_ric is None:
+        return SweepBurn(burn.epoch, from_km_s(burn.dv_prograde), from_km_s(burn.dv_normal), from_km_s(burn.dv_radial))
+    radial, in_track, cross = burn.own_ric
+    return SweepBurn(burn.epoch, from_km_s(in_track), from_km_s(cross), from_km_s(radial))
+
+
 # PLR0913, PLR0917: one parameter per column of the row it builds.
 def _sol_to_entry(  # noqa: PLR0913, PLR0917
     sol: InterceptSolution,
@@ -677,6 +688,9 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
     dv_nor = 0.0
     dv_rad = 0.0
     departure: tuple[float, float, float] | None = None
+    # Every burn at its own time, m/s, for a scenario opened from the sweep (SPC-184): burn 1 as the departure, and
+    # each later burn split in red's own frame at its state then, where the engine applies it.
+    transfer = tuple(_sweep_burn(b, k == 0) for k, b in enumerate(sol.burns))
     if sol.burns:
         first = sol.burns[0]
         departure = (from_km_s(first.dv_prograde), from_km_s(first.dv_normal), from_km_s(first.dv_radial))
@@ -702,6 +716,7 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
         ).posture_label,
         arrives=arrives_at_target(method_name),
         departure_m_s=departure,
+        transfer_m_s=transfer,
     )
 
 

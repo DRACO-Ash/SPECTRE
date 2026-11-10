@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
+from typing import NamedTuple
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.manoeuvre_calibration import DEFAULT_SWEEP_BUDGET_M_S
@@ -410,6 +411,15 @@ class ThreatActor:
     manual: bool = False
 
 
+class SweepBurn(NamedTuple):
+    """One burn of a sweep entry's transfer: its own UTC time and its prograde, normal and radial parts, m/s."""
+
+    at_utc:   datetime
+    prograde: float
+    normal:   float
+    radial:   float
+
+
 @dataclass
 class ThreatSweepEntry:
     """One (target, epoch) intercept result."""
@@ -445,6 +455,9 @@ class ThreatSweepEntry:
     #: above sum every burn of the transfer, which is no one burn. None when
     #: the solution carried no burn.
     departure_m_s: tuple[float, float, float] | None = None
+    #: Every burn of the transfer, in time order, each at its own UTC time with its own parts in m/s (SPC-184):
+    #: what a scenario opened from the sweep carries. Empty when the solution carried no burn.
+    transfer_m_s: tuple[SweepBurn, ...] = ()
 
 
 @dataclass

@@ -149,3 +149,25 @@ class TestClaimsTheCodeBearsOut:
         source = _read("docs/generate_guide.py")
         assert "matching recommended COA —" not in source
         assert "completed + 50+" not in source
+
+
+class TestTheOwnersRulingsOf5November:
+    """SPC-178, SPC-179 and SPC-183, each an owner ruling of 2026-11-05, in both descriptions."""
+
+    def test_the_budget_is_300_s_and_the_cap_12000_sample_hours(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "300 s" in text and "12,000 sample-hours" in text
+            assert "120 s budget" not in text and "4,800 sample-hours" not in text
+
+    def test_the_hint_names_what_fits_at_the_new_cap(self) -> None:
+        assert "about 23.7 h fits at 500 samples with no burn to size" in _flat(_read("docs/decision_engine_phases.md"))
+
+    def test_degraded_custody_scores_between_held_and_lost(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "Degraded custody counts as lost" not in text
+            assert "0.25 of the custody penalty an hour lost carries" in text
+
+    def test_an_untouched_probability_is_one_the_form_records_as_never_edited(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "never edited" in text
+            assert "P is the untouched default" not in text

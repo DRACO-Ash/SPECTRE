@@ -14,9 +14,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from spectre.domain.custody import span_text
 from spectre.domain.decision import ScenarioResult, SelectorStrategy
 from spectre.domain.decision_figures import TcaUncertainty
-from spectre.domain.decision_tree import GameNode, GameTree
+from spectre.domain.decision_tree import GameNode, GameTree, PathFigures
 from spectre.domain.provenance import FigureBasis
 from spectre.domain.tree_selectors import OBSERVED_NO_PICK, TreeSelection, follows_picks
 from spectre.web.format_units import format_m_s, to_m_s
@@ -52,7 +53,22 @@ _IN_HOURS = "; shown here in hours after the scenario epoch, no finer than its u
 _NO_UNCERTAINTY_NOTE = "No uncertainty is recorded for this time."
 _HELD = "held over the {h:g} h horizon"
 _LOST = "lost for up to {gap:.1f} h of the {h:g} h horizon"
+#: Custody degraded for some of the horizon (SPC-179), never shown as held or lost, and its hours never as lost.
+_DEGRADED = "degraded, neither held nor lost, for {d} of the {h:g} h horizon"
+_DEGRADED_THEN_LOST = "degraded, neither held nor lost, for {d}, then lost for up to {gap:.1f} h of the {h:g} h horizon"
 _SCORE = "{score:.3f}, lower is better"
+
+
+def custody_value(path: PathFigures, horizon_h: float) -> str:
+    """A sequence's custody in words: held, lost for how long, or degraded for how long and then lost (SPC-179)."""
+    if path.custody_maintained:
+        return _HELD.format(h=horizon_h)
+    degraded = getattr(path, "custody_degraded_hours", 0.0)
+    if degraded == 0.0:
+        return _LOST.format(gap=path.custody_gap_hours, h=horizon_h)
+    if path.custody_gap_hours == 0.0:
+        return _DEGRADED.format(d=span_text(degraded), h=horizon_h)
+    return _DEGRADED_THEN_LOST.format(d=span_text(degraded), gap=path.custody_gap_hours, h=horizon_h)
 
 
 @dataclass(frozen=True)
@@ -167,9 +183,7 @@ class _Builder:
         bases, path = node.figures.bases, node.path
         horizon = self.result.scenario.horizon_hours
         maintained, gap = path.custody_bases
-        custody = _HELD.format(h=horizon) if path.custody_maintained else _LOST.format(
-            gap=path.custody_gap_hours, h=horizon,
-        )
+        custody = custody_value(path, horizon)
         tca = node.figures.tca_uncertainty
         when = _when(node.figures.tca_utc, self.result.scenario.epoch_utc, tca)
         timed = FigureBasis(bases.time_to_closest_hours.kind, _when_note(bases.time_to_closest_hours.note, tca))

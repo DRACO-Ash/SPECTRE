@@ -19,6 +19,7 @@ from spectre.astro.monte_carlo import BlueBurn, SeparationWindow
 from spectre.astro.response_burn import BurnRefusal, Rk45Plan
 from spectre.domain import decision
 from spectre.domain.decision import (
+    EVALUATION_BUDGET_S,
     ActionType,
     AdversaryAction,
     RunControl,
@@ -206,7 +207,7 @@ class TestTheJobPage:
         scenario = _sampled_scenario(_hold(), _avoid(name=" "), n=50)
         scenario.adversary_actions.append(AdversaryAction("A1", "Drift", ActionType.NO_ACTION, 0.5, 0.7))
         progress: list[SamplingProgress] = []
-        run = RunControl(budget_s=120.0, stop=lambda: None, progress=progress.append, clock=lambda: 0.0)
+        run = RunControl(budget_s=EVALUATION_BUDGET_S, stop=lambda: None, progress=progress.append, clock=lambda: 0.0)
         evaluate_scenario(scenario, sampler=_Ticking(), run=run)
         return progress
 

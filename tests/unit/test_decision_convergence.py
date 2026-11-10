@@ -42,6 +42,7 @@ from spectre.astro.monte_carlo import (
 )
 from spectre.domain.decision import (
     CONVERGED_MEANS,
+    MAX_SAMPLE_HOURS,
     AdversaryHypothesis,
     BoundElset,
     PreManoeuvreState,
@@ -147,7 +148,7 @@ class TestWhatThePageSays:
         assert cell.ca_refusal == (
             "Not sampled: P5, P50 and P95 are known only to within 6.2 km, wider than the 5.0 km this miss needs (1 km, "
             "or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the "
-            "4,800 sample-hour cap." + _LOOKUPS
+            f"{MAX_SAMPLE_HOURS:,.0f} sample-hour cap." + _LOOKUPS
         )
 
     def test_converged_means_is_on_the_sampled_page(self) -> None:

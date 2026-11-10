@@ -57,6 +57,10 @@ class Burn:
     dv_prograde: float = 0.0  # km/s — along-track component
     dv_normal: float = 0.0    # km/s — cross-track component
     dv_radial: float = 0.0    # km/s — radial component
+    # km/s: radial, in-track and cross-track in the burning object's own frame at its state just before the burn,
+    # the frame the Decision Engine applies a burn in (SPC-184). The parts above are split at whichever state the
+    # solver passed, which for a Lambert arrival burn is the target's. None for a burn of no size.
+    own_ric: tuple[float, float, float] | None = None
 
 
 @dataclass
@@ -145,7 +149,8 @@ def lambert_intercept(
 
     # Decompose delta-V into VNB (prograde/normal/radial) frame.
     burn1 = _make_burn(1, t_departure, sol.delta_v1, sv_red)
-    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_blue)
+    # Split at the target's state, as the sweep shows it; red's own frame there is the end of its transfer arc.
+    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_blue, own=StateVector(epoch=t_arrival, r=r_target, v=sol.v2))
 
     # Actual miss distance at arrival.
     _miss = float(np.linalg.norm(r_target - sv_blue.r)) if target_distance_km > 0 else 0.0
@@ -1689,7 +1694,9 @@ def min_time_intercept_wrapper(
     sol, sv_target = hit
     t_arrival = t_epoch + timedelta(seconds=hi)
     burn1 = _make_burn(1, t_epoch, sol.delta_v1, sv_red)
-    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_target)
+    burn2 = _make_burn(
+        2, t_arrival, sol.delta_v2, sv_target, own=StateVector(epoch=t_arrival, r=sv_target.r, v=sol.v2),
+    )
 
     return InterceptSolution(
         method="min_time",
@@ -1718,8 +1725,13 @@ def _make_burn(
     epoch: datetime,
     dv_eci: np.ndarray,
     sv: StateVector,
+    own: StateVector | None = None,
 ) -> Burn:
-    """Create a Burn with VNB decomposition from an ECI delta-V vector."""
+    """Create a Burn with VNB decomposition from an ECI delta-V vector.
+
+    The VNB parts are split at *sv*; ``own_ric`` at *own*, the burning object's own state just before the burn,
+    when *sv* is another object's (SPC-184), else at *sv*.
+    """
     mag = float(np.linalg.norm(dv_eci))
     if mag < 1e-14:
         return Burn(burn_number=number, epoch=epoch, delta_v=dv_eci, delta_v_mag=0.0)
@@ -1735,6 +1747,8 @@ def _make_burn(
     normal = float(np.dot(dv_eci, n_hat))
     radial = float(np.dot(dv_eci, b_hat))
 
+    mine = sv if own is None else own
+    ric = _eci_to_hill_matrix(mine.r, mine.v) @ dv_eci
     return Burn(
         burn_number=number,
         epoch=epoch,
@@ -1743,4 +1757,5 @@ def _make_burn(
         dv_prograde=prograde,
         dv_normal=normal,
         dv_radial=radial,
+        own_ric=(float(ric[0]), float(ric[1]), float(ric[2])),
     )

@@ -215,10 +215,10 @@ def _picture(understanding: tu.Understanding = tu.Understanding.LOW, **kw: Any) 
     return decision.ThreatPicture(**fields)
 
 
-def _scenario(picture: Any = None, *, probability: float = 0.3, bound: bool = True) -> Scenario:
+def _scenario(picture: Any = None, *, probability: float = 0.3, bound: bool = True, edited: bool = True) -> Scenario:
     adversary = [
         AdversaryAction(id="A1", name="Approach", action_type=ActionType.MANOEUVRE, probability=probability,
-                        confidence=0.6),
+                        confidence=0.6, probability_edited=edited),
         AdversaryAction(id="A2", name="Hold", action_type=ActionType.NO_ACTION, probability=0.7, confidence=0.4),
     ]
     friendly = [
@@ -372,10 +372,22 @@ class TestTheMinimaxGuidance:
         assert result.robust_strategy is SelectorStrategy.EXPECTED_VALUE   # recommended, never switched
 
     def test_expected_value_with_an_untouched_default_probability_says_so(self) -> None:
-        result = evaluate_scenario(_scenario(probability=decision.DEFAULT_PROBABILITY, bound=False),
+        """SPC-183: the form records that row 1's P was never edited, so it is the panel's default, untouched."""
+        result = evaluate_scenario(_scenario(probability=decision.DEFAULT_PROBABILITY, bound=False, edited=False),
                                    SelectorStrategy.EXPECTED_VALUE)
         assert result.objective_guidance is not None
         assert result.objective_guidance.startswith(self._GUIDANCE)
+
+    def test_a_deliberate_default_probability_is_not_read_as_untouched(self) -> None:
+        """SPC-183, the owner's ruling of 2026-11-05 (concept section 9, decision 11): a P the operator edited to
+        0.5 is theirs, so the guidance reads the record, not the value."""
+        scenario = _scenario(_picture(tu.Understanding.MODERATE), probability=decision.DEFAULT_PROBABILITY)
+        assert evaluate_scenario(scenario, SelectorStrategy.EXPECTED_VALUE).objective_guidance is None
+
+    def test_an_unedited_probability_is_the_panels_default(self) -> None:
+        """A P the form says was never edited holds the value the panel gave the row; anything else is refused."""
+        with pytest.raises(ValueError, match="not edited"):
+            _scenario(probability=0.3, edited=False)
 
     def test_expected_value_on_a_bound_red_track_with_no_picture_says_so(self) -> None:
         """Understanding not assessed is not earned: the cautious reading gives the guidance, saying only what the

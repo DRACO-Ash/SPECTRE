@@ -6,8 +6,11 @@
    a loaded row keeps a hidden field so it stays loaded when the form changes. Nothing here fills P or Conf: loading
    is not applying, a ticked control is applied at Evaluate, and only while the suggestion is still the one shown
    (concept section 7.5, items 2 and 3). The control sits inside the evaluate form, so it sets its own target,
-   swap, indicator, disabled element and include, which htmx would otherwise take from the form. #}
-{% if note %}
+   swap, indicator, disabled element and include, which htmx would otherwise take from the form.
+   edited (list of row ids) is the record of the rows whose P the operator edited (SPC-183), carried in a hidden
+   field per row whatever else the region says, so the next change and Evaluate send it back. #}
+{% for row_id in edited %}<input type="hidden" name="adv_p_edited" value="{{ row_id }}">
+{% endfor %}{% if note %}
 <p class="adv-prior-note">{{ note }}</p>
 {% else %}
 <p class="adv-prior-note" style="margin:0 0 0.2rem">Nothing is read from NOTSO for a row until you load it; loading fills neither P nor Conf.</p>

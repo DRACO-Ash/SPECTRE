@@ -1303,6 +1303,16 @@ def _section_13_decision_engine(doc: Document) -> None:
         "departure burn, and a second row from the latest confirmed burn in the red track's held element-set "
         "history when there is one. Nothing is evaluated for you, and P and Conf are never filled."
     )
+    _add_body(doc,
+        "A transfer of several burns is carried whole on its row, as one action with one P. The departure burn "
+        "fills the row's fields, and the panel lists every burn of the transfer before you press Evaluate, each "
+        "with its own UTC time and its prograde, normal and radial parts in m/s. Each later burn's parts are "
+        "split in red's own in-track, cross-track and radial frame at its state on the transfer, where the engine "
+        "applies it. The engine applies them in time order wherever the row is sampled or our burn is sized "
+        "against it. A burn at or before the bound red element set's epoch is never applied, since that set may "
+        "already include it: the panel and the results name each such burn, and a row whose every burn is dropped "
+        "is not sampled. A later burn over 1,000 m/s is named on the panel, and Evaluate refuses the row."
+    )
 
     _add_heading_h2(doc, "Adversary Actions")
     _add_body(doc,
@@ -1347,18 +1357,28 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "than 50 samples, an out-of-date orbit, a red element set newer than the burn, or a cost over the "
                 "cap. The row counts as converged when P5, P50 and P95 are each known to within 1 km, or 5 per "
                 "cent of P5 where larger.")
+    _add_bullet(doc, "A row of several burns is sampled from the first burn it applies, and costed from that "
+                "burn. Every later burn is drawn at its own time with the row's pointing, timing and drag spreads, "
+                "and a delta-V spread in proportion to its size. A burn due after the span searched ends is flown "
+                "by no sample. Each figure's basis names how many of the row's burns it applies.")
     _add_bullet(doc, "A manoeuvre with no hypothesis is refused a closest approach: where red goes if it does not "
                 "move is not the outcome of a manoeuvre. Add a hypothesis.")
     _add_bullet(doc, "Time of closest approach carries an uncertainty from both element sets' errors, and is "
                 "printed no finer than that uncertainty.")
     _add_bullet(doc, "Custody is read from the bound red track as the sweep reads it and carried over the horizon, "
-                "assuming no newer element set arrives. Degraded custody counts as lost. Your response is not "
-                "applied to custody.")
+                "assuming no newer element set arrives. Degraded custody can judge your warning time but not "
+                "whether a burn is normal, so the hours it is degraded are shown as degraded, never as held or "
+                "lost, and a span under 0.1 h says so rather than 0.0 h. By the owner's ruling of 5 November 2026, "
+                "each hour degraded carries 0.25 of the custody penalty an hour lost carries, and the custody gap "
+                "counts lost hours only. Like held custody, it is lost once its element set passes its limit or a "
+                "burn is newer than it, and a manoeuvre with no burn time takes the worst case. Your response is "
+                "not applied to custody. A row of several burns is read at the earliest burn it applies.")
     _add_bullet(doc, "Show trajectory opens the Hill-frame view of a cell's pair, which shows the shape of the "
                 "approach, not the cell's figures. A sampled cell also has a histogram of its sampled times.")
     _add_body(doc,
-        "A scenario that samples or sizes a burn runs as a job inside a 120 s budget, capped at 4,800 "
-        "sample-hours. The page shows progress and a Cancel button; a stopped evaluation scores nothing."
+        "A scenario that samples or sizes a burn runs as a job inside a 300 s budget, capped at "
+        "12,000 sample-hours, the owner's ruling of 5 November 2026. The page shows progress and a Cancel button; "
+        "a stopped evaluation scores nothing."
     )
 
     _add_heading_h2(doc, "Collect First and the Sweep's Threat Picture")
@@ -1382,9 +1402,13 @@ def _section_13_decision_engine(doc: Document) -> None:
         ],
     )
     _add_body(doc,
-        "Under expected value, a bound row whose Understanding is LOW, or whose P is the untouched default, "
+        "Under expected value, a bound row whose Understanding is LOW, or any row whose P you never edited, "
         "carries a line saying expected value rests on a probability the evidence has not earned, and recommends "
-        "minimax. The rule is never switched for you."
+        "minimax. The rule is never switched for you. The form records a P once you change it from the panel's "
+        "0.5, and keeps the record if you set it back, so to choose 0.5 deliberately, change P and then set it "
+        "to 0.5; leaving 0.5 in place, or typing 0.5 over it, is not recorded. A P from a NOTSO suggestion you "
+        "applied counts as edited. Each row says whose P and Conf it holds: a P never edited is the panel's "
+        "default."
     )
 
     _add_heading_h2(doc, "Looking Further Ahead: the Game Tree")
@@ -1396,6 +1420,9 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
                 "most) or by cost, is refused as soon as you press Evaluate, naming the largest depth that would "
                 "fit. A tree missing what it needs still evaluates as one turn, and the results say why.")
+    _add_bullet(doc, "A row carrying several burns of one transfer refuses the tree: equal turns put a row's burn "
+                "at the same time in every turn, so they cannot give each burn a turn of its own. The result is "
+                "one turn and says so.")
     _add_bullet(doc, "Each later turn starts where the last one left both orbits, after red's burn and yours. "
                 "Every figure in a tree is propagated by RK45 for both orbits.")
     _add_bullet(doc, "The results show the recommendation per turn for the rule in use: turn 1's pick, then the "
@@ -1407,7 +1434,7 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "A tree that runs out of budget shows the deepest turn built in full and says so.")
     _add_body(doc,
         "What turn 1 shows of red is read through the red track's custody: lost at a burn shows a burn, held "
-        "shows no burn, anything else shows nothing. You may state what turn 1 showed. Under expected value the "
+        "shows no burn, anything else, degraded included, shows nothing. You may state what turn 1 showed. Under expected value the "
         "results then show the update after turn 1 for that observation, with its likelihood model; with none "
         "stated they say nothing was updated. The update moves no figure and writes no P. One turn has no later "
         "pick to update, so an observation stated with a depth of 1 is refused beside the form. Minimax and "
@@ -1421,7 +1448,10 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "It does not model a sensor's line of sight to red.")
     _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
                 "P as entered.")
-    _add_bullet(doc, "It models one impulsive burn per adversary row per turn.")
+    _add_bullet(doc, "Its game tree models one impulsive burn per adversary row per turn, so a row carrying several "
+                "burns of one transfer is evaluated as one turn.")
+    _add_bullet(doc, "It does not guess burns a sweep solution does not list: a V-bar or H-bar hop solution lists only "
+                "its entry and final burns, so its row carries the entry burn alone, and the panel says so.")
     _add_callout(doc,
         "The Decision Engine output is a recommendation, not an order. Operators retain full authority over "
         "response selection. It shows its working so you can challenge it; context, rules of engagement and "

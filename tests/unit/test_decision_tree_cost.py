@@ -107,8 +107,8 @@ class TestTheCostModelAgainstTheMeasuredTrees:
         ("n", "turns", "turn_h", "case", "fits"),
         [
             (100, 2, 2.0, COPLANAR_LEO, True),     # 15.7 s idle
-            (100, 3, 2.0, COPLANAR_LEO, False),    # 59.3 s idle
-            (500, 2, 2.0, COPLANAR_LEO, False),    # 67.7 s idle
+            (100, 3, 2.0, COPLANAR_LEO, True),     # 59.3 s idle; refused under the 120 s budget, fits 300 s
+            (500, 2, 2.0, COPLANAR_LEO, True),     # 67.7 s idle; refused under the 120 s budget, fits 300 s
             (50, 2, 2.0, COPLANAR_LEO, True),      # 10.0 s idle
             (100, 2, 0.5, PLANE_CHANGE, True),     # 5.2 s idle
             (100, 3, 0.5, PLANE_CHANGE, True),     # 19.5 s idle
@@ -118,10 +118,12 @@ class TestTheCostModelAgainstTheMeasuredTrees:
         assert (tree_cost(_two_by_two(n, turns, turn_h, case)) <= MAX_SAMPLE_HOURS) is fits
 
     def test_the_largest_tree_that_fits(self) -> None:
-        """At 100 samples, 2 turns of coplanar_leo fit and 3 do not; plane_change's short turns fit 3."""
-        assert largest_tree(_two_by_two(100, 3, 2.0)) == 2
+        """At 100 samples 3 turns of coplanar_leo fit; at 150, 2 fit and 3 do not; at 1,000 no tree fits.
+        plane_change's short turns fit 3."""
+        assert largest_tree(_two_by_two(100, 3, 2.0)) == 3
+        assert largest_tree(_two_by_two(150, 3, 2.0)) == 2
         assert largest_tree(_two_by_two(100, 3, 0.5, PLANE_CHANGE)) == 3
-        assert largest_tree(_two_by_two(500, 2, 2.0)) == 1
+        assert largest_tree(_two_by_two(1000, 2, 2.0)) == 1
 
     def test_more_samples_or_turns_never_cost_less(self) -> None:
         costs = [tree_cost(_two_by_two(n, 2, 2.0)) for n in (50, 100, 200)]

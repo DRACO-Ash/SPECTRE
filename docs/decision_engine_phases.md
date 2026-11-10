@@ -1,7 +1,9 @@
 # Decision Engine: as built, and the phases that built it
 
-*Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release. The history of each
-step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
+*Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release, and updated for
+three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
+lost (SPC-179) and the record of whether each P was edited (SPC-183). The history of each step is in CHANGELOG.md
+and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
 
 **Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
 SPC-100 to SPC-152, summarised in `.board/README.md`. Three points of the original plan were corrected before the
@@ -79,15 +81,19 @@ tests/unit/test_decision_reference_cases.py.
   P5, and its time of closest approach is the earliest at or below P5. One series serves the row, except that a
   response with a sized burn gets its own series after that burn, so its cells differ from the rest of the row.
 ● Before anything runs, a row is **refused**, keeping its cell a lookup and saying why, for fewer than 50 samples,
-  an orbit not current, a red element set newer than the burn (it may already contain it), a start more than 10 km
+  an orbit not current, a red element set newer than the burn (it may already contain it; for a row of several
+  burns, at or after every one of them), a start more than 10 km
   or 100 m/s from the bound red track, or a cost over the cap. While running, a failed sample or a series that does
   not converge refuses the row by name.
 ● **Converged** means P5, P50 and P95 are each known to within 1 km, or 5 per cent of P5 where that is larger
   (SPC-117): the operator reads P5 to answer "can it reach one of mine", and 8 km at 800 km changes no answer.
   Below 20 km the 1 km floor governs.
-● **The cost cap** is 4,800 sample-hours, what the 120 s budget covers at the slowest rate measured (40
-  sample-hours a second), with 9 minutes of set-up counted per sample. An over-cap row is refused naming the longest
-  horizon that would fit; the panel says about 9.4 h fits at 500 samples with no burn to size.
+● **The cost cap** is 12,000 sample-hours, what the 300 s budget covers at the slowest rate measured (40
+  sample-hours a second), with 9 minutes of set-up counted per sample. The owner ruled on 2026-11-05 to raise the
+  budget from 120 s, when the cap was 4,800 (SPC-178). An over-cap row is refused naming the longest horizon that
+  would fit; the panel says about 23.7 h fits at 500 samples with no burn to size. Nothing else ends a run before
+  its budget: the page polls without limit, no reaper ends a job (it stops only when cancelled, replaced, signed out
+  of, when the sign-in expires 8 h after it began, or at shutdown), and no server or container timeout applies to it.
 ● **Off the request** (SPC-113): a scenario that samples runs as a session job the page polls every 2 s, naming the
   hypothesis being sampled, the samples done and the budget used, with a Cancel button. One sampled evaluation runs
   on the server at a time; a second waits and its budget starts when it runs. A stopped evaluation scores nothing and
@@ -115,8 +121,14 @@ tests/unit/test_decision_reference_cases.py.
   normal and how the warning time changed. With a red track bound, the route reads its custody as the sweep does and
   carries it over the horizon on the assumption that no newer element set arrives: it is lost from the earliest of
   the scenario epoch if lost already, the newest element set passing its limit, and a hypothesised burn that set cannot show.
-  Degraded custody counts as lost and is shown as degraded. A manoeuvre with no burn time takes the worst case, a
-  burn at the epoch, and says so. Our response is not applied to custody.
+  A row of several burns is read at the earliest burn it applies (SPC-184).
+  Degraded custody, which can judge the warning time but not whether a burn is normal, is degraded until one of
+  those would lose it. The owner ruled on 2026-11-05 that it scores between held and lost (SPC-179): each hour
+  degraded carries 0.25 of the custody penalty an hour lost carries, a ruling and not a sourced figure. The hours it
+  is degraded are shown as degraded in the cell, its basis and the result's custody note, never as held or lost, a
+  span under 0.1 h as "under 0.1 h" rather than 0.0 h, and the custody gap counts lost hours only. Once one of those
+  rules loses it, it is lost, as held custody is. A manoeuvre with no burn time takes the worst case, a burn at the scenario epoch, and says
+  so, unless custody is lost at the epoch already. Our response is not applied to custody.
 ● **Our response burns** (SPC-121): a manoeuvre response may carry a target separation, a delta-V budget (50 m/s
   unless given) and an axis. Its burn is sized, not optimised: the manoeuvre library's first guess is doubled
   towards the target and halved back to within 1 per cent, in at most 16 trials, both senses flown. Our burn is
@@ -141,14 +153,84 @@ tests/unit/test_decision_reference_cases.py.
   collection, or decide-by passed, it says act on the ceiling.
 ● Collections are listed beside the ranking, never scored, so the recommendation is always one of the operator's own
   rows.
-● Under expected value, a bound row whose Understanding is LOW, or whose P is the untouched default, carries the
-  guidance that expected value rests on a probability the evidence has not earned, and recommends minimax. The
-  selector is never switched for the operator.
+● Under expected value, a bound row whose Understanding is LOW, or any row whose P the form records as never
+  edited, carries the guidance that expected value rests on a probability the evidence has not earned, and
+  recommends minimax. The selector is never switched for the operator.
+● **Whether each P was edited** is recorded by the form (SPC-183), so a deliberate 0.5 is the operator's own. The
+  NOTSO region inside the form is asked again on every change, with every row's id and P, and answers with a hidden
+  field per edited row, keyed by its id, which the next change and Evaluate send back. A row is edited once its P is
+  posted as anything but the text the panel gives every row, and stays edited, through re-renders and row additions
+  and removals. Evaluate also reads the P posted beside the record, so an edit to anything but 0.5 just before
+  pressing it counts; an edit away from 0.5 and back that the region has not yet answered is not recorded, and the
+  row shows the guidance, the cautious side. A row whose P came from an applied NOTSO suggestion counts as edited.
+  htmx's HX-Trigger-Name header names the element that asks, the region, not the field that changed, so the record
+  compares each P with the panel's text instead. Retyping the same value is no change to the browser and is not
+  recorded, so a deliberate 0.5 is made by changing P and setting it back. A row whose P was never edited says its P
+  is the panel's default and only its Conf the operator's.
 
-Concept section 9 records the choices this rests on, each Claude's choice and not a ruling: decision 9 (where the
+Concept section 9 records the choices this rests on, each Claude's choice when built: decision 9 (where the
 engine reads the Threat range and decide-by), decision 10 (collect first with no decide-by), decision 11 (what counts
-as an untouched probability), decision 12 (collect-first rows are listed, not scored) and decision 13 (what a
-scenario opened from the sweep can carry, SPC-150).
+as an untouched probability, ruled on 2026-11-05: the form tracks whether each P was edited, SPC-183), decision 12
+(collect-first rows are listed, not scored) and decision 13 (what a scenario opened from the sweep can carry,
+SPC-150; every burn of the transfer, SPC-184).
+
+## Every burn of a transfer
+
+**Status: built (SPC-184).** Owner ruling, 2026-11-05: carry every burn of the transfer (concept section 9,
+decision 13).
+
+● A scenario opened from the sweep carries every burn of the entry's transfer on its row, each at its own UTC time
+  with its own prograde, normal and radial parts in m/s, read as in-track, cross-track and radial. The departure
+  burn's parts are its VNB parts, as before, which match on a near-circular orbit; each later burn's are split in
+  red's own RIC frame at its state on the transfer, where the engine applies it, since a Lambert or minimum-time
+  solution splits its arrival burn at the target's state. The burns are one adversary action with one P, never
+  alternatives. The departure burn fills the row's fields; the panel lists every burn in words before Evaluate and
+  carries the later burns beside the first burn's fixed time. A transfer of one burn fills the panel as before.
+● A solution whose listed burns do not sum to its delta-V does not list every burn: a V-bar or H-bar hop solution
+  lists its entry and final burns of 3 hops. Its row carries the departure burn alone, as before SPC-184, and the
+  panel says why.
+● Wherever the row is sampled, and wherever our burn is sized against it, red makes every burn the row applies in
+  time order, each in the RIC frame of its own state at that burn. A burn due after the span searched ends is handed
+  to no sample, so no figure flies it. Our sized burn's line, and the closest approach an after-TCA refusal names,
+  say red's nominal transfer and how many of its burns it flies; the row's burn line names the burn its series
+  starts from.
+● A burn at or before the bound red element set's epoch is never applied, since that set may already include it.
+  Exactly those are dropped and the rest kept, and the panel, the result, the session log and the provenance name
+  each burn applied and each dropped. The row then starts from its first applied burn, from the bound red track's
+  own state there. A row whose every burn is dropped is refused as a single burn that set may include is, and when
+  its first burn is exactly at the set's epoch, where a single burn's check would not refuse, by a sentence of its
+  own.
+● A later burn over 1,000 m/s, the limit on the departure burn's own field, held by the burn's size, is named on the
+  panel before Evaluate, and Evaluate refuses the row naming the limit.
+● Custody reads the earliest burn the row applies. The cost counts the row's integration from that burn, as for
+  one burn there, and the panel fits its sample count to the budget from it.
+● Each figure's basis names how many of the row's burns it applies: the sampled closest approach and its time
+  name the burns red flies before the span searched ends, custody names the burn it reads, our sized burn names
+  the burns it was sized against, and a lookup or the score applies none.
+● The game tree refuses a row of several burns (below, D3 and D7), and the one-turn result stands with the reason.
+
+Decisions taken building it, Claude's and not rulings:
+● **Each later burn's spread.** A later burn is sampled with the row's pointing, timing and drag spreads, and a
+  delta-V spread in proportion to its size (the first burn's spread over the first burn's delta-V). Each burn
+  draws from a seed of its own, set by the row's seed and the burn's number, so a burn draws the same spread
+  whichever burns before it are dropped. Its timing is drawn on its own, not tied to the first burn's; a later
+  burn drawn before the first is made at the first.
+● **At or before.** A burn exactly at the red element set's epoch is dropped from a row of several burns, as the
+  ruling words it. A single burn at that epoch is still sampled, as before (`decision._after_burn` refuses only a
+  burn strictly before it), so the single-burn path is unchanged.
+● **Which solutions list every burn.** A solution lists every burn when its burns' sizes sum to its delta-V, to
+  1 part in a million. The sweep's own sums agree to about 1e-13 m/s; a hop solution's fall short by a third or
+  more. The hop's own burns are not rebuilt here: its final burn is placed on red's unburnt orbit, so it is not a
+  flown sequence to carry.
+● **The later burns' frame.** The solver's arrival burn is split anew at red's own state on the two-body transfer
+  arc (`maneuvers.Burn.own_ric`); the sweep's own figures are unchanged. The engine's RK45 arc, with J2 and drag,
+  differs slightly from that two-body arc, as the departure burn's SGP4 start does.
+● **The tree refuses every row carrying more than one burn**, even when only one of them is applied, since each
+  later turn burns again from the row's first burn as hypothesised.
+● **Show trajectory** draws the first burn the row applies, since the view takes one burn, and the cell names the
+  later burns it does not draw.
+● **The panel's fields set burn 1 only.** The later burns are carried as the sweep gave them; a transfer carries at
+  most 8 burns, and a later burn after the horizon is refused beside the form.
 
 ## Phase 5: a probability from NOTSO history
 
@@ -193,7 +275,7 @@ NOTSO-derived P) and decision 18 (how the interval reaches the pick).
   hypothesis, and no row's cell may be refused. Without these the result is one turn and says why.
 ● Turn 1 is the matrix. Each later turn starts from where the turn before left both orbits: red sample by sample
   after its hypothesised burn, blue after our sized burn. Every figure in a tree is RK45 with J2 and drag.
-● The tree runs as one evaluation in the one sampled slot, inside the 120 s budget. A run that overruns keeps the
+● The tree runs as one evaluation in the one sampled slot, inside the 300 s budget. A run that overruns keeps the
   deepest turn built in full and says so.
 
 ### What the result shows
@@ -232,7 +314,9 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   falls at the same offset after each turn starts, and each response executes its time to execute after each turn
   starts, with a target separation sized again against red's nominal burn in that turn. A burn that falls outside
   its turn refuses the tree. Owner ruling, 2026-11-05: accept unequal turns, with their lengths determined by the engine, never set
-  by the operator (SPC-187).
+  by the operator (SPC-187). Until then a row carrying several burns of one transfer (SPC-184) refuses the tree,
+  since equal turns put a row's burn at one time in every turn and cannot give each burn a turn of its own;
+  unequal turns are SPC-187.
 ● **D4. Samples carried as themselves.** Sample k is carried from turn to turn as sample k. Each turn's draws are
   seeded from the row's seed, the turn and the red path, so the same evaluation gives the same tree. A sample whose
   drawn timing puts its burn after its turn ends keeps that burn, and the turn after makes it then. Owner ruling, 2026-11-05: keep.
@@ -241,13 +325,14 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   was sampled; its delta-V is our burns added up, a lookup when any turn's is; its custody is the bound red track's
   with the earliest red burn on it; its score is the one-turn weighted sum on those figures, a lookup. Owner ruling, 2026-11-05: keep.
 ● **D6. The caps.** At most 1,000 branches, the sum over turns k of (rows times responses) to the k, and the same
-  4,800 sample-hour cost cap, with 16 sizing trials charged for every sizing. So coplanar_leo at 50 samples over three
-  2 h turns costs about 6,700 sample-hours and is refused, though its prototype ran in 33 s idle. Recalibrating the
-  cap for trees is the owner's decision. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178), then measure trees
-  under load and set their own cap from the measurements (SPC-188).
+  cost cap as the matrix, 12,000 sample-hours since the 300 s budget, with 16 sizing trials charged for every sizing.
+  So coplanar_leo at 50 samples over three 2 h turns costs about 6,700 sample-hours. It was refused under the 4,800
+  cap when the budget was 120 s, though its prototype ran in 33 s idle, and it fits now; at 150 samples it costs
+  about 15,400 and is refused. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178, built), then measure trees under
+  load and set their own cap from the measurements (SPC-188); until then the tree shares the matrix's cap.
 ● **D7. Refused before anything runs, the matrix kept.** An unbound or out-of-date side, a row with no orbit to carry
-  on, a burn outside its turn, too many branches or too high a cost refuses the tree, in that order, and the one-turn
-  result stands with the reason. Owner ruling, 2026-11-05: keep.
+  on, a row of several burns (SPC-184), a burn outside its turn, too many branches or too high a cost refuses the
+  tree, in that order, and the one-turn result stands with the reason. Owner ruling, 2026-11-05: keep.
 ● **D8. Never cut short silently.** A spent budget keeps the deepest turn built in full, naming the run's own budget;
   a failed or unconverged branch keeps the turns built and names the branch, since a pick over a tree missing a
   branch could miss its worst case. Owner ruling, 2026-11-05: keep.
@@ -257,9 +342,10 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   mean weighted by P and by the update. A set with no weight has no pick and says so. The first response wins a tie.
   Owner ruling, 2026-11-05: keep.
 ● **D10. The likelihood model is the engine's own custody rule.** Custody lost at a burn in the turn shows a burn,
-  not which; held through it shows no burn; lost for another reason, or not read, shows nothing. Each row gives one
-  of these for certain. This was chosen over a new detection model with made-up rates. The update is a lookup.
-  Owner ruling, 2026-11-05: keep.
+  not which; held through it shows no burn; degraded, lost for another reason, or not read, shows nothing. Each row
+  gives one of these for certain. This was chosen over a new detection model with made-up rates. The update is a
+  lookup. Owner ruling, 2026-11-05: keep. Degraded custody scores between held and lost since SPC-179, but it is
+  neither held through a turn nor lost at a burn from held, so it still shows nothing.
 ● **D11. Red's next move is weighed by P as entered.** Nothing sourced says how red's turn-1 move bears on its next,
   so the update says which turn-1 branch we are on, not what red does next, and the same rule reads turn 2 in a
   3-turn tree. A persistent-intent model needs a stated prior strength, which is the owner's decision. A row's
@@ -296,8 +382,9 @@ The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
   doctrine words stay off screen, and SPC-177 is closed.
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
-● **One impulsive burn per adversary row per turn.** A transfer of several burns is carried as its first burn. The
-  owner ruled on 2026-11-05 to carry every burn of the transfer (SPC-184).
+● **A game tree over a transfer of several burns.** The matrix carries every burn of the transfer (SPC-184), but
+  the tree's equal turns cannot place them, so such a row refuses the tree. Unequal turns, set by the engine, are
+  SPC-187.
 
 ## Summary
 

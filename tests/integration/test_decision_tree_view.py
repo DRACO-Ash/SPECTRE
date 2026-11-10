@@ -26,7 +26,7 @@ from spectre.domain.decision import ScenarioResult, Seen, SelectorStrategy
 from spectre.domain.decision_tree import MAX_TREE_BRANCHES, TREE_DEEPEST, TREE_DEPTH_BRANCHES, TREE_UNBOUND
 from spectre.domain.tree_selectors import NO_OBSERVATION, OBSERVED, PROBABILITY_IGNORED
 from spectre.web.decision_job import DecisionJob, JobState
-from spectre.web.routes.decision import _OBSERVED_ONE_TURN
+from spectre.web.routes.decision import _OBSERVATION_LABELS, _OBSERVED_ONE_TURN
 from spectre.web.tree_view import PLAN_MARK, tree_view
 from tests.integration.conftest import session_state
 from tests.integration.test_decision_binding_on_screen import _hold
@@ -99,6 +99,16 @@ class TestThePanel:
         assert re.findall(r'<option value="([a-z_]*)"', block) == ["", "burn", "no_burn", "nothing"]
         assert "Not stated: nothing is updated" in block
         assert _unlabelled(block) == []
+
+    def test_nothing_shown_names_degraded_custody(self, client: Any, auth_cookie: str) -> None:
+        """SPC-179 keeps degraded custody as a case that shows nothing at a turn, so the choice says so, as served
+        and in the panel's own list for a render without the route's."""
+        block = _block(_panel(client, auth_cookie), '<label class="tree-observed"')
+        nothing = "Nothing: custody degraded, lost for another reason, or not read"
+        assert re.search(r'<option value="nothing"[^>]*>\s*' + re.escape(nothing) + r"\s*<", block)
+        fallback = (_TEMPLATES / "partials" / "decision_panel.html").read_text(encoding="utf-8")
+        for seen, label in _OBSERVATION_LABELS.items():
+            assert f'("{seen.name.lower()}", "{label}")' in fallback
 
     def test_its_hint_says_what_a_tree_needs_and_what_is_refused(self, client: Any, auth_cookie: str) -> None:
         page = _panel(client, auth_cookie)

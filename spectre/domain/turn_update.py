@@ -3,8 +3,10 @@
 An update needs a stated likelihood model: what we observe of red after a turn, and how likely that is under each
 red move. Here it is the bound red track's custody, as the sweep judges it, carried over the horizon with the red
 burns on the path (SPC-123), read at the turn's end. Custody lost at a burn in the turn shows that red burnt, though
-not which burn; custody held through the turn shows that it did not; custody lost for any other reason, lost in an
-earlier turn, or never read, shows nothing. Each move gives one of these for certain, so the likelihood of what we
+not which burn; custody held through the turn shows that it did not; custody degraded at the scenario epoch, lost
+for any other reason, lost in an earlier turn, or never read, shows nothing. Degraded custody scores between held and
+lost (the owner's ruling of 2026-11-05, SPC-179), but it is neither held through a turn nor lost at a burn after
+being held: its history cannot judge whether a burn is normal, so it shows nothing here, as before that ruling. Each move gives one of these for certain, so the likelihood of what we
 see is 1 under each move that gives it and 0 under the rest, and moves that give the same thing are not told apart.
 
 The posterior after turn 1 is the rows' P restricted to the rows that give what we see, renormalised: Bayes' rule
@@ -25,7 +27,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import NamedTuple, cast
 
-from spectre.domain.custody import Horizon, LossCause, custody_over_horizon
+from spectre.domain.custody import Custody, Horizon, LossCause, custody_over_horizon
 from spectre.domain.decision import AdversaryAction, Scenario, Seen, _untouched
 from spectre.domain.provenance import Basis, FigureBasis
 
@@ -46,8 +48,8 @@ _HUNDREDTHS = 100
 LIKELIHOOD_MODEL = (
     "The update after turn 1 rests on this likelihood model: what turn 1 lets us see of red is the bound red "
     "track's custody, as the sweep judges it, carried over turn 1 with each row's burn. Custody lost at a burn in "
-    "the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody lost "
-    "for any other reason, or not read, shows nothing. {rows}. Each row gives what it gives for certain, so rows "
+    "the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody "
+    "degraded, lost for any other reason, or not read, shows nothing. {rows}. Each row gives what it gives for certain, so rows "
     "that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome, so "
     "the update is a lookup; the same rule reads turn 2 in a 3-turn tree."
 )
@@ -55,8 +57,8 @@ LIKELIHOOD_MODEL = (
 SEEN_MODEL = (
     "Each later pick may rest only on what the turns before it let us see of red: the bound red track's custody, "
     "as the sweep judges it, carried over each turn with each row's burn. Custody lost at a burn in the turn shows "
-    "that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other "
-    "reason, or not read, shows nothing. In turn 1: {rows}. Each row gives what it gives for certain, so branches "
+    "that red burnt, not which burn; custody held through it shows that red did not; custody degraded, lost for any "
+    "other reason, or not read, shows nothing. In turn 1: {rows}. Each row gives what it gives for certain, so branches "
     "that show the same thing share one pick. It is the custody rule, not calibrated against any outcome."
 )
 INDEPENDENT_TURNS = (
@@ -103,8 +105,8 @@ def burns_on(scenario: Scenario, red_path: Sequence[int], turn_s: float) -> tupl
 def seen_after(scenario: Scenario, red_path: Sequence[int], turn_s: float) -> Seen:
     """What we see of red at the end of turn len(*red_path*), red having made its moves on *red_path* so far."""
     red = None if scenario.binding is None else scenario.binding.red
-    if red is None or red.custody is None:
-        return Seen.NOTHING
+    if red is None or red.custody is None or red.custody.state is Custody.DEGRADED:
+        return Seen.NOTHING   # degraded is neither held through a turn nor lost at a burn from held (D10, SPC-179)
     burns = burns_on(scenario, red_path, turn_s)
     over = custody_over_horizon(
         red.custody, elset_hours=red.age_hours, limit_hours=red.limit_hours,

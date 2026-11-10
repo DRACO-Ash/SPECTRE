@@ -24,6 +24,7 @@ from spectre.astro.response_burn import RESPONSE_PROPAGATOR
 from spectre.domain import decision, decision_tree
 from spectre.domain.custody import Custody, CustodyStatus, Horizon, custody_over_horizon
 from spectre.domain.decision import (
+    EVALUATION_BUDGET_S,
     ActionType,
     AdversaryAction,
     BoundElset,
@@ -385,6 +386,23 @@ class TestPathFigures:
         assert figures.score == pytest.approx(expected)
         assert figures.closest_approach_km == 25.0
 
+    def test_degraded_custody_counts_its_degraded_hours_apart_from_its_lost_hours(self) -> None:
+        """SPC-179: degraded for the hour before the earliest red burn, then lost for 5 h; the gap is the 5 h lost,
+        and the score carries the degraded hour at DEGRADED_CUSTODY_WEIGHT of an hour lost."""
+        red = dataclasses.replace(cases.bound("red"), custody=CustodyStatus(Custody.DEGRADED, "Custody degraded."))
+        rows, responses = [cases.still(), cases.evasive()], [cases.hold()]
+        scenario = cases.scenario(rows, responses, bind=decision.ScenarioBinding(red=red, blue=cases.bound("blue")))
+        steps = [PathStep(rows[1], responses[0], 0.0, EPOCH + timedelta(hours=1)), PathStep(rows[0], responses[0], 0.0)]
+        figures = path_figures(scenario, steps, 25.0, sampled=False)
+        assert (figures.custody_maintained, figures.custody_gap_hours) == (False, pytest.approx(5.0))
+        assert figures.custody_degraded_hours == pytest.approx(1.0)
+        assert "degraded, neither held nor lost, for 1.0 h of the horizon" in figures.custody_bases[0].note
+        assert "the hours it is degraded, 1.0 h, are not lost hours" in figures.custody_bases[1].note
+        expected = decision._score(scenario, responses[0], decision._Figures(False, 5.0, 25.0, 0.0, 1.0))
+        assert figures.score == pytest.approx(expected)
+        still = path_figures(scenario, [PathStep(rows[0], responses[0], 0.0)] * 2, 25.0, sampled=False)
+        assert (still.custody_maintained, still.custody_gap_hours, still.custody_degraded_hours) == (False, 0.0, 6.0)
+
     def test_time_to_execute_is_summed_and_capped_and_the_least_reversible_counts(self) -> None:
         """10."""
         rows = [cases.still()]
@@ -450,7 +468,7 @@ class TestTheBudget:
         monkeypatch.setattr(decision_tree, "continue_series", then_stop)
         rows = [cases.still(), cases.evasive(PLANE_CHANGE, n=50, offset_h=0.1)]
         scenario = cases.scenario(rows, [cases.hold()], horizon_h=1.0, bind=PLANE_CHANGE)
-        run = RunControl(budget_s=120.0, stop=lambda: "Superseded." if stopping["now"] else None)
+        run = RunControl(budget_s=EVALUATION_BUDGET_S, stop=lambda: "Superseded." if stopping["now"] else None)
         with pytest.raises(EvaluationStoppedError, match="Superseded"):
             evaluate_tree(scenario, run=run)
 

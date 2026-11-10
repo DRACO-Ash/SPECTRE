@@ -44,7 +44,7 @@ _WAIT_S = 5.0
 _WAITING = (
     "Reading custody: waiting up to 20 s for RX's element-set history, a first fetch from UDL, so its custody is "
     "judged as the sweep judges it. The evaluation starts when the history arrives or the wait ends; if it has not "
-    "arrived by then, custody reads degraded, which counts as lost, and the next evaluation uses it."
+    "arrived by then, custody reads degraded, which scores between held and lost, and the next evaluation uses it."
 )
 _HELD = CustodyStatus(Custody.HELD, "Custody held.")
 

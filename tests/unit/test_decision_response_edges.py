@@ -60,7 +60,7 @@ from tests.unit.test_decision_response import (
     _sized_stub,
     _WithBurns,
 )
-from tests.unit.test_decision_sampled import _evasive, _series
+from tests.unit.test_decision_sampled import _elset, _evasive, _never, _series, _steady
 
 _LOOKUP_DV = " This cell's delta-V is a lookup."
 
@@ -127,25 +127,47 @@ class TestComputedRefusals:
             "100 km." + _LOOKUP_DV
         )
 
-    def test_geo_over_72_h_with_five_burns_is_refused_on_the_cap(self) -> None:
-        """Risk 5: (2 + 16 x 5) x 72.15 = 5,916 sample-hours, so GEO is refused conservatively."""
-        responses = [_hold(), *(
+    @staticmethod
+    def _five_burns() -> list[FriendlyResponse]:
+        return [_hold(), *(
             FriendlyResponse(f"F{k}", f"Avoid {k}", ActionType.MANOEUVRE, 0.3, 0.8, 0.0, burn=ResponseBurnSpec(100.0))
             for k in range(1, 6)
         )]
+
+    def test_geo_over_72_h_with_five_burns_fits_the_cap(self) -> None:
+        """Risk 5: (2 + 16 x 5) x 72.15 = 5,916.3 sample-hours. Refused under the 120 s budget's 4,800, it fits
+        the 300 s budget's cap (the owner's ruling of 2026-11-05, SPC-178), so its burns are sized in a job."""
         scenario = Scenario(
             name="GEO", epoch_utc=EPOCH,
             adversary_actions=[AdversaryAction("A0", "Drift", ActionType.NO_ACTION, 0.5, 0.7)],
-            friendly_responses=responses, horizon_hours=72.0,
+            friendly_responses=self._five_burns(), horizon_hours=72.0,
             binding=ScenarioBinding(red=_geo("red"), blue=_geo("blue")),
         )
+        assert decision._turn_one_cost_h(scenario) == pytest.approx(5916.3)
+        assert decision._turn_one_cost_h(scenario) <= decision.MAX_SAMPLE_HOURS
+        assert needs_a_run(scenario)
+
+    def test_burns_to_size_beside_a_sampled_row_over_the_cap_are_refused_on_it(self) -> None:
+        """A computed row and a sampled row of 500 over 9 h, with five burns: the sampled row's floor is
+        500 x 9.15 + 5 x (150 x 9.15 + 16 x 9.15 + 9) = 12,214.5, and the computed rows' sizing (2 + 80) x 9.15 =
+        750.3 more, so 12,965. The computed cells keep their SGP4 figure and our delta-V stays a lookup."""
+        scenario = Scenario(
+            name="Mixed", epoch_utc=EPOCH,
+            adversary_actions=[
+                AdversaryAction("A0", "Drift", ActionType.NO_ACTION, 0.5, 0.7),
+                AdversaryAction("A1", "Evade", ActionType.MANOEUVRE, 0.5, 0.7, hypothesis=_steady(500)),
+            ],
+            friendly_responses=self._five_burns(), horizon_hours=9.0,
+            binding=ScenarioBinding(red=_elset("red"), blue=_elset("blue")),
+        )
         assert not needs_a_run(scenario)
-        result = evaluate_scenario(scenario)
+        result = evaluate_scenario(scenario, sampler=_never)
         refusal = result.outcome_matrix[0][1].response_refusal
         assert refusal is not None and refusal.startswith(
-            "Our burn is not sized: sizing it with the rest of this evaluation needs at least 5,917 sample-hours, "
-            "above the 4,800 one evaluation may run within its 120 s budget. At these sample counts the longest "
-            "horizon that fits is 58.3 h."
+            "Our burn is not sized: sizing it with the rest of this evaluation needs at least 12,965 sample-hours, "
+            f"above the {decision.MAX_SAMPLE_HOURS:,.0f} one evaluation may run within its "
+            f"{decision.EVALUATION_BUDGET_S:.0f} s budget. At these sample counts the longest horizon that fits is "
+            "8.3 h."
         )
         assert refusal.endswith(_LOOKUP_DV)
         assert result.outcome_matrix[0][1].ca_computed is not None

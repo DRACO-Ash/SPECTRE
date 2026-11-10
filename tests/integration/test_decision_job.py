@@ -3,7 +3,7 @@
 POST /plan/decision/evaluate answers a scenario that samples nothing on the
 request, as before. One that would sample starts a job and returns a partial
 that polls GET /plan/decision/job every 2 s until the result replaces it. One
-sampled evaluation runs at a time on the server, under a 120 s budget that
+sampled evaluation runs at a time on the server, under a 300 s budget that
 starts when it runs, and it stops at its next sample when it is cancelled,
 replaced, signed out of, or the server shuts down. Every outcome is named on
 the page; none is exception text.
@@ -25,6 +25,7 @@ import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from spectre.domain.decision import (
+    EVALUATION_BUDGET_S,
     EvaluationStoppedError,
     RunControl,
     SamplingProgress,
@@ -52,8 +53,8 @@ _FAKE_WAITS = 2_000
 _NO_JOB = "No evaluation is held for this sign-in: a newer one replaced it, or the sign-in changed."
 _FAILED = "The evaluation failed; the server log has the detail. Nothing was scored."
 _STARTING_SOON = (
-    "Starting: no other evaluation holds the sampling slot on this server, and the 120 s budget starts when sampling "
-    "does."
+    f"Starting: no other evaluation holds the sampling slot on this server, and the {EVALUATION_BUDGET_S:.0f} s "
+    "budget starts when sampling does."
 )
 
 
@@ -328,7 +329,7 @@ async def test_the_evaluation_runs_off_the_event_loop(owner: Any, fake_evaluate:
 
 
 async def test_server_shutdown_stops_a_running_job(owner: Any, fake_evaluate: list[_Fake]) -> None:
-    """J11: the lifespan's shutdown sets the stop, so a worker thread does not hold the exit for up to 120 s."""
+    """J11: the lifespan's shutdown sets the stop, so a worker thread does not hold the exit for up to the budget."""
     from fastapi.testclient import TestClient
 
     from spectre.web.app import app
@@ -475,8 +476,8 @@ def test_polling_a_running_job_shows_its_progress(client: Any, auth_cookie: str)
     session_state(auth_cookie).decision_job = job  # type: ignore[attr-defined]
     text = _poll(client, auth_cookie, job.job_id).text
     epoch = job.scenario.epoch_utc.strftime("%H:%M")
-    assert (f"Sampling hypothesis 2 of 3: 1,250 of 2,000 samples, 41 s of the 120 s budget used. Scenario epoch "
-            f"{epoch} UTC.") in text
+    assert (f"Sampling hypothesis 2 of 3: 1,250 of 2,000 samples, 41 s of the {EVALUATION_BUDGET_S:.0f} s budget used. "
+            f"Scenario epoch {epoch} UTC.") in text
     assert re.search(r'<progress[^>]*\bmax="2000"[^>]*\bvalue="1250"', text)
     form = re.search(r'<form\b[^>]*hx-post="/plan/decision/job/cancel"[^>]*>(.*?)</form>', text, re.S)
     assert form is not None, "the running job has no cancel form"
@@ -519,7 +520,7 @@ def _in_state(state: JobState, **changes: Any) -> DecisionJob:
     ("job", "expected"),
     [
         (_in_state(JobState.QUEUED), _STARTING_SOON),
-        (_in_state(JobState.QUEUED, waiting=True), "Yours starts after it, and its 120 s budget starts then."),
+        (_in_state(JobState.QUEUED, waiting=True), f"Yours starts after it, and its {EVALUATION_BUDGET_S:.0f} s budget starts then."),
         (_in_state(JobState.RUNNING), "no sample has finished yet"),
         (_in_state(JobState.RUNNING, progress=SamplingProgress(1, 1, 5, 500, 2.0)), "5 of 500 samples"),
         (_in_state(JobState.STOPPED, stopped="you cancelled it"), "Evaluation stopped: you cancelled it."),

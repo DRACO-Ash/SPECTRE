@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from spectre.astro.response_burn import BurnAxis
-from spectre.domain.decision import SamplingProgress, Scenario
+from spectre.domain.decision import EVALUATION_BUDGET_S, SamplingProgress, Scenario, longest_horizon_h
 from spectre.domain.decision_figures import ResponseBurnSpec
 from spectre.web.decision_job import DecisionJob, JobState, job_view
 from tests.integration.test_decision_binding_on_screen import _hold
@@ -79,7 +79,8 @@ class TestThePanel:
 
     def test_the_hint_counts_burns_against_the_cap(self, client: Any, auth_cookie: str) -> None:
         text = " ".join(_panel(client, auth_cookie).split())
-        assert "at 500 samples a horizon up to about 9.4 h fits with no burn to size, 7.0 h with one and 3.4 h with five" in text
+        none, one, five = (longest_horizon_h(500, burns=k) for k in (0, 1, 5))
+        assert f"at 500 samples a horizon up to about {none} h fits with no burn to size, {one} h with one and {five} h with five" in text
 
 
 class TestTheForm:
@@ -145,7 +146,8 @@ class TestTheJobPage:
         view: dict[str, Any] = job_view_for(job)
         epoch = job.scenario.epoch_utc.strftime("%H:%M")
         assert view["message"] == (
-            f"Sizing our burn for Avoid: trial 3 of at most 16, 2 s of the 120 s budget used. Scenario epoch {epoch} UTC."
+            f"Sizing our burn for Avoid: trial 3 of at most 16, 2 s of the {EVALUATION_BUDGET_S:.0f} s budget used. Scenario "
+            f"epoch {epoch} UTC."
         )
 
     def test_the_progress_bar_is_labelled_for_sizing(self, client: Any, auth_cookie: str) -> None:

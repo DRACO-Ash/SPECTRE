@@ -9,7 +9,10 @@ knows:
 ● the target as the blue asset, when it is held as one, matched by catalogue
   number, never by name;
 ● the transfer's departure burn as a hypothesis, at its own UTC time, read in
-  RIC from the solver's velocity, normal and radial parts;
+  RIC from the solver's velocity, normal and radial parts, and every later burn
+  of the transfer with it, each at its own UTC time, one action with one P
+  (SPC-184), unless the solution does not list every burn (a hop's), when the
+  row carries the departure alone and the panel says why;
 ● the latest confirmed burn in the red track's held element-set history,
   which evaluate builds from the element set before it through
   hypothesis_from_tle_record (SPC-001);
@@ -32,6 +35,7 @@ from typing import Any, NamedTuple
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.data.intel import satno_from_tle
 from spectre.domain.decision import ThreatPicture, longest_horizon_h
+from spectre.domain.decision_transfer import MAX_BURN_M_S, TransferBurn
 from spectre.domain.models import ThreatAssessment, ThreatSweepEntry
 from spectre.web.decision_threat import THREAT_PICTURE_MAX_AGE
 from spectre.web.elsets import elset_age
@@ -86,6 +90,34 @@ _DEPARTURE = (
     "the {archetype} archetype's dispersions."
 )
 _BURNED_THEN = " Its departure is before now, so the hypothesis is that it burned then."
+_TRANSFER = (
+    "Adversary row 1: the transfer's {n} burns from the sweep's solution, one action with one P, each at its own "
+    "time with the {archetype} archetype's dispersions. Burn 1's prograde, normal and radial parts are read as "
+    "in-track, cross-track and radial, which match on a near-circular orbit; each later burn's are split in red's own "
+    "in-track, cross-track and radial frame at its state on the transfer, where the engine applies it. Burn 1, "
+    "{dv:.0f} m/s at {at}, is in the fields below; the engine applies {applies}."
+)
+_SOME_DROPPED = (
+    "{burns} of row 1, at {at}, {verb} at or before the red element set held for {red}, dated {epoch}, which may "
+    "already include {them}, so the engine will not apply {them}. It applies {kept}."
+)
+_ALL_DROPPED = (
+    "The engine will not sample row 1's closest approach: each of its {n} burns is at or before the red element set "
+    "held for {red}, dated {epoch}, so that set may already include them."
+)
+_NOT_LISTED = (
+    "Row 1 carries burn 1 alone: the sweep's {method} solution lists {n} burns summing to {listed:.1f} m/s of the "
+    "transfer's {total:.1f} m/s, so not every burn of its transfer, and the engine does not guess the rest."
+)
+#: The listed burns sum to the solution's cost within this share of it, or 1e-6 m/s, when it lists every burn: the
+#: sweep's own sums agree to about 1e-13 m/s, and a hop solution's fall short by a third or more.
+_LISTED_TOLERANCE = 1e-6
+_TOO_BIG = (
+    "{burns} of row 1 {verb} {dv} m/s, over the {most:,.0f} m/s a burn may be, so Evaluate will refuse the row: set "
+    "its archetype to None to keep it a lookup, or open a cheaper entry from the sweep."
+)
+_FIRST_LINE = ", set in the fields above"
+_DROPPED_LINE = "; not applied, at or before the red element set's epoch"
 _DETECTED = (
     "Adversary row {row}: the burn detected at {at} in {red}'s element-set history, started from the element set "
     "before it, with the {archetype} archetype's dispersions, as the history classes the burn."
@@ -134,10 +166,21 @@ class PrefilledRow:
     detected: bool = False
     #: Whether the engine will sample it: not a burn the held red element set may already include.
     sampled: bool = True
+    #: The transfer's burns after the first, each at its own UTC time (SPC-184); empty for a single burn.
+    then: tuple[TransferBurn, ...] = ()
+    #: Every burn of the transfer in words, burn 1 first, for the panel to list before Evaluate; empty for one burn.
+    burn_lines: tuple[str, ...] = ()
+    #: The first burn the engine will apply, when that is not burn_at: the held red set may include those before it.
+    starts_at: datetime | None = None
 
     @property
     def burn_at_iso(self) -> str:
         return "" if self.burn_at is None else self.burn_at.isoformat()
+
+    @property
+    def then_value(self) -> str:
+        """The later burns as the panel posts them: each "UTC prograde normal radial" in m/s, joined by ";"."""
+        return ";".join(f"{b.at_utc.isoformat()} {b.prograde_m_s!r} {b.normal_m_s!r} {b.radial_m_s!r}" for b in self.then)
 
     @property
     def burn_label(self) -> str:
@@ -253,8 +296,87 @@ def _bind_blue(state: Any, entry: ThreatSweepEntry, draft: _Draft) -> None:
     draft.filled.append(f"Blue asset: {asset.name}, the target {target}, held as a blue asset (SATNO {satno}).")
 
 
-def _departure_row(entry: ThreatSweepEntry, now: datetime, draft: _Draft) -> PrefilledRow:
-    """Row 1: the transfer's departure burn as a hypothesis, or the entry named as a lookup and why."""
+def _burn_line(number: int, burn: TransferBurn, dropped: bool) -> str:
+    """One burn of the transfer as the panel lists it."""
+    words = burn.words(number)
+    where = _FIRST_LINE if number == 1 else ""
+    return f"{words[0].upper()}{words[1:]}{where}{_DROPPED_LINE if dropped else ''}."
+
+
+def _numbered(numbers: list[int]) -> str:
+    shown = [str(k) for k in numbers]
+    joined = shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"
+    return f"burn {joined}" if len(numbers) == 1 else f"burns {joined}"
+
+
+def _applies(dropped: list[int], kept: list[int]) -> str:
+    """Which burns the engine applies, in the fill sentence's words: never every burn when one is dropped."""
+    if not dropped:
+        return "every burn in time order"
+    if not kept:
+        return "none of them, as said below"
+    order = " in time order" if len(kept) > 1 else ""
+    return f"{_numbered(kept)}{order}, not {_numbered(dropped)}, as said below"
+
+
+def _lists_every_burn(entry: ThreatSweepEntry, draft: _Draft) -> bool:
+    """Whether the solution lists every burn of its transfer: its burns sum to its cost. A hop solution lists only
+    its entry and final burns of several hops, so its row carries burn 1 alone, and the panel says why (SPC-184)."""
+    listed = sum(math.hypot(b.prograde, b.normal, b.radial) for b in entry.transfer_m_s)
+    if math.isclose(listed, entry.delta_v_m_s, rel_tol=_LISTED_TOLERANCE, abs_tol=_LISTED_TOLERANCE):
+        return True
+    draft.left.append(_NOT_LISTED.format(
+        method=entry.method.upper(), n=len(entry.transfer_m_s), listed=listed, total=entry.delta_v_m_s,
+    ))
+    return False
+
+
+def _too_big(burns: tuple[TransferBurn, ...], draft: _Draft) -> None:
+    """Name, before Evaluate, any later burn over the size a burn may be, which Evaluate would refuse (SPC-184)."""
+    big = [k for k, b in enumerate(burns, 1) if k > 1 and b.dv_m_s > MAX_BURN_M_S]
+    if big:
+        sizes = " and ".join(f"{burns[k - 1].dv_m_s:,.0f}" for k in big)
+        draft.left.append(_TOO_BIG.format(
+            burns=_numbered(big).capitalize(), verb="is" if len(big) == 1 else "are", dv=sizes, most=MAX_BURN_M_S,
+        ))
+
+
+def _transfer_row(
+    row: PrefilledRow, entry: ThreatSweepEntry, red: tuple[str, datetime | None], draft: _Draft, now: datetime,
+) -> PrefilledRow:
+    """Row 1 with every burn of the transfer (SPC-184): the later burns carried, each burn listed, and any at or
+    before the held red set's epoch named as not applied. Burn 1 is the departure, at the entry's own burn time."""
+    first = TransferBurn(entry.burn_epoch, *(entry.departure_m_s or (0.0, 0.0, 0.0)))
+    burns = (first, *(TransferBurn(*b) for b in entry.transfer_m_s[1:]))
+    name, epoch = red
+    dropped = [k for k, b in enumerate(burns, 1) if epoch is not None and b.at_utc <= epoch]
+    dated = "" if epoch is None else _when(epoch)
+    kept = [k for k in range(1, len(burns) + 1) if k not in dropped]
+    sentence = _TRANSFER.format(
+        n=len(burns), archetype=MANOEUVRE_ARCHETYPES[SWEEP_ARCHETYPE].name, dv=first.dv_m_s,
+        at=_when(entry.burn_epoch), applies=_applies(dropped, kept),
+    )
+    draft.filled.append(sentence + (_BURNED_THEN if entry.burn_epoch < now else ""))
+    lines = tuple(_burn_line(k, b, k in dropped) for k, b in enumerate(burns, 1))
+    if dropped and kept:
+        one = len(dropped) == 1
+        draft.left.append(_SOME_DROPPED.format(
+            burns=_numbered(dropped).capitalize(), at=" and ".join(_when(burns[k - 1].at_utc) for k in dropped),
+            verb="is" if one else "are", red=name, epoch=dated, them="it" if one else "them",
+            kept=_numbered(kept),
+        ))
+    elif dropped:
+        draft.left.append(_ALL_DROPPED.format(n=len(burns), red=name, epoch=dated))
+    _too_big(burns, draft)
+    starts = burns[kept[0] - 1].at_utc if kept and kept[0] != 1 else None
+    return dataclasses.replace(row, then=burns[1:], burn_lines=lines, starts_at=starts, sampled=bool(kept))
+
+
+def _departure_row(
+    entry: ThreatSweepEntry, now: datetime, draft: _Draft, red_epoch: datetime | None = None,
+) -> PrefilledRow:
+    """Row 1: the transfer's departure burn as a hypothesis, with every later burn of the transfer (SPC-184), or the
+    entry named as a lookup and why."""
     name = f"Least-warning {entry.method.upper()} transfer to {entry.target.target_name}"
     if not draft.red:
         return PrefilledRow(name)
@@ -266,13 +388,16 @@ def _departure_row(entry: ThreatSweepEntry, now: datetime, draft: _Draft) -> Pre
     if dv < _ZERO_BURN_M_S:
         draft.left.append(_ZERO_DEPARTURE)
         return PrefilledRow(name)
-    archetype = MANOEUVRE_ARCHETYPES[SWEEP_ARCHETYPE].name
-    sentence = _DEPARTURE.format(dv=dv, at=_when(entry.burn_epoch), archetype=archetype)
-    draft.filled.append(sentence + (_BURNED_THEN if entry.burn_epoch < now else ""))
-    return PrefilledRow(
+    row = PrefilledRow(
         name, archetype=SWEEP_ARCHETYPE, dv_m_s=_number(dv),
         direction=(_number(radial / dv), _number(prograde / dv), _number(normal / dv)), burn_at=entry.burn_epoch,
     )
+    if len(entry.transfer_m_s) > 1 and _lists_every_burn(entry, draft):
+        return _transfer_row(row, entry, (draft.red, red_epoch), draft, now)
+    archetype = MANOEUVRE_ARCHETYPES[SWEEP_ARCHETYPE].name
+    sentence = _DEPARTURE.format(dv=dv, at=_when(entry.burn_epoch), archetype=archetype)
+    draft.filled.append(sentence + (_BURNED_THEN if entry.burn_epoch < now else ""))
+    return row
 
 
 def latest_detected_burn(state: Any, satno: int | None, red: str, now: datetime) -> DetectedBurn | str:
@@ -335,7 +460,8 @@ def _fit_samples(horizon_h: float, now: datetime, draft: _Draft) -> None:
     sampled = [row for row in draft.rows if row.archetype and row.sampled]
     if not sampled:
         return
-    earliest = min(_hours(row.burn_at, now) for row in sampled if row.burn_at is not None)
+    # A row of several burns is integrated from the first the engine applies (SPC-184).
+    earliest = min(_hours(row.starts_at or row.burn_at, now) for row in sampled if row.burn_at is not None)
     span = horizon_h + max(0.0, -earliest)
     rows = len(sampled)
     n = next((n for n in range(DEFAULT_SAMPLES, MIN_SAMPLES - 1, -_SAMPLE_STEP)
@@ -387,7 +513,8 @@ def open_from_sweep(state: Any, entry: str, sweep: str, now: datetime) -> SweepP
     draft = _Draft()
     _bind_red(state, assessment, draft)
     _bind_blue(state, chosen, draft)
-    draft.rows.append(_departure_row(chosen, now, draft))
+    held = elset_age(assessment.red_tle or "", now)
+    draft.rows.append(_departure_row(chosen, now, draft, None if held is None else held.epoch))
     _detected_row(state, assessment, now, draft)
     horizon = min(MAX_HORIZON_H, math.ceil(_hours(arrival, now)) + 1.0)
     draft.filled.append(_HORIZON.format(h=f"{horizon:g}", at=_when(arrival)))

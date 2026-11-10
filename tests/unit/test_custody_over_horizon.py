@@ -152,32 +152,73 @@ class TestDegraded:
     """Degraded: the orbit is current, but whether a burn is normal cannot be judged (SPC-018).
 
     The operator's custody is information to judge both whether a burn is normal and how the warning time
-    changed, so custody that can judge only one is not held: it counts as lost, for the whole horizon, since
-    nothing in the horizon brings the missing history.
+    changed, so custody that can judge only one is neither held nor lost: it is degraded, and the owner ruled on
+    2026-11-05 (SPC-179) that it scores between the two. It stays degraded until it would be lost by the rules
+    held custody is lost by: the newest element set passing its limit, or a hypothesised burn newer than it.
     """
 
-    _SENTENCE = (
-        "Custody degraded for the whole 10 h horizon, which counts as lost: its orbit is current, so how a burn "
-        "changes your warning time can be judged, but whether it is normal cannot, and custody needs both."
+    _WHY = (
+        "Degraded, neither held nor lost: how a burn changes your warning time can be judged, but whether it is "
+        "normal cannot."
     )
 
-    def test_degraded_is_lost_for_the_whole_horizon(self) -> None:
+    def test_degraded_through_the_horizon_is_neither_held_nor_lost(self) -> None:
         over = _over(_DEGRADED)
-        assert (over.at_epoch, over.lost_from_h, over.lost_hours, over.cause) == (
-            Custody.DEGRADED, 0.0, 10.0, LossCause.DEGRADED,
+        assert (over.at_epoch, over.lost_from_h, over.lost_hours, over.degraded_hours, over.cause) == (
+            Custody.DEGRADED, None, 0.0, 10.0, None,
         )
-        assert not over.maintained and over.lost_from_epoch
-        assert over.sentence == self._SENTENCE
+        assert not over.maintained and not over.lost_from_epoch
+        assert over.sentence == (
+            "Custody degraded through the 10 h horizon: its newest element set stays within its 72 h limit until "
+            "2026-11-01 07:00 UTC, after the horizon ends. " + self._WHY
+        )
 
-    @pytest.mark.parametrize("burn_h", [-1.0, 2.0])
-    def test_a_burn_changes_nothing_once_degraded(self, burn_h: float) -> None:
+    def test_degraded_until_the_element_set_ages_out_then_lost(self) -> None:
+        over = _over(_DEGRADED, elset=20.0, limit=24.0)
+        assert (over.lost_from_h, over.lost_hours, over.degraded_hours, over.cause) == (4.0, 6.0, 4.0, LossCause.AGES_OUT)
+        assert not over.maintained and not over.lost_from_epoch
+        assert over.sentence == (
+            "Custody degraded for 4.0 h from the start of the horizon. " + self._WHY + " Custody lost from 2026-10-29 "
+            "16:00 UTC, 4.0 h into the horizon, for up to 6.0 h: its newest element set then passes its 24 h limit, "
+            "so unless a newer one arrives, whether a burn is normal and how it changes your warning time cannot be "
+            "judged."
+        )
+
+    def test_degraded_until_a_burn_newer_than_the_element_set_then_lost(self) -> None:
+        over = _over(_DEGRADED, burn=_at(2.0))
+        assert (over.lost_from_h, over.lost_hours, over.degraded_hours, over.cause) == (2.0, 8.0, 2.0, LossCause.BURN)
+        assert over.sentence.startswith("Custody degraded for 2.0 h from the start of the horizon. " + self._WHY)
+        assert over.sentence.endswith("Custody lost from the burn at 2026-10-29 14:00 UTC, 2.0 h into the horizon, "
+                                      "for up to 8.0 h: the burn is newer than the newest element set, so whether it "
+                                      "is normal and how it changes your warning time cannot be judged until a newer "
+                                      "element set arrives.")
+
+    @pytest.mark.parametrize("burn_h", [0.004, 0.03])
+    def test_a_degraded_span_under_a_tenth_of_an_hour_is_never_shown_as_none(self, burn_h: float) -> None:
+        """A burn 14 s or 108 s in leaves a degraded span that reads 0.0 h to one decimal: it says under 0.1 h."""
         over = _over(_DEGRADED, burn=_at(burn_h))
-        assert (over.lost_from_h, over.lost_hours, over.cause) == (0.0, 10.0, LossCause.DEGRADED)
-        assert over.sentence == self._SENTENCE
+        assert over.degraded_hours == pytest.approx(burn_h)
+        assert over.sentence.startswith("Custody degraded for under 0.1 h from the start of the horizon. " + self._WHY)
+        assert "0.0 h of" not in over.sentence
+
+    def test_a_burn_before_the_epoch_newer_than_the_element_set_loses_it_for_the_whole_horizon(self) -> None:
+        """Degraded hours run only until custody is lost; a burn already made leaves none."""
+        over = _over(_DEGRADED, burn=_at(-1.0))
+        assert (over.lost_from_h, over.lost_hours, over.degraded_hours, over.cause) == (0.0, 10.0, 0.0, LossCause.BURN)
+        assert over.lost_from_epoch
+
+    def test_a_burn_in_the_element_set_leaves_it_degraded(self) -> None:
+        over = _over(_DEGRADED, burn=_at(-6.0))
+        assert (over.lost_from_h, over.degraded_hours) == (None, 10.0)
 
     def test_degraded_past_its_limit_is_lost_already(self) -> None:
         """An element set past its limit cannot judge the warning time either: lost, not degraded."""
-        assert _over(_DEGRADED, elset=30.0, limit=24.0).cause is LossCause.ALREADY_LOST
+        over = _over(_DEGRADED, elset=30.0, limit=24.0)
+        assert (over.cause, over.degraded_hours, over.lost_hours) == (LossCause.ALREADY_LOST, 0.0, 10.0)
+
+    def test_held_custody_has_no_degraded_hours(self) -> None:
+        assert _over().degraded_hours == 0.0
+        assert _over(elset=20.0, limit=24.0).degraded_hours == 0.0
 
 
 def test_a_horizon_of_no_length_is_refused() -> None:

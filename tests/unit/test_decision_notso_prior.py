@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from spectre.astro.notso import NOTSOType
+from spectre.domain import decision
 from spectre.domain.decision import (
     ActionType,
     AdversaryAction,
@@ -92,8 +93,17 @@ class TestTheResultSaysWhoseValuesTheyAre:
         (line,) = evaluate_scenario(_scenario(_row(confidence=0.7, prior=prior))).row_sources
         assert line.startswith("P 0.13 is the NOTSO suggestion you applied; Conf is your own.")
 
+    def test_a_p_never_edited_is_the_panels_default_and_only_conf_is_the_operators(self) -> None:
+        """SPC-183: the form records this P as never edited, so the line does not call it the operator's own."""
+        row = dataclasses.replace(_row(0.5, 0.6), probability_edited=False)
+        assert evaluate_scenario(_scenario(row)).row_sources == (decision.DEFAULT_P_VALUES,)
+        assert decision.DEFAULT_P_VALUES == "P 0.5 is the panel's default, never edited; Conf is your own."
+
     def test_no_source_line_breaks_i13(self) -> None:
-        result = evaluate_scenario(_scenario(_row(prior=_prior()), dataclasses.replace(_row(0.3, 0.6), id="A2")))
+        unedited = dataclasses.replace(_row(0.5, 0.6), id="A3", probability_edited=False)
+        result = evaluate_scenario(
+            _scenario(_row(prior=_prior()), dataclasses.replace(_row(0.3, 0.6), id="A2"), unedited),
+        )
         assert [s for s in result.row_sources if i13_problems(s)] == []
 
 
@@ -118,6 +128,16 @@ class TestTheEvaluationRecordsIt:
         row = _row(0.5, 0.3, prior=_prior(probability=0.5))
         assert evaluate_scenario(_scenario(row), SelectorStrategy.EXPECTED_VALUE).objective_guidance is None
 
-    def test_a_typed_default_is_still_untouched(self) -> None:
-        guidance = evaluate_scenario(_scenario(_row(0.5, 0.3)), SelectorStrategy.EXPECTED_VALUE).objective_guidance
+    def test_a_typed_default_is_not_untouched(self) -> None:
+        """SPC-183: the owner ruled on 2026-11-05 that the form tracks whether each P was edited, so a deliberate 0.5
+        is the operator's own; only a P the form records as never edited is untouched."""
+        typed = _row(0.5, 0.3)
+        assert evaluate_scenario(_scenario(typed), SelectorStrategy.EXPECTED_VALUE).objective_guidance is None
+        left = dataclasses.replace(typed, probability_edited=False)
+        guidance = evaluate_scenario(_scenario(left), SelectorStrategy.EXPECTED_VALUE).objective_guidance
         assert (guidance or "").startswith("Expected value rests on a probability the evidence has not earned.")
+
+    def test_an_accepted_suggestion_counts_as_edited_whatever_the_record(self) -> None:
+        """A row whose P came from an applied NOTSO suggestion is never untouched (SPC-130, SPC-183)."""
+        row = dataclasses.replace(_row(0.5, 0.3, prior=_prior(probability=0.5)), probability_edited=False)
+        assert evaluate_scenario(_scenario(row), SelectorStrategy.EXPECTED_VALUE).objective_guidance is None

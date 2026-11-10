@@ -10,9 +10,13 @@ applied to custody yet. A manoeuvre with no hypothesis names no burn time, so
 it takes the worst case, a burn at the scenario epoch, with basis lookup.
 Unbound, blue only, or with no status read, the rule of thumb stays and the
 page says so. Degraded custody cannot judge whether a burn is normal, so in
-the operator's terms it is not held: it counts as lost for the whole horizon.
-Custody already lost or degraded at the epoch is lost whatever the burn time,
-so a manoeuvre with no hypothesis is computed then, not the worst case.
+the operator's terms it is neither held nor lost: the owner ruled on
+2026-11-05 (SPC-179) that each hour of it carries 0.25 of the custody penalty
+an hour lost carries, and it is shown as degraded in the cell, the cell's
+basis and the result's note, never in the gap of lost hours. Custody already
+lost at the epoch is lost whatever the burn time, so a manoeuvre with no
+hypothesis is computed then, not the worst case; degraded custody is not lost
+yet, so such a manoeuvre takes the worst case.
 
 The bound fixtures are the plane-change reference element sets, both at
 EPOCH, against a 24 h limit, over a 1 h horizon.
@@ -69,11 +73,26 @@ _CUSTODY_NOTE = (
     "the assumption that no newer element set arrives, so each custody gap is an upper bound. Our response is not "
     "applied to custody yet: a sensor retask that would bring a newer element set sooner is not modelled, so every "
     "response in a row has the same custody. Degraded custody can judge the warning time but not whether a burn "
-    "is normal, so it counts as lost. " + BASIS
+    "is normal, so the hours it is degraded are shown as degraded, neither held nor lost: each carries 0.25 of the "
+    "custody penalty an hour lost carries, the owner's ruling of 2026-11-05 rather than a sourced figure, and the "
+    "custody gap counts only the hours lost. Like held custody, it is lost once its newest element set passes its "
+    "limit or a burn is newer than it, and a manoeuvre that names no burn time takes the worst case. " + BASIS
 )
 _DEGRADED_THROUGH = (
-    "Custody degraded for the whole 1 h horizon, which counts as lost: its orbit is current, so how a burn changes "
-    "your warning time can be judged, but whether it is normal cannot, and custody needs both."
+    "Custody degraded through the 1 h horizon: its newest element set stays within its 24 h limit until "
+    "2026-10-18 12:00 UTC, after the horizon ends. Degraded, neither held nor lost: how a burn changes your warning "
+    "time can be judged, but whether it is normal cannot."
+)
+_DEGRADED_NOTE = (
+    "the bound red track RED_PC's custody as the sweep judges it at the scenario epoch, degraded, carried over the "
+    "1 h horizon on the assumption that no newer element set arrives: lost once its newest element set passes its "
+    "limit or a hypothesised burn is newer than it; degraded, neither held nor lost, for 1.0 h of the horizon, each "
+    "such hour carrying 0.25 of the custody penalty an hour lost carries (the owner's ruling of 2026-11-05), since "
+    "degraded custody can judge the warning time but not whether a burn is normal; our response is not applied"
+)
+_DEGRADED_GAP_NOTE = (
+    "hours of the horizon custody is lost, an upper bound, since a newer element set may arrive sooner; the hours "
+    "it is degraded, 1.0 h, are not lost hours and are not in this gap; our response is not applied"
 )
 _RULE_OF_THUMB = "Custody here is a rule of thumb, not the held, degraded or lost custody shown on the sweep."
 _BIND_RED = "Bind a red track to compute it from its element set and history."
@@ -87,10 +106,11 @@ def _custodied(status: CustodyStatus | None = _HELD, *, blue: bool = True, **kwa
     return ScenarioBinding(red=_red(status, **kwargs), blue=_elset("blue") if blue else None)
 
 
-def _burn_at_quarter_hour(scenario: Scenario) -> Scenario:
-    """Row 0 carries a hypothesis burning 0.25 h into the 1 h horizon, with a rule-of-thumb gap share of 0.5."""
+def _burn_at_quarter_hour(scenario: Scenario, hours: float = 0.25) -> Scenario:
+    """Row 0 carries a hypothesis burning 0.25 h, or *hours*, into the 1 h horizon, with a rule-of-thumb gap share
+    of 0.5."""
     action = dataclasses.replace(
-        scenario.adversary_actions[0], custody_gap_fraction=0.5, hypothesis=_steady(50, at=EPOCH + timedelta(hours=0.25)),
+        scenario.adversary_actions[0], custody_gap_fraction=0.5, hypothesis=_steady(50, at=EPOCH + timedelta(hours=hours)),
     )
     return dataclasses.replace(scenario, adversary_actions=[action, *scenario.adversary_actions[1:]])
 
@@ -173,30 +193,65 @@ class TestABoundRedTracksCustodyIsComputed:
         assert str(result.row_custody[_NO_ACTION]).startswith("Custody lost for the whole 1 h horizon: its newest")
 
 
-    @pytest.mark.parametrize(("status", "sentence"), [
-        (_LOST, "Custody lost for the whole 1 h horizon: its newest element set is already past its limit"),
-        (_DEGRADED, _DEGRADED_THROUGH),
-    ], ids=["lost", "degraded"])
-    def test_custody_lost_at_the_epoch_is_computed_for_a_manoeuvre_without_a_hypothesis(
-        self, status: CustodyStatus, sentence: str,
-    ) -> None:
+    def test_custody_lost_at_the_epoch_is_computed_for_a_manoeuvre_without_a_hypothesis(self) -> None:
         """No burn time can make custody already lost any worse, so it is computed, not the worst case."""
-        result = _evaluated(_custodied(status))
+        result = _evaluated(_custodied(_LOST))
         for cell in result.outcome_matrix[_MANOEUVRE]:
-            assert _custody(cell) == (False, 1.0, status.state, Basis.COMPUTED, Basis.COMPUTED)
-        assert str(result.row_custody[_MANOEUVRE]).startswith(sentence)
+            assert _custody(cell) == (False, 1.0, Custody.LOST, Basis.COMPUTED, Basis.COMPUTED)
+        assert str(result.row_custody[_MANOEUVRE]).startswith(
+            "Custody lost for the whole 1 h horizon: its newest element set is already past its limit",
+        )
         assert "Add a manoeuvre hypothesis" not in str(result.row_custody[_MANOEUVRE])
+
+    def test_degraded_custody_takes_the_worst_case_for_a_manoeuvre_without_a_hypothesis(self) -> None:
+        """Degraded is not lost yet, so a burn at the epoch, the worst case, would still lose it (SPC-179)."""
+        result = _evaluated(_custodied(_DEGRADED))
+        for cell in result.outcome_matrix[_MANOEUVRE]:
+            assert _custody(cell) == (False, 1.0, None, Basis.LOOKUP, Basis.LOOKUP)
+            assert cell.custody_degraded_hours == 0.0
+        assert result.row_custody[_MANOEUVRE] == _WORST_CASE
+
+
+def _custody_only(binding: ScenarioBinding, *, burn: bool = False) -> ScenarioResult:
+    """The scenario with all the weight on custody, so each score is the custody penalty alone."""
+    scenario = _scenario(binding=binding)
+    scenario = _burn_at_quarter_hour(scenario) if burn else scenario
+    for name in ("w_closest_approach", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
+        setattr(scenario, name, 0.0)
+    scenario.w_custody = 1.0
+    return evaluate_scenario(scenario, sampler=_Fake() if burn else _never)
 
 
 class TestTheScore:
-    def test_degraded_is_not_held_and_scores_as_lost(self) -> None:
-        """K11: degraded cannot judge whether a burn is normal, and the operator's custody needs both."""
-        lost, degraded = _evaluated(_custodied(_LOST)), _evaluated(_custodied(_DEGRADED))
-        for lost_row, degraded_row in zip(lost.outcome_matrix, degraded.outcome_matrix, strict=True):
-            assert [c.composite_score for c in lost_row] == [c.composite_score for c in degraded_row]
-        for row in degraded.outcome_matrix:
-            for cell in row:
-                assert _custody(cell) == (False, 1.0, Custody.DEGRADED, Basis.COMPUTED, Basis.COMPUTED)
+    def test_the_degraded_weight_is_the_owners_ruling(self) -> None:
+        """K11, SPC-179: the owner ruled on 2026-11-05 that degraded scores between held and lost, at a quarter."""
+        assert decision.DEGRADED_CUSTODY_WEIGHT == 0.25
+
+    def test_degraded_through_the_horizon_scores_a_quarter_of_lost(self) -> None:
+        """K11: an hour degraded carries 0.25 of the penalty an hour lost carries; held carries none. The still
+        rows are degraded for the whole 1 h, with no lost hours; held they score 0 and lost 1."""
+        held = _custody_only(_custodied())
+        degraded = _custody_only(_custodied(_DEGRADED))
+        lost = _custody_only(_custodied(_LOST))
+        for row in (_RETASK, _POSTURE, _NO_ACTION):
+            assert [c.composite_score for c in held.outcome_matrix[row]] == [0.0] * 4
+            assert [c.composite_score for c in degraded.outcome_matrix[row]] == [0.25] * 4
+            assert [c.composite_score for c in lost.outcome_matrix[row]] == [1.0] * 4
+            for cell in degraded.outcome_matrix[row]:
+                assert _custody(cell) == (False, 0.0, Custody.DEGRADED, Basis.COMPUTED, Basis.COMPUTED)
+                assert cell.custody_degraded_hours == 1.0
+
+    def test_degraded_until_a_burn_scores_its_degraded_and_lost_hours_apart(self) -> None:
+        """Degraded for the 0.25 h before the burn and lost for the 0.75 h after it: 0.75 + 0.25 x 0.25 = 0.8125.
+        The gap is the 0.75 h lost, never the hour custody was not held."""
+        result = _custody_only(_custodied(_DEGRADED), burn=True)
+        for cell in result.outcome_matrix[_MANOEUVRE]:
+            assert _custody(cell) == (False, 0.75, Custody.DEGRADED, Basis.COMPUTED, Basis.COMPUTED)
+            assert cell.custody_degraded_hours == 0.25
+            assert cell.composite_score == 0.8125
+            # Each sample is scored with the degraded hours too, so the score's spread agrees with the score.
+            assert cell.score_percentiles == pytest.approx({5: 0.8125, 50: 0.8125, 95: 0.8125})
+        assert str(result.row_custody[_MANOEUVRE]).startswith("Custody degraded for 0.2 h from the start of the horizon.")
 
     def test_the_score_counts_the_computed_gap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With all the weight on custody, every cell of the burn row scores 0.75, and the no-action row 0."""
@@ -280,13 +335,58 @@ class TestWhatTheResultSays:
         assert _WORST_CASE in text
         assert f"Custody at evaluation: {_HELD.sentence}" in text
 
-    def test_degraded_custody_is_shown_in_the_cell_and_never_ticked(self) -> None:
-        markup = _render(_evaluated(_custodied(_DEGRADED)))
-        text = _page(_evaluated(_custodied(_DEGRADED)))
-        assert text.count("✗ custody degraded (computed)") == 16
-        assert "✓ custody" not in text
+    def test_degraded_custody_is_shown_in_the_cell_never_ticked_or_crossed(self) -> None:
+        """SPC-179: the three still rows are degraded through the horizon; the manoeuvre row takes the worst case."""
+        result = _evaluated(_custodied(_DEGRADED))
+        markup = _render(result)
+        text = _page(result)
+        assert text.count("◐ custody degraded (computed)") == 12
+        assert text.count("✗ custody (lookup)") == 4
+        assert "✓ custody" not in text and "✗ custody degraded" not in text
         assert '<span style="color:#22c55e">✓</span>' not in markup
-        assert text.count(_DEGRADED_THROUGH) == 4
+        assert text.count(_DEGRADED_THROUGH) == 3
+
+    def test_degraded_then_lost_is_shown_as_both_in_the_cell(self) -> None:
+        text = _page(_evaluated(_custodied(_DEGRADED), burn=True))
+        assert text.count("◐ custody degraded, then lost (computed)") == 4
+
+    def test_degraded_custody_is_degraded_in_the_cell_basis_and_not_in_the_gap(self) -> None:
+        result = _evaluated(_custodied(_DEGRADED))
+        cell = result.outcome_matrix[_NO_ACTION][0]
+        assert cell.figure_bases.custody_maintained.note == _DEGRADED_NOTE
+        assert cell.figure_bases.custody_gap_hours.note == _DEGRADED_GAP_NOTE
+        assert "custody: computed, " + _DEGRADED_NOTE in cell.basis
+        assert result.custody_note == _CUSTODY_NOTE
+        assert _CUSTODY_NOTE in _page(result)
+
+    @pytest.mark.parametrize("burn_h", [0.004, 0.03])
+    def test_a_degraded_span_under_a_tenth_of_an_hour_is_never_shown_as_lost_or_as_none(self, burn_h: float) -> None:
+        """A burn 14 s or 108 s in: the cell, its basis, its gap and the row sentence all say degraded, then lost,
+        and none says the span was 0.0 h."""
+        scenario = _burn_at_quarter_hour(_scenario(binding=_custodied(_DEGRADED)), burn_h)
+        result = evaluate_scenario(scenario, sampler=_Fake())
+        for cell in result.outcome_matrix[_MANOEUVRE]:
+            assert cell.custody_reading == "degraded, then lost"
+            assert "for under 0.1 h of the horizon" in cell.figure_bases.custody_maintained.note
+            assert "the hours it is degraded, under 0.1 h," in cell.figure_bases.custody_gap_hours.note
+            assert "0.0 h" not in cell.basis
+        sentence = str(result.row_custody[_MANOEUVRE])
+        assert sentence.startswith("Custody degraded for under 0.1 h from the start of the horizon.")
+        text = _page(result)
+        assert text.count("◐ custody degraded, then lost (computed)") == 4
+        assert "for 0.0 h" not in text
+
+    def test_a_cell_in_plain_text_marks_degraded_as_neither_held_nor_lost(self) -> None:
+        """OutcomeMetrics' text form keeps the cell's mark: ✓ held, ✗ lost, ◐ degraded (SPC-179)."""
+        degraded = _evaluated(_custodied(_DEGRADED)).outcome_matrix[_NO_ACTION][0]
+        lost = _evaluated(_custodied(_LOST)).outcome_matrix[_NO_ACTION][0]
+        held = _evaluated(_custodied()).outcome_matrix[_NO_ACTION][0]
+        assert [str(c).split()[0] for c in (held, degraded, lost)] == ["Custody:✓", "Custody:◐", "Custody:✗"]
+
+    def test_held_custody_says_nothing_of_degraded_hours(self, held: ScenarioResult) -> None:
+        bases = held.outcome_matrix[_NO_ACTION][0].figure_bases
+        assert "degraded, neither held nor lost" not in bases.custody_maintained.note
+        assert "degraded" not in bases.custody_gap_hours.note
 
     def test_an_all_worst_case_result_does_not_call_custody_a_rule_of_thumb(self) -> None:
         """Every row a manoeuvre with no hypothesis: every figure a lookup, custody the worst case, not the rule."""
@@ -367,6 +467,10 @@ class TestTheInvariantsHold:
             ({"custody_gap_hours": 0.5}, "gap"),
             ({"custody_state": Custody.LOST}, "lost"),
             ({"custody_state": Custody.DEGRADED}, "degraded"),
+            ({"custody_degraded_hours": 0.5}, "degraded"),
+            ({"custody_maintained": False, "custody_gap_hours": 0.5, "custody_state": Custody.LOST,
+              "custody_degraded_hours": 0.5}, "degraded"),
+            ({"figure_bases": LOOKUP_BASES, "custody_state": None, "custody_degraded_hours": 0.5}, "degraded"),
             (
                 {"figure_bases": outcome_bases(
                     custody_maintained=FigureBasis(Basis.COMPUTED, "custody"),
@@ -380,7 +484,8 @@ class TestTheInvariantsHold:
         ],
         ids=[
             "state with a lookup basis", "computed basis without a state", "maintained with a gap",
-            "lost yet maintained", "degraded yet maintained", "custody and its gap on different bases",
+            "lost yet maintained", "degraded yet maintained", "degraded hours yet maintained",
+            "degraded hours when lost at the epoch", "degraded hours on a lookup", "custody and its gap on different bases",
         ],
     )
     def test_a_cell_that_breaks_an_invariant_is_refused(self, changes: dict[str, Any], match: str) -> None:

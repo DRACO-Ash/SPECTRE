@@ -87,7 +87,7 @@ class TestOverTheCostCap:
         assert refusal.endswith(_ONLY_THE_MATRIX)
 
     def test_three_turns_over_the_cap_name_two(self) -> None:
-        scenario = _two_by_two(100, 3, 2.0)
+        scenario = _two_by_two(150, 3, 2.0)
         assert tree_cost(scenario) > MAX_SAMPLE_HOURS
         assert largest_tree(scenario) == 2
         refusal = depth_refusal(scenario)

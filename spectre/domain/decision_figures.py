@@ -147,15 +147,17 @@ RESPONSE_SHORT = (
 RESPONSE_EDGE = (
     " The objects are still closing when the search ends, so the target holds only to {end:%Y-%m-%d %H:%M} UTC."
 )
+#: What a sampled cell's burn is sized against, red flying one burn; a row of several names its transfer (SPC-184).
+NOMINAL_BURN = "the hypothesis's nominal burn"
 _SAMPLED_BUYS = " Across samples it buys {buys:+.1f} km at P5: {p5b:.1f} km before it, {p5a:.1f} km after it."
 SAMPLED_RESPONSE_LINE = (
-    "Our burn: {dv:.2f} m/s {axis} ({sense}) at {at:%Y-%m-%d %H:%M} UTC, sized on the hypothesis's nominal burn to "
-    "put its closest approach at {target:g} km." + _SAMPLED_BUYS
+    "Our burn: {dv:.2f} m/s {axis} ({sense}) at {at:%Y-%m-%d %H:%M} UTC, sized on {nominal} to put its closest "
+    "approach at {target:g} km." + _SAMPLED_BUYS
 )
 #: SAMPLED_RESPONSE_LINE when the whole budget, flown against the hypothesis's nominal burn, falls short.
 SAMPLED_RESPONSE_SHORT = (
     "Our burn: the whole {budget:g} m/s budget, {axis} ({sense}) at {at:%Y-%m-%d %H:%M} UTC, falls short of the "
-    "{target:g} km target on the hypothesis's nominal burn, reaching {nominal:.1f} km." + _SAMPLED_BUYS
+    "{target:g} km target on {nominal}, reaching {reached:.1f} km." + _SAMPLED_BUYS
 )
 SAMPLED_UNDER_TARGET = (
     " P5 after our burn is {p5a:.1f} km, under the {target:g} km target: {share} samples still came closer than the "
@@ -202,6 +204,8 @@ class ResponseFigure:
     sampled_before_p5_km: float | None = None
     sampled_after_p5_km: float | None = None
     sampled_under_target: tuple[int, int] | None = None
+    #: What a sampled cell's burn was sized against: a row of several burns names its transfer (SPC-184).
+    nominal: str = NOMINAL_BURN
 
     @property
     def delta_v_km_s(self) -> float:
@@ -249,7 +253,7 @@ class ResponseFigure:
         return template.format(
             dv=self.delta_v_km_s * _M_S_PER_KM_S, axis=self.sized.axis.value, sense=self._sense, at=self.burn_at_utc,
             target=self.target_km, buys=self.buys_km, p5b=self.sampled_before_p5_km, p5a=self.sampled_after_p5_km,
-            budget=self.budget_km_s * _M_S_PER_KM_S, nominal=self.sized.after.approach.miss_km,
+            budget=self.budget_km_s * _M_S_PER_KM_S, reached=self.sized.after.approach.miss_km, nominal=self.nominal,
         ) + self._under_target()
 
     def _under_target(self) -> str:

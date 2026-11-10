@@ -27,6 +27,7 @@ from spectre.domain.turn_update import (
     POSTERIOR_NO_WEIGHT,
     POSTERIOR_ONE_ROW,
     POSTERIOR_SHARES,
+    SEEN_MODEL,
     SENTENCES,
     Seen,
     burns_on,
@@ -74,9 +75,16 @@ class TestWhatATurnShows:
 
     @pytest.mark.parametrize("state", [Custody.LOST, Custody.DEGRADED])
     def test_custody_lost_or_degraded_at_the_epoch_shows_nothing(self, state: Custody) -> None:
-        """22: the custody rule counts degraded as lost, so no turn shows anything."""
+        """22: lost at the epoch, nothing is lost at a burn and nothing is held, so no turn shows anything. Degraded
+        scores between held and lost since SPC-179, but it is neither held through a turn nor lost at a burn from
+        held, so D10, kept by the owner on 2026-11-05, still reads it as showing nothing."""
         scenario = _scenario([cases.still(), _evasive()], _custody(state))
         assert likelihood(scenario, _TURN_S) == (Seen.NOTHING, Seen.NOTHING)
+
+    def test_the_model_names_degraded_among_what_shows_nothing(self) -> None:
+        """SPC-179: degraded is no longer a kind of lost, so the model's words name it."""
+        assert "custody degraded, lost for any other reason, or not read, shows nothing" in LIKELIHOOD_MODEL
+        assert "custody degraded, lost for any other reason, or not read, shows nothing" in SEEN_MODEL
 
     def test_custody_not_read_or_no_red_track_shows_nothing(self) -> None:
         """22: with no custody read there is nothing to see by, so the update cannot move the weights."""
@@ -145,9 +153,14 @@ class TestThePosteriorAfterTurnOne:
         burn, _ = posteriors(scenario, likelihood(scenario, _TURN_S))
         assert "row 1, Evasive, 0.66 of the weight, from your P;" in burn.line
         assert "row 2, Evasive, 0.33 of the weight" in burn.line
-        untouched = _scenario([_evasive(), _evasive(2.0, "A2", 0.2), cases.still()])
+        untouched = _scenario([dataclasses.replace(_evasive(), probability_edited=False), _evasive(2.0, "A2", 0.2),
+                               cases.still()])
         burn, _ = posteriors(untouched, likelihood(untouched, _TURN_S))
         assert "row 1, Evasive, 0.71 of the weight, from the default P of 0.5, untouched;" in burn.line
+        # SPC-183: a 0.5 the operator edited to is their own P, not the untouched default.
+        edited = _scenario([_evasive(), _evasive(2.0, "A2", 0.2), cases.still()])
+        burn, _ = posteriors(edited, likelihood(edited, _TURN_S))
+        assert "row 1, Evasive, 0.71 of the weight, from your P;" in burn.line
 
     def test_when_every_row_gives_the_same_thing_the_weights_stand(self) -> None:
         """26: custody not read, so every row gives nothing and the posterior is the prior."""

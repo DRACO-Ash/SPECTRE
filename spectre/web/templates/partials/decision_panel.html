@@ -67,6 +67,9 @@
      detected burn evaluate builds from the held history. Blank on a row the operator builds. #}
   <input type="hidden" name="hyp_burn_at" value="{{ row.burn_at_iso if row is not none else '' }}">
   <input type="hidden" name="hyp_detected" value="{{ '1' if detected else '' }}">
+  {# Hidden, posted by every row (SPC-184): the transfer's later burns, each at its own UTC time with its parts in
+     m/s, carried with the first; blank for a single burn. #}
+  <input type="hidden" name="hyp_then" value="{{ row.then_value if row is not none else '' }}">
   <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.3rem; margin-top:0.2rem">
     <label>Archetype
       <select name="hyp_archetype" style="width:100%; font-size:0.6rem">
@@ -107,6 +110,15 @@
     that time however long this panel is open.{% if detected %} It is the burn detected in the element-set history,
     started from the element set before it; its delta-V and direction are the detection's.{% endif %} To enter your
     own burn, set the archetype to None and add a row.</p>
+  {% endif %}
+  {% if row is not none and row.burn_lines %}
+  {# Every burn of the transfer (SPC-184), one action with one P: burn 1 is the fields above, the rest are carried
+     as the sweep gave them. In words, wrapping at phone width. #}
+  <p class="hyp-transfer-lead" style="margin:0.2rem 0 0">This row carries {{ row.burn_lines | length }} burns of one
+    transfer as one action, listed in time order:</p>
+  <ol class="hyp-transfer" aria-label="The transfer's burns" style="margin:0.15rem 0 0 1rem; padding:0; overflow-wrap:anywhere">
+    {% for line in row.burn_lines %}<li>{{ line }}</li>{% endfor %}
+  </ol>
   {% endif %}
   <p style="margin:0.2rem 0 0">Starts from the bound red track's state at the burn time. 0 is the moment you press
     Evaluate; a negative time is a burn already made since the red element set's epoch. Blank fields take the
@@ -252,7 +264,7 @@
                placeholder="Cost" style="font-size:0.63rem" title="Normalised cost [0,1]">
         <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
-        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5"
+        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
         <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
@@ -307,7 +319,7 @@
     {% set observation_choices = observations if observations is defined else [
       ("burn", "A burn: custody lost at a burn in turn 1"),
       ("no_burn", "No burn: custody held through turn 1"),
-      ("nothing", "Nothing: custody lost for another reason, or not read")
+      ("nothing", "Nothing: custody degraded, lost for another reason, or not read")
     ] %}
     <div class="tree-fields" style="margin-bottom:0.5rem; font-size:0.65rem; color:var(--text-dim)">
       <label class="tree-depth" style="display:block; margin-bottom:0.3rem">
@@ -391,7 +403,7 @@ function addFrRow() {
     </select>
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Normalised cost [0,1]">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
-    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5" style="font-size:0.63rem" title="Time to execute (h)">
+    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" style="font-size:0.63rem" title="Time to execute (h)">
     <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
     {{ response_burn_fields(hyp) }}`;
   document.getElementById('fr-rows').appendChild(div);

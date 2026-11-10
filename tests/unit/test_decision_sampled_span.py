@@ -71,9 +71,12 @@ class TestTheSampledSearchStopsAtTheLimit:
         assert fake.calls[0][2] == SeparationWindow(start_utc=EPOCH, span_s=4 * _HOUR_S)
 
     def test_the_trim_admits_what_the_horizon_alone_would_not(self) -> None:
-        """2: 100 samples over 48 h cost 4,815 sample-hours and were refused; over the 24 h earned, they fit."""
+        """2: enough samples that over 48 h their floor alone, samples times hours, is past MAX_SAMPLE_HOURS, so
+        they would be refused before anything ran; over the 24 h earned, they fit."""
+        n = int(decision.MAX_SAMPLE_HOURS / 36.0)
+        assert n * 48.0 > decision.MAX_SAMPLE_HOURS
         fake = _Fake()
-        result = evaluate_scenario(_one_row(_evasive(100), age_h=0.0), sampler=fake)
+        result = evaluate_scenario(_one_row(_evasive(n), age_h=0.0), sampler=fake)
         assert fake.calls[0][2].span_s == 24 * _HOUR_S
         cell = result.outcome_matrix[0][0]
         assert cell.ca_refusal is None

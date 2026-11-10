@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,7 @@ from spectre.web.tree_view import (
     TreeView,
     _when,
     _when_note,
+    custody_value,
     tree_view,
 )
 from tests.unit._tree_view_cases import sampled_result, still_result
@@ -163,6 +165,19 @@ class TestTheNodes:
                 f"{band[5]:.1f} km at P5; P50 {band[50]:.1f} km, P95 {band[95]:.1f} km; known to within "
                 f"{node.figures.half_width_km:.2f} km"
             )
+
+    @pytest.mark.parametrize(("gap", "degraded", "expected"), [
+        (0.0, 0.0, "held over the 6 h horizon"),
+        (5.0, 0.0, "lost for up to 5.0 h of the 6 h horizon"),
+        (0.0, 6.0, "degraded, neither held nor lost, for 6.0 h of the 6 h horizon"),
+        (5.0, 1.0, "degraded, neither held nor lost, for 1.0 h, then lost for up to 5.0 h of the 6 h horizon"),
+        (5.996, 0.004, "degraded, neither held nor lost, for under 0.1 h, then lost for up to 6.0 h of the 6 h horizon"),
+    ], ids=["held", "lost", "degraded", "degraded then lost", "degraded under a tenth of an hour"])
+    def test_custody_is_shown_as_held_lost_or_degraded(self, gap: float, degraded: float, expected: str) -> None:
+        """SPC-179: degraded is never shown as held or lost, and its hours are never called hours lost."""
+        path = SimpleNamespace(custody_maintained=gap == 0.0 and degraded == 0.0, custody_gap_hours=gap,
+                               custody_degraded_hours=degraded)
+        assert custody_value(path, 6.0) == expected  # type: ignore[arg-type]
 
     def test_custody_lost_says_for_how_long(self) -> None:
         result = sampled_result()

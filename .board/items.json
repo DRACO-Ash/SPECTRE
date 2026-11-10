@@ -1639,7 +1639,11 @@
   "files": [
    "spectre/domain/decision.py",
    "docs/decision_engine_phases.md"
-  ]
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-179",
@@ -1651,7 +1655,11 @@
   "note": "Owner ruling 2026-11-05. Was scored as LOST. Degraded (orbit current, no history to judge burns) now sits between held and lost at 0.25 of the penalty; the basis line names the weight as the owner's.",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-180",
@@ -1703,7 +1711,11 @@
   "files": [
    "spectre/web/templates/partials/decision_panel.html",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-184",
@@ -1717,7 +1729,11 @@
    "spectre/domain/decision.py",
    "spectre/web/routes/threat.py",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 480,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-185",

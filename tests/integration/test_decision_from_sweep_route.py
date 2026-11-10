@@ -27,6 +27,7 @@ import pytest
 from spectre.domain.decision import AdversaryHypothesis, HypothesisSource, Scenario
 from spectre.domain.models import BlueAsset, RedTrack, ThreatAssessment, ThreatSweepEntry, ThreatTarget
 from spectre.web.decision_job import DecisionJob
+from spectre.web.decision_prior import UNEDITED_PROBABILITY
 from spectre.web.routes import decision as decision_routes
 from spectre.web.routes import threat as threat_routes
 from tests.conftest import csrf_headers
@@ -132,6 +133,20 @@ class TestTheFilledPanel:
         assert ['value="0.5"' in f for f in _field(page, "adv_prob")] == [True]
         assert ['value="0.7"' in f for f in _field(page, "adv_conf")] == [True]
         assert "Not pre-filled: P, Conf and Gap keep the engine's defaults" in _text(page)
+
+    def test_a_p_left_as_the_sweep_opened_it_is_untouched_and_an_edited_one_is_not(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """SPC-183: a row opened from the sweep starts at the text the edit record compares from, so its P reads as
+        untouched until the operator edits it, and as their own once the record says so."""
+        page = _open(client, auth_cookie)
+        assert [f'value="{UNEDITED_PROBABILITY}"' in f for f in _field(page, "adv_prob")] == [True]
+        guidance = "Expected value rests on a probability"
+        left = _evaluate(client, auth_cookie, _form(adv_prob=[UNEDITED_PROBABILITY], strategy="expected_value"))
+        edited = _evaluate(client, auth_cookie, _form(adv_prob=[UNEDITED_PROBABILITY], adv_p_edited=["A1"],
+                                                      strategy="expected_value"))
+        assert guidance in _text(left.text)
+        assert guidance not in _text(edited.text)
 
     def test_opening_evaluates_nothing(self, client: Any, auth_cookie: str, held: Any,
                                        captured: list[DecisionJob]) -> None:

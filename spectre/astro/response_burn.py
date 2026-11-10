@@ -187,12 +187,15 @@ def elset_response_plan(
     return Rk45Plan(before, tuple(_size(pair, window, request, before, tick) for request in requests))
 
 
-def hypothesis_response_plan(
+# PLR0913: the sampled row's red, blue and window, the requests, and two optional keywords (its tick and red's
+# later burns, SPC-184).
+def hypothesis_response_plan(  # noqa: PLR0913
     hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, requests: Sequence[BurnRequest], *,
-    tick: SizingTick | None = None,
+    tick: SizingTick | None = None, then: Sequence[ManoeuvreHypothesis] = (),
 ) -> tuple[SizedBurn | BurnRefusal, ...] | None:
-    """Each request sized against red with the hypothesis's nominal burn (a sampled row); None when an arc fails."""
-    red = nominal_red_arc(hypothesis, window)
+    """Each request sized against red with the hypothesis's nominal burn (a sampled row), and the later burns of its
+    transfer, *then*, each as stated (SPC-184); None when an arc fails."""
+    red = nominal_red_arc(hypothesis, window, then)
     blue_arc = _arc_or_none(blue, window)
     if red is None or blue_arc is None:
         return None

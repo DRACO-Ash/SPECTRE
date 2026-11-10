@@ -24,14 +24,17 @@ the moment the newest element set passes its limit; and a hypothesised burn
 newer than the newest element set, which that element set cannot show. So
 each gap it gives is an upper bound. Degraded custody can judge the warning
 time but not whether a burn is normal, and the operator's custody needs both,
-so it counts as lost for the whole horizon: nothing within it brings the
-missing history.
+so it is neither held nor lost: it stays degraded until one of those rules
+would lose it, and its degraded hours are counted apart from its lost hours.
+The owner ruled on 2026-11-05 (SPC-179) that degraded scores between held and
+lost; the weight it carries is the Decision Engine's, not this module's.
 
 Pure functions over plain data. No I/O, no framework.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -164,10 +167,12 @@ _AGES_OUT = (
     "newest element set then passes its {limit} limit, so unless a newer one arrives, whether a burn is normal and "
     "how it changes your warning time cannot be judged."
 )
-_DEGRADED = (
-    "Custody degraded for the whole {h:g} h horizon, which counts as lost: its orbit is current, so how a burn "
-    "changes your warning time can be judged, but whether it is normal cannot, and custody needs both."
+#: Follows _THROUGH for custody degraded through the horizon, and precedes the loss for custody degraded first.
+_DEGRADED_WHY = (
+    "Degraded, neither held nor lost: how a burn changes your warning time can be judged, but whether it is normal "
+    "cannot."
 )
+_DEGRADED_FIRST = "Custody degraded for {span} from the start of the horizon. " + _DEGRADED_WHY + " "
 _BURN_AHEAD = (
     "Custody lost from the burn at {at:%Y-%m-%d %H:%M} UTC, {from_h:.1f} h into the horizon, for up to "
     "{lost:.1f} h: the burn is newer than the newest element set, so whether it is normal and how it changes your "
@@ -180,11 +185,17 @@ _BURN_MADE = (
 )
 
 
+def span_text(hours: float) -> str:
+    """A span of the horizon, *hours* above 0, to 0.1 h, or "under 0.1 h" for one that would read 0.0 h, so a short
+    span of degraded custody is never shown as none (SPC-179)."""
+    shown = f"{hours:.1f}"
+    return "under 0.1 h" if shown == "0.0" else f"{shown} h"
+
+
 class LossCause(StrEnum):
     """Why custody is lost within a horizon."""
 
     ALREADY_LOST = "already lost"
-    DEGRADED = "degraded"
     AGES_OUT = "ages out"
     BURN = "burn"
 
@@ -199,18 +210,20 @@ class Horizon(NamedTuple):
 
 @dataclass(frozen=True)
 class CustodyOverHorizon:
-    """Custody at the scenario epoch, and when within the horizon it is lost, an upper bound."""
+    """Custody at the scenario epoch, and when within the horizon it is lost, an upper bound; custody degraded at
+    the epoch is degraded for *degraded_hours* before that (SPC-179)."""
 
     at_epoch:    Custody
-    lost_from_h: float | None   # hours into the horizon; None when held throughout
+    lost_from_h: float | None   # hours into the horizon; None when never lost within it
     lost_hours:  float
     cause:       LossCause | None
     sentence:    str
+    degraded_hours: float = 0.0
 
     @property
     def maintained(self) -> bool:
-        """Never lost within the horizon: held throughout."""
-        return self.lost_from_h is None
+        """Never lost and never degraded within the horizon: held throughout."""
+        return self.lost_from_h is None and self.degraded_hours == 0.0
 
     @property
     def lost_from_epoch(self) -> bool:
@@ -233,15 +246,30 @@ def custody_over_horizon(
 
     *elset_hours* is the newest element set's age at the start and *limit_hours* its regime's limit, both None
     when its epoch cannot be read. The element set passes its limit once its age is strictly past it. Degraded
-    custody cannot judge whether a burn is normal, so it is lost for the whole horizon.
+    custody cannot judge whether a burn is normal, so it is degraded, not held, until held custody would be lost.
     """
     h = horizon.hours
     if not h > 0.0:
         raise ValueError(f"a horizon has a length; got {h!r} h")
     if status.state is Custody.LOST or elset_hours is None or limit_hours is None or elset_hours > limit_hours:
         return CustodyOverHorizon(status.state, 0.0, h, LossCause.ALREADY_LOST, _ALREADY_LOST.format(h=h))
-    if status.state is Custody.DEGRADED:
-        return CustodyOverHorizon(status.state, 0.0, h, LossCause.DEGRADED, _DEGRADED.format(h=h))
+    over = _carried(status.state, elset_hours, limit_hours, horizon)
+    if status.state is not Custody.DEGRADED:
+        return over
+    degraded_h = h if over.lost_from_h is None else over.lost_from_h
+    if over.lost_from_h is None:
+        sentence = f"{over.sentence} {_DEGRADED_WHY}"
+    elif degraded_h > 0.0:
+        sentence = _DEGRADED_FIRST.format(span=span_text(degraded_h)) + over.sentence
+    else:
+        sentence = over.sentence
+    return dataclasses.replace(over, sentence=sentence, degraded_hours=degraded_h)
+
+
+def _carried(state: Custody, elset_hours: float, limit_hours: float, horizon: Horizon) -> CustodyOverHorizon:
+    """Custody current at the epoch, *state* held or degraded, carried until the element set ages out or a burn
+    newer than it, whichever is first."""
+    h = horizon.hours
     limit = f"{limit_hours:.0f} h"
     # A limit within float tolerance of the end, on either side, is reached as the horizon ends (SPC-119).
     at_end = math.isclose(limit_hours - elset_hours, h)
@@ -253,11 +281,11 @@ def custody_over_horizon(
     if from_h >= h:
         until = horizon.start_utc + timedelta(hours=limit_hours - elset_hours)
         template = _THROUGH_TO_THE_END if at_end else _THROUGH
-        sentence = template.format(state=status.state.value, h=h, limit=limit, until=until)
-        return CustodyOverHorizon(status.state, None, 0.0, None, sentence)
+        sentence = template.format(state=state.value, h=h, limit=limit, until=until)
+        return CustodyOverHorizon(state, None, 0.0, None, sentence)
     at = horizon.start_utc + timedelta(hours=from_h)
     if from_h < 0.0:
-        return CustodyOverHorizon(status.state, 0.0, h, cause, _BURN_MADE.format(h=h, at=at))
+        return CustodyOverHorizon(state, 0.0, h, cause, _BURN_MADE.format(h=h, at=at))
     template = _BURN_AHEAD if cause is LossCause.BURN else _AGES_OUT
     sentence = template.format(at=at, from_h=from_h, lost=h - from_h, limit=limit)
-    return CustodyOverHorizon(status.state, from_h, h - from_h, cause, sentence)
+    return CustodyOverHorizon(state, from_h, h - from_h, cause, sentence)

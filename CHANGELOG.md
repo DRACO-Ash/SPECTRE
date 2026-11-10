@@ -9,10 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, from four owner rulings of 5 November 2026.**
+
+### Changed
+- A sampled evaluation may now run for 300 s, not 120 s, so the cost cap rises from 4,800 to 12,000 sample-hours at the measured 40 sample-hours a second. The panel's hints, the refusals and the tree's cost check say so; nothing else bounds a run below 300 s (SPC-178).
+- Degraded custody, an orbit current but with no history to judge its burns, now scores between held and lost: each hour degraded carries 0.25 of the penalty an hour lost carries, the owner's ruling and not a sourced figure. Degraded hours are shown as degraded in the cell, its basis and the custody note, never as held or lost, and the custody gap counts lost hours only. The game tree's observation model is unchanged: degraded custody still shows nothing (SPC-179).
+- The panel records whether each P was edited, so a deliberate 0.5 is no longer read as untouched; an applied NOTSO suggestion counts as edited. A row never edited reads "P 0.5 is the panel's default, never edited" (SPC-183).
+- A scenario opened from the sweep carries every burn of the transfer, each at its own time, applied in time order wherever the row is sampled or sized against. A burn at or before the bound red element set's epoch is dropped, and the panel, the result, the session log and the provenance name every burn applied and dropped. Custody reads the earliest burn applied. The game tree refuses a row of several burns and keeps the one-turn result (SPC-184).
+
 ### Added
 - `scripts/udl_conjunction_probe.py` (SPC-033): checks the assumed UDL conjunction field names against live UDL and prints
   field names, types and value shapes only, for the owner to run where UDL is reachable.
 - `docs/analyst-session-agenda.md` (SPC-080): the agenda and questions for the analyst session the owner is arranging.
+- `evaluation/`: an independent evaluation of the decision-analysis engine at 0.24.2 against the owner's framework. Verdict Fail (9 of 10 gates Red), score 1.68; 36 findings, now SPC-191 to SPC-226 on the board.
 
 ## [0.24.2] - 2026-11-05
 

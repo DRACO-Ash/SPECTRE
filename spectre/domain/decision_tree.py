@@ -69,7 +69,6 @@ from spectre.astro.response_burn import (
 from spectre.domain.custody import Horizon, custody_over_horizon
 from spectre.domain.decision import (
     _BURN_SEARCH_FRACTION,
-    _CUSTODY_GAP_NOTE,
     _NOMINAL_TCA,
     _PRE_RUN_CHECKS,
     _SCORE_NOTE,
@@ -109,6 +108,7 @@ from spectre.domain.decision import (
     _tca_uncertainty,
     _turn_one_cost_h,
     _unearned_side,
+    custody_bases,
     evaluate_scenario,
     outcome_bases,
     sized_burns,
@@ -165,6 +165,13 @@ TREE_REFUSED_ROW = (
     "No tree built: row {row}, {name}, has no propagated orbit for turn 2 to start from, since its closest approach "
     "is refused: its cell says why. This result is one turn."
 )
+# D3 places a row's burn at one offset in every turn, so a transfer's later burns have no turn of their own: unequal
+# turns, set by the engine, are SPC-187 (owner ruling, 2026-11-05). Until then a row of several burns refuses the
+# tree, and the one-turn result stands with this reason (D7, SPC-184).
+TREE_SEVERAL_BURNS = (
+    "No tree built: row {row}, {name}, carries {n} burns of one transfer. Equal turns put a row's burn at the same "
+    "time after every turn starts, so they cannot give each of its burns a turn of its own. This result is one turn."
+)
 TREE_BUDGET_TURN_ONE = (
     "No tree built: the evaluation's {budget:g} s budget ran out in turn 1 before row {row}, {name}, was sampled, so "
     "turn 2 has no orbit to start from. This result is one turn."
@@ -216,7 +223,8 @@ _WHY_RK45 = "could not be put on RK45 within the budget"
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
     TREE_HEADER, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, TREE_RED_AGAIN, TREE_RESPONSE_AGAIN,
-    TREE_UNBOUND, TREE_LOOKUP_ROW, TREE_REFUSED_ROW, TREE_BUDGET_TURN_ONE, TREE_BURN_OUTSIDE, TREE_OVER_BRANCHES, TREE_OVER_CAP, TREE_BUDGET,
+    TREE_UNBOUND, TREE_LOOKUP_ROW, TREE_REFUSED_ROW, TREE_SEVERAL_BURNS, TREE_BUDGET_TURN_ONE, TREE_BURN_OUTSIDE,
+    TREE_OVER_BRANCHES, TREE_OVER_CAP, TREE_BUDGET,
     TREE_BRANCH_REFUSED, TREE_DEPTH_BRANCHES, TREE_DEPTH_COST, TREE_DEEPEST,
 )
 
@@ -248,7 +256,7 @@ _PATH_SCORE_NOTE = f"the one-turn score on this sequence's figures: {_SCORE_NOTE
 _PATH_CUSTODY_NOTE = (
     "the bound red track {red}'s custody as the sweep judges it at the scenario epoch, {state}, carried over the "
     "{h:g} h horizon with the earliest red burn on this sequence, on the assumption that no newer element set "
-    "arrives; our responses are not applied"
+    "arrives{degraded}; our responses are not applied"
 )
 
 
@@ -303,6 +311,7 @@ class PathFigures(NamedTuple):
     score:               float     # the one-turn weighted sum on these figures, a lookup
     custody_bases:       tuple[FigureBasis, FigureBasis]
     bases:               PathBases
+    custody_degraded_hours: float = 0.0   # not in custody_gap_hours (SPC-179)
 
 
 @dataclass(frozen=True, eq=False)
@@ -465,6 +474,14 @@ def _lookup_row(scenario: Scenario) -> str | None:
     return None
 
 
+def _several_burns(scenario: Scenario) -> str | None:
+    """The first row carrying more than one burn of a transfer, which equal turns cannot place (SPC-184)."""
+    for i, action in enumerate(scenario.adversary_actions):
+        if action.hypothesis is not None and action.hypothesis.then:
+            return TREE_SEVERAL_BURNS.format(row=i + 1, name=action.name, n=len(action.hypothesis.then) + 1)
+    return None
+
+
 def _offset_s(scenario: Scenario, action: AdversaryAction) -> float:
     """When a row's hypothesis burns, seconds after the scenario epoch, and so after each turn starts."""
     hypothesis = cast("AdversaryHypothesis", action.hypothesis).hypothesis
@@ -516,9 +533,9 @@ def _over_cap(scenario: Scenario) -> str | None:
     )
 
 
-#: What a tree needs before its size is counted: both sides bound and current, an orbit from every row, every burn
-#: inside its turn. Then what it fits: the branch cap and the cost cap.
-_SHAPE_CHECKS = (_unbound, _lookup_row, _burn_outside)
+#: What a tree needs before its size is counted: both sides bound and current, an orbit from every row, one burn a
+#: row, every burn inside its turn. Then what it fits: the branch cap and the cost cap.
+_SHAPE_CHECKS = (_unbound, _lookup_row, _several_burns, _burn_outside)
 _FIT_CHECKS = (_over_branches, _over_cap)
 
 
@@ -582,21 +599,32 @@ class PathStep(NamedTuple):
     delta_v_basis: Basis = Basis.LOOKUP
 
 
-def _path_custody(scenario: Scenario, steps: Sequence[PathStep]) -> tuple[bool, float, tuple[FigureBasis, FigureBasis]]:
+class _PathCustody(NamedTuple):
+    """A sequence's custody: held throughout or not, its hours lost, its hours degraded (SPC-179) and their bases."""
+
+    maintained:     bool
+    gap_hours:      float
+    degraded_hours: float
+    bases:          tuple[FigureBasis, FigureBasis]
+
+
+def _path_custody(scenario: Scenario, steps: Sequence[PathStep]) -> _PathCustody:
     """The bound red track's custody over the horizon with the sequence's earliest red burn, when it was read; else
-    the rule of thumb's worst turn, a lookup."""
+    the rule of thumb's worst turn, a lookup, which has no degraded hours."""
     red = scenario.binding.red if scenario.binding is not None else None
     if red is None or red.custody is None:
         figures = [_lookup_figures(s.action, s.response, scenario) for s in steps]
         bases = (LOOKUP_BASES.custody_maintained, LOOKUP_BASES.custody_gap_hours)
-        return all(f.custody_maintained for f in figures), max(f.custody_gap_hours for f in figures), bases
+        return _PathCustody(
+            all(f.custody_maintained for f in figures), max(f.custody_gap_hours for f in figures), 0.0, bases,
+        )
     burns = [s.red_burn_utc for s in steps if s.red_burn_utc is not None]
     over = custody_over_horizon(
         red.custody, elset_hours=red.age_hours, limit_hours=red.limit_hours,
         horizon=Horizon(scenario.epoch_utc, scenario.horizon_hours, min(burns, default=None)),
     )
-    note = _PATH_CUSTODY_NOTE.format(red=red.stk_name, state=over.at_epoch.value, h=scenario.horizon_hours)
-    return over.maintained, over.lost_hours, (FigureBasis(Basis.COMPUTED, note), FigureBasis(Basis.COMPUTED, _CUSTODY_GAP_NOTE))
+    bases = custody_bases(red.stk_name, over, _PATH_CUSTODY_NOTE, scenario.horizon_hours)
+    return _PathCustody(over.maintained, over.lost_hours, over.degraded_hours, bases)
 
 
 def _listed(items: Sequence[str], joiner: str) -> str:
@@ -624,14 +652,18 @@ def path_figures(scenario: Scenario, steps: Sequence[PathStep], closest_km: floa
     """A sequence's figures from its steps and its closest approach, *sampled* or computed: our burns added up,
     custody with the earliest red burn, time to execute summed and capped at the horizon, the least reversible
     response, and the score, each with its basis."""
-    maintained, gap, custody_bases = _path_custody(scenario, steps)
+    custody = _path_custody(scenario, steps)
     delta_v = sum(s.delta_v_km_s for s in steps)
     tte = min(sum(s.response.time_to_execute_hours for s in steps), scenario.horizon_hours)
     reversibility = min(s.response.reversibility for s in steps)
     standing = dataclasses.replace(steps[-1].response, time_to_execute_hours=tte, reversibility=reversibility)
-    score = _score(scenario, standing, _Figures(maintained, gap, closest_km, delta_v))
+    figures = _Figures(custody.maintained, custody.gap_hours, closest_km, delta_v, custody.degraded_hours)
+    score = _score(scenario, standing, figures)
     bases = _path_bases(steps, sampled=sampled)
-    return PathFigures(closest_km, delta_v, maintained, gap, tte, reversibility, score, custody_bases, bases)
+    return PathFigures(
+        closest_km, delta_v, custody.maintained, custody.gap_hours, tte, reversibility, score, custody.bases, bases,
+        custody.degraded_hours,
+    )
 
 
 def _require_tree_propagator(tree: GameTree, matrix: Sequence[Sequence[OutcomeMetrics]]) -> None:

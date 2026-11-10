@@ -1211,3 +1211,12 @@ Test hardening and one race fix.
 | Test | **HYGIENE** | A PostgreSQL 16 job joins the SQLite one in CI | The suite was run green on PostgreSQL 16 here before the job was added. | Then the runner's PostgreSQL service differs from the one used here, and its log names the test. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.25.0
+
+Four owner rulings built in the Decision Engine, and the evaluation of 0.24.2 committed under `evaluation/`.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. Product changes in the Decision Engine (`decision.py`, `custody.py`, `decision_tree.py`, `turn_update.py`, `routes/decision.py`, `decision_from_sweep.py` and their templates) | `scripts/check-quality.sh` against the previous commit passed all five legs: no function over 15, 100 per cent coverage on changed lines, 0 per cent duplication. The full suite (8,515 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

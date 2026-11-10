@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import html
+import itertools
 import logging
 import math
 from collections.abc import Sequence
@@ -51,6 +52,7 @@ from spectre.domain.decision import (
     pre_manoeuvre_state,
 )
 from spectre.domain.decision_figures import ResponseBurnSpec
+from spectre.domain.decision_transfer import MAX_BURN_M_S, MAX_TRANSFER_BURNS, TransferBurn
 from spectre.domain.decision_tree import depth_refusal, evaluate_tree
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
@@ -74,7 +76,15 @@ from spectre.web.decision_job import (
     new_job,
     start_job,
 )
-from spectre.web.decision_prior import NO_HORIZON, NO_RED, RowsAsked, apply_priors, horizon, row_views
+from spectre.web.decision_prior import (
+    NO_HORIZON,
+    NO_RED,
+    RowsAsked,
+    apply_priors,
+    edited_rows,
+    horizon,
+    row_views,
+)
 from spectre.web.decision_threat import held_picture
 from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
@@ -94,7 +104,7 @@ _MAX_ROWS = 5
 _MAX_HORIZON_H = 720.0
 # The hypothesis fields' ranges (SPC-114). A burn more than 72 h before the scenario epoch is older than the
 # longest staleness limit, so the orbit it starts from would be refused as out of date anyway.
-_MAX_DV_M_S = 1000.0
+_MAX_DV_M_S = MAX_BURN_M_S
 _MAX_SIGMA_M_S = 100.0
 _MIN_SAMPLES, _MAX_SAMPLES, _DEFAULT_SAMPLES = MIN_SAMPLES, MAX_SAMPLES, DEFAULT_SAMPLES
 _EARLIEST_BURN_H = EARLIEST_BURN_H
@@ -122,6 +132,18 @@ _DETECTED_GONE = (
     "The detected burn in row {row}, at {at}, is no longer in the held history for {red}. Open the scenario from "
     "the sweep again."
 )
+# The transfer's later burns, posted beside the first burn's fixed time (SPC-184).
+_THEN_UNREAD = "The transfer's later burns in row {row} cannot be read; reload the panel."
+_THEN_ORDER = "The transfer's later burns in row {row} are not in time order after its first; reload the panel."
+_THEN_LATE = "Burn {k} of the transfer in row {row}, at {at}, is after the horizon. Lengthen the horizon to cover it."
+_THEN_MANY = "The transfer in row {row} carries more than {most} burns; reload the panel."
+_THEN_UNFIXED = "The transfer's later burns in row {row} need its first burn's fixed time; reload the panel."
+_THEN_TOO_BIG = (
+    "Burn {k} of the transfer in row {row} is {dv:,.0f} m/s, over the {most:,.0f} m/s a burn may be. Set the row's "
+    "archetype to None to keep it a lookup, or open a cheaper entry from the sweep."
+)
+#: A later burn posts its UTC time and its prograde, normal and radial parts.
+_THEN_FIELDS = 4
 _SECONDS_PER_HOUR = 3600.0
 # Our burn per friendly row (SPC-121): a target separation up to this, km, and a budget up to this, m/s.
 _MAX_TARGET_KM = 100_000.0
@@ -139,7 +161,7 @@ _OBSERVATIONS: dict[str, Seen] = {seen.name.lower(): seen for seen in Seen}
 _OBSERVATION_LABELS: dict[Seen, str] = {
     Seen.BURN: "A burn: custody lost at a burn in turn 1",
     Seen.NO_BURN: "No burn: custody held through turn 1",
-    Seen.NOTHING: "Nothing: custody lost for another reason, or not read",
+    Seen.NOTHING: "Nothing: custody degraded, lost for another reason, or not read",
 }
 _AXIS_LABELS: dict[BurnAxis, str] = {
     BurnAxis.CHEAPEST: "Cheapest, from the manoeuvre library",
@@ -246,7 +268,8 @@ def _action_type(types: Sequence[str], index: int) -> ActionType:
 
 
 class _AdversaryColumns(NamedTuple):
-    """The adversary form's columns, one entry per row: each row's custody gap share apart from its confidence."""
+    """The adversary form's columns, one entry per row: each row's custody gap share apart from its confidence, and
+    the ids of the rows whose P was edited (SPC-183)."""
 
     ids:   list[str]
     names: list[str]
@@ -254,6 +277,7 @@ class _AdversaryColumns(NamedTuple):
     probs: list[float]
     confs: list[float]
     gaps:  list[float]
+    edited: tuple[str, ...] = ()
 
 
 def _adversary_rows(
@@ -269,6 +293,7 @@ def _adversary_rows(
             confidence=float(_at(columns.confs, i, 0.5)),
             hypothesis=_at(hypotheses, i, None),
             custody_gap_fraction=_at(columns.gaps, i, DEFAULT_CUSTODY_GAP_FRACTION),
+            probability_edited=columns.ids[i] in columns.edited,
         )
         for i in range(len(columns.ids))
     ]
@@ -277,8 +302,9 @@ def _adversary_rows(
 class _HypothesisColumns(NamedTuple):
     """The hypothesis section's columns as posted, one raw entry per adversary row (SPC-114).
 
-    The last two are hidden and optional (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is
-    the detected burn to build from the held history. A form without them reads both as blank on every row.
+    The last three are hidden and optional (SPC-150, SPC-184): a burn the sweep fixed at its own UTC time, whether it
+    is the detected burn to build from the held history, and the transfer's later burns. A form without them reads
+    each as blank on every row.
     """
 
     archetypes: list[str]
@@ -291,6 +317,7 @@ class _HypothesisColumns(NamedTuple):
     burns_h:    list[str]
     burns_at:   list[str]
     detected:   list[str]
+    then:       list[str]
 
 
 class _HypothesisEntry(NamedTuple):
@@ -306,6 +333,8 @@ class _HypothesisEntry(NamedTuple):
     burn_at:   datetime | None = None
     #: Build from the held history's detected burn at burn_at, from the element set before it (SPC-001).
     detected:  bool = False
+    #: The transfer's later burns, each at its own UTC time, one action with the first (SPC-184).
+    then:      tuple[TransferBurn, ...] = ()
 
 
 def _hypothesis_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> _HypothesisColumns | None:
@@ -320,7 +349,7 @@ def _hypothesis_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> _Hyp
     )
     if all(column is None for column in raw):
         return None
-    optional = (form.hyp_burns_at, form.hyp_detected)
+    optional = (form.hyp_burns_at, form.hyp_detected, form.hyp_then)
     if any(len(column or []) != rows for column in raw) or any(
         column is not None and len(column) != rows for column in optional
     ):
@@ -383,6 +412,58 @@ def _fixed_burn(
     return moment, detected
 
 
+def _later_burn(raw: str) -> TransferBurn | None:
+    """One posted later burn, "UTC prograde normal radial" in m/s; None unless each part reads and is in range."""
+    parts = raw.split()
+    if len(parts) != _THEN_FIELDS:
+        return None
+    at = _read_burn_at(parts[0])
+    try:
+        values = [float(p) for p in parts[1:]]
+    except ValueError:
+        return None
+    if at is None or not all(math.isfinite(v) for v in values):
+        return None
+    return TransferBurn(at, values[0], values[1], values[2])
+
+
+def _then_problem(burns: Sequence[TransferBurn], first: datetime, row: int, end: datetime) -> str | None:
+    """Why the read later burns cannot be carried: out of time order from the first, or after the horizon."""
+    big = next(((k, b) for k, b in enumerate(burns, 2) if b.dv_m_s > MAX_BURN_M_S), None)
+    if big is not None:   # by its size, as burn 1's delta-V field is held
+        return _THEN_TOO_BIG.format(k=big[0], row=row, dv=big[1].dv_m_s, most=MAX_BURN_M_S)
+    times = [first, *(b.at_utc for b in burns)]
+    if any(later < earlier for earlier, later in itertools.pairwise(times)):
+        return _THEN_ORDER.format(row=row)
+    late = next(((k, b) for k, b in enumerate(burns, 2) if b.at_utc > end), None)
+    return None if late is None else _THEN_LATE.format(k=late[0], row=row, at=_when(late[1].at_utc))
+
+
+def _later_burns(
+    inputs: _Inputs, raw: str, fixed: tuple[datetime | None, bool], row: int, end: datetime,
+) -> tuple[TransferBurn, ...]:
+    """Row *row*'s posted later burns, checked; empty when blank. *fixed* is the first burn's fixed time and whether
+    the row is a detected burn, which carries none; *end* is the horizon's end (SPC-184)."""
+    text = raw.strip()
+    if not text:
+        return ()
+    first, detected = fixed
+    pieces = text.split(";")
+    burns = [_later_burn(piece) for piece in pieces]
+    if first is None or detected:
+        problem: str | None = _THEN_UNFIXED.format(row=row)
+    elif len(pieces) + 1 > MAX_TRANSFER_BURNS:
+        problem = _THEN_MANY.format(row=row, most=MAX_TRANSFER_BURNS)
+    elif any(b is None for b in burns):
+        problem = _THEN_UNREAD.format(row=row)
+    else:
+        problem = _then_problem(cast("list[TransferBurn]", burns), first, row, end)
+    if problem is not None:
+        inputs.refuse(problem)
+        return ()
+    return tuple(cast("list[TransferBurn]", burns))
+
+
 def _entered(
     inputs: _Inputs, columns: _HypothesisColumns, index: int, *, detected: bool,
 ) -> tuple[float | None, tuple[float, float, float] | None]:
@@ -420,6 +501,7 @@ def _entry(
         ),
         burn_at=burn_at,
         detected=detected,
+        then=_later_burns(inputs, columns.then[index], (burn_at, detected), row, now + timedelta(hours=horizon)),
     )
 
 
@@ -449,7 +531,8 @@ def _hypothesis(entry: _HypothesisEntry, red_tle: str, now: datetime) -> Adversa
         built = AdversaryHypothesis.from_entered(
             entry.dv_m_s, entry.direction, at, archetype=entry.archetype, n_samples=entry.samples,
         )
-    return built if entry.sigma_m_s is None else built.with_spread(entry.sigma_m_s)
+    built = built if entry.sigma_m_s is None else built.with_spread(entry.sigma_m_s)
+    return built.with_transfer(entry.then) if entry.then else built
 
 
 class _Hypotheses(NamedTuple):
@@ -665,22 +748,26 @@ class _PriorQuery(BaseModel):
     # The rows loaded from NOTSO (SPC-131): each loaded row's hidden field, and the id of the row whose Load from
     # NOTSO control sent this request.
     adv_loaded:    list[str] = Field(default_factory=list, alias="adv_loaded")
+    # Each row's P as posted, and the rows recorded as edited by an earlier change (SPC-183).
+    adv_probs:     list[str] = Field(default_factory=list, alias="adv_prob")
+    adv_p_edited:  list[str] = Field(default_factory=list, alias="adv_p_edited")
 
 
 def _prior_context(state: SessionState, query: _PriorQuery, now: datetime) -> dict[str, object]:
     """The region's context: each adversary row's NOTSO suggestion for the bound red track, or the one note why none
-    can be worked out yet."""
+    can be worked out yet; and, whatever it says, the rows whose P was edited (SPC-183)."""
+    edited = edited_rows(query.adv_ids[:_MAX_ROWS], query.adv_probs, query.adv_p_edited)
     hours = horizon(query.horizon_hours)
     red_sat = query.red_sat.strip()
     if not red_sat or hours is None:
-        return {"note": NO_HORIZON if red_sat else NO_RED, "rows": []}
+        return {"note": NO_HORIZON if red_sat else NO_RED, "rows": [], "edited": edited}
     bound = bind_scenario(state, red_sat, "", now)
     red = None if bound.binding is None else bound.binding.red
     if red is None:
-        return {"note": bound.problem or NO_RED, "rows": []}
+        return {"note": bound.problem or NO_RED, "rows": [], "edited": edited}
     asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors,
                       query.adv_loaded)
-    return {"note": "", "rows": row_views(state, asked, red, (hours, now))}
+    return {"note": "", "rows": row_views(state, asked, red, (hours, now)), "edited": edited}
 
 
 @router.get("/prior", response_class=HTMLResponse)
@@ -796,8 +883,12 @@ class _ScenarioForm(BaseModel):
     # Hidden and optional (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is the detected burn.
     hyp_burns_at: list[str] | None = Field(default=None, alias="hyp_burn_at")
     hyp_detected: list[str] | None = None
+    # Hidden and optional (SPC-184): the transfer's later burns, each "UTC prograde normal radial" in m/s, by ";".
+    hyp_then: list[str] | None = None
     # Each NOTSO suggestion the operator ticked to apply (SPC-130): the row's id and the P and Conf it showed.
     adv_priors: list[str] | None = Field(default=None, alias="adv_prior")
+    # The rows whose P the NOTSO region recorded as edited (SPC-183), by id; a form without them records none.
+    adv_p_edited: list[str] | None = Field(default=None, alias="adv_p_edited")
 
 
 class _Parsed(NamedTuple):
@@ -837,6 +928,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
         form.adv_ids or [], form.adv_names or [], form.adv_types or [],
         inputs.column(form.adv_probs, "probability"), inputs.column(form.adv_confs, "confidence"),
         inputs.column(form.adv_gaps, "custody gap share"),
+        tuple(edited_rows(form.adv_ids or [], form.adv_probs or [], form.adv_p_edited or [])),
     )
     friendly = _ResponseColumns(
         inputs.column(form.fr_costs, "cost"), inputs.column(form.fr_revs, "reversibility"),

@@ -14,6 +14,15 @@ year, read from its element set's international designator, is not counted. Eval
 is still the one shown: each tick posts the row's id and the values the panel
 showed, and a suggestion that has moved since is refused, never applied in its
 new form unseen.
+
+The region also carries the record of which rows' P the operator edited
+(SPC-183, the owner's ruling of 2026-11-05 on concept section 9, decision 11),
+as a hidden field per edited row keyed by the row's id. It is asked again on
+every change in the form, so a P posted as anything but the text the panel gave
+every row is recorded then, and stays recorded after, through later changes and
+re-renders; a removed row's record goes with it. htmx 1.9.12 names in
+HX-Trigger-Name the element that asks, this region, not the field that changed,
+so the record compares each row's P with the panel's text instead.
 """
 
 from __future__ import annotations
@@ -28,7 +37,7 @@ from typing import Any, NamedTuple
 
 from spectre.astro.notso import NOTSORecord
 from spectre.data.notso_cache import get_notso_cache
-from spectre.domain.decision import ActionType, AdversaryAction, BoundElset
+from spectre.domain.decision import DEFAULT_PROBABILITY, ActionType, AdversaryAction, BoundElset
 from spectre.domain.notso_prior import NoPrior, NotsoPrior, notso_prior
 from spectre.web.log_safety import log_safe
 from spectre.web.routes.pol import notso_behaviour_profile, notsos_from_cache_records
@@ -53,6 +62,19 @@ _TICK_MOVED = (
     "it, or untick it to keep your own values."
 )
 _TICK_PARTS = 3
+#: The text the panel gives every row's P, the server-rendered rows, those opened from the sweep and those the Add
+#: button builds alike: a P posted as anything else was edited (SPC-183).
+UNEDITED_PROBABILITY = f"{DEFAULT_PROBABILITY}"
+
+
+def edited_rows(ids: Sequence[str], probs: Sequence[str], recorded: Sequence[str]) -> list[str]:
+    """The ids of the rows on the form whose P the operator edited: recorded as edited by an earlier change, or
+    posted now as anything but UNEDITED_PROBABILITY. A recorded id no longer on the form is dropped (SPC-183)."""
+    kept = set(recorded)
+    return [
+        row_id for i, row_id in enumerate(ids)
+        if row_id in kept or (i < len(probs) and probs[i].strip() != UNEDITED_PROBABILITY)
+    ]
 
 
 def _profile(state: Any, satno: int, notices: list[NOTSORecord]) -> Any | None:
@@ -131,9 +153,12 @@ class Applied(NamedTuple):
 
 
 def _applied(action: AdversaryAction, prior: NotsoPrior) -> AdversaryAction:
-    """*action* holding *prior*'s P, and its Conf when it offers one, with the suggestion it accepted."""
+    """*action* holding *prior*'s P, and its Conf when it offers one, with the suggestion it accepted: P edited by
+    the operator's tick, so never untouched (SPC-183)."""
     conf = action.confidence if prior.confidence is None else prior.confidence
-    return dataclasses.replace(action, probability=prior.probability, confidence=conf, accepted_prior=prior)
+    return dataclasses.replace(
+        action, probability=prior.probability, confidence=conf, accepted_prior=prior, probability_edited=True,
+    )
 
 
 class _Ask(NamedTuple):

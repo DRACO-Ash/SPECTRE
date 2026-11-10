@@ -107,7 +107,6 @@ class TestTheLongestHorizon:
         n = 500
         expected = (MAX_SAMPLE_HOURS - n * SET_UP_S_PER_SAMPLE / 3600.0) / (n + 2)
         assert longest_horizon_h(n) == pytest.approx(int(expected * 10) / 10)
-        assert longest_horizon_h(500) == pytest.approx(9.4)
 
     def test_more_rows_share_the_cap(self) -> None:
         assert longest_horizon_h(500, rows=5) < longest_horizon_h(500)
