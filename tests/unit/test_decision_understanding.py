@@ -46,6 +46,8 @@ from tests.unit._i13 import i13_problems
 _NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
 _HISTORY = tu.PULL_HISTORY
 _RECORD = "analyst to date and source the intel record"
+#: The age the engine shows beside every figure and sentence a picture assessed 20 min before evaluation feeds.
+_AGE = "from the sweep's picture assessed 20 min before this evaluation"
 
 
 def _cue(observation: str = _HISTORY, steps: int = 3, hours: float = 0.5, *, fed: bool = True,
@@ -262,8 +264,8 @@ class TestCollectFirstRows:
         assert rows[0].basis == FigureBasis(Basis.LOOKUP, decision.COLLECTION_NOTE)
         assert rows[0].basis.note.startswith("collection to narrow the threat range")
         assert rows[0].sentence == (
-            f"{_RECORD}, 4 h: collection to narrow the threat range: the cue's tuned duration, a lookup. Not ranked "
-            "against your responses: collecting moves no figure until what it finds is in the sweep."
+            f"{_RECORD}, 4 h: collection to narrow the threat range: the cue's tuned duration, a lookup ({_AGE}). "
+            "Not ranked against your responses: collecting moves no figure until what it finds is in the sweep."
         )
         for sentence in rows[0].sentence.split(". "):
             assert i13_problems(sentence) == [], sentence
@@ -325,14 +327,14 @@ class TestTheThreatBesideTheFields:
     def test_each_row_carries_its_understanding_into_the_result(self) -> None:
         result = evaluate_scenario(_scenario(_picture(tu.Understanding.MODERATE)))
         assert result.row_understanding == (
-            "Understanding MODERATE: shown beside P and Conf as context; it fills neither.",
+            f"Understanding MODERATE: shown beside P and Conf as context; it fills neither ({_AGE}).",
         ) * 2
 
     def test_a_bound_red_track_with_no_picture_reads_not_assessed(self) -> None:
         result = evaluate_scenario(_scenario())
         assert result.row_understanding == (
-            "Understanding not assessed: the engine holds no current picture from the sweep for RED_X, so nothing "
-            "fills P or Conf.",
+            "Understanding not assessed: the engine reads no picture from the sweep for RED_X, so nothing fills P "
+            "or Conf.",
         ) * 2
         assert result.collection is None
         assert result.threat_lines == ()
@@ -344,18 +346,19 @@ class TestTheThreatBesideTheFields:
     def test_the_threat_range_and_understanding_are_said_apart(self) -> None:
         result = evaluate_scenario(_scenario(_picture()))
         assert result.threat_lines == (
-            "Threat range for RED_X: from MEDIUM to CRITICAL, as the sweep assessed it at 08:40 UTC on 4 Nov.",
-            "Understanding LOW: the sweep's rating of RED_X.",
-            "Decide by 15:00 UTC on 4 Nov for BLUE_1: its fastest intercept could arrive at 03:00 UTC on 5 Nov.",
+            f"Threat range for RED_X: from MEDIUM to CRITICAL ({_AGE}, at 08:40 UTC on 4 Nov).",
+            f"Understanding LOW: the sweep's rating of RED_X ({_AGE}).",
+            "Decide by 15:00 UTC on 4 Nov for BLUE_1: its fastest intercept could arrive at 03:00 UTC on 5 Nov "
+            f"({_AGE}).",
         )
         for line in (*result.threat_lines, *result.row_understanding):
             assert i13_problems(line) == [], line
 
-    def test_a_picture_with_no_sweep_time_or_deadline_says_so(self) -> None:
-        result = evaluate_scenario(_scenario(_picture(assessed_at=None, decide_at=None, decide_by="")))
+    def test_a_picture_with_no_deadline_says_so(self) -> None:
+        result = evaluate_scenario(_scenario(_picture(decide_at=None, decide_by="")))
         assert result.threat_lines == (
-            "Threat range for RED_X: from MEDIUM to CRITICAL, as the sweep assessed it.",
-            "Understanding LOW: the sweep's rating of RED_X.",
+            f"Threat range for RED_X: from MEDIUM to CRITICAL ({_AGE}, at 08:40 UTC on 4 Nov).",
+            f"Understanding LOW: the sweep's rating of RED_X ({_AGE}).",
         )
 
 
@@ -367,7 +370,8 @@ class TestTheMinimaxGuidance:
         result = evaluate_scenario(scenario, SelectorStrategy.EXPECTED_VALUE)
         minimax = evaluate_scenario(scenario, SelectorStrategy.MINIMAX).robust_best_response
         assert result.objective_guidance == (
-            f"{self._GUIDANCE} Minimax, the cautious rule, needs no probability: it recommends {minimax.name}."
+            f"Expected value rests on a probability the evidence has not earned ({_AGE}). Minimax, the cautious "
+            f"rule, needs no probability: it recommends {minimax.name}."
         )
         assert result.robust_strategy is SelectorStrategy.EXPECTED_VALUE   # recommended, never switched
 
@@ -395,8 +399,8 @@ class TestTheMinimaxGuidance:
         result = evaluate_scenario(_scenario(), SelectorStrategy.EXPECTED_VALUE)
         minimax = evaluate_scenario(_scenario(), SelectorStrategy.MINIMAX).robust_best_response
         assert result.objective_guidance == (
-            "Expected value rests on a probability no current Threat picture for RED_X supports. Minimax, the "
-            f"cautious rule, needs no probability: it recommends {minimax.name}."
+            "Expected value rests on a probability no Threat picture for RED_X supports. Minimax, the cautious "
+            f"rule, needs no probability: it recommends {minimax.name}."
         )
         for sentence in result.objective_guidance.split(". "):
             assert i13_problems(sentence) == [], sentence
@@ -404,7 +408,7 @@ class TestTheMinimaxGuidance:
     def test_a_picture_less_bound_row_at_the_default_probability_reads_the_picture_less_guidance(self) -> None:
         result = evaluate_scenario(_scenario(probability=decision.DEFAULT_PROBABILITY),
                                    SelectorStrategy.EXPECTED_VALUE)
-        assert (result.objective_guidance or "").startswith("Expected value rests on a probability no current")
+        assert (result.objective_guidance or "").startswith("Expected value rests on a probability no Threat")
 
     def test_expected_value_on_earned_understanding_and_set_probabilities_says_nothing(self) -> None:
         result = evaluate_scenario(_scenario(_picture(tu.Understanding.MODERATE)), SelectorStrategy.EXPECTED_VALUE)
@@ -417,3 +421,133 @@ class TestTheMinimaxGuidance:
     def test_the_guidance_keeps_i13(self) -> None:
         guidance = evaluate_scenario(_scenario(_picture()), SelectorStrategy.EXPECTED_VALUE).objective_guidance
         assert guidance is not None and i13_problems(guidance) == []
+
+
+class TestThePicturesAgeBesideEveryFigureItFeeds:
+    """SPC-181, the owner's ruling of 2026-11-05 (concept section 9, decision 9): the engine reads the picture at any
+    age, and says how old it was at evaluation beside every figure and sentence it feeds."""
+
+    _OLD = "from the sweep's picture assessed 3 h 10 min before this evaluation"
+
+    @pytest.mark.parametrize(("age", "words"), [
+        (timedelta(seconds=59), "under 1 min"), (timedelta(minutes=1), "1 min"), (timedelta(minutes=59), "59 min"),
+        (timedelta(hours=1), "1 h"), (timedelta(hours=3, minutes=10, seconds=59), "3 h 10 min"),
+        (timedelta(hours=23, minutes=59), "23 h 59 min"), (timedelta(days=1), "1 d"),
+        (timedelta(days=2, hours=4, minutes=30), "2 d 4 h"),
+    ])
+    def test_the_age_is_in_words_rounded_down(self, age: timedelta, words: str) -> None:
+        assert decision.picture_age_words(age) == words
+
+    def test_a_picture_hours_old_carries_its_age_beside_every_sentence_it_feeds(self) -> None:
+        picture = _picture(assessed_at=_NOW - timedelta(hours=3, minutes=10))
+        result = evaluate_scenario(_scenario(picture), SelectorStrategy.EXPECTED_VALUE)
+        assert result.threat_lines[0] == f"Threat range for RED_X: from MEDIUM to CRITICAL ({self._OLD}, at 05:50 UTC on 4 Nov)."
+        assert all(line.endswith(f"({self._OLD}).") for line in result.threat_lines[1:])
+        assert result.collection is not None and result.collection.advice is tu.Advice.COLLECT_FIRST
+        assert result.collection.sentence.endswith(f"could raise the Threat floor to HIGH ({self._OLD}).")
+        assert [row.sentence.split(". ")[0] for row in result.collection_rows] == [
+            f"{_RECORD}, 4 h: collection to narrow the threat range: the cue's tuned duration, a lookup ({self._OLD})",
+        ]
+        assert (result.objective_guidance or "").startswith(
+            f"Expected value rests on a probability the evidence has not earned ({self._OLD}). Minimax",
+        )
+        assert all(note is not None and note.endswith(f"({self._OLD}).") for note in result.row_understanding)
+        for text in (*result.threat_lines, result.collection.sentence, result.collection_rows[0].sentence,
+                     result.objective_guidance or "", *(n or "" for n in result.row_understanding)):
+            for sentence in text.split(". "):
+                assert i13_problems(sentence) == [], sentence
+
+    def test_a_picture_days_old_is_read_with_decide_by_passed(self) -> None:
+        """Its age moves nothing but the words: decide-by has passed, so the advice is to act on the ceiling."""
+        result = evaluate_scenario(_scenario(_picture(assessed_at=_NOW - timedelta(days=2, hours=1),
+                                                      decide_at=_NOW - timedelta(days=1))))
+        assert result.collection is not None
+        assert result.collection.sentence == (
+            "Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from MEDIUM to CRITICAL, across "
+            "Threat HIGH, where your response changes, and decide-by has passed (from the sweep's picture assessed "
+            "2 d 1 h before this evaluation)."
+        )
+        assert result.collection_rows == ()
+
+    def test_guidance_the_picture_does_not_feed_carries_no_age(self) -> None:
+        """At Understanding MODERATE an untouched P alone is what is not earned, so the picture's age is not beside
+        it."""
+        scenario = _scenario(_picture(tu.Understanding.MODERATE), probability=decision.DEFAULT_PROBABILITY,
+                             edited=False)
+        guidance = evaluate_scenario(scenario, SelectorStrategy.EXPECTED_VALUE).objective_guidance
+        assert guidance is not None
+        assert guidance.startswith("Expected value rests on a probability the evidence has not earned. Minimax")
+
+    def test_a_picture_states_when_it_was_assessed(self) -> None:
+        """With no time it was assessed, its age cannot be shown beside what it feeds, so there is no picture."""
+        with pytest.raises(TypeError, match="assessed_at"):
+            decision.ThreatPicture(red="RED_X", floor=Band.MEDIUM, ceiling=Band.CRITICAL,  # type: ignore[call-arg]
+                                   understanding=tu.Understanding.LOW)
+
+    def test_a_picture_assessed_after_the_evaluation_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="assessed after"):
+            _scenario(_picture(assessed_at=_NOW + timedelta(seconds=1)))
+        assert _scenario(_picture(assessed_at=_NOW)).threat is not None
+
+
+class TestTheDecideByIsRestatedAtTheEvaluation:
+    """A picture read at any age carries the sweep's decide-by, worded against the sweep's own clock. Once that
+    deadline has passed by the evaluation, the engine says so against the evaluation, so the line never says "Decide
+    by" a past time or counts hours "from now" from the sweep, and it agrees with the advice below it (concept
+    section 7.5, item 5: one deadline)."""
+
+    _OLD = "from the sweep's picture assessed 3 d before this evaluation"
+    _PASSED_AT_SWEEP = ("Decide-by has passed for BLUE_1: an intercept could arrive at 11:00 UTC on 1 Nov, 2.0 h from "
+                        "now, inside your response time of 4 h.")
+
+    def _lines(self, **kw: Any) -> tuple[str, ...]:
+        fields: dict[str, Any] = {"assessed_at": _NOW - timedelta(days=3), "target": "BLUE_1"}
+        fields.update(kw)
+        return evaluate_scenario(_scenario(_picture(**fields))).threat_lines
+
+    def test_a_deadline_set_at_the_sweep_and_passed_since_says_it_has_passed(self) -> None:
+        lines = self._lines(decide_at=_NOW - timedelta(days=2, hours=18), arrival=_NOW - timedelta(days=2, hours=6))
+        assert lines[2] == (
+            "Decide-by has passed for BLUE_1: it was 15:00 UTC on 1 Nov, and the intercept it was set against could "
+            f"have arrived at 03:00 UTC on 2 Nov, before this evaluation ({self._OLD})."
+        )
+        assert not any(line.startswith("Decide by ") for line in lines)
+
+    def test_one_passed_at_the_sweep_counts_its_hours_from_the_evaluation_not_the_sweep(self) -> None:
+        at_sweep = ("Decide-by has passed for BLUE_1: an intercept could arrive at 11:00 UTC on 4 Nov, 5.2 h from "
+                    "now, inside your response time of 6 h.")
+        lines = self._lines(assessed_at=_NOW - timedelta(hours=3, minutes=10), decide_by=at_sweep,
+                            decide_at=_NOW - timedelta(hours=4), arrival=_NOW + timedelta(hours=2))
+        assert lines[2] == (
+            "Decide-by has passed for BLUE_1: it was 05:00 UTC on 4 Nov, and an intercept could arrive at 11:00 UTC "
+            "on 4 Nov, 2.0 h after this evaluation (from the sweep's picture assessed 3 h 10 min before this "
+            "evaluation)."
+        )
+        assert "from now" not in " ".join(lines)
+
+    def test_its_arrival_passed_too_says_it_could_have_arrived(self) -> None:
+        lines = self._lines(decide_by=self._PASSED_AT_SWEEP, decide_at=_NOW - timedelta(days=3, hours=2),
+                            arrival=_NOW - timedelta(days=2, hours=22))
+        assert lines[2] == (
+            "Decide-by has passed for BLUE_1: it was 07:00 UTC on 1 Nov, and the intercept it was set against could "
+            f"have arrived at 11:00 UTC on 1 Nov, before this evaluation ({self._OLD})."
+        )
+
+    def test_with_no_arrival_held_it_says_only_when_the_deadline_was(self) -> None:
+        lines = self._lines(decide_at=_NOW - timedelta(days=2, hours=18), arrival=None, target="")
+        assert lines[2] == f"Decide-by has passed: it was 15:00 UTC on 1 Nov ({self._OLD})."
+
+    def test_a_deadline_still_ahead_is_shown_as_the_sweep_worded_it(self) -> None:
+        """Its sentence holds only clock times, which do not age."""
+        lines = self._lines(decide_at=_NOW + timedelta(hours=6), arrival=_NOW + timedelta(hours=18))
+        assert lines[2] == ("Decide by 15:00 UTC on 4 Nov for BLUE_1: its fastest intercept could arrive at 03:00 UTC "
+                            f"on 5 Nov ({self._OLD}).")
+
+    def test_the_line_and_the_advice_agree_that_the_deadline_has_passed(self) -> None:
+        result = evaluate_scenario(_scenario(_picture(assessed_at=_NOW - timedelta(days=3), target="BLUE_1",
+                                                      decide_at=_NOW - timedelta(days=2, hours=18),
+                                                      arrival=_NOW - timedelta(days=2, hours=6))))
+        assert result.collection is not None and "decide-by has passed" in result.collection.sentence
+        assert result.threat_lines[2].startswith("Decide-by has passed for BLUE_1")
+        for sentence in result.threat_lines[2].split(". "):
+            assert i13_problems(sentence) == [], sentence

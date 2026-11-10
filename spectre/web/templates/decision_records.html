@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{# Decision records (SPC-192, evaluation F-01): one per finished evaluation, newest first, with the operator's
+   decision, the form to record it on the viewer's own record not yet decided, or "No decision recorded". Context:
+   records (decision_record.ListedRecord, newest first), every (an admin's view of every operator's records, which
+   names whose each is) and current_user. Every field is the operator's text or the engine's, and autoescaped. Each
+   figure says its basis: the one-turn matrix's pick, a tree's own turn-1 pick, which rules' picks the results showed
+   and when expected value's probability is not earned. No script and no handler attribute. #}
+{% block title %}SPECTRE: Decision records{% endblock %}
+
+{# The bar holds only the way back, so it fits a phone's width beside the logo; who is signed in, and Sign Out, sit
+   at the head of the page. #}
+{% block nav_actions %}
+<a href="/" class="spectre-btn spectre-btn-ghost" title="Return to operator console" style="flex-shrink:0">&larr; Console</a>
+{% endblock %}
+
+{% block content %}
+<div style="padding:var(--spectre-space-4) 0; max-width:960px; margin:0 auto">
+  <div class="spectre-panel-header" style="margin-bottom:var(--spectre-space-4); flex-wrap:wrap; gap:var(--spectre-space-2)">
+    <h1 class="spectre-panel-title" style="margin:0; font-size:inherit">Decision records</h1>
+    <span class="spectre-badge spectre-badge-neutral">{{ records | length }} record{% if records | length != 1 %}s{% endif %}</span>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:var(--spectre-space-2); margin:0 0 var(--spectre-space-2)">
+    <span class="spectre-caption nav-user" style="font-size:var(--spectre-size-caption); overflow-wrap:anywhere">Signed in as {{ current_user.username }}{% if every %} &middot; admin{% endif %}</span>
+    <form method="post" action="/logout" style="margin:0">
+      {# Plain POST: the token must be a field, not the hx-headers header. #}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="spectre-btn spectre-btn-ghost">Sign Out</button>
+    </form>
+  </div>
+  <p style="font-size:var(--spectre-size-small); color:var(--text-dim); margin:0 0 var(--spectre-space-2)">
+    {% if every %}Every operator's records, newest first, with whose each is. As an admin you read every record and
+    decide only your own.{% else %}Your records, newest first: one for each evaluation you ran that finished.{% endif %}
+    A record not yet decided is decided here or on its results, once.
+  </p>
+  <p style="font-size:var(--spectre-size-small); color:var(--text-dim); margin:0 0 var(--spectre-space-4)">
+    A record holds the operator's username, the scenario's name, the response names and the rationale typed, with
+    the code version and the hash of every input; it holds no element set and no raw input, so it cannot yet replay a
+    recommendation. No retention is applied: how long records are kept, and who may read them, is the owner's
+    decision.
+  </p>
+
+  {% if not records %}
+  <p style="font-size:var(--spectre-size-small); color:var(--text-dim)">No decision records yet.</p>
+  {% endif %}
+
+  {% for r in records %}
+  <article class="decision-record-entry" aria-labelledby="record-{{ r.id }}"
+           style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.9rem; margin-bottom:0.5rem; overflow-wrap:anywhere">
+    <h2 id="record-{{ r.id }}" style="margin:0 0 0.25rem; font-size:0.8rem; color:var(--text-primary)">Record {{ r.id }}: {{ r.scenario_name }}</h2>
+    <p style="margin:0; font-size:0.72rem; color:var(--text-dim)">Evaluated {{ r.created }}.{% if every %} Run by {{ r.username }}.{% endif %}
+      {{ r.turns }} turn{% if r.turns != 1 %}s{% endif %}, keep-out distance {{ r.keep_out_km }} km as entered.
+      Code version {{ r.code_version }}; {{ r.inputs }} input hash{% if r.inputs != 1 %}es{% endif %} held.</p>
+    {% if r.turns > 1 %}
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">Rule used: {{ r.rule }}. The one-turn matrix recommends {{ r.recommended }}.{% if r.tree_pick %} Over the {{ r.turns }} turns, {{ r.rule }} picks {{ r.tree_pick }} for turn 1.{% endif %}</p>
+    {% if r.tree_lines %}
+    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">The game tree, as the results said it:</p>
+    <ul style="margin:0.1rem 0 0; padding-left:1.1rem; font-size:0.72rem; color:var(--text-dim)">
+      {% for line in r.tree_lines %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% else %}
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">Rule used: {{ r.rule }}. Recommended: {{ r.recommended }}.</p>
+    {% endif %}
+    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">All three rules on the same matrix, worked out for this record; the results showed {{ r.rule }}'s pick alone: {% for rule, pick in r.picks %}{% if loop.first %}{{ rule | capitalize }}{% else %}{{ rule }}{% endif %} picks {{ pick }}{% if not loop.last %}, {% else %}.{% endif %}{% endfor %}</p>
+    {% if r.caveat %}
+    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--gold)">{{ r.caveat }}</p>
+    {% endif %}
+    {% if r.decision.decided %}
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; font-weight:700; color:var(--text-primary)">Decided {{ r.decision.decided_at }}: {{ r.decision.decision_name }}.</p>
+    <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim); white-space:pre-wrap">{% if r.decision.rationale %}Rationale: {{ r.decision.rationale }}{% else %}No rationale given.{% endif %}</p>
+    {% else %}
+    <p style="margin:0.2rem 0 0; font-size:0.75rem; font-weight:700; color:var(--gold)">No decision recorded.</p>
+    {% if r.decidable %}{% with rec = r.decision %}{% include "partials/decision_record_form.html" %}{% endwith %}{% endif %}
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% endblock %}

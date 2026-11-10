@@ -34,10 +34,10 @@ from typing import Any, NamedTuple
 
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.data.intel import satno_from_tle
-from spectre.domain.decision import ThreatPicture, longest_horizon_h
+from spectre.domain.decision import longest_horizon_h, picture_age_words
 from spectre.domain.decision_transfer import MAX_BURN_M_S, TransferBurn
 from spectre.domain.models import ThreatAssessment, ThreatSweepEntry
-from spectre.web.decision_threat import THREAT_PICTURE_MAX_AGE
+from spectre.web.decision_threat import readable_picture
 from spectre.web.elsets import elset_age
 from spectre.web.format_units import format_tof_label
 from spectre.web.routes.pol import HELD_HISTORY_MAX_AGE, history_evidence, reserve_reset_for
@@ -143,12 +143,11 @@ _OVER_BUDGET = (
     "needs, so the engine will refuse it as over its budget: remove a row, or shorten the horizon, which then ends "
     "before the arrival."
 )
-_PICTURE = "The engine reads the sweep's Threat picture for {red} while it is under {limit} min old: it is {age} min old now."
-_PICTURE_OLD = (
-    "The sweep is {limit} min old or more, so the engine will not read its Threat picture. Sweep again for a current "
-    "one."
+_PICTURE = (
+    "The engine reads the sweep's Threat picture for {red}, assessed {age} ago, and shows its age beside every figure "
+    "it feeds."
 )
-_NO_PICTURE = "The sweep holds no Threat picture for {red}, so the engine reads none."
+_NO_PICTURE = "The engine reads no Threat picture from the sweep for {red}."
 
 
 @dataclass(frozen=True)
@@ -475,15 +474,12 @@ def _fit_samples(horizon_h: float, now: datetime, draft: _Draft) -> None:
 
 
 def _picture_sentence(state: Any, red: str, now: datetime) -> str:
-    """Whether the engine will read the sweep's Threat picture for *red*, as decision_threat.held_picture reads it."""
-    picture = getattr(state, "threat_picture", None)
-    limit = int(THREAT_PICTURE_MAX_AGE.total_seconds() // 60)
-    if not isinstance(picture, ThreatPicture) or picture.red != red or picture.assessed_at is None:
+    """Whether the engine will read the sweep's Threat picture for *red*, as decision_threat.held_picture reads it:
+    at any age, which it says (SPC-181)."""
+    picture = readable_picture(getattr(state, "threat_picture", None), red, now)
+    if picture is None:
         return _NO_PICTURE.format(red=red)
-    age = now - picture.assessed_at
-    if age >= THREAT_PICTURE_MAX_AGE:
-        return _PICTURE_OLD.format(limit=limit)
-    return _PICTURE.format(red=red, limit=limit, age=int(age.total_seconds() // 60))
+    return _PICTURE.format(red=red, age=picture_age_words(now - picture.assessed_at))
 
 
 def _source(assessment: ThreatAssessment, entry: ThreatSweepEntry, now: datetime) -> str:

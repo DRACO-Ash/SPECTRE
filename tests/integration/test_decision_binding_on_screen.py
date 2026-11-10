@@ -284,7 +284,7 @@ class TestTheResult:
         assert "error-msg" not in resp.text
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
         assert f"Red: RX (RX), {shown}" in text
-        assert "None" not in text
+        assert "None" not in text.replace("None of these", "")   # the decision choice (SPC-192) is words
 
     def test_an_unreadable_epoch_renders(self, client: Any, auth_cookie: str, held: Any) -> None:
         line1, line2 = _tle(datetime.now(tz=UTC)).split("\n")
@@ -294,7 +294,7 @@ class TestTheResult:
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
         assert "Epoch unreadable" in text
         assert "Its epoch cannot be read, so its age is unknown; read it as out of date." in text
-        assert "None" not in text
+        assert "None" not in text.replace("None of these", "")   # the decision choice (SPC-192) is words
         assert "Evaluation error" not in text
 
     def test_a_vanished_object_is_refused_inline(self, client: Any, auth_cookie: str, held: Any) -> None:

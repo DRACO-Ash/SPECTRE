@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, is now recorded with the operator's decision (evaluation finding F-01).**
+
+### Added
+- A decision record for every finished evaluation, kept in the database: when, who, the scenario, the rule used, the recommendation, the picks under all three rules, the turns, the keep-out distance, the code version and every input hash. No element-set text or raw input is stored (that is SPC-193). The operator records one decision on the results page, once: one of their own responses, "None of these" (with a rationale) or "Decision deferred", with a rationale of up to 2,000 characters. A second decision, or a decision on another operator's record, is refused. A Decision records page lists an operator's own records, and every record for an admin. A deleted account's records are kept, readable by an admin. No retention is applied: retention, access and erasure await the owner's ruling as data protection lead (SPC-192, SPC-228).
+- SGP4 is checked in the suite against the published verification vectors shipped with the sgp4 library, and the production RK45 settings against a tight DOP853 reference at 48 h and 72 h (evaluation finding F-06, SPC-197).
+
+### Changed
+- The Decision Engine reads the sweep's threat picture for the same red track at any age, and states its age beside every line it feeds; a decide-by already passed is restated, not dropped (owner ruling, SPC-181).
+- The operator guide no longer calls the engine "game-theoretic": it is decision analysis over the operator's rows, minimax a guaranteed floor over pure responses, not a game solution, and randomised responses are not considered (evaluation finding F-15, SPC-218).
+- The test suite's database is a temporary SQLite file rather than one shared in-memory connection, so a background record write is not undone by a request's rollback.
+
 ## [0.26.0] - 2026-11-10
 
 **Operator output: 4, the recommended response, now registers miss distance (evaluation finding F-10).**

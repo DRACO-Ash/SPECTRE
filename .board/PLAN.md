@@ -1,14 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.27: 4 items, 720 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-192       360m  fills the release to its floor
-    SPC-181       120m  fills the release to its floor
-    SPC-197       120m  fills the release to its floor
-    SPC-218       120m  priority low; anchors the release
-  lane 1 (360m): SPC-192
-  lane 2 (360m): SPC-181, SPC-197, SPC-218
-
 V0.28: 2 items, 720 priced min, gates browser, container, lint, quality, sast, tests
   forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-193       360m  fills the release to its floor
@@ -114,6 +105,8 @@ waiting: SPC-198 - needs an owner answer
 waiting: SPC-212 - needs an owner answer
 
 waiting: SPC-227 - needs an owner answer
+
+waiting: SPC-228 - needs an owner answer
 
 off path: SPC-072 - research: no release gate
 

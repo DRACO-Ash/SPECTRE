@@ -52,7 +52,8 @@
 
 {# ── The sweep's Threat picture for the bound red track (SPC-171): the range, Understanding and decide-by, each a
      sentence of its own (I13), the collect-first advice and the rows it lists, never scored, and the expected-value
-     guidance. Context only: nothing here moves a figure or fills P or Conf. One div with no div inside. ── #}
+     guidance. Context only: nothing here moves a figure or fills P or Conf. The picture is read at any age, and each
+     line, like each row's Understanding, carries that age in words beside it (SPC-181). One div with no div inside. ── #}
 {% set threat_lines = result.threat_lines if result.threat_lines is defined else () %}
 {% set collection = result.collection if result.collection is defined else none %}
 {% set guidance = result.objective_guidance if result.objective_guidance is defined else none %}
@@ -506,3 +507,12 @@
   </div>
 
 </div>
+
+{# ── The operator's decision (SPC-192): read from "record" and "record_note", which only the route passes, so an older
+     caller renders without. The form is outside the evaluate form and names its own target. ── #}
+{% set written = record if record is defined else none %}
+{% if written is not none %}
+{% with rec = written %}{% include "partials/decision_record_form.html" %}{% endwith %}
+{% elif record_note is defined and record_note %}
+<p role="note" class="decision-record-note" style="margin:0.5rem 0 0; font-size:0.65rem; font-weight:700; color:var(--gold)">{{ record_note }}</p>
+{% endif %}

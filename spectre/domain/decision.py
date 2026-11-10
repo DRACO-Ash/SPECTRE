@@ -1431,13 +1431,36 @@ COLLECTION_NOTE = "collection to narrow the threat range: the cue's tuned durati
 #: a row whose P the form records as never edited, not one merely holding 0.5 (the owner's ruling of 2026-11-05 on
 #: concept section 9, decision 11, SPC-183).
 EXPECTED_VALUE_UNEARNED = "Expected value rests on a probability the evidence has not earned."
-#: The same, for a bound red track the engine holds no current picture for: it says only what the engine holds.
-EXPECTED_VALUE_NO_PICTURE = "Expected value rests on a probability no current Threat picture for {red} supports."
+#: The same, for a bound red track the engine reads no picture for: it says only what the engine reads.
+EXPECTED_VALUE_NO_PICTURE = "Expected value rests on a probability no Threat picture for {red} supports."
+#: What the engine shows beside every figure and sentence the sweep's picture feeds, its age at evaluation in words
+#: (SPC-181, the owner's ruling of 2026-11-05 on concept section 9, decision 9: the picture is read at any age).
+PICTURE_AGE = "from the sweep's picture assessed {age} before this evaluation"
+_SECONDS_PER_MINUTE = 60
+_MINUTES_PER_HOUR = 60
+_HOURS_PER_DAY = 24
 
 
 def _when(moment: datetime) -> str:
     """A moment as the sweep writes decide-by: "15:00 UTC on 4 Nov"."""
     return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def picture_age_words(age: timedelta) -> str:
+    """*age* in words, rounded down to the unit shown: "under 1 min", "20 min", "3 h 10 min", "2 d 4 h"."""
+    minutes = int(age.total_seconds() // _SECONDS_PER_MINUTE)
+    hours, minute = divmod(minutes, _MINUTES_PER_HOUR)
+    days, hour = divmod(hours, _HOURS_PER_DAY)
+    if days:
+        return f"{days} d" + (f" {hour} h" if hour else "")
+    if hours:
+        return f"{hours} h" + (f" {minute} min" if minute else "")
+    return f"{minutes} min" if minutes else "under 1 min"
+
+
+def _beside(sentence: str, age: str) -> str:
+    """*sentence* with *age* in brackets before its full stop."""
+    return f"{sentence.removesuffix('.')} ({age})."
 
 
 @dataclass(frozen=True)
@@ -1452,13 +1475,15 @@ class CollectionRow:
 
     name:  str
     hours: float
+    #: The age of the sweep's picture the row comes from, as PICTURE_AGE words it (SPC-181).
+    age:   str
     basis: FigureBasis = FigureBasis(Basis.LOOKUP, COLLECTION_NOTE)
 
     @property
     def sentence(self) -> str:
         return (
-            f"{self.name}, {self.hours:g} h: {self.basis.note}. Not ranked against your responses: collecting moves "
-            "no figure until what it finds is in the sweep."
+            f"{_beside(f'{self.name}, {self.hours:g} h: {self.basis.note}.', self.age)} Not ranked against your "
+            "responses: collecting moves no figure until what it finds is in the sweep."
         )
 
 
@@ -1468,7 +1493,9 @@ class ThreatPicture:
 
     Context for the operator and the collect-first advice only: it moves no figure, no score and no field of an
     adversary row. *red* names the red track it was assessed for; *decide_at* is the sweep's decide-by, None when it
-    set none, *decide_by* its sentence and *target* the blue asset it was set for.
+    set none, *decide_by* its sentence, *target* the blue asset it was set for and *arrival* the intercept it was set
+    against, None when unknown. *assessed_at* is when the sweep assessed it, which every picture states: the engine
+    reads it at any age and shows that age beside every figure and sentence it feeds (SPC-181).
     """
 
     red:           str
@@ -1478,16 +1505,41 @@ class ThreatPicture:
     cues:          tuple[Cue, ...] = ()
     decide_at:     datetime | None = None
     decide_by:     str = ""
-    assessed_at:   datetime | None = None
     target:        str = ""
+    arrival:       datetime | None = None
+    assessed_at:   datetime = field(kw_only=True)
 
     def __post_init__(self) -> None:
         if self.floor > self.ceiling:
             raise ValueError(f"a threat range with its floor {self.floor.name} above its ceiling {self.ceiling.name}")
 
+    def age(self, now: datetime) -> str:
+        """How old the picture is at *now*, the evaluation, as PICTURE_AGE words it."""
+        return PICTURE_AGE.format(age=picture_age_words(now - self.assessed_at))
+
+    def decide_line(self, now: datetime) -> str:
+        """The decide-by as it stands at *now*, the evaluation; "" when the sweep gave none.
+
+        The sweep words its decide-by against its own clock. A deadline still ahead holds only clock times, so its
+        sentence stands at any age. One passed by *now* is said again against *now*, so the line never says "Decide
+        by" a past time or counts hours from the sweep, and it agrees with the advice (concept section 7.5, item 5).
+        """
+        if self.decide_at is None or self.decide_at > now:
+            return self.decide_by
+        passed = f"Decide-by has passed{f' for {self.target}' if self.target else ''}: it was {_when(self.decide_at)}"
+        if self.arrival is None:
+            return f"{passed}."
+        if self.arrival > now:
+            left = (self.arrival - now).total_seconds() / _SECONDS_PER_HOUR
+            return f"{passed}, and an intercept could arrive at {_when(self.arrival)}, {left:.1f} h after this evaluation."
+        return (f"{passed}, and the intercept it was set against could have arrived at {_when(self.arrival)}, before "
+                "this evaluation.")
+
     def advice(self, now: datetime) -> CollectionAdvice:
-        """Collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10)."""
-        return collection_advice((self.floor, self.ceiling), self.cues, now=now, decide_at=self.decide_at)
+        """Collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10), with the
+        picture's age beside it."""
+        advice = collection_advice((self.floor, self.ceiling), self.cues, now=now, decide_at=self.decide_at)
+        return dataclasses.replace(advice, sentence=_beside(advice.sentence, self.age(now)))
 
     def collection_rows(self, now: datetime) -> tuple[CollectionRow, ...]:
         """One row per cue that needs someone outside SPECTRE, when the advice at *now* is to collect first.
@@ -1498,15 +1550,20 @@ class ThreatPicture:
         if self.advice(now).advice is not Advice.COLLECT_FIRST:
             return ()
         landing = landing_cues(self.cues, now=now, decide_at=self.decide_at)
-        return tuple(CollectionRow(c.observation, c.hours) for c in landing if not c.inside_spectre)
+        return tuple(CollectionRow(c.observation, c.hours, self.age(now)) for c in landing if not c.inside_spectre)
 
 
 def _require_threat(scenario: Scenario) -> None:
-    """A threat picture is about the bound red track it was assessed for, and no other."""
+    """A threat picture is about the bound red track it was assessed for, and no other, and was assessed by the
+    scenario epoch, so its age there can be said."""
     picture = scenario.threat
+    if picture is None:
+        return
     red = None if scenario.binding is None else scenario.binding.red
-    if picture is not None and (red is None or red.stk_name != picture.red):
+    if red is None or red.stk_name != picture.red:
         raise ValueError(f"a threat picture belongs to the bound red track it was assessed for, {picture.red}")
+    if picture.assessed_at > scenario.epoch_utc:
+        raise ValueError(f"a threat picture assessed after the scenario epoch, at {picture.assessed_at.isoformat()}")
 
 
 class Seen(StrEnum):
@@ -1744,16 +1801,17 @@ class ScenarioResult:
 
     @property
     def threat_lines(self) -> tuple[str, ...]:
-        """The sweep's Threat range, its Understanding and its decide-by, each its own sentence (I13)."""
+        """The sweep's Threat range, its Understanding and its decide-by as it stands at evaluation, each its own
+        sentence (I13), each with the picture's age at evaluation beside it (SPC-181)."""
         picture = self._picture()
         if picture is None:
             return ()
-        at = "" if picture.assessed_at is None else f" at {_when(picture.assessed_at)}"
+        age = picture.age(self.scenario.epoch_utc)
         return (
-            f"Threat range for {picture.red}: from {picture.floor.name} to {picture.ceiling.name}, as the sweep "
-            f"assessed it{at}.",
-            f"Understanding {picture.understanding.name}: the sweep's rating of {picture.red}.",
-            *([picture.decide_by] if picture.decide_by else []),
+            _beside(f"Threat range for {picture.red}: from {picture.floor.name} to {picture.ceiling.name}.",
+                    f"{age}, at {_when(picture.assessed_at)}"),
+            _beside(f"Understanding {picture.understanding.name}: the sweep's rating of {picture.red}.", age),
+            *([_beside(decide, age)] if (decide := picture.decide_line(self.scenario.epoch_utc)) else []),
         )
 
     @property
@@ -1768,19 +1826,22 @@ class ScenarioResult:
             return (None,) * rows
         if picture is None:
             return (
-                f"Understanding not assessed: the engine holds no current picture from the sweep for {red}, so "
-                "nothing fills P or Conf.",
+                f"Understanding not assessed: the engine reads no picture from the sweep for {red}, so nothing fills "
+                "P or Conf.",
             ) * rows
-        return (f"Understanding {picture.understanding.name}: shown beside P and Conf as context; it fills neither.",) * rows
+        note = f"Understanding {picture.understanding.name}: shown beside P and Conf as context; it fills neither."
+        return (_beside(note, picture.age(self.scenario.epoch_utc)),) * rows
 
     def _unearned(self) -> str | None:
-        """Why expected value's weights are not earned: a bound red track with no current picture, a picture at
-        Understanding LOW, or any row whose P the form records as never edited (SPC-183); None when none holds."""
+        """Why expected value's weights are not earned: a bound red track with no picture read, a picture at
+        Understanding LOW, with its age beside it (SPC-181), or any row whose P the form records as never edited
+        (SPC-183); None when none holds."""
         red, picture = self._red_name(), self._picture()
         if red is not None and picture is None:
             return EXPECTED_VALUE_NO_PICTURE.format(red=red)
-        low = picture is not None and picture.understanding is Understanding.LOW
-        if low or any(_untouched(a) for a in self.scenario.adversary_actions):
+        if picture is not None and picture.understanding is Understanding.LOW:
+            return _beside(EXPECTED_VALUE_UNEARNED, picture.age(self.scenario.epoch_utc))
+        if any(_untouched(a) for a in self.scenario.adversary_actions):
             return EXPECTED_VALUE_UNEARNED
         return None
 

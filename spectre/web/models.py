@@ -6,7 +6,7 @@ import secrets
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import DateTime, Index, Integer, String, event, func
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.base import NO_VALUE
 
@@ -126,3 +126,67 @@ def _revoke_sessions_on_password_change(
         from spectre.web.planning_state import clear_account_state
 
         clear_account_state(target.id)
+
+
+class DecisionRecord(Base):
+    """One finished Decision Engine evaluation, and what the operator decided on it (SPC-192, evaluation F-01).
+
+    Written when the evaluation finishes, whichever path ran it: when (UTC), who, the scenario's name, the rule
+    used and its pick on the one-turn matrix, the picks of all three rules on the same matrix with expected value's
+    basis, a tree's own turn-1 pick and recommendation lines, the code version and every input hash from the
+    result's provenance, the turns and the keep-out distance. The responses the operator may choose from
+    are listed by id and name, so a decision is checked against the scenario's own rows. The decision, its
+    rationale and its own UTC time are set once, by the operator who ran the evaluation.
+
+    It holds no element-set text and no raw inputs: replaying a recommendation from a record is SPC-193 (F-02).
+    No retention is applied; how long records are kept and who may read them is the owner's decision.
+
+    Only generic types, so the table is the same on SQLite and PostgreSQL. Operator text is Text, never
+    String(n): PostgreSQL enforces a length SQLite ignores, so a name one database stored the other would refuse.
+    For the same reason a name's U+0000, which PostgreSQL's text refuses, is kept as U+FFFD. The lists are Text
+    holding JSON, for the same portability.
+
+    *user_id* is the account that ran it, and None once that account is deleted, so a later account handed the
+    same id by SQLite never reads it; *username* keeps the name it was run under, for an admin reading it. Keeping
+    a deleted account's records is Claude's design choice, awaiting the owner's ruling as data protection lead.
+    """
+
+    __tablename__ = "decision_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    scenario_name: Mapped[str] = mapped_column(Text, nullable=False)
+    rule: Mapped[str] = mapped_column(String(32), nullable=False)
+    recommended_id: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_name: Mapped[str] = mapped_column(Text, nullable=False)
+    minimax_id: Mapped[str] = mapped_column(Text, nullable=False)
+    minimax_name: Mapped[str] = mapped_column(Text, nullable=False)
+    minimin_id: Mapped[str] = mapped_column(Text, nullable=False)
+    minimin_name: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_value_id: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_value_name: Mapped[str] = mapped_column(Text, nullable=False)
+    #: What the results say under expected value when its probability is not earned, whatever rule ran; None when
+    #: it is earned.
+    expected_value_caveat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: For a game tree, the rule's own pick for turn 1, which can differ from the one-turn matrix's; None for one turn
+    #: or a tree with no pick.
+    tree_pick_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tree_pick_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The tree's recommendation lines as the results showed them, or why it has none, as JSON; [] for one turn.
+    tree_recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    code_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    calibration_source: Mapped[str] = mapped_column(Text, nullable=False)
+    #: [{"label", "sha256", "epoch"}] in the provenance's order, as JSON.
+    input_hashes: Mapped[str] = mapped_column(Text, nullable=False)
+    #: [{"id", "name"}] of the scenario's friendly responses, in its order, as JSON.
+    responses: Mapped[str] = mapped_column(Text, nullable=False)
+    turns: Mapped[int] = mapped_column(Integer, nullable=False)
+    keep_out_km: Mapped[float] = mapped_column(Float, nullable=False)
+    #: The response's place in *responses* as "response-<n>", "none" or "deferred"; None until decided.
+    decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: What the operator chose, in the words the select showed.
+    decision_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -20,6 +20,8 @@ Bounded on purpose, after the burn watch (spectre.web.burn_watch):
   evaluation replaces it, or the server shuts down. The asyncio task is never
   cancelled for these: cancelling it would free the slot while the worker
   thread kept sampling.
+* Once sampling finishes it writes the evaluation's decision record (SPC-192) before the page shows the
+  results, and Cancel no longer stops it then; a job that stops before that, or fails, writes none.
 * It is not filed with the UDL login's tasks: a UDL logout ends the UDL
   connection, not the sign-in, and the job holds no UDL password.
 
@@ -60,6 +62,9 @@ logger = logging.getLogger(__name__)
 
 #: What the job evaluates with: evaluate_tree, which is evaluate_scenario for one turn (SPC-142), or a test's stand-in.
 Evaluate = Callable[..., ScenarioResult]
+#: What a finished job hands its result to (SPC-192): write its decision record, answering the record's id, or None
+#: when it could not be written.
+Record = Callable[[ScenarioResult], Awaitable[int | None]]
 #: What a job does before it evaluates (SPC-119): read the bound red track's custody, which may wait on a UDL
 #: history fetch, and return the scenario with it.
 Prepare = Callable[[Scenario], Awaitable[Scenario]]
@@ -76,12 +81,13 @@ class CustodyRead:
 
 
 class JobState(StrEnum):
-    """Where a job is: reading custody, waiting for the server's sampling slot, sampling, or finished one of three
-    ways."""
+    """Where a job is: reading custody, waiting for the server's sampling slot, sampling, writing its decision record
+    once sampling has finished (SPC-192), or finished one of three ways."""
 
     CUSTODY = "custody"
     QUEUED = "queued"
     RUNNING = "running"
+    RECORDING = "recording"
     DONE = "done"
     STOPPED = "stopped"
     FAILED = "failed"
@@ -108,14 +114,20 @@ class DecisionJob:
     #: Read before the evaluation (SPC-119): the bound red track's custody, which waits on a UDL history fetch.
     #: None when custody is read already.
     custody: CustodyRead | None = field(default=None, repr=False)
+    #: Writes the decision record once the evaluation finishes (SPC-192); None writes none, as a test's job may.
+    record: Record | None = field(default=None, repr=False)
+    #: The decision record's id once written; None before, and when it could not be.
+    record_id: int | None = None
 
 
-def new_job(scenario: Scenario, strategy: SelectorStrategy, *, custody: CustodyRead | None = None) -> DecisionJob:
+def new_job(
+    scenario: Scenario, strategy: SelectorStrategy, *, custody: CustodyRead | None = None, record: Record | None = None,
+) -> DecisionJob:
     """A job for *scenario*, with an id the page cannot guess: reading custody first when *custody* is given, else
-    queued."""
+    queued; writing its decision record with *record* when it finishes (SPC-192)."""
     return DecisionJob(
         job_id=secrets.token_urlsafe(8), scenario=scenario, strategy=strategy,
-        state=JobState.QUEUED if custody is None else JobState.CUSTODY, custody=custody,
+        state=JobState.QUEUED if custody is None else JobState.CUSTODY, custody=custody, record=record,
     )
 
 
@@ -210,7 +222,7 @@ async def _prepared(state: SessionState, key: SessionKey, job: DecisionJob) -> b
         logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
         job.state = JobState.FAILED
         return False
-    _finish(state, key, job, result)
+    await _finish(state, key, job, result)
     return False
 
 
@@ -246,15 +258,29 @@ async def run_job(state: SessionState, key: SessionKey, job: DecisionJob, *, eva
             logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
             job.state = JobState.FAILED
             return
-    _finish(state, key, job, result)
+    await _finish(state, key, job, result)
 
 
-def _finish(state: SessionState, key: SessionKey, job: DecisionJob, result: ScenarioResult) -> None:
-    """Hold the result and log it, unless the job stopped being wanted while its last sample ran."""
+async def _finish(state: SessionState, key: SessionKey, job: DecisionJob, result: ScenarioResult) -> None:
+    """Write the decision record, then hold the result and log it, unless the job stopped being wanted while its
+    last sample ran, when nothing is written (SPC-192).
+
+    While the record is written the job is RECORDING: the page polls on, and Cancel no longer stops it, since
+    sampling, the thing Cancel stops, has finished. A job that stops being wanted while its record is written, by
+    a newer evaluation, a sign-out or shutdown, stops there: its record stands, for an evaluation that finished,
+    and is decided on the Decision records page, but its results are not held.
+    """
     reason = still_wanted(state, key, job)
     if reason:
         _stop(job, reason)
         return
+    if job.record is not None:
+        job.state = JobState.RECORDING
+        job.record_id = await job.record(result)
+        reason = still_wanted(state, key, job)
+        if reason:
+            _stop(job, reason)
+            return
     job.result, job.state = result, JobState.DONE
     state.append_log(evaluated_line(job.scenario, result))
     logger.info("[Decision] Evaluated %s as job %s", log_safe(job.scenario.name), log_safe(job.job_id))
@@ -282,14 +308,15 @@ def start_job(
     job.task = spawn(run_job(state, key, job))
 
 
-#: The states a job is still underway in: the page polls them, and Cancel stops them.
-_UNDERWAY = (JobState.CUSTODY, JobState.QUEUED, JobState.RUNNING)
+#: The states a job is still underway in, and the page polls; Cancel stops all but the last, writing its record.
+_CANCELLABLE = (JobState.CUSTODY, JobState.QUEUED, JobState.RUNNING)
+_UNDERWAY = (*_CANCELLABLE, JobState.RECORDING)
 
 
 def cancel_job(state: SessionState, job_id: str) -> None:
     """Stop this sign-in's job if *job_id* names it and it has not finished; its thread stops at its next sample."""
     job = held_job(state, job_id)
-    if job is not None and job.state in _UNDERWAY:
+    if job is not None and job.state in _CANCELLABLE:
         job.cancelled.set()
         _stop(job, "you cancelled it")
 
@@ -334,6 +361,7 @@ _CUSTODY = (
 _STOPPED = "Evaluation stopped: {reason}. Nothing was scored; evaluate again to see the figures."
 _FAILED = "The evaluation failed; the server log has the detail. Nothing was scored."
 _DONE = "The evaluation finished."
+_RECORDING = "The evaluation finished; writing its decision record."
 
 
 def _red_name(job: DecisionJob) -> str:
@@ -357,6 +385,7 @@ def _message(job: DecisionJob) -> str:
     return {
         JobState.STOPPED: _STOPPED.format(reason=job.stopped),
         JobState.FAILED: _FAILED,
+        JobState.RECORDING: _RECORDING,
     }.get(job.state, _DONE)
 
 
@@ -364,10 +393,11 @@ def job_view(state: SessionState, job_id: str) -> dict[str, Any]:
     """What the job partial shows: the job if *job_id* names it, the sentence for its state, and whether to poll."""
     job = held_job(state, job_id)
     if job is None:
-        return {"job": None, "message": NO_JOB, "polling": False, "progress": None}
+        return {"job": None, "message": NO_JOB, "polling": False, "cancellable": False, "progress": None}
     return {
         "job": job,
         "message": _message(job),
         "polling": job.state in _UNDERWAY,
+        "cancellable": job.state in _CANCELLABLE,
         "progress": job.progress if job.state is JobState.RUNNING else None,
     }

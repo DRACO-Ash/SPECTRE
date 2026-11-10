@@ -393,24 +393,29 @@ class TestThePictureTheEngineWillRead:
             decide_at=None, decide_by="", assessed_at=_SWEPT,
         )
 
-    def test_a_current_picture_for_the_red_track_is_named_with_its_age(self) -> None:
+    def test_a_picture_for_the_red_track_is_named_with_its_age(self) -> None:
         prefill = _open(_state(threat_picture=self._picture()))
         assert (
-            "The engine reads the sweep's Threat picture for RX while it is under 30 min old: it is 10 min old now."
+            "The engine reads the sweep's Threat picture for RX, assessed 10 min ago, and shows its age beside every "
+            "figure it feeds."
         ) in prefill.left
 
-    def test_a_picture_30_min_old_or_more_is_said_not_to_be_read(self) -> None:
-        prefill = _open(_state(threat_picture=self._picture()), now=_SWEPT + timedelta(minutes=30))
+    def test_a_picture_hours_old_is_read_and_its_age_said(self) -> None:
+        """SPC-181: the picture is read at any age; the prefill says how old it is, never that it will not be read."""
+        prefill = _open(_state(threat_picture=self._picture()), now=_SWEPT + timedelta(hours=3, minutes=10))
         assert (
-            "The sweep is 30 min old or more, so the engine will not read its Threat picture. Sweep again for a "
-            "current one."
+            "The engine reads the sweep's Threat picture for RX, assessed 3 h 10 min ago, and shows its age beside "
+            "every figure it feeds."
         ) in prefill.left
+        assert not any("30 min old" in line for line in prefill.left)
 
-    @pytest.mark.parametrize("picture", [None, "other"])
-    def test_with_no_picture_for_the_red_track_it_says_none_is_read(self, picture: str | None) -> None:
-        held = self._picture("OTHER") if picture else None
+    @pytest.mark.parametrize("picture", [None, "other", "later"])
+    def test_with_no_picture_it_reads_for_the_red_track_it_says_none_is_read(self, picture: str | None) -> None:
+        """A picture for another red track, or one assessed after now, whose age cannot be said, is not read."""
+        held = {None: None, "other": self._picture("OTHER"),
+                "later": dataclasses.replace(self._picture(), assessed_at=_NOW + timedelta(minutes=1))}[picture]
         prefill = _open(_state(threat_picture=held))
-        assert "The sweep holds no Threat picture for RX, so the engine reads none." in prefill.left
+        assert "The engine reads no Threat picture from the sweep for RX." in prefill.left
 
 
 class TestTheOperatorText:

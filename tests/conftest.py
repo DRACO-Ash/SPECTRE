@@ -13,6 +13,13 @@ from spectre.domain.models import AccessInterval, RunConfig
 # The data directory, where the NOTSO cache is seeded on first use (audit
 # F-062), is a scratch directory for the suite rather than ./data in the tree.
 os.environ.setdefault("SPECTRE_DATA_DIR", tempfile.mkdtemp(prefix="spectre-test-data-"))
+# The suite's database is a file of its own, as the server's is, not one in-memory connection every session shares
+# (SPC-192). A decision job writes its record in the background while requests run; on the shared connection a
+# request's rollback undid that write, and the connection's lock, bound to the first event loop that waited on it,
+# refused every later module's loop. Set here, before either directory's conftest sets its own default.
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite+aiosqlite:///{tempfile.mkdtemp(prefix='spectre-test-db-')}/spectre-test.db",
+)
 
 
 @pytest.fixture()

@@ -3,9 +3,10 @@
 The sweep is where ACCESS, the threat range and decide-by are worked out, so
 the engine reads the picture the sweep held for the red track it is bound to,
 and no other: a picture held for another red track is not used, and with
-none current the rows read "Understanding not assessed". A picture 30 min
-old or more is not read, and the sweep's deadline is read only for the blue
-asset it was set for. The probability and confidence the operator posted
+none the rows read "Understanding not assessed". A picture is read at any
+age, with its age at evaluation beside every figure and sentence it feeds
+(SPC-181), and the sweep's deadline is read only for the blue asset it was set
+for. The probability and confidence the operator posted
 reach the engine as posted, whatever the Understanding. The route's clock is fixed here, so no test reads the wall
 clock, and UDL is not connected, so none reaches the network.
 """
@@ -34,7 +35,7 @@ from tests.unit.test_elset_freshness import _tle
 _NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
 _RECORD = "analyst to date and source the intel record"
 _NOT_ASSESSED = (
-    "Understanding not assessed: the engine holds no current picture from the sweep for RX, so nothing fills P or Conf."
+    "Understanding not assessed: the engine reads no picture from the sweep for RX, so nothing fills P or Conf."
 )
 _DECIDE_BY = "Decide by 15:00 UTC on 4 Nov for BLUE_1: its fastest intercept could arrive at 03:00 UTC on 5 Nov."
 
@@ -86,12 +87,13 @@ class TestThePictureTheSweepHolds:
         situation = tu.Situation(now=_NOW, access=Band.CRITICAL, custody=Custody.HELD, history_truncated=False)
         understanding = tu.assess((), situation, with_cues=True)
         state = type("State", (), {"threat_picture": None})()
-        decide = DecideBy(Due.SET, _DECIDE_BY, decide_at=_NOW + timedelta(hours=6), target="BLUE_1")
+        decide = DecideBy(Due.SET, _DECIDE_BY, decide_at=_NOW + timedelta(hours=6), arrival=_NOW + timedelta(hours=18),
+                          target="BLUE_1")
         decision_threat.hold_threat_picture(state, "RX", understanding, decide, _NOW)
         assert state.threat_picture == decision.ThreatPicture(
             red="RX", floor=Band.MINIMAL, ceiling=Band.CRITICAL, understanding=tu.Understanding.LOW,
             cues=understanding.cues, decide_at=_NOW + timedelta(hours=6), decide_by=_DECIDE_BY, assessed_at=_NOW,
-            target="BLUE_1",
+            target="BLUE_1", arrival=_NOW + timedelta(hours=18),
         )
 
     def test_a_withheld_decide_by_holds_no_deadline(self) -> None:
@@ -101,7 +103,7 @@ class TestThePictureTheSweepHolds:
         state = type("State", (), {"threat_picture": None})()
         withheld = DecideBy(Due.NONE, "No decide-by: custody is lost.")
         decision_threat.hold_threat_picture(state, "RX", tu.assess((), situation), withheld, _NOW)
-        assert state.threat_picture.decide_at is None
+        assert state.threat_picture.decide_at is None and state.threat_picture.arrival is None
         assert state.threat_picture.decide_by == "No decide-by: custody is lost."
 
     def test_a_sweep_whose_model_failed_holds_nothing(self) -> None:
@@ -126,28 +128,26 @@ def _state(picture: Any) -> Any:
     return type("State", (), {"threat_picture": picture})()
 
 
-class TestTheEngineReadsOnlyACurrentPictureForItsOwnObjects:
-    """A picture is read only while it is current, and its deadline only for the blue asset it was set for."""
+class TestTheEngineReadsThePictureForItsOwnObjectsAtAnyAge:
+    """A picture is read at any age (SPC-181), and its deadline only for the blue asset it was set for."""
 
-    @pytest.mark.parametrize("age", [timedelta(0), timedelta(minutes=29, seconds=59)])
-    def test_a_picture_under_30_min_old_is_read(self, age: timedelta) -> None:
+    @pytest.mark.parametrize("age", [timedelta(0), timedelta(minutes=29, seconds=59), timedelta(minutes=30),
+                                     timedelta(hours=3, minutes=10), timedelta(days=3)])
+    def test_a_picture_is_read_at_any_age(self, age: timedelta) -> None:
+        """The owner's ruling of 2026-11-05 (concept section 9, decision 9): the age is shown, not used to refuse."""
         from spectre.web import decision_threat
 
         picture = _picture(assessed_at=_NOW - age)
         assert decision_threat.held_picture(_state(picture), _binding(), _NOW) == picture
+        assert not hasattr(decision_threat, "THREAT_PICTURE_MAX_AGE")
 
-    @pytest.mark.parametrize("age", [timedelta(minutes=30), timedelta(hours=3)])
-    def test_a_picture_30_min_old_or_more_is_not(self, age: timedelta) -> None:
-        """Its range rests on a history the sweep would fetch again by now, so its range and cues may have moved."""
+    def test_a_picture_assessed_after_the_evaluation_is_not_read(self) -> None:
+        """Its age at evaluation cannot be said, so it is not shown."""
         from spectre.web import decision_threat
 
-        assert timedelta(minutes=30) == decision_threat.THREAT_PICTURE_MAX_AGE
-        assert decision_threat.held_picture(_state(_picture(assessed_at=_NOW - age)), _binding(), _NOW) is None
-
-    def test_a_picture_with_no_time_it_was_assessed_is_not_read(self) -> None:
-        from spectre.web import decision_threat
-
-        assert decision_threat.held_picture(_state(_picture(assessed_at=None)), _binding(), _NOW) is None
+        late = _picture(assessed_at=_NOW + timedelta(seconds=1))
+        assert decision_threat.held_picture(_state(late), _binding(), _NOW) is None
+        assert decision_threat.readable_picture(late, "RX", _NOW + timedelta(seconds=1)) == late
 
     @pytest.mark.parametrize("blue", [None, "BLUE_1"], ids=["no blue asset bound", "the asset it was set for"])
     def test_the_sweeps_deadline_is_read_for_its_own_target_or_with_no_blue_asset_bound(self, blue: str | None) -> None:
@@ -181,8 +181,9 @@ class TestTheEnginePage:
         assert (
             "Collect first: pull its element-set history, about 30 min, lands before decide-by at 15:00 UTC on 4 Nov."
         ) in text
-        assert "Threat range for RX: from MEDIUM to CRITICAL, as the sweep assessed it at 08:40 UTC on 4 Nov." in text
-        assert _DECIDE_BY in text
+        assert ("Threat range for RX: from MEDIUM to CRITICAL (from the sweep's picture assessed 20 min before this "
+                "evaluation, at 08:40 UTC on 4 Nov).") in text
+        assert f"{_DECIDE_BY.removesuffix('.')} (from the sweep's picture assessed 20 min before this evaluation)." in text
         assert f"{_RECORD}, 4 h: collection to narrow the threat range" in text
 
     @pytest.mark.parametrize("strategy", ["minimax", "expected_value"])
@@ -203,7 +204,7 @@ class TestTheEnginePage:
         held.threat_picture = _picture(decide_at=_NOW - timedelta(minutes=5))
         text = _text(_page(client, auth_cookie))
         assert "Act on the ceiling: treat it as Threat CRITICAL." in text
-        assert "and decide-by has passed." in text
+        assert "and decide-by has passed (from the sweep's picture assessed 20 min before this evaluation)." in text
         assert "collection to narrow the threat range" not in text
 
     def test_a_picture_held_for_another_red_track_is_not_used(self, client: Any, auth_cookie: str, held: Any) -> None:
@@ -212,21 +213,60 @@ class TestTheEnginePage:
         assert "Collect first" not in text and "Threat range for" not in text
         assert _NOT_ASSESSED in text
 
-    def test_a_picture_from_an_earlier_sweep_is_not_used(self, client: Any, auth_cookie: str, held: Any) -> None:
-        held.threat_picture = _picture(assessed_at=_NOW - timedelta(minutes=45))
+    def test_a_picture_hours_old_is_read_with_its_age_beside_every_figure_it_feeds(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """SPC-181: the threat lines, the collect-first advice and rows, the guidance and the decide-by each say how
+        old the picture was at evaluation."""
+        held.threat_picture = _picture(assessed_at=_NOW - timedelta(hours=3, minutes=10))
+        page = _page(client, auth_cookie, strategy="expected_value")
+        age = "(from the sweep's picture assessed 3 h 10 min before this evaluation"
+        block = page[page.index('class="threat-context"'):]
+        block = block[:block.index("</div>")]
+        paragraphs = [_text(p) for p in re.findall(r"<p[^>]*>(.*?)</p>", block, re.S)]
+        assert len(paragraphs) == 6   # range, Understanding, decide-by, advice, one row, guidance
+        assert all(age in p for p in paragraphs)
+        assert paragraphs[0].endswith(f"{age}, at 05:50 UTC on 4 Nov).")
+        assert paragraphs[2] == f"{_DECIDE_BY.removesuffix('.')} {age})."
+        assert paragraphs[3].startswith("Collect first:") and paragraphs[3].endswith(f"{age}).")
+        assert paragraphs[4].startswith(f"{_RECORD}, 4 h:") and f"a lookup {age}). Not ranked" in paragraphs[4]
+        assert paragraphs[5].startswith(f"Expected value rests on a probability the evidence has not earned {age}).")
+        notes = [html.unescape(n) for n in re.findall(r'class="row-understanding"[^>]*>([^<]*)<', page)]
+        assert notes and all(n.endswith(f"{age}).") for n in notes)
+        assert _NOT_ASSESSED not in _text(page)
+
+    def test_a_decide_by_passed_at_an_old_sweep_is_restated_against_the_evaluation(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """The sweep worded its passed decide-by against its own clock, "2.0 h from now". Read 3 d later, the page
+        counts nothing from the sweep: it says when the deadline was and that the intercept could have arrived."""
+        from types import SimpleNamespace
+
+        from spectre.domain.decide_by import ResponseTimes, decide_by
+        from spectre.web import decision_threat
+
+        swept = _NOW - timedelta(days=3)
+        entry = SimpleNamespace(burn_epoch=swept, tof_hours=2.0, delta_v_m_s=10.0, arrives=True,
+                                target=SimpleNamespace(target_name="BLUE_1"))
+        decide = decide_by([entry], ResponseTimes(sign_in=4.0), swept, 100.0)
+        assert decide.due is Due.PASSED and "2.0 h from now" in decide.sentence
+        situation = tu.Situation(now=swept, access=Band.CRITICAL, custody=Custody.HELD, history_truncated=False)
+        decision_threat.hold_threat_picture(held, "RX", tu.assess((), situation, with_cues=True), decide, swept)
         text = _text(_page(client, auth_cookie))
-        assert "Collect first" not in text and "Threat range for" not in text
-        assert _NOT_ASSESSED in text
+        assert ("Decide-by has passed for BLUE_1: it was 07:00 UTC on 1 Nov, and the intercept it was set against "
+                "could have arrived at 11:00 UTC on 1 Nov, before this evaluation (from the sweep's picture assessed 3 d "
+                "before this evaluation).") in text
+        assert "from now" not in text and "Decide by " not in text
 
     def test_with_no_picture_the_page_says_only_what_the_engine_holds(
         self, client: Any, auth_cookie: str, held: Any,
     ) -> None:
-        """No current picture is all the engine knows: it never says whether a sweep was run."""
+        """No picture read is all the engine knows: it never says whether a sweep was run."""
         held.threat_picture = None
         text = _text(_page(client, auth_cookie, strategy="expected_value"))
         assert _NOT_ASSESSED in text
         assert "no threat sweep" not in text.lower()
-        assert ("Expected value rests on a probability no current Threat picture for RX supports. Minimax, the "
+        assert ("Expected value rests on a probability no Threat picture for RX supports. Minimax, the "
                 "cautious rule") in text
 
     @pytest.mark.parametrize("level", list(tu.Understanding))
@@ -236,12 +276,14 @@ class TestTheEnginePage:
         held.threat_picture = _picture(understanding=level)
         text = _text(_page(client, auth_cookie))
         assert "P=0.3 · Conf=0.6" in text
-        assert f"Understanding {level.name}: shown beside P and Conf as context; it fills neither." in text
+        assert (f"Understanding {level.name}: shown beside P and Conf as context; it fills neither (from the sweep's "
+                "picture assessed 20 min before this evaluation).") in text
 
     def test_expected_value_at_understanding_low_names_minimax(self, client: Any, auth_cookie: str, held: Any) -> None:
         held.threat_picture = _picture()
         text = _text(_page(client, auth_cookie, strategy="expected_value"))
-        assert "Expected value rests on a probability the evidence has not earned. Minimax, the cautious rule" in text
+        assert ("Expected value rests on a probability the evidence has not earned (from the sweep's picture assessed "
+                "20 min before this evaluation). Minimax, the cautious rule") in text
 
     def test_every_new_sentence_on_the_page_keeps_i13(self, client: Any, auth_cookie: str, held: Any) -> None:
         held.threat_picture = _picture()

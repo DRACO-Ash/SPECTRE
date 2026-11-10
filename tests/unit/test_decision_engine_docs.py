@@ -9,6 +9,7 @@ bullets as filled circles or squares.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -171,3 +172,138 @@ class TestTheOwnersRulingsOf5November:
         for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
             assert "never edited" in text
             assert "P is the untouched default" not in text
+
+
+class TestTheDecisionRecord:
+    """SPC-192 (evaluation F-01): both descriptions say what a record holds, what it does not, and whose call the
+    rest is."""
+
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            "Decision records", "one record for each finished evaluation", "None of these", "Decision deferred",
+            "2,000 characters", "one decision, once", "all three rules",
+            "no element-set text and no raw input", "SPC-193",
+            "No retention is applied", "retention and access are the owner's decision",
+            "data protection lead",
+        ],
+    )
+    def test_both_say_what_a_record_holds_and_whose_decision_its_keeping_is(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_the_phase_document_no_longer_says_only_the_session_holds_a_result(self) -> None:
+        doc = _flat(_read("docs/decision_engine_phases.md"))
+        assert "nothing records what the operator decided" not in doc.lower()
+
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            "gate G1", "record half", "advisory half", "not reassessed", "decide it on the Decision records page",
+            "never shown", "Claude's design choice", "replacement character", "control character",
+            "expected value", "one-turn matrix",
+        ],
+    )
+    def test_both_say_what_the_review_of_spc_192_settled(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_neither_says_no_record_describes_results_the_page_never_showed(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "no record describes results the page never showed" not in text.lower()
+
+    def test_the_section_says_it_is_built_and_which_choices_are_claudes(self) -> None:
+        doc = _read("docs/decision_engine_phases.md")
+        section = doc[doc.index("## The decision record (SPC-192)"):doc.index("## What remains out of scope")]
+        assert "**Status: built" in section
+        for choice in ("RECORDING", "no pagination", "kept when its account is deleted", "awaiting the owner's ruling"):
+            assert choice in _flat(section), choice
+
+
+def test_security_counts_every_free_text_a_record_holds_and_lists_its_retention_as_open() -> None:
+    text = _flat(_read("docs/SECURITY.md"))
+    bullet = text[text.index("Decision records (SPC-192)"):]
+    for held in ("username", "scenario's name", "response names", "rationale"):
+        assert held in bullet[:600], held
+    open_items = text[text.index("Data protection"):]
+    assert "decision records" in open_items.lower()
+
+
+def _guide_strings() -> str:
+    """Every string literal in the guide generator, each implicit concatenation read as the one string it is."""
+    tree = ast.parse(_read("docs/generate_guide.py"))
+    return " ".join(
+        node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+
+
+#: Where a sentence may call the engine game-theoretic or a game solution: what the operator and a reader see.
+_DESCRIPTIONS = ("docs/**/*.md", "docs/generate_guide.py", "spectre/web/templates/**/*.html")
+#: Histories that record earlier wording, never rewritten.
+_HISTORIES = ("docs/CHANGE-LEDGER.md",)
+_GAME_CLAIM = re.compile(r"game[- ]theor|(?<!not a )game solution", re.IGNORECASE)
+
+
+class TestDecisionAnalysisNotAGameSolution:
+    """SPC-218, evaluation finding F-15: the engine computes pure-response rules over the operator's rows, so it is
+    decision analysis with a worst-case floor, not game-theoretic evaluation, and a reader is told so."""
+
+    def test_no_description_calls_the_engine_game_theoretic_or_a_game_solution(self) -> None:
+        found = [
+            f"{path.relative_to(_ROOT)}: {match.group(0)}"
+            for pattern in _DESCRIPTIONS for path in sorted(_ROOT.glob(pattern))
+            if str(path.relative_to(_ROOT)) not in _HISTORIES
+            for match in _GAME_CLAIM.finditer(path.read_text(encoding="utf-8"))
+        ]
+        assert found == []
+
+    @pytest.mark.parametrize("words", [
+        "decision analysis over operator-entered rows", "a worst-case floor (minimax)", "a best case (minimin)",
+        "expected value", "Randomised (mixed) responses are not considered",
+        "minimax is a guaranteed floor over pure responses, not a game solution",
+    ])
+    def test_the_guide_says_what_the_engine_is_where_it_introduces_it_and_in_its_section(self, words: str) -> None:
+        strings = _guide_strings()
+        introduction = strings[strings.index("Beyond manoeuvre planning"):strings.index("Integration with the Unified")]
+        assert words.lower() in introduction.lower()
+        assert words.lower() in _flat(_guide_section().replace('" "', "")).lower()
+
+
+class TestThePictureAtAnyAge:
+    """SPC-181, the owner's ruling of 2026-11-05 on concept section 9, decision 9."""
+
+    def test_no_description_says_the_picture_must_be_under_30_min_old(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section(),
+                     _flat(_read("docs/threat_confidence_concept.md"))):
+            assert "under 30 min" not in text and "within the last 30 minutes" not in text
+
+    def test_both_descriptions_say_its_age_is_shown_beside_every_figure_it_feeds(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _flat(_guide_strings())):
+            assert "at any age" in text
+            assert "from the sweep's picture assessed 3 h 10 min before this evaluation" in text
+
+    def test_each_description_says_a_later_sweep_of_another_red_track_replaces_the_picture(self) -> None:
+        """The session holds one picture, the last sweep's: the engine bound to a red track swept before another reads
+        none, and no description may promise it."""
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _flat(_guide_strings()),
+                     _flat(_read("docs/threat_confidence_concept.md"))):
+            assert "a later sweep of another red track" in text
+        assert "When the sweep has assessed the bound red track, at any age" not in _flat(_guide_strings())
+
+    def test_each_description_says_a_passed_decide_by_is_said_again_against_the_evaluation(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _flat(_guide_strings()),
+                     _flat(_read("docs/threat_confidence_concept.md"))):
+            assert "said again against the evaluation" in text
+
+
+class TestWhatAMixedResponseCouldGuarantee:
+    """A randomised mix can guarantee only a better expected score, against a red that cannot see the draw: the
+    score realised is one pure response's, whose worst case is never better than minimax's."""
+
+    def test_the_guide_claims_no_better_guaranteed_score_from_a_mix(self) -> None:
+        text = _flat(_guide_strings())
+        assert "can guarantee a better score than any one response" not in text
+        assert "a better expected score, against a red that cannot see the draw" in text
+
+    def test_the_guide_says_which_way_the_floor_points_on_a_lower_is_better_score(self) -> None:
+        assert "a floor on the outcome: its score can be no worse than that" in _flat(_guide_strings())

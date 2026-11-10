@@ -1685,7 +1685,11 @@
   "files": [
    "spectre/web/decision_threat.py",
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-182",
@@ -1848,7 +1852,11 @@
    "spectre/web/models.py",
    "spectre/web/planning_state.py",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-193",
@@ -1915,7 +1923,11 @@
   "note": "Evaluation finding F-06 (Critical, G7, L2, L4), evaluation/EVALUATION.md. Remediation: adopt P-12 and P-13 into tests/unit with fixed thresholds, run in CI. Closing evidence: both tests green in CI.",
   "files": [
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-198",
@@ -2180,7 +2192,11 @@
   "note": "Evaluation finding F-15 (Low, §1a, L1, L5), evaluation/EVALUATION.md. Remediation: reword to decision analysis with a worst-case floor; state that randomised responses are not considered. Closing evidence: the regenerated guide.",
   "files": [
    "docs/generate_guide.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-219",
@@ -2290,6 +2306,21 @@
   "task": "Technical authority to sign the score-scale rationale (F-10 closing evidence)",
   "note": "Read docs/decision_engine_phases.md, Score scales (SPC-191): the keep-out-anchored closest-approach scale, the delta-V scale to 1,000 m/s and the 10 km default are Claude's choices, unsourced. Sign, amend or reject; F-10 closes on signature.",
   "files": [
+   "docs/decision_engine_phases.md"
+  ]
+ },
+ {
+  "ref": "SPC-228",
+  "priority": "high",
+  "order": 1,
+  "group": "eval-gate",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 60,
+  "task": "Rule on retention, access and erasure of decision records (data protection lead)",
+  "note": "SPC-192 stores each operator's username, scenario and response names and free-text rationale, with no retention applied; a deleted account's records are kept, readable by an admin. docs/SECURITY.md and docs/decision_engine_phases.md list this as open.",
+  "files": [
+   "docs/SECURITY.md",
    "docs/decision_engine_phases.md"
   ]
  }

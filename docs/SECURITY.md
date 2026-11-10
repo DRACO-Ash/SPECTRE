@@ -105,6 +105,13 @@ marked `UNCLASS // PAIR` in the file, by the owner's ruling of 24 October 2026.
 password hash, role) and log lines recording usernames and client addresses on
 sign-in attempts. That brings it within UK GDPR; see the open items.
 
+● Decision records (SPC-192) hold the username that ran each Decision Engine
+evaluation and operator-typed free text: the scenario's name, the response names
+and the rationale. No retention is applied: how long they are kept, and who may
+read them beyond the operator and admins, is the owner's decision as data
+protection lead. A deleted account's records are kept under its username; that
+is Claude's design choice, awaiting the owner's ruling.
+
 ● UDL credentials are held in memory for one sign-in only, never shared with
 another sign-in of the same account, cleared on logout, password change and
 account deletion, dropped when the session cookie expires, and never written
@@ -126,7 +133,7 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Property-based tests | None; `hypothesis` is not used |
 | Structured JSON logging | `spectre/app_logging/config.py` defines it, but the web application never calls it |
 | CONTRIBUTING.md | Absent |
-| Data protection | Operator accounts and sign-in logs are personal data; a DPIA screening and a retention period for logs are due |
+| Data protection | Operator accounts, sign-in logs and decision records are personal data; a DPIA screening, a retention period for logs and for decision records, and a ruling on keeping a deleted account's decision records are due |
 
 ## Incident response
 

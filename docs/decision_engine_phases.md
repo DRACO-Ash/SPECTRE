@@ -2,8 +2,8 @@
 
 *Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release, and updated for
 three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
-lost (SPC-179) and the record of whether each P was edited (SPC-183); and for the score scales of SPC-191, which are
-Claude's design choices, not rulings. The history of each step is in CHANGELOG.md
+lost (SPC-179) and the record of whether each P was edited (SPC-183); for the score scales of SPC-191, which are
+Claude's design choices, not rulings; and for the decision record of SPC-192. The history of each step is in CHANGELOG.md
 and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
 
 **Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
@@ -195,11 +195,21 @@ tests/unit/test_decision_reference_cases.py.
 
 ## The sweep's Threat picture and collect first
 
-**Status: built (SPC-171).** Threat Understanding concept, docs/threat_confidence_concept.md, section 7.5.
+**Status: built (SPC-171; any age, SPC-181).** Threat Understanding concept, docs/threat_confidence_concept.md,
+section 7.5, and section 9, decision 9.
 
-● The engine reads the sweep's Threat range, Understanding, cues and decide-by for the bound red track while the
-  picture is under 30 minutes old, and decide-by only for the blue asset it was set for, so the two never disagree.
-  Threat and Understanding are shown as separate sentences, each with its axis named.
+● The engine reads the Threat range, Understanding, cues and decide-by of the last sweep in the session, when it was
+  of the bound red track, at any age, and decide-by only for the blue asset it was set for, so the two never
+  disagree. The session holds one picture, so a later sweep of another red track replaces it, as does a sweep whose
+  model failed. Threat and Understanding are shown as separate sentences, each with its axis named.
+● Every figure and sentence the picture feeds carries its age at evaluation in words beside it: the threat lines,
+  the decide-by, the collect-first advice and rows, the expected-value guidance and each row's Understanding, for
+  example "from the sweep's picture assessed 3 h 10 min before this evaluation". A picture states when it was
+  assessed; one assessed after the evaluation has no age to show, so it is not read.
+● The sweep words its decide-by against its own clock. One still ahead at evaluation holds only clock times and is
+  shown as the sweep worded it. One that has passed by the evaluation is said again against the evaluation: when it
+  was, and when the intercept could arrive, in hours after the evaluation, or that it could have arrived before it.
+  So the line never says "Decide by" a past time, and it agrees with the advice below it.
 ● When the Threat range straddles the line where the recommended response changes and a collection that could move
   it off that line lands before decide-by, the guidance says collect first and names the collection; with no such
   collection, or decide-by passed, it says act on the ceiling.
@@ -422,6 +432,63 @@ The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC
 ● **D15. Plain details and summary.** The tree is server-rendered with no script and no new library, so nothing is
   added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190).
 
+## The decision record (SPC-192)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-01 found that a finished evaluation lived only in the sign-in's memory
+and one line of the session log, so once the sign-in ended no one could show what the operator was recommended,
+chose or rejected. That is the record half of gate G1 ("Advisory, decision recorded", rated Red: "Record: none
+(F-01)"). SPC-192 addresses the record half only: the advisory half was not reassessed, and neither was the gate's
+Red rating, which stands until the evaluation is repeated. The engine now keeps one record for each finished
+evaluation, in the `decision_records` table beside the accounts.
+
+● **What a record holds.** It is written when the evaluation finishes, whether the request answered it or a job ran
+  it: when, in UTC; the signed-in operator's username; the scenario's name; the rule used and the response the
+  one-turn matrix recommends under it, by id and name; for a game tree, the rule's own pick for turn 1, which can
+  differ from the one-turn matrix's, and the tree's recommendation lines as the results showed them, or why it has
+  none; the picks of all three rules, minimax, minimin and expected value, each taken with the engine's own
+  `find_robust_response` on the same matrix, which reads the figures and changes none; when expected value's
+  probability is not earned, the guidance the results give for it, whichever rule ran; the code version, the
+  calibration source and every input hash from the result's provenance; the turns; the keep-out distance; and the
+  scenario's responses by id and name, so a decision is checked against them.
+● **What it does not hold.** No element-set text and no raw input: the hashes say which inputs were used but cannot
+  rebuild them, so a record cannot yet replay a recommendation. Storing the inputs and a replay command is SPC-193
+  (evaluation finding F-02).
+● **Text both databases take alike.** PostgreSQL's text refuses U+0000, which SQLite stores. A name holding it is kept
+  with the replacement character, U+FFFD, in its place, so the record is still written; a rationale holding any
+  control character other than tab, line feed and carriage return is refused with a sentence.
+● **When none is written.** An evaluation refused before it runs, stopped by Cancel, a sign-out, a newer evaluation
+  or shutdown before its sampling finished, or that fails writes no record. Nor does one whose account was deleted
+  before the record was written: the write checks, in its own transaction, that the account still exists under the
+  same id and name, so a later account handed the freed id by SQLite cannot inherit it. A record the database will
+  not take is logged, and the results then say that no decision can be recorded against them.
+● **A record whose results were never shown.** Once a job's sampling has finished it writes its record, in a state
+  Cancel does not stop, and only then shows the results. A record can therefore describe results the operator never
+  saw: the console was reloaded or closed while the job ran, or a newer evaluation or a sign-out came while the
+  record was being written, when the job stops with its record kept. The operator can decide it on the Decision
+  records page.
+● **The operator's decision.** The results end with a form, outside the evaluate form, that asks what the operator
+  decided: one of the scenario's own responses, None of these, or Decision deferred, with a rationale of at most
+  2,000 characters, required for None of these. The same form sits under each of the operator's own records not yet
+  decided on the Decision records page, so a record whose results are gone can still be decided: the operator can
+  decide it on the Decision records page. A record takes one decision, once, stored with its own UTC time: a second
+  is refused with a sentence, and only the operator who ran the evaluation may decide it. A record that is not the
+  operator's is refused with the same sentence as one that does not exist. An admin reads every record but decides
+  only their own.
+● **Decision records.** A page reached from the Decision Engine panel lists the operator's own records, newest first,
+  each with when, the scenario, the rule, its recommendation (for a tree, the one-turn matrix's pick and the tree's
+  own), all three rules' picks, saying the results showed only the rule used and when expected value's probability
+  is not earned, and the decision, its rationale and its time, or "No decision recorded". An admin sees every record
+  and whose it is. Records are kept by account, so they are there after signing out and in again.
+● **Retention and access.** No retention is applied: records are kept until the owner decides otherwise. A record
+  holds a username and free text (the scenario's name, the response names and the rationale), so retention and
+  access are the owner's decision, as data protection lead.
+● **Claude's design choices, awaiting the owner's ruling.** The recommendation stored is the one-turn matrix's pick,
+  with a tree's own turn-1 pick beside it. A job's record is written in a RECORDING state that Cancel cannot stop.
+  A record is kept when its account is deleted, under the username it was made with, readable by an admin and
+  decided by no one; erasing it with the account instead is the data protection lead's call. The Decision records
+  page has no pagination and no limit.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
@@ -434,6 +501,8 @@ The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
   doctrine words stay off screen, and SPC-177 is closed.
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
+● **Replaying a recommendation from its record** (SPC-193, evaluation finding F-02): the record keeps input hashes,
+  not inputs.
 ● **A game tree over a transfer of several burns.** The matrix carries every burn of the transfer (SPC-184), but
   the tree's equal turns cannot place them, so such a row refuses the tree. Unequal turns, set by the engine, are
   SPC-187.

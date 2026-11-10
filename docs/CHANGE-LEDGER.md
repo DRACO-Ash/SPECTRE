@@ -1229,3 +1229,12 @@ The score's closest-approach and delta-V scales (evaluation finding F-10).
 | Code Quality | **HYGIENE** | None made for the gate. Product changes in `decision.py`, `decision_figures.py`, `routes/decision.py` and the decision templates | `scripts/check-quality.sh` against 0.25.0 passed all five legs. The full suite (8,578 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.27.0
+
+A decision record (evaluation F-01), propagator checks in the suite (F-06), the threat picture at any age and the guide's wording (F-15).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. A new table `decision_records`, a new module `web/decision_record.py`, two routes and a page | `scripts/check-quality.sh` against 0.26.0 passed all five legs. The full suite (8,756 passed) and every CI coverage floor are green on the same tree; the record's tests also passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The new table is created by `create_all` at start. | n/a. |
+

@@ -1,6 +1,7 @@
 {# A sampled Decision Engine evaluation running as a session job (SPC-113), rendered into #decision-results.
-   Context: job (DecisionJob or none), message (its sentence), polling (whether to poll again) and progress
-   (SamplingProgress or none). Only a queued or running job polls; the results that replace it do not, so the
+   Context: job (DecisionJob or none), message (its sentence), polling (whether to poll again), progress
+   (SamplingProgress or none) and cancellable, optional: whether Cancel still stops it, which it does not while the
+   decision record is written (SPC-192). Only a job underway polls; the results that replace it do not, so the
    polling ends there. #}
 <div class="decision-job" role="status" aria-live="polite"
      style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.9rem"
@@ -13,7 +14,7 @@
     <progress max="{{ progress.total }}" value="{{ progress.done }}" style="width:100%">{{ progress.done }} of {{ progress.total }}</progress>
   </label>
   {% endif %}
-  {% if polling and job is not none %}
+  {% if (cancellable if cancellable is defined else polling) and job is not none %}
   <form hx-post="/plan/decision/job/cancel" hx-target="#decision-results" hx-swap="innerHTML"
         style="margin-top:0.35rem">
     <input type="hidden" name="job_id" value="{{ job.job_id }}">

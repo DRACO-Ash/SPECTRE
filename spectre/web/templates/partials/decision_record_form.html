@@ -1,0 +1,47 @@
+{# The operator's decision on one decision record (SPC-192, evaluation F-01): a form while the record holds none, the
+   decision once it does. Included at the foot of the results, in each of the operator's own undecided entries on
+   the Decision records page, and returned by POST /plan/decision/records/{id}/decide, which swaps this whole
+   region. On the console it sits in #decision-results, outside the evaluate form, and still names its own target,
+   indicator and disabled element, so no setting of the evaluate form's can reach it. No script and no handler
+   attribute.
+   Context: rec (decision_record.RecordView or none: none when the post was refused before any record could be
+   shown), record_id (when rec is none), problem (a refusal, optional) and rationale_text (what the operator typed,
+   kept on a refusal, optional). #}
+{% set problem_text = problem if problem is defined and problem else "" %}
+{% set typed = rationale_text if rationale_text is defined and rationale_text else "" %}
+{% set region_id = rec.id if rec is not none else record_id %}
+<section class="decision-record" id="decision-record-{{ region_id }}" aria-labelledby="decision-record-heading-{{ region_id }}"
+         style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.9rem; margin-top:0.5rem">
+  <h3 id="decision-record-heading-{{ region_id }}" style="margin:0 0 0.3rem; font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Your decision</h3>
+  {% if rec is not none and rec.decided %}
+  <p class="decision-recorded" style="margin:0; font-size:0.65rem; color:var(--text-primary)">Decision recorded {{ rec.decided_at }}: {{ rec.decision_name }}.</p>
+  <p class="decision-rationale" style="margin:0.15rem 0 0; font-size:0.62rem; color:var(--text-dim); overflow-wrap:anywhere; white-space:pre-wrap">{% if rec.rationale %}Rationale: {{ rec.rationale }}{% else %}No rationale given.{% endif %}</p>
+  {% elif rec is not none %}
+  <p style="margin:0 0 0.3rem; font-size:0.62rem; color:var(--text-dim)">This evaluation is decision record {{ rec.id }}.
+    Record what you decided: one of the scenario's responses, none of these, or deferred. A record takes one
+    decision, once, and only from you. The rationale is required for None of these.</p>
+  <form hx-post="/plan/decision/records/{{ rec.id }}/decide"
+        hx-target="#decision-record-{{ rec.id }}"
+        hx-swap="outerHTML"
+        hx-indicator="#decision-record-indicator-{{ rec.id }}"
+        hx-disabled-elt="find button[type=submit]">
+    <label for="decision-choice-{{ rec.id }}" style="display:block; font-size:0.62rem; color:var(--text-dim)">Decision</label>
+    <select id="decision-choice-{{ rec.id }}" name="decision" required style="display:block; font-size:0.65rem; margin:0.15rem 0 0.3rem; max-width:100%; box-sizing:border-box">
+      <option value="" selected disabled>Choose a decision</option>
+      {%- for value, label in rec.choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {%- endfor %}
+    </select>
+    <label for="decision-rationale-{{ rec.id }}" style="display:block; font-size:0.62rem; color:var(--text-dim)">Rationale (at most 2,000 characters; required for None of these)</label>
+    <textarea id="decision-rationale-{{ rec.id }}" name="rationale" rows="3" maxlength="2000"
+              style="display:block; width:100%; box-sizing:border-box; font-size:0.65rem; margin:0.15rem 0 0.3rem">{{ typed }}</textarea>
+    <div class="submit-row">
+      <button type="submit" class="btn-primary">Record decision</button>
+      <span id="decision-record-indicator-{{ rec.id }}" class="htmx-indicator">
+        <span class="spinner"></span>Recording&hellip;
+      </span>
+    </div>
+  </form>
+  {% endif %}
+  {% if problem_text %}<p class="error-msg" role="alert" style="font-size:0.65rem; margin:0.3rem 0 0">{{ problem_text }}</p>{% endif %}
+</section>

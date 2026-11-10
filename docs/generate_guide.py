@@ -396,10 +396,12 @@ def _section_01_introduction(doc: Document) -> None:
         "references Notice to Space Operators messages against detected manoeuvres to build "
         "operator behavioural profiles; Photometry Analysis detects brightness anomalies "
         "from light-curve data that may indicate attitude changes or physical alterations. "
-        "The Decision Engine applies game-theoretic scenario evaluation to support "
-        "commander-level response selection, and the Training Environment provides a "
-        "sandboxed gamified environment for operator skill development across five "
-        "progressive levels."
+        "The Decision Engine applies decision analysis over operator-entered rows to "
+        "support commander-level response selection, with a worst-case floor (minimax), a "
+        "best case (minimin) and expected value. Randomised (mixed) responses are not "
+        "considered, so minimax is a guaranteed floor over pure responses, not a game "
+        "solution. The Training Environment provides a sandboxed gamified environment for "
+        "operator skill development across five progressive levels."
     )
     _add_body(doc,
         "Integration with the Unified Data Library (UDL) provides authoritative live TLE "
@@ -1394,8 +1396,15 @@ def _section_13_decision_engine(doc: Document) -> None:
 
     _add_heading_h2(doc, "Collect First and the Sweep's Threat Picture")
     _add_body(doc,
-        "When the sweep has assessed the bound red track within the last 30 minutes, the results show its Threat "
-        "range, its Understanding and decide-by, each in its own sentence. If the Threat range straddles the line "
+        "When the last sweep in this session was of the bound red track, the results show its Threat range, its "
+        "Understanding and decide-by at any age, each in its own sentence, and beside each the picture's age at "
+        "evaluation in words, for example \"from the sweep's picture assessed 3 h 10 min before this evaluation\". "
+        "The collect-first advice and rows and the expected-value guidance it feeds carry the same age. The session "
+        "holds one picture, so a later sweep of another red track replaces it, as does a sweep whose model failed: "
+        "sweep the bound red track again to read one. A decide-by that has passed by the evaluation is said again "
+        "against the evaluation: when it was, and when the intercept could arrive, counted from the evaluation, not "
+        "the sweep. An old picture may no longer hold: weigh its age, or sweep again. If the Threat range straddles "
+        "the line "
         "where the recommendation changes and a collection that could settle it lands before decide-by, the "
         "guidance says collect first and names it; otherwise it says act on the ceiling. Collections are listed "
         "beside the ranking and never scored, so the recommendation is always one of your own responses."
@@ -1411,6 +1420,14 @@ def _section_13_decision_engine(doc: Document) -> None:
              "evidence; the results say whether the pick holds across a NOTSO interval"],
             ["Minimin", "The response whose best case scores least", "The optimistic rule, not a robust one"],
         ],
+    )
+    _add_body(doc,
+        "This is decision analysis over operator-entered rows, with a worst-case floor (minimax), a best case "
+        "(minimin) and expected value, each picking one of your responses. Scores are lower-is-better, so the "
+        "floor is a floor on the outcome: its score can be no worse than that. Randomised (mixed) responses are not "
+        "considered, so minimax is a guaranteed floor over pure responses, not a game solution: a mix chosen at "
+        "random can guarantee only a better expected score, against a red that cannot see the draw, than any one "
+        "response, and the engine does not look for one."
     )
     _add_body(doc,
         "Under expected value, a bound row whose Understanding is LOW, or any row whose P you never edited, "
@@ -1452,6 +1469,45 @@ def _section_13_decision_engine(doc: Document) -> None:
         "minimin do not use probability: in place of the update the results show 'What each turn lets us see', "
         "the same custody rule that sets what each later pick may depend on, and say nothing was updated."
     )
+
+    _add_heading_h2(doc, "Recording Your Decision")
+    _add_body(doc,
+        "SPECTRE keeps one record for each finished evaluation, whether it was answered at once or ran as a job. "
+        "This is the record half of gate G1 in the independent evaluation (finding F-01); the advisory half and "
+        "the gate's Red rating were not reassessed. The record holds when it finished, in UTC, your username, the "
+        "scenario's name, the rule you used and the one-turn matrix's recommendation under it, the picks of all "
+        "three rules (minimax, minimin and expected value) on the same figures, the code version and a hash of "
+        "every input, the turn depth and the keep-out distance. It holds "
+        "no element-set text and no raw input, so it cannot yet replay a recommendation; that is SPC-193. An "
+        "evaluation that is refused, cancelled, replaced, ended by sign-out or that fails before its sampling "
+        "finished writes no record."
+    )
+    _add_bullet(doc, "The results end with Your decision: choose one of the scenario's own responses, None of "
+                "these, or Decision deferred, and give a rationale of at most 2,000 characters. The rationale is "
+                "required for None of these, and may not hold a control character other than a tab or a line "
+                "break. Record decision stores it with its own UTC time.")
+    _add_bullet(doc, "A record takes one decision, once: a second is refused with a sentence. Only the operator who "
+                "ran the evaluation may decide it; an admin reads every record but decides only their own.")
+    _add_bullet(doc, "Once a job has finished sampling it writes its record before the results show, and Cancel no "
+                "longer stops it. A record can still describe results never shown: you reloaded or closed the "
+                "console while the job ran, or a newer evaluation or a sign-out came while the record was written. "
+                "Decide it on the Decision records page. If the record cannot be written the results say so, and "
+                "no decision can be recorded against them.")
+    _add_bullet(doc, "Decision records, linked from the top of the panel, opens in a new tab and lists your own "
+                "records newest first: when, the scenario, the rule, its recommendation, all three rules' picks, "
+                "and your decision, rationale and its time, or No decision recorded with the form to record it. "
+                "An admin sees every record and whose it is. Records are kept by account, so they are there after "
+                "you sign out and in again.")
+    _add_bullet(doc, "For a game tree the record names the one-turn matrix pick and the tree's own pick for turn 1, "
+                "which can differ, with the tree's recommendation lines. The page says that the results showed only "
+                "the rule you used, and repeats the warning when expected value rests on a probability not earned.")
+    _add_bullet(doc, "A name holding the NUL control character, which PostgreSQL cannot store, is recorded with the "
+                "replacement character in its place.")
+    _add_bullet(doc, "No retention is applied: records stay until the owner decides otherwise. A record holds a "
+                "username and free text, so retention and access are the owner's decision, "
+                "as data protection lead.")
+    _add_bullet(doc, "Claude's design choice, awaiting the owner's ruling: a deleted account's records are kept, "
+                "and the page has no pagination.")
 
     _add_heading_h2(doc, "What It Does Not Do")
     _add_bullet(doc, "It does not cite its scoring weights yet (SPC-151); the score is a weighted heuristic.")
@@ -2195,6 +2251,9 @@ def _section_22_user_management(doc: Document) -> None:
     )
     _add_bullet(doc, "An admin cannot delete their own account.")
     _add_bullet(doc, "An admin cannot delete or demote the last remaining admin account.")
+    _add_bullet(doc, "The account's decision records stay, under its username, for an admin to read; no one can "
+                "record a decision on them any more, and a later account of the same name does not see them. "
+                "Keeping them is Claude's design choice, awaiting the owner's ruling as data protection lead.")
     _add_callout(doc,
         "Deletion is permanent and immediate. There is no soft-delete or recycle bin. "
         "Ensure the correct account is selected before confirming."

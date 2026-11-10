@@ -9,6 +9,8 @@ POST /plan/decision/evaluate   → the ranked results partial for a scenario tha
                                  the matrix when asked for (SPC-142)
 GET  /plan/decision/job        → the job's progress, or its results once done
 POST /plan/decision/job/cancel → stop the job; nothing is scored
+GET  /plan/decision/records    → the decision records page: the operator's own, or every one for an admin (SPC-192)
+POST /plan/decision/records/{id}/decide → the operator's decision on a record they ran, once (SPC-192)
 """
 
 from __future__ import annotations
@@ -23,9 +25,10 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple, cast
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, Path, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.astro.propagator import TLE_ERRORS
@@ -60,6 +63,7 @@ from spectre.domain.decision_transfer import MAX_BURN_M_S, MAX_TRANSFER_BURNS, T
 from spectre.domain.decision_tree import depth_refusal, evaluate_tree
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 from spectre.web.auth import require_login
+from spectre.web.database import get_db
 from spectre.web.decision_binding import bind_scenario
 from spectre.web.decision_custody import HISTORY_WAIT_S, history_fetch, red_custody, with_red_custody
 from spectre.web.decision_from_sweep import (
@@ -74,6 +78,7 @@ from spectre.web.decision_from_sweep import (
 from spectre.web.decision_job import (
     CustodyRead,
     JobState,
+    Record,
     cancel_job,
     evaluated_line,
     job_view,
@@ -88,6 +93,18 @@ from spectre.web.decision_prior import (
     edited_rows,
     horizon,
     row_views,
+)
+from spectre.web.decision_record import (
+    UNRECORDED,
+    Operator,
+    RecordView,
+    decide,
+    fresh_view,
+    listed,
+    records_for,
+    row_view,
+    stored_view,
+    write_record,
 )
 from spectre.web.decision_threat import held_picture
 from spectre.web.decision_trajectory import trajectory_links
@@ -1066,18 +1083,30 @@ async def _answer(
     """
     state = get_session_state(user)
     key = cast("SessionKey", user.session_key)   # require_login admits only a sign-in
+    record = _recorder(user)
     if custody is None and not await asyncio.to_thread(needs_a_run, scenario):
         state.decision_job = None   # an answer here replaces any job, whose poll would overwrite it
-        return await _evaluate_inline(request, state, scenario, strat)
-    job = new_job(scenario, strat, custody=custody)
+        return await _evaluate_inline(request, state, scenario, strat, record)
+    job = new_job(scenario, strat, custody=custody, record=record)
     start_job(state, key, job)
     return render(request, "partials/decision_job.html", job_view(state, job.job_id))
 
 
+def _recorder(user: User) -> Record:
+    """What writes the decision record of an evaluation *user* runs, once it finishes (SPC-192)."""
+    operator = Operator(user.id, user.username)
+
+    async def record(result: ScenarioResult) -> int | None:
+        return await write_record(result, operator)
+
+    return record
+
+
 async def _evaluate_inline(
-    request: Request, state: SessionState, scenario: Scenario, strat: SelectorStrategy,
+    request: Request, state: SessionState, scenario: Scenario, strat: SelectorStrategy, record: Record,
 ) -> HTMLResponse:
-    """Evaluate on a worker thread, so no other session waits on it, and render the results."""
+    """Evaluate on a worker thread, so no other session waits on it, write its decision record, and render the
+    results."""
     try:
         result = await asyncio.to_thread(evaluate_tree, scenario, strat)
         state.append_log(evaluated_line(scenario, result))
@@ -1085,29 +1114,42 @@ async def _evaluate_inline(
     except Exception:
         logger.exception("Decision evaluation failed")
         return _err("Evaluation error: the scenario could not be evaluated; the server log has the detail.")
-    return render(request, "partials/decision_results.html", _results_context(result))
+    record_id = await record(result)
+    view = None if record_id is None else fresh_view(record_id, result)
+    return render(request, "partials/decision_results.html", _results_context(result, view, unrecorded=view is None))
 
 
-def _results_context(result: ScenarioResult) -> dict[str, Any]:
-    """The results partial's context: the result, each cell's Show trajectory values, and the tree's view (SPC-142)."""
-    return {"result": result, "links": trajectory_links(result), "tree": tree_view(result)}
+def _results_context(result: ScenarioResult, record: RecordView | None, *, unrecorded: bool) -> dict[str, Any]:
+    """The results partial's context: the result, each cell's Show trajectory values, the tree's view (SPC-142), and
+    its decision record (SPC-192).
+
+    *record* is the record's view, which shows its decision form or the decision made; *unrecorded* says a record
+    was asked for and could not be written, which the page then says.
+    """
+    return {
+        "result": result, "links": trajectory_links(result), "tree": tree_view(result),
+        "record": record, "record_note": UNRECORDED if unrecorded else "",
+    }
 
 
 @router.get("/job", response_class=HTMLResponse)
 async def decision_job_status(
     request: Request,
     current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     job_id: Annotated[str, Query()] = "",
 ) -> HTMLResponse:
     """The job's progress, which polls again; or its results once done, which do not, so polling ends."""
-    return _job_page(request, job_view(get_session_state(current_user), job_id))
+    return await _job_page(request, db, job_view(get_session_state(current_user), job_id))
 
 
-def _job_page(request: Request, view: dict[str, Any]) -> HTMLResponse:
-    """The results of a finished job, else the job partial for *view*."""
+async def _job_page(request: Request, db: AsyncSession, view: dict[str, Any]) -> HTMLResponse:
+    """The results of a finished job, with its decision record as stored now, else the job partial for *view*."""
     job = view["job"]
     if job is not None and job.state is JobState.DONE and job.result is not None:
-        return render(request, "partials/decision_results.html", _results_context(job.result))
+        record = None if job.record_id is None else await stored_view(db, job.record_id, job.result)
+        context = _results_context(job.result, record, unrecorded=job.record is not None and record is None)
+        return render(request, "partials/decision_results.html", context)
     return render(request, "partials/decision_job.html", view)
 
 
@@ -1122,6 +1164,7 @@ async def decision_job_cancel(
     request: Request,
     form: Annotated[_CancelForm, Form()],
     current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HTMLResponse:
     """Stop this sign-in's job; its worker thread stops at its next sample, and nothing is scored.
 
@@ -1129,4 +1172,52 @@ async def decision_job_cancel(
     """
     state = get_session_state(current_user)
     cancel_job(state, form.job_id)
-    return _job_page(request, job_view(state, form.job_id))
+    return await _job_page(request, db, job_view(state, form.job_id))
+
+
+# ── The decision record (SPC-192, evaluation F-01) ──
+
+#: The largest record id the route reads: PostgreSQL's INTEGER, so a larger one is refused by the form, not the driver.
+_MAX_RECORD_ID = 2_147_483_647
+
+
+class _DecideForm(BaseModel):
+    """The operator's decision, by the select's value, and their rationale; both may be blank, and are checked."""
+
+    decision: str = ""
+    rationale: str = ""
+
+
+@router.post("/records/{record_id}/decide", response_class=HTMLResponse)
+async def decision_record_decide(
+    request: Request,
+    record_id: Annotated[int, Path(ge=1, le=_MAX_RECORD_ID)],
+    form: Annotated[_DecideForm, Form()],
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> HTMLResponse:
+    """Record the operator's decision on a record they ran, once, and return its region: the decision, or the form
+    with the sentence that refused it. A record the operator may not decide is not shown."""
+    operator = Operator(current_user.id, current_user.username)
+    decided = await decide(db, record_id, operator, form.decision, form.rationale)
+    context = {
+        "rec": None if decided.row is None else row_view(decided.row), "record_id": record_id,
+        "problem": decided.problem, "rationale_text": form.rationale if decided.problem else "",
+    }
+    return render(request, "partials/decision_record_form.html", context)
+
+
+@router.get("/records", response_class=HTMLResponse)
+async def decision_records(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> HTMLResponse:
+    """The decision records page: the operator's own records newest first, or every record and whose for an admin;
+    each of the viewer's own records not yet decided carries the decision form."""
+    every = current_user.role == "admin"
+    viewer = Operator(current_user.id, current_user.username)
+    rows = await records_for(db, viewer, every=every)
+    return render(request, "decision_records.html", {
+        "records": [listed(row, viewer) for row in rows], "every": every, "current_user": current_user,
+    })
