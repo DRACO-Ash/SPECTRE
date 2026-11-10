@@ -1802,5 +1802,461 @@
   "deps": [
    "SPC-189"
   ]
+ },
+ {
+  "ref": "SPC-191",
+  "priority": "high",
+  "order": 0,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-10: closest approach enters the score linearly over 0 to 50,000 km at weight 0.25; 1 m/s of our delta-V weighs the…",
+  "note": "Evaluation finding F-10 (Critical, §1b, L1, L2), evaluation/EVALUATION.md. Remediation: a threshold-anchored value function in _norm_ca, anchored at an operator-set keep-out distance; a re-anchored delta-V scale; reference cases re-derived. Closing evidence: P-17 inverted; a scale rationale signed by the technical authority. Owner, 2026-11-10: F-10 first.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-192",
+  "priority": "high",
+  "order": 10,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-01: a finished evaluation is held in session memory and logged as one line naming the recommendation; nothing reco…",
+  "note": "Evaluation finding F-01 (Critical, G1, L5), evaluation/EVALUATION.md. Remediation: a durable decision record (new table in spectre/web/models.py) written by spectre/web/routes/decision.py, capturing the operator's decision and rationale on the results page. Closing evidence: a stored record per evaluation, retrievable after sign-out, holding the operator's decision; a test.",
+  "files": [
+   "spectre/web/decision_job.py",
+   "spectre/web/models.py",
+   "spectre/web/planning_state.py",
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-193",
+  "priority": "high",
+  "order": 11,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-02: provenance hashes the inputs but stores none; the result lives at most the 8 h sign-in. Identical inputs repea…",
+  "note": "Evaluation finding F-02 (Critical, G2, L4), evaluation/EVALUATION.md. Remediation: store canonical inputs (element sets as fetched, rows, responses, weights, rule, seeds, code version) with the record; add a replay command. Closing evidence: a replay test reproducing a stored recommendation exactly from the record alone.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/provenance.py",
+   "spectre/web/planning_state.py"
+  ]
+ },
+ {
+  "ref": "SPC-194",
+  "priority": "high",
+  "order": 12,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-03: one rule per evaluation, chosen on the panel and changeable after a result is seen; minimax's pick is named on…",
+  "note": "Evaluation finding F-03 (Critical, G3, L1, L5), evaluation/EVALUATION.md. Remediation: compute all three picks in every ScenarioResult and show them side by side with a disagreement line in decision_results.html; set a primary rule per deployment before use. Closing evidence: the page showing three picks; a disagreement test; the configuration record.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "spectre/web/templates/partials/decision_panel.html"
+  ]
+ },
+ {
+  "ref": "SPC-195",
+  "priority": "high",
+  "order": 13,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-04: no field can mark a response unacceptable; every response enters a compensatory weighted sum.",
+  "note": "Evaluation finding F-04 (Critical, G4, L1), evaluation/EVALUATION.md. Remediation: a veto with a stated reason on FriendlyResponse and scenario-level constraints, applied before find_robust_response and the tree selectors; vetoed responses shown greyed with the reason. Closing evidence: probe P-06 written as specified and passing.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ]
+ },
+ {
+  "ref": "SPC-196",
+  "priority": "high",
+  "order": 14,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-05: every figure is tagged computed, sampled or lookup, but operator judgements (cost, reversibility, time to exec…",
+  "note": "Evaluation finding F-05 (Critical, G5, L2), evaluation/EVALUATION.md. Remediation: Basis.JUDGEMENT for operator-entered values; a lookup register in docs/ with source, owner and date; the code version on the results page. Closing evidence: every figure on the page tagged one of four; the register.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/provenance.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ]
+ },
+ {
+  "ref": "SPC-197",
+  "priority": "high",
+  "order": 15,
+  "group": "eval-gate",
+  "minutes": 120,
+  "task": "F-06: no repository test pins SGP4 to the published vectors or the production RK45 to a reference. The evaluation's…",
+  "note": "Evaluation finding F-06 (Critical, G7, L2, L4), evaluation/EVALUATION.md. Remediation: adopt P-12 and P-13 into tests/unit with fixed thresholds, run in CI. Closing evidence: both tests green in CI.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ]
+ },
+ {
+  "ref": "SPC-198",
+  "priority": "high",
+  "order": 16,
+  "group": "eval-gate",
+  "minutes": 900,
+  "task": "F-07: no hazard analysis or safety-related determination; the audit left the operational status of the engine as \"a…",
+  "note": "Evaluation finding F-07 (Critical, G8, L6), evaluation/EVALUATION.md. Remediation: hazard identification, a hazard log and a safety-related determination under Def Stan 00-056, owned by the safety lead. Closing evidence: the hazard log and the signed determination. Hazard log and safety-related determination: the safety lead's work, outside the code.",
+  "files": [],
+  "needs_owner": true,
+  "human_minutes": 240
+ },
+ {
+  "ref": "SPC-199",
+  "priority": "high",
+  "order": 17,
+  "group": "eval-gate",
+  "minutes": 900,
+  "task": "F-08: a trust-boundary inventory exists, not an engine threat model; no ISN 2023/09 artefacts; the Content Security…",
+  "note": "Evaluation finding F-08 (Critical, G9, L7), evaluation/EVALUATION.md. Remediation: an engine threat model against ISN 2023/09; a nonce-based policy with the inline scripts moved to static files. Closing evidence: the threat model; a policy without 'unsafe-inline' and 'unsafe-eval'; tests.",
+  "files": [
+   "spectre/web/app.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ]
+ },
+ {
+  "ref": "SPC-200",
+  "priority": "high",
+  "order": 18,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-09: many out-of-envelope inputs are detected and refused in sentences, but no operating design domain is stated, a…",
+  "note": "Evaluation finding F-09 (Critical, G10, L2), evaluation/EVALUATION.md. Remediation: an operating design domain in docs/, checked at evaluation entry with a flag per breach (with F-29 to F-31). Closing evidence: the document and a test per breach.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/elsets.py"
+  ]
+ },
+ {
+  "ref": "SPC-201",
+  "priority": "high",
+  "order": 19,
+  "group": "eval-gate",
+  "minutes": 120,
+  "task": "F-25: element sets from UDL reach the engine with no checksum or range check (tle_checksum_valid is called only at o…",
+  "note": "Evaluation finding F-25 (Critical, G9, L2, L7), evaluation/EVALUATION.md. Remediation: checksum and field range checks in spectre/web/elsets.py on every ingest path; on failure refuse and keep the held set. Closing evidence: P-14's UDL case inverted; a test per path.",
+  "files": [
+   "spectre/web/elsets.py",
+   "spectre/web/routes/operator.py",
+   "spectre/web/routes/udl.py"
+  ]
+ },
+ {
+  "ref": "SPC-202",
+  "priority": "high",
+  "order": 2,
+  "group": "eval-trial",
+  "minutes": 900,
+  "task": "F-11: the miss payoff is an SGP4 point miss or a P5 over burn dispersions only; element-set error, 1 km plus 2 km a…",
+  "note": "Evaluation finding F-11 (High, §1g, §1h, L2, L3), evaluation/EVALUATION.md. Remediation: sample the initial state from the along_track model in run_separation_series, or add it in quadrature in _computed_cell; state it on screen. Closing evidence: a test showing the band widen with element-set age at the model's rate.",
+  "files": [
+   "spectre/astro/along_track.py",
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-203",
+  "priority": "high",
+  "order": 3,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-12: expected value divides each P by the sum over the rows entered; no residual row; no check that P sums to 1. A…",
+  "note": "Evaluation finding F-12 (High, §1a, §1b, L1), evaluation/EVALUATION.md. Remediation: P summing to at most 1 with a residual \"none of these\" row; the shares used shown beside each P. Closing evidence: P-03b inverted; a refusal when P sums above 1.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ]
+ },
+ {
+  "ref": "SPC-204",
+  "priority": "high",
+  "order": 4,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-14: collect-first advice rests on Threat range band steps against a fixed, unsourced action line, and calls that l…",
+  "note": "Evaluation finding F-14 (High, §1f, L1, L3), evaluation/EVALUATION.md. Remediation: derive decision relevance from the matrix (the pick under each cue outcome); drop the \"where your response changes\" wording until then. Closing evidence: a test that a cue unable to change the pick yields no collect-first advice.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/threat_understanding.py"
+  ]
+ },
+ {
+  "ref": "SPC-205",
+  "priority": "high",
+  "order": 5,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-16: default weights are uncited direct ratings; no weight stability is computed or shown. In the bound scenarios a…",
+  "note": "Evaluation finding F-16 (High, §1b, §1h, L1, L3), evaluation/EVALUATION.md. Remediation: show the smallest single-weight change that flips the pick (exact, since the score is linear in the weights); swing-weight elicitation (SPC-151). Closing evidence: the stability line on screen matching P-16.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-206",
+  "priority": "med",
+  "order": 6,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-13: a tie goes to the response entered first, and the tie is not shown.",
+  "note": "Evaluation finding F-13 (Medium, §1c, L1), evaluation/EVALUATION.md. Remediation: detect ties within a stated tolerance and show every tied response. Closing evidence: P-05's tie case showing both.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ]
+ },
+ {
+  "ref": "SPC-207",
+  "priority": "med",
+  "order": 7,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-17: the lookup model's relations are unsourced: a sensor retask's custody gap is half its time to execute, a manoe…",
+  "note": "Evaluation finding F-17 (Medium, L1, L2), evaluation/EVALUATION.md. Remediation: restrict lookup-only results to training, or source each relation through the F-05 register. Closing evidence: register entries, or an enforced training-only label.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-208",
+  "priority": "med",
+  "order": 8,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-18: composite scores are coloured green below 0.25, amber below 0.50 and red above, with no source for the thresho…",
+  "note": "Evaluation finding F-18 (Medium, L5), evaluation/EVALUATION.md. Remediation: remove the colours, or tie them to sourced thresholds. Closing evidence: the page without unsourced colour bands.",
+  "files": [
+   "spectre/web/templates/partials/decision_results.html"
+  ]
+ },
+ {
+  "ref": "SPC-209",
+  "priority": "med",
+  "order": 1,
+  "group": "eval-accred",
+  "minutes": 900,
+  "task": "F-19: the force model is two-body, J2 and exponential drag; the module asserts burn dispersion dominates force-model…",
+  "note": "Evaluation finding F-19 (Medium, §1g, L2), evaluation/EVALUATION.md. Remediation: compare against a higher-fidelity propagator by regime and burn size, and state where the claim holds. Closing evidence: a comparison table by regime.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ]
+ },
+ {
+  "ref": "SPC-210",
+  "priority": "med",
+  "order": 2,
+  "group": "eval-accred",
+  "minutes": 360,
+  "task": "F-22: the update's likelihood is a deterministic custody rule, stated as uncalibrated; no calibration evidence exist…",
+  "note": "Evaluation finding F-22 (Medium, §1e, L3, L4), evaluation/EVALUATION.md. Remediation: back-test the custody likelihood on held histories and report a Brier score. Closing evidence: a calibration report with its data and code.",
+  "files": [
+   "spectre/domain/turn_update.py"
+  ]
+ },
+ {
+  "ref": "SPC-211",
+  "priority": "med",
+  "order": 9,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-23: decide-by uses a 12 h default response time chosen by the developer, \"tuned, not sourced\".",
+  "note": "Evaluation finding F-23 (Medium, §1f, L1), evaluation/EVALUATION.md. Remediation: require an operator-set response time before decide-by shows, or source the default. Closing evidence: a test, or a cited default.",
+  "files": [
+   "spectre/domain/decide_by.py"
+  ]
+ },
+ {
+  "ref": "SPC-212",
+  "priority": "med",
+  "order": 3,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-24: no record of the JSP 936 in-scope decision or an ethical risk assessment.",
+  "note": "Evaluation finding F-24 (Medium, L8), evaluation/EVALUATION.md. Remediation: record the in-scope decision and complete the ethical risk assessment (framework recommendation 1). Closing evidence: the recorded decision and assessment. The JSP 936 scoping decision and ethical risk assessment are the owner's to record.",
+  "files": [],
+  "needs_owner": true,
+  "human_minutes": 240
+ },
+ {
+  "ref": "SPC-213",
+  "priority": "med",
+  "order": 10,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-26: the half-width shown as how closely P5 is known is the widest of the P5, P50 and P95 half-widths, and also dec…",
+  "note": "Evaluation finding F-26 (Medium, L2, L3), evaluation/EVALUATION.md. Remediation: label P5 with its own half-width; name the convergence figure separately. Closing evidence: the label equal to P5's half-width; a test.",
+  "files": [
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-214",
+  "priority": "med",
+  "order": 11,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-27: the production RK45 adds up to 0.652 km of position and 0.353 km of separation error at 72 h, unstated, agains…",
+  "note": "Evaluation finding F-27 (Medium, L2, L3), evaluation/EVALUATION.md. Remediation: tighten the tolerances or state the integrator error in the sampled basis note. Closing evidence: P-13 under 0.1 km at 72 h, or the error stated.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ]
+ },
+ {
+  "ref": "SPC-215",
+  "priority": "med",
+  "order": 12,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-29: deep-space orbits are evaluated with no regime statement; a Molniya-class orbit gets the LEO 24 h staleness li…",
+  "note": "Evaluation finding F-29 (Medium, G10, L2), evaluation/EVALUATION.md. Remediation: regime-specific limits and error rates; flag SDP4 cells. Closing evidence: a test per regime.",
+  "files": [
+   "spectre/astro/along_track.py",
+   "spectre/web/elsets.py"
+  ]
+ },
+ {
+  "ref": "SPC-216",
+  "priority": "med",
+  "order": 13,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-30: the SGP4 path has no altitude floor; a decayed object between perigee error intervals produced \"Computed: 643.…",
+  "note": "Evaluation finding F-30 (Medium, G10), evaluation/EVALUATION.md. Remediation: the RK45 path's altitude floor applied to the SGP4 path. Closing evidence: P-14's decayed case refused.",
+  "files": [
+   "spectre/astro/elset_approach.py",
+   "spectre/astro/monte_carlo.py"
+  ]
+ },
+ {
+  "ref": "SPC-217",
+  "priority": "med",
+  "order": 14,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-31: all five weights at 0 are accepted (every score 0); every P at 0 under expected value is accepted; in both the…",
+  "note": "Evaluation finding F-31 (Medium, G10, L1), evaluation/EVALUATION.md. Remediation: refuse a zero weight total and expected value with zero total P, as the tree already does (turn_update.py:196-197). Closing evidence: tests for both refusals.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-218",
+  "priority": "low",
+  "order": 4,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-15: the guide calls the engine \"game-theoretic scenario evaluation\"; it computes pure-strategy rules only (P-02: p…",
+  "note": "Evaluation finding F-15 (Low, §1a, L1, L5), evaluation/EVALUATION.md. Remediation: reword to decision analysis with a worst-case floor; state that randomised responses are not considered. Closing evidence: the regenerated guide.",
+  "files": [
+   "docs/generate_guide.py"
+  ]
+ },
+ {
+  "ref": "SPC-219",
+  "priority": "low",
+  "order": 5,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-20: custody loss and closest approach are added independently.",
+  "note": "Evaluation finding F-20 (Low, §1b, L1), evaluation/EVALUATION.md. Remediation: document the assumption; add an interaction term if the analyst session supports one. Closing evidence: the documented assumption or a tested term.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-220",
+  "priority": "low",
+  "order": 6,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-21: leaves are valued as if no one moves after the last turn (at most 3); stated on screen.",
+  "note": "Evaluation finding F-21 (Low, §1d, L1), evaluation/EVALUATION.md. Remediation: name it in the guide's limitations. Closing evidence: the guide text.",
+  "files": [
+   "spectre/domain/decision_tree.py"
+  ]
+ },
+ {
+  "ref": "SPC-221",
+  "priority": "low",
+  "order": 7,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-32: scores are not checked finite before selection; an injected NaN lookup printed \"nan\" and the pick followed row…",
+  "note": "Evaluation finding F-32 (Low, L1), evaluation/EVALUATION.md. Remediation: refuse a non-finite score in find_robust_response. Closing evidence: a test with an injected NaN.",
+  "files": [
+   "spectre/domain/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-222",
+  "priority": "low",
+  "order": 8,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-33: a missing row value silently becomes P 0.5, Conf 0.5 or gap 0.7; a missing weight takes its default.",
+  "note": "Evaluation finding F-33 (Low, L5), evaluation/EVALUATION.md. Remediation: refuse missing values. Closing evidence: a test.",
+  "files": [
+   "spectre/web/routes/decision.py"
+  ]
+ },
+ {
+  "ref": "SPC-223",
+  "priority": "low",
+  "order": 9,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-34: no range check on element-set fields; an inclination of 597.4° produced a computed miss of 356.0 km.",
+  "note": "Evaluation finding F-34 (Low, L2), evaluation/EVALUATION.md. Remediation: field range checks at ingest, with F-25. Closing evidence: a test refusing 597.4°.",
+  "files": [
+   "spectre/web/elsets.py"
+  ]
+ },
+ {
+  "ref": "SPC-224",
+  "priority": "low",
+  "order": 10,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-35: the seed is fixed at 42; at N 50 whether a row converges is one draw (15 of 20 seeds in one case).",
+  "note": "Evaluation finding F-35 (Low, L2, L4), evaluation/EVALUATION.md. Remediation: show the seed; check convergence on two seeds. Closing evidence: a test.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ]
+ },
+ {
+  "ref": "SPC-225",
+  "priority": "low",
+  "order": 11,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-36: SGP4 runs on WGS-72; the RK45 started from its states uses WGS-84 constants; nothing states this.",
+  "note": "Evaluation finding F-36 (Low, L2), evaluation/EVALUATION.md. Remediation: state the handover and quantify it. Closing evidence: a note with a measured figure.",
+  "files": [
+   "spectre/astro/constants.py",
+   "spectre/astro/propagator.py"
+  ]
+ },
+ {
+  "ref": "SPC-226",
+  "priority": "low",
+  "order": 12,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-38: an element set dated in the future is given age 0, so it reads as current.",
+  "note": "Evaluation finding F-38 (Low, L2), evaluation/EVALUATION.md. Remediation: probe it; if confirmed, refuse future epochs. Closing evidence: the probe result and a test.",
+  "files": [
+   "spectre/web/elsets.py"
+  ]
  }
 ]
