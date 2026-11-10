@@ -1204,7 +1204,8 @@ def evaluate_tree(
     tree = _build(scenario, result, one)
     _require_tree_propagator(tree, result.outcome_matrix)
     if tree.complete_turns > 0:
-        matrix = scenario.friendly_responses.index(result.robust_best_response)
+        best = result.robust_best_response
+        matrix = None if best is None else scenario.friendly_responses.index(best)
         picked = select(scenario, tree.roots, tree.complete_turns, strategy, matrix_pick=matrix)
         tree = dataclasses.replace(tree, selection=picked)
     return dataclasses.replace(result, tree=tree, budget_ran_out=_ran_out(one.budget))

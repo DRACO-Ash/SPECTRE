@@ -1905,7 +1905,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/domain/tree_selectors.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.29.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-196",
@@ -1919,7 +1923,11 @@
    "spectre/domain/decision.py",
    "spectre/domain/provenance.py",
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.29.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-197",

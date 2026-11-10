@@ -9,6 +9,9 @@ A decision record now keeps one JSON document holding:
 ● the rule the evaluation ran under, the result's composite score matrix and the code version that computed it;
 ● whether its time budget ran out, which a replay, run in full, cannot repeat, so it says so.
 
+Version 2 (SPC-195) adds each response's veto and reason. Version 1, written by 0.28.0, holds neither and is still
+read, every response permitted, exactly as a 0.28.0 scenario was; a version 1 document holding a veto is refused.
+
 The text is canonical (keys sorted, no spaces, ASCII with every other character escaped, no NaN), so the same inputs
 give the same text and its SHA-256 identifies them; a U+0000 is stored escaped, so PostgreSQL's text takes it.
 
@@ -28,7 +31,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -57,9 +60,13 @@ from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
 from spectre.domain.threat_understanding import Cue, Dimension, Understanding
 
-#: What the document is, and the one version of it this code reads and writes.
+#: What the document is, and the version of it this code writes (SPC-195: each response's veto and reason).
 SCHEMA = "spectre.decision-inputs"
-VERSION = 1
+VERSION = 2
+#: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed.
+VERSIONS = (1, 2)
+#: The response fields version 2 added (SPC-195), which a version 1 document never holds.
+_VETO_FIELDS = frozenset({"vetoed", "veto_reason"})
 #: The document's own fields, every one required.
 _TOP = ("schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out")
 
@@ -197,14 +204,17 @@ _STATE: Codec = (
 
 @dataclass(frozen=True)
 class _Shape:
-    """A dataclass written as an object of its own init fields, each by its codec or as a single value."""
+    """A dataclass written as an object of its own init fields, each by its codec or as a single value. *omit* names
+    fields an earlier version of the document never held: they are neither written nor read, so each takes its
+    default."""
 
     kind:    type
     special: Mapping[str, Codec]
+    omit:    frozenset[str] = frozenset()
     codecs:  dict[str, Codec] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        declared = {f.name: str(f.type) for f in dataclasses.fields(self.kind) if f.init}
+        declared = {f.name: str(f.type) for f in dataclasses.fields(self.kind) if f.init and f.name not in self.omit}
         unknown = set(self.special) - set(declared)
         if unknown:
             raise TypeError(f"{self.kind.__name__} has no field {', '.join(sorted(unknown))}")
@@ -244,7 +254,16 @@ _MANOEUVRE = _Shape(ManoeuvreHypothesis, {"epoch_utc": _MOMENT, "pre_manoeuvre_s
 _HYPOTHESIS = _Shape(AdversaryHypothesis, {
     "hypothesis": _MANOEUVRE.codec, "source": _enum(HypothesisSource), "then": _many(_TRANSFER_BURN.codec),
 })
-_FIGURE_BASIS = _Shape(FigureBasis, {"kind": _enum(Basis)})
+def _evidence_basis_in(value: Any, where: str) -> Basis:
+    """A stored NOTSO suggestion's basis: a judgement (SPC-196) is the operator's, and no version-1 writer ever stored
+    one there, so it is refused rather than read."""
+    kind = cast("Basis", _enum(Basis)[1](value, where))
+    if kind is Basis.JUDGEMENT:
+        raise _refuse(where, "a NOTSO suggestion is a lookup, never a judgement")
+    return kind
+
+
+_FIGURE_BASIS = _Shape(FigureBasis, {"kind": (lambda member: member.value, _evidence_basis_in)})
 _COUNTED = _Shape(CountedNotice, {"start": _MOMENT, "kind": _enum(NOTSOType)})
 _PRIOR = _Shape(NotsoPrior, {
     "action_type": _enum(ActionType), "span_start": _MOMENT, "span_end": _MOMENT,
@@ -255,7 +274,10 @@ _ACTION = _Shape(AdversaryAction, {
     "action_type": _enum(ActionType), "hypothesis": _optional(_HYPOTHESIS.codec), "accepted_prior": _optional(_PRIOR.codec),
 })
 _BURN_SPEC = _Shape(ResponseBurnSpec, {"axis": _enum(BurnAxis)})
-_RESPONSE = _Shape(FriendlyResponse, {"action_type": _enum(ActionType), "burn": _optional(_BURN_SPEC.codec)})
+_RESPONSE_CODECS: dict[str, Codec] = {"action_type": _enum(ActionType), "burn": _optional(_BURN_SPEC.codec)}
+_RESPONSE = _Shape(FriendlyResponse, _RESPONSE_CODECS)
+#: A response as version 1 holds it, with no veto: read as permitted.
+_RESPONSE_V1 = _Shape(FriendlyResponse, _RESPONSE_CODECS, omit=_VETO_FIELDS)
 _CUSTODY = _Shape(CustodyStatus, {"state": _enum(Custody)})
 _ELSET = _Shape(BoundElset, {"epoch": _optional(_MOMENT), "custody": _optional(_CUSTODY.codec)})
 _BINDING = _Shape(ScenarioBinding, {"red": _optional(_ELSET.codec), "blue": _optional(_ELSET.codec)})
@@ -265,23 +287,27 @@ _PICTURE = _Shape(ThreatPicture, {
     "floor": _enum(Band), "ceiling": _enum(Band), "understanding": _enum(Understanding), "cues": _many(_CUE.codec),
     "decide_at": _optional(_MOMENT), "arrival": _optional(_MOMENT), "assessed_at": _MOMENT,
 })
-_SCENARIO = _Shape(Scenario, {
-    "epoch_utc": _MOMENT, "adversary_actions": _many(_ACTION.codec, list),
-    "friendly_responses": _many(_RESPONSE.codec, list), "binding": _optional(_BINDING.codec),
+_SCENARIO_CODECS: dict[str, Codec] = {
+    "epoch_utc": _MOMENT, "adversary_actions": _many(_ACTION.codec, list), "binding": _optional(_BINDING.codec),
     "threat": _optional(_PICTURE.codec), "observed": _optional(_enum(Seen)),
-})
+}
+#: The scenario as each version holds it: version 1's responses carry no veto.
+_SCENARIOS: dict[int, _Shape] = {
+    1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)}),
+    2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)}),
+}
 
 
 def encode_scenario(scenario: Scenario) -> dict[str, Any]:
-    """*scenario* as plain JSON values, every field of every part of it."""
-    return _SCENARIO.write(scenario)
+    """*scenario* as plain JSON values, every field of every part of it, as this version writes it."""
+    return _SCENARIOS[VERSION].write(scenario)
 
 
-def decode_scenario(document: Any, where: str = "scenario") -> Scenario:
-    """The Scenario *document* holds, strictly: an unknown, a missing or a misshapen field is refused, as is a
-    scenario the engine's own checks refuse."""
+def decode_scenario(document: Any, where: str = "scenario", version: int = VERSION) -> Scenario:
+    """The Scenario *document* holds, as *version* of the document holds it, strictly: an unknown, a missing or a
+    misshapen field is refused, as is a scenario the engine's own checks refuse."""
     try:
-        return _SCENARIO.read(document, where)  # type: ignore[no-any-return]
+        return _SCENARIOS[version].read(document, where)  # type: ignore[no-any-return]
     except InputsRefusedError:
         raise
     except (ValueError, TypeError) as error:
@@ -362,10 +388,12 @@ def read_inputs(text: str, sha256: str) -> StoredInputs:
     document = _exactly(_parsed(text, sha256), _TOP, "")
     if document["schema"] != SCHEMA:
         raise _refuse("schema", f"{document['schema']!r} is not {SCHEMA}")
-    if type(document["version"]) is not int or document["version"] != VERSION:
-        raise _refuse("version", f"version {document['version']!r} is not one this code reads; it knows version {VERSION}")
+    version = document["version"]
+    if type(version) is not int or version not in VERSIONS:
+        known = " and ".join(str(v) for v in VERSIONS)
+        raise _refuse("version", f"version {version!r} is not one this code reads; it knows versions {known}")
     rule = _enum(SelectorStrategy)[1](document["rule"], "rule")
-    scenario = decode_scenario(document["scenario"])
+    scenario = decode_scenario(document["scenario"], version=version)
     return StoredInputs(
         scenario, rule, _scores(document["scores"], scenario), _text_in(document["code_version"], "code_version"),
         _plain("bool")[1](document["budget_ran_out"], "budget_ran_out"),

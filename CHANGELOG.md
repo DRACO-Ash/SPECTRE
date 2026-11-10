@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-11
+
+**Operator output: 4, the recommended response, can exclude responses the operator marks not permitted (evaluation F-04), and every input says whether it is the operator's judgement (F-05).**
+
+### Added
+- Each friendly response can be marked "Not permitted", with a reason of up to 500 characters. A vetoed response is removed before aggregation: it is never the pick under any rule, in the side-by-side comparison, in a game tree at any turn or in the decision record, and it is never ranked first. It is still evaluated and shown greyed with "Not permitted" and its reason. With every response vetoed, nothing is recommended and the result says why. Recording a vetoed response as the operator's own decision needs a rationale. Constraint libraries from doctrine or rules of engagement are the owner's to supply later; the veto is Claude's design (SPC-195).
+- A fourth basis, judgement, for every value the operator enters that reaches a score or a pick (response cost, reversibility and time to execute, P and Conf, the weights, the keep-out distance); it never lends a figure more standing than lookup, and the results list the judgement inputs in words (SPC-196).
+- `docs/lookup-register.md`: every fixed figure the Decision Engine uses, with its value, place in the code, purpose, source, owner and date. A test fails when a listed constant changes or disappears, or when an engine module gains a numeric constant the register does not list (SPC-196).
+- The code version on the results page (SPC-196).
+
+### Changed
+- Stored inputs are written at schema version 2, which carries each response's veto; version 1 records from 0.28.0 still read and replay.
+
 ## [0.28.0] - 2026-11-11
 
 **Operator output: 4, the recommended response, shows all three rules side by side (evaluation F-03) and can be replayed from its record (F-02).**

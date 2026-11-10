@@ -105,7 +105,7 @@ class TestLoadFromNotso:
 
     def test_loading_is_not_applying(self, client: Any, auth_cookie: str, held: Any) -> None:  # noqa: F811
         page = _text(_results(client, auth_cookie, adv_loaded=["A1"]))
-        assert "P=0.6 · Conf=0.7" in page
+        assert "P=0.6 (judgement) · Conf=0.7 (judgement)" in page
         assert "P and Conf are your own." in page
 
     def test_the_load_control_sets_what_it_would_otherwise_take_from_the_evaluate_form(

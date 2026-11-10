@@ -9,11 +9,15 @@
    TCA histogram reads each cell's tca_histogram; both are guarded too. A row's custody gap share (SPC-161) is
    guarded, and shown only on a manoeuvre row whose custody is the rule of thumb, the one place it sets a figure.
    The sweep's Threat picture for the bound red track (SPC-171): its lines, the collect-first advice, the
-   expected-value guidance, each row's Understanding and the collect-first rows, each guarded too. #}
+   expected-value guidance, each row's Understanding and the collect-first rows, each guarded too. A response marked
+   not permitted (SPC-195) is greyed, with "Not permitted:" and its reason in words beside it in the matrix and the
+   rankings; it carries no rank and no star, and with every response so marked nothing is starred. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}
+{# The rule chosen's pick, which the star and the blue highlights mark; none when every response is not permitted. #}
+{% set best = result.robust_best_response %}
 {% set binding = result.scenario.binding if result.scenario.binding is defined else none %}
 
 {# ── Bound to (SPC-100): which real objects this scenario is about, and how old their orbits were at
@@ -144,22 +148,42 @@
     {% endif %}
     {# A job's result arrives after the request, so the moment its times count from is on screen. #}
     <div class="scenario-epoch">Scenario epoch {{ result.scenario.epoch_utc.strftime('%Y-%m-%d %H:%M') }} UTC; times to closest approach count from it.</div>
+    {# The code version that computed the result, from its provenance (SPC-196, evaluation F-05). #}
+    {% if result.code_version_line is defined %}
+    <div class="code-version">{{ result.code_version_line }}</div>
+    {% endif %}
   </div>
+  {# ── Judgement inputs (SPC-196, evaluation F-05): every value on the panel that enters a score or a pick, set or
+       kept, each marked with its basis in words: judgement; lookup for a P never edited, a NOTSO suggestion applied
+       or an archetype's delta-V; computed for a detected burn. One div with no div inside. ── #}
+  {% if result.judgement_lines is defined and result.judgement_head is defined %}
+  <div role="note" class="judgement-inputs" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem">
+    <p style="margin:0.1rem 0; font-size:0.6rem"><strong>{{ result.judgement_head }}</strong></p>
+    <ul style="margin:0.1rem 0; padding-left:1rem">
+      {% for line in result.judgement_lines %}
+      <li class="judgement-input" style="font-size:0.6rem">{{ line.subject }}: {% for x in line.inputs %}{% if x.name %}{{ x.name }} {% endif %}{% if x.shown %}{{ x.shown }} {% endif %}{{ modelled.mark(x.basis) }}{% if not loop.last %}, {% endif %}{% endfor %}. {{ line.reads }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   {# The headline is the deployment's primary rule's pick (SPC-194), read from "rules", which only the route passes;
-     an older caller renders the rule used. A primary rule with no pick, expected value with every row at P 0, shows
-     no recommendation, and the primary line below says why. #}
+     an older caller renders the rule used. A primary rule with no pick, expected value with every row at P 0 or any
+     rule with every response marked not permitted (SPC-195), shows no recommendation, and the primary line below
+     says why. #}
   {% set rules_shown = rules if rules is defined else none %}
   {% set headline = rules_shown.headline if rules_shown is not none else result.robust_best_response %}
   <div class="headline-pick" style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
     {% if headline is none %}No recommendation{% else %}{{ headline.name }}{% endif %}
   </div>
   {% if headline is not none %}
-  <div style="font-size:0.63rem; color:var(--text-dim); margin-top:0.1rem">
-    Type: <strong>{{ headline.action_type.value | replace('_',' ') | title }}</strong> ·
-    Cost: <strong>{{ headline.cost }}</strong> ·
-    Reversibility: <strong>{{ headline.reversibility }}</strong> ·
-    Time to execute: <strong>{{ headline.time_to_execute_hours }}h</strong>
+  {# The response's own type and inputs are the operator's judgement, and say so (SPC-196). #}
+  {% set hb = result.response_input_bases[headline.id] if result.response_input_bases is defined and headline.id in result.response_input_bases else none %}
+  <div class="headline-inputs" style="font-size:0.63rem; color:var(--text-dim); margin-top:0.1rem">
+    Type: <strong>{{ headline.action_type.value | replace('_',' ') | title }}</strong>{% if hb is not none %} {{ modelled.mark(hb.action_type) }}{% endif %} ·
+    Cost: <strong>{{ headline.cost }}</strong>{% if hb is not none %} {{ modelled.mark(hb.cost) }}{% endif %} ·
+    Reversibility: <strong>{{ headline.reversibility }}</strong>{% if hb is not none %} {{ modelled.mark(hb.reversibility) }}{% endif %} ·
+    Time to execute: <strong>{{ headline.time_to_execute_hours }}h</strong>{% if hb is not none %} {{ modelled.mark(hb.time_to_execute) }}{% endif %}
   </div>
   {% endif %}
   {# ── Every rule's pick side by side (SPC-194, evaluation F-03): each rule with its meaning, whether they agree,
@@ -178,6 +202,13 @@
     <p class="tree-rules-agreement" data-agree="{{ 'yes' if rules_shown.tree_agree else 'no' }}" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:{{ 'var(--text-primary)' if rules_shown.tree_agree else 'var(--gold)' }}">{{ rules_shown.tree_line }}</p>
     {% endif %}
     <p class="rules-basis" style="margin:0.1rem 0; font-size:0.6rem">{{ rules_shown.basis }}</p>
+  </div>
+  {% endif %}
+  {# Each response marked not permitted, with its reason, and that no rule picks it (SPC-195). #}
+  {% set veto_lines = result.veto_lines if result.veto_lines is defined else () %}
+  {% if veto_lines %}
+  <div role="note" class="veto-lines" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem; overflow-wrap:anywhere">
+    {% for line in veto_lines %}<p class="not-permitted" style="margin:0.1rem 0; font-size:0.6rem">{{ line }}</p>{% endfor %}
   </div>
   {% endif %}
   {# Whether the pick holds across each applied NOTSO suggestion's interval on P (SPC-132); under a rule that reads
@@ -212,11 +243,16 @@
           Adversary Action ↓
         </th>
         {% for resp in fr %}
-        <th style="text-align:center; padding:0.2rem 0.35rem; font-weight:600;
-                   color:{% if resp.id == result.robust_best_response.id %}var(--ops-blue){% else %}var(--text-dim){% endif %}">
+        {% set starred = best is not none and resp.id == best.id %}
+        {% set barred = resp.vetoed is defined and resp.vetoed %}
+        <th data-permitted="{{ 'no' if barred else 'yes' }}" style="text-align:center; padding:0.2rem 0.35rem; font-weight:600;
+                   color:{% if starred %}var(--ops-blue){% else %}var(--text-dim){% endif %}">
           {{ resp.name | truncate(14, True, '…') }}
-          {% if resp.id == result.robust_best_response.id %}
+          {% if starred %}
           <span style="font-size:0.55rem; color:var(--ops-blue)"> ★</span>
+          {% endif %}
+          {% if barred %}
+          <div class="not-permitted" style="font-weight:400; font-style:italic; font-size:0.55rem; color:var(--text-dim); overflow-wrap:anywhere">{{ resp.not_permitted }}</div>
           {% endif %}
         </th>
         {% endfor %}
@@ -229,10 +265,12 @@
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.25rem 0.35rem">
           <div style="font-weight:600; color:var(--gold)">{{ a.name | truncate(22, True, '…') }}</div>
+          {# Type, P, Conf and the gap share each carry their basis, judgement or lookup (SPC-196). #}
+          {% set rb = result.row_input_bases[i] if result.row_input_bases is defined and result.row_input_bases | length > i else none %}
           <div style="font-size:0.58rem; color:var(--text-dim)">
-            {{ a.action_type.value | replace('_',' ') | title }} ·
-            P={{ a.probability }} · Conf={{ a.confidence }}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
-              and (result.row_custody is not defined or result.row_custody | length <= i or result.row_custody[i] is none) %} · <span class="row-gap" title="The rule of thumb loses custody for this share of the horizon when the response neither manoeuvres nor retasks a sensor; Conf moves no figure">Gap={{ a.custody_gap_fraction }}</span>{% endif %}
+            {{ a.action_type.value | replace('_',' ') | title }}{% if rb is not none %} {{ modelled.mark(rb.action_type) }}{% endif %} ·
+            P={{ a.probability }}{% if rb is not none %} {{ modelled.mark(rb.probability) }}{% endif %} · Conf={{ a.confidence }}{% if rb is not none %} {{ modelled.mark(rb.confidence) }}{% endif %}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
+              and (result.row_custody is not defined or result.row_custody | length <= i or result.row_custody[i] is none) %} · <span class="row-gap" title="The rule of thumb loses custody for this share of the horizon when the response neither manoeuvres nor retasks a sensor; Conf moves no figure">Gap={{ a.custody_gap_fraction }}</span>{% if rb is not none %} {{ modelled.mark(rb.custody_gap_fraction) }}{% endif %}{% endif %}
           </div>
           {% if result.row_sources is defined and result.row_sources | length > i %}
           <div class="row-source" style="font-size:0.56rem; color:var(--text-dim)">{{ result.row_sources[i] }}</div>
@@ -262,7 +300,8 @@
         </td>
         {% for j in range(fr | length) %}
           {% set om = result.outcome_matrix[i][j] %}
-          {% set is_best = (fr[j].id == result.robust_best_response.id) %}
+          {% set is_best = best is not none and fr[j].id == best.id %}
+          {% set barred = fr[j].vetoed is defined and fr[j].vetoed %}
           {# Guarded here: StrictUndefined raises on an attribute of an undefined value before a macro runs. #}
           {% set fbs = om.figure_bases if om.figure_bases is defined else none %}
           {% set band = om.ca_percentiles if om.ca_percentiles is defined else none %}
@@ -275,8 +314,10 @@
           {% else %}
             {% set score_color = "#ef4444" %}
           {% endif %}
-          <td style="text-align:center; padding:0.25rem 0.35rem;
-                     background:{% if is_best %}rgba(59,139,235,0.06){% else %}transparent{% endif %}">
+          {# Greyed: a response not permitted is evaluated and shown, but its score is no candidate (SPC-195). #}
+          {% if barred %}{% set score_color = "var(--text-dim)" %}{% endif %}
+          <td data-permitted="{{ 'no' if barred else 'yes' }}" style="text-align:center; padding:0.25rem 0.35rem;
+                     background:{% if is_best %}rgba(59,139,235,0.06){% else %}transparent{% endif %}{% if barred %}; border:1px dashed var(--border); font-style:italic{% endif %}">
             <div class="figure" data-figure="composite_score"
                  data-basis="{% if fbs is not none %}{{ modelled.kind(fbs.composite_score) }}{% else %}lookup{% endif %}"
                  title="{% if fbs is not none and fbs.composite_score is defined and fbs.composite_score.note is defined %}{{ fbs.composite_score.note }}{% else %}Basis not recorded; read as a lookup{% endif %}"
@@ -507,11 +548,13 @@
       {% set ranked = result.ranked_cells[i] if result.ranked_cells is defined else [] %}
       {% for resp, score in result.ranked_per_adversary[i] %}
         {% set cell = ranked[loop.index0][2] if ranked | length > loop.index0 else none %}
-        {% if score < 0.25 %}{% set sc = "#22c55e" %}{% elif score < 0.5 %}{% set sc = "#f59e0b" %}{% else %}{% set sc = "#ef4444" %}{% endif %}
-        <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:4px;
-                    padding:0.3rem 0.5rem; font-size:0.62rem; min-width:7rem">
-          <div style="font-size:0.58rem; color:var(--text-dim)">#{{ loop.index }}</div>
-          <div style="font-weight:700; color:{% if resp.id == result.robust_best_response.id %}var(--ops-blue){% else %}var(--text-primary){% endif %}">
+        {% set barred = resp.vetoed is defined and resp.vetoed %}
+        {% if barred %}{% set sc = "var(--text-dim)" %}{% elif score < 0.25 %}{% set sc = "#22c55e" %}{% elif score < 0.5 %}{% set sc = "#f59e0b" %}{% else %}{% set sc = "#ef4444" %}{% endif %}
+        <div data-permitted="{{ 'no' if barred else 'yes' }}" style="background:var(--bg-secondary); border:1px {{ 'dashed' if barred else 'solid' }} var(--border); border-radius:4px;
+                    padding:0.3rem 0.5rem; font-size:0.62rem; min-width:7rem; max-width:16rem; overflow-wrap:anywhere">
+          {# A response not permitted is listed after every permitted one and carries no rank (SPC-195). #}
+          <div style="font-size:0.58rem; color:var(--text-dim)">{% if barred %}Not ranked{% else %}#{{ loop.index }}{% endif %}</div>
+          <div style="font-weight:700; color:{% if best is not none and resp.id == best.id %}var(--ops-blue){% elif barred %}var(--text-dim){% else %}var(--text-primary){% endif %}">
             {{ resp.name | truncate(16, True, '…') }}
           </div>
           <div style="font-family:monospace; color:{{ sc }}">{{ "%.3f" | format(score) }}</div>
@@ -519,6 +562,9 @@
           <div class="score-spread"{% if cell.score_percentiles_text is defined and cell.score_percentiles_text is not none %} title="{{ cell.score_percentiles_text }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ cell.score_spread_text }}</div>
           {% else %}
           <div class="score-spread" style="font-size:0.55rem; color:var(--text-dim)">Score spread: lookup, none computed</div>
+          {% endif %}
+          {% if barred %}
+          <div class="not-permitted" style="font-size:0.55rem; font-style:italic; color:var(--text-dim)">{{ resp.not_permitted }}</div>
           {% endif %}
         </div>
       {% endfor %}

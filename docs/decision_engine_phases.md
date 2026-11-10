@@ -4,8 +4,10 @@
 three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
 lost (SPC-179) and the record of whether each P was edited (SPC-183); for the score scales of SPC-191, which are
 Claude's design choices, not rulings; for the decision record of SPC-192; and for every rule's pick side by side
-with a primary rule (SPC-194) and replay from the stored record (SPC-193). The history of each step is in
-CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
+with a primary rule (SPC-194) and replay from the stored record (SPC-193); for responses the operator marks not
+permitted (SPC-195); and for the judgement basis, the lookup register and the code version on the results (SPC-196).
+The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
+why.*
 
 **Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
 SPC-100 to SPC-152, summarised in `.board/README.md`. Three points of the original plan were corrected before the
@@ -27,17 +29,20 @@ behind that ranking rests on.
 
 The operator enters up to five adversary actions and up to five friendly responses. The engine fills an outcome
 matrix, one cell per pair, ranks the responses for each adversary action, and picks one response under each of the
-three rules, the deployment's primary rule's pick heading the result. With a turn depth of 2 or 3 it also builds a game tree in which red may move again after each of our
+three rules, never one the operator marked not permitted, the deployment's primary rule's pick heading the result. With a turn depth of 2 or 3 it also builds a game tree in which red may move again after each of our
 responses. The result is a modelled recommendation, never an order, and the page says so.
 
 ## Every figure states its basis
 
-Each figure carries a `FigureBasis` (SPC-101) of one of three kinds, shown in its cell as "(computed)", "(sampled)"
-or "(lookup)" with the rule behind it in words:
+Each figure carries a `FigureBasis` (SPC-101) of one of four kinds, shown beside it as "(computed)", "(sampled)",
+"(lookup)" or "(judgement)" with the rule behind it in words:
 ● **Computed**: propagated from real element sets, both objects on one propagator, with no randomness.
 ● **Sampled**: the P5 of many propagated realisations of a hypothesised red burn, with its spread and how well that
   P5 is known.
-● **Lookup**: a fixed rule of thumb or table value. It moves the ranking but rests on no orbit.
+● **Lookup**: a fixed rule of thumb or table value. It moves the ranking but rests on no orbit. Every one the engine
+  reads is in docs/lookup-register.md (SPC-196).
+● **Judgement**: a value the operator set or kept on the panel (SPC-196). It is not evidence. The results list each
+  one under "Judgement inputs", set out below.
 
 The composite score is a weighted sum of custody, closest approach, our delta-V, time to execute and reversibility,
 lower being better. Its weights are uncited (SPC-151), so the score is always a lookup, whatever its inputs are.
@@ -94,6 +99,70 @@ F-10's closing evidence requires, so F-10 stays open until it does.
   200 to 15,000 km, every score drops by 0.07 to 0.16 and 5 cells change band, four of them amber to green and one
   red to amber. A miss under about 10 km barely moves, and a small burn of ours scores more than before. The bands
   themselves are finding F-18 (SPC-208) and are unchanged.
+
+## Judgement inputs, the lookup register and the code version (SPC-196)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-05 (Critical, gate G5) found every figure tagged computed, sampled or
+lookup, but the operator's own values (each response's cost, reversibility and time to execute, each row's P and
+Conf, the weights, the keep-out distance) carried no judgement tag, the lookup constants no source, owner or date,
+and the code version was never shown. Gate G5 was rated Red; that rating stands until the evaluation is repeated.
+
+● **A fourth basis, judgement.** `Basis.JUDGEMENT` in `spectre/domain/provenance.py` is a value the operator set
+  or kept on the panel. It is declared first, the weakest of the four: `weakest()` of a judgement and anything else
+  is the judgement, so a judgement never lends a figure more standing than a lookup. A lookup is at least a fixed,
+  registered rule, the same for every operator; a judgement is one operator's opinion at one evaluation. The Threat
+  Understanding model grades a judgement as it grades a lookup, LOW, and refuses a judgement as evidence.
+● **Judgement inputs on the results.** Under the basis lines, the results list every input on the panel that enters
+  a score or a pick, each marked in words: the weights, the keep-out distance, the horizon and the number of turns;
+  each response's type, cost, reversibility and time to execute, and its burn's target separation, delta-V budget and
+  axis when it has one; each row's type, P and Conf, and its custody gap share where the rule of thumb reads it, which
+  is on a manoeuvre row whose custody is not read, against a response that neither manoeuvres nor retasks a sensor;
+  each manoeuvre hypothesis and its sample count; and, for a tree, the turn-1 observation stated. Each line says what
+  reads its inputs. The headline response's type, cost, reversibility and time to execute, and each row's type, P,
+  Conf and gap share in the matrix, carry the same mark beside them.
+● **Set or kept.** A value on the panel when the operator evaluates is the operator's judgement, whether set or kept
+  where the panel started it: the form records no edit of it, so its note names where a new panel starts it, never
+  that it was typed. A delta-V budget left blank is the registered default, 50 m/s, which the operator kept by
+  leaving it blank, and its note says so. The values a new panel starts at are in the lookup register, and a test
+  holds the panel's fields and the route's form to them.
+● **What is not a judgement says what it rests on.** A P the form records as never edited is the panel's default
+  (SPC-183), marked "(lookup)"; a P and Conf from an applied NOTSO suggestion (SPC-130) carry the suggestion's own
+  basis. A manoeuvre hypothesis is marked by where it came from: entered on the panel, a judgement of what red might
+  do; an archetype chosen, a judgement, with its typical delta-V a lookup from `MANOEUVRE_ARCHETYPES`; a burn
+  detected in the element-set history, what red did, computed from element sets. Its line says its row's closest
+  approach is sampled from it only when the row was sampled, and otherwise that nothing was sampled from it.
+● **A figure's mark names the evidence and rules it rests on, taking the inputs as given.** The operator's inputs
+  are not counted in a figure's basis: every figure rests on the weights alike, so counting them would mark every
+  figure a judgement and tell none from another. A lookup that applies a rule of thumb to an input, such as cost x
+  0.05 km/s of delta-V, is marked lookup for the rule, and the input is listed as a judgement. The score is marked
+  lookup, as before, and no stronger.
+● **The lookup register.** `docs/lookup-register.md` lists every numeric constant in the Decision Engine's own
+  modules, and the lookups it reads from other modules to set a figure, a score, a pick or its advice (the manoeuvre
+  archetypes, the collect-first times, the NOTSO interval, the element-set age limits and others), each with its
+  value, where it is in the code, what it does, its source or "none: rule of thumb", its owner ("unassigned" where
+  none is recorded, and the owner's rulings where they exist) and the date it was set. The rules of thumb that were
+  bare numbers in the lookup model (cost x 5 and cost x 2 on closest approach, cost x 0.05 km/s of delta-V, half a
+  sensor retask's time to execute, 0.4 of the horizon) are now named constants, with no change of value, and so are
+  the values a new panel starts Conf, cost, reversibility, time to execute and the horizon at.
+  `tests/unit/test_lookup_register.py` fails when a constant the register names leaves the code or changes value
+  without the register; when one of the engine's own modules gains a numeric module constant the register does not
+  list, however it is assigned; when the lookup model's functions hold a bare number other than 0 and 1; and when
+  the panel or the route's form starts a field anywhere but its registered value.
+● **The code version on the results.** The figure-basis lines end with the code version that computed the result,
+  from its provenance, in words: "Code version 0.28.0: the version SPECTRE reports for the code that computed this
+  result, from its provenance." It names a release only for a released build. A result with no provenance says its
+  code version is not recorded.
+● **Stored inputs unchanged.** No Scenario or response field was added, so the stored inputs keep schema version 1,
+  and a record written by 0.28.0 reads and replays as before. The reader now refuses a stored NOTSO suggestion whose
+  basis is a judgement, which no writer stores.
+● **Claude's design choices, awaiting the owner's ruling.** Judgement ranks below lookup rather than beside it. A
+  judgement is an input's basis, not a derived figure's, for the reason above. A value kept at the panel's start is
+  the operator's judgement, as is a budget left blank, rather than a lookup, since the form records no edit of them
+  as it does for P; recording one would change the stored inputs. Conf is listed though it moves no figure, as the
+  finding names it. A detected burn is marked computed and listed with the inputs, so its row's line says what it
+  rests on. The register's completeness check covers the engine's own modules; the constants of other modules it
+  lists are held to their value, not checked for newcomers.
 
 ## Phase 1: the matrix, bound to real objects
 
@@ -487,7 +556,8 @@ evaluation, in the `decision_records` table beside the accounts.
   the decision, its rationale and its time, or "No decision recorded". An admin sees every record
   and whose it is. Records are kept by account, so they are there after signing out and in again.
 ● **Retention and access.** No retention is applied: records are kept until the owner decides otherwise. A record
-  holds a username, free text (the scenario's name, the response names and the rationale) and, since 0.28.0, the
+  holds a username, free text (the scenario's name, the response names, the rationale and, since SPC-195, the reason
+  a response is not permitted) and, since 0.28.0, the
   evaluation's stored inputs, element-set text included, so retention and access are the owner's decision, as data
   protection lead. The owner's open retention ruling (SPC-228) now covers the stored inputs too.
 ● **Claude's design choices, awaiting the owner's ruling.** The recommendation stored is the one-turn matrix's pick,
@@ -514,12 +584,15 @@ repeated.
   is not earned, the existing guidance stays beside its pick, whichever rule ran; it says what minimax picks, not
   what it recommends, since the recommendation is the primary rule's. With every row at P 0, expected value has no
   weight to pick on: it has no pick, on the matrix as on the tree, the page says so, and it is never counted as
-  agreeing with another rule. (`find_robust_response` alone would name the first response, a tie it has not earned.)
+  agreeing with another rule. (`find_robust_response` alone would name the first response, since SPC-195 the first
+  not marked not permitted, a tie it has not earned.)
 ● **A tree's turn-1 pick under each rule.** Where a game tree was built, each rule's turn-1 pick is
   `tree_selectors.select` over the tree already built, turns built in full only; nothing is sampled again. A second
   line says whether the rules agree on turn 1, flagged in the same colour as a disagreement on the matrix. It names
   the turns asked and, when the budget stopped the tree sooner, the turns built in full, as in "Over the 2 turns,
-  built in full to turn 1 only". Expected value can have no pick when every row has P 0, and the line says so.
+  built in full to turn 1 only". Expected value can have no pick when every row has P 0, and the line says so. With
+  every response marked not permitted (SPC-195), no rule has a pick and the line says that, not that the rules
+  disagree.
 ● **The deployment's primary rule.** `SPECTRE_PRIMARY_RULE` names it: minimax, minimin or expected_value, read where
   the other settings are read (`spectre/config/settings.py`). Unset, it is minimax, the cautious rule. The panel's
   selector starts on it. The headline recommendation is the primary rule's pick. When the operator chose another
@@ -535,7 +608,8 @@ repeated.
   two new columns that init_db adds to a 0.27.0 database in place. The record's `recommended_*` columns keep the
   rule used's pick, as in 0.27.0; the records page calls it the rule used's pick, and says the primary rule's pick
   was the recommendation shown, so "recommendation" means one thing on every page. A rule with no pick is held as an
-  empty id and name and listed as picking nothing, since every row had P 0. A record from before says its primary
+  empty id and name and listed as picking nothing, with the reason: every row had P 0, or, since SPC-195, every
+  response was marked not permitted. A record from before says its primary
   rule was not recorded, and keeps its old wording, "Recommended:".
 ● **Claude's design choices, awaiting the owner's ruling.** Minimax as the default primary rule, being the cautious
   rule. A value of `SPECTRE_PRIMARY_RULE` that names no rule is not refused at boot: it is logged as a warning, once
@@ -551,7 +625,7 @@ stored none, so a recommendation could not be reproduced once the sign-in ended;
 exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evaluation is repeated.
 
 ● **What is stored.** With each record, one canonical JSON document and its SHA-256: the whole Scenario (rows,
-  responses, weights, horizon, turns, keep-out distance and observation; every hypothesis with its dispersions,
+  responses with any veto and its reason (SPC-195), weights, horizon, turns, keep-out distance and observation; every hypothesis with its dispersions,
   sample count and seed, and a transfer's later burns; each accepted NOTSO prior with its cover and counted notices;
   the Threat picture with its cues; and the binding, each bound element set's text as read, its epoch, age, limit,
   data mode and custody), the rule the evaluation ran under, the composite score matrix, the code version, and
@@ -586,13 +660,67 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
   record is held in the deployment's own database, as the NOTSO cache already is, under the owner's rulings of
   24 and 28 October 2026 that holding cached data is acceptable. docs/SECURITY.md lists it, and the owner's open
   retention ruling (SPC-228) now covers the stored inputs too.
-● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, and no reader for any other.
+● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, when built; since SPC-195 the
+  document is written as version 2, and version 1 is still read (see the next section).
   Replay runs with no wall-time budget, so an evaluation the 300 s budget cut short, a sampled row refused or a tree
   built in part, is replayed in full and the comparison may then differ; the stored inputs record whether the budget
   ran out, so the report says why, and names where. The code version is stored in the document, so it is covered by
   the hash, and it is the one the report says first. A record whose inputs could not be encoded is not written, and the
   results say no decision can be recorded, as for any record the database will not take. The replay is a command
   for an administrator with access to the database; no route or page offers it.
+
+## Responses not permitted (SPC-195)
+
+**Status: built. Each choice below is Claude's design choice, not a ruling.** Evaluation finding F-04 (Critical, gate
+G4, "Hard constraints enforced as vetoes before aggregation") found that no field could mark a response unacceptable,
+so a response that breaks a legal, rules-of-engagement or safety constraint was recommended whenever it scored best
+(probe P-06). Gate G4 was rated Red; that rating stands until the evaluation is repeated. Constraint libraries drawn
+from doctrine or from rules of engagement are the owner's to supply later: what is built is the operator's own veto,
+response by response, with a reason in words.
+
+● **A veto on each response** (Claude's choice). Each friendly response row on the panel carries a labelled "Not
+  permitted" checkbox and a labelled reason field. The reason is required when the box is ticked, at most 500
+  characters of one line, stored without its surrounding spaces; a reason holding a control character is refused
+  with a sentence. A reason typed with the box not ticked is refused rather than dropped unsaid. The box posts its
+  row's own id, so a tick that names no row, or two rows sharing an id, is refused and the panel asks to be reloaded;
+  so is a tick posted with no reasons at all, which is never read as permitted.
+  The veto and its reason are fields of the response, `vetoed` and `veto_reason`, not permitted by default.
+● **Removed before aggregation** (Claude's choice). `find_robust_response` ranks only the responses not marked not
+  permitted, under every rule, so a vetoed response is never any rule's pick: not the headline, not a pick beside it,
+  not a pick in the record. A tie is broken among the permitted responses alone, the first of them winning as
+  before, so a tie never brings a vetoed response back. With every row at P 0, expected value still has no pick.
+  The NOTSO interval lines read the same permitted responses. On a game tree, a response not permitted is never
+  valued in any information set, so no turn picks it and no plan mark falls on its branches; the recommendation per
+  turn names each such response as never picked.
+● **Still evaluated and shown** (Claude's choice). A vetoed response is evaluated exactly as before, so every figure
+  is the same vetoed or not, and the operator sees what was excluded and why. It is greyed in the matrix, with "Not
+  permitted:" and its reason in words in its column's heading and a dashed outline on its cells; in the rankings it
+  is listed after every permitted response with no rank number, so it is never ranked first, and carries the same
+  words; on the tree each branch of it carries them beside its heading, and every later branch below it is greyed
+  too, saying it follows that response, since the whole sequence is excluded. A line above the matrix names each
+  response marked not permitted with its reason and says that no rule picks it. On the panel the box keeps its own
+  width, so its words stay beside it at any width.
+● **Every response marked not permitted** (Claude's choice). No rule has a pick, so the headline reads "No
+  recommendation", the agreement line says no rule picks a response since every response is marked not permitted,
+  and a tree's agreement line says the same of turn 1, not that the rules disagree; both are flagged in the colour a
+  disagreement takes, since nothing is recommended. The primary rule's line says why, nothing is starred, nothing is ranked, a tree's turn 1 has no pick and says why,
+  and the record stores no pick. Under expected value with a probability not earned, the guidance says minimax picks
+  nothing, for the same reason.
+● **On the record** (Claude's choice). Each response a record lists carries its reason when it was marked not
+  permitted, so the Decision records page lists which responses were vetoed and why. The operator may still record a
+  vetoed response as their decision, but only with a rationale; the decision select labels it as marked not
+  permitted, and the decision, on the results and on the records page, says it was marked not permitted, with its
+  reason.
+● **Stored inputs, version 2** (Claude's choice). The stored inputs now write version 2 of their document, which
+  holds each response's veto and reason. A record written by 0.28.0 holds version 1, with no veto: it is still read,
+  every response permitted, and replays as before. A version 1 document holding a veto is refused, naming where.
+  The scenario's provenance hash leaves out the veto of a response that is permitted, so a scenario with nothing
+  vetoed hashes exactly as it did in 0.28.0, and such a record's input hashes still match its replay; a veto changes
+  the hash. Where the record's responses or its stored inputs mark any response not permitted, the replay sets the
+  one against the other, so a veto dropped from the record's column is caught.
+● **Not built.** Scenario-level constraints, a constraint applied across responses or tied to a rule set, wait on
+  the constraint libraries above. The veto weighs nothing: it is not a penalty in the score, and no score or weight
+  changes with it.
 
 ## What remains out of scope
 
@@ -606,6 +734,8 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
   doctrine words stay off screen, and SPC-177 is closed.
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
+● **Constraint libraries** (SPC-195): rules drawn from doctrine or rules of engagement that would mark responses not
+  permitted without the operator ticking each are the owner's to supply; until then each veto is the operator's.
 ● **A game tree over a transfer of several burns.** The matrix carries every burn of the transfer (SPC-184), but
   the tree's equal turns cannot place them, so such a row refuses the tree. Unequal turns, set by the engine, are
   SPC-187.
@@ -619,3 +749,4 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
 | 3 | Computed closest approach and time, custody, our burns sized, trajectory and histogram | Built |
 | 5 | A NOTSO suggestion for P and Conf, its interval, and its timeline | Built |
 | 4 | A game tree of up to three turns, its picks, the update after turn 1, and its view | Built |
+| SPC-195 | A response marked not permitted, shown with its reason and never picked | Built |

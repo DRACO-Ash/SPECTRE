@@ -5,7 +5,8 @@ evaluates it: evaluate_tree, which is evaluate_scenario for one turn. Sampling i
 identical inputs repeat exactly (evaluation probe P-15). The replay is set against the record, field by field:
 
 ● the record's own rule and code version columns against those inside its hashed inputs, which a rehashed edit to
-  either would leave apart;
+  either would leave apart, and, where either holds one, the responses its responses column marks not permitted
+  against those its stored inputs mark (SPC-195);
 ● the recommendation shown, the deployment's primary rule's pick; the rule used's pick; each rule's pick on the
   matrix; and a tree's turn-1 pick;
 ● every input hash the record holds against the replay's own, which a rehashed edit to the stored inputs cannot
@@ -67,16 +68,18 @@ Kind = Literal["check", "pick", "hash", "score"]
 @dataclass(frozen=True)
 class Recorded:
     """What a record holds beside its stored inputs: the rule used's pick, each rule's pick on the matrix and a
-    tree's turn-1 pick, each as (id, name) or None; its rule and code version columns; its input hashes; and the
-    deployment's primary rule, None when it holds none."""
+    tree's turn-1 pick, each as (id, name) or None; its rule and code version columns; its input hashes; the
+    deployment's primary rule, None when it holds none; and each response its responses column marks not permitted,
+    as (id, name, reason), none for a record from before vetoes (SPC-195)."""
 
-    recommended:  Named
-    picks:        Mapping[SelectorStrategy, Named]
-    tree_pick:    Named
-    rule:         str
-    code_version: str
-    input_hashes: tuple[Hash, ...]
-    primary:      SelectorStrategy | None
+    recommended:   Named
+    picks:         Mapping[SelectorStrategy, Named]
+    tree_pick:     Named
+    rule:          str
+    code_version:  str
+    input_hashes:  tuple[Hash, ...]
+    primary:       SelectorStrategy | None
+    not_permitted: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,12 +181,24 @@ def _tree_pick(result: ScenarioResult) -> FriendlyResponse | None:
     return None if first is None else result.scenario.friendly_responses[first]
 
 
-def _checks(stored: StoredInputs, recorded: Recorded) -> list[Comparison]:
-    """The record's own rule and code version columns against those its hashed inputs hold."""
-    return [
+def _checks(stored: StoredInputs, recorded: Recorded, kept: Kept) -> list[Comparison]:
+    """The record's own rule and code version columns against those its hashed inputs hold, and, where either marks
+    a response not permitted, the record's responses column against the stored inputs (SPC-195)."""
+    checks = [
         Comparison("Rule used", _rule_words(recorded.rule), RULE_WORDS[stored.rule], kind="check", sides=_COLUMN_SIDES),
         Comparison("Code version", recorded.code_version, stored.code_version, kind="check", sides=_COLUMN_SIDES),
     ]
+    vetoed = tuple((r.id, r.name, r.veto_reason) for r in stored.scenario.friendly_responses if r.vetoed)
+    if recorded.not_permitted or vetoed:
+        stored_text = _vetoes_text(tuple((kept(i), kept(n), kept(why)) for i, n, why in vetoed))
+        checks.append(Comparison("Not permitted", _vetoes_text(recorded.not_permitted), stored_text, kind="check",
+                                 sides=_COLUMN_SIDES))
+    return checks
+
+
+def _vetoes_text(vetoes: tuple[tuple[str, str, str], ...]) -> str:
+    """Responses marked not permitted, each as its name, id and reason, in order; "none" for none."""
+    return "; ".join(f"{name} ({rid}): {why}" for rid, name, why in vetoes) or "none"
 
 
 def _rule_words(value: str) -> str:
@@ -258,7 +273,7 @@ def replay(
     result = run(stored.scenario, stored.rule)
     return Replay(
         stored.code_version, spectre.__version__ if running is None else running,
-        (*_checks(stored, recorded), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
+        (*_checks(stored, recorded, kept), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
          *_scores(stored, result)),
         budget_ran_out=stored.budget_ran_out,
     )

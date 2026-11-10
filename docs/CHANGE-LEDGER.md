@@ -1247,3 +1247,12 @@ All three rules side by side (evaluation F-03) and replay from a stored record (
 | Code Quality | **HYGIENE** | None made for the gate. New modules `domain/rule_comparison.py`, `domain/decision_inputs.py`, `domain/decision_replay.py` and `scripts/replay_decision.py`; four columns on `decision_records` | `scripts/check-quality.sh` against 0.27.0 passed all five legs. The full suite (8,974 passed) and every CI coverage floor are green on the same tree; the record, upgrade, replay and admin tests (170) passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. `.env.example` documents `SPECTRE_PRIMARY_RULE`. | n/a. |
 
+## 0.29.0
+
+Vetoes before aggregation (evaluation F-04) and the judgement basis with a lookup register (F-05).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New module `domain/decision_judgement.py`; vetoes in the decision engine, selectors, comparison, stored inputs (version 2) and record | `scripts/check-quality.sh` against 0.28.0 passed all five legs. The full suite (9,222 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

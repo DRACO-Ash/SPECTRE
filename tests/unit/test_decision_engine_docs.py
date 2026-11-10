@@ -251,10 +251,48 @@ class TestTheDecisionRecord:
             assert choice in _flat(section), choice
 
 
+class TestTheVeto:
+    """SPC-195 (evaluation F-04, gate G4): both descriptions say a response can be marked not permitted, what that
+    does, and that the design is Claude's while constraint libraries are the owner's to supply."""
+
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            "Not permitted", "SPC-195", "F-04", "gate G4", "reason", "500 characters", "never ranked first",
+            "every response is marked not permitted", "tie", "greyed", "rationale", "rules of engagement",
+            "version 2", "version 1",
+        ],
+    )
+    def test_both_say_what_a_veto_does(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_the_phase_document_records_each_choice_as_claudes_and_the_libraries_as_the_owners(self) -> None:
+        doc = _read("docs/decision_engine_phases.md")
+        section = _flat(doc[doc.index("## Responses not permitted (SPC-195)"):doc.index("## What remains out of scope")])
+        assert "**Status: built" in section
+        assert section.count("Claude's choice") >= 6
+        assert "the owner's to supply" in section
+        assert "doctrine" in section
+
+    def test_both_say_a_later_branch_of_the_tree_is_greyed_too(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "follows that response" in text
+
+    def test_the_phase_document_says_why_a_record_lists_a_rule_picking_nothing(self) -> None:
+        text = _flat(_read("docs/decision_engine_phases.md"))
+        assert "listed as picking nothing, since every row had P 0." not in text
+        assert "every response was marked not permitted" in text
+        assert "not that the rules disagree" in text
+
+    def test_the_phase_document_no_longer_says_one_schema_version(self) -> None:
+        assert "One schema version, 1, and no reader for any other" not in _flat(_read("docs/decision_engine_phases.md"))
+
+
 def test_security_counts_every_free_text_a_record_holds_and_lists_its_retention_as_open() -> None:
     text = _flat(_read("docs/SECURITY.md"))
     bullet = text[text.index("Decision records (SPC-192)"):]
-    for held in ("username", "scenario's name", "response names", "rationale"):
+    for held in ("username", "scenario's name", "response names", "rationale", "reason a response is not permitted"):
         assert held in bullet[:600], held
     open_items = text[text.index("Data protection"):]
     assert "decision records" in open_items.lower()

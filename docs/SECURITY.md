@@ -106,8 +106,8 @@ password hash, role) and log lines recording usernames and client addresses on
 sign-in attempts. That brings it within UK GDPR; see the open items.
 
 ● Decision records (SPC-192) hold the username that ran each Decision Engine
-evaluation and operator-typed free text: the scenario's name, the response names
-and the rationale. No retention is applied: how long they are kept, and who may
+evaluation and operator-typed free text: the scenario's name, the response names,
+the rationale and the reason a response is not permitted (SPC-195). No retention is applied: how long they are kept, and who may
 read them beyond the operator and admins, is the owner's decision as data
 protection lead. A deleted account's records are kept under its username; that
 is Claude's design choice, awaiting the owner's ruling.

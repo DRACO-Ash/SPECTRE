@@ -10,7 +10,9 @@ The three rules' picks are the engine's own find_robust_response on the result's
 no figure and no recommendation changes. Since 0.28.0 a record also keeps the deployment's primary rule and whether
 the rule used differed (SPC-194), and the evaluation's canonical inputs with their SHA-256, element-set text included
 (SPC-193, evaluation F-02), from which replay_record evaluates the scenario again and sets the result against the
-record.
+record. Since SPC-195 each response a record lists carries its reason when it was marked not permitted, so the
+records page says which were and why; no vetoed response is ever held as a pick, and one may be recorded as the
+operator's decision only with a rationale.
 """
 
 from __future__ import annotations
@@ -55,6 +57,10 @@ _ONCE = "A decision is already recorded for this evaluation; a record takes one 
 _CHOOSE = "Choose one of the listed decisions."
 _TOO_LONG = "The rationale is at most {most:,} characters; this one is {n:,}."
 _SAY_WHY = "Give the rationale: it is required when none of these responses is chosen."
+_SAY_WHY_VETOED = "Give the rationale: it is required when the response chosen was marked not permitted."
+#: How the decision select labels a response marked not permitted, and what the decision says of it (SPC-195).
+_MARKED = "{label}, marked not permitted"
+_WAS_MARKED = "{name} ({id}) was marked not permitted: {reason}"
 _CONTROL = "The rationale holds a control character, which a record cannot store; remove it and record again."
 #: A control character other than tab, line feed and carriage return: PostgreSQL's text refuses U+0000, which
 #: SQLite stores, and no other has a place in a typed rationale.
@@ -146,6 +152,18 @@ def _tree_pick(result: ScenarioResult) -> FriendlyResponse | None:
     return None if first is None else result.scenario.friendly_responses[first]
 
 
+def _responses(result: ScenarioResult) -> list[dict[str, str]]:
+    """The scenario's responses as a record lists them, by id and name, each marked not permitted with its reason
+    (SPC-195); every name and reason kept as a record keeps text."""
+    listed_responses = []
+    for response in result.scenario.friendly_responses:
+        entry = {"id": _kept(response.id), "name": _kept(response.name)}
+        if response.vetoed:
+            entry["not_permitted"] = _kept(response.veto_reason)
+        listed_responses.append(entry)
+    return listed_responses
+
+
 def _tree_lines(result: ScenarioResult) -> list[str]:
     """What the results said of the tree's recommendation: the selection's own lines, or why it has none."""
     tree = result.tree
@@ -185,7 +203,7 @@ def new_record(
         code_version="" if provenance is None else provenance.code_version,
         calibration_source="" if provenance is None else provenance.calibration_source,
         input_hashes=json.dumps(_hashes(result)),
-        responses=json.dumps([{"id": _kept(r.id), "name": _kept(r.name)} for r in scenario.friendly_responses]),
+        responses=json.dumps(_responses(result)),
         turns=scenario.turns, keep_out_km=scenario.keep_out_km,
         primary_rule=primary.value, rule_differed=result.robust_strategy is not primary,
         inputs=inputs, inputs_sha256=inputs_sha256,
@@ -214,7 +232,13 @@ def recorded_of(row: DecisionRecord) -> Recorded:
         tree_pick=_pick_of(row.tree_pick_id, row.tree_pick_name),
         rule=row.rule, code_version=row.code_version, input_hashes=tuple(json.loads(row.input_hashes)),
         primary=primary,
+        not_permitted=tuple((r["id"], r["name"], r["not_permitted"]) for r in _vetoed(row)),
     )
+
+
+def _vetoed(row: DecisionRecord) -> list[dict[str, str]]:
+    """The responses *row* lists as marked not permitted, in order; none on a record from before vetoes (SPC-195)."""
+    return [r for r in json.loads(row.responses) if "not_permitted" in r]
 
 
 def stored_of(row: DecisionRecord) -> StoredInputs:
@@ -252,11 +276,25 @@ def utc_text(moment: datetime | None) -> str:
 
 
 def choices(responses: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
-    """The decision select's options, value and label: each response by name and id, then the two that are not."""
-    listed = tuple(
-        (_RESPONSE_VALUE.format(n=n), f"{response['name']} ({response['id']})") for n, response in enumerate(responses)
-    )
+    """The decision select's options, value and label: each response by name and id, saying when it was marked not
+    permitted (SPC-195), then the two that are not responses."""
+    listed = tuple((_RESPONSE_VALUE.format(n=n), _choice(response)) for n, response in enumerate(responses))
     return (*listed, *_NOT_A_RESPONSE.items())
+
+
+def _choice(response: dict[str, str]) -> str:
+    label = f"{response['name']} ({response['id']})"
+    return _MARKED.format(label=label) if "not_permitted" in response else label
+
+
+def _marked(responses: list[dict[str, str]], decision: str | None) -> str:
+    """What the decision *decision* says when it chose a response marked not permitted: which, and why; else empty."""
+    chosen = next(
+        (r for n, r in enumerate(responses) if _RESPONSE_VALUE.format(n=n) == decision and "not_permitted" in r), None,
+    )
+    if chosen is None:
+        return ""
+    return _WAS_MARKED.format(name=chosen["name"], id=chosen["id"], reason=chosen["not_permitted"])
 
 
 @dataclass(frozen=True)
@@ -268,6 +306,8 @@ class RecordView:
     decision_name: str = ""
     rationale: str = ""
     decided_at: str = ""
+    #: When the decision chose a response marked not permitted, which and why (SPC-195); else empty.
+    marked: str = ""
 
     @property
     def decided(self) -> bool:
@@ -276,10 +316,7 @@ class RecordView:
 
 def fresh_view(record_id: int, result: ScenarioResult) -> RecordView:
     """The view of the record just written for *result*, which holds no decision yet."""
-    return RecordView(
-        record_id,
-        choices([{"id": _kept(r.id), "name": _kept(r.name)} for r in result.scenario.friendly_responses]),
-    )
+    return RecordView(record_id, choices(_responses(result)))
 
 
 async def stored_view(db: AsyncSession, record_id: int, result: ScenarioResult) -> RecordView:
@@ -291,9 +328,10 @@ async def stored_view(db: AsyncSession, record_id: int, result: ScenarioResult) 
 
 def row_view(row: DecisionRecord) -> RecordView:
     """The view of a stored record, with its decision when it holds one."""
+    responses = json.loads(row.responses)
     return RecordView(
-        row.id, choices(json.loads(row.responses)), row.decision_name or "", row.rationale or "",
-        utc_text(row.decided_at),
+        row.id, choices(responses), row.decision_name or "", row.rationale or "", utc_text(row.decided_at),
+        _marked(responses, row.decision),
     )
 
 
@@ -311,7 +349,8 @@ def _refusal(row: DecisionRecord, decision: str, rationale: str) -> str:
     """Why *decision* with *rationale* cannot be recorded on *row*, checked in order; empty when it can."""
     if row.decided_at is not None:
         return _ONCE
-    if decision not in dict(choices(json.loads(row.responses))):
+    responses = json.loads(row.responses)
+    if decision not in dict(choices(responses)):
         return _CHOOSE
     if len(rationale) > MAX_RATIONALE:
         return _TOO_LONG.format(most=MAX_RATIONALE, n=len(rationale))
@@ -319,6 +358,8 @@ def _refusal(row: DecisionRecord, decision: str, rationale: str) -> str:
         return _CONTROL
     if decision == NONE_OF_THESE and not rationale:
         return _SAY_WHY
+    if _marked(responses, decision) and not rationale:
+        return _SAY_WHY_VETOED
     return ""
 
 
@@ -380,16 +421,20 @@ _RULE_WORDS: dict[str, str] = {rule.value: words for rule, words in RULE_WORDS.i
 _PRIMARY_USED = "Primary rule: {primary}, the rule used; {shown}"
 _PRIMARY_DIFFERED = "Primary rule: {primary}; {shown} The rule used, {rule}, differed from it."
 _SHOWN = "the recommendation shown was its pick, {pick}."
-_SHOWN_NONE = "it had no pick, since every row had P 0, so no recommendation was shown."
+_SHOWN_NONE = "it had no pick, {why}, so no recommendation was shown."
 _PRIMARY_UNRECORDED = (
     "Primary rule: not recorded; this record was written by a version of SPECTRE that did not record one."
 )
-#: How the records page names a pick a record holds as none: expected value's, with every row at P 0.
-_NO_PICK = "nothing, since every row had P 0"
+#: Why a record holds a pick as none: expected value's, with every row at P 0, or every rule's, with every response
+#: marked not permitted (SPC-195).
+_WHY_P0 = "since every row had P 0"
+_WHY_VETOED = "since every response was marked not permitted"
+#: Each response a record lists as marked not permitted, with its reason (SPC-195).
+_NOT_PERMITTED = "Not permitted: {name} ({id}): {reason}"
 #: The rule used and its pick, on a record that holds a primary rule, whose results named the primary's pick the
 #: recommendation; and on one from before, whose results recommended the rule used's pick alone.
 _USED = "Rule used: {rule}, picking {pick}."
-_USED_NONE = "Rule used: {rule}, with no pick, since every row had P 0."
+_USED_NONE = "Rule used: {rule}, with no pick, {why}."
 _USED_TREE = "Rule used: {rule}; on the one-turn matrix it picks {pick}."
 _USED_BEFORE = "Rule used: {rule}. Recommended: {pick}."
 _USED_BEFORE_TREE = "Rule used: {rule}. The one-turn matrix recommends {pick}."
@@ -421,6 +466,8 @@ class ListedRecord:
     primary: str
     #: The rule used and its pick, in the words that fit what the results showed when it ran.
     used: str
+    #: Each response marked not permitted, with its reason (SPC-195); empty when none was.
+    not_permitted: tuple[str, ...] = ()
 
     @property
     def primary_recorded(self) -> bool:
@@ -433,9 +480,15 @@ def as_entered(km: float) -> str:
     return repr(km).removesuffix(".0")
 
 
-def _pick_text(response_id: str, name: str) -> str:
-    """A pick a record holds, as the records page names it: its name and id, or that there was none."""
-    return _NO_PICK if not response_id and not name else f"{name} ({response_id})"
+def _why_none(row: DecisionRecord) -> str:
+    """Why *row* holds a pick as none: every response marked not permitted, else every row at P 0."""
+    responses = json.loads(row.responses)
+    return _WHY_VETOED if responses and len(_vetoed(row)) == len(responses) else _WHY_P0
+
+
+def _pick_text(response_id: str, name: str, why: str) -> str:
+    """A pick a record holds, as the records page names it: its name and id, or that there was none and *why*."""
+    return f"nothing, {why}" if not response_id and not name else f"{name} ({response_id})"
 
 
 def _primary_text(row: DecisionRecord) -> str:
@@ -446,7 +499,7 @@ def _primary_text(row: DecisionRecord) -> str:
     pick = _pick_of(getattr(row, f"{row.primary_rule}_id"), getattr(row, f"{row.primary_rule}_name"))
     words = {
         "primary": _RULE_WORDS[row.primary_rule],
-        "shown": _SHOWN_NONE if pick is None else _SHOWN.format(pick=f"{pick[1]} ({pick[0]})"),
+        "shown": _SHOWN_NONE.format(why=_why_none(row)) if pick is None else _SHOWN.format(pick=f"{pick[1]} ({pick[0]})"),
     }
     if row.primary_rule == row.rule:
         return _PRIMARY_USED.format(**words)
@@ -457,22 +510,22 @@ def _used_text(row: DecisionRecord) -> str:
     """The rule used and its pick: since a record holds a primary rule, the primary's pick was the recommendation, so
     the rule used's is only its pick; on a record from before, it was the recommendation."""
     rule, pick = _RULE_WORDS.get(row.rule, row.rule), _pick_of(row.recommended_id, row.recommended_name)
-    said = _pick_text(row.recommended_id, row.recommended_name)
+    said = _pick_text(row.recommended_id, row.recommended_name, _why_none(row))
     if row.primary_rule not in _RULE_WORDS:
         return (_USED_BEFORE_TREE if row.turns > 1 else _USED_BEFORE).format(rule=rule, pick=said)
     if pick is None:
-        return _USED_NONE.format(rule=rule)
+        return _USED_NONE.format(rule=rule, why=_why_none(row))
     return (_USED_TREE if row.turns > 1 else _USED).format(rule=rule, pick=said)
 
 
 def listed(row: DecisionRecord, viewer: Operator) -> ListedRecord:
     """*row* as the records page lists it to *viewer*."""
-    view = row_view(row)
+    view, why = row_view(row), _why_none(row)
     return ListedRecord(
         id=row.id, created=utc_text(row.created_at), username=row.username, scenario_name=row.scenario_name,
         rule=_RULE_WORDS.get(row.rule, row.rule),
         picks=tuple(
-            (RULE_WORDS[rule], _pick_text(getattr(row, f"{rule.value}_id"), getattr(row, f"{rule.value}_name")))
+            (RULE_WORDS[rule], _pick_text(getattr(row, f"{rule.value}_id"), getattr(row, f"{rule.value}_name"), why))
             for rule in RULES
         ),
         turns=row.turns, keep_out_km=as_entered(row.keep_out_km), code_version=row.code_version or "not recorded",
@@ -480,4 +533,7 @@ def listed(row: DecisionRecord, viewer: Operator) -> ListedRecord:
         tree_pick="" if row.tree_pick_id is None else f"{row.tree_pick_name} ({row.tree_pick_id})",
         tree_lines=tuple(json.loads(row.tree_recommendation)), caveat=row.expected_value_caveat or "",
         decidable=_owns(row, viewer) and not view.decided, primary=_primary_text(row), used=_used_text(row),
+        not_permitted=tuple(
+            _NOT_PERMITTED.format(name=r["name"], id=r["id"], reason=r["not_permitted"]) for r in _vetoed(row)
+        ),
     )

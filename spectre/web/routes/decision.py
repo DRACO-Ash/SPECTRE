@@ -21,6 +21,7 @@ import html
 import itertools
 import logging
 import math
+import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple, cast
@@ -43,6 +44,7 @@ from spectre.domain.decision import (
     MAX_KEEP_OUT_KM,
     MAX_SAMPLE_HOURS,
     MAX_TURNS,
+    MAX_VETO_REASON,
     MIN_KEEP_OUT_KM,
     ActionType,
     AdversaryAction,
@@ -174,6 +176,23 @@ _MAX_BUDGET_M_S = 1000.0
 _DEFAULT_BUDGET_M_S = 50.0
 _RESPONSE_RELOAD = "The response fields do not match the friendly rows; reload the panel."
 _AXIS_UNKNOWN = "Choose a listed axis for row {row}."
+# A response marked not permitted (SPC-195): its reason is required, at most MAX_VETO_REASON characters and one line
+# of plain text, and a reason with no tick is refused rather than dropped unsaid.
+_VETO_REASON_REQUIRED = (
+    "Give the reason response row {row} is not permitted: it is required when Not permitted is ticked."
+)
+_VETO_TOO_LONG = "The reason in response row {row} is at most {most} characters; this one is {n:,}."
+_VETO_CONTROL = "The reason in response row {row} holds a control character; remove it and evaluate again."
+_VETO_UNTICKED = (
+    "Response row {row} has a reason for being not permitted, but Not permitted is not ticked: tick it, or clear the "
+    "reason."
+)
+_VETO_UNMATCHED = (
+    "Not permitted names a response that is not exactly one row of the form; reload the panel and enter the "
+    "responses again."
+)
+#: A control character, which a one-line reason never holds.
+_VETO_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 # The game tree (SPC-142): what the operator states turn 1 showed of red, by the form's names.
 _OBSERVED_UNKNOWN = "Choose a listed observation for turn 1."
 _OBSERVED_ONE_TURN = (
@@ -641,6 +660,46 @@ def _friendly_rows(
     ]
 
 
+def _vetoes(inputs: _Inputs, form: _ScenarioForm) -> list[str | None]:
+    """Each friendly row's reason for being not permitted, stripped, or None for a row permitted (SPC-195); empty
+    when the form posts neither column. The box posts the row's id when ticked, so a tick must name exactly one row;
+    every row posts its reason, blank included, so the reasons stay aligned with the rows."""
+    ids, ticked, reasons = form.fr_ids or [], form.fr_vetoed or [], form.fr_veto_reasons
+    if reasons is None and not ticked:
+        return []
+    if reasons is None or len(reasons) != len(ids):
+        inputs.refuse(_RESPONSE_RELOAD)
+        return []
+    if any(ids.count(t) != 1 for t in ticked):
+        inputs.refuse(_VETO_UNMATCHED)
+        return []
+    return [_veto(inputs, reason.strip(), ids[i] in ticked, i + 1) for i, reason in enumerate(reasons)]
+
+
+def _veto(inputs: _Inputs, reason: str, ticked: bool, row: int) -> str | None:
+    """One row's reason when it is ticked, checked; None when it is not, and a reason then refused, not dropped."""
+    if not ticked:
+        if reason:
+            inputs.refuse(_VETO_UNTICKED.format(row=row))
+        return None
+    if not reason:
+        inputs.refuse(_VETO_REASON_REQUIRED.format(row=row))
+    elif len(reason) > MAX_VETO_REASON:
+        inputs.refuse(_VETO_TOO_LONG.format(row=row, most=MAX_VETO_REASON, n=len(reason)))
+    elif _VETO_CONTROL_CHARACTER.search(reason):
+        inputs.refuse(_VETO_CONTROL.format(row=row))
+    return reason
+
+
+def _vetoed(responses: list[FriendlyResponse], vetoes: Sequence[str | None]) -> list[FriendlyResponse]:
+    """*responses*, each whose row gives a reason marked not permitted with it (SPC-195)."""
+    reasons = [*vetoes, *([None] * (len(responses) - len(vetoes)))]
+    return [
+        r if why is None else dataclasses.replace(r, vetoed=True, veto_reason=why)
+        for r, why in zip(responses, reasons, strict=True)
+    ]
+
+
 def _burn_columns(form: _ScenarioForm, rows: int, inputs: _Inputs) -> tuple[list[str], list[str], list[str]] | None:
     """The three burn columns, or None when the form posts none; columns of another length than the rows are
     refused. Every row posts all three, blanks included, so they stay aligned with the friendly rows (SPC-121)."""
@@ -722,6 +781,8 @@ def _panel_context(state: SessionState, prefill: SweepPrefill | None = None) -> 
         "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
         "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
         "default_probability": DEFAULT_PROBABILITY,
+        # The longest reason a response may give for being not permitted (SPC-195), the engine's own.
+        "max_veto_reason": MAX_VETO_REASON,
         # The keep-out distance (SPC-191): a scenario opened from the sweep takes the default like any other.
         "keep_out": {
             "default": f"{DEFAULT_KEEP_OUT_KM:g}", "min": f"{MIN_KEEP_OUT_KM:g}", "max": f"{MAX_KEEP_OUT_KM:g}",
@@ -887,6 +948,9 @@ class _ScenarioForm(BaseModel):
     fr_targets: list[str] | None = Field(default=None, alias="fr_target")
     fr_budgets: list[str] | None = Field(default=None, alias="fr_budget")
     fr_axes: list[str] | None = Field(default=None, alias="fr_axis")
+    # Not permitted per friendly row (SPC-195): the ids of the rows ticked, and every row's reason, blanks included.
+    fr_vetoed: list[str] | None = Field(default=None, alias="fr_vetoed")
+    fr_veto_reasons: list[str] | None = Field(default=None, alias="fr_veto_reason")
     # Scoring weights
     w_custody: str = "0.35"
     w_ca: str = "0.25"
@@ -938,6 +1002,8 @@ class _Parsed(NamedTuple):
     turns:     int = 1
     observed:  Seen | None = None
     keep_out_km: float = DEFAULT_KEEP_OUT_KM
+    # Each friendly row's reason for being not permitted, None for a row permitted (SPC-195).
+    vetoes:    tuple[str | None, ...] = ()
 
 
 def _observed(inputs: _Inputs, raw: str) -> Seen | None:
@@ -976,7 +1042,8 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
     if observed is not None and turns == 1:
         # One turn has no later pick for it to update, and no tree to say so on: refused, not dropped unsaid.
         inputs.refuse(_OBSERVED_ONE_TURN)
-    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form), turns, observed, keep_out)
+    burns, vetoes = _burns(inputs, form), tuple(_vetoes(inputs, form))
+    return _Parsed(horizon, weights, adversary, friendly, entries, burns, turns, observed, keep_out, vetoes)
 
 
 def _utc_now() -> datetime:
@@ -1061,9 +1128,9 @@ def _scenario(
         name=form.scenario_name,
         epoch_utc=now,
         adversary_actions=_adversary_rows(parsed.adversary, hypotheses),
-        friendly_responses=_friendly_rows(
+        friendly_responses=_vetoed(_friendly_rows(
             form.fr_ids or [], form.fr_names or [], form.fr_types or [], parsed.friendly, parsed.burns,
-        ),
+        ), parsed.vetoes),
         horizon_hours=parsed.horizon,
         w_custody=w_custody_n,
         w_closest_approach=w_ca_n,

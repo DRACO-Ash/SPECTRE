@@ -275,7 +275,7 @@ class TestTheEnginePage:
     ) -> None:
         held.threat_picture = _picture(understanding=level)
         text = _text(_page(client, auth_cookie))
-        assert "P=0.3 · Conf=0.6" in text
+        assert "P=0.3 (judgement) · Conf=0.6 (judgement)" in text
         assert (f"Understanding {level.name}: shown beside P and Conf as context; it fills neither (from the sweep's "
                 "picture assessed 20 min before this evaluation).") in text
 
@@ -307,7 +307,7 @@ class TestAProbabilityNotPosted:
         resp = _evaluate(client, auth_cookie, form)
         assert resp.status_code == 200 and "error-msg" not in resp.text
         text = _text(resp.text)
-        assert f"P={decision.DEFAULT_PROBABILITY:g} · Conf=0.6" in text
+        assert f"P={decision.DEFAULT_PROBABILITY:g} (lookup) · Conf=0.6 (judgement)" in text
         assert "Expected value rests on a probability the evidence has not earned." in text
 
 

@@ -1284,12 +1284,31 @@ def _section_13_decision_engine(doc: Document) -> None:
              "propagator, with no randomness."],
             ["Sampled", "The P5 of many propagated runs of a hypothesised red burn, the miss only 1 run in 20 came "
              "closer than, with its spread and how well it is known."],
-            ["Lookup", "A fixed rule of thumb or table value. It moves the ranking but rests on no orbit."],
+            ["Lookup", "A fixed rule of thumb or table value. It moves the ranking but rests on no orbit. Each one "
+             "is listed in docs/lookup-register.md with its source, owner and the date it was set."],
+            ["Judgement", "A value on the panel when you evaluated, set by you or kept where the panel started it. "
+             "It is not evidence, and it never lends a figure more standing than a lookup."],
         ],
     )
     _add_body(doc,
         "The composite score is always a lookup. Its weights are not yet cited (SPC-151), so read a cell's figures, "
         "not only its rank."
+    )
+    _add_body(doc,
+        "Under the basis lines, 'Judgement inputs' lists every input on the panel that enters a score or a pick, "
+        "each marked '(judgement)': the weights, the keep-out distance, the horizon and the turns; each response's "
+        "type, cost, reversibility and time to execute, and its burn's target separation, budget and axis; each "
+        "row's type, P and Conf, and its custody gap share where the rule of thumb reads it; each manoeuvre "
+        "hypothesis and its samples; and the turn-1 observation you state for a tree. A value you kept where the "
+        "panel started it is your judgement too, and its note says where a new panel starts it; a budget left blank "
+        "is the 50 m/s default you kept. Each line says what reads it. A P you never edited is marked '(lookup)', the "
+        "panel's default, and so are a P and Conf from a NOTSO suggestion you applied. A hypothesis is marked by where "
+        "it came from: entered, or an archetype you chose, is your judgement, with an archetype's delta-V a lookup; "
+        "a burn detected in the element-set history is what red did, '(computed)'. Its line says its row was sampled "
+        "from it only when it was. A figure's own mark names the evidence and rules it rests on, taking your inputs as "
+        "given. The recommended response's type, cost, reversibility and time to execute, and each row's type, P and "
+        "Conf in the matrix, carry the same mark. The last basis line names the code version that computed the "
+        "result. Every lookup, and every value a new panel starts at, is listed in docs/lookup-register.md."
     )
     _add_body(doc,
         "The score values closest approach and your delta-V in orders of magnitude. Set the keep-out distance on "
@@ -1362,6 +1381,31 @@ def _section_13_decision_engine(doc: Document) -> None:
         "that would come after the closest approach or the span searched, or whose arc fails, is refused in its cell "
         "and its delta-V stays a lookup."
     )
+
+    _add_heading_h2(doc, "Marking a Response Not Permitted")
+    _add_body(doc,
+        "A response that breaks a legal, rules-of-engagement or safety constraint must never be recommended, however "
+        "well it scores (finding F-04, gate G4, SPC-195; the gate's Red rating stands until the evaluation is "
+        "repeated). Tick Not permitted on its row and give the reason in the field beside it: the reason is required "
+        "when the box is ticked, at most 500 characters on one line. A reason typed without the tick is refused "
+        "rather than dropped."
+    )
+    _add_bullet(doc, "No rule ever picks a response marked not permitted: not the headline, not a pick beside it, "
+                "not a turn of the game tree, and not a pick in your decision record. A tie is broken among the "
+                "permitted responses alone, so a tie never brings it back.")
+    _add_bullet(doc, "It is still evaluated, so you see what was excluded and why. It is greyed, with Not permitted: "
+                "and your reason in words, in the matrix heading, in the rankings, where it is listed last with no "
+                "rank and is never ranked first, and beside each of its branches in the tree. Every later branch below "
+                "it in the tree is greyed too, saying it follows that response.")
+    _add_bullet(doc, "If every response is marked not permitted, nothing is recommended: the headline reads No "
+                "recommendation and the results say why, on the matrix and on the game tree alike.")
+    _add_bullet(doc, "Your record keeps which responses were marked not permitted and why. You may still record one "
+                "as your decision, but only with a rationale, and the record says it was marked not permitted. "
+                "The stored inputs are version 2 of their document, holding each veto; a record written by "
+                "0.28.0, version 1, still reads and replays, with nothing vetoed.")
+    _add_bullet(doc, "Each veto is yours, response by response. Constraint libraries drawn from doctrine or rules "
+                "of engagement are the owner's to supply later; these choices are Claude's design, awaiting the "
+                "owner's ruling.")
 
     _add_heading_h2(doc, "How the Figures Are Worked Out")
     _add_bullet(doc, "Closest approach, computed: for a red action that does not move red, both orbits are "
@@ -1517,8 +1561,8 @@ def _section_13_decision_engine(doc: Document) -> None:
     )
     _add_bullet(doc, "The results end with Your decision: choose one of the scenario's own responses, None of "
                 "these, or Decision deferred, and give a rationale of at most 2,000 characters. The rationale is "
-                "required for None of these, and may not hold a control character other than a tab or a line "
-                "break. Record decision stores it with its own UTC time.")
+                "required for None of these and for a response marked not permitted, and may not hold a control "
+                "character other than a tab or a line break. Record decision stores it with its own UTC time.")
     _add_bullet(doc, "A record takes one decision, once: a second is refused with a sentence. Only the operator who "
                 "ran the evaluation may decide it; an admin reads every record but decides only their own.")
     _add_bullet(doc, "Once a job has finished sampling it writes its record before the results show, and Cancel no "
@@ -1548,6 +1592,7 @@ def _section_13_decision_engine(doc: Document) -> None:
 
     _add_heading_h2(doc, "What It Does Not Do")
     _add_bullet(doc, "It does not cite its scoring weights yet (SPC-151); the score is a weighted heuristic.")
+    _add_bullet(doc, "It holds no constraint library: a response is marked not permitted only when you tick it.")
     _add_bullet(doc, "It does not sample element-set error, so a sampled band can be narrower than the orbit is known.")
     _add_bullet(doc, "It does not model a sensor's line of sight to red.")
     _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "

@@ -12,8 +12,10 @@ set, and one pick must serve every branch in it. Each rule is applied by backwar
 ● Minimin takes the best sequence and picks the least: the optimistic rule, not a robust one.
 
 The leaves are each sequence's score, the one-turn weighted sum on its figures, a lookup; lower is better. A tree
-built in part is picked over the turns built in full. The first response wins a tie, as in one turn. Nothing here
-writes a probability into a row, and the update is shown only under expected value, the one rule that reads P.
+built in part is picked over the turns built in full. The first response wins a tie, as in one turn. A response
+marked not permitted (SPC-195) is never valued, so no turn picks it and a tie never brings it back; with every
+response so marked, turn 1 has no pick and says why. Its branches are still built and shown. Nothing here writes a
+probability into a row, and the update is shown only under expected value, the one rule that reads P.
 Imports the Decision Engine, never the reverse; nothing here imports the web layer.
 """
 
@@ -23,7 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, cast
 
-from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s
+from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s, permitted_responses
 from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.turn_update import Posterior, Seen, likelihood, model_lines, posteriors, seen_after, seen_lines
 
@@ -51,6 +53,9 @@ PICK_FIRST = "Turn 1: {pick}."
 PICK_LATER = "Turn {k}, if {history}: {pick}."
 NO_PICK_FIRST = "Turn 1: no pick, since every row has P 0."
 NO_PICK = "Turn {k}, if {history}: no pick, since every row that fits it has P 0."
+# A response marked not permitted (SPC-195): never a pick in any turn, and with every response so marked, no pick.
+NO_PICK_VETOED_FIRST = "Turn 1: no pick, since every response is marked not permitted."
+EXCLUDED = "Never picked in any turn, being marked not permitted: {names}."
 MATRIX_DIFFERS = (
     "Over the {turns} turns, {rule} picks {tree} for turn 1, where the one-turn matrix picks {matrix}: the matrix "
     "sees turn 1 alone."
@@ -81,7 +86,8 @@ _SPAN = "the {turns} turns"
 
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
-    *RULES.values(), PARTIAL, PICK_FIRST, PICK_LATER, NO_PICK_FIRST, NO_PICK, MATRIX_DIFFERS, SCORE_LINE,
+    *RULES.values(), PARTIAL, PICK_FIRST, PICK_LATER, NO_PICK_FIRST, NO_PICK, NO_PICK_VETOED_FIRST, EXCLUDED,
+    MATRIX_DIFFERS, SCORE_LINE,
     PROBABILITY_IGNORED, NO_OBSERVATION, OBSERVED, OBSERVED_NOT_GIVEN, OBSERVED_NO_LATER_TURN, OBSERVED_UNUSED,
     OBSERVED_NO_PICK,
 )
@@ -108,7 +114,8 @@ After = tuple[tuple[int, Seen], ...]
 
 class TurnPick(NamedTuple):
     """The pick for *turn* after *after*, and each response's value there under the rule, lower being better;
-    None for a pick or a value that has no weight under expected value."""
+    None for a pick or a value that has no weight under expected value, and None for the value of a response marked
+    not permitted, which is never valued (SPC-195)."""
 
     turn:   int
     after:  After
@@ -155,11 +162,16 @@ class _Selector:
         p = [a.probability for a in scenario.adversary_actions]
         total = sum(p)
         self.shares = [x / total if total > 0.0 else 0.0 for x in p]
+        self.allowed = set(permitted_responses(scenario))
         self.found: dict[After, TurnPick] = {}
 
     def value(self, members: Sequence[_Member], k: int, after: After) -> float | None:
-        """The rule's value of the set *members* in turn *k*, its pick recorded; None with no weight in it."""
-        values = tuple(self._take(members, k, after, r) for r in range(len(self.scenario.friendly_responses)))
+        """The rule's value of the set *members* in turn *k*, its pick recorded; None with no weight in it, or with
+        every response marked not permitted. A response not permitted is never valued, so it is never the pick."""
+        values = tuple(
+            self._take(members, k, after, r) if r in self.allowed else None
+            for r in range(len(self.scenario.friendly_responses))
+        )
         known = [j for j, v in enumerate(values) if v is not None]
         pick = min(known, key=lambda j: cast("float", values[j])) if known else None
         self.found[after] = TurnPick(k, after, pick, values)
@@ -212,6 +224,8 @@ def _history(scenario: Scenario, after: After) -> str:
 
 
 def _pick_line(scenario: Scenario, pick: TurnPick) -> str:
+    if pick.pick is None and not permitted_responses(scenario):
+        return NO_PICK_VETOED_FIRST
     if pick.pick is None:
         return NO_PICK_FIRST if pick.turn == 1 else NO_PICK.format(k=pick.turn, history=_history(scenario, pick.after))
     name = scenario.friendly_responses[pick.pick].name
@@ -220,9 +234,11 @@ def _pick_line(scenario: Scenario, pick: TurnPick) -> str:
     return PICK_LATER.format(k=pick.turn, history=_history(scenario, pick.after), pick=name)
 
 
-def _matrix_line(scenario: Scenario, strategy: SelectorStrategy, turns: int, picks: Sequence[TurnPick], matrix_pick: int) -> tuple[str, ...]:
+def _matrix_line(
+    scenario: Scenario, strategy: SelectorStrategy, turns: int, picks: Sequence[TurnPick], matrix_pick: int | None,
+) -> tuple[str, ...]:
     tree_pick = picks[0].pick
-    if turns == 1 or tree_pick is None or tree_pick == matrix_pick:
+    if turns == 1 or tree_pick is None or matrix_pick is None or tree_pick == matrix_pick:
         return ()
     names = [f.name for f in scenario.friendly_responses]
     rule = strategy.value.replace("_", " ")
@@ -254,11 +270,18 @@ def _update_lines(
     return (*model, OBSERVED.format(seen=observed.value), stated.line)
 
 
+def _excluded(scenario: Scenario) -> tuple[str, ...]:
+    """The line naming each response marked not permitted, which no turn picks; none when every one is permitted."""
+    names = [r.name for r in scenario.friendly_responses if r.vetoed]
+    return (EXCLUDED.format(names=", ".join(names)),) if names else ()
+
+
 def select(
-    scenario: Scenario, roots: Sequence[TreeNode], turns: int, strategy: SelectorStrategy, *, matrix_pick: int,
+    scenario: Scenario, roots: Sequence[TreeNode], turns: int, strategy: SelectorStrategy, *, matrix_pick: int | None,
 ) -> TreeSelection:
     """*strategy*'s picks over the first *turns* turns of the tree under *roots*, beside the one-turn matrix's pick,
-    *matrix_pick*, which a turn-1 pick that differs from it names. Each turn is the span searched split equally."""
+    *matrix_pick*, which a turn-1 pick that differs from it names; None when the matrix has no pick. Each turn is the
+    span searched split equally."""
     turn_s = _searched_span_s(scenario) / scenario.turns
     selector = _Selector(scenario, strategy, turns, turn_s)
     selector.value([_Member(roots, (), 1.0)], 1, ())
@@ -269,7 +292,7 @@ def select(
     span = _SPAN_ONE if turns == 1 else _SPAN.format(turns=turns)
     partial = (PARTIAL.format(k=turns, turns=scenario.turns),) if turns < scenario.turns else ()
     recommendation = (
-        RULES[strategy].format(span=span), *partial, *(_pick_line(scenario, p) for p in picks),
+        RULES[strategy].format(span=span), *partial, *(_pick_line(scenario, p) for p in picks), *_excluded(scenario),
         *_matrix_line(scenario, strategy, turns, picks, matrix_pick), SCORE_LINE,
     )
     update = _update_lines(scenario, strategy, gives, stated)

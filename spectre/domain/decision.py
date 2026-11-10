@@ -218,6 +218,7 @@ from spectre.domain.threat_understanding import (
 
 if TYPE_CHECKING:
     from spectre.astro.pattern_of_life import Manoeuvre, TLERecord
+    from spectre.domain.decision_judgement import JudgementLine, ResponseInputs, RowInputs
     from spectre.domain.decision_tree import GameTree
     from spectre.domain.notso_prior import NotsoPrior
 
@@ -821,6 +822,16 @@ DEFAULT_PROBABILITY = 0.5
 #: thumb's gap until SPC-161, so a page left at its defaults scores as it did.
 DEFAULT_CUSTODY_GAP_FRACTION = 0.7
 
+#: Where a new panel starts the operator's other inputs (SPC-196): a new adversary row's Conf, and a new response's
+#: cost, reversibility and time to execute. The panel's fields carry these values and
+#: tests/unit/test_lookup_register.py holds them to it; the results name them, since the form records no edit of them.
+DEFAULT_CONFIDENCE = 0.7
+DEFAULT_RESPONSE_COST = 0.3
+DEFAULT_REVERSIBILITY = 0.8
+DEFAULT_TIME_TO_EXECUTE_H = 6.0
+#: The horizon a scenario takes, and a new panel starts at, unless one is given, hours.
+DEFAULT_HORIZON_H = 72.0
+
 #: Beside the adversary rows on the panel: what each of a row's three numbers means and what reads it (SPC-161).
 ADVERSARY_FIELDS_NOTE = (
     "P: how likely you judge this action, from 0 to 1; the expected-value selector weights each row by it. "
@@ -900,6 +911,22 @@ def _require_accepted(action: AdversaryAction) -> None:
         )
 
 
+#: The longest reason a response may give for being not permitted, in characters (SPC-195).
+MAX_VETO_REASON = 500
+#: A response not permitted, in the words the matrix, the rankings and the tree show beside it (SPC-195).
+NOT_PERMITTED = "Not permitted: {reason}"
+#: Each response not permitted, as the result lists it above the matrix (SPC-195).
+VETO_LINE = (
+    "{name} ({id}) is marked not permitted, so no rule picks it; it is still evaluated and shown. Its reason: "
+    "{reason}"
+)
+#: What the expected-value guidance says of minimax when every response is marked not permitted (SPC-195).
+MINIMAX_NONE_PERMITTED = (
+    "Minimax, the cautious rule, needs no probability, but every response is marked not permitted, so it picks "
+    "nothing."
+)
+
+
 @dataclass
 class FriendlyResponse:
     """A single friendly COA to evaluate against each adversary action."""
@@ -914,6 +941,10 @@ class FriendlyResponse:
     # Our burn on the blue asset (SPC-121): a target separation to size it to, with its budget and axis. A
     # manoeuvre response only; it burns at its time to execute after the scenario epoch.
     burn:                 ResponseBurnSpec | None = None
+    # The operator's veto (SPC-195, evaluation F-04): a response marked not permitted on legal, rules-of-engagement
+    # or safety grounds, with the reason in words. It is still evaluated and shown, but no rule ever picks it.
+    vetoed:               bool = False
+    veto_reason:          str = ""
 
     def __post_init__(self) -> None:
         _require_fraction("FriendlyResponse", "cost", self.cost)
@@ -925,6 +956,36 @@ class FriendlyResponse:
             )
         if self.burn is not None:
             _require_burn_spec(self)
+        _require_veto(self)
+
+    @property
+    def not_permitted(self) -> str | None:
+        """The words "Not permitted:" and the reason, for a vetoed response; None for one that is permitted."""
+        return NOT_PERMITTED.format(reason=self.veto_reason) if self.vetoed else None
+
+
+def _require_veto(response: FriendlyResponse) -> None:
+    """A veto is a truth value; a vetoed response gives a reason of at most MAX_VETO_REASON characters, and a
+    permitted one gives none, so no reason is held that nothing reads (SPC-195)."""
+    if not isinstance(response.vetoed, bool):
+        raise TypeError(f"FriendlyResponse.vetoed takes True or False; got {response.vetoed!r}")
+    if not isinstance(response.veto_reason, str):
+        raise TypeError(f"FriendlyResponse.veto_reason takes text; got {type(response.veto_reason).__name__}")
+    if not response.vetoed:
+        if response.veto_reason:
+            raise ValueError("FriendlyResponse.veto_reason is given only for a response not permitted")
+        return
+    if not response.veto_reason.strip():
+        raise ValueError("FriendlyResponse.veto_reason is required when a response is not permitted")
+    if len(response.veto_reason) > MAX_VETO_REASON:
+        raise ValueError(
+            f"FriendlyResponse.veto_reason is at most {MAX_VETO_REASON} characters; got {len(response.veto_reason)}"
+        )
+
+
+def permitted_responses(scenario: Scenario) -> list[int]:
+    """The places of *scenario*'s responses not marked not permitted, in order: the only ones a rule may pick."""
+    return [j for j, response in enumerate(scenario.friendly_responses) if not response.vetoed]
 
 
 def _require_burn_spec(response: FriendlyResponse) -> None:
@@ -1597,7 +1658,7 @@ class Scenario:
     epoch_utc:          datetime
     adversary_actions:  list[AdversaryAction]
     friendly_responses: list[FriendlyResponse]
-    horizon_hours:      float = 72.0
+    horizon_hours:      float = DEFAULT_HORIZON_H
 
     # Scoring weights (sum should equal 1)
     w_custody:          float = 0.35    # Penalty for losing custody
@@ -1695,8 +1756,8 @@ class ScenarioResult:
     outcome_matrix:         list[list[OutcomeMetrics]]
     # ranked_responses[i][j] = (friendly_response, score) sorted best→worst for adversary i
     ranked_per_adversary:   list[list[tuple[FriendlyResponse, float]]]
-    # The robust best response (minimax by default)
-    robust_best_response:   FriendlyResponse
+    # The robust best response (minimax by default); None when every response is marked not permitted (SPC-195)
+    robust_best_response:   FriendlyResponse | None
     robust_strategy:        SelectorStrategy
     computation_time_s:     float
     # The code, calibration and scenario behind this result (audit F-121).
@@ -1870,7 +1931,17 @@ class ScenarioResult:
         if why is None:
             return None
         minimax = find_robust_response(self.scenario, self.outcome_matrix, SelectorStrategy.MINIMAX)
+        if minimax is None:
+            return f"{why} {MINIMAX_NONE_PERMITTED}"
         return f"{why} Minimax, the cautious rule, needs no probability: it picks {minimax.name}."
+
+    @property
+    def veto_lines(self) -> tuple[str, ...]:
+        """Each response marked not permitted, with its reason, and that it is shown but never picked (SPC-195)."""
+        return tuple(
+            VETO_LINE.format(name=r.name, id=r.id, reason=r.veto_reason)
+            for r in self.scenario.friendly_responses if r.vetoed
+        )
 
     @property
     def basis_lines(self) -> tuple[str, ...]:
@@ -2048,6 +2119,45 @@ class ScenarioResult:
         """How the score values closest approach and our delta-V, at this scenario's keep-out distance (SPC-191)."""
         return SCORE_SCALES_LINE.format(keep=_keep_out_text(self.scenario.keep_out_km))
 
+    # ── The operator's judgements and the code version (SPC-196, evaluation F-05) ──
+
+    @property
+    def judgement_head(self) -> str:
+        """What heads the list of judgement inputs on the page."""
+        from spectre.domain.decision_judgement import JUDGEMENT_HEAD
+
+        return JUDGEMENT_HEAD
+
+    @property
+    def judgement_lines(self) -> tuple[JudgementLine, ...]:
+        """Every input the operator entered that enters a score or a pick, each tagged with its basis in words."""
+        from spectre.domain.decision_judgement import judgement_lines
+
+        sampled = tuple(any(c.figure_bases.closest_approach_km.kind is Basis.SAMPLED for c in row)
+                        for row in self.outcome_matrix)
+        return judgement_lines(self.scenario, self.row_custody, sampled)
+
+    @property
+    def row_input_bases(self) -> tuple[RowInputs, ...]:
+        """Per adversary row, the basis of its P, Conf and custody gap share, as its matrix row marks them."""
+        from spectre.domain.decision_judgement import row_inputs
+
+        return tuple(row_inputs(a) for a in self.scenario.adversary_actions)
+
+    @property
+    def response_input_bases(self) -> dict[str, ResponseInputs]:
+        """Per response id, the basis of its cost, reversibility and time to execute, as the headline marks them."""
+        from spectre.domain.decision_judgement import response_inputs
+
+        return {r.id: response_inputs(r) for r in self.scenario.friendly_responses}
+
+    @property
+    def code_version_line(self) -> str:
+        """The code version that computed this result, from its provenance, in words."""
+        from spectre.domain.decision_judgement import code_version_line
+
+        return code_version_line(self.provenance)
+
 
 _ROW_SAMPLED = (
     "Closest approach spread {std:.1f} km (1 sigma) over {n} samples; P5, P50 and P95 known to within {hw:.2f} km. "
@@ -2107,6 +2217,15 @@ _BASE_CA_KM: dict[ActionType, float] = {
     ActionType.SENSOR_RETASK: 10000.0,   # not a physical threat
 }
 _OTHER_CA_KM = 3000.0
+#: The lookup model's rules of thumb, each unsourced and listed in docs/lookup-register.md (SPC-196): a manoeuvre
+#: response raises the lookup closest approach to x(1 + 5 cost), a posture change to x(1 + 2 cost); a manoeuvre with no
+#: sized burn spends cost x 0.05 km/s; against a manoeuvre, a sensor retask holds custody with a gap of half its time
+#: to execute; and a lookup closest approach comes at 0.4 of the horizon.
+_MANOEUVRE_CA_PER_COST = 5.0
+_POSTURE_CA_PER_COST = 2.0
+_LOOKUP_DV_KM_S_PER_COST = 0.05
+_RETASK_GAP_SHARE = 0.5
+_LOOKUP_TCA_SHARE = 0.4
 #: The score's far anchor for closest approach, km: no threat at or beyond it (SPC-191 keeps it from before).
 _CA_NORMALISATION_KM = 50_000.0
 
@@ -2188,11 +2307,13 @@ def _lookup_cell(
     """
     figures = _lookup_figures(adversary, friendly, scenario)
     if friendly.burn is None:
-        return _outcome(scenario, friendly, _Built(figures, scenario.horizon_hours * 0.4, LOOKUP_BASES), custody)
+        return _outcome(
+            scenario, friendly, _Built(figures, scenario.horizon_hours * _LOOKUP_TCA_SHARE, LOOKUP_BASES), custody,
+        )
     unused = _TARGET_UNUSED.format(target=friendly.burn.target_km)
     delta_v = FigureBasis(Basis.LOOKUP, f"{LOOKUP_BASES.delta_v_cost_km_s.note}. {unused}")
     bases = dataclasses.replace(LOOKUP_BASES, delta_v_cost_km_s=delta_v)
-    built = _Built(figures, scenario.horizon_hours * 0.4, bases)
+    built = _Built(figures, scenario.horizon_hours * _LOOKUP_TCA_SHARE, bases)
     return _outcome(scenario, friendly, built, custody, response_refusal=unused)
 
 
@@ -2213,7 +2334,7 @@ def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scen
     elif adversary_is_manoeuvre and friendly.action_type == ActionType.SENSOR_RETASK:
         # Sensor retask reduces gap but doesn't eliminate manoeuvre risk
         custody_maintained = True
-        custody_gap_hours  = friendly.time_to_execute_hours * 0.5
+        custody_gap_hours  = friendly.time_to_execute_hours * _RETASK_GAP_SHARE
 
     # ── Closest approach ─────────────────────────────────────────────────────
     # Phase 1: analytic estimate based on action type pairing
@@ -2221,14 +2342,14 @@ def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scen
 
     # Friendly response modifies CA distance
     if friendly.action_type == ActionType.MANOEUVRE:
-        ca_km = base_ca_km * (1.0 + friendly.cost * 5.0)  # increase separation
+        ca_km = base_ca_km * (1.0 + friendly.cost * _MANOEUVRE_CA_PER_COST)  # increase separation
     elif friendly.action_type == ActionType.POSTURE_CHANGE:
-        ca_km = base_ca_km * (1.0 + friendly.cost * 2.0)
+        ca_km = base_ca_km * (1.0 + friendly.cost * _POSTURE_CA_PER_COST)
     else:
         ca_km = base_ca_km
 
     # ── ΔV cost ───────────────────────────────────────────────────────────────
-    dv_km_s = friendly.cost * 0.05 if friendly.action_type == ActionType.MANOEUVRE else 0.0   # 0–50 m/s range
+    dv_km_s = friendly.cost * _LOOKUP_DV_KM_S_PER_COST if friendly.action_type == ActionType.MANOEUVRE else 0.0
 
     return _Figures(custody_maintained, custody_gap_hours, ca_km, dv_km_s)
 
@@ -3946,17 +4067,18 @@ def rank_responses(
 ) -> list[tuple[FriendlyResponse, float]]:
     """Sort friendly responses best→worst for a single adversary action.
 
-    Best = lowest composite score.
+    Best = lowest composite score. A response marked not permitted is listed after every permitted one, in score
+    order among themselves, so it is never ranked first (SPC-195).
     """
     pairs = [(fr, om.composite_score) for fr, om in zip(friendly_responses, outcome_row, strict=True)]
-    return sorted(pairs, key=lambda x: x[1])
+    return sorted(pairs, key=lambda x: (x[0].vetoed, x[1]))
 
 
 def find_robust_response(
     scenario: Scenario,
     outcome_matrix: list[list[OutcomeMetrics]],
     strategy: SelectorStrategy = SelectorStrategy.MINIMAX,
-) -> FriendlyResponse:
+) -> FriendlyResponse | None:
     """Select the robust best response across all adversary actions.
 
     Parameters
@@ -3973,45 +4095,44 @@ def find_robust_response(
 
     Returns
     -------
-    The ``FriendlyResponse`` that is robust under the chosen strategy.
+    The ``FriendlyResponse`` that is robust under the chosen strategy, or None when every response is marked not
+    permitted. A response marked not permitted is removed before any rule aggregates, so it is never the pick, and
+    a tie is broken among the permitted responses alone (SPC-195).
     """
     n_adversary = len(scenario.adversary_actions)
-    n_friendly  = len(scenario.friendly_responses)
 
-    if n_friendly == 0:
+    if not scenario.friendly_responses:
         raise ValueError("No friendly responses to select from")
-
-    scores = [0.0] * n_friendly
+    allowed = permitted_responses(scenario)
+    if not allowed:
+        return None
 
     if strategy == SelectorStrategy.MINIMAX:
-        for j in range(n_friendly):
-            scores[j] = max(outcome_matrix[i][j].composite_score for i in range(n_adversary))
-        best_j = min(range(n_friendly), key=lambda j: scores[j])
+        best_j = min(allowed, key=lambda j: max(outcome_matrix[i][j].composite_score for i in range(n_adversary)))
 
     elif strategy == SelectorStrategy.EXPECTED_VALUE:
-        best_j = _expected_value_pick([a.probability for a in scenario.adversary_actions], outcome_matrix)
+        best_j = _expected_value_pick([a.probability for a in scenario.adversary_actions], outcome_matrix, allowed)
 
     else:  # MINIMIN: minimise the best-case score, the optimistic rule
-        for j in range(n_friendly):
-            scores[j] = min(outcome_matrix[i][j].composite_score for i in range(n_adversary))
-        best_j = min(range(n_friendly), key=lambda j: scores[j])
+        best_j = min(allowed, key=lambda j: min(outcome_matrix[i][j].composite_score for i in range(n_adversary)))
 
     return scenario.friendly_responses[best_j]
 
 
-def _expected_value_pick(probabilities: Sequence[float], outcome_matrix: Sequence[Sequence[OutcomeMetrics]]) -> int:
-    """The index of the response with the least expected score, each row weighed by its share of *probabilities*.
+def _expected_value_pick(
+    probabilities: Sequence[float], outcome_matrix: Sequence[Sequence[OutcomeMetrics]], allowed: Sequence[int],
+) -> int:
+    """The index, among *allowed*, of the response with the least expected score, each row weighed by its share of
+    *probabilities*.
 
     The first such response wins a tie.
     """
     total_p = sum(probabilities)
     if total_p <= 0:
         total_p = 1.0
-    scores = [
-        sum((probabilities[i] / total_p) * outcome_matrix[i][j].composite_score for i in range(len(probabilities)))
-        for j in range(len(outcome_matrix[0]))
-    ]
-    return min(range(len(scores)), key=lambda j: scores[j])
+    return min(allowed, key=lambda j: sum(
+        (probabilities[i] / total_p) * outcome_matrix[i][j].composite_score for i in range(len(probabilities))
+    ))
 
 
 # ── The interval on a NOTSO-derived P, carried into the pick (SPC-132) ─────────
@@ -4087,8 +4208,10 @@ def interval_pick(
     probabilities = [a.probability for a in scenario.adversary_actions]
     centre = probabilities[row]
 
+    allowed = permitted_responses(scenario)
+
     def pick_at(p: float) -> int:
-        return _expected_value_pick([*probabilities[:row], p, *probabilities[row + 1:]], matrix)
+        return _expected_value_pick([*probabilities[:row], p, *probabilities[row + 1:]], matrix, allowed)
 
     low, high = span
     points = sorted({low, high, centre, *(c for c in _crossings(row, probabilities, matrix) if low < c < high)})
@@ -4110,13 +4233,14 @@ def joint_pick(
     holds every corner of the box holds the whole box, so the corners alone say whether the pick changes anywhere.
     """
     probabilities = [a.probability for a in scenario.adversary_actions]
-    pick = _expected_value_pick(probabilities, matrix)
+    allowed = permitted_responses(scenario)
+    pick = _expected_value_pick(probabilities, matrix, allowed)
     rows = sorted(spans)
     for corner in itertools.product(*(spans[r] for r in rows)):
         moved = list(probabilities)
         for r, p in zip(rows, corner, strict=True):
             moved[r] = p
-        found = _expected_value_pick(moved, matrix)
+        found = _expected_value_pick(moved, matrix, allowed)
         if found != pick:
             return pick, (corner, found)
     return pick, None
@@ -4176,7 +4300,7 @@ def interval_lines(
     with two or more such rows, whether it holds with them moved together; under a rule that reads no probability,
     one line saying so in place of an interval it ignores."""
     rows = [i for i, a in enumerate(scenario.adversary_actions) if a.accepted_prior is not None]
-    if not rows:
+    if not rows or not permitted_responses(scenario):
         return ()
     if strategy is not SelectorStrategy.EXPECTED_VALUE:
         return (_PROBABILITY_IGNORED.format(rule=strategy.value.capitalize(), rows=_rows_named(rows)),)
@@ -4335,7 +4459,7 @@ def _evaluate(
         robust_strategy=strategy,
         computation_time_s=round(wall_time, 4),
         provenance=provenance(
-            [value_input("scenario", scenario), *_binding_inputs(scenario), *_hypothesis_inputs(scenario),
+            [value_input("scenario", _hashed(scenario)), *_binding_inputs(scenario), *_hypothesis_inputs(scenario),
              *_transfer_inputs(scenario, transfers), *_prior_inputs(scenario)],
         ),
         row_notes=_row_notes(scenario, plan),
@@ -4348,6 +4472,17 @@ def _evaluate(
         budget_ran_out=_ran_out(budget),
     )
     return result, TurnOne(pre, plan, computed, budget)
+
+
+def _hashed(scenario: Scenario) -> dict[str, Any]:
+    """*scenario* as its provenance hashes it: every field, except that a permitted response omits its veto and
+    reason, so a scenario with nothing vetoed hashes as it did before vetoes existed and a 0.28.0 record's input
+    hashes still match its replay (SPC-195)."""
+    plain = dataclasses.asdict(scenario)
+    for response in plain["friendly_responses"]:
+        if not response["vetoed"]:
+            del response["vetoed"], response["veto_reason"]
+    return plain
 
 
 def _ran_out(budget: _Budget | None) -> bool:

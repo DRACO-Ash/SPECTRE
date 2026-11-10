@@ -290,6 +290,8 @@ class EvidenceItem:
              "a prior never raises the floor above MEDIUM"),
             (_band_key(self.floor_to) > int(_PRIOR_FLOOR_CAP) and self.basis is Basis.LOOKUP,
              "an uncalibrated lookup never raises the floor above MEDIUM"),
+            # A judgement is weaker than a lookup (SPC-196), so no rule here written for a lookup may let one through.
+            (self.basis is Basis.JUDGEMENT, "a judgement is not evidence; the threat model reads none"),
         )
         for failed, message in problems:
             if failed:
@@ -957,8 +959,8 @@ def _grade(floor: Support | None, ceiling: Support, *, lapsed: bool = False) -> 
     name, support = next((n, s) for n, s in bounds if s.basis is least)
     past = lapsed and name == "ceiling"
     rests, since = ("rested", ", since decayed") if past else ("rests", "")
-    if least is Basis.LOOKUP:
-        return Understanding.LOW, f"the {name} {rests} on a lookup ({support.label}){since}"
+    if _BASIS_RANK[least] <= _BASIS_RANK[Basis.LOOKUP]:   # a judgement, weaker still, grades no higher (SPC-196)
+        return Understanding.LOW, f"the {name} {rests} on a {least.value} ({support.label}){since}"
     if least is Basis.SAMPLED:
         return Understanding.MODERATE, f"the {name} {rests} on a sampled figure ({support.label}){since}"
     if any(s.controlled for _, s in bounds):

@@ -314,7 +314,7 @@ class TestEvaluate:
         page = _results(client, auth_cookie)
         assert "error-msg" not in page
         assert "P and Conf are your own." in _text(page)
-        assert "P=0.6 · Conf=0.7" in _text(page)
+        assert "P=0.6 (judgement) · Conf=0.7 (judgement)" in _text(page)
 
     def test_a_ticked_suggestion_still_shown_is_applied_and_recorded(
         self, client: Any, auth_cookie: str, held: Any,
@@ -322,7 +322,7 @@ class TestEvaluate:
         page = _results(client, auth_cookie, adv_prior=[f"A1|{_P}|"])
         assert "error-msg" not in page
         text = _text(page)
-        assert f"P={_P} · Conf=0.7" in text
+        assert f"P={_P} (lookup) · Conf=0.7 (judgement)" in text
         assert f"P {_P} is the NOTSO suggestion you applied; Conf is your own." in text
 
     def test_a_ticked_suggestion_with_a_conf_applies_both(self, client: Any, auth_cookie: str, held: Any) -> None:

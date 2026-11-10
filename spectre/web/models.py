@@ -182,7 +182,8 @@ class DecisionRecord(Base):
     calibration_source: Mapped[str] = mapped_column(Text, nullable=False)
     #: [{"label", "sha256", "epoch"}] in the provenance's order, as JSON.
     input_hashes: Mapped[str] = mapped_column(Text, nullable=False)
-    #: [{"id", "name"}] of the scenario's friendly responses, in its order, as JSON.
+    #: [{"id", "name"}] of the scenario's friendly responses, in its order, as JSON; a response marked not permitted
+    #: (SPC-195) also carries "not_permitted", its reason.
     responses: Mapped[str] = mapped_column(Text, nullable=False)
     turns: Mapped[int] = mapped_column(Integer, nullable=False)
     keep_out_km: Mapped[float] = mapped_column(Float, nullable=False)

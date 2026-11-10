@@ -5,7 +5,9 @@ result's GameTree into plain values the template prints without doing any sum: e
 sequence's, each with its basis kind and rule, the path of red moves and our responses it rests on, and whether it
 is on the plan the recommendation follows. Delta-V is converted to m/s here, at the route boundary, and only here.
 The per-turn recommendation and the update after turn 1 are the selection's own lines, in two parts; under a rule
-that reads no probability the second part is headed as what each turn lets us see, since nothing is updated.
+that reads no probability the second part is headed as what each turn lets us see, since nothing is updated. A
+branch whose own response is marked not permitted (SPC-195) says so, with the reason, beside its heading; a later
+branch below it says that it follows that response, so every sequence such a response starts is shown as excluded.
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ HEADING_NOT_BUILT = "Game tree: {turns} turns asked for, none built"
 UPDATE_HEADING = "The update after turn 1"
 UPDATE_HEADING_NO_PROBABILITY = "What each turn lets us see"
 _HEADING = "Turn {k} of {turns}: red {action}, our {response}"
+#: A branch below one whose response is marked not permitted (SPC-195): its sequence is excluded too.
+_FOLLOWS = "Excluded: it follows {response} in turn {k}, which is marked not permitted."
 _PATH = "Rests on: {steps}."
 _STEP = "{action} against {response} in turn {k}"
 _SUMMARY = "score {score:.3f} ({score_kind}); closest approach along it {closest:.1f} km ({closest_kind})"
@@ -94,6 +98,9 @@ class NodeView:
     plan:     str
     figures:  tuple[FigureView, ...]
     children: tuple[NodeView, ...]
+    #: "Not permitted:" and the reason when this branch's own response is marked so (SPC-195); else, when an earlier
+    #: turn's response along its sequence is, that it follows that response; else empty.
+    not_permitted: str = ""
 
 
 @dataclass(frozen=True)
@@ -155,6 +162,7 @@ class _Builder:
         self.result, self.tree = result, tree
         self.actions = [a.name for a in result.scenario.adversary_actions]
         self.responses = [f.name for f in result.scenario.friendly_responses]
+        self.vetoes = [f.not_permitted or "" for f in result.scenario.friendly_responses]
 
     def node(self, node: GameNode, before: Sequence[tuple[int, int]]) -> NodeView:
         steps = (*before, (node.action, node.response))
@@ -177,6 +185,14 @@ class _Builder:
             ),
             on, plan, self.figures(node),
             tuple(self.node(child, steps) for child in node.children),
+            self.vetoes[node.response] or self.follows(before),
+        )
+
+    def follows(self, before: Sequence[tuple[int, int]]) -> str:
+        """That a branch follows a response marked not permitted in an earlier turn, the first such; else empty."""
+        return next(
+            (_FOLLOWS.format(response=self.responses[r], k=k) for k, (_, r) in enumerate(before, 1) if self.vetoes[r]),
+            "",
         )
 
     def figures(self, node: GameNode) -> tuple[FigureView, ...]:

@@ -151,8 +151,8 @@ class TestTheBasesAreTyped:
     def test_every_figure_has_an_operator_label(self) -> None:
         assert set(FIGURE_LABELS) == {f.name for f in fields(OutcomeBases)}
 
-    def test_the_bases_are_exactly_lookup_sampled_computed(self) -> None:
-        assert {b.value for b in Basis} == {"lookup", "sampled", "computed"}
+    def test_the_bases_are_exactly_judgement_lookup_sampled_computed(self) -> None:
+        assert {b.value for b in Basis} == {"judgement", "lookup", "sampled", "computed"}   # judgement: SPC-196
 
     def test_weakest_orders_lookup_sampled_computed(self) -> None:
         assert weakest(Basis.COMPUTED, Basis.LOOKUP) is Basis.LOOKUP

@@ -4,7 +4,8 @@
    records (decision_record.ListedRecord, newest first), every (an admin's view of every operator's records, which
    names whose each is) and current_user. Every field is the operator's text or the engine's, and autoescaped. Each
    figure says its basis: the one-turn matrix's pick, a tree's own turn-1 pick, which rules' picks the results showed
-   and when expected value's probability is not earned. No script and no handler attribute. #}
+   and when expected value's probability is not earned. Each response marked not permitted is listed with its
+   reason (SPC-195), and a decision that chose one says so. No script and no handler attribute. #}
 {% block title %}SPECTRE: Decision records{% endblock %}
 
 {# The bar holds only the way back, so it fits a phone's width beside the logo; who is signed in, and Sign Out, sit
@@ -69,8 +70,14 @@
     {% if r.caveat %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--gold)">{{ r.caveat }}</p>
     {% endif %}
+    {% for line in r.not_permitted %}
+    <p class="not-permitted" style="margin:0.1rem 0 0; font-size:0.72rem; font-style:italic; color:var(--text-dim)">{{ line }}</p>
+    {% endfor %}
     {% if r.decision.decided %}
     <p style="margin:0.2rem 0 0; font-size:0.75rem; font-weight:700; color:var(--text-primary)">Decided {{ r.decision.decided_at }}: {{ r.decision.decision_name }}.</p>
+    {% if r.decision.marked %}
+    <p class="decision-not-permitted" style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--gold)">{{ r.decision.marked }}</p>
+    {% endif %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim); white-space:pre-wrap">{% if r.decision.rationale %}Rationale: {{ r.decision.rationale }}{% else %}No rationale given.{% endif %}</p>
     {% else %}
     <p style="margin:0.2rem 0 0; font-size:0.75rem; font-weight:700; color:var(--gold)">No decision recorded.</p>

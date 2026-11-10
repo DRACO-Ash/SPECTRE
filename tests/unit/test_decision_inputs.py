@@ -195,6 +195,10 @@ SCENARIOS: dict[str, Any] = {
     "blue only, unreadable epoch, training, no satno": lambda: dataclasses.replace(_lookup(), binding=ScenarioBinding(
         blue=dataclasses.replace(cases.bound("blue"), epoch=None, age_hours=None, limit_hours=None, satno=None,
                                  training=True, data_mode="SIMULATED"))),
+    "a response not permitted (SPC-195)": lambda: dataclasses.replace(_lookup(), friendly_responses=[
+        dataclasses.replace(r, vetoed=True, veto_reason="ROE \u2013 <none>") if j == 1 else r
+        for j, r in enumerate(_lookup().friendly_responses)
+    ]),
     "red out of date, lost": lambda: dataclasses.replace(_lookup(), binding=ScenarioBinding(
         red=_bound(age_hours=40.0, custody=CustodyStatus(Custody.LOST, "Custody lost.")), blue=cases.bound("blue"))),
 }
@@ -330,12 +334,12 @@ class TestStrictRefusal:
         _assert_refused(canonical_json(document), sha256, "SHA-256")
 
     def test_an_unknown_version_is_refused(self) -> None:
-        _assert_refused(*_stored({**_document(), "version": VERSION + 1}), "version 2", "knows version 1")
+        _assert_refused(*_stored({**_document(), "version": VERSION + 1}), "version 3", "knows versions 1 and 2")
 
     def test_a_version_that_is_not_a_whole_number_is_refused(self) -> None:
-        text, sha256 = _stored({**_document(), "version": 1.0})
-        assert '"version":1.0' in text
-        _assert_refused(text, sha256, "version 1.0", "knows version 1")
+        text, sha256 = _stored({**_document(), "version": 2.0})
+        assert '"version":2.0' in text
+        _assert_refused(text, sha256, "version 2.0", "knows versions 1 and 2")
 
     def test_a_truth_value_is_not_a_score(self) -> None:
         document = _document()

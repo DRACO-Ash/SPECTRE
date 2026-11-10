@@ -31,6 +31,7 @@
   "fields_note": adversary_fields_note if adversary_fields_note is defined else "",
   "default_gap": default_gap if default_gap is defined else 0.7,
   "default_probability": default_probability if default_probability is defined else 0.5,
+  "max_veto_reason": max_veto_reason if max_veto_reason is defined else 500,
 } %}
 
 {# ── Our burn for one friendly row (SPC-121). Read only for a manoeuvre response; a blank target leaves its delta-V
@@ -57,6 +58,20 @@
   <p style="margin:0.2rem 0 0">With both sides bound, our burn is sized at the response's time to execute after the
     scenario epoch to put the closest approach at the target, within the budget, and applied to the blue asset.</p>
 </details>
+{%- endmacro %}
+
+{# ── Not permitted for one friendly row (SPC-195, evaluation F-04): a labelled box and a labelled reason, required
+     when the box is ticked. The box posts the row's own id, so a tick names its row; every row posts its reason,
+     blank included, so the reasons stay aligned with the rows. A response so marked is still evaluated and shown, but
+     no rule picks it. The row builder below emits this same block with its own id. No div inside, no handler. The
+     box sets its own width, since the stylesheet stretches every input to the width of its box. ── #}
+{% macro response_veto_fields(h, row_id) -%}
+<div class="fr-veto" style="grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:0.3rem 0.6rem; align-items:center; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+  <label style="display:inline-flex; align-items:center; gap:0.25rem; white-space:nowrap"><input type="checkbox" name="fr_vetoed" value="{{ row_id }}" style="width:auto; flex:none; margin:0; padding:0"> Not permitted</label>
+  <label style="flex:1 1 12rem">Reason not permitted (legal, rules of engagement or safety; required when ticked, at most {{ h.max_veto_reason }} characters)
+    <input type="text" name="fr_veto_reason" maxlength="{{ h.max_veto_reason }}" style="width:100%; font-size:0.6rem">
+  </label>
+</div>
 {%- endmacro %}
 
 {# ── A manoeuvre hypothesis for one adversary row (SPC-114). Every field sits in its label and carries no id,
@@ -287,6 +302,7 @@
           ✕
         </button>
         {{ response_burn_fields(hyp) }}
+        {{ response_veto_fields(hyp, "R1") }}
       </div>
     </div>
     <button type="button" onclick="addFrRow()"
@@ -427,7 +443,8 @@ function addFrRow() {
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
     <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" style="font-size:0.63rem" title="Time to execute (h)">
     <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
-    {{ response_burn_fields(hyp) }}`;
+    {{ response_burn_fields(hyp) }}
+    {{ response_veto_fields(hyp, "R${c}") }}`;
   document.getElementById('fr-rows').appendChild(div);
 }
 

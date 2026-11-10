@@ -54,7 +54,7 @@ from spectre.domain.decision import (
 )
 from spectre.domain.decision_transfer import ledger_sentence
 from spectre.domain.decision_tree import evaluate_tree
-from spectre.domain.rule_comparison import RULE_WORDS, label, matrix_picks
+from spectre.domain.rule_comparison import RULE_WORDS, matrix_picks, pick_words
 from spectre.web.decision_record import primary_rule
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey
@@ -193,8 +193,7 @@ def _recommendation(result: ScenarioResult) -> str:
     primary, chosen, picks = primary_rule(), result.robust_strategy, matrix_picks(result)
 
     def said(rule: SelectorStrategy) -> str:
-        pick = picks[rule]
-        return "no pick, since every row has P 0" if pick is None else log_safe(label(pick))
+        return log_safe(pick_words(result.scenario, picks[rule]))
 
     if chosen is primary:
         return f"{said(primary)}, the pick of {RULE_WORDS[primary]}, the primary rule and the rule chosen."
