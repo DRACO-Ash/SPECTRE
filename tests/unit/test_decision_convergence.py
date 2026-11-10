@@ -6,7 +6,8 @@ magnitude. The 1 km absolute tolerance refused most burns already made, the
 of a few km changes no answer. The tolerance is now 1 km, or 5 % of P5 where
 that is larger: below 20 km, every close approach the operator would act on
 is held exactly as tightly as before, and the score moves by at most
-w_ca x half-width / 50,000.
+w_ca x ln(1 + half-width / P5) / ln(50,000 / keep-out), the closest-approach term valued in
+orders of magnitude (SPC-191).
 
 Measured at seed 42 (the archetypes' default), the reference element sets in
 tests/unit/_decision_reference.py, the burn 0.25 h into the window unless

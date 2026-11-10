@@ -2,7 +2,8 @@
 
 *Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release, and updated for
 three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
-lost (SPC-179) and the record of whether each P was edited (SPC-183). The history of each step is in CHANGELOG.md
+lost (SPC-179) and the record of whether each P was edited (SPC-183); and for the score scales of SPC-191, which are
+Claude's design choices, not rulings. The history of each step is in CHANGELOG.md
 and docs/CHANGE-LEDGER.md; this page says what the engine does now and why.*
 
 **Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
@@ -39,8 +40,59 @@ or "(lookup)" with the rule behind it in words:
 
 The composite score is a weighted sum of custody, closest approach, our delta-V, time to execute and reversibility,
 lower being better. Its weights are uncited (SPC-151), so the score is always a lookup, whatever its inputs are.
-Closest approach is normalised to 50,000 km and delta-V to 100 m/s, so a few kilometres of miss barely move a score
-while a burn does; the page tells the operator to read the cell, not the ranking, for what a burn buys.
+Closest approach and our delta-V are each valued in orders of magnitude (SPC-191): closest approach scores its full
+penalty at or inside the keep-out distance the operator sets on the panel and none at 50,000 km, and our delta-V
+reaches its full penalty at the engine's 1,000 m/s per-burn limit. The next section sets out both scales.
+
+## Score scales (SPC-191)
+
+**Status: built. Each scale is Claude's design choice, not a ruling.** Evaluation finding F-10 (Critical) found the
+score nearly blind to closest approach. Closest approach entered it linearly over 0 to 50,000 km at weight 0.25, so
+1 m/s of our delta-V weighed the same as 400 km of miss, and our delta-V saturated at 100 m/s, so 100 and 500 m/s
+scored the same. A 1 m/s burn that opened a miss from 1 km to 100 km ranked below doing nothing (probe P-17). The
+owner said on 2026-11-10 "F-10 first". **The technical authority has not yet signed the scale rationale**, which
+F-10's closing evidence requires, so F-10 stays open until it does.
+
+● **Closest approach, in orders of magnitude from a keep-out distance K** (Claude's choice). The term is 1 for a
+  miss at or inside K, 0 at or beyond 50,000 km, the far anchor kept from before, and ln(50,000 / miss) /
+  ln(50,000 / K) between. It is continuous and falls strictly between the anchors, and each tenfold of miss is worth
+  the same: about 0.27 of the term at K 10 km. The operator's question is whether something can reach one of theirs,
+  a question of magnitude: 1 km and 100 km differ in kind, 20,000 km and 20,100 km do not.
+● **K is the operator's** (Claude's choice). It is a Scenario field, keep_out_km, set on the panel as the labelled
+  number field "Keep-out distance (km)", from 0.1 to 10,000 km, below the far anchor so the scale has room. A value
+  outside that range, or not a finite number, is refused with a sentence, as every other panel number is. A cleared
+  field is refused too, as a cleared horizon is: the form reads a blank as absent, so a default there would score a
+  cleared field at 10 km unasked. The result states the distance it used exactly as entered.
+● **The default K is 10 km** (Claude's choice, unsourced). A miss of a few kilometres is close for any asset, but
+  10 km rests on no source, and the panel, the score's basis note and the result each say so. A scenario opened from
+  the sweep, a reference case and a scenario built in code take the default. K enters the scenario's provenance hash
+  as every other scenario field does.
+● **Our delta-V, in orders of magnitude up to the per-burn limit** (Claude's choice). The term is ln(1 + dv) /
+  ln(1,001) for dv in m/s, and 1 at the engine's per-burn limit, MAX_BURN_M_S, 1,000 m/s, and above. 1 m/s scores
+  0.10, 10 m/s 0.35, 100 m/s 0.67 and 500 m/s 0.90, where 100 and 500 m/s both scored 1 before.
+● **One function each.** `_norm_ca` and `_norm_dv` in `spectre/domain/decision.py` are the only places the score
+  reads a miss or our delta-V. The cell score, the sampled score's percentiles and spread, the computed and sampled
+  response figures, the burn score note, the sampled caveat's spread and the game tree's path score all go through
+  them. The burn score note is now the term before the burn less the term after it, not a linear share of the km,
+  and it reports the cell whose score the burn moves most, which on this scale need not be the one where it buys
+  most kilometres. The game tree's path score reads our burns along a sequence added up on the same scale, so
+  burns adding up to 1,000 m/s or more score the full delta-V term, and its basis note says so.
+● **Break-even at the defaults.** Opening a miss from 1 km to 100 km lowers the score by 0.25 x (1 - ln 500 /
+  ln 5,000) = 0.0676. Our delta-V adds 0.20 x ln(1 + dv) / ln 1,001, which equals that at about 9.3 m/s. A burn
+  under about 9.3 m/s that buys that move now scores better than doing nothing; under the old scales the break-even
+  was about 0.25 m/s. P-17's 1 m/s burn to 100 km scores 0.2039 against 0.2514 for doing nothing, and minimax picks it.
+  The break-even moves with K: about 38 m/s at K 1 km, and none at K 100 km, where a 1 km and a 100 km miss both
+  score the full penalty.
+● **The evaluation probe stays as evidence of 0.24.2.** Evaluation probe P-17 is frozen with the evaluation and
+  reads a constant SPC-191 removed, so it no longer runs against this code. Its inversion, F-10's closing evidence
+  in the code, is `tests/unit/test_decision_score_scales.py`, which recommends the 1 m/s burn to 100 km.
+● **What moved.** No reference case's pick changed: in every case at both window starts, Hold is still the pick under
+  all three rules. No pinned pick in the test suite changed. Pinned scores were re-derived by hand from the two
+  formulas. Scores on far misses fall, so many cells that were amber now read green under the results' colour bands
+  (green below 0.25, amber below 0.50). In the 12 cells of the lookup scenario evaluation probe P-17 uses, misses of
+  200 to 15,000 km, every score drops by 0.07 to 0.16 and 5 cells change band, four of them amber to green and one
+  red to amber. A miss under about 10 km barely moves, and a small burn of ours scores more than before. The bands
+  themselves are finding F-18 (SPC-208) and are unchanged.
 
 ## Phase 1: the matrix, bound to real objects
 

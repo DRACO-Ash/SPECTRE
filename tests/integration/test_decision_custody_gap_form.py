@@ -45,9 +45,11 @@ class TestTheEvaluation:
         assert _scores(client, auth_cookie, adv_conf=["0.9"], adv_gap=["0.5"]) == unsure
 
     def test_the_posted_share_sets_the_gap(self, client: Any, auth_cookie: str) -> None:
-        """0.35 x the share + 0.25 x (1 - 200/50,000) + 0.10 x (4/72) + 0.10 x (1 - 0.8)."""
-        assert _scores(client, auth_cookie, adv_gap=["0.0"]) == ["0.275"]
-        assert _scores(client, auth_cookie, adv_gap=["1.0"]) == ["0.625"]
+        """0.35 x the share + 0.25 x ln 250 / ln 5,000 + 0.10 x (4/72) + 0.10 x (1 - 0.8): the 200 km miss in orders
+        of magnitude from the default 10 km keep-out (SPC-191), 0.25 x 0.648272 = 0.162068, so 0.187624 and 0.537624.
+        """
+        assert _scores(client, auth_cookie, adv_gap=["0.0"]) == ["0.188"]
+        assert _scores(client, auth_cookie, adv_gap=["1.0"]) == ["0.538"]
 
     @pytest.mark.parametrize("confidence", ["0.13", "0.9"])
     def test_the_posted_confidence_is_recorded_on_the_row(

@@ -23,6 +23,7 @@ The bound fixtures are the plane-change reference element sets
 from __future__ import annotations
 
 import dataclasses
+import math
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, NoReturn
@@ -397,7 +398,9 @@ class TestOnlySgp4AndTheScore:
         assert result.propagator_line is None
 
     def test_the_score_follows_the_computed_miss(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """D13: with all the weight on closest approach, the score is 1 - miss / 50,000 at the unrounded miss."""
+        """D13: with all the weight on closest approach, the score is the closest-approach term at the unrounded miss:
+        10.4036 km is just outside the default 10 km keep-out, so ln(50,000 / miss) / ln 5,000 (SPC-191); the lookup's
+        5,000 km is ln 10 / ln 5,000 = 0.270346."""
         scenario = _scenario(binding=_binding())
         for name in ("w_custody", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
             setattr(scenario, name, 0.0)
@@ -415,9 +418,9 @@ class TestOnlySgp4AndTheScore:
         assert miss != round(miss, 1)
         assert scored.count(miss) == 12   # every computed cell scores on 10.4036 km, never on the 10.4 shown
         for cell in _cells(result, _NO_ACTION):
-            assert cell.composite_score == round(1.0 - miss / 50_000.0, 6)
+            assert cell.composite_score == round(math.log(50_000.0 / miss) / math.log(5_000.0), 6)
         lookup = evaluate_scenario(dataclasses.replace(scenario, binding=None))
-        assert _cells(lookup, _NO_ACTION)[_NO_ACTION].composite_score == round(1.0 - 5000.0 / 50_000.0, 6)
+        assert _cells(lookup, _NO_ACTION)[_NO_ACTION].composite_score == 0.270346
 
 
 # ── D14, D15, D17, D19: what the result says ──

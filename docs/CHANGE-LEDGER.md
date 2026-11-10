@@ -1220,3 +1220,12 @@ Four owner rulings built in the Decision Engine, and the evaluation of 0.24.2 co
 | Code Quality | **HYGIENE** | None made for the gate. Product changes in the Decision Engine (`decision.py`, `custody.py`, `decision_tree.py`, `turn_update.py`, `routes/decision.py`, `decision_from_sweep.py` and their templates) | `scripts/check-quality.sh` against the previous commit passed all five legs: no function over 15, 100 per cent coverage on changed lines, 0 per cent duplication. The full suite (8,515 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.26.0
+
+The score's closest-approach and delta-V scales (evaluation finding F-10).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. Product changes in `decision.py`, `decision_figures.py`, `routes/decision.py` and the decision templates | `scripts/check-quality.sh` against 0.25.0 passed all five legs. The full suite (8,578 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

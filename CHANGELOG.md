@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, now registers miss distance (evaluation finding F-10).**
+
+### Changed
+- The score values closest approach in orders of magnitude: the full penalty at or inside a keep-out distance the operator sets on the panel, none at 50,000 km or more, and ln(50,000 / miss) / ln(50,000 / K) between. Before, it was linear over 0 to 50,000 km, so 1 m/s of our delta-V weighed the same as 400 km of miss (SPC-191).
+- The score values our delta-V in orders of magnitude up to the engine's 1,000 m/s per-burn limit, ln(1 + dv) / ln 1,001, so 100 and 500 m/s no longer score the same.
+- At the defaults, spending about 9.3 m/s to move a miss from 1 km to 100 km now breaks even; it was about 0.25 m/s. No reference case's pick changed; far-miss scores fall, so some cells move to a lower colour band (finding F-18, SPC-208, is open).
+
+### Added
+- A "Keep-out distance (km)" field on the decision panel, from 0.1 to 10,000 km, default 10 km. The default and both scales are Claude's design choices, unsourced, and every result says so; the technical authority has not yet signed the scale rationale (`docs/decision_engine_phases.md`, "Score scales"), so F-10 stays open until it does.
+
 ## [0.25.0] - 2026-11-10
 
 **Operator output: 4, the recommended response, from four owner rulings of 5 November 2026.**

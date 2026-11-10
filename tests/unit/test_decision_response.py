@@ -437,17 +437,27 @@ class TestTheBudget:
 
 class TestWhatTheResultSays:
     def test_the_score_note_gives_both_deltas(self, leo: ScenarioResult) -> None:
-        """44."""
+        """44; SPC-191: the move is the closest-approach term before the burn less the one after it, each worked here
+        as 1 at or inside the 10 km keep-out and ln(50,000 / miss) / ln 5,000 beyond it, and the delta-V's share is
+        0.20 x ln(1 + dv) / ln 1,001 for dv in m/s."""
         figure = _cell(leo).ca_response
         assert figure is not None
         w = leo.scenario
-        ca = w.w_closest_approach * figure.buys_km / 50_000.0
-        dv = w.w_dv_cost * _cell(leo).delta_v_cost_km_s / 0.1
+        before, after = figure.misses_km
+        assert after - before == figure.buys_km
+
+        def term(miss_km: float) -> float:
+            return 1.0 if miss_km <= 10.0 else math.log(50_000.0 / miss_km) / math.log(5_000.0)
+
+        ca = w.w_closest_approach * abs(term(before) - term(after))
+        dv_m_s = _cell(leo).delta_v_cost_km_s * 1000
+        dv = w.w_dv_cost * math.log(1.0 + dv_m_s) / math.log(1_001.0)
+        assert ca > w.w_closest_approach * abs(figure.buys_km) / 50_000.0   # more than the linear scale gave it
         assert leo.burn_score_note == (
-            f"The score normalises closest approach to 50,000 km and delta-V to 100 m/s, so the {figure.buys_km:.1f} km "
-            f"our burn buys against Drift moves its score by {ca:.4f} while its "
-            f"{_cell(leo).delta_v_cost_km_s * 1000:.2f} m/s adds {dv:.4f}: read what a burn buys from its cell, not "
-            "from the ranking."
+            "The score values closest approach in orders of magnitude from the 10 km keep-out distance to 50,000 km, "
+            f"and our delta-V in orders of magnitude up to 1,000 m/s, so the {figure.buys_km:.1f} km our burn buys "
+            f"against Drift moves its score by {ca:.4f} while its {dv_m_s:.2f} m/s adds {dv:.4f}: read what a burn "
+            "buys from its cell as well as from the ranking."
         )
 
     def test_the_binding_note_says_when_our_delta_v_is_computed(self) -> None:

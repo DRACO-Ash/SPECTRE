@@ -1826,10 +1826,14 @@
   "group": "eval-trial",
   "minutes": 360,
   "task": "F-10: closest approach enters the score linearly over 0 to 50,000 km at weight 0.25; 1 m/s of our delta-V weighs the…",
-  "note": "Evaluation finding F-10 (Critical, §1b, L1, L2), evaluation/EVALUATION.md. Remediation: a threshold-anchored value function in _norm_ca, anchored at an operator-set keep-out distance; a re-anchored delta-V scale; reference cases re-derived. Closing evidence: P-17 inverted; a scale rationale signed by the technical authority. Owner, 2026-11-10: F-10 first.",
+  "note": "Evaluation finding F-10 (Critical, §1b, L1, L2), evaluation/EVALUATION.md. Remediation: a threshold-anchored value function in _norm_ca, anchored at an operator-set keep-out distance; a re-anchored delta-V scale; reference cases re-derived. Closing evidence: P-17 inverted; a scale rationale signed by the technical authority. Owner, 2026-11-10: F-10 first. Built in 0.26.0: P-17 inverted in tests/unit/test_decision_score_scales.py. The finding stays open until the technical authority signs the scale rationale (SPC-227).",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.26.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-192",
@@ -2273,6 +2277,20 @@
   "note": "Evaluation finding F-38 (Low, L2), evaluation/EVALUATION.md. Remediation: probe it; if confirmed, refuse future epochs. Closing evidence: the probe result and a test.",
   "files": [
    "spectre/web/elsets.py"
+  ]
+ },
+ {
+  "ref": "SPC-227",
+  "priority": "high",
+  "order": 0,
+  "group": "eval-trial",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 60,
+  "task": "Technical authority to sign the score-scale rationale (F-10 closing evidence)",
+  "note": "Read docs/decision_engine_phases.md, Score scales (SPC-191): the keep-out-anchored closest-approach scale, the delta-V scale to 1,000 m/s and the 10 km default are Claude's choices, unsourced. Sign, amend or reject; F-10 closes on signature.",
+  "files": [
+   "docs/decision_engine_phases.md"
   ]
  }
 ]

@@ -34,9 +34,13 @@ from spectre.domain.decision import (
     ADVERSARY_FIELDS_NOTE,
     BINDING_NOTE,
     DEFAULT_CUSTODY_GAP_FRACTION,
+    DEFAULT_KEEP_OUT_KM,
     DEFAULT_PROBABILITY,
+    KEEP_OUT_NOTE,
+    MAX_KEEP_OUT_KM,
     MAX_SAMPLE_HOURS,
     MAX_TURNS,
+    MIN_KEEP_OUT_KM,
     ActionType,
     AdversaryAction,
     AdversaryHypothesis,
@@ -699,6 +703,11 @@ def _panel_context(state: SessionState, prefill: SweepPrefill | None = None) -> 
         "adversary_fields_note": ADVERSARY_FIELDS_NOTE,
         "default_gap": DEFAULT_CUSTODY_GAP_FRACTION,
         "default_probability": DEFAULT_PROBABILITY,
+        # The keep-out distance (SPC-191): a scenario opened from the sweep takes the default like any other.
+        "keep_out": {
+            "default": f"{DEFAULT_KEEP_OUT_KM:g}", "min": f"{MIN_KEEP_OUT_KM:g}", "max": f"{MAX_KEEP_OUT_KM:g}",
+            "note": KEEP_OUT_NOTE,
+        },
         "prefill": prefill,
         **_bind_context(state, red, blue),
         **_hypothesis_context(),
@@ -863,6 +872,9 @@ class _ScenarioForm(BaseModel):
     w_dv: str = "0.20"
     w_time: str = "0.10"
     w_rev: str = "0.10"
+    # The miss at or inside which closest approach scores its full penalty (SPC-191). No default, as for the horizon:
+    # FastAPI reads a blank field as absent, and a default would turn a cleared distance into a silent 10 km.
+    keep_out_km: str | None = None
     strategy: str = "minimax"
     # The game tree (SPC-142): its turn depth, 1 to 3, and what the operator states turn 1 showed, blank for none.
     turns: str = "1"
@@ -903,6 +915,7 @@ class _Parsed(NamedTuple):
     burns:     list[ResponseBurnSpec | None]
     turns:     int = 1
     observed:  Seen | None = None
+    keep_out_km: float = DEFAULT_KEEP_OUT_KM
 
 
 def _observed(inputs: _Inputs, raw: str) -> Seen | None:
@@ -924,6 +937,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
         inputs.number(w, "each scoring weight")
         for w in (form.w_custody, form.w_ca, form.w_dv, form.w_time, form.w_rev)
     ]
+    keep_out = inputs.number(form.keep_out_km, "the keep-out distance (km)", MAX_KEEP_OUT_KM, low=MIN_KEEP_OUT_KM)
     adversary = _AdversaryColumns(
         form.adv_ids or [], form.adv_names or [], form.adv_types or [],
         inputs.column(form.adv_probs, "probability"), inputs.column(form.adv_confs, "confidence"),
@@ -940,7 +954,7 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
     if observed is not None and turns == 1:
         # One turn has no later pick for it to update, and no tree to say so on: refused, not dropped unsaid.
         inputs.refuse(_OBSERVED_ONE_TURN)
-    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form), turns, observed)
+    return _Parsed(horizon, weights, adversary, friendly, entries, _burns(inputs, form), turns, observed, keep_out)
 
 
 def _utc_now() -> datetime:
@@ -1037,6 +1051,7 @@ def _scenario(
         binding=binding,
         turns=parsed.turns,
         observed=parsed.observed,
+        keep_out_km=parsed.keep_out_km,
     )
 
 

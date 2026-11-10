@@ -1253,7 +1253,7 @@ def _section_12_scenario_planning(doc: Document) -> None:
 
 
 def _section_13_decision_engine(doc: Document) -> None:
-    """Section 13: Decision Engine & Scenario Evaluation, as built at 0.24.0 (SPC-152)."""
+    """Section 13: Decision Engine & Scenario Evaluation, as built at 0.24.0 (SPC-152), with SPC-191's score scales."""
     _add_page_break(doc)
     _add_eyebrow(doc, "Section 13")
     _add_heading_h1(doc, "Decision Engine & Scenario Evaluation")
@@ -1287,6 +1287,17 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_body(doc,
         "The composite score is always a lookup. Its weights are not yet cited (SPC-151), so read a cell's figures, "
         "not only its rank."
+    )
+    _add_body(doc,
+        "The score values closest approach and your delta-V in orders of magnitude. Set the keep-out distance on "
+        "the panel, 'Keep-out distance (km)', from 0.1 to 10,000 km: a miss at or inside it scores the full "
+        "closest-approach penalty, and each tenfold beyond it scores less, down to none at 50,000 km. Its default, "
+        "10 km, is Claude's choice and unsourced, and the results state the distance used. Your delta-V scores in "
+        "orders of magnitude up to 1,000 m/s, the engine's per-burn limit, so a 100 m/s burn and a 500 m/s burn "
+        "score apart. At the default weights and keep-out distance, a burn of up to about 9 m/s that opens a miss "
+        "from 1 km to 100 km scores better than doing nothing. The break-even moves with the keep-out distance: "
+        "about 38 m/s at 1 km, and none at 100 km, where both misses score the full penalty. A cleared field is "
+        "refused, not scored at the default. Neither scale has yet been signed off by the technical authority."
     )
 
     _add_heading_h2(doc, "Bind the Scenario to Real Objects")

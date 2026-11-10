@@ -188,6 +188,7 @@ from spectre.domain.decision_figures import (
     tca_uncertainty,
 )
 from spectre.domain.decision_transfer import (
+    MAX_BURN_M_S,
     RowBurns,
     TransferBurn,
     require_transfer,
@@ -281,8 +282,9 @@ EVERY_ROW_REFUSED = "Both orbits are bound, but no closest approach could be com
 #: custody_gap_hours, and the hours custody is degraded (SPC-179), which are not a figure of their own but share
 #: custody's basis; norm_ca closest_approach_km, norm_dv delta_v_cost_km_s. time_to_closest_hours is not used.
 _SCORE_INPUTS: tuple[str, ...] = ("custody_maintained", "custody_gap_hours", "closest_approach_km", "delta_v_cost_km_s")
-#: The weights and the normalisations (50,000 km; 0.1 km/s, i.e. 100 m/s) are rules of thumb, so the score
-#: is never stronger than lookup, whatever its figures are. Citing the weights (SPC-151) does not change this.
+#: The weights and the scales (closest approach from the keep-out distance to 50,000 km, our delta-V up to the
+#: 1,000 m/s per-burn limit, SPC-191) are rules of thumb, so the score is never stronger than lookup, whatever its
+#: figures are. Citing the weights (SPC-151) does not change this.
 _SCORING_RULE_KIND: Basis = Basis.LOOKUP
 
 
@@ -310,10 +312,22 @@ class OutcomeBases:
         return tuple((f.name, getattr(self, f.name)) for f in fields(self))
 
 
+#: The keep-out distance a scenario takes unless the operator sets one, km (SPC-191). Claude's choice, not a ruling
+#: and not a sourced figure: a miss of a few kilometres is close for any asset, and the panel says it is unsourced.
+DEFAULT_KEEP_OUT_KM: float = 10.0
+#: The range the keep-out distance may take, km: 100 m is already finer than any element set is known to, and the
+#: upper end stays well below the 50,000 km at which closest approach scores nothing, so the scale between has room.
+MIN_KEEP_OUT_KM: float = 0.1
+MAX_KEEP_OUT_KM: float = 10_000.0
+
+
 _SCORE_NOTE = (
     "weighted sum of custody, closest approach and our delta-V with the response's time to execute and "
-    "reversibility; weights as set on the panel, scaled to sum to one, defaults not yet cited (SPC-151); closest approach normalised "
-    "to 50,000 km and delta-V to 0.1 km/s (100 m/s); never stronger than lookup"
+    "reversibility; weights as set on the panel, scaled to sum to one, defaults not yet cited (SPC-151); closest "
+    "approach valued in orders of magnitude, the full penalty at or inside the keep-out distance set on the panel, "
+    f"whose default, {DEFAULT_KEEP_OUT_KM:g} km, is Claude's choice and unsourced, and none at 50,000 km or more; our "
+    f"delta-V valued in orders of magnitude up to the {MAX_BURN_M_S:,.0f} m/s per-burn limit (SPC-191); never "
+    "stronger than lookup"
 )
 
 
@@ -1510,6 +1524,14 @@ def _require_observed(observed: object) -> None:
         raise ValueError(f"Scenario.observed must be a Seen or None; got {observed!r}")
 
 
+def _require_keep_out(keep_out_km: float) -> None:
+    """A finite keep-out distance from MIN_KEEP_OUT_KM to MAX_KEEP_OUT_KM (SPC-191)."""
+    if not (math.isfinite(keep_out_km) and MIN_KEEP_OUT_KM <= keep_out_km <= MAX_KEEP_OUT_KM):
+        raise ValueError(
+            f"Scenario.keep_out_km must be from {MIN_KEEP_OUT_KM:g} to {MAX_KEEP_OUT_KM:g} km; got {keep_out_km!r}"
+        )
+
+
 @dataclass
 class Scenario:
     """A what-if scenario: N adversary actions × M friendly responses."""
@@ -1540,6 +1562,9 @@ class Scenario:
     # What the operator states turn 1 of the tree showed of red (SPC-142). Under expected value the update after
     # turn 1 is shown for it alone; None when nothing was stated, and then nothing is updated. It moves no figure.
     observed:           Seen | None = None
+    # The miss at or inside which closest approach scores its full penalty, km (SPC-191): set on the panel, and
+    # DEFAULT_KEEP_OUT_KM, Claude's choice and unsourced, for a scenario opened from the sweep or built in code.
+    keep_out_km:        float = DEFAULT_KEEP_OUT_KM
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -1550,6 +1575,7 @@ class Scenario:
         _require_threat(self)
         _require_turns(self.turns)
         _require_observed(self.observed)
+        _require_keep_out(self.keep_out_km)
 
 
 #: The most turns a game tree runs (SPC-140): a fourth would multiply the branches past what one evaluation builds.
@@ -1845,21 +1871,36 @@ class ScenarioResult:
             dm=abs(rk45.miss_km - sgp4.miss_km), dt=abs(rk45.tca_s - sgp4.tca_s),
         )
 
+    def _burn_moves(self) -> list[tuple[float, int, OutcomeMetrics]]:
+        """Each cell with a sized burn, with how far its burn moves the cell's closest-approach term in the score:
+        the term before the burn less the one after it, each by _norm_ca, so it holds whatever the scale (SPC-191)."""
+        w = self.scenario
+        moves = []
+        for i, cell in self._responses():
+            figure = cast("ResponseFigure", cell.ca_response)
+            if figure.sized.burn is None:
+                continue
+            before, after = figure.misses_km
+            move = w.w_closest_approach * abs(_norm_ca(before, w.keep_out_km) - _norm_ca(after, w.keep_out_km))
+            moves.append((move, i, cell))
+        return moves
+
     @property
     def burn_score_note(self) -> str | None:
-        """How little what a burn buys moves its score, against what its delta-V adds; None with no burn (SPC-121)."""
-        burnt = [
-            (i, cell) for i, cell in self._responses()
-            if cell.ca_response is not None and cell.ca_response.sized.burn is not None
-        ]
-        if not burnt:
+        """How much what a burn buys moves its score, against what its delta-V adds; None with no burn (SPC-121).
+
+        It reports the cell whose score the burn moves most, not the one it buys most kilometres in: on a scale in
+        orders of magnitude the two differ (SPC-191). The delta-V's share is _norm_dv of that cell's delta-V.
+        """
+        moves = self._burn_moves()
+        if not moves:
             return None
-        i, cell = max(burnt, key=lambda pair: abs(cast("ResponseFigure", pair[1].ca_response).buys_km))
-        buys = cast("ResponseFigure", cell.ca_response).buys_km
+        move, i, cell = max(moves, key=lambda found: found[0])
+        figure = cast("ResponseFigure", cell.ca_response)
         w = self.scenario
         return BURN_SCORE_NOTE.format(
-            buys=buys, adv=w.adversary_actions[i].name, ca=w.w_closest_approach * abs(buys) / _CA_NORMALISATION_KM,
-            dv=from_km_s(cell.delta_v_cost_km_s), dvs=w.w_dv_cost * cell.delta_v_cost_km_s / _DV_NORMALISATION_KM_S,
+            keep=_keep_out_text(w.keep_out_km), buys=figure.buys_km, adv=w.adversary_actions[i].name, ca=move,
+            dv=from_km_s(cell.delta_v_cost_km_s), dvs=w.w_dv_cost * _norm_dv(cell.delta_v_cost_km_s),
         )
 
     @property
@@ -1905,10 +1946,13 @@ class ScenarioResult:
 
     @property
     def score_spread_note(self) -> str | None:
-        """SCORE_SPREAD_NOTE when any cell is sampled, else None (SPC-115); its burn variant once a burn is sized."""
+        """SCORE_SPREAD_NOTE when any cell is sampled, else None (SPC-115); its response variant once a response is
+        flown in the samples, which points to the burn note only when a burn is sized and the note is shown."""
         if not self._bands():
             return None
-        return SCORE_SPREAD_NOTE_WITH_BURNS if self._responses() else SCORE_SPREAD_NOTE
+        if not self._responses():
+            return SCORE_SPREAD_NOTE
+        return SCORE_SPREAD_NOTE_WITH_BURNS + (SCORE_SPREAD_BURN_POINTER if self._burn_moves() else "")
 
     @property
     def row_uncertainty(self) -> tuple[str, ...]:
@@ -1930,10 +1974,15 @@ class ScenarioResult:
         bands = self._bands()
         if not bands:
             return None
-        w = self.scenario.w_closest_approach
-        delta = max(w * (_norm_ca(band[5]) - _norm_ca(band[95])) for band in bands)
+        w, keep = self.scenario.w_closest_approach, self.scenario.keep_out_km
+        delta = max(w * (_norm_ca(band[5], keep) - _norm_ca(band[95], keep)) for band in bands)
         caveat = _RESULT_CAVEAT_WITH_BURNS if self._responses() else _RESULT_CAVEAT
-        return caveat.format(delta=delta)
+        return caveat.format(delta=delta, keep=_keep_out_text(keep))
+
+    @property
+    def score_scales_line(self) -> str:
+        """How the score values closest approach and our delta-V, at this scenario's keep-out distance (SPC-191)."""
+        return SCORE_SCALES_LINE.format(keep=_keep_out_text(self.scenario.keep_out_km))
 
 
 _ROW_SAMPLED = (
@@ -1994,10 +2043,8 @@ _BASE_CA_KM: dict[ActionType, float] = {
     ActionType.SENSOR_RETASK: 10000.0,   # not a physical threat
 }
 _OTHER_CA_KM = 3000.0
-#: The score's closest approach normalisation, km: no threat at or beyond it.
+#: The score's far anchor for closest approach, km: no threat at or beyond it (SPC-191 keeps it from before).
 _CA_NORMALISATION_KM = 50_000.0
-#: The score's delta-V normalisation, km/s (100 m/s).
-_DV_NORMALISATION_KM_S = 0.1
 
 
 def compute_outcome_metrics(
@@ -2122,9 +2169,27 @@ def _lookup_figures(adversary: AdversaryAction, friendly: FriendlyResponse, scen
     return _Figures(custody_maintained, custody_gap_hours, ca_km, dv_km_s)
 
 
-def _norm_ca(ca_km: float) -> float:
-    """Closest approach as a score term: 1 at 0 km (co-location), 0 at 50,000 km or more (no threat)."""
-    return 1.0 - min(ca_km / _CA_NORMALISATION_KM, 1.0)
+def _keep_out_text(keep_out_km: float) -> str:
+    """The keep-out distance as scored, km: the shortest text that reads back as the same float, so an operator's
+    1234.5678 is not shown as 1234.57, and 10.0 reads 10 (SPC-191)."""
+    return repr(float(keep_out_km)).removesuffix(".0")
+
+
+def _norm_ca(ca_km: float, keep_out_km: float) -> float:
+    """Closest approach as a score term, in orders of magnitude (SPC-191): 1 at or inside the keep-out distance, 0 at
+    50,000 km or more, and ln(50,000 / miss) / ln(50,000 / keep-out) between, so each tenfold of miss is worth the
+    same. The only place the score reads a miss."""
+    if ca_km <= keep_out_km:
+        return 1.0
+    if ca_km >= _CA_NORMALISATION_KM:
+        return 0.0
+    return math.log(_CA_NORMALISATION_KM / ca_km) / math.log(_CA_NORMALISATION_KM / keep_out_km)
+
+
+def _norm_dv(delta_v_km_s: float) -> float:
+    """Our delta-V as a score term, in orders of magnitude (SPC-191): ln(1 + dv) / ln(1 + 1,000) for dv in m/s, 1 at
+    the engine's per-burn limit, MAX_BURN_M_S, and above. The only place the score reads our delta-V."""
+    return min(math.log1p(from_km_s(delta_v_km_s)) / math.log1p(MAX_BURN_M_S), 1.0)
 
 
 def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) -> float:
@@ -2133,13 +2198,15 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
     Each component is normalised to [0, 1] with domain assumptions:
     custody loss 0 when maintained, 1 for a full-horizon gap, each hour degraded
     counting DEGRADED_CUSTODY_WEIGHT of an hour lost (SPC-179); closest approach
-    inverted, 0 km to 50,000 km; delta-V 0 to 0.1 km/s (100 m/s); time to
-    execute 0 to the full horizon; reversibility inverted, a reward.
+    by _norm_ca, in orders of magnitude from the scenario's keep-out distance to
+    50,000 km; our delta-V by _norm_dv, in orders of magnitude up to the 1,000 m/s
+    per-burn limit (SPC-191); time to execute 0 to the full horizon;
+    reversibility inverted, a reward.
     """
     custody_h     = figures.custody_gap_hours + DEGRADED_CUSTODY_WEIGHT * figures.custody_degraded_hours
     norm_custody  = 0.0 if figures.custody_maintained else min(custody_h / scenario.horizon_hours, 1.0)
-    norm_ca       = _norm_ca(figures.closest_approach_km)   # high CA = low score (good)
-    norm_dv       = min(figures.delta_v_km_s / _DV_NORMALISATION_KM_S, 1.0)
+    norm_ca       = _norm_ca(figures.closest_approach_km, scenario.keep_out_km)   # high CA = low score (good)
+    norm_dv       = _norm_dv(figures.delta_v_km_s)
     norm_time     = min(friendly.time_to_execute_hours / scenario.horizon_hours, 1.0)
     norm_rev      = 1.0 - friendly.reversibility          # reward reversibility → lower score
 
@@ -2283,8 +2350,8 @@ _RESULT_CAVEAT = (
     "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers only the "
     "hypothesis: its delta-V, pointing, timing and drag. Element-set errors, and the hypothesis being wrong, are "
     "not in it. Our response is not applied to the blue orbit yet, so every response in a sampled row has the "
-    "same closest approach. The score normalises closest approach to 50,000 km, so the sampled spread moves it "
-    "by at most {delta:.4f} here."
+    "same closest approach. The score values closest approach in orders of magnitude from the {keep} km keep-out "
+    "distance to 50,000 km, so the sampled spread moves it by at most {delta:.4f} here."
 )
 #: _RESULT_CAVEAT once a response's burn is sized (SPC-121).
 _RESULT_CAVEAT_WITH_BURNS = (
@@ -2292,7 +2359,8 @@ _RESULT_CAVEAT_WITH_BURNS = (
     "hypothesis: its delta-V, pointing, timing and drag. Element-set errors, the hypothesis being wrong and our "
     "burn's execution error are not in it. A response with a target separation applies our burn, sized on the "
     "hypothesis's nominal burn, to the blue asset in every sample, so its cells differ from the rest of the row. The "
-    "score normalises closest approach to 50,000 km, so the sampled spread moves it by at most {delta:.4f} here."
+    "score values closest approach in orders of magnitude from the {keep} km keep-out distance to 50,000 km, so "
+    "the sampled spread moves it by at most {delta:.4f} here."
 )
 #: Shown with the sampled caveat when any cell is sampled (SPC-117): what a converged band is, in the operator's terms.
 CONVERGED_MEANS = (
@@ -2305,15 +2373,23 @@ CONVERGED_MEANS = (
 LOOKUP_CELL_TITLE = "Lookup: a fixed figure, with no distribution."
 #: Shown once under the sampled caveat when any cell is sampled (SPC-115).
 SCORE_SPREAD_NOTE = (
-    "Score spread is the 1-sigma spread of the composite score across samples. It is small because closest "
-    "approach is normalised to 50,000 km, not because the outcome is certain. Our response is not applied to the "
-    "blue orbit, so within a sampled row the ranking is decided by lookup figures."
+    "Score spread is the 1-sigma spread of the composite score across samples, from the closest-approach term "
+    "alone. Every miss at or inside the keep-out distance scores the full penalty, so a band inside it shows no "
+    "spread however wide it is; a small spread does not mean the outcome is certain. Our response is not applied "
+    "to the blue orbit, so within a sampled row the ranking is decided by lookup figures."
 )
-#: SCORE_SPREAD_NOTE once a response's burn is sized (SPC-121).
+#: SCORE_SPREAD_NOTE once a response with a target separation is flown in the samples, a burn of none included
+#: (SPC-121, SPC-191).
 SCORE_SPREAD_NOTE_WITH_BURNS = (
-    "Score spread is the 1-sigma spread of the composite score across samples. It is small because closest "
-    "approach is normalised to 50,000 km, not because the outcome is certain, and the same normalisation keeps "
-    "what our burn buys from moving the ranking much."
+    "Score spread is the 1-sigma spread of the composite score across samples, from the closest-approach term "
+    "alone. Every miss at or inside the keep-out distance scores the full penalty, so a band inside it shows no "
+    "spread however wide it is; a small spread does not mean the outcome is certain. A response given a target "
+    "separation is flown in every sample, so its cells can differ from the rest of the row."
+)
+#: Added to SCORE_SPREAD_NOTE_WITH_BURNS once a burn is sized, when the burn note is shown (SPC-191).
+SCORE_SPREAD_BURN_POINTER = (
+    " Our burn moves the ranking by the change in the closest-approach term, against the delta-V term it adds; "
+    "the burn note gives both for the cell whose score the burn moves most."
 )
 #: A row whose action carries a hypothesis in a scenario not bound on both sides.
 UNSAMPLED_ROW_NOTE = (
@@ -3034,8 +3110,9 @@ def _sampled_cell(
     """A cell scored on the sampled P5, with its time the earliest TCA at or below it; the rest are lookups.
 
     Each sample's miss is scored too, through the same _score, for the composite score's P5, P50, P95 and
-    1-sigma spread across samples (SPC-115). The score is linear in the miss below 50,000 km. With our burn
-    (SPC-121), *series* is the samples after it and the delta-V is the burn's.
+    1-sigma spread across samples (SPC-115). The score falls with each order of magnitude of miss between the
+    keep-out distance and 50,000 km (SPC-191), so its percentiles mirror the misses'. With our burn (SPC-121),
+    *series* is the samples after it and the delta-V is the burn's.
     """
     friendly = response.friendly
     figures = _custodial(_lookup_figures(adversary, friendly, scenario), custody)._replace(
@@ -3359,11 +3436,28 @@ RK45_FOR_BURNS = (
     "puts the closest approach at {sm:.3f} km at {st:%Y-%m-%d %H:%M:%S} UTC and RK45 at {rm:.3f} km at "
     "{rt:%H:%M:%S} UTC: {dm:.3f} km and {dt:.0f} s apart, which is the propagators, not any burn."
 )
-#: Shown with the result when a burn is sized: the score cannot see what it buys (SPC-121; weights are SPC-151).
+#: Shown with the result when a burn is sized: what it buys against what it costs in the score (SPC-121, SPC-191;
+#: weights are SPC-151).
 BURN_SCORE_NOTE = (
-    "The score normalises closest approach to 50,000 km and delta-V to 100 m/s, so the {buys:.1f} km our burn buys "
-    "against {adv} moves its score by {ca:.4f} while its {dv:.2f} m/s adds {dvs:.4f}: read what a burn buys from its "
-    "cell, not from the ranking."
+    "The score values closest approach in orders of magnitude from the {keep} km keep-out distance to 50,000 km, "
+    f"and our delta-V in orders of magnitude up to {MAX_BURN_M_S:,.0f} m/s, so the {{buys:.1f}} km our burn buys "
+    "against {adv} moves its score by {ca:.4f} while its {dv:.2f} m/s adds {dvs:.4f}: read what a burn buys from "
+    "its cell as well as from the ranking."
+)
+#: Shown with every result (SPC-191): the two scales the score reads a miss and our delta-V on, and the keep-out
+#: distance it used, with the basis of its default.
+SCORE_SCALES_LINE = (
+    "The score values closest approach in orders of magnitude: the full penalty at or inside the keep-out distance "
+    f"of {{keep}} km, none at 50,000 km or more. Our delta-V is valued in orders of magnitude up to "
+    f"{MAX_BURN_M_S:,.0f} m/s, the engine's per-burn limit. The keep-out distance is set on the panel; its default, "
+    f"{DEFAULT_KEEP_OUT_KM:g} km, is Claude's choice and unsourced, and neither scale has been signed off by the "
+    "technical authority."
+)
+#: Beside the keep-out distance on the panel (SPC-191).
+KEEP_OUT_NOTE = (
+    "A miss at or inside the keep-out distance scores the full closest-approach penalty, and each tenfold beyond it "
+    f"scores less, down to none at 50,000 km. The default, {DEFAULT_KEEP_OUT_KM:g} km, is Claude's choice and "
+    "unsourced: set the distance inside which a miss is unacceptable for your asset."
 )
 _DV_LOOKUP = " This cell's delta-V is a lookup."
 #: Our delta-V in a computed or sampled cell for a response that does not burn (SPC-125): the cost x 0.05 rule does

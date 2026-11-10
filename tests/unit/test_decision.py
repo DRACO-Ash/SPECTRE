@@ -101,11 +101,12 @@ class TestComputeOutcomeMetrics:
         r = _fr()
         s = _scenario([a], [r])
         om = compute_outcome_metrics(a, r, s)
-        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km; 0.25 x 0.99 + 0.20 x 0.15
-        # + 0.10 x 6/72 + 0.10 x 0.2 = 0.305833.
+        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km and 0.3 x 50 = 15 m/s, each in orders of magnitude
+        # (SPC-191): 0.25 x ln 100 / ln 5,000 + 0.20 x ln 16 / ln 1,001 + 0.10 x 6/72 + 0.10 x 0.2
+        # = 0.25 x 0.540691 + 0.20 x 0.401315 + 0.008333 + 0.02 = 0.243769.
         assert om == OutcomeMetrics(
             custody_maintained=True, custody_gap_hours=0.0, closest_approach_km=500.0,
-            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.305833,
+            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.243769,
         )
 
     def test_composite_score_in_unit_interval(self):
@@ -223,23 +224,28 @@ class TestFindRobustResponse:
         """A1 (manoeuvre, custody gap share 0.8) against R1 (manoeuvre, cost 0.4,
         reversibility 0.7, 6 h), 72 h horizon, default weights:
         custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
-        0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;
+        in orders of magnitude from the 10 km keep-out to 50,000 km (SPC-191),
+        0.25 x ln(50,000/600) / ln 5,000 = 0.25 x 0.519285 = 0.129821; ΔV
+        0.02 km/s, 20 m/s, 0.20 x ln 21 / ln 1,001 = 0.20 x 0.440676 = 0.088135;
         time 6/72, 0.10 x 0.0833 = 0.008333; reversibility 0.10 x 0.3 = 0.03.
-        Total 0.325333. A1/R3 (doing nothing against the manoeuvre) loses
-        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.249 + 0.008333 =
-        0.537333. Before audit F-035 that gap was scaled by R3's reversibility
-        of 1.0 to nothing, and R3 scored 0.257333. The other four follow the
-        same rules."""
+        Total 0.256290. A1/R3 (doing nothing against the manoeuvre) loses
+        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.25 x ln 250 /
+        ln 5,000 (0.648272) + 0.008333 = 0.450401. Before audit F-035 that gap
+        was scaled by R3's reversibility of 1.0 to nothing. The other four
+        follow the same rules: 5,000 km against no action is ln 10 / ln 5,000
+        = 0.270346, and R1's 15,000 km ln(10/3) / ln 5,000 = 0.141358. Under
+        the linear scales before SPC-191 the rows were 0.325333, 0.267333,
+        0.537333 and 0.253333, 0.243333, 0.233333; each rule's pick is the same."""
         _, om = self._two_adversary_scenario()
         assert [[m.composite_score for m in row] for row in om] == [
-            [0.325333, 0.267333, 0.537333],
-            [0.253333, 0.243333, 0.233333],
+            [0.25629, 0.180401, 0.450401],
+            [0.161808, 0.08592, 0.07592],
         ]
 
     @pytest.mark.parametrize(("strategy", "pick"), [
-        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.325, 0.267, 0.537
-        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.289, 0.255, 0.385
-        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.253, 0.243, 0.233
+        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.256, 0.180, 0.450
+        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.209, 0.133, 0.263
+        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.162, 0.086, 0.076
     ])
     def test_each_selector_picks_its_response(self, strategy, pick):
         """The sensor retask keeps custody cheaply, so the robust rules pick it;
@@ -272,7 +278,7 @@ class TestEvaluateScenario:
         s      = _scenario()
         result = evaluate_scenario(s)
         assert result.robust_best_response.id == "R1"
-        assert result.outcome_matrix[0][0].composite_score == 0.305833
+        assert result.outcome_matrix[0][0].composite_score == 0.243769   # as test_returns_outcome_metrics
 
     def test_outcome_matrix_shape(self):
         adv_list = [_adv(id=f"A{i}") for i in range(3)]

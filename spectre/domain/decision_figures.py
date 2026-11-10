@@ -214,11 +214,17 @@ class ResponseFigure:
         return 0.0 if burn is None else float(np.linalg.norm(burn.delta_v_ric_km_s))
 
     @property
+    def misses_km(self) -> tuple[float, float]:
+        """The closest approach before our burn and after it, km: P5 and P5 in a sampled cell."""
+        if self.sampled_before_p5_km is not None and self.sampled_after_p5_km is not None:
+            return self.sampled_before_p5_km, self.sampled_after_p5_km
+        return self.sized.before.approach.miss_km, self.sized.after.approach.miss_km
+
+    @property
     def buys_km(self) -> float:
         """The closest approach after our burn minus the one before it, km: P5 against P5 in a sampled cell."""
-        if self.sampled_before_p5_km is not None and self.sampled_after_p5_km is not None:
-            return self.sampled_after_p5_km - self.sampled_before_p5_km
-        return self.sized.after.approach.miss_km - self.sized.before.approach.miss_km
+        before, after = self.misses_km
+        return after - before
 
     @property
     def _sense(self) -> str:

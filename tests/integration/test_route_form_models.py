@@ -47,7 +47,7 @@ class TestInterceptForm:
 
 class TestDecisionForm:
     _SCENARIO = {
-        "scenario_name": "Form model", "horizon_hours": "72",
+        "scenario_name": "Form model", "horizon_hours": "72", "keep_out_km": "10",
         "adv_id": ["A1", "A2"], "adv_name": ["Approach", "Hold"], "adv_type": ["RPO", "RPO"],
         "adv_prob": ["0.6", "0.4"], "adv_conf": ["0.8", "0.7"],
         "fr_id": ["F1"], "fr_name": ["Manoeuvre"], "fr_type": ["MANOEUVRE"],

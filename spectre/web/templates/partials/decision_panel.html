@@ -4,12 +4,16 @@
    max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional;
    adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional;
    default_probability, the engine's own default for P, optional: nothing from Understanding fills P (SPC-171);
+   keep_out, optional: the keep-out distance's default, range and note (SPC-191);
    prefill (decision_from_sweep.SweepPrefill|None), optional: the fill from a sweep entry and what it says, or its
    problem; it never carries P, Conf or Gap (SPC-150) #}
 
 {% set fill = prefill if prefill is defined and prefill and not prefill.problem else none %}
 {% set refusal = prefill.problem if prefill is defined and prefill else "" %}
 {% set adv_rows = fill.rows if fill and fill.rows else [none] %}
+{# With no keep_out the field shows no figure and no range: a default here would show without its basis, and its
+   range would be a second copy of the engine's. A blank is refused when posted. #}
+{% set keep = keep_out if keep_out is defined else {"default": "", "min": "", "max": "", "note": ""} %}
 
 {% set hyp = {
   "archetypes": archetypes if archetypes is defined else [],
@@ -165,8 +169,8 @@
         hx-indicator="#decision-indicator"
         hx-disabled-elt="find button[type=submit]">
 
-    {# ── Scenario name + horizon ── #}
-    <div style="display:grid; grid-template-columns:2fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+    {# ── Scenario name, horizon and keep-out distance (SPC-191) ── #}
+    <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
       <label style="font-size:0.65rem; color:var(--text-dim)">
         Scenario Name
         <input type="text" name="scenario_name" value="{{ fill.scenario_name if fill else 'Unnamed Scenario' }}"
@@ -177,7 +181,15 @@
         <input type="number" name="horizon_hours" value="{{ fill.horizon_h if fill else 72 }}" min="0.1" max="720" step="0.1"
                style="width:100%; font-size:0.65rem; margin-top:0.15rem">
       </label>
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Keep-out distance (km)
+        <input type="number" name="keep_out_km" value="{{ keep.default }}"{% if keep.min %} min="{{ keep.min }}"{% endif %}{% if keep.max %} max="{{ keep.max }}"{% endif %} step="any"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
     </div>
+    {% if keep.note %}
+    <p class="keep-out-note" style="margin:-0.3rem 0 0.5rem; font-size:0.6rem; color:var(--text-dim)">{{ keep.note }}</p>
+    {% endif %}
 
     {# ── Bind to real objects (SPC-100). Rebuilt from the session each time it comes into view;
          the fragment never emits this wrapper's id, so the swap does not re-trigger itself. ── #}

@@ -114,6 +114,7 @@ from spectre.domain.decision import (
     sized_burns,
 )
 from spectre.domain.decision_figures import ResponseFigure, TcaUncertainty
+from spectre.domain.decision_transfer import MAX_BURN_M_S
 from spectre.domain.provenance import Basis, FigureBasis, weakest
 from spectre.domain.tree_selectors import TreeSelection, select
 
@@ -252,7 +253,11 @@ _PATH_SAMPLED_NOTE = (
 _PATH_UNSIZED = " No burn is sized for {which}, so the blue asset is flown there without one."
 _PATH_DV_NOTE = "our burns along this sequence added up, each as its own turn states it"
 _PATH_DV_LOOKUP = "; the delta-V for {which} is a lookup, not a sized burn, so the sum is a lookup"
-_PATH_SCORE_NOTE = f"the one-turn score on this sequence's figures: {_SCORE_NOTE}"
+_PATH_SCORE_NOTE = (
+    f"the one-turn score on this sequence's figures: {_SCORE_NOTE}; here our delta-V is this sequence's burns added "
+    f"up, so burns adding up to {MAX_BURN_M_S:,.0f} m/s or more score the full delta-V term, as one burn at the "
+    "per-burn limit does"
+)
 _PATH_CUSTODY_NOTE = (
     "the bound red track {red}'s custody as the sweep judges it at the scenario epoch, {state}, carried over the "
     "{h:g} h horizon with the earliest red burn on this sequence, on the assumption that no newer element set "

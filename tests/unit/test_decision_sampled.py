@@ -275,12 +275,24 @@ def sampled() -> ScenarioResult:
 
 
 class TestASampledCell:
-    def test_the_score_is_on_p5(self, sampled: ScenarioResult) -> None:
-        """D3: the score moves by the weight times the change in closest approach over 50,000 km."""
-        lookup = _lookup(sampled.scenario)
-        w = sampled.scenario.w_closest_approach
+    def test_the_score_is_on_p5(self) -> None:
+        """D3: the score moves by the weight times the change in the closest-approach term (SPC-191).
+
+        At the default 10 km keep-out, P5 (3 km) and P50 (8 km) both score the full penalty, so this tells them apart
+        at a 1 km keep-out, where the term is ln(50,000 / miss) / ln 50,000: 0.898463 at 3 km, 0.807811 at 8 km and
+        0.723124 at 20 km.
+        """
+        scenario = dataclasses.replace(_bound(), keep_out_km=1.0)
+        sampled = evaluate_scenario(scenario, sampler=_Fake())
+        lookup = _lookup(scenario)
+        w = scenario.w_closest_approach
+
+        def term(miss_km: float) -> float:
+            return math.log(50_000.0 / miss_km) / math.log(50_000.0)
+
+        assert [round(term(p), 6) for p in (3.0, 8.0, 20.0)] == [0.898463, 0.807811, 0.723124]
         for cell, plain in zip(_cells(sampled, 0), _cells(lookup, 0), strict=True):
-            on = {p: plain.composite_score + w * (plain.closest_approach_km - p) / 50_000.0 for p in (3.0, 8.0, 20.0)}
+            on = {p: plain.composite_score + w * (term(p) - term(plain.closest_approach_km)) for p in (3.0, 8.0, 20.0)}
             assert cell.composite_score == pytest.approx(on[3.0], abs=2e-6)
             assert cell.composite_score != pytest.approx(on[20.0], abs=2e-6)
             assert cell.composite_score != pytest.approx(on[8.0], abs=2e-6)
@@ -827,26 +839,29 @@ class TestTheResultCountsItsSampledCells:
         assert sampled.n_sampled_cells == 4
 
     def test_the_caveat_appears_only_with_a_sampled_cell(self, sampled: ScenarioResult) -> None:
-        """D22: delta is 0.25 x (20 - 3) / 50,000 = 0.000085."""
+        """D22: P5 3 km is inside the 10 km keep-out, so its term is 1; P95 20 km's is ln 2,500 / ln 5,000 = 0.918618;
+        delta is 0.25 x (1 - 0.918618) = 0.0203 (SPC-191). It was 0.25 x (20 - 3) / 50,000 = 0.000085."""
         assert sampled.sampled_caveat == (
             "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers only "
             "the hypothesis: its delta-V, pointing, timing and drag. Element-set errors, and the hypothesis being "
             "wrong, are not in it. Our response is not applied to the blue orbit yet, so every response in a "
-            "sampled row has the same closest approach. The score normalises closest approach to 50,000 km, so "
-            "the sampled spread moves it by at most 0.0001 here."
+            "sampled row has the same closest approach. The score values closest approach in orders of magnitude "
+            "from the 10 km keep-out distance to 50,000 km, so the sampled spread moves it by at most 0.0203 here."
         )
         plain = evaluate_scenario(_scenario())
         assert plain.sampled_caveat is None
         assert plain.n_sampled_cells == 0
 
     def test_the_caveat_delta_is_the_largest_over_the_sampled_cells(self) -> None:
+        """D22 at weight 1: 1 - 0.918618 = 0.0814."""
         scenario = _bound()
         scenario.w_closest_approach = 1.0
         result = evaluate_scenario(scenario, sampler=_Fake())
-        assert str(result.sampled_caveat).endswith("moves it by at most 0.0003 here.")
+        assert str(result.sampled_caveat).endswith("moves it by at most 0.0814 here.")
 
     def test_the_caveat_delta_is_the_widest_band_not_the_first(self) -> None:
-        """Row 0 spans 3 to 20 km (0.0003), row 1 3 to 103 km (0.0020): the caveat states the larger."""
+        """Row 0 spans 3 to 20 km (1 - 0.918618 = 0.0814), row 1 3 to 103 km (1 - ln(50,000 / 103) / ln 5,000 =
+        1 - 0.726184 = 0.2738): the caveat states the larger."""
         runs: list[SeparationSeries] = []
 
         def two_bands(_h: ManoeuvreHypothesis, _b: BlueTrack, window: SeparationWindow) -> SeparationSeries:
@@ -858,7 +873,7 @@ class TestTheResultCountsItsSampledCells:
         scenario.w_closest_approach = 1.0
         result = evaluate_scenario(scenario, sampler=two_bands)
         assert len(runs) == 2
-        assert str(result.sampled_caveat).endswith("moves it by at most 0.0020 here.")
+        assert str(result.sampled_caveat).endswith("moves it by at most 0.2738 here.")
 
     def test_a_refused_result_has_no_caveat(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _scenario_refused, result = _refused("too few samples", monkeypatch)

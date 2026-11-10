@@ -64,12 +64,15 @@ class TestTheRuleOfThumb:
         assert _unanswered(_approach(custody_gap_fraction=1.0)).custody_gap_hours == pytest.approx(72.0)
 
     def test_at_the_default_a_page_left_alone_scores_as_it_did(self) -> None:
-        """The page posted confidence 0.7 by default, so its gap was 0.7 of the horizon; the default share is 0.7."""
+        """The page posted confidence 0.7 by default, so its gap was 0.7 of the horizon; the default share is 0.7.
+
+        The gap is as it was; the 200 km miss now scores in orders of magnitude (SPC-191): 0.25 x ln 250 / ln 5,000
+        = 0.25 x 0.648272 = 0.162068, where it was 0.25 x (1 - 200 / 50,000)."""
         assert decision.DEFAULT_CUSTODY_GAP_FRACTION == 0.7
         assert _approach().custody_gap_fraction == 0.7
         cell = _unanswered(_approach())
         assert cell.custody_gap_hours == pytest.approx(72.0 * 0.7)
-        assert cell.composite_score == pytest.approx(0.35 * 0.7 + 0.25 * (1.0 - 200.0 / 50_000.0))
+        assert cell.composite_score == pytest.approx(0.35 * 0.7 + 0.162068, abs=1e-6)
 
     @pytest.mark.parametrize("share", [-0.1, 1.1, math.nan])
     def test_the_share_is_a_fraction(self, share: float) -> None:

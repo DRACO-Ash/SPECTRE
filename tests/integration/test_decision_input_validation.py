@@ -18,7 +18,7 @@ from tests.conftest import csrf_headers
 
 def _form(**overrides: Any) -> dict[str, Any]:
     form: dict[str, Any] = {
-        "scenario_name": "Check", "horizon_hours": "72",
+        "scenario_name": "Check", "horizon_hours": "72", "keep_out_km": "10",
         "adv_id": ["A1"], "adv_name": ["Approach"], "adv_type": ["manoeuvre"],
         "adv_prob": ["0.6"], "adv_conf": ["0.7"],
         "fr_id": ["F1"], "fr_name": ["Hold"], "fr_type": ["manoeuvre"],

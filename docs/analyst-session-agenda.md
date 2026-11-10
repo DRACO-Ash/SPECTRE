@@ -45,8 +45,8 @@ The Decision Engine ranks responses by a weighted sum. The defaults are rules of
 | Term | Default weight | The question to ask |
 |:-|:-|:-|
 | Custody lost | 0.35 | How much worse is losing custody than a close approach? |
-| Closest approach | 0.25 | At what distance does a close approach stop mattering? (normalised to 50,000 km today) |
-| Our delta-V | 0.20 | What delta-V spend is significant for a blue asset? (normalised to 100 m/s today) |
+| Closest approach | 0.25 | At what distance does a close approach stop mattering, and inside what distance is it unacceptable? (valued in orders of magnitude from the keep-out distance set on the panel, default 10 km, Claude's choice and unsourced, to 50,000 km today, SPC-191) |
+| Our delta-V | 0.20 | What delta-V spend is significant for a blue asset? (valued in orders of magnitude up to 1,000 m/s today, SPC-191) |
 | Time to execute | 0.10 | How much does a slow response cost against a fast one? |
 | Reversibility | 0.10 | Does a reversible response earn credit in practice? |
 

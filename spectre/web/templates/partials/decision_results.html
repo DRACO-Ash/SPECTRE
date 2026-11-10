@@ -126,6 +126,9 @@
     {% if result.rk45_reference_line is defined and result.rk45_reference_line is not none %}
     <div class="rk45-reference" style="color:var(--gold)">{{ result.rk45_reference_line }}</div>
     {% endif %}
+    {% if result.score_scales_line is defined %}
+    <div class="score-scales">{{ result.score_scales_line }}</div>
+    {% endif %}
     {% if result.burn_score_note is defined and result.burn_score_note is not none %}
     <div class="burn-score-note" style="color:var(--gold)">{{ result.burn_score_note }}</div>
     {% endif %}

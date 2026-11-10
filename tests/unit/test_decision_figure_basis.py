@@ -199,7 +199,8 @@ class TestPhaseOneSaysWhichRule:
         assert "0.05 km/s" in bases.delta_v_cost_km_s.note
         assert "confidence" in bases.custody_gap_hours.note
         assert "50,000 km" in bases.composite_score.note
-        assert "0.1 km/s" in bases.composite_score.note
+        assert "keep-out distance" in bases.composite_score.note
+        assert "1,000 m/s per-burn limit" in bases.composite_score.note
         assert "not the held, degraded or lost custody" in bases.custody_maintained.note
 
     def test_a_mixed_cell_names_its_computed_figure(self) -> None:

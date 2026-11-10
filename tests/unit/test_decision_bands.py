@@ -40,6 +40,16 @@ _DISTRIBUTION = (
 _MISSES = np.array([miss for miss, _tca in (*_LOW, *_REST)])
 
 
+def _ca_term(miss_km: float) -> float:
+    """The closest-approach term at the default 10 km keep-out (SPC-191): 1 at or inside it, then
+    ln(50,000 / miss) / ln 5,000, worked here apart from the engine's own function."""
+    return 1.0 if miss_km <= 10.0 else float(np.log(50_000.0 / miss_km) / np.log(5_000.0))
+
+
+#: The closest-approach term of each fake sample: 9 of the 50 misses are at or inside 10 km and score 1.
+_TERMS = np.array([_ca_term(m) for m in _MISSES])
+
+
 @pytest.fixture(scope="module")
 def sampled() -> ScenarioResult:
     return evaluate_scenario(_bound(), sampler=_Fake())
@@ -70,27 +80,29 @@ class TestTheCellCarriesItsSpread:
         assert p[5] <= p[50] <= p[95]
         assert cell.score_std is not None and cell.score_std > 0.0
 
-    def test_the_score_spread_is_the_weight_times_the_miss_spread_over_50000_km(
+    def test_the_score_spread_is_the_weight_times_the_spread_of_the_closest_approach_term(
         self, sampled: ScenarioResult,
     ) -> None:
-        """U2: the score is linear in the miss below 50,000 km, so its spread scales with the misses'."""
-        w = sampled.scenario.w_closest_approach
-        for cell in sampled.outcome_matrix[0]:
-            assert cell.score_std == pytest.approx(w * float(np.std(_MISSES)) / 50_000.0, rel=1e-12)
+        """U2: only the miss differs between samples, so the score's spread is w times its term's (SPC-191).
 
-    def test_the_score_percentiles_are_the_samples_percentiles(self, sampled: ScenarioResult) -> None:
-        """The score falls by w / 50,000 per km of miss (higher is worse), so its P5 is the misses' P95 and so on.
-
-        Pinned against np.percentile of the sampled misses: score P_k plus w x miss P_(100 - k) / 50,000 is the
-        same constant for k of 5, 50 and 95, so each hover shows that percentile and not another.
+        0.25 x the 1-sigma spread of the 50 terms, 9 of them 1 and the rest ln(50,000 / miss) / ln 5,000, is 0.0092.
         """
         w = sampled.scenario.w_closest_approach
-        miss = {k: float(np.percentile(_MISSES, k)) for k in (5, 50, 95)}
-        assert miss[95] - miss[5] > 10.0, "the fake's misses must spread for this test to tell percentiles apart"
+        assert w * float(np.std(_TERMS)) == pytest.approx(0.0092, abs=5e-5)
+        for cell in sampled.outcome_matrix[0]:
+            assert cell.score_std == pytest.approx(w * float(np.std(_TERMS)), rel=1e-12)
+
+    def test_the_score_percentiles_are_the_samples_percentiles(self, sampled: ScenarioResult) -> None:
+        """The score is w times the closest-approach term plus figures every sample shares, so score P_k less w x
+        the terms' P_k is the same constant for k of 5, 50 and 95: each hover shows that percentile and not another.
+        """
+        w = sampled.scenario.w_closest_approach
+        term = {k: float(np.percentile(_TERMS, k)) for k in (5, 50, 95)}
+        assert term[95] - term[5] > 0.1, "the fake's misses must spread for this test to tell percentiles apart"
         for cell in sampled.outcome_matrix[0]:
             p = cell.score_percentiles
             assert p is not None
-            base = [p[k] + w * miss[100 - k] / 50_000.0 for k in (5, 50, 95)]
+            base = [p[k] - w * term[k] for k in (5, 50, 95)]
             assert base == pytest.approx([base[1]] * 3, abs=1e-12)
 
     @pytest.mark.parametrize(
@@ -133,7 +145,7 @@ class TestThePageShowsTheSpread:
                                                             page_html, re.S)]
         assert cells == [
             "Closest approach spread 5.0 km (1 sigma) over 50 samples; P5, P50 and P95 known to within 0.40 km. "
-            "Score spread across samples under 0.0001.",
+            "Score spread across samples 0.0092.",
             "Not sampled, so no spread: the cells say why.",
             "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
             "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
@@ -143,10 +155,10 @@ class TestThePageShowsTheSpread:
     def test_each_ranking_card_shows_the_score_spread(self, mixed: ScenarioResult) -> None:
         """U7."""
         text = _page(mixed)
-        assert text.count("Score spread under 0.0001 (1 sigma, 50 samples)") == 4
+        assert text.count("Score spread 0.0092 (1 sigma, 50 samples)") == 4   # U2's 0.0092
         assert text.count("Score spread: lookup, none computed") == 12
         spread = mixed.outcome_matrix[0][0].score_spread_text
-        assert spread == "Score spread under 0.0001 (1 sigma, 50 samples)"
+        assert spread == "Score spread 0.0092 (1 sigma, 50 samples)"
         ranked = mixed.ranked_cells[0]
         assert [(r.id, s) for r, s, _cell in ranked] == [(r.id, s) for r, s in mixed.ranked_per_adversary[0]]
         assert all(cell is mixed.outcome_matrix[0][mixed.scenario.friendly_responses.index(r)]
@@ -171,9 +183,10 @@ class TestThePageShowsTheSpread:
     def test_the_spread_note_shows_once_when_any_cell_is_sampled(self, sampled: ScenarioResult) -> None:
         """U8."""
         assert SCORE_SPREAD_NOTE == (
-            "Score spread is the 1-sigma spread of the composite score across samples. It is small because closest "
-            "approach is normalised to 50,000 km, not because the outcome is certain. Our response is not applied "
-            "to the blue orbit, so within a sampled row the ranking is decided by lookup figures."
+            "Score spread is the 1-sigma spread of the composite score across samples, from the closest-approach term "
+            "alone. Every miss at or inside the keep-out distance scores the full penalty, so a band inside it shows "
+            "no spread however wide it is; a small spread does not mean the outcome is certain. Our response is not "
+            "applied to the blue orbit, so within a sampled row the ranking is decided by lookup figures."
         )
         assert _page(sampled).count(SCORE_SPREAD_NOTE) == 1
         assert SCORE_SPREAD_NOTE not in _page(evaluate_scenario(_scenario()))
