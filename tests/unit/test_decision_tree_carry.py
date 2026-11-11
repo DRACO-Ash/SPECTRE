@@ -4,6 +4,10 @@ Each check rebuilds one figure the tree reports from the orbits themselves: a sa
 turn ends, red's nominal arc carried into turn 3, a slice that stops at its turn's end, a later turn's time of
 closest approach, and turn 1's slices against our burnt arc. A tree that took any of these from the wrong arc or
 the wrong window would report a figure the orbits do not give.
+
+Since SPC-202 every sample also draws both objects' element-set error along track (elset_offsets_km, from the row's
+seed), so the arcs rebuilt here move red's unburnt arc and blue's arc along themselves by each sample's draw, as the
+series does, and every figure checked is re-derived from them.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from spectre.astro.monte_carlo import (
 )
 from spectre.astro.response_burn import BurnRequest, Rk45Pair
 from spectre.domain import decision_tree
-from spectre.domain.decision import AdversaryAction, ScenarioResult
+from spectre.domain.decision import AdversaryAction, ScenarioResult, sample_error
 from spectre.domain.decision_tree import TREE_RED_AGAIN, GameTree, evaluate_tree
 from tests.unit import _decision_tree_cases as cases
 from tests.unit._decision_reference import COPLANAR_LEO, EPOCH, PLANE_CHANGE
@@ -41,25 +45,48 @@ def _tree(result: ScenarioResult) -> GameTree:
     return tree
 
 
+def _offsets(hypothesis: mc.ManoeuvreHypothesis) -> np.ndarray:
+    """Each sample's along-track draws, red then blue, km: plane_change bound fresh, 1 km each (SPC-202)."""
+    rows = [cases.still()]
+    error = sample_error(cases.scenario(rows, [cases.hold()], bind=PLANE_CHANGE))
+    assert error == (1.0, 1.0)
+    return mc.elset_offsets_km(error, hypothesis.random_seed, hypothesis.n_samples)
+
+
 def _turn_one_reds(hypothesis: mc.ManoeuvreHypothesis, span_s: float) -> list[_Arc]:
-    """Each sample's red over the whole span as turn 1's series flies it: the unburnt arc, burnt as drawn."""
-    draws = mc.generate_samples(hypothesis)
+    """Each sample's red over the whole span as turn 1's series flies it: the unburnt arc moved along itself by the
+    sample's element-set draw (SPC-202), burnt as drawn."""
+    draws, offsets = mc.generate_samples(hypothesis), _offsets(hypothesis)[:, 0]
     burn_s = (hypothesis.epoch_utc - EPOCH).total_seconds()
-    unburnt = mc._unburnt_arc(hypothesis, mc._earliest_s(burn_s + draws[:, 3]), span_s, burn_s)
+    pad = mc._pad_s(offsets, np.asarray(hypothesis.pre_manoeuvre_state_eci_km))
+    unburnt = mc._unburnt_arc(hypothesis, mc._earliest_s(burn_s + draws[:, 3]) - pad, span_s + pad, burn_s)
     assert unburnt is not None
+    speed = float(np.linalg.norm(unburnt(0.0)[3:]))
     window = SeparationWindow(EPOCH, span_s)
-    reds = [mc._sample_red(draw, unburnt, burn_s, hypothesis.bstar_post, window) for draw in draws]
+    reds = [
+        mc._sample_red(draw, mc._shifted(unburnt, float(off) / speed), burn_s, hypothesis.bstar_post, window)
+        for draw, off in zip(draws, offsets, strict=True)
+    ]
     assert all(red is not None for red in reds)
     return [red for red in reds if red is not None]
 
 
-def _blue_coast(span_s: float) -> tuple[_Arc, float]:
-    """plane_change's blue from its SGP4 state at the epoch by RK45 over *span_s*, and its B*."""
+def _blue_coast(span_s: float, offsets_km: np.ndarray | None = None) -> tuple[_Arc, float]:
+    """plane_change's blue from its SGP4 state at the epoch by RK45 over *span_s*, and its B*; run past each end as
+    far as *offsets_km*, blue's draws, need (SPC-202)."""
     blue0 = elset_state(PLANE_CHANGE.blue_tle, EPOCH)
     assert blue0 is not None
-    coast = rk45_arc(blue0.state_eci_km, span_s, blue0.bstar)
+    pad = 0.0 if offsets_km is None else mc._pad_s(offsets_km, blue0.state_eci_km)
+    coast = rk45_arc(blue0.state_eci_km, span_s, blue0.bstar, pad)
     assert coast is not None
     return coast, blue0.bstar
+
+
+def _blue_shifts(hypothesis: mc.ManoeuvreHypothesis) -> np.ndarray:
+    """Each sample's blue draw as the seconds blue is read on along its orbit (SPC-202)."""
+    blue0 = elset_state(PLANE_CHANGE.blue_tle, EPOCH)
+    assert blue0 is not None
+    return mc.along_track_shifts_s(_offsets(hypothesis)[:, 1], blue0.state_eci_km)
 
 
 def _hypothesis(row: AdversaryAction) -> mc.ManoeuvreHypothesis:
@@ -92,8 +119,9 @@ class TestALateBurnIsMadeInTheTurnAfter:
         reds = _turn_one_reds(hypothesis.hypothesis, 7200.0)
         late = 3528.0 + mc.generate_samples(hypothesis.hypothesis)[:, 3] > 3600.0
         assert int(late.sum()) >= 5
-        blue, _ = _blue_coast(7200.0)
-        expected = [_miss_km(red, blue, 3600.0, 7200.0) for red in reds]
+        blue, _ = _blue_coast(7200.0, _offsets(hypothesis.hypothesis)[:, 1])
+        shifts = _blue_shifts(hypothesis.hypothesis)
+        expected = [_miss_km(red, mc._shifted(blue, float(dt)), 3600.0, 7200.0) for red, dt in zip(reds, shifts, strict=True)]
         np.testing.assert_allclose(hold_course.figures.slice_min_km, expected, atol=0.01, rtol=0.0)
 
 
@@ -142,12 +170,18 @@ class TestTurnOnesSlicesAreAgainstOurBurntArc:
         assert response is not None
         burn = response.sized.burn
         assert burn is not None
-        coast, bstar = _blue_coast(3600.0)
-        burnt = burnt_arc(coast, burn, 3600.0, bstar)
+        offsets = _offsets(_hypothesis(rows[1]))[:, 1]
+        coast, bstar = _blue_coast(3600.0, offsets)
+        blue0 = elset_state(PLANE_CHANGE.blue_tle, EPOCH)
+        assert blue0 is not None
+        burnt = burnt_arc(coast, burn, 3600.0 + mc._pad_s(offsets, blue0.state_eci_km), bstar)
         assert burnt is not None
         reds = _turn_one_reds(_hypothesis(rows[1]), 3600.0)
-        against_burnt = np.array([_miss_km(red, burnt, 0.0, 1800.0) for red in reds])
-        against_coast = np.array([_miss_km(red, coast, 0.0, 1800.0) for red in reds])
+        shifts = _blue_shifts(_hypothesis(rows[1]))
+        against_burnt = np.array([_miss_km(red, mc._shifted(burnt, float(dt)), 0.0, 1800.0)
+                                  for red, dt in zip(reds, shifts, strict=True)])
+        against_coast = np.array([_miss_km(red, mc._shifted(coast, float(dt)), 0.0, 1800.0)
+                                  for red, dt in zip(reds, shifts, strict=True)])
         np.testing.assert_allclose(root.figures.slice_min_km, against_burnt, atol=1e-6, rtol=0.0)
         assert np.max(np.abs(against_burnt - against_coast)) > 1.0
         for child in root.children:
@@ -266,11 +300,14 @@ class TestALaterNodesTimeAndStart:
             assert figures.tca_utc == approach.tca_utc(start)
             uncertainty = figures.tca_uncertainty
             assert uncertainty is not None
+            # Every sample drew both sets' error at the scenario epoch, 1 km each, so the TCA's uncertainty holds only
+            # its growth from then to the TCA (SPC-202).
             errors = [
-                elset_position_error_km(tle, EPOCH, approach.tca_utc(start))
+                elset_position_error_km(tle, EPOCH, approach.tca_utc(start)) ** 2 - 1.0
                 for tle in (PLANE_CHANGE.red_tle, PLANE_CHANGE.blue_tle)
             ]
-            assert uncertainty.position_error_km == pytest.approx(float(np.hypot(*errors)), rel=1e-12)
+            assert uncertainty.undrawn
+            assert uncertainty.position_error_km == pytest.approx(float(np.sqrt(sum(errors))), rel=1e-9)
         assert moved > 0
         assert all(len({a.tca_s for a in own.approaches}) > 1 for own, _ in made)
 

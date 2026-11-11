@@ -78,12 +78,23 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Sign-in throttling | Limits per client address and per username | `spectre/web/routes/login.py`, `spectre/web/rate_limit.py` |
 | UDL call throttling | Limits on UDL authentication, data and sync calls | `spectre/web/rate_limit.py` |
 | Compute bounds | Monte Carlo horizon at most 720 hours, photometry CSV at most 512 KiB, and a per-operator limit shared by both | `spectre/web/routes/pol.py`, `spectre/web/rate_limit.py` |
-| Security headers | Content Security Policy with no third-party hosts, nosniff, frame restrictions, HSTS over HTTPS | `spectre/web/app.py` |
+| Security headers | Content Security Policy with no third-party hosts and `script-src 'self'` alone (no inline script, no handler attribute, no eval), nosniff, frame restrictions, HSTS over HTTPS | `spectre/web/app.py`, `spectre/web/static/js/` |
 | Log injection | Operator-supplied values are neutralised before logging | `spectre/web/log_safety.py` |
 | Administration | Admin-only routes; the last admin cannot be removed, even by concurrent changes | `spectre/web/routes/admin.py` |
 
 `spectre/web/app.py` records, beside the policy, what the Content Security
-Policy does not stop: `script-src` still allows inline script.
+Policy allows and why. Since SPC-199 (evaluation finding F-08) `script-src` is
+`'self'` alone: every script is a first-party file under
+`spectre/web/static/js` or a vendored library, no template carries an inline
+script, an event-handler attribute or an `hx-on` attribute, and htmx runs with
+`allowEval` and `allowScriptTags` off. An injected inline script or handler is
+refused by the browser. The policy does not stop injected markup: an element
+carrying htmx attributes still sends a same-origin request with the CSRF token
+it inherits from `<body>`, so output escaping remains the control against that
+(T9 in the threat model). `style-src` still allows inline style, and frames are
+limited to the console itself for the training page. The engine's draft threat
+model is `docs/threat-model-decision-engine.md`, for the security lead to
+review and sign.
 
 ## Network exposure
 

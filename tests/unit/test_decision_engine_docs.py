@@ -465,3 +465,58 @@ class TestTheWeightStability:
         for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
             assert "the nearest, so a change" not in text
             assert "within 1e-12" not in text
+
+
+class TestElementSetErrorInTheMiss:
+    """SPC-202 (evaluation F-11): both descriptions say every sample draws each object's element-set error along
+    track, a computed miss carries a band whose lower edge the score reads, the model and its source, and that a
+    record of 0.28.0 to 0.31.0 replays under the rule it was evaluated by; none says the error is left out."""
+
+    @pytest.mark.parametrize("claim", [
+        "SPC-202", "F-11", "element-set error along track", "in quadrature", "lower edge", "tuned, not sourced",
+        "1 km at epoch plus 2 km a day", "0.28.0 to 0.31.0", "no radial or cross-track part",
+    ])
+    def test_both_say_it(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_no_description_says_it_is_not_sampled(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _flat(_read("docs/decision-engine-envelope.md")),
+                     _guide_section()):
+            assert "element-set error is not sampled" not in text.lower()
+            assert "does not sample element-set error" not in text.lower()
+
+    def test_the_phase_document_records_its_choices_as_claudes_and_the_figures_that_moved(self) -> None:
+        doc = _read("docs/decision_engine_phases.md")
+        section = _flat(doc[doc.index("## Element-set error in the miss (SPC-202)"):
+                            doc.index("## What remains out of scope")])
+        assert "**Status: built" in section
+        assert "awaiting the owner's ruling" in section
+        for figure in ("855.86", "854.86", "19.94", "17.87", "8.94"):
+            assert figure in section, figure
+
+
+class TestElementSetErrorReviewed:
+    """The review of SPC-202: the phase document says a pick can change where our burn is sized, names the one pinned,
+    gives a convergence example the engine can meet, says a computed band is 1 sigma against a sampled P5, and says a
+    sampled TCA counts the error once; the guide says the band is 1 sigma and a sampled TCA holds the growth alone."""
+
+    @staticmethod
+    def _section() -> str:
+        doc = _read("docs/decision_engine_phases.md")
+        return _flat(doc[doc.index("## Element-set error in the miss (SPC-202)"):doc.index("## What remains out of scope")])
+
+    def test_no_claim_that_a_row_shares_one_band(self) -> None:
+        assert "every response shares the same band" not in self._section()
+
+    @pytest.mark.parametrize("claim", [
+        "The rule can change a pick", "0.694479", "0.704518", "sized to 15 km",
+        "Both 24 h old", "well inside GEO's 72 h limit", "P5 7.56 km",
+        "1.645 sigma", "A sampled TCA holds only the error's growth", "The operating envelope.",
+    ])
+    def test_the_phase_document_says_it(self, claim: str) -> None:
+        assert claim in self._section(), claim
+
+    @pytest.mark.parametrize("claim", ["1 sigma", "carries only the growth of the error", "can change which"])
+    def test_the_guide_says_it(self, claim: str) -> None:
+        assert claim in _guide_section(), claim

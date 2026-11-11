@@ -407,6 +407,9 @@
             <div class="computed-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_computed_caveat }}</div>
             {% endif %}
             {% endif %}
+            {% if om.ca_elset_line is defined and om.ca_elset_line is not none %}
+            <div class="elset-band" style="font-size:0.55rem; color:var(--text-dim)">{{ om.ca_elset_line }}</div>
+            {% endif %}
             {% if om.ca_caveat is defined and om.ca_caveat is not none %}
             <div class="sampled-caveat" style="font-size:0.55rem; color:var(--gold)">{{ om.ca_caveat }}</div>
             {% endif %}
@@ -448,26 +451,10 @@
     </tbody>
   </table>
   </div>
-  <div id="decision-geometry" aria-live="polite"></div>
-  {% if links is defined %}
-  <script>
-  (function () {
-    /* Which cell opened the view: every cell's trajectory form posts to the same view, so the one submitted is
-       marked and the view's close and Escape return focus there. Listened for on this table, not on document. */
-    var region = document.getElementById('decision-geometry');
-    var table = region ? region.parentElement : null;
-    if (!table) { return; }
-    table.addEventListener('submit', function (event) {
-      var form = event.target;
-      if (!form.classList || !form.classList.contains('show-trajectory')) { return; }
-      table.querySelectorAll('form.show-trajectory[data-geometry-opener]').forEach(function (f) {
-        f.removeAttribute('data-geometry-opener');
-      });
-      form.setAttribute('data-geometry-opener', 'true');
-    }, true);
-  })();
-  </script>
-  {% endif %}
+  {# With links, the cell whose trajectory form was submitted is marked, so the view returns focus there:
+     geometry-opener in /static/js/decision.js (SPC-199). #}
+  <div id="decision-geometry" aria-live="polite"{% if links is defined %} data-init="geometry-opener"{% endif %}></div>
+
 
 </div>
 
@@ -520,11 +507,11 @@
 {% set hist_cells = [] %}
 {% for row in result.outcome_matrix %}{% set hi = loop.index0 %}{% for om in row %}{% if om.tca_histogram is defined and om.tca_histogram is not none %}{% set _ = hist_cells.append((hi, loop.index0, om.tca_histogram)) %}{% endif %}{% endfor %}{% endfor %}
 {% if hist_cells %}
-<section class="tca-histogram" aria-labelledby="tca-hist-heading"
+<section class="tca-histogram" data-init="tca-histogram" aria-labelledby="tca-hist-heading"
          style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem">
   <h3 id="tca-hist-heading" style="margin:0 0 0.4rem; font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">Sampled times of closest approach</h3>
   <label for="tca-hist-cell" style="font-size:0.62rem; color:var(--text-dim); margin-right:0.4rem">Sampled cell</label>
-  <select id="tca-hist-cell" onchange="spectreTcaHistogram(this.value)" style="font-size:0.62rem">
+  <select id="tca-hist-cell" data-action-change="tcaHistogram" style="font-size:0.62rem">
     {% for hi, hj, h in hist_cells %}
     <option value="{{ hi }}-{{ hj }}">{{ adv[hi].name }} against {{ fr[hj].name }}</option>
     {% endfor %}
@@ -547,41 +534,7 @@
     </table>
     {% endfor %}
   </details>
-  <script>
-  (function () {
-    var chart = null;
-    function draw(cell) {
-      var block = document.getElementById('tca-hist-data-' + cell);
-      document.querySelectorAll('.tca-histogram [data-cell]').forEach(function (el) {
-        el.hidden = el.getAttribute('data-cell') !== cell;
-      });
-      if (!block || typeof Chart === 'undefined') { return; }
-      var data = JSON.parse(block.textContent);
-      /* The bars and the axis take the table's own text: its edges are stated exactly, so nothing here rounds a time. */
-      var table = document.querySelector('.tca-histogram table[data-cell="' + cell + '"]');
-      var labels = table ? Array.prototype.map.call(table.querySelectorAll('tbody tr td:first-child'), function (td) { return td.textContent; }) : [];
-      var axis = table ? table.querySelector('thead th').textContent : '';
-      var styles = getComputedStyle(document.documentElement);
-      var bar = styles.getPropertyValue('--ops-blue').trim();
-      var dim = styles.getPropertyValue('--text-dim').trim();
-      if (chart) { chart.destroy(); }
-      chart = new Chart(document.getElementById('tca-hist-chart'), {
-        type: 'bar',
-        data: { labels: labels, datasets: [{ label: 'Samples', data: data.counts, backgroundColor: bar }] },
-        options: {
-          animation: false, maintainAspectRatio: false, plugins: { legend: { display: false } },
-          scales: {
-            x: { title: { display: true, text: axis, color: dim }, ticks: { color: dim } },
-            y: { beginAtZero: true, title: { display: true, text: 'Samples', color: dim }, ticks: { color: dim, precision: 0 } }
-          }
-        }
-      });
-    }
-    window.spectreTcaHistogram = draw;
-    var select = document.getElementById('tca-hist-cell');
-    if (select) { draw(select.value); }
-  })();
-  </script>
+  {# Drawn and redrawn by tca-histogram in /static/js/decision.js (SPC-199). #}
 </section>
 {% endif %}
 

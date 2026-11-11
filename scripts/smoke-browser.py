@@ -91,7 +91,8 @@ def _find_chromium() -> str | None:
     for root in (Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")),):
         if not root.is_dir():
             continue
-        for candidate in sorted(root.glob("chromium-*/chrome-linux/chrome")):
+        # chrome-linux on older builds, chrome-linux64 on newer ones.
+        for candidate in sorted(root.glob("chromium-*/chrome-linux*/chrome")):
             if candidate.is_file():
                 return str(candidate)
     return None

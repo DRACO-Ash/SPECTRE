@@ -890,6 +890,74 @@ def elset_state(tle: str, at: datetime) -> BlueTrack | None:
     return BlueTrack(state_eci_km=np.concatenate([sv.r, sv.v]), bstar=orbit.bstar, epoch_utc=at)
 
 
+class ElsetError(NamedTuple):
+    """Each object's element-set position error along its orbit at the window start, 1 sigma, km (SPC-202).
+
+    A separation series given one draws, for every sample, an offset of each object along its orbit from a normal
+    distribution of this sigma, and flies that object from where the offset puts it: its whole trajectory a moment
+    earlier or later, by the offset over its speed then, which is the same orbit moved along itself. The Decision
+    Engine reads the sigmas from spectre/astro/along_track.py's model at each element set's age.
+    """
+
+    red_km: float
+    blue_km: float
+
+
+#: The element-set draws' own stream, so they never share a seed with the burn draws generate_samples makes from the
+#: hypothesis's seed alone (SPC-202). The SPC number; any constant apart from the burn's would serve.
+ELSET_ERROR_STREAM = 202
+#: The two sides' indices in an element-set draw: red, then blue.
+_RED, _BLUE = 0, 1
+
+
+def elset_offsets_km(error: ElsetError, seed: int, n: int) -> np.ndarray:
+    """Each of *n* samples' along-track offsets, red then blue, km: shape (n, 2) (SPC-202).
+
+    Sample k's draw for side s is one standard normal from its own generator, seeded (seed, ELSET_ERROR_STREAM, k,
+    s), times that side's sigma: the same whatever the sample count, and one side's sigma never moves the other's.
+    Positive is ahead along the orbit.
+    """
+    sigmas = (error.red_km, error.blue_km)
+    draws = [
+        [float(np.random.default_rng((seed, ELSET_ERROR_STREAM, k, side)).standard_normal()) for side in (_RED, _BLUE)]
+        for k in range(n)
+    ]
+    offsets: np.ndarray = np.asarray(draws, dtype=float).reshape(n, 2) * np.asarray(sigmas, dtype=float)
+    return offsets
+
+
+#: Added to every arc's padding, s, so a shifted arc never reads its integrator's own end.
+_PAD_MARGIN_S = 1.0
+
+
+def _slowest_km_s(state: np.ndarray) -> float:
+    """The slowest the object at *state* goes on its orbit, km/s: at apogee, by vis-viva; its speed now if the orbit
+    is not closed."""
+    speed = float(np.linalg.norm(state[3:]))
+    sma, ecc, _ = _state_to_keplerian(np.asarray(state[:3]), np.asarray(state[3:]))
+    if not (sma > 0.0 and ecc < 1.0):
+        return speed
+    return min(speed, math.sqrt(_MU / sma * (1.0 - ecc) / (1.0 + ecc)))
+
+
+def _pad_s(offsets_km: np.ndarray, state: np.ndarray) -> float:
+    """How far past each end an arc must run for every one of *offsets_km* to be read from it, s; 0 with none."""
+    largest = float(np.max(np.abs(offsets_km), initial=0.0))
+    return 0.0 if largest == 0.0 else largest / _slowest_km_s(state) + _PAD_MARGIN_S
+
+
+def _shifted(arc: _Trajectory, dt_s: float) -> _Trajectory:
+    """*arc* *dt_s* later along itself: the object where the arc puts it dt_s on (SPC-202). *arc* itself for 0."""
+    if dt_s == 0.0:
+        return arc
+    return lambda t: arc(t + dt_s)
+
+
+def _shift_s(offset_km: float, state: np.ndarray) -> float:
+    """The time an object at *state* takes to cover *offset_km* along its orbit, s: the shift that moves it so far."""
+    return 0.0 if offset_km == 0.0 else offset_km / float(np.linalg.norm(state[3:]))
+
+
 #: What every separation series propagates with, stated on the series.
 SEPARATION_PROPAGATOR = "RK45 with J2 and exponential drag, red and blue alike"
 
@@ -960,6 +1028,9 @@ class Kept(NamedTuple):
     bstar: np.ndarray
     slice_min_km: np.ndarray
     pending: tuple[tuple[RedBurn, ...], ...]
+    # Each sample's blue, that many seconds on along its own orbit: its element-set draw (SPC-202), for the next turn
+    # to search against blue moved as this one did. None when the series drew none.
+    blue_shift_s: np.ndarray | None = None
 
 
 class RedBurn(NamedTuple):
@@ -1007,6 +1078,8 @@ class SeparationSeries:
     # Each sample's red state and B* at a game tree's turn boundary, and its smallest separation from each blue
     # within the turn (SPC-140); None unless a boundary was asked for. Arrays, so never compared.
     kept: Kept | None = field(default=None, compare=False)
+    # The element-set error each sample drew, red's and blue's 1 sigma (SPC-202); None when none was drawn.
+    elset_error: ElsetError | None = None
 
     def __post_init__(self) -> None:
         if self.closing_speeds_km_s and len(self.closing_speeds_km_s) != len(self.approaches):
@@ -1070,7 +1143,7 @@ _REENTERED = "re-entered"
 def run_separation_series(  # noqa: PLR0913
     hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, *, tick: Tick | None = None,
     blue_burns: Sequence[BlueBurn] = (), keep_at_s: Sequence[float] = (),
-    red_then: Sequence[ManoeuvreHypothesis] = (),
+    red_then: Sequence[ManoeuvreHypothesis] = (), elset_error: ElsetError | None = None,
 ) -> SeparationSeries:
     """Each sample's closest approach to *blue* in *window*, with P5, P50 and P95 of the misses.
 
@@ -1118,6 +1191,13 @@ def run_separation_series(  # noqa: PLR0913
     direction, spreads and seed are read; its pre-manoeuvre state is not. A later burn whose drawn time falls before
     the sample's first burn is made at the first. The series integrates red from its first burn on, as with one
     burn, so its cost does not grow with the burns.
+
+    With *elset_error* (SPC-202), every sample also draws each object's element-set error along its orbit
+    (elset_offsets_km, from the hypothesis's seed) and flies that object from where the draw puts it: red's unburnt
+    arc and blue's arc, each read that many seconds on, so the shared arcs are still integrated once, a little past
+    each end. A sample's burn is made from its moved red; our burns on blue keep their time on blue's moved arc, so
+    each is made at the same point of blue's orbit. The misses, and so the band, P5, convergence and score, are then
+    of the moved objects. With none, or both sigmas 0, nothing changes.
     """
     _check_window(window, blue)
     _check_burns(blue_burns)
@@ -1126,20 +1206,29 @@ def run_separation_series(  # noqa: PLR0913
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     keeper = _Keeper(keep_at_s, len(samples), 1 + len(blue_burns), window) if keep_at_s else None
     later = _later_draws(red_then, len(samples), window)
-    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns, keeper, later))
     seed = hypothesis.random_seed or 0
+    offsets = _offsets(elset_error, seed, len(samples))
+    outcomes = _approaches(hypothesis, samples, blue, window, _Hooks(tick, blue_burns, keeper, later, offsets))
     series = _series_of(
         window, [outcome[0] for outcome in outcomes], _Ran(hypothesis.random_seed, t_start, keeper),
         integration_s=_integration_s(burn_s + samples[:, 3], burn_s, window.span_s),
         after_burns=tuple(
             _burn_series(burn, [outcome[k + 1] for outcome in outcomes], seed) for k, burn in enumerate(blue_burns)
         ),
+        elset_error=None if offsets is None else elset_error,
     )
     logger.info(
         "Separation series: %d/%d samples in %.1fs over %.0f s",
         len(series.approaches), hypothesis.n_samples, series.wall_time_seconds, window.span_s,
     )
     return series
+
+
+def _offsets(error: ElsetError | None, seed: int, n: int) -> np.ndarray | None:
+    """Each sample's along-track offsets, or None when there is no error to draw."""
+    if error is None or (error.red_km == 0.0 and error.blue_km == 0.0):
+        return None
+    return elset_offsets_km(error, seed, n)
 
 
 class _Ran(NamedTuple):
@@ -1247,12 +1336,37 @@ def nominal_red_arc(
         return None
 
 
-def rk45_arc(state: np.ndarray, span_s: float, bstar: float) -> _Trajectory | None:
-    """*state* at the window start integrated by this engine's RK45 to *span_s*; None when the solve fails.
+def rk45_arc(state: np.ndarray, span_s: float, bstar: float, pad_s: float = 0.0) -> _Trajectory | None:
+    """*state* at the window start integrated by this engine's RK45 to *span_s*, and *pad_s* past each end for a
+    sample's element-set shift to read (SPC-202); None when the solve fails.
 
     Raises ReenteredError when the arc goes below REENTRY_FLOOR_KM.
     """
-    return _dense_arc(state, 0.0, span_s, bstar)
+    return _padded_arc(state, span_s, bstar, pad_s)
+
+
+def shift_pad_s(shifts_s: np.ndarray | None) -> float:
+    """How far past each end an arc must run for every one of *shifts_s* to be read from it, s; 0 with none."""
+    largest = 0.0 if shifts_s is None else float(np.max(np.abs(shifts_s), initial=0.0))
+    return 0.0 if largest == 0.0 else largest + _PAD_MARGIN_S
+
+
+def along_track_shifts_s(offsets_km: np.ndarray, state: np.ndarray) -> np.ndarray:
+    """Each of *offsets_km* as the seconds an object at *state* takes to cover it along its orbit (SPC-202)."""
+    return np.array([_shift_s(float(x), state) for x in offsets_km])
+
+
+def moved_states(state: np.ndarray, bstar: float, offsets_km: np.ndarray) -> np.ndarray | None:
+    """*state* moved along its own orbit by each of *offsets_km*, km: the states (n, 6) an RK45 arc from it puts
+    the object at that many seconds on (SPC-202). None when the arc cannot be had."""
+    shifts = np.array([_shift_s(float(x), state) for x in offsets_km])
+    try:
+        arc = _padded_arc(state, 0.0, bstar, _pad_s(np.asarray(offsets_km, dtype=float), state))
+    except ReenteredError:
+        return None
+    if arc is None:
+        return None
+    return np.array([arc(float(dt)) for dt in shifts])
 
 
 def separation_integration_s(hypothesis: ManoeuvreHypothesis, window: SeparationWindow) -> float:
@@ -1311,6 +1425,8 @@ class _Hooks(NamedTuple):
     keeper: _Keeper | None = None
     # Per sample, the later burns of its transfer as drawn (SPC-184); empty for a single burn.
     later: tuple[tuple[RedBurn, ...], ...] = ()
+    # Per sample, red's and blue's along-track offsets, km (SPC-202); None for none.
+    offsets_km: np.ndarray | None = None
 
 
 def _approaches(
@@ -1323,26 +1439,63 @@ def _approaches(
     so its excepts never swallow what a tick raises; the exception propagates and no result is returned. When the
     shared arcs fail, no sample runs and no tick is called.
     """
-    tick, blue_burns, keeper, later = hooks
+    tick, blue_burns, keeper, later, offsets = hooks
     burn_s = (hypothesis.epoch_utc - window.start_utc).total_seconds()
     earliest = _earliest_s(burn_s + samples[:, 3])
+    pads = _Pads.of(offsets, hypothesis, blue)
     try:
-        blue_arc = _dense_arc(blue.state_eci_km, 0.0, window.span_s, blue.bstar)
-        unburnt = _unburnt_arc(hypothesis, earliest, window.span_s, burn_s)
+        blue_arc = _padded_arc(blue.state_eci_km, window.span_s, blue.bstar, pads.blue)
+        unburnt = _unburnt_arc(hypothesis, earliest - pads.red, window.span_s + pads.red, burn_s)
     except (ArithmeticError, ValueError, ReenteredError):   # numpy's LinAlgError is a ValueError
         blue_arc = unburnt = None
     if blue_arc is None or unburnt is None:
         return [(_FAILED,) * (1 + len(blue_burns))] * len(samples)
     arcs = _Arcs(blue=blue_arc, unburnt=unburnt, burn_s=burn_s)
-    blues = (blue_arc, *(_burnt_blue(blue_arc, burn, window, blue.bstar) for burn in blue_burns))
+    padded = window._replace(span_s=window.span_s + pads.blue)
+    blues = (blue_arc, *(_burnt_blue(blue_arc, burn, padded, blue.bstar) for burn in blue_burns))
+    shifts = _shifts(offsets, unburnt(0.0), blue.state_eci_km, len(samples))
     outcomes: list[tuple[Sampled | str, ...]] = []
     for k, sample in enumerate(samples):
-        keep = None if keeper is None else functools.partial(keeper.keep, k, blues)
-        outcomes.append(_try_sample(sample, arcs, hypothesis.bstar_post, window, blues, keep,
-                                    later[k] if later else ()))
+        red_dt, blue_dt = shifts[k]
+        moved = tuple(b if isinstance(b, str) else _shifted(b, blue_dt) for b in blues)
+        keep = _hearing(keeper, k, moved, blue_dt)
+        outcomes.append(_try_sample(sample, arcs._replace(unburnt=_shifted(unburnt, red_dt)), hypothesis.bstar_post,
+                                    window, moved, keep, later[k] if later else ()))
         if tick is not None:
             tick(len(outcomes), len(samples))
     return outcomes
+
+
+class _Pads(NamedTuple):
+    """How far past each end red's unburnt arc and blue's arc run, s, so every sample's shift reads inside them."""
+
+    red: float
+    blue: float
+
+    @classmethod
+    def of(cls, offsets: np.ndarray | None, hypothesis: ManoeuvreHypothesis, blue: BlueTrack) -> _Pads:
+        if offsets is None:
+            return cls(0.0, 0.0)
+        red_state = np.asarray(hypothesis.pre_manoeuvre_state_eci_km, dtype=float)
+        return cls(_pad_s(offsets[:, _RED], red_state), _pad_s(offsets[:, _BLUE], blue.state_eci_km))
+
+
+def _shifts(
+    offsets: np.ndarray | None, red_start: np.ndarray, blue_start: np.ndarray, n: int,
+) -> list[tuple[float, float]]:
+    """Each sample's red and blue shifts, s: its offsets over each object's speed at the window start; 0 for none."""
+    if offsets is None:
+        return [(0.0, 0.0)] * n
+    return [(_shift_s(float(r), red_start), _shift_s(float(b), blue_start)) for r, b in offsets]
+
+
+def _padded_arc(state: np.ndarray, span_s: float, bstar: float, pad_s: float) -> _Trajectory | None:
+    """*state* at the window start integrated over the window and *pad_s* past each end; the window alone for 0."""
+    ahead = _dense_arc(state, 0.0, span_s + pad_s, bstar)
+    if pad_s == 0.0 or ahead is None:
+        return ahead
+    back = _dense_arc(state, 0.0, -pad_s, bstar)
+    return None if back is None else _spliced(back, ahead, 0.0)
 
 
 def _burnt_blue(arc: _Trajectory, burn: BlueBurn, window: SeparationWindow, bstar: float) -> _Trajectory | str:
@@ -1590,6 +1743,7 @@ class _Keeper:
         self.bstar = np.full(samples, np.nan)
         self.slice_min_km = np.full((blues, samples), np.nan)
         self.pending: list[tuple[RedBurn, ...]] = [()] * samples
+        self.blue_shift_s = np.zeros(samples)
         self.slice_window = SeparationWindow(window.start_utc, self.at_s[0], window.step_s)
 
     def keep(self, k: int, blues: Sequence[_Trajectory | str], red: _RedArc) -> None:
@@ -1601,9 +1755,22 @@ class _Keeper:
             if isinstance(found, Sampled):
                 self.slice_min_km[b, k] = found.approach.miss_km
 
+    def hearing(self, k: int, blues: Sequence[_Trajectory | str], shift_s: float) -> Callable[[_RedArc], None]:
+        """What sample *k*'s red is handed to: kept against *blues*, each moved by its draw, whose shift, s, is kept
+        for the next turn (SPC-202)."""
+        self.blue_shift_s[k] = shift_s
+        return functools.partial(self.keep, k, blues)
+
     @property
     def kept(self) -> Kept:
-        return Kept(self.at_s, self.red, self.bstar, self.slice_min_km, tuple(self.pending))
+        return Kept(self.at_s, self.red, self.bstar, self.slice_min_km, tuple(self.pending), self.blue_shift_s)
+
+
+def _hearing(
+    keeper: _Keeper | None, k: int, blues: Sequence[_Trajectory | str], shift_s: float,
+) -> Callable[[_RedArc], None] | None:
+    """Sample *k*'s keep, or None when nothing is kept."""
+    return None if keeper is None else keeper.hearing(k, blues, shift_s)
 
 
 class TurnBurn(NamedTuple):
@@ -1626,6 +1793,9 @@ class ContinuedRed(NamedTuple):
     bstars: np.ndarray
     burn: TurnBurn | None = None
     pending: tuple[tuple[RedBurn, ...], ...] = ()
+    # Per sample, the seconds each blue is read on along its own orbit: the sample's element-set draw for blue, carried
+    # from the turn that drew it (SPC-202). None for none.
+    blue_shift_s: np.ndarray | None = None
 
 
 class ContinuedSeries(NamedTuple):
@@ -1719,7 +1889,9 @@ def continue_series(
     hypothesis's B* after it plus its draw's offset. A burn its last turn drew past that turn's end
     (``red.pending``) is made first, when it falls. Each blue is a trajectory from the window start, as the
     tree carried it. Sample order is kept, so turn k's sample is turn 1's. *tick* and *keep_at_s* serve as in
-    run_separation_series. Raises ValueError for a window the helper would refuse.
+    run_separation_series. With ``red.blue_shift_s`` (SPC-202), sample k searches each blue read that many seconds on
+    along its own orbit, as the turn that drew the shift did, so each blue arc must run that far past each end
+    (rk45_arc's *pad_s*). Raises ValueError for a window the helper would refuse.
     """
     _check_span(window)
     started = time.monotonic()
@@ -1727,10 +1899,12 @@ def continue_series(
     draws = None if burn is None else generate_samples(replace(burn.hypothesis, n_samples=n))
     keeper = _Keeper(keep_at_s, n, len(blues), window) if keep_at_s else None
     outcomes: list[tuple[Sampled | str, ...]] = []
+    shifts = np.zeros(n) if red.blue_shift_s is None else np.asarray(red.blue_shift_s, dtype=float)
     for k in range(n):
-        keep = None if keeper is None else functools.partial(keeper.keep, k, blues)
+        moved = [_shifted(blue, float(shifts[k])) for blue in blues]
+        keep = _hearing(keeper, k, moved, float(shifts[k]))
         burns = (*(red.pending[k] if red.pending else ()), *_drawn_burns(burn, None if draws is None else draws[k]))
-        outcomes.append(_continue_sample((red.states[k], float(red.bstars[k])), burns, window, blues, keep))
+        outcomes.append(_continue_sample((red.states[k], float(red.bstars[k])), burns, window, moved, keep))
         if tick is not None:
             tick(k + 1, n)
     ran = _Ran(0 if burn is None else burn.hypothesis.random_seed, started, keeper)

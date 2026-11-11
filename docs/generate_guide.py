@@ -451,6 +451,8 @@ def _section_02_system_overview(doc: Document) -> None:
             ["Authentication", "SQLAlchemy + bcrypt", "Operator credential management"],
             ["TLE Source", "UDL (Unified Data Library)", "Authoritative TLE retrieval via HTTPS"],
             ["Charting", "Chart.js 4.x", "Trade-space scatter plots in the browser"],
+            ["Browser Scripts", "First-party files in /static/js",
+             "Every control's behaviour; the Content Security Policy allows no inline script and no eval"],
             ["Design System", "Bluestaq Dark Ops", "Navy/gold operational colour scheme"],
         ],
     )
@@ -1295,6 +1297,22 @@ def _section_13_decision_engine(doc: Document) -> None:
         "not only its rank."
     )
     _add_body(doc,
+        "Element-set error is in every closest approach the engine propagates (SPC-202, evaluation finding F-11). "
+        "Its model is the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day in LEO "
+        "and MEO, 2 km plus 1 km a day at GEO and beyond, at each element set's age. In a sampled cell every sample "
+        "also draws each object's element-set error along track, red and blue each their own, so the band, P5 and "
+        "the score read the moved objects; no radial or cross-track part is drawn. A computed cell keeps its miss "
+        "as the figure and shows a band beside it, the miss less and plus both sets' error at the closest approach "
+        "in quadrature, 1 sigma, and its score reads the band's lower edge, the closer case: Claude's choice. A "
+        "sampled cell scores on P5, so the two are read at different confidence levels. Where our burn is sized, "
+        "the burn is sized on the miss, and its cell scores its own band's lower edge, so the rule can change which "
+        "response is picked. A sampled time of closest approach carries only the growth of the error after the "
+        "scenario epoch, since every sample draws the error at the epoch. A record written by 0.28.0 to 0.31.0 is "
+        "replayed under the rule it was evaluated by, with no element-set error, and the replay says so first. A "
+        "wider band needs more samples to converge: a GEO pair 15 km apart with both sets a day old needs 1,000, "
+        "where the default is 500."
+    )
+    _add_body(doc,
         "Under the basis lines, 'Judgement inputs' lists every input on the panel that enters a score or a pick, "
         "each marked '(judgement)': the weights, the keep-out distance, the horizon and the turns; each response's "
         "type, cost, reversibility and time to execute, and its burn's target separation, budget and axis; each "
@@ -1347,7 +1365,8 @@ def _section_13_decision_engine(doc: Document) -> None:
         "on SDP4, SGP4's deep-space branch, which SGP4 uses from a period of about 225 minutes. Its figures stand. "
         "For a GEO set, its staleness limit and element-set error model are the "
         "GEO rules of thumb, tuned rather than sourced; for HEO, Molniya-class and other orbits on SDP4 they are rules of thumb set for LEO and GEO, "
-        "not validated for it. An object below the 100 km re-entry floor at any moment searched, or that SGP4 "
+        "not validated for it. The flag says that the error model also sets every sample's draw, every computed "
+        "band, and the closest approach and score that read them. An object below the 100 km re-entry floor at any moment searched, or that SGP4 "
         "reports decayed, has decayed: no closest approach is computed from it, and the results say so. With all 5 weights at 0, Evaluate is refused, since every score would be 0."
     )
     _add_body(doc,
@@ -1458,9 +1477,12 @@ def _section_13_decision_engine(doc: Document) -> None:
 
     _add_heading_h2(doc, "How the Figures Are Worked Out")
     _add_bullet(doc, "Closest approach, computed: for a red action that does not move red, both orbits are "
-                "propagated from their element sets with no burn, searched every 60 s and refined to 0.01 s.")
+                "propagated from their element sets with no burn, searched every 60 s and refined to 0.01 s. "
+                "Beside the miss is a band, the miss less and plus both sets' element-set error at the closest "
+                "approach in quadrature, 1 sigma, and the score reads its lower edge.")
     _add_bullet(doc, "Closest approach, sampled: for a row with a hypothesis, each sample's burn is drawn and "
-                "propagated beside the blue asset. The row scores on P5. It is refused, and says why, for fewer "
+                "propagated beside the blue asset, and each sample also draws both objects' element-set error "
+                "along track at each set's age at the scenario epoch. The row scores on P5. It is refused, and says why, for fewer "
                 "than 50 samples, an out-of-date orbit, a red element set newer than the burn, or a cost over the "
                 "cap. The row counts as converged when P5, P50 and P95 are each known to within 1 km, or 5 per "
                 "cent of P5 where larger.")
@@ -1471,7 +1493,8 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "A manoeuvre with no hypothesis is refused a closest approach: where red goes if it does not "
                 "move is not the outcome of a manoeuvre. Add a hypothesis.")
     _add_bullet(doc, "Time of closest approach carries an uncertainty from both element sets' errors, and is "
-                "printed no finer than that uncertainty.")
+                "printed no finer than that uncertainty. A sampled one carries only the errors' growth after the "
+                "scenario epoch, since every sample draws the errors at the epoch.")
     _add_bullet(doc, "Custody is read from the bound red track as the sweep reads it and carried over the horizon, "
                 "assuming no newer element set arrives. Degraded custody can judge your warning time but not "
                 "whether a burn is normal, so the hours it is degraded are shown as degraded, never as held or "
@@ -1676,7 +1699,8 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_heading_h2(doc, "What It Does Not Do")
     _add_bullet(doc, "It does not cite its scoring weights yet (SPC-151); the score is a weighted heuristic.")
     _add_bullet(doc, "It holds no constraint library: a response is marked not permitted only when you tick it.")
-    _add_bullet(doc, "It does not sample element-set error, so a sampled band can be narrower than the orbit is known.")
+    _add_bullet(doc, "It draws element-set error along track only, from a rule of thumb, tuned, not sourced; "
+                "error across track is not in any band.")
     _add_bullet(doc, "It does not model a sensor's line of sight to red.")
     _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
                 "P as entered.")

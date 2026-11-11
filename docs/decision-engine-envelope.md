@@ -58,8 +58,8 @@ The bundled watchlist, `spectre/data/hrr_default.json`, passes in full.
 | Dimension | Fit for | Enforced at | Value | Outside it |
 |---|---|---|---|---|
 | Near-Earth orbits | A period under about 225 minutes, propagated by SGP4's near-Earth branch; the library makes the switch itself | `spectre/astro/propagator.py` `DEEP_SPACE_PERIOD_MIN` | `225.0` | Flagged, not refused (F-29). A GEO set on SDP4, SGP4's deep-space branch, carries a sentence that its staleness limit and its element-set error model are the GEO rules of thumb, tuned rather than sourced. Any other set on SDP4 (HEO, Molniya-class, GTO, MEO over the switch, or beyond GEO) carries a sentence that they are rules of thumb set for LEO and GEO, not validated for that orbit. Its figures stand. Limits sourced for it are SPC-215 |
-| The deep-space flag | One sentence per bound set on SDP4 that is not a GEO set, red first | `spectre/domain/decision_envelope.py` `DEEP_SPACE` | none | Shown under "Outside the operating envelope" on the result |
-| The GEO flag | One sentence per bound GEO set, red first: GEO as `regime_from_tle` reads it, the regime its limit and error model are chosen by | `spectre/domain/decision_envelope.py` `DEEP_SPACE_GEO` | none | Shown under "Outside the operating envelope" on the result |
+| The deep-space flag | One sentence per bound set on SDP4 that is not a GEO set, red first. Since SPC-202 the error model also sets every sample's draw, every computed band and the closest approach and score that read them, and the sentence says so; a record of 0.28.0 to 0.31.0 keeps the sentence it showed | `spectre/domain/decision_envelope.py` `DEEP_SPACE_ELSET` | none | Shown under "Outside the operating envelope" on the result |
+| The GEO flag | One sentence per bound GEO set, red first: GEO as `regime_from_tle` reads it, the regime its limit and error model are chosen by. Since SPC-202 it says the error model also sets the draws, the bands, the closest approach and the score; a record of 0.28.0 to 0.31.0 keeps the sentence it showed | `spectre/domain/decision_envelope.py` `DEEP_SPACE_GEO_ELSET` | none | Shown under "Outside the operating envelope" on the result |
 | In orbit | Above the re-entry floor at every instant searched, on both propagators | `spectre/astro/monte_carlo.py` `REENTRY_FLOOR_KM` | `100.0` | Refused: a sampled row below it refuses itself (RK45); the computed search refuses the pair, every computed cell says so, and the result says it once (SGP4, F-30). Probe P-14's decayed object, between two of SGP4's perigee errors, gave "Computed: 643.1 km"; it now gives no computed figure |
 | SGP4's own decay error | Read as the same re-entry, so the result says the object has decayed whether the search meets this error or the floor first | `spectre/astro/propagator.py` `SGP4_DECAYED` | `6` | Refused as decayed, with the decayed flag; any other SGP4 error is refused as a propagation failure |
 | The decayed flag | One sentence, naming the side and the set | `spectre/domain/decision_envelope.py` `DECAYED` | none | Shown under "Outside the operating envelope" on the result |
@@ -109,7 +109,9 @@ The engine is not fit for these, and does not claim to be. None is checked, beca
 gives; each is said on the result or in docs/decision_engine_phases.md where it bears on a figure. The limits on
 turns and rows above are checked and refused, so they are not repeated here.
 
-● **Element-set error is not sampled.** A sampled band can be narrower than the element sets' own error.
+● **Element-set error across track is not drawn.** Since SPC-202 every sample draws each object's element-set error
+  along track, and a computed miss carries a band of both sets' error in quadrature, from the threat sweep's rule of
+  thumb, tuned, not sourced; a radial or cross-track part is not drawn, and the model is not validated for any regime.
 ● **Third bodies are not modelled.** RK45 carries J2 and drag only, so at GEO it parts from SDP4 by 11 to 18 km
   (probe P-13).
 ● **A sensor's line of sight is not modelled.** Custody is about information, not geometry.

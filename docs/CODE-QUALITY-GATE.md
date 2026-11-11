@@ -109,8 +109,9 @@ function in `scripts/` does not fail a loop over code the gate never sees.
   strips line breaks and control characters so a newline in a username cannot
   forge an audit record.
 ● **Web:MouseEventWithoutKeyboardEquivalentCheck** and friends. A shared
-  `spectreActivate(event)` handler in `base.html`; elements opt in with
-  `tabindex="0" onkeydown="spectreActivate(event)"`. A console that answers only
+  keydown listener in `spectre/web/static/js/core.js`; elements opt in with
+  `tabindex="0" data-activate` beside the `data-action` that names their click
+  (SPC-199: the policy allows no inline handler). A console that answers only
   to a mouse is unusable from a keyboard, which in an operations room is a real
   barrier and not a formality.
 ● **css:S7924** contrast. The caution amber `#EF9F27` is 9.00:1 on the dark

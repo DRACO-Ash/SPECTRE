@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -124,7 +125,7 @@ class TestASampledCell:
         """12: the earliest sample at or below P5 is the second, 2.5 km at 1,200 s; it closes at 0.5 km/s."""
 
         class _WithSpeeds(_Fake):
-            def __call__(self, hypothesis: ManoeuvreHypothesis, blue: object, window: SeparationWindow) -> object:
+            def __call__(self, hypothesis: ManoeuvreHypothesis, blue: object, window: SeparationWindow, **_: Any) -> object:
                 series = _series(window)
                 speeds = tuple(0.5 if k == 1 else 0.01 for k in range(len(series.approaches)))
                 return dataclasses.replace(series, closing_speeds_km_s=speeds)

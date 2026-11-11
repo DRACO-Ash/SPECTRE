@@ -1964,11 +1964,15 @@
   "group": "eval-gate",
   "minutes": 900,
   "task": "F-08: a trust-boundary inventory exists, not an engine threat model; no ISN 2023/09 artefacts; the Content Security…",
-  "note": "Evaluation finding F-08 (Critical, G9, L7), evaluation/EVALUATION.md. Remediation: an engine threat model against ISN 2023/09; a nonce-based policy with the inline scripts moved to static files. Closing evidence: the threat model; a policy without 'unsafe-inline' and 'unsafe-eval'; tests.",
+  "note": "Evaluation finding F-08 (Critical, G9, L7), evaluation/EVALUATION.md. Remediation: an engine threat model against ISN 2023/09; a nonce-based policy with the inline scripts moved to static files. Closing evidence: the threat model; a policy without 'unsafe-inline' and 'unsafe-eval'; tests. Built in 0.32.0: script-src 'self' alone, and a draft threat model. Gate G9 stays open until the security lead signs the model (SPC-229).",
   "files": [
    "spectre/web/app.py",
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.32.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-200",
@@ -2017,7 +2021,11 @@
    "spectre/astro/along_track.py",
    "spectre/astro/monte_carlo.py",
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.32.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-203",
@@ -2370,6 +2378,32 @@
   "files": [
    "docs/SECURITY.md",
    "docs/decision_engine_phases.md"
+  ]
+ },
+ {
+  "ref": "SPC-229",
+  "priority": "high",
+  "order": 2,
+  "group": "eval-gate",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 120,
+  "task": "Security lead to review and sign the draft engine threat model",
+  "note": "docs/threat-model-decision-engine.md: 11 threats by the 7 ISN 2023/09 principles, each with what exists in the code, what remains and its owner. Draft by Claude; does not close gate G9 until signed.",
+  "files": [
+   "docs/threat-model-decision-engine.md"
+  ]
+ },
+ {
+  "ref": "SPC-230",
+  "priority": "low",
+  "order": 20,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "Fix scripts/smoke-browser.py: Chromium path and the asset-screening check",
+  "note": "Found building SPC-202: the script looks for chrome-linux/ where the installed browser is chrome-linux64/, and its [asset-screening-result] check fails on 0.31.0 as well, before any 0.32.0 change.",
+  "files": [
+   "scripts/smoke-browser.py"
   ]
  }
 ]

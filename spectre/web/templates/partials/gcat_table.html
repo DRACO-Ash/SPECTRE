@@ -29,7 +29,7 @@
         hx-target="#gcat-table-area"
         hx-swap="innerHTML"
         hx-indicator="#gcat-load-ind"
-        onclick="gcatSelectDs(this)"
+        data-action="gcatSelectDs"
         title="{{ meta.desc }}">
   <span class="gcat-ds-label">{{ meta.label }}</span>
   <span class="gcat-ds-rows gcat-rows-loaded">{{ "{:,}".format(total_rows) }}</span>
@@ -77,7 +77,7 @@
              class="gcat-search">
       {% if q %}
       <button class="gcat-search-clr"
-              data-dataset="{{ dataset_key }}" onclick="gcatClearSearch(this.dataset.dataset)"
+              data-dataset="{{ dataset_key }}" data-action="gcatClearSearch"
               title="Clear search filter">&#10005;</button>
       {% endif %}
     </div>
@@ -125,7 +125,7 @@
           {% if q %}
             No records match &ldquo;<em>{{ q }}</em>&rdquo;&ensp;&mdash;&ensp;
             <button class="gcat-link-btn"
-                    data-dataset="{{ dataset_key }}" onclick="gcatClearSearch(this.dataset.dataset)"
+                    data-dataset="{{ dataset_key }}" data-action="gcatClearSearch"
                     title="Clear filter and show all records">clear filter</button>
           {% else %}
             No data available.
@@ -202,29 +202,5 @@
 
 </div>{# end .gcat-pgn #}
 
-<script>
-/* Sync nav active state after table swap */
-(function() {
-  document.querySelectorAll('.gcat-ds-btn').forEach(function(b) {
-    b.classList.toggle('active', b.dataset.ds === '{{ dataset_key }}');
-  });
-  /* Show correct category group if needed */
-  var btn = document.querySelector('.gcat-ds-btn[data-ds="{{ dataset_key }}"]');
-  if (btn) {
-    var cat = btn.dataset.cat;
-    if (cat) {
-      document.querySelectorAll('.gcat-nav-group').forEach(function(g) {
-        if (g.dataset.catGroup === cat && !g.classList.contains('active')) {
-          /* Switch category tab to match the selected dataset */
-          g.classList.add('active');
-          var tab = document.querySelector('.gcat-ctab[data-cat="' + cat + '"]');
-          if (tab) {
-            document.querySelectorAll('.gcat-ctab').forEach(function(t) { t.classList.remove('active'); });
-            tab.classList.add('active');
-          }
-        }
-      });
-    }
-  }
-})();
-</script>
+{# Syncs the nav to this dataset after the swap: /static/js/gcat.js (SPC-199). #}
+<span hidden data-init="gcat-sync" data-dataset="{{ dataset_key }}"></span>

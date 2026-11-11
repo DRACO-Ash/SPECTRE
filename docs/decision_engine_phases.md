@@ -8,7 +8,8 @@ with a primary rule (SPC-194) and replay from the stored record (SPC-193); for r
 permitted (SPC-195); for the judgement basis, the lookup register and the code version on the results (SPC-196);
 and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); for what P means, a
 probability over mutually exclusive actions with the remainder weighed (SPC-203); and for collect first tied to the
-engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205).
+engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205); and for element-set error in
+every closest approach the engine propagates (SPC-202).
 The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
 why.*
 
@@ -227,8 +228,9 @@ tests/unit/test_decision_reference_cases.py.
   on the server at a time; a second waits and its budget starts when it runs. A stopped evaluation scores nothing and
   says why.
 ● **On screen** (SPC-115): a sampled cell shows P5 to P95 with the median, the half-width P5 is known to, and the
-  score's spread across samples. The hover names what is not in the band: element-set error and the hypothesis
-  being wrong.
+  score's spread across samples. Since SPC-202 every sample also draws both objects' element-set error along track,
+  and the cell says so with each side's error and age; the hover names what is still not in the band: element-set
+  error across track and the hypothesis being wrong.
 
 ## Phase 3: computed outcomes, custody and our burns
 
@@ -240,13 +242,16 @@ tests/unit/test_decision_reference_cases.py.
   element sets, searched every 60 s with each local minimum refined to 0.01 s. A manoeuvre row with no hypothesis is
   refused, saying to add one: where red goes if it does not move is not the outcome of a manoeuvre. Since SPC-200 the
   search holds the RK45 path's re-entry floor, 100 km: an object below it at any instant searched has decayed, and
-  every computed cell is refused, saying so.
+  every computed cell is refused, saying so. Since SPC-202 the miss carries a band beside it, the miss less and plus
+  both element sets' error at the closest approach in quadrature, and the score reads the band's lower edge.
 ● **One propagator per figure**: computed is SGP4 on both objects, sampled is RK45 on both. When a matrix holds
   both, the result states the measured gap between the two propagators.
 ● **The span searched** (SPC-118) runs from the scenario epoch to the earlier of the horizon's end and the moment
   either element set passes its limit, and the page states a trimmed span.
 ● **The time of closest approach** carries an uncertainty (SPC-118, SPC-124): both element sets' position error over
-  the closing speed, erring wide, and the hours after the epoch are printed no finer than that uncertainty.
+  the closing speed, erring wide, and the hours after the epoch are printed no finer than that uncertainty. Since
+  SPC-202 a sampled TCA's uncertainty holds only the error's growth from the scenario epoch to the TCA, since every
+  sample draws the error at the epoch.
 ● **Custody** (SPC-123) is the operator's definition: timely and actionable information to judge whether a burn is
   normal and how the warning time changed. With a red track bound, the route reads its custody as the sweep does and
   carries it over the horizon on the assumption that no newer element set arrives: it is lost from the earliest of
@@ -668,7 +673,8 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
   300 s budget, a sampled row refused, a burn left unsized or a tree built in part, the stored inputs say so; the
   replay runs in full with no budget, so it says before comparing that what the budget left out may differ, and the
   verdict says so again if the replay differs. A record written by 0.28.0 or 0.29.0 is replayed under the rule it was
-  evaluated by, and the command says so first too (SPC-203, set out below). A record with no stored inputs is said to hold none, with no version
+  evaluated by, and the command says so first too (SPC-203, set out below); so is a record of 0.28.0 to 0.31.0,
+  under the miss rule it was evaluated by (SPC-202). A record with no stored inputs is said to hold none, with no version
   line. It exits 0 when the replay matches, 1 when it differs, 2 for a usage error and 3 when there is nothing to
   replay, or no database at the configured SQLite path.
 ● **It writes nothing.** A SQLite database is opened read-only, and one that is not at the configured path is not
@@ -678,8 +684,8 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
   24 and 28 October 2026 that holding cached data is acceptable. docs/SECURITY.md lists it, and the owner's open
   retention ruling (SPC-228) now covers the stored inputs too.
 ● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, when built; since SPC-195 the
-  document is written as version 2, and since SPC-203 as version 3, versions 1 and 2 still read (see the next two
-  sections).
+  document is written as version 2, since SPC-203 as version 3 and since SPC-202 as version 4, every earlier version
+  still read (see the sections on each).
   Replay runs with no wall-time budget, so an evaluation the 300 s budget cut short, a sampled row refused or a tree
   built in part, is replayed in full and the comparison may then differ; the stored inputs record whether the budget
   ran out, so the report says why, and names where. The code version is stored in the document, so it is covered by
@@ -1010,14 +1016,147 @@ their ratings stand until the evaluation is repeated.
     the engine's pick there turns on the rounding, and the point is still placed where the lines meet.
   ■ The record stores the recommendation's line alone, not the chosen rule's or every weight's.
 
+## Element-set error in the miss (SPC-202)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling, awaiting the owner's
+ruling; they are listed at the end of this section.** Evaluation finding F-11 (High) found that the closest-approach
+payoff was an SGP4 point miss (computed cells) or a P5 over the burn's dispersions alone (sampled cells): element-set
+error, which the code's own model puts at 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, never
+entered it, so bands read tighter than the inputs allow. Gates were not reassessed; their ratings stand until the
+evaluation is repeated.
+
+● **The model.** `spectre/astro/along_track.py`'s `_ERROR_MODEL_KM`, the threat sweep's rule of thumb, tuned, not
+  sourced: 1 km at epoch plus 2 km a day of age in LEO and MEO, 2 km plus 1 km a day at GEO and beyond (GEO and DEEP
+  as `regime_from_tle` reads the set). It is in docs/lookup-register.md. Each set's age is read from its epoch.
+● **Sampled cells.** Every sample also draws each object's element-set error along track, from a normal distribution
+  whose 1 sigma is the model's error at that set's age at the scenario epoch, red and blue each their own draw. The
+  draws are seeded per sample and side from the hypothesis's seed on a stream of their own (`ELSET_ERROR_STREAM`),
+  so an evaluation repeats exactly and the burn draws are untouched. The draw moves the object along its own orbit:
+  its RK45 arc is read that many seconds later or earlier, the offset over its speed at the window start, which is
+  the same orbit moved along itself, so the shared arcs are still integrated once, run a little past each end. The
+  band, P5, its convergence and the score all read the moved objects' misses. The cell names each side's 1 sigma and
+  age, and its basis names the model and its source.
+● **Computed cells.** The SGP4 miss stays the figure. Beside it, a band: the miss less and plus both sets' error at
+  the time of closest approach in quadrature, 1 sigma, the same figure the TCA's uncertainty has used since SPC-118,
+  never below 0 km. The score reads the lower edge: the operator reads the closer case to answer "can it reach one of
+  mine". Each computed cell shows "Element-set error: low to high km", says the band is 1 sigma, and gives what the
+  score reads and each set's age at the TCA. A cell on RK45 because our burn was sized carries the same band; our
+  burn is sized on the miss itself.
+● **The time of closest approach.** A computed TCA's uncertainty is both sets' whole error at the TCA, as since
+  SPC-118. A sampled TCA's is not: every sample has drawn both sets' error at the scenario epoch, so the samples' TCAs
+  spread by it already, and adding it again to each sample's TCA would count it twice. Its ± and the TCA histogram's
+  bin floor hold only what no sample draws, each set's error at the TCA less its error at the scenario epoch in
+  quadrature, both sets in quadrature, and the hover and the histogram's caption say so. In the game tree a sampled
+  node's TCA reads the same way.
+● **The game tree.** Each sample keeps its draws from turn to turn: red's in the state it carries, blue's as the time
+  along its orbit it is read at. A sampled turn after a computed one draws both errors at its start, moving red's one
+  state along its orbit for each sample. A computed node shows its miss with the band in its basis, and its sequence
+  scores the path's closest approach less the error at that node's closest approach, the latest along the path and so
+  no smaller than any before it. The node's basis says the sequence's score reads the path's closest approach less
+  that error, which is not always the node's own miss less it.
+● **Every sentence that said "element-set error is not in it"** now names the error included, its model with its
+  figures, its source and the ages read: the computed and sampled bases, the band's hover, each computed row's
+  Uncertainty sentence, from the row's first cell, the computed and sampled caveats, "Converged means" and the tree's
+  four notes. Where the error is drawn the ages are at the scenario epoch; where it is beside a computed miss they are
+  at that closest approach, and the result's computed caveat gives the ages at the scenario epoch and says each is
+  older by the time to the closest approach.
+● **The operating envelope.** The deep-space and GEO flags say that the unvalidated or unsourced error model now sets
+  every sample's draw, every computed band and the closest approach and score that read them, not only a set's age and
+  its TCA's uncertainty. A record of 0.28.0 to 0.31.0 keeps the flags it showed.
+● **Records of 0.28.0 to 0.31.0.** They are replayed under the rule they were evaluated by, as SPC-203 did for P:
+  stored inputs version 4 adds the scenario's miss rule; versions 1 to 3 read as the rule before it, no element-set
+  error, so the replay reproduces what the operator was shown, says so first, and the provenance hashes those records
+  as they were. Version 4 holds the new rule alone. No other stored field was needed: each set's text, epoch and age
+  were stored already. `tests/unit/_decision_records_0_31_0.json` holds two records 0.31.0 wrote, a sampled and
+  computed matrix and a two-turn tree, and each replays exactly.
+● **What moved.** Re-derived by evaluating each case under both rules, never pasted. The plane-change computed miss,
+  10.40 km, now scores on 8.94 km, inside the 10 km keep-out, so its closest-approach term is the full penalty. The
+  orbit raise burned 2 h before its window (convergence C7): P5 855.86 km known to within 11.34 km before, 854.86 km
+  within 12.08 km now. The Evasive sampled row: 10.7 to 13.4 km before, 9.7 to 15.1 km now. Our burn sized to 20 km
+  against the Evasive burn 0.25 h in: P5 9.45 km before and 19.94 km after, 16 of 100 samples under the target, before;
+  7.27 km and 17.87 km, 52 of 100 under it, now, since the burn is sized on the nominal, not the band. The reference
+  cases pass unchanged: each computed figure is still the SGP4 miss, and the series with one undispersed sample draws
+  nothing.
+● **Picks.** The rule can change a pick, and does where our burn is sized. Responses in a row need not share a band: a
+  response whose burn is sized has its own miss, TCA and so error, and a fixed subtraction does not move every cell's
+  logarithmic closest-approach term alike, nor keep a minimax pick. Checked by evaluating each under both rules: no
+  matrix pick and no tree turn-1 pick changed in the 8 record fixtures (0.28.0, 0.29.0 and 0.31.0), nor in C7, the
+  Evasive row, test 36 or coplanar_leo computed with Hold against Avoid sized to 20 km, nor the turn-1 picks and the
+  path selected in two trees from `tests/unit/_decision_tree_cases.py` under expected value and minimax. One that
+  changed, pinned in `tests/unit/test_decision_elset_error.py`: coplanar_leo computed, Hold against Avoid with our
+  burn sized to 15 km, the closest-approach weight 0.7 and the other four 0.075 each. Before, every rule picked Avoid,
+  0.694479 against Hold's 0.699953; now every rule picks Hold, 0.7 against Avoid's 0.704518. Hold's miss, 10.01 km, is
+  just outside the 10 km keep-out and its lower edge inside it, where the term is already the full penalty, so Hold
+  moves by under 0.0001. Avoid's burn puts the miss at 15.1 km and is scored at that less its own error, 1.74 km, so
+  only Avoid's score rises. The same happens at a 12 km target with the weight at 0.9. A burn sized short of the error
+  buys less than its target says; the caveat with a sized burn says so.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ **Along track only.** The model is an along-track error, so no radial or cross-track part is drawn: any figure
+    for one would be unsourced, and along track is where element-set error grows fastest. The results say what is
+    still not in the band.
+  ■ **A normal distribution, 1 sigma the model's figure.** The sweep uses the model as a shift both ways; the TCA's
+    uncertainty reads it as 1 sigma, so the draw does too.
+  ■ **The age at the scenario epoch, fixed for the span.** The draw is an initial-state error; within the span the
+    moved orbit is flown as it is, so the error does not grow at the model's 2 km a day while the span runs, where a
+    computed band read at the closest approach does.
+  ■ **A time along the orbit.** Moving an object along its own orbit is reading its arc at another time, which keeps
+    the cost of a series where it was; our burns on blue keep their time on blue's moved arc, so each is made at the
+    same point of blue's orbit.
+  ■ **The lower edge for the score of a computed cell.** It is never below 0 km. A crossing at high speed turns
+    along-track error mostly into time, so the lower edge can overstate how much closer the pair comes; it errs
+    towards the closer case.
+  ■ **A 1-sigma edge beside a P5.** The brief sets the band as the miss less and plus the error; the computed cell
+    scores on that, 1 sigma closer, while a sampled cell scores on P5, about 1.645 sigma closer where the error
+    dominates its spread. Rows of one matrix can so be scored at different confidence levels: the same co-orbital pair
+    20 km apart with red two days old scores 14.9 km computed and P5 11.3 km sampled. Both the line and the basis say
+    the band is 1 sigma.
+  ■ **A sampled TCA holds only the error's growth.** Every sample draws the error at the scenario epoch, so its ± is
+    the growth from then to the TCA alone, rather than the whole error counted again.
+  ■ **Replay under the rule evaluated by**, not under this code's rule with the difference reported.
+  ■ **More samples may be needed.** A wider band converges more slowly, at about the same cost a series: 500 samples
+    took 3.5 s with the draws and 3.2 s without at LEO, 2.9 s and 3.0 s at GEO, measured here. A co-orbital GEO pair
+    15 km apart over 1 h, both sets 12 h old, 2.5 km each, converges at the default 500 samples, P5 8.42 km known to
+    within 0.94 km against 1.00 km. Both 24 h old, 3 km each, well inside GEO's 72 h limit, it does not: P5 7.10 km
+    known to within 1.13 km, so the row is refused as unconverged. At 1,000 samples it converges, P5 7.56 km within
+    0.64 km. A LEO pair 15 km apart over 0.5 h converges at 500 samples with both sets 19 h old, 2.58 km each, within
+    0.97 km, and not at 24 h, its limit, 3 km each, within 1.13 km. The panel takes up to 2,000 samples a row; the
+    default stays 500.
+
+## The page's script and the draft threat model (SPC-199)
+
+**Status: the policy is built; the threat model is a draft for the owner's security lead to review and sign. Each
+choice not named in the brief is Claude's design choice, not a ruling; they are listed at the end of this section.**
+Evaluation finding F-08 (Critical, gate G9) found no engine threat model and a Content Security Policy that allowed
+`'unsafe-inline'` and `'unsafe-eval'`, with the results page itself carrying 2 inline scripts. Gate G9 was rated Red;
+that rating stands until the security lead has signed the model and the evaluation is repeated.
+
+● **What the browser runs.** `script-src` is `'self'` alone. The Decision Engine panel's row builder, the results'
+  trajectory opener and the histogram of sampled times of closest approach are in `spectre/web/static/js/decision.js`,
+  with the rest of the console's script in the other files beside it. The rows Add Adversary Action and Add Friendly
+  Response build are a `<template>` in the panel, the same markup the script string held, with each row's number
+  written where `__ROW__` stands. The histogram's data stays in its `<script type="application/json">` blocks, which
+  the browser never runs. An injected inline script, handler attribute or `hx-on` is refused by the browser.
+  Injected markup is not: an element carrying `hx-get` or `hx-post` still sends a same-origin request with the CSRF
+  token it inherits, so output escaping remains the control against it (T9 in the threat model).
+● **What the operator sees.** Nothing changes: every control does what it did, and the browser tests in
+  `tests/browser/` drive each one under the policy.
+● **The draft threat model.** `docs/threat-model-decision-engine.md`, structured by the 7 ISN 2023/09 principles,
+  covers poisoned element sets, tampered weights, priors and vetoes, the integrity and non-repudiation of records and
+  stored inputs, the confidentiality of the friendly priorities they reveal, the UDL credential and injection in the
+  browser, each with what exists, what remains and its owner. It is unsigned and does not close G9 by itself.
+● **Claude's design choices, awaiting the owner's ruling.** Behaviour is reached through `data-action`,
+  `data-init` and the other attributes `spectre/web/static/js/core.js` lists, resolved against its own registries
+  and never against `window`. A fragment's start-up code runs on htmx's load event, once for each element. htmx runs
+  with `allowEval` and `allowScriptTags` off. Inline style is still allowed.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
   ranking a weighted heuristic. Since SPC-205 the results show how far one weight can move before the
   recommendation changes; swing-weight elicitation remains SPC-151.
 ● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
-● **Element-set error is not sampled.** A sampled band can be narrower than element-set error; a per-cell comparison
-  needs the regime on the bound element set and is a follow-up.
+● **Element-set error across track** is not drawn, and the along-track model is a rule of thumb, tuned, not sourced
+  (SPC-202); sourced error rates per regime are SPC-215.
 ● **A sensor's line of sight to red is not modelled.** Custody is about information, not geometry, and our response
   is not applied to it.
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
@@ -1043,3 +1182,5 @@ their ratings stand until the evaluation is repeated.
 | SPC-203 | P summing to at most 1, the remainder weighed as no adversary action, each row's share shown | Built |
 | SPC-204 | Collect first only for a collection that can change the recommended response; the action line described as what it is | Built |
 | SPC-205 | The smallest change of one weight that changes the recommendation, beside it and on the record | Built |
+| SPC-202 | Element-set error drawn in every sample, and a band beside every computed miss whose lower edge the score reads | Built |
+| SPC-199 | The panel's and the results' script in first-party files under a policy with no inline script or eval; a draft threat model for the security lead | Built; threat model a draft |

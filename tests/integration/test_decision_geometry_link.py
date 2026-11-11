@@ -13,7 +13,6 @@ wall clock.
 from __future__ import annotations
 
 import html
-import json
 import re
 from collections.abc import Iterator
 from datetime import timedelta
@@ -122,9 +121,10 @@ _DECISION_OPENER = "form.show-trajectory[data-geometry-opener] button[type=submi
 
 
 def _opener(page: str) -> str:
-    found = re.search(r"var OPENER = (\"[^\n]*\");", page)
+    """The control the panel returns focus to, from the panel's data-opener (SPC-199: no script in the panel)."""
+    found = re.search(r'<section id="[^"]*geom-panel"[^>]*\sdata-opener="([^"]*)"', page)
     assert found is not None, "the panel names the control that opened it"
-    return str(json.loads(found.group(1)))
+    return html.unescape(found.group(1))
 
 
 class TestBothPanelsOnOnePage:

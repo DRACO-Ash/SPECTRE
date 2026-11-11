@@ -16,6 +16,7 @@ import html
 import json
 import re
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,6 +28,9 @@ from spectre.domain.decision_figures import HISTOGRAM_CAPTION, TcaHistogram, tca
 from tests.unit.test_decision_computed import _computed, _metrics
 from tests.unit.test_decision_figure_basis import _render
 from tests.unit.test_decision_sampled import _bound, _Fake
+
+#: The histogram's drawing moved here from an inline block in the results (SPC-199).
+_DECISION_JS = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js" / "decision.js"
 
 _PLANE_CHANGE_KM_S = 0.394
 
@@ -219,7 +223,7 @@ class TestTheCell:
     def test_edge_samples_are_left_out_of_the_bars(self) -> None:
         fake = _WithSpeeds()
 
-        def sampler(hypothesis: Any, blue: Any, window: SeparationWindow) -> SeparationSeries:
+        def sampler(hypothesis: Any, blue: Any, window: SeparationWindow, **_: Any) -> SeparationSeries:
             out = fake(hypothesis, blue, window)
             edges = (
                 ClosestApproach(9.0, window.span_s, True), ClosestApproach(9.2, window.span_s, True),
@@ -237,7 +241,7 @@ class TestTheCell:
         """Through the cell: one sample closing at 0 km/s has no sigma, so no time to draw."""
         fake = _WithSpeeds()
 
-        def sampler(hypothesis: Any, blue: Any, window: SeparationWindow) -> SeparationSeries:
+        def sampler(hypothesis: Any, blue: Any, window: SeparationWindow, **_: Any) -> SeparationSeries:
             out = fake(hypothesis, blue, window)
             return dataclasses.replace(out, closing_speeds_km_s=(0.0, *out.closing_speeds_km_s[1:]))
 
@@ -290,8 +294,11 @@ class TestThePage:
         """The bars are labelled with the table's exact edges and the axis with its heading: nothing in the script
         rounds a time."""
         panel = _histogram_panel(_render(sampled))
-        assert "toFixed" not in panel
-        assert "td:first-child" in panel and "thead th" in panel
+        assert 'data-init="tca-histogram"' in panel
+        script = _DECISION_JS.read_text(encoding="utf-8")
+        draw = script[script.index("function tcaHistogram(cell)"):script.index("SPECTRE.action('tcaHistogram'")]
+        assert "toFixed" not in draw
+        assert "td:first-child" in draw and "thead th" in draw
 
     def test_no_panel_without_a_sampled_cell(self) -> None:
         assert 'class="tca-histogram"' not in _render(_computed())
@@ -301,7 +308,8 @@ class TestThePage:
         page = _render(sampled)
         assert "<script src" not in page
         assert "cdn" not in page.lower()
-        assert "new Chart(" in _histogram_panel(page)
+        assert 'data-init="tca-histogram"' in _histogram_panel(page)
+        assert "new Chart(" in _DECISION_JS.read_text(encoding="utf-8")
 
     def test_an_older_result_shape_renders(self, sampled: ScenarioResult) -> None:
         """60: a cell built before SPC-124 has no histogram attribute, and the result no links."""

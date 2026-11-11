@@ -17,18 +17,20 @@ import html
 import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
 from spectre.domain.decision import (
+    _ROW_ELSET,
     LOOKUP_CELL_TITLE,
     SCORE_SPREAD_NOTE,
     OutcomeMetrics,
     ScenarioResult,
     evaluate_scenario,
 )
+from spectre.domain.decision_figures import ElsetErrorAt
 from tests.unit.test_decision_figure_basis import _render, _text
 from tests.unit.test_decision_sampled import _LOW, _REST, _bound, _evasive, _Fake, _metrics, _scenario
 
@@ -147,8 +149,9 @@ class TestThePageShowsTheSpread:
             "Closest approach spread 5.0 km (1 sigma) over 50 samples; P5, P50 and P95 known to within 0.40 km. "
             "Score spread across samples 0.0092.",
             "Not sampled, so no spread: the cells say why.",
-            "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
-            "Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",
+            *(("Computed by SGP4 with no burn: one figure, no spread, with element-set error as a band beside it; "
+               "the score reads its lower edge. " + _ROW_ELSET.format(**cast("ElsetErrorAt", row[0].ca_elset_error).words()))
+              for row in mixed.outcome_matrix[2:]),
         ]
         assert list(mixed.row_uncertainty) == cells
 

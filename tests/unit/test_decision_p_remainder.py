@@ -305,10 +305,11 @@ class TestASumAbove1IsRefused:
 
 
 class TestTheStoredInputs:
-    def test_this_code_writes_version_3_and_reads_every_earlier_one(self) -> None:
-        assert (VERSION, VERSIONS) == (3, (1, 2, 3))
+    def test_this_code_writes_the_remainder_rule_and_reads_every_earlier_version(self) -> None:
+        """Version 3 added the rule (SPC-203); version 4, which this code writes, holds it too (SPC-202)."""
+        assert (VERSION, VERSIONS) == (4, (1, 2, 3, 4))
         document = json.loads(store_inputs(evaluate_scenario(_scenario(_row(0.1))))[0])
-        assert document["version"] == 3
+        assert document["version"] == 4
         assert document["scenario"]["probability_rule"] == "remainder"
 
     def test_the_remainder_is_stored_beside_the_rows_not_as_one_of_them(self) -> None:
@@ -371,7 +372,7 @@ class TestTheStoredInputs:
         with pytest.raises(InputsRefusedError, match=r"refused at scenario\.probability_rule: version 3 holds"):
             read_inputs(text, sha256_of(text))
 
-    @pytest.mark.parametrize("version", [4, 0, "2"], ids=["a later one", "0", "text"])
+    @pytest.mark.parametrize("version", [5, 0, "2"], ids=["a later one", "0", "text"])
     def test_an_old_shaped_document_of_an_unknown_version_is_refused_as_that_version(self, version: Any) -> None:
         """A version 2 document whose version is changed and rehashed is named for its version, not for a field
         version 3 would hold."""

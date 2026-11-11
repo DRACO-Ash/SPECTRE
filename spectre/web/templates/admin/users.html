@@ -48,7 +48,7 @@
     <form hx-post="/admin/users"
           hx-target="#user-table-region"
           hx-swap="innerHTML"
-          hx-on::after-request="if(event.detail.successful) this.reset()"
+          data-after-request="resetOnSuccess"
           style="display:flex; flex-wrap:wrap; gap:var(--spectre-space-3); align-items:flex-end;
                  padding:var(--spectre-space-4)">
       <div style="flex:1; min-width:160px">

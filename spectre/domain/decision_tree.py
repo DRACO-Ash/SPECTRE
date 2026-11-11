@@ -47,14 +47,18 @@ from spectre.astro.monte_carlo import (
     SeparationWindow,
     TurnBurn,
     _miss_stats,
+    along_track_shifts_s,
     burnt_arc,
     continue_series,
+    elset_offsets_km,
     elset_state,
+    moved_states,
     nominal_continued_arc,
     nominal_red_arc,
     rk45_arc,
     run_separation_series,
     searched_approach,
+    shift_pad_s,
 )
 from spectre.astro.response_burn import (
     MAX_SIZING_TRIALS,
@@ -95,6 +99,7 @@ from spectre.domain.decision import (
     TurnOne,
     _Budget,
     _BudgetSpentError,
+    _drawn_tca_uncertainty,
     _eligible_rows,
     _evaluate,
     _Figures,
@@ -110,12 +115,14 @@ from spectre.domain.decision import (
     _turn_one_cost_h,
     _unearned_side,
     custody_bases,
+    elset_error_at,
     evaluate_scenario,
     outcome_bases,
+    sample_error,
     sized_burns,
     with_remainder,
 )
-from spectre.domain.decision_figures import ResponseFigure, TcaUncertainty
+from spectre.domain.decision_figures import ELSET_MODEL, ElsetErrorAt, ResponseFigure, TcaUncertainty, lower_edge_km
 from spectre.domain.decision_transfer import MAX_BURN_M_S
 from spectre.domain.provenance import Basis, FigureBasis, weakest
 from spectre.domain.tree_selectors import TreeSelection, select
@@ -257,6 +264,36 @@ _PATH_SAMPLED_NOTE = (
     "P5 of each sample's own smallest separation along this sequence, sample k carried from turn to turn as sample "
     "k, each turn's slice to the next turn's start and the last turn's to the end of the span, as if no one moves "
     "after it, by RK45 with J2 and exponential drag for both orbits; the element sets' own errors are not sampled."
+)
+#: The four notes above once element-set error is in every propagated figure (SPC-202).
+_SAMPLED_NOTE_ELSET = (
+    "P5 of {n} sampled misses from this turn's start to the end of the span, as if no one moves again, each "
+    "sample carried from where its last turn left it, by RK45 with J2 and exponential drag for both orbits; each "
+    "sample carries both objects' element-set error along track, drawn once at the start of its first sampled turn "
+    "from " + ELSET_MODEL + ", at each set's age at the scenario epoch: red {rk:.1f} km, {ra:.1f} h old, and blue "
+    "{bk:.1f} km, {ba:.1f} h old"
+)
+_COMPUTED_NOTE_ELSET = (
+    "smallest separation from this turn's start to the end of the span, as if no one moves again, both orbits "
+    "carried from where the last turn left them by RK45 with J2 and exponential drag; element-set error is beside "
+    "it, not in it: {e:.1f} km (1 sigma) at its closest approach, red's {rk:.1f} km ({ra:.1f} h old then) and "
+    "blue's {bk:.1f} km ({ba:.1f} h old) in quadrature, by " + ELSET_MODEL + "; the sequence's score reads its "
+    "closest approach along the path, {closest:.1f} km, less this error: {low:.1f} km"
+)
+_PATH_COMPUTED_NOTE_ELSET = (
+    "the smallest separation along this sequence, each turn's slice to the next turn's start and the last turn's "
+    "to the end of the span, as if no one moves after it, both orbits carried from turn to turn by RK45 with J2 and "
+    "exponential drag. Its score reads it less the element-set error at this turn's closest approach, {e:.1f} km "
+    "(1 sigma): red's {rk:.1f} km (its set {ra:.1f} h old then) and blue's {bk:.1f} km ({ba:.1f} h old) in "
+    "quadrature, by " + ELSET_MODEL + ", which is no less than the error at any closest approach before it."
+)
+_PATH_SAMPLED_NOTE_ELSET = (
+    "P5 of each sample's own smallest separation along this sequence, sample k carried from turn to turn as sample "
+    "k, each turn's slice to the next turn's start and the last turn's to the end of the span, as if no one moves "
+    "after it, by RK45 with J2 and exponential drag for both orbits; each sample carries both objects' element-set "
+    "error along track, drawn once at the start of its first sampled turn from " + ELSET_MODEL + ", at each set's "
+    "age at the scenario epoch: red {rk:.1f} km (1 sigma), its set {ra:.1f} h old, and blue {bk:.1f} km, "
+    "{ba:.1f} h old; a computed turn before that enters as its one figure."
 )
 _PATH_UNSIZED = " No burn is sized for {which}, so the blue asset is flown there without one."
 _PATH_DV_NOTE = "our burns along this sequence added up, each as its own turn states it"
@@ -665,11 +702,15 @@ def _listed(items: Sequence[str], joiner: str) -> str:
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} {joiner} {items[-1]}"
 
 
-def _path_bases(steps: Sequence[PathStep], *, sampled: bool) -> PathBases:
-    """What a sequence's figures rest on: its closest approach computed or sampled, its delta-V the weakest of its
-    turns', naming each lookup, and its score a lookup."""
+def _path_bases(steps: Sequence[PathStep], *, sampled: bool, elset: ElsetErrorAt | None = None) -> PathBases:
+    """What a sequence's figures rest on: its closest approach computed or sampled, with *elset*, the element-set
+    error in it or beside it under SPC-202's rule, its delta-V the weakest of its turns', naming each lookup, and its
+    score a lookup."""
     unsized = [f"{s.response.name} in turn {k}" for k, s in enumerate(steps, start=1) if s.delta_v_basis is not Basis.COMPUTED]
-    closest_note = _PATH_SAMPLED_NOTE if sampled else _PATH_COMPUTED_NOTE
+    if elset is None:
+        closest_note = _PATH_SAMPLED_NOTE if sampled else _PATH_COMPUTED_NOTE
+    else:
+        closest_note = (_PATH_SAMPLED_NOTE_ELSET if sampled else _PATH_COMPUTED_NOTE_ELSET).format(**elset.words())
     delta_v_note = _PATH_DV_NOTE
     if unsized:
         closest_note += _PATH_UNSIZED.format(which=_listed(unsized, "or"))
@@ -681,18 +722,23 @@ def _path_bases(steps: Sequence[PathStep], *, sampled: bool) -> PathBases:
     )
 
 
-def path_figures(scenario: Scenario, steps: Sequence[PathStep], closest_km: float, *, sampled: bool) -> PathFigures:
+def path_figures(
+    scenario: Scenario, steps: Sequence[PathStep], closest_km: float, *, sampled: bool, elset: ElsetErrorAt | None = None,
+) -> PathFigures:
     """A sequence's figures from its steps and its closest approach, *sampled* or computed: our burns added up,
     custody with the earliest red burn, time to execute summed and capped at the horizon, the least reversible
-    response, and the score, each with its basis."""
+    response, and the score, each with its basis. *elset* is the element-set error under SPC-202's rule: drawn in a
+    sampled sequence's samples, at the scenario epoch, or beside a computed one's closest approach, at this turn's,
+    where the score reads the closest approach less it, never below 0 km."""
     custody = _path_custody(scenario, steps)
     delta_v = sum(s.delta_v_km_s for s in steps)
     tte = min(sum(s.response.time_to_execute_hours for s in steps), scenario.horizon_hours)
     reversibility = min(s.response.reversibility for s in steps)
     standing = dataclasses.replace(steps[-1].response, time_to_execute_hours=tte, reversibility=reversibility)
-    figures = _Figures(custody.maintained, custody.gap_hours, closest_km, delta_v, custody.degraded_hours)
+    scored = closest_km if sampled or elset is None else lower_edge_km(closest_km, elset.combined_km)
+    figures = _Figures(custody.maintained, custody.gap_hours, scored, delta_v, custody.degraded_hours)
     score = _score(scenario, standing, figures)
-    bases = _path_bases(steps, sampled=sampled)
+    bases = _path_bases(steps, sampled=sampled, elset=elset)
     return PathFigures(
         closest_km, delta_v, custody.maintained, custody.gap_hours, tte, reversibility, score, custody.bases, bases,
         custody.degraded_hours,
@@ -730,6 +776,26 @@ class _Carry(NamedTuple):
     blue:          np.ndarray
     slices:        np.ndarray
     pending:       tuple[tuple[RedBurn, ...], ...] = ()
+    # Each sample's blue, read that many seconds on along its own orbit: its element-set draw (SPC-202); None for none.
+    blue_shift_s:  np.ndarray | None = None
+
+
+class _Drawn(NamedTuple):
+    """Each sample's red start and B*, and blue's shift, s, drawn where a sampled turn follows a computed one, which
+    leaves red one state (SPC-202)."""
+
+    red:          np.ndarray
+    red_bstar:    np.ndarray
+    blue_shift_s: np.ndarray
+
+
+class _RedTurn(NamedTuple):
+    """Red's move in a turn: its burn, if any, its nominal arc and the B* it ends on, and what was drawn at the turn's
+    start, if anything."""
+
+    burn:    TurnBurn | None
+    nominal: tuple[Trajectory, float]
+    drawn:   _Drawn | None = None
 
 
 @dataclass(eq=False)
@@ -803,6 +869,8 @@ class _Tree:
         self.red0 = cast("BlueTrack", elset_state(self.red.tle, scenario.epoch_utc))
         self.blue0 = cast("BlueTrack", elset_state(self.blue.tle, scenario.epoch_utc))
         self.window = SeparationWindow(scenario.epoch_utc, self.span_s)
+        # What every sample draws, red's and blue's 1 sigma at the scenario epoch; None under the rule before SPC-202.
+        self.error = sample_error(scenario)
         self.labels = {str(j): f.name for j, f in enumerate(scenario.friendly_responses)}
         self.built = 0
 
@@ -882,7 +950,7 @@ class _Tree:
             variant = 0 if burn is None else burns.index(burn) + 1
             carry = _Carry(
                 kept.red[:, 0, :], kept.bstar, nominal(self.turn_s), hypothesis.bstar_post, arc(self.turn_s),
-                kept.slice_min_km[variant], kept.pending,
+                kept.slice_min_km[variant], kept.pending, None if self.error is None else kept.blue_shift_s,
             )
             roots.append(self._root(i, j, cell, carry, sampled=True))
         return roots
@@ -934,7 +1002,8 @@ class _Tree:
         )
         last = self.scenario.turns == 1
         return _Branch(
-            1, ((i, j),), start, figures, path_figures(self.scenario, [step], figures.closest_approach_km, sampled=sampled),
+            1, ((i, j),), start, figures,
+            path_figures(self.scenario, [step], figures.closest_approach_km, sampled=sampled, elset=cell.ca_elset_error),
             (step,), None if last else carry, sampled,
         )
 
@@ -975,27 +1044,51 @@ class _Tree:
         nominal = nominal_continued_arc(carry.nominal, carry.nominal_bstar, burn, window.span_s)
         if nominal is None:
             raise self._refuse([*group[0].steps, (a, 0)], _WHY_ARC)
-        blues = [blue for parent in group for blue in self._responses(k, parent, a, window, nominal[0])]
+        turn = _RedTurn(burn, nominal, self._draw(carry, burn, [*group[0].steps, (a, 0)]))
+        pad = shift_pad_s(carry.blue_shift_s if turn.drawn is None else turn.drawn.blue_shift_s)
+        blues = [blue for parent in group for blue in self._responses(k, parent, (a, pad), window, nominal[0])]
         sampled = group[0].sampled or burn is not None
         found = (
-            self._sampled(k, (a, carry, burn), blues, window) if sampled else self._computed(k, nominal[0], blues, window)
+            self._sampled(k, (a, carry, turn), blues, window) if sampled else self._computed(k, nominal[0], blues, window)
         )
-        return [self._child(blue, a, f, (burn, nominal), sampled=sampled) for blue, f in zip(blues, found, strict=True)]
+        return [self._child(blue, a, f, turn, sampled=sampled) for blue, f in zip(blues, found, strict=True)]
 
-    def _responses(self, k: int, parent: _Branch, a: int, window: SeparationWindow, nominal: Trajectory) -> list[_Blue]:
-        """Each response's blue over turn *k* from *parent*: our burn sized again against red's nominal burn."""
+    def _draw(self, carry: _Carry, burn: TurnBurn | None, steps: Sequence[tuple[int, int]]) -> _Drawn | None:
+        """Each sample's element-set draw where a sampled turn follows a computed one (SPC-202): red's one state moved
+        along its orbit by each sample's draw, and blue's draw as the seconds it is read on; None where nothing is
+        drawn here: no burn, red sampled already, or the rule before SPC-202."""
+        if burn is None or self.error is None or carry.red.shape[0] != 1:
+            return None
+        n = burn.hypothesis.n_samples
+        offsets = elset_offsets_km(self.error, burn.hypothesis.random_seed, n)
+        red = moved_states(carry.red[0], float(carry.red_bstar[0]), offsets[:, 0])
+        if red is None:
+            raise self._refuse(steps, _WHY_ARC)
+        return _Drawn(red, np.repeat(carry.red_bstar, n), along_track_shifts_s(offsets[:, 1], carry.blue))
+
+    def _responses(
+        self, k: int, parent: _Branch, move: tuple[int, float], window: SeparationWindow, nominal: Trajectory,
+    ) -> list[_Blue]:
+        """Each response's blue over turn *k* from *parent*: our burn sized again against red's nominal burn. *move*
+        is red's move and how far past each end blue's arcs run for each sample's shift to read (SPC-202)."""
+        a, pad = move
         try:
-            coast = rk45_arc(cast("_Carry", parent.carry).blue, window.span_s, self.blue0.bstar)
+            coast = rk45_arc(cast("_Carry", parent.carry).blue, window.span_s, self.blue0.bstar, pad)
         except ReenteredError:
             coast = None
         if coast is None:
             raise self._refuse([*parent.steps, (a, 0)], _WHY_ARC)
         pair = Rk45Pair(nominal, coast, self.blue0.bstar)
-        return [self._respond(parent, (a, j), window, pair) for j in range(len(self.scenario.friendly_responses))]
+        ends = window._replace(span_s=window.span_s + pad)
+        return [self._respond(parent, (a, j), (window, ends), pair) for j in range(len(self.scenario.friendly_responses))]
 
-    def _respond(self, parent: _Branch, step: tuple[int, int], window: SeparationWindow, pair: Rk45Pair) -> _Blue:
-        """Our response *step* = (red's move, our response) from *parent*, its burn sized against red's nominal arc."""
+    def _respond(
+        self, parent: _Branch, step: tuple[int, int], windows: tuple[SeparationWindow, SeparationWindow], pair: Rk45Pair,
+    ) -> _Blue:
+        """Our response *step* = (red's move, our response) from *parent*, its burn sized against red's nominal arc.
+        *windows* is the turn's window and the same window running as far as blue's arc does (SPC-202)."""
         a, j = step
+        window, ends = windows
         friendly = self.scenario.friendly_responses[j]
         spec = friendly.burn
         if spec is None:
@@ -1010,21 +1103,26 @@ class _Tree:
             refusal = _response_refusal(result, at, window, _NOMINAL_TCA)
             return _Blue(parent, j, pair.blue, _ResponseCell(friendly, None, refusal))
         figure = ResponseFigure(result, at, spec.target_km, spec.budget_km_s)
-        arc = pair.blue if result.burn is None else self._burnt(pair.blue, result.burn, window.span_s, [*parent.steps, (a, j)])
+        arc = pair.blue if result.burn is None else self._burnt(pair.blue, result.burn, ends.span_s, [*parent.steps, (a, j)])
         return _Blue(parent, j, arc, _ResponseCell(friendly, figure, None))
 
     def _sampled(
-        self, k: int, red: tuple[int, _Carry, TurnBurn | None], blues: Sequence[_Blue], window: SeparationWindow,
+        self, k: int, red: tuple[int, _Carry, _RedTurn], blues: Sequence[_Blue], window: SeparationWindow,
     ) -> list[_Found]:
-        a, carry, burn = red
+        a, carry, turn = red
+        burn = turn.burn
+        if turn.drawn is not None:
+            carry = carry._replace(red=turn.drawn.red, red_bstar=turn.drawn.red_bstar,
+                                   blue_shift_s=turn.drawn.blue_shift_s)
         n = carry.red.shape[0]
         reps = burn.hypothesis.n_samples if n == 1 and burn is not None else 1
         starts, bstars = np.repeat(carry.red, reps, axis=0), np.repeat(carry.red_bstar, reps)
         pending = tuple(p for p in carry.pending for _ in range(reps))
+        shifts = None if carry.blue_shift_s is None else np.repeat(carry.blue_shift_s, reps)
         self._may_start()
         tick = None if self.budget is None else self.budget.sampling()
         keep = (self.turn_s,) if k < self.scenario.turns else ()
-        red_on = ContinuedRed(starts, bstars, burn, pending)
+        red_on = ContinuedRed(starts, bstars, burn, pending, shifts)
         out = continue_series(red_on, [b.arc for b in blues], window, tick=tick, keep_at_s=keep)
         found = []
         for b, (blue, series) in enumerate(zip(blues, out.series, strict=True)):
@@ -1047,16 +1145,15 @@ class _Tree:
             found.append(_Found(miss, sliced, approach, None))
         return found
 
-    def _child(
-        self, blue: _Blue, a: int, found: _Found, red: tuple[TurnBurn | None, tuple[Trajectory, float]], *,
-        sampled: bool,
-    ) -> _Branch:
+    def _child(self, blue: _Blue, a: int, found: _Found, red: _RedTurn, *, sampled: bool) -> _Branch:
         parent, action = blue.parent, self.scenario.adversary_actions[a]
         steps = (*parent.steps, (a, blue.column))
         k = len(steps)
         window = self._window(k)
         carry = cast("_Carry", parent.carry)
-        burn, (nominal, nominal_bstar) = red
+        if red.drawn is not None:
+            carry = carry._replace(red=red.drawn.red, red_bstar=red.drawn.red_bstar, blue_shift_s=red.drawn.blue_shift_s)
+        burn, (nominal, nominal_bstar) = red.burn, red.nominal
         friendly = self.scenario.friendly_responses[blue.column]
         delta_v = blue.response.figures(_lookup_figures(action, friendly, self.scenario)).delta_v_km_s
         burn_utc = None if burn is None else window.start_utc + timedelta(seconds=burn.at_s)
@@ -1064,7 +1161,7 @@ class _Tree:
         walk = (*parent.walk, PathStep(action, friendly, delta_v, burn_utc, delta_v_basis))
         seed = 0 if burn is None else burn.hypothesis.random_seed
         closest = self._path_closest(steps, paired_minima(carry.slices, found.misses), seed)
-        path = path_figures(self.scenario, walk, closest, sampled=sampled)
+        path = path_figures(self.scenario, walk, closest, sampled=sampled, elset=self._path_error(found, window, sampled=sampled))
         start = TurnStart(
             (k - 1) * self.turn_s, carry.red, carry.red_bstar,
             tuple(s.red_burn_utc for s in parent.walk if s.red_burn_utc is not None), carry.blue,
@@ -1077,16 +1174,32 @@ class _Tree:
         self.built += 1
         return branch
 
+    def _error_at(self, found: _Found, window: SeparationWindow) -> ElsetErrorAt:
+        """Both sets' element-set error at *found*'s closest approach (SPC-202)."""
+        return elset_error_at(cast("ScenarioBinding", self.scenario.binding), found.approach.approach.tca_utc(window.start_utc))
+
+    def _path_error(self, found: _Found, window: SeparationWindow, *, sampled: bool) -> ElsetErrorAt | None:
+        """A sequence's element-set error under SPC-202's rule: what its samples drew, at the scenario epoch, or,
+        computed, the error at this turn's closest approach, the latest and so the largest along it, which its score
+        reads its closest approach less. None under the rule before."""
+        if self.error is None:
+            return None
+        if sampled:
+            return elset_error_at(cast("ScenarioBinding", self.scenario.binding), self.scenario.epoch_utc)
+        return self._error_at(found, window)
+
     def _carry(self, found: _Found, carry: _Carry, nominal: tuple[Trajectory, float], blue: Trajectory) -> _Carry:
         kept = None if found.series is None else found.series.kept
         pending: tuple[tuple[RedBurn, ...], ...] = ()
+        shifts = None
         if kept is None:
             red, bstar = nominal[0](self.turn_s)[None, :], carry.red_bstar
         else:
             red, bstar, pending = kept.red[:, 0, :], kept.bstar, kept.pending
+            shifts = None if self.error is None else kept.blue_shift_s
         return _Carry(
             red, bstar, nominal[0](self.turn_s), nominal[1], blue(self.turn_s), paired_minima(carry.slices, found.slices),
-            pending,
+            pending, shifts,
         )
 
     def _figures(
@@ -1098,12 +1211,16 @@ class _Tree:
         series = found.series
         approach, speed = found.approach
         binding = cast("ScenarioBinding", self.scenario.binding)
-        tca = _tca_uncertainty(binding, window.start_utc, approach, speed, window.span_s)
+        tca = (
+            _tca_uncertainty(binding, window.start_utc, approach, speed, window.span_s)
+            if series is None or self.error is None
+            else _drawn_tca_uncertainty(binding, self.scenario.epoch_utc, window, (approach, speed))
+        )
         label = _NODE_LABEL.format(k=k, turns=self.scenario.turns, path=self._label(steps))
         if series is None:
-            kind, note, ca, band, hw = Basis.COMPUTED, _COMPUTED_NOTE, approach.miss_km, None, None
+            kind, note, ca, band, hw = Basis.COMPUTED, self._computed_note(found, window, path), approach.miss_km, None, None
         else:
-            kind, note = Basis.SAMPLED, _SAMPLED_NOTE.format(n=len(series.approaches))
+            kind, note = Basis.SAMPLED, self._sampled_note(len(series.approaches))
             ca, band, hw = series.miss_km_p5, series.percentiles, series.percentile_half_width_km
         maintained, gap = path.custody_bases
         bases = response.bases(outcome_bases(
@@ -1115,6 +1232,22 @@ class _Tree:
             ca, approach.tca_utc(window.start_utc), band, hw, tuple(float(x) for x in found.slices), delta_v, tca,
             bases, propagator,
         )
+
+    def _computed_note(self, found: _Found, window: SeparationWindow, path: PathFigures) -> str:
+        """A later computed node's note: with its element-set band and what its sequence's score reads, under SPC-202's
+        rule: the path's closest approach less this node's error."""
+        if self.error is None:
+            return _COMPUTED_NOTE
+        error = self._error_at(found, window)
+        closest = path.closest_approach_km
+        return _COMPUTED_NOTE_ELSET.format(closest=closest, low=lower_edge_km(closest, error.combined_km), **error.words())
+
+    def _sampled_note(self, n: int) -> str:
+        """A later sampled node's note: with each sample's element-set draw, under SPC-202's rule."""
+        if self.error is None:
+            return _SAMPLED_NOTE.format(n=n)
+        drawn = elset_error_at(cast("ScenarioBinding", self.scenario.binding), self.scenario.epoch_utc)
+        return _SAMPLED_NOTE_ELSET.format(n=n, **drawn.words())
 
 
 #: A later turn's computed figure: one red and one blue arc, both carried on by RK45.

@@ -60,6 +60,7 @@ class _Ticking:
 
     def __call__(
         self, _h: ManoeuvreHypothesis, _b: BlueTrack, window: SeparationWindow, /, *, tick: Tick | None = None,
+        **_: Any,
     ) -> SeparationSeries:
         self.calls += 1
         for k in range(1, 51):
@@ -179,7 +180,8 @@ def test_progress_is_reported_once_per_sample() -> None:
 
 
 def test_without_a_run_control_the_sampler_is_called_without_a_tick() -> None:
-    """Behaviour without a RunControl is exactly as before: three positional arguments and nothing else."""
+    """Without a RunControl no tick is passed: three positional arguments and the element-set error every bound row
+    draws (SPC-202), nothing else."""
     calls: list[tuple[Any, ...]] = []
 
     def three(*args: Any, **kwargs: Any) -> SeparationSeries:
@@ -187,7 +189,7 @@ def test_without_a_run_control_the_sampler_is_called_without_a_tick() -> None:
         return _series(args[2])
 
     evaluate_scenario(_bound(), sampler=three)
-    assert len(calls) == 1 and len(calls[0][0]) == 3 and calls[0][1] == {}
+    assert len(calls) == 1 and len(calls[0][0]) == 3 and set(calls[0][1]) == {"elset_error"}
 
 
 def test_a_run_control_without_a_ready_row_never_reads_its_clock() -> None:

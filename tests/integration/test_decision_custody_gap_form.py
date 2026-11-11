@@ -83,8 +83,8 @@ class TestThePanel:
 
     def test_each_row_posts_a_labelled_share_at_the_default(self, client: Any, auth_cookie: str) -> None:
         page = _panel(client, auth_cookie)
-        first = page[page.index('<div class="adv-row"'):page.index('onclick="addAdvRow()"')]
-        builder = page[page.index("function addAdvRow()"):page.index("function addFrRow()")]
+        first = page[page.index('<div class="adv-row"'):page.index('data-action="addAdvRow"')]
+        builder = page[page.index('<template id="adv-row-template">'):page.index('<template id="fr-row-template">')]
         for row in (first, builder):
             gap = re.search(r'<input[^>]*name="adv_gap"[^>]*>', row)
             assert gap is not None

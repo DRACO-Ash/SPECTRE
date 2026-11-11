@@ -43,6 +43,8 @@ _EPOCH = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 _DEPART = _NOW + timedelta(hours=1)
 _MID = _NOW + timedelta(hours=3)
 _ARRIVE = _NOW + timedelta(hours=6)
+#: Where the panel's rendered rows end: the row builder's template follows, holding an empty row (SPC-199).
+_ROW_TEMPLATE = '<template id="adv-row-template">'
 
 
 def _transfer(*times: datetime) -> tuple[SweepBurn, ...]:
@@ -241,7 +243,7 @@ class TestThePanelShowsTheBurnsBeforeEvaluate:
     def test_the_burns_are_listed_and_carried_in_a_hidden_field(self) -> None:
         page = TestThePanelRendersUnderStrictUndefined._render(
             pol=None, prefill=_open(_state(_listed(transfer_m_s=_transfer()))))
-        rows = page.split("<script>", 1)[0]
+        rows = page.split(_ROW_TEMPLATE, 1)[0]
         lead = re.search(r'<p class="hyp-transfer-lead"[^>]*>(.*?)</p>', rows, re.S)
         assert lead is not None
         assert " ".join(lead.group(1).split()) == (
@@ -253,12 +255,12 @@ class TestThePanelShowsTheBurnsBeforeEvaluate:
         hidden = re.findall(r'<input type="hidden" name="hyp_then" value="([^"]*)">', rows)
         assert hidden == [f"{_MID.isoformat()} -12.5 0.0 3.0;{_ARRIVE.isoformat()} 0.0 0.0 -2.0"]
         # The row builder's empty row posts the column too, blank, so the columns stay aligned.
-        script = page.split("<script>", 1)[1]
+        script = page.split(_ROW_TEMPLATE, 1)[1]
         assert '<input type="hidden" name="hyp_then" value="">' in script
 
     def test_a_single_burn_panel_lists_nothing_and_posts_a_blank(self) -> None:
         page = TestThePanelRendersUnderStrictUndefined._render(pol=None, prefill=_open(_state(_entry())))
-        rows = page.split("<script>", 1)[0]
+        rows = page.split(_ROW_TEMPLATE, 1)[0]
         assert "hyp-transfer" not in rows
         assert re.findall(r'<input type="hidden" name="hyp_then" value="([^"]*)">', rows) == [""]
 

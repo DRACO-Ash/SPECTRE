@@ -105,10 +105,10 @@ class TestTheRefreshNote:
         )
         first = client.get("/udl/elset-refresh", cookies={"spectre_session": auth_cookie}).text
         assert "1 updated, 3 already current" in " ".join(first.split())
-        assert "spectreRereadRedCard" in first, "the first report re-reads the red card"
+        assert 'data-init="reread-red-card"' in first, "the first report re-reads the red card"
         assert "hx-get" not in first, "polling stops"
         again = client.get("/udl/elset-refresh", cookies={"spectre_session": auth_cookie}).text
-        assert "spectreRereadRedCard" not in again, "and it does so once"
+        assert 'data-init="reread-red-card"' not in again, "and it does so once"
 
 
 class TestProvenanceIsRecorded:

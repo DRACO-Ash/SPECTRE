@@ -218,7 +218,7 @@
     {# ── Adversary Actions ── #}
     <div style="font-size:0.65rem; font-weight:700; color:var(--gold); text-transform:uppercase;
                 letter-spacing:0.05em; margin-bottom:0.3rem">Adversary Actions</div>
-    <div id="adv-rows">
+    <div id="adv-rows" data-row-count="{{ adv_rows | length }}">
       {# Template row: JS duplicates this. A scenario opened from the sweep renders one row per filled row. #}
       {% for row in adv_rows %}
       <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
@@ -245,7 +245,7 @@
            (WCAG 4.1.2). The name states the action, which is removing a row,
            not closing the panel. The same name is repeated on the rows the
            script below builds. #}
-        <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action"
+        <button type="button" data-action="removeRow" data-row-class="adv-row" aria-label="Remove adversary action"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
@@ -270,7 +270,7 @@
     {% if hyp.fields_note %}
     <p class="adv-fields-note hint" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">{{ hyp.fields_note }}</p>
     {% endif %}
-    <button type="button" onclick="addAdvRow()"
+    <button type="button" data-action="addAdvRow"
             style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
       + Add Adversary Action
     </button>
@@ -278,7 +278,7 @@
     {# ── Friendly Responses ── #}
     <div style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase;
                 letter-spacing:0.05em; margin-bottom:0.3rem">Friendly Responses</div>
-    <div id="fr-rows">
+    <div id="fr-rows" data-row-count="1">
       <div class="fr-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;
                                   gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="fr_id" value="R1">
@@ -296,7 +296,7 @@
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
         <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
-        <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response"
+        <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
@@ -305,7 +305,7 @@
         {{ response_veto_fields(hyp, "R1") }}
       </div>
     </div>
-    <button type="button" onclick="addFrRow()"
+    <button type="button" data-action="addFrRow"
             style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
       + Add Friendly Response
     </button>
@@ -397,18 +397,11 @@
 
 <div id="decision-results"></div>
 
-<script>
-var _advCount = {{ adv_rows | length }};
-var _frCount  = 1;
-
-function addAdvRow() {
-  _advCount++;
-  var c = _advCount;
-  var div = document.createElement('div');
-  div.className = 'adv-row';
-  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
-  div.innerHTML = `
-    <input type="hidden" name="adv_id" value="A${c}">
+{# The rows Add Adversary Action and Add Friendly Response build: decision.js clones one, writing the row's own
+   number where __ROW__ stands. Inert until cloned, so nothing in them posts (SPC-199). #}
+<template id="adv-row-template">
+  <div class="adv-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
+    <input type="hidden" name="adv_id" value="A__ROW__">
     <input type="text" name="adv_name" placeholder="Adversary action name" style="font-size:0.63rem">
     <select name="adv_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
@@ -419,19 +412,13 @@ function addAdvRow() {
     <label style="font-size:0.6rem;color:var(--text-dim)">P<input type="number" name="adv_prob" value="{{ hyp.default_probability }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
     <label style="font-size:0.6rem;color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
     <label style="font-size:0.6rem;color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
-    <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
-    {{ hypothesis_fields(hyp) }}`;
-  document.getElementById('adv-rows').appendChild(div);
-}
-
-function addFrRow() {
-  _frCount++;
-  var c = _frCount;
-  var div = document.createElement('div');
-  div.className = 'fr-row';
-  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
-  div.innerHTML = `
-    <input type="hidden" name="fr_id" value="R${c}">
+    <button type="button" data-action="removeRow" data-row-class="adv-row" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
+    {{ hypothesis_fields(hyp) }}
+  </div>
+</template>
+<template id="fr-row-template">
+  <div class="fr-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
+    <input type="hidden" name="fr_id" value="R__ROW__">
     <input type="text" name="fr_name" placeholder="Friendly response name" style="font-size:0.63rem">
     <select name="fr_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
@@ -442,14 +429,8 @@ function addFrRow() {
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Normalised cost [0,1]">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
     <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" style="font-size:0.63rem" title="Time to execute (h)">
-    <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
+    <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
     {{ response_burn_fields(hyp) }}
-    {{ response_veto_fields(hyp, "R${c}") }}`;
-  document.getElementById('fr-rows').appendChild(div);
-}
-
-function removeRow(btn, cls) {
-  var row = btn.closest('.' + cls);
-  if (row) row.remove();
-}
-</script>
+    {{ response_veto_fields(hyp, "R__ROW__") }}
+  </div>
+</template>

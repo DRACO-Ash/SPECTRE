@@ -138,6 +138,7 @@ class TestTheBasesAreTyped:
             "ca_percentiles", "ca_std_km", "ca_samples", "ca_refusal", "ca_caveat", "ca_half_width_km", "ca_computed",
             "tca_uncertainty", "ca_sampled_tca",   # how closely the TCA is known qualifies its time (SPC-118)
             "tca_histogram",   # the samples' TCAs, binned no finer than each is known (SPC-124)
+            "ca_elset_error",   # the element-set error a computed band or a sampled draw holds (SPC-202)
         }
         # The figures the score was built from, unrounded, which the weight stability reads (SPC-205), qualify it too.
         about_the_score = {"score_percentiles", "score_std", "score_figures"}

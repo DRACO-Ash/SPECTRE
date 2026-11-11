@@ -32,12 +32,14 @@ from spectre.domain.decision import (
     compute_outcome_metrics,
     evaluate_scenario,
 )
-from spectre.domain.decision_figures import ResponseBurnSpec
+from spectre.domain.decision_figures import ELSET_MODEL, ResponseBurnSpec
 from spectre.domain.provenance import Basis
 from tests.unit.test_decision_response import _avoid, _computed_scenario, _hold
 from tests.unit.test_decision_sampled import _binding, _evasive, _Fake, _never, _scenario
 
-#: Words only a lookup's note carries: each names one Phase 1 constant.
+#: Words only a lookup's note carries: each names one Phase 1 constant. Since SPC-202 an earned closest approach also
+#: names the element-set error it holds, whose model is the threat sweep's rule of thumb, said by name as ELSET_MODEL;
+#: that model is not a Phase 1 lookup, so its sentence is read past.
 _LOOKUP_WORDS = ("per adversary action type", "0.4 of the horizon", "rule of thumb", "response cost x 0.05")
 _EARNED = frozenset({Basis.COMPUTED, Basis.SAMPLED})
 _HELD = CustodyStatus(Custody.HELD, "Custody held.")
@@ -91,7 +93,8 @@ class TestNoBoundFigureReadsALookupWhereAnEarnedOneExists:
             for figure, basis in bases.items():
                 if figure == "composite_score" or basis.kind is Basis.LOOKUP:
                     continue
-                assert not any(word in basis.note for word in _LOOKUP_WORDS), (name, figure, basis.note)
+                note = basis.note.replace(ELSET_MODEL, "")
+                assert not any(word in note for word in _LOOKUP_WORDS), (name, figure, basis.note)
             if bases.delta_v_cost_km_s.kind is Basis.LOOKUP:
                 assert friendly.action_type is ActionType.MANOEUVRE and friendly.burn is None
                 assert "Enter a target separation" in bases.delta_v_cost_km_s.note

@@ -19,6 +19,12 @@ remainder that is not the one the rows leave. Versions 1 and 2, written by 0.28.
 those releases evaluated by, each row weighed by its P over the rows' sum with no remainder, P summing above 1
 included, so they replay as they were evaluated then.
 
+Version 4 (SPC-202) adds the scenario's miss rule: element-set error drawn in every sample and a band beside every
+computed miss, the score reading its lower edge. Versions 1 to 3, written by 0.28.0 to 0.31.0, are read under the rule
+those releases evaluated by, MissRule.POINT, the computed miss scored as it stands and the sampled band over the burn's
+spread alone, so they replay as they were evaluated then. Nothing else in the document changed: each element set's
+text, epoch and age were stored already, and they are what the error is read from.
+
 The text is canonical (keys sorted, no spaces, ASCII with every other character escaped, no NaN), so the same inputs
 give the same text and its SHA-256 identifies them; a U+0000 is stored escaped, so PostgreSQL's text takes it.
 
@@ -53,6 +59,7 @@ from spectre.domain.decision import (
     BoundElset,
     FriendlyResponse,
     HypothesisSource,
+    MissRule,
     ProbabilityRule,
     Scenario,
     ScenarioBinding,
@@ -70,20 +77,24 @@ from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
 from spectre.domain.threat_understanding import Cue, Dimension, Understanding
 
-#: What the document is, and the version of it this code writes (SPC-203: the probability rule and the remainder).
+#: What the document is, and the version of it this code writes (SPC-202: the miss rule).
 SCHEMA = "spectre.decision-inputs"
-VERSION = 3
+VERSION = 4
 #: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed; versions
-#: 1 and 2, written by 0.28.0 and 0.29.0, hold no probability rule, and read under the rule they were evaluated by.
-VERSIONS = (1, 2, 3)
+#: 1 and 2, written by 0.28.0 and 0.29.0, hold no probability rule, and read under the rule they were evaluated by;
+#: versions 1 to 3, written by 0.28.0 to 0.31.0, hold no miss rule, and read under the rule they were evaluated by.
+VERSIONS = (1, 2, 3, 4)
 #: The response fields version 2 added (SPC-195), which a version 1 document never holds.
 _VETO_FIELDS = frozenset({"vetoed", "veto_reason"})
 #: The scenario field version 3 added (SPC-203), and the rule a document without it was evaluated by.
 _RULE_FIELD = "probability_rule"
 _RULE_BEFORE: dict[str, Any] = {_RULE_FIELD: ProbabilityRule.SHARES}
+#: The scenario field version 4 added (SPC-202), and the rule a document without it was evaluated by.
+_MISS_FIELD = "miss_rule"
+_MISS_BEFORE: dict[str, Any] = {_MISS_FIELD: MissRule.POINT}
 #: The document's own fields, every one required: version 3 adds the remainder of P (SPC-203).
 _TOP = ("schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out")
-_TOPS: dict[int, tuple[str, ...]] = {1: _TOP, 2: _TOP, 3: (*_TOP, "remainder")}
+_TOPS: dict[int, tuple[str, ...]] = {1: _TOP, 2: _TOP, 3: (*_TOP, "remainder"), 4: (*_TOP, "remainder")}
 #: The first version holding the remainder of P (SPC-203).
 _REMAINDER_SINCE = 3
 
@@ -323,25 +334,51 @@ def _write_rule(rule: ProbabilityRule) -> str:
 
 
 def _read_rule(value: Any, where: str) -> ProbabilityRule:
-    """The remainder rule, and no other: a version 3 document under the 0.29.0 rule would replay as evaluated before
-    SPC-203, which no version 3 record was."""
+    """The remainder rule, and no other: a version 3 or 4 document under the 0.29.0 rule would replay as evaluated
+    before SPC-203, which no such record was."""
     if value != ProbabilityRule.REMAINDER.value:
-        raise _refuse(where, f"version 3 holds the remainder rule alone, not {value!r}; the 0.29.0 rule is read only "
-                             "from versions 1 and 2, which 0.28.0 and 0.29.0 wrote")
+        raise _refuse(where, f"version 3 holds the remainder rule alone, as version 4 does, not {value!r}; the 0.29.0 "
+                             "rule is read only from versions 1 and 2, which 0.28.0 and 0.29.0 wrote")
     return ProbabilityRule.REMAINDER
+
+
+def _write_miss(rule: MissRule) -> str:
+    """The element-set error rule, the one version 4 holds. A scenario under the rule of 0.28.0 to 0.31.0 is only ever
+    a replay of a record those releases wrote, and a replay writes no record, so one is never stored again
+    (SPC-202)."""
+    if rule is not MissRule.ELSET_ERROR:
+        raise ValueError(
+            "a scenario under the miss rule of 0.28.0 to 0.31.0 is never stored again: version 4 holds the element-set "
+            "error rule alone, and only versions 1 to 3, which those releases wrote, read as the rule before it"
+        )
+    return rule.value
+
+
+def _read_miss(value: Any, where: str) -> MissRule:
+    """The element-set error rule, and no other: a version 4 document under the rule before it would replay as
+    evaluated before SPC-202, which no version 4 record was."""
+    if value != MissRule.ELSET_ERROR.value:
+        raise _refuse(where, f"version 4 holds the element-set error rule alone, not {value!r}; the rule before it is "
+                             "read only from versions 1 to 3, which 0.28.0 to 0.31.0 wrote")
+    return MissRule.ELSET_ERROR
 
 
 #: Version 3's probability rule: the remainder rule, written and read, and no other (SPC-203).
 _REMAINDER_RULE: Codec = (_write_rule, _read_rule)
-#: The scenario as each version holds it: version 1's responses carry no veto, and neither version 1 nor 2 holds the
-#: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203).
+#: Version 4's miss rule: the element-set error rule, written and read, and no other (SPC-202).
+_ELSET_RULE: Codec = (_write_miss, _read_miss)
+#: The scenario as each version holds it: version 1's responses carry no veto; neither version 1 nor 2 holds the
+#: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203); and none of versions 1 to 3
+#: holds the miss rule, so each reads as the rule 0.28.0 to 0.31.0 evaluated by (SPC-202).
 _SCENARIOS: dict[int, _Shape] = {
     1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)},
-              omit=frozenset({_RULE_FIELD}), fill=_RULE_BEFORE),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD}), fill={**_RULE_BEFORE, **_MISS_BEFORE}),
     2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)},
-              omit=frozenset({_RULE_FIELD}), fill=_RULE_BEFORE),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD}), fill={**_RULE_BEFORE, **_MISS_BEFORE}),
     3: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
-                         _RULE_FIELD: _REMAINDER_RULE}),
+                         _RULE_FIELD: _REMAINDER_RULE}, omit=frozenset({_MISS_FIELD}), fill=_MISS_BEFORE),
+    4: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
+                         _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE}),
 }
 
 

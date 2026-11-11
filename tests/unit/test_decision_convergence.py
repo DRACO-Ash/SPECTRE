@@ -43,9 +43,11 @@ from spectre.astro.monte_carlo import (
 )
 from spectre.domain.decision import (
     CONVERGED_MEANS,
+    CONVERGED_MEANS_ELSET,
     MAX_SAMPLE_HOURS,
     AdversaryHypothesis,
     BoundElset,
+    MissRule,
     PreManoeuvreState,
     ScenarioBinding,
     evaluate_scenario,
@@ -103,8 +105,10 @@ class TestOnTheMeasuredCases:
     def test_a_burn_two_hours_before_the_window_is_sampled_and_says_it_was_already_opening(self) -> None:
         """C7: the "something moved" case. Orbit Raise burned 2 h before a 1 h window, red fitted at the burn.
 
-        P5 855.86 km known to within 11.34 km, against 42.79 km. Every sample is closest at the window's first
-        instant, so the cell says P5 is the separation then, not an encounter.
+        P5 855.86 km known to within 11.34 km, against 42.79 km, before SPC-202; with each sample drawing both
+        objects' element-set error, 1.17 km each at 2 h old, P5 854.86 km known to within 12.08 km (re-derived by
+        evaluating this scenario under each rule). Every sample is closest at the window's first instant, so the cell
+        says P5 is the separation then, not an encounter.
         """
         start = EPOCH + timedelta(hours=2)
         red_then = elset_state(PLANE_CHANGE.red_tle, EPOCH)
@@ -126,8 +130,8 @@ class TestOnTheMeasuredCases:
         cell = _cells(evaluate_scenario(scenario), 0)[0]
         assert cell.ca_refusal is None
         assert cell.ca_percentiles is not None
-        assert cell.ca_percentiles[5] == pytest.approx(855.86, abs=0.1)
-        assert cell.ca_half_width_km == pytest.approx(11.34, abs=0.05)
+        assert cell.ca_percentiles[5] == pytest.approx(854.86, abs=0.1)
+        assert cell.ca_half_width_km == pytest.approx(12.08, abs=0.05)
         assert str(cell.ca_caveat).endswith(
             " In 100 of 100 samples the objects were already opening when the window began, so the closest approach "
             "was before it."
@@ -139,7 +143,7 @@ class TestWhatThePageSays:
         """C4: P5 100 km gives a 5 km tolerance; a 6.2 km half-width misses it."""
         fake = _Fake(half_width=6.2, converged=False)
 
-        def wide(*args: object) -> SeparationSeries:
+        def wide(*args: object, **_: object) -> SeparationSeries:
             series = fake(*args)  # type: ignore[arg-type]
             return dataclasses.replace(
                 series, miss_km_p5=100.0, miss_km_p50=120.0, miss_km_p95=150.0, tolerance_km=5.0,
@@ -153,17 +157,30 @@ class TestWhatThePageSays:
         )
 
     def test_converged_means_is_on_the_sampled_page(self) -> None:
-        """C5."""
+        """C5. Since SPC-202 every sample draws element-set error, so the sentence says what it cannot say of that
+        draw; a record of 0.28.0 to 0.31.0, under the rule before it, keeps the sentence it showed."""
         assert CONVERGED_MEANS == (
             "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is "
             "larger (95 % bootstrap): more samples would move them by less than that. Whether a move that size "
             "matters depends on how close is too close for your asset, which this page is not told. It says nothing "
             "about element-set error or the hypothesis being wrong."
         )
-        assert "reach" not in CONVERGED_MEANS
+        assert CONVERGED_MEANS_ELSET == (
+            "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is "
+            "larger (95 % bootstrap): more samples would move them by less than that. Whether a move that size "
+            "matters depends on how close is too close for your asset, which this page is not told. It says nothing "
+            "about whether the element-set error drawn is right, spectre/astro/along_track.py's model, the threat "
+            "sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day in LEO and MEO, 2 km plus 1 km a "
+            "day at GEO and beyond, at each set's age at the scenario epoch ({ages}), or about the hypothesis being "
+            "wrong."
+        )
+        assert "reach" not in CONVERGED_MEANS_ELSET
         sampled = evaluate_scenario(_bound(), sampler=_Fake())
-        assert sampled.converged_means == CONVERGED_MEANS
-        assert CONVERGED_MEANS in _page(sampled)
+        shown = CONVERGED_MEANS_ELSET.format(ages="red's set 0.0 h old and blue's 0.0 h old")   # both sets at epoch
+        assert sampled.converged_means == shown
+        assert shown in _page(sampled)
+        before = evaluate_scenario(dataclasses.replace(_bound(), miss_rule=MissRule.POINT), sampler=_Fake())
+        assert before.converged_means == CONVERGED_MEANS
         plain = evaluate_scenario(_scenario())
         assert plain.converged_means is None
         assert "Converged means" not in _page(plain)

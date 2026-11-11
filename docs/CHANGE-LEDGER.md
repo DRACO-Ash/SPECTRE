@@ -1274,3 +1274,13 @@ Weight stability (evaluation F-16) and collect-first advice tied to the decision
 | Code Quality | **HYGIENE** | None made for the gate. New module `domain/weight_stability.py`; decision relevance in `decision.py`; one column on `decision_records` | `scripts/check-quality.sh` against 0.30.0 passed all five legs. The full suite (9,688 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.32.0
+
+Element-set error in the miss (evaluation F-11) and a script policy with no inline script or eval (F-08).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New first-party JavaScript under `spectre/web/static/js/`, which the platform may score with no coverage report of its own | `scripts/check-quality.sh` against 0.31.0 passed all five legs; the browser tests in `tests/browser/` drive every moved control under the policy and passed here with Chromium required. The full suite (9,939 passed) and every CI coverage floor are green on the same tree. | Then the platform scores the JavaScript on its own terms; the report names the file, and `sonar-project.properties` is where to declare its coverage or exclusion. |
+| DAST | **EVIDENCED** | `script-src 'self'`, no `'unsafe-inline'` or `'unsafe-eval'` | The header is asserted on every page by tests. | Then a page or fragment still needs a script the policy refuses; the browser console names it. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

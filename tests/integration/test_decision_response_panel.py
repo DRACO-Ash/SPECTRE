@@ -71,7 +71,9 @@ class TestThePanel:
     def test_an_added_row_has_the_same_labelled_fields(self, client: Any, auth_cookie: str) -> None:
         """46: the row builder."""
         html = _panel(client, auth_cookie)
-        builder = html[html.index("function addFrRow()"):html.index("function removeRow(")]
+        # The row builder's markup is a <template> the panel carries (SPC-199).
+        builder = html[html.index('<template id="fr-row-template">'):]
+        builder = builder[:builder.index("</template>")]
         section = _section(builder)
         for name in _FIELDS:
             assert f'name="{name}"' in section, name

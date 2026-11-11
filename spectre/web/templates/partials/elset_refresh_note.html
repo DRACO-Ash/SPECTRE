@@ -19,8 +19,6 @@
   {% for sentence in refresh.refused %}<span class="elset-refused" style="display:block">{{ sentence }}</span>{% endfor %}
 </div>
 {% if announce and refresh.updated %}
-<script>
-if (typeof window.spectreRereadRedCard === 'function') { window.spectreRereadRedCard(); }
-</script>
+<span hidden data-init="reread-red-card"></span>
 {% endif %}
 {% endif %}

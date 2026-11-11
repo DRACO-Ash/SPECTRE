@@ -40,6 +40,19 @@ TCA_TITLE = (
     "{v:,.1f} m/s. All of the error is taken along the approach, so it errs wide; our burn's execution error is not "
     "in it."
 )
+#: TCA_TITLE for a sampled TCA under SPC-202's rule: every sample draws both sets' error at the scenario epoch, so the
+#: samples' TCAs spread by it already, and the ± holds only its growth from the scenario epoch to the TCA.
+TCA_TITLE_UNDRAWN = (
+    "TCA known to {pm}: the element-set error the samples do not draw, its growth from the scenario epoch to the "
+    "TCA, {pos:.1f} km, both objects combined in quadrature by {model}, over a closing speed of {v:,.1f} m/s. The "
+    "error at the scenario epoch is drawn in every sample, so it is in the spread of the samples' TCAs, not in this. "
+    "All of the growth is taken along the approach, so it errs wide; our burn's execution error is not in it."
+)
+#: Said after TCA_TOO_SLOW for a sampled TCA under SPC-202's rule.
+TCA_TOO_SLOW_UNDRAWN = (
+    " That error is only the growth of both sets' element-set error from the scenario epoch to the TCA, which the "
+    "samples do not draw; the error at the scenario epoch is in the spread of the samples' TCAs."
+)
 TCA_TOO_SLOW = (
     "TCA not known to better than the {span:.1f} h searched: the objects close at {v:.2f} m/s, too slowly to fix the "
     "time from a {pos:.1f} km position error."
@@ -48,6 +61,67 @@ TCA_TOO_SLOW = (
 TCA_TOO_SLOW_PM = "± more than the {span:.1f} h searched"
 TCA_AT_EDGE = "No TCA uncertainty: the smallest separation is at the edge of the search, not an encounter."
 TCA_NO_SPEED = "No TCA uncertainty: this series recorded no closing speed for the sample that sets the TCA."
+
+
+# ── Element-set error in the closest approach (SPC-202, evaluation F-11) ──
+
+#: The model every element-set error sentence names, with its source: spectre/astro/along_track.py's _ERROR_MODEL_KM.
+ELSET_MODEL = (
+    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus "
+    "2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond"
+)
+#: What a sampled closest approach draws, in its basis (SPC-202).
+SAMPLED_ELSET = (
+    "each sample also draws each object's element-set error along track, from a normal distribution whose 1 sigma "
+    "is " + ELSET_MODEL + ", at its element set's age at the scenario epoch: red {rk:.1f} km, {ra:.1f} h old, and "
+    "blue {bk:.1f} km, {ba:.1f} h old; no radial or cross-track part is drawn, and the error does not grow within "
+    "the span"
+)
+#: What a computed closest approach carries beside it, in its basis (SPC-202).
+COMPUTED_ELSET = (
+    "element-set error is beside it as a band, not in the figure: {e:.1f} km (1 sigma) at the closest approach, "
+    "red's {rk:.1f} km ({ra:.1f} h old then) and blue's {bk:.1f} km ({ba:.1f} h old) combined in quadrature, by "
+    + ELSET_MODEL + "; the score reads the band's lower edge, {low:.1f} km, the miss less 1 sigma"
+)
+#: The band in a computed cell (SPC-202).
+COMPUTED_ELSET_LINE = (
+    "Element-set error: {low:.1f} km to {high:.1f} km, the miss less and plus {e:.1f} km (1 sigma), both sets' "
+    "along-track error at the TCA in quadrature (red {ra:.1f} h old then, blue {ba:.1f} h; the sweep's rule of thumb, "
+    "tuned, not sourced); the score reads {low:.1f} km, the closer edge."
+)
+#: What a sampled cell drew (SPC-202).
+SAMPLED_ELSET_LINE = (
+    "Element-set error drawn in every sample, along track: red 1 sigma {rk:.1f} km ({ra:.1f} h old at the scenario "
+    "epoch), blue {bk:.1f} km ({ba:.1f} h old); the sweep's rule of thumb, tuned, not sourced."
+)
+
+
+@dataclass(frozen=True)
+class ElsetErrorAt:
+    """Both bound element sets' along-track position error at one moment, by spectre/astro/along_track.py's model:
+    each set's age then, h, and its error, km (SPC-202). A sampled cell draws it at the scenario epoch, 1 sigma; a
+    computed cell reads it at its closest approach."""
+
+    at:         datetime
+    red_age_h:  float
+    blue_age_h: float
+    red_km:     float
+    blue_km:    float
+
+    @property
+    def combined_km(self) -> float:
+        """Both errors in quadrature, km."""
+        return math.hypot(self.red_km, self.blue_km)
+
+    def words(self) -> dict[str, float]:
+        """The figures the sentences name."""
+        return {"rk": self.red_km, "ra": self.red_age_h, "bk": self.blue_km, "ba": self.blue_age_h,
+                "e": self.combined_km}
+
+
+def lower_edge_km(miss_km: float, error_km: float) -> float:
+    """The closer edge of a computed miss's band: the miss less the error, never below 0 km (SPC-202)."""
+    return max(miss_km - error_km, 0.0)
 
 
 def sigma_text(sigma_s: float) -> str:
@@ -69,6 +143,8 @@ class TcaUncertainty(NamedTuple):
     closing_speed_km_s: float     # NaN when the series recorded none
     span_s: float
     at_edge: bool
+    # A sampled TCA under SPC-202's rule: the position error is only what the samples do not draw.
+    undrawn: bool = False
 
     @property
     def too_slow(self) -> bool:
@@ -102,8 +178,13 @@ class TcaUncertainty(NamedTuple):
         if math.isnan(self.closing_speed_km_s):
             return TCA_NO_SPEED
         if self.sigma_s is None:
-            return TCA_TOO_SLOW.format(
+            slow = TCA_TOO_SLOW.format(
                 span=self.span_s / _SECONDS_PER_HOUR, v=self.closing_speed_km_s * 1000.0, pos=self.position_error_km,
+            )
+            return slow + TCA_TOO_SLOW_UNDRAWN if self.undrawn else slow
+        if self.undrawn:
+            return TCA_TITLE_UNDRAWN.format(
+                pm=self.pm, pos=self.position_error_km, v=self.closing_speed_km_s * 1000.0, model=ELSET_MODEL,
             )
         return TCA_TITLE.format(pm=self.pm, pos=self.position_error_km, v=self.closing_speed_km_s * 1000.0)
 
@@ -299,15 +380,18 @@ class ResponseFigure:
         )
 
 
-def tca_uncertainty(position_error_km: float, closing_speed_km_s: float, span_s: float, *, at_edge: bool) -> TcaUncertainty:
-    """Position error over closing speed; no sigma at an edge, at a speed of rounding noise or none, or past the span."""
+def tca_uncertainty(
+    position_error_km: float, closing_speed_km_s: float, span_s: float, *, at_edge: bool, undrawn: bool = False,
+) -> TcaUncertainty:
+    """Position error over closing speed; no sigma at an edge, at a speed of rounding noise or none, or past the span.
+    *undrawn*: the error is only what a sampled cell's samples do not draw (SPC-202)."""
     sigma: float | None = None
     speed_known = not math.isnan(closing_speed_km_s)
     if not at_edge and speed_known and closing_speed_km_s >= SLOWEST_CLOSING_KM_S:
         sigma = position_error_km / closing_speed_km_s
         if sigma > span_s:
             sigma = None
-    return TcaUncertainty(sigma, position_error_km, closing_speed_km_s, span_s, at_edge)
+    return TcaUncertainty(sigma, position_error_km, closing_speed_km_s, span_s, at_edge, undrawn)
 
 
 # ── The sampled TCAs as a histogram (SPC-124) ──
@@ -324,6 +408,14 @@ HISTOGRAM_CAPTION = (
     "uncertainty of the drawn samples' TCAs from element-set error; {wider}. Not shown: {closing} still closing when "
     "the search ended and {opening} already opening when it began, whose smallest separation is at an edge, not an "
     "encounter, and {unfixed} closing too slowly to fix a time within the span searched."
+)
+
+#: HISTOGRAM_CAPTION's floor under SPC-202's rule, where every sample draws both sets' error at the scenario epoch.
+_FLOOR_FROM = "the median uncertainty of the drawn samples' TCAs from element-set error"
+_FLOOR_FROM_UNDRAWN = (
+    "the median uncertainty of the drawn samples' TCAs from the growth of element-set error after the scenario "
+    "epoch, which the samples do not draw; the error at the scenario epoch is drawn in every sample, so it is in the "
+    "spread of the bars"
 )
 
 
@@ -379,12 +471,15 @@ class TcaHistogram:
     median_sigma_s: float
     n_unfixed: int = 0
     n_wider: int = 0
+    # Under SPC-202's rule each sample's uncertainty is only the error's growth the samples do not draw.
+    undrawn: bool = False
 
     @property
     def caption(self) -> str:
         """What the bars hold, how wide they are and why, how many drawn are known less well, and what is left out."""
         total = self.n_shown + self.n_closing_at_end + self.n_opening_at_start + self.n_unfixed
-        return HISTOGRAM_CAPTION.format(
+        caption = HISTOGRAM_CAPTION if not self.undrawn else HISTOGRAM_CAPTION.replace(_FLOOR_FROM, _FLOOR_FROM_UNDRAWN)
+        return caption.format(
             n=self.n_shown, total=total, bin=_bin_label(self.bin_width_s), pm=sigma_text(self.median_sigma_s),
             wider=_wider_text(self.n_wider), closing=self.n_closing_at_end, opening=self.n_opening_at_start,
             unfixed=self.n_unfixed,
@@ -413,11 +508,11 @@ class TcaHistogram:
 
 
 def tca_histogram(
-    tcas_h: Sequence[float], sigmas_s: Sequence[float | None], *, n_closing: int, n_opening: int,
+    tcas_h: Sequence[float], sigmas_s: Sequence[float | None], *, n_closing: int, n_opening: int, undrawn: bool = False,
 ) -> TcaHistogram | None:
     """The samples' TCAs, hours after the scenario epoch, each with its own sigma, binned no narrower than the median
     sigma of those drawn. A sample with no sigma has no time to draw and is counted instead. None with no sample to
-    draw."""
+    draw. *undrawn*: each sigma is only what the samples do not draw (SPC-202)."""
     fixed = [(t, s) for t, s in zip(tcas_h, sigmas_s, strict=True) if s is not None]
     if not fixed:
         return None
@@ -432,4 +527,5 @@ def tca_histogram(
     return TcaHistogram(
         width, tuple(float(e) / _SECONDS_PER_HOUR for e in edges), tuple(int(c) for c in counts), len(fixed),
         n_closing, n_opening, median, n_unfixed=len(tcas_h) - len(fixed), n_wider=int(np.sum(sigmas > width)),
+        undrawn=undrawn,
     )

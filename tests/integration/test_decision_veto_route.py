@@ -73,8 +73,9 @@ class TestThePanel:
     def test_a_row_added_on_the_panel_carries_the_same_fields_keyed_by_its_own_id(
         self, client: TestClient, auth_cookie: str,
     ) -> None:
-        builder = _between(_panel(client, auth_cookie), "function addFrRow()", "document.getElementById('fr-rows')")
-        assert 'name="fr_vetoed" value="R${c}"' in builder
+        # The row builder's markup is a <template>; decision.js writes the row's number where __ROW__ stands.
+        builder = _between(_panel(client, auth_cookie), '<template id="fr-row-template">', "</template>")
+        assert 'name="fr_vetoed" value="R__ROW__"' in builder
         assert 'name="fr_veto_reason" maxlength="500"' in builder
         assert _unlabelled(_between(builder, '<div class="fr-veto"', "</div>")) == []
 
@@ -85,8 +86,7 @@ class TestThePanel:
         words out under the reason beside it. Both the fixed row and an added row set the box's own width."""
         page = _panel(client, auth_cookie)
         fixed = _between(page, '<div class="fr-veto"', "</div>")
-        added = _between(_between(page, "function addFrRow()", "document.getElementById('fr-rows')"),
-                         '<div class="fr-veto"', "</div>")
+        added = _between(_between(page, '<template id="fr-row-template">', "</template>"), '<div class="fr-veto"', "</div>")
         for block in (fixed, added):
             box = re.search(r'<input type="checkbox" name="fr_vetoed"[^>]*>', block)
             assert box is not None

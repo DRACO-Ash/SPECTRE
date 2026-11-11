@@ -2384,3 +2384,8 @@ button[disabled] {
 ::-webkit-scrollbar-track { background: var(--bg); border-radius: 3px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ── Splash already seen this session (SPC-199) ─────────────────
+   theme-boot.js marks the page before first paint, so the splash never
+   paints on a later load; operator.js then removes it. */
+html.spectre-splash-seen #spectre-splash { display: none !important; }

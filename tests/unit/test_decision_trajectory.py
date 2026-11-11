@@ -14,6 +14,7 @@ import copy
 import html
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -231,8 +232,11 @@ class TestThePage:
         """Every cell posts to the same view, so the results mark the form that was submitted; the view's close
         and Escape return focus to that cell, not the first such button on the page."""
         page = _render_with_links(plane)
-        script = page[page.index('<div id="decision-geometry"'):]
-        script = script[script.index("<script>"):script.index("</script>")]
+        assert '<div id="decision-geometry" aria-live="polite" data-init="geometry-opener">' in page
+        # The marking moved from an inline block to decision.js (SPC-199).
+        source = (Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js" / "decision.js").read_text(
+            encoding="utf-8")
+        script = source[source.index("SPECTRE.init('geometry-opener'"):source.index("/* ── Sampled times")]
         assert "setAttribute('data-geometry-opener'" in script
         assert "removeAttribute('data-geometry-opener')" in script
         assert "document.addEventListener" not in script, "scoped to the results table, not the whole console"

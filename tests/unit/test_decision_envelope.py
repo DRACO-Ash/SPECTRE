@@ -29,7 +29,7 @@ from spectre.domain.decision import (
     evaluate_scenario,
     find_robust_response,
 )
-from spectre.domain.decision_envelope import DECAYED, DEEP_SPACE, DEEP_SPACE_GEO, envelope_lines
+from spectre.domain.decision_envelope import DECAYED, DEEP_SPACE_ELSET, DEEP_SPACE_GEO_ELSET, envelope_lines
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.domain.rule_comparison import compare_rules
 from spectre.web.decision_binding import bound_elset
@@ -144,14 +144,15 @@ class TestDeepSpaceIsFlaggedNotRefused:
         result = evaluate_scenario(scenario, sampler=_never)
         period = TLEOrbit(_MOLNIYA).period_minutes
         assert result.envelope == (
-            DEEP_SPACE.format(side="red", name="PROBE_RED", period=period, limit=24.0),
+            DEEP_SPACE_ELSET.format(side="red", name="PROBE_RED", period=period, limit=24.0),
         )
         assert result.envelope[0] == (
             "The red element set PROBE_RED is propagated with SDP4, SGP4's deep-space branch, which the library "
             f"chooses for a period of about 225 min or more (this set's is about {period:.1f} min): the staleness "
             "limit applied to it, 24 h, and the element-set error model are rules of thumb set for LEO and GEO, not "
-            "validated for this orbit, so its age and the uncertainty of its time of closest approach may be "
-            "misstated. Its figures stand, flagged."
+            "validated for this orbit, so its age, the element-set error drawn in every sample and set beside every "
+            "computed miss, the closest approach and score that read that error, and the uncertainty of its time of "
+            "closest approach may be misstated. Its figures stand, flagged."
         )
         assert result.envelope[0] in _page(result)
         computed = {c.figure_bases.closest_approach_km.kind for c in result.outcome_matrix[1]}
@@ -164,15 +165,17 @@ class TestDeepSpaceIsFlaggedNotRefused:
         lines = envelope_lines(_scenario(binding=binding))
         period = TLEOrbit(GEO_DRIFT_IN.red_tle).period_minutes
         assert lines == (
-            DEEP_SPACE_GEO.format(side="red", name="PROBE_RED", period=period, limit=72.0),
-            DEEP_SPACE_GEO.format(side="blue", name="PROBE_BLUE", period=TLEOrbit(GEO_DRIFT_IN.blue_tle).period_minutes,
+            DEEP_SPACE_GEO_ELSET.format(side="red", name="PROBE_RED", period=period, limit=72.0),
+            DEEP_SPACE_GEO_ELSET.format(side="blue", name="PROBE_BLUE", period=TLEOrbit(GEO_DRIFT_IN.blue_tle).period_minutes,
                                   limit=72.0),
         )
         assert lines[0] == (
             f"The red element set PROBE_RED is a GEO set, propagated with SDP4, SGP4's deep-space branch (period "
             f"about {period:.1f} min): the staleness limit applied to it, 72 h, and the element-set error model are "
-            "the engine's GEO rules of thumb, tuned rather than sourced (SPC-215 will source them), so its age and the "
-            "uncertainty of its time of closest approach may be misstated. Its figures stand, flagged."
+            "the engine's GEO rules of thumb, tuned rather than sourced (SPC-215 will source them), so its age, the "
+            "element-set error drawn in every sample and set beside every computed miss, the closest approach and "
+            "score that read that error, and the uncertainty of its time of closest approach may be misstated. Its "
+            "figures stand, flagged."
         )
         assert "not validated for this orbit" not in " ".join(lines)
 
@@ -185,7 +188,7 @@ class TestDeepSpaceIsFlaggedNotRefused:
         orbit = TLEOrbit(edge)
         assert orbit.deep_space and orbit.period_minutes < DEEP_SPACE_PERIOD_MIN
         lines = envelope_lines(_scenario(binding=_binding(edge, PLANE_CHANGE.blue_tle, EPOCH)))
-        assert lines == (DEEP_SPACE.format(side="red", name="PROBE_RED", period=orbit.period_minutes, limit=24.0),)
+        assert lines == (DEEP_SPACE_ELSET.format(side="red", name="PROBE_RED", period=orbit.period_minutes, limit=24.0),)
         assert f"about {orbit.period_minutes:.1f} min" in lines[0]
         assert "is over" not in lines[0]
 

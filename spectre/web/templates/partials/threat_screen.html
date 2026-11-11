@@ -131,8 +131,8 @@
         {% set vc = band_colours.get(v.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
         {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
         {% set row_id = 'scr-' ~ loop.index0 %}
-        <tr class="threat-parent" data-row="{{ row_id }}" onclick="scrToggle(this.dataset.row)" style="cursor:pointer"
-            tabindex="0" onkeydown="spectreActivate(event)"
+        <tr class="threat-parent" data-row="{{ row_id }}" data-action="scrToggle" style="cursor:pointer"
+            tabindex="0" data-activate
             title="Open the profiles behind this verdict">
           <td class="col-dim">{{ loop.index }}</td>
           {% set badge_mode = actor_modes.get(v.actor_satno, "REAL") %}
@@ -226,13 +226,5 @@
 
 </div>
 
-<script>
-  /* Open one actor's profiles. Kept here rather than in the page shell so the
-     behaviour arrives with the fragment that needs it. */
-  function scrToggle(cls) {
-    document.querySelectorAll('.scr-child.' + cls).forEach(function (row) {
-      row.style.display = row.style.display === 'none' ? '' : 'none';
-    });
-  }
-</script>
+{# Opening one actor's profiles is scrToggle in /static/js/sweep.js (SPC-199). #}
 {% endif %}

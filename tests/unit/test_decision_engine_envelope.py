@@ -18,7 +18,7 @@ import pytest
 from spectre.astro import elset_approach
 from spectre.astro.elset_check import _ANGLES
 from spectre.astro.monte_carlo import REENTRY_FLOOR_KM
-from spectre.domain.decision_envelope import DEEP_SPACE, DEEP_SPACE_GEO
+from spectre.domain.decision_envelope import DEEP_SPACE, DEEP_SPACE_ELSET, DEEP_SPACE_GEO, DEEP_SPACE_GEO_ELSET
 from tests.unit.test_lookup_register import _module, resolve
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -87,9 +87,12 @@ def test_the_reentry_floor_holds_on_both_propagators() -> None:
 
 
 def test_deep_space_is_flagged_and_not_refused() -> None:
-    assert "Its figures stand, flagged." in DEEP_SPACE and "Its figures stand, flagged." in DEEP_SPACE_GEO
+    for sentence in (DEEP_SPACE, DEEP_SPACE_GEO, DEEP_SPACE_ELSET, DEEP_SPACE_GEO_ELSET):
+        assert "Its figures stand, flagged." in sentence
     assert "rules of thumb set for LEO and GEO, not validated for this orbit" in DEEP_SPACE
     assert "GEO rules of thumb, tuned rather than sourced" in DEEP_SPACE_GEO
+    for sentence in (DEEP_SPACE_ELSET, DEEP_SPACE_GEO_ELSET):   # SPC-202: the model also sets the miss and the score
+        assert "the closest approach and score that read that error" in sentence
 
 
 def _row(dimension: str) -> list[str]:

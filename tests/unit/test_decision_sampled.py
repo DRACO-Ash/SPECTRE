@@ -195,7 +195,9 @@ class _Fake:
         self.calls: list[tuple[ManoeuvreHypothesis, BlueTrack, SeparationWindow]] = []
         self.series = series
 
-    def __call__(self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow) -> SeparationSeries:
+    def __call__(
+        self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, **_: Any,
+    ) -> SeparationSeries:
         self.calls.append((hypothesis, blue, window))
         series = dict(self.series)
         reentered = series.pop("n_reentered", 0)
@@ -781,14 +783,17 @@ class TestPlanSampling:
 
 class TestEndToEnd:
     def test_a_bound_plane_change_with_an_evasive_hypothesis_is_sampled(self) -> None:
-        """D18: the plane-change element sets bound, the Evasive archetype from red's state at EPOCH, 50 samples."""
+        """D18: the plane-change element sets bound, the Evasive archetype from red's state at EPOCH, 50 samples, each
+        drawing both objects' element-set error at epoch, 1 km each (SPC-202)."""
         scenario = _bound()
         result = evaluate_scenario(scenario)
         hypothesis = scenario.adversary_actions[0].hypothesis
         assert hypothesis is not None
         blue = elset_state(PLANE_CHANGE.blue_tle, EPOCH)
         assert blue is not None
-        series = run_separation_series(hypothesis.hypothesis, blue, SeparationWindow(EPOCH, 3600.0))
+        error = decision.sample_error(scenario)
+        assert error == (1.0, 1.0)
+        series = run_separation_series(hypothesis.hypothesis, blue, SeparationWindow(EPOCH, 3600.0), elset_error=error)
         assert series.converged and series.n_failed == 0
         for cell in _cells(result, 0):
             assert cell.ca_refusal is None
@@ -798,8 +803,9 @@ class TestEndToEnd:
             assert cell.time_to_closest_hours == round(series.earliest_tca_at_or_below_p5_s / 3600.0, 2)
         p = _cells(result, 0)[0].ca_percentiles
         assert p is not None
-        # A 2 m/s evasive burn at the reference crossing: misses of about 10 to 14 km near 1,411 s.
-        assert 9.0 < p[5] <= p[50] <= p[95] < 15.0
+        # A 2 m/s evasive burn at the reference crossing, with element-set error: misses of about 9.7 to 15.1 km near
+        # 1,411 s (10.7 to 13.4 km before SPC-202, re-derived by evaluating this scenario under each rule).
+        assert 9.0 < p[5] <= p[50] <= p[95] < 16.0
         assert abs(_cells(result, 0)[0].time_to_closest_hours - 1411.0 / 3600.0) < 0.02
 
 
@@ -842,11 +848,15 @@ class TestTheResultCountsItsSampledCells:
         """D22: P5 3 km is inside the 10 km keep-out, so its term is 1; P95 20 km's is ln 2,500 / ln 5,000 = 0.918618;
         delta is 0.25 x (1 - 0.918618) = 0.0203 (SPC-191). It was 0.25 x (20 - 3) / 50,000 = 0.000085."""
         assert sampled.sampled_caveat == (
-            "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers only "
-            "the hypothesis: its delta-V, pointing, timing and drag. Element-set errors, and the hypothesis being "
-            "wrong, are not in it. Our response is not applied to the blue orbit yet, so every response in a "
-            "sampled row has the same closest approach. The score values closest approach in orders of magnitude "
-            "from the 10 km keep-out distance to 50,000 km, so the sampled spread moves it by at most 0.0203 here."
+            "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers the "
+            "hypothesis, its delta-V, pointing, timing and drag, and each object's element-set error along track, "
+            "drawn in every sample from spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, "
+            "not sourced: 1 km at epoch plus 2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond, at "
+            "its set's age at the scenario epoch: red's set 0.0 h old and blue's 0.0 h old. Element-set error across "
+            "track, and the hypothesis being wrong, are not in it. Our response is not applied to the blue orbit yet, "
+            "so every response in a sampled row has the same closest approach. The score values closest approach in "
+            "orders of magnitude from the 10 km keep-out distance to 50,000 km, so the sampled spread moves it by at "
+            "most 0.0203 here."
         )
         plain = evaluate_scenario(_scenario())
         assert plain.sampled_caveat is None
@@ -864,7 +874,7 @@ class TestTheResultCountsItsSampledCells:
         1 - 0.726184 = 0.2738): the caveat states the larger."""
         runs: list[SeparationSeries] = []
 
-        def two_bands(_h: ManoeuvreHypothesis, _b: BlueTrack, window: SeparationWindow) -> SeparationSeries:
+        def two_bands(_h: ManoeuvreHypothesis, _b: BlueTrack, window: SeparationWindow, **_: Any) -> SeparationSeries:
             series = _series(window)
             runs.append(series)
             return dataclasses.replace(series, miss_km_p95=103.0) if len(runs) == 2 else series

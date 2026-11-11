@@ -182,8 +182,10 @@ class TestAComputedRowAppliesOurBurn:
         assert hold_line is not None and hold_line.endswith("; RK45, no burn.")
 
     def test_the_caveat_says_a_response_with_a_target_differs(self, leo: ScenarioResult) -> None:
-        assert leo.computed_caveat == decision.COMPUTED_CAVEAT_WITH_BURNS
+        assert leo.computed_caveat == decision.COMPUTED_CAVEAT_WITH_BURNS_ELSET.format(
+            ages="red's set 0.0 h old and blue's 0.0 h old")   # both coplanar_leo sets at the scenario epoch
         assert "A response with a target separation applies our burn to the blue asset" in leo.computed_caveat
+        assert "Our burn is sized on the miss itself, not the band, so a response whose burn is sized scores its own" in leo.computed_caveat
 
 
 class TestWhatIsNotSized:
@@ -307,7 +309,7 @@ class _WithBurns(_Fake):
         self.burns: tuple[BlueBurn, ...] | None = None
 
     def __call__(self, hypothesis: ManoeuvreHypothesis, blue: Any, window: SeparationWindow, *,
-                 blue_burns: tuple[BlueBurn, ...] = ()) -> SeparationSeries:
+                 blue_burns: tuple[BlueBurn, ...] = (), **_: Any) -> SeparationSeries:
         self.burns = blue_burns
         series = _series(window)
         shifted = tuple(dataclasses.replace(a, miss_km=a.miss_km + 16.93) for a in series.approaches)
@@ -319,13 +321,16 @@ class _WithBurns(_Fake):
 
 class TestASampledRow:
     def test_a_real_sampled_run_applies_our_burn_in_every_sample(self) -> None:
-        """36: plane_change Evasive 0.25 h in, 100 samples: 5.47 m/s inward, 9.45 km at P5 before, 19.94 km after."""
+        """36: plane_change Evasive 0.25 h in, 100 samples: 5.47 m/s inward, sized on the nominal burn. Before SPC-202,
+        9.45 km at P5 before and 19.94 km after, 16 of 100 under the 20 km target; with each sample drawing both
+        objects' element-set error, 1.0 km each at epoch, 7.27 km before and 17.87 km after, 52 of 100 under it
+        (re-derived by evaluating this scenario under each rule): the burn is sized on the nominal, not the band."""
         result = evaluate_scenario(_sampled_scenario(_hold(), _avoid(), real=True))
         hold, avoid = result.outcome_matrix[0]
         assert hold.ca_percentiles is not None and avoid.ca_percentiles is not None
-        assert avoid.ca_percentiles[5] >= 19.5
+        assert avoid.ca_percentiles[5] == pytest.approx(17.87, abs=0.05)
         assert avoid.ca_response is not None
-        assert avoid.ca_response.buys_km == pytest.approx(10.5, abs=0.6)
+        assert avoid.ca_response.buys_km == pytest.approx(10.6, abs=0.6)
         assert avoid.ca_response.buys_km == avoid.ca_percentiles[5] - hold.ca_percentiles[5]
         assert avoid.figure_bases.delta_v_cost_km_s.kind is Basis.COMPUTED
         assert avoid.figure_bases.closest_approach_km.note.endswith(

@@ -57,13 +57,13 @@
          markup, not script: it says the column can be sorted before anyone has
          clicked, and it gives aiSort a selector that cannot touch the two
          columns that do not sort. #}
-      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="1" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="2" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="3" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="4" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="5" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="6" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="7" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -79,8 +79,8 @@
      resolves here, unlike in the sweep. #}
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
-      onclick="aiToggle({{ loop.index0 }})"
-      tabindex="0" onkeydown="spectreActivate(event)"
+      data-action="aiToggle" data-idx="{{ loop.index0 }}"
+      tabindex="0" data-activate
       aria-expanded="false"
       aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
@@ -133,12 +133,11 @@
          in onclick. #}
       <button class="btn-secondary btn-sm"
               type="button"
-              onkeydown="event.stopPropagation()"
               data-red="{{ item.result.red_name }}" data-blue="{{ item.result.blue_name }}"
               {# The engine field is the manoeuvre start, so the first burn
                  epoch goes in, not the arrival (audit F-242). #}
               data-epoch="{{ (item.result.burns[0].burn_epoch if item.result.burns else item.result.arrival_epoch).strftime('%Y-%m-%dT%H:%M') }}"
-              onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch)"
+              data-action="aiLoadEngine"
               title="Pre-fill the intercept engine with these objects and start epoch (method and TOF are not set)">Load</button>
     </td>
   </tr>
@@ -367,115 +366,10 @@
 </table>
 </div>
 
-<script>
-/* ── Toggle detail row ── */
-function aiToggle(idx) {
-  var det  = document.getElementById('ai-detail-' + idx);
-  var chev = document.getElementById('ai-chevron-' + idx);
-  if (!det) return;
-  var open = det.style.display !== 'none';
-  det.style.display = open ? 'none' : '';
-  if (chev) chev.innerHTML = open ? '&#9654;' : '&#9660;';
-  /* Same fact as the chevron, for an operator who cannot see it. */
-  var row = document.querySelector('[aria-controls="ai-detail-' + idx + '"]');
-  if (row) row.setAttribute('aria-expanded', open ? 'false' : 'true');
-}
-
-/* ── Pre-fill the intercept engine ── */
-function aiLoadEngine(redSat, blueSat, epoch) {
-  if (typeof switchToEngine === 'function') switchToEngine();
-  var redSel  = document.getElementById('ie-red-sat');
-  var blueSel = document.getElementById('ie-blue-sat');
-  var startIn = document.querySelector('input[name="manoeuvre_start"]');
-  if (redSel)  redSel.value  = redSat;
-  if (blueSel) blueSel.value = blueSat;
-  if (startIn) startIn.value = epoch;
-  var engine = document.getElementById('intercept-engine-form');
-  if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-/* ── Column sort ── */
-var _aiSortCol = -1, _aiSortAsc = true;
-
-function aiSort(col, type) {
-  var table = document.getElementById('all-intercepts-table');
-  if (!table) return;
-  var tbody = table.tBodies[0];
-
-  /* Toggle direction if same column, else reset to ascending */
-  if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
-  else { _aiSortCol = col; _aiSortAsc = true; }
-
-  _aiMarkSortHeader(table, col);
-  var grouped = _aiPairRows(Array.from(tbody.rows));
-  grouped.pairs.sort(_aiCompare(col, type));
-
-  /* Re-insert: sorted pairs first, failed rows last */
-  grouped.pairs.forEach(function(pair) {
-    tbody.appendChild(pair[0]);
-    if (pair[1]) tbody.appendChild(pair[1]);
-  });
-  grouped.orphans.forEach(function(r) { tbody.appendChild(r); });
-}
-
-/* Sort indicators in the header. The glyph and aria-sort are the same fact
-   for two different operators, so they are written together and can never
-   drift apart. */
-function _aiMarkSortHeader(table, col) {
-  table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
-  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
-  var th = table.querySelectorAll('thead th')[col];
-  if (!th) return;
-  var ind = th.querySelector('.hrr-sort-ind');
-  if (ind) ind.textContent = _aiSortAsc ? ' ▲' : ' ▼';
-  th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
-}
-
-/* Parent rows paired with the detail row that follows each; rows that are
-   neither (failed methods) are kept apart to go last. */
-function _aiPairRows(rows) {
-  var pairs = [];
-  var orphans = [];
-  var i = 0;
-  while (i < rows.length) {
-    var row = rows[i];
-    if (!row.classList.contains('threat-parent')) {
-      orphans.push(row);
-      i++;
-      continue;
-    }
-    var next = rows[i + 1];
-    var detail = (next && !next.classList.contains('threat-parent')) ? next : null;
-    pairs.push([row, detail]);
-    i += detail ? 2 : 1;
-  }
-  return { pairs: pairs, orphans: orphans };
-}
-
-/* Orders pairs by the parent row's data-sort-<col>; a numeric column reads an
-   unparseable value as Infinity, so it sorts last ascending. */
-function _aiSortKey(row, col, type) {
-  var v = row.getAttribute('data-sort-' + col) || '';
-  if (type !== 'num') return v;
-  var n = Number.parseFloat(v);
-  return Number.isNaN(n) ? Infinity : n;
-}
-
-function _aiCompare(col, type) {
-  return function(a, b) {
-    var av = _aiSortKey(a[0], col, type);
-    var bv = _aiSortKey(b[0], col, type);
-    if (av < bv) return _aiSortAsc ? -1 : 1;
-    if (av > bv) return _aiSortAsc ?  1 : -1;
-    return 0;
-  };
-}
-</script>
+{# Toggle, load and sort are in /static/js/intercepts.js (SPC-199). #}
 
 {% if intercept_history and intercept_history | length > 1 %}
-<script>
-if (typeof _spectreRenderTradeSpace === 'function') _spectreRenderTradeSpace();
-</script>
+<span hidden data-init="trade-space-render"></span>
 {% endif %}
 
 {% endif %}

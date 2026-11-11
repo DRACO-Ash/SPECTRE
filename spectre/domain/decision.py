@@ -156,6 +156,7 @@ from spectre.astro.monte_carlo import (
     BlueBurn,
     BlueTrack,
     BurnSeries,
+    ElsetError,
     ManoeuvreHypothesis,
     ManoeuvreType,
     SeparationSeries,
@@ -192,11 +193,18 @@ from spectre.domain.custody import (
 )
 from spectre.domain.decision_envelope import envelope_lines
 from spectre.domain.decision_figures import (
+    COMPUTED_ELSET,
+    COMPUTED_ELSET_LINE,
+    ELSET_MODEL,
     NOMINAL_BURN,
+    SAMPLED_ELSET,
+    SAMPLED_ELSET_LINE,
+    ElsetErrorAt,
     ResponseBurnSpec,
     ResponseFigure,
     TcaHistogram,
     TcaUncertainty,
+    lower_edge_km,
     tca_histogram,
     tca_uncertainty,
 )
@@ -257,6 +265,20 @@ class ProbabilityRule(StrEnum):
 
     REMAINDER = "remainder"
     SHARES = "shares"
+
+
+class MissRule(StrEnum):
+    """What a closest approach the engine propagates holds of the element sets' own error (SPC-202, evaluation F-11).
+
+    ELSET_ERROR: each sample of a sampled cell draws both objects' element-set error along track, and a computed cell
+    carries a band, the miss less and plus both sets' error at the closest approach in quadrature, its score reading
+    the lower edge. POINT: the rule of 0.28.0 to 0.31.0, a computed miss scored as it stands and a sampled band over
+    the burn's spread alone; it is read only from a record those releases wrote, so the replay evaluates it as it
+    was evaluated then.
+    """
+
+    ELSET_ERROR = "element-set error"
+    POINT = "point"
 
 
 class SelectorStrategy(Enum):
@@ -1115,6 +1137,10 @@ class OutcomeMetrics:
     response_refusal:     str | None = None
     # The samples' TCAs as a histogram, binned no finer than each is known (SPC-124); only on a sampled cell.
     tca_histogram:        TcaHistogram | None = None
+    # The element-set error a computed or sampled closest approach holds (SPC-202): for a computed cell, both sets'
+    # error at its TCA, the band beside the miss; for a sampled cell, the 1 sigma each sample drew at the scenario
+    # epoch. None under the rule of 0.28.0 to 0.31.0, and on a lookup.
+    ca_elset_error:       ElsetErrorAt | None = None
     # The figures the composite score was built from, unrounded (SPC-205, SPC-204): what the weight stability and a
     # cue's outcomes score again, so neither reads the rounded figures shown. Set by the engine on every cell it builds;
     # None on a cell built by hand, which is then scored again from the figures shown.
@@ -1141,6 +1167,7 @@ class OutcomeMetrics:
         _require_custody(self)
         _require_tca(self)
         _require_response(self)
+        _require_elset_error(self)
 
     @property
     def ca_band(self) -> str | None:
@@ -1156,9 +1183,32 @@ class OutcomeMetrics:
         if self.ca_percentiles is None:
             return None
         p = self.ca_percentiles
-        return _CA_DISTRIBUTION.format(
+        error = self.ca_elset_error
+        distribution = _CA_DISTRIBUTION if error is None else _CA_DISTRIBUTION_ELSET
+        return distribution.format(
             n=self.ca_samples, p5=p[5], p50=p[50], p95=p[95], std=self.ca_std_km, hw=self.ca_half_width_km,
+            **({} if error is None else error.words()),
         )
+
+    @property
+    def ca_elset_band(self) -> tuple[float, float] | None:
+        """A computed miss's element-set band, km: the miss less and plus both sets' error at the TCA in quadrature,
+        the lower edge never below 0 (SPC-202). None on a sampled or lookup cell, and under the rule before it."""
+        found, error = self.ca_computed, self.ca_elset_error
+        if found is None or error is None:
+            return None
+        miss = found.approach.miss_km
+        return lower_edge_km(miss, error.combined_km), miss + error.combined_km
+
+    @property
+    def ca_elset_line(self) -> str | None:
+        """The element-set error the cell's closest approach holds, in one sentence; None when it holds none."""
+        error, band = self.ca_elset_error, self.ca_elset_band
+        if error is None:
+            return None
+        if band is None:
+            return SAMPLED_ELSET_LINE.format(**error.words())
+        return COMPUTED_ELSET_LINE.format(low=band[0], high=band[1], **error.words())
 
     @property
     def ca_title(self) -> str:
@@ -1326,6 +1376,14 @@ def _require_response(cell: OutcomeMetrics) -> None:
         raise ValueError("a sized burn's computed closest approach is RK45 for both orbits, never SGP4")
 
 
+def _require_elset_error(cell: OutcomeMetrics) -> None:
+    """Element-set error is held only by a closest approach computed or sampled (SPC-202)."""
+    if cell.ca_elset_error is None:
+        return
+    if _cell_bases(cell).closest_approach_km.kind not in (Basis.COMPUTED, Basis.SAMPLED):
+        raise ValueError("ca_elset_error is set only on a computed or sampled closest approach")
+
+
 def _require_one_propagator(matrix: Sequence[Sequence[OutcomeMetrics]]) -> None:
     """Every computed cell in a result names the same propagator, so no row is ranked across two (SPC-121)."""
     named = {cell.ca_computed.propagator for row in matrix for cell in row if cell.ca_computed is not None}
@@ -1351,6 +1409,14 @@ _CA_DISTRIBUTION = (
     "error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, and the "
     "hypothesis being wrong."
 )
+#: The band's hover once each sample draws element-set error (SPC-202).
+_CA_DISTRIBUTION_ELSET = (
+    "Distribution of {n} sampled misses: P5 {p5:.1f} km, P50 {p50:.1f} km, P95 {p95:.1f} km; spread {std:.1f} km "
+    "(1 sigma); each percentile known to within {hw:.2f} km (95 % bootstrap). In this spread: the burn's spread and "
+    "each object's element-set error along track, drawn from " + ELSET_MODEL + ", at each set's age at the scenario "
+    "epoch: red {rk:.1f} km (1 sigma), its set {ra:.1f} h old, and blue {bk:.1f} km, its set {ba:.1f} h old. Not in "
+    "it: element-set error across track, and the hypothesis being wrong."
+)
 _SCORE_SPREAD = "Score spread {s} (1 sigma, {n} samples)"
 _SCORE_SPREAD_LOOKUP = "Score spread: lookup, none computed"
 _SCORE_PERCENTILES = "Score P5 {p5:.4f}, P50 {p50:.4f}, P95 {p95:.4f} across samples; the score's basis is lookup."
@@ -1373,7 +1439,7 @@ def _require_computed(cell: OutcomeMetrics) -> None:
         raise ValueError("a cell is computed or refused, not both")
     miss, hours = round(found.approach.miss_km, 1), round(found.approach.tca_s / _SECONDS_PER_HOUR, 2)
     if cell.closest_approach_km != miss:
-        raise ValueError(f"a computed cell scores and shows the computed miss, {miss} km; got {cell.closest_approach_km!r}")
+        raise ValueError(f"a computed cell shows the computed miss, {miss} km; got {cell.closest_approach_km!r}")
     if cell.time_to_closest_hours != hours:
         raise ValueError(f"a computed cell shows the computed time, {hours} h; got {cell.time_to_closest_hours!r}")
 
@@ -1772,6 +1838,9 @@ class Scenario:
     # What the rows' P mean to expected value (SPC-203): REMAINDER, unless the scenario was read from a record 0.28.0
     # or 0.29.0 wrote, which is replayed under the rule it was evaluated under, SHARES.
     probability_rule:   ProbabilityRule = ProbabilityRule.REMAINDER
+    # What a propagated closest approach holds of element-set error (SPC-202): ELSET_ERROR, unless the scenario was
+    # read from a record 0.28.0 to 0.31.0 wrote, which is replayed as it was evaluated, POINT.
+    miss_rule:          MissRule = MissRule.ELSET_ERROR
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -2301,7 +2370,16 @@ class ScenarioResult:
         """What a computed closest approach does not say; None when no cell is computed (SPC-120)."""
         if not self._computed():
             return None
+        if self.scenario.miss_rule is MissRule.ELSET_ERROR:
+            caveat = COMPUTED_CAVEAT_WITH_BURNS_ELSET if self._on_rk45() else COMPUTED_CAVEAT_ELSET
+            return caveat.format(ages=self._elset_ages())
         return COMPUTED_CAVEAT_WITH_BURNS if self._on_rk45() else COMPUTED_CAVEAT
+
+    def _elset_ages(self) -> str:
+        """Both bound sets' ages at the scenario epoch, as the result's sentences name them (SPC-202). Only asked where
+        a cell is computed or sampled, so both sides are bound with their epochs."""
+        at = elset_error_at(cast("ScenarioBinding", self.scenario.binding), self.scenario.epoch_utc)
+        return ELSET_AGES.format(**at.words())
 
     @property
     def rk45_reference_line(self) -> str | None:
@@ -2385,8 +2463,12 @@ class ScenarioResult:
 
     @property
     def converged_means(self) -> str | None:
-        """CONVERGED_MEANS when any cell is sampled, else None (SPC-117)."""
-        return CONVERGED_MEANS if self._bands() else None
+        """CONVERGED_MEANS when any cell is sampled, else None (SPC-117); its element-set variant (SPC-202)."""
+        if not self._bands():
+            return None
+        if self.scenario.miss_rule is MissRule.ELSET_ERROR:
+            return CONVERGED_MEANS_ELSET.format(ages=self._elset_ages())
+        return CONVERGED_MEANS
 
     @property
     def score_spread_note(self) -> str | None:
@@ -2420,8 +2502,13 @@ class ScenarioResult:
             return None
         w, keep = self.scenario.w_closest_approach, self.scenario.keep_out_km
         delta = max(w * (_norm_ca(band[5], keep) - _norm_ca(band[95], keep)) for band in bands)
-        caveat = _RESULT_CAVEAT_WITH_BURNS if self._responses() else _RESULT_CAVEAT
-        return caveat.format(delta=delta, keep=_keep_out_text(keep))
+        caveats = (
+            (_RESULT_CAVEAT_ELSET, _RESULT_CAVEAT_WITH_BURNS_ELSET) if self.scenario.miss_rule is MissRule.ELSET_ERROR
+            else (_RESULT_CAVEAT, _RESULT_CAVEAT_WITH_BURNS)
+        )
+        caveat = caveats[1] if self._responses() else caveats[0]
+        ages = self._elset_ages() if self.scenario.miss_rule is MissRule.ELSET_ERROR else ""
+        return caveat.format(delta=delta, keep=_keep_out_text(keep), ages=ages)
 
     @property
     def score_scales_line(self) -> str:
@@ -2483,6 +2570,20 @@ _ROW_RK45 = (
     "Computed by RK45 for both orbits, our burn applied where a response names a target: one figure per cell, no "
     "spread; element-set error is not in it."
 )
+#: _ROW_COMPUTED and _ROW_RK45 once the band is shown beside the miss (SPC-202).
+_ROW_COMPUTED_ELSET = (
+    "Computed by SGP4 with no burn: one figure, no spread, with element-set error as a band beside it; the score "
+    "reads its lower edge. {elset}"
+)
+_ROW_RK45_ELSET = (
+    "Computed by RK45 for both orbits, our burn applied where a response names a target: one figure per cell, no "
+    "spread, with element-set error as a band beside it; the score reads its lower edge. {elset}"
+)
+#: What a computed row's band holds, from its first cell, in its Uncertainty sentence (SPC-202).
+_ROW_ELSET = (
+    "The band is {e:.1f} km (1 sigma) at the first cell's closest approach, red's {rk:.1f} km (its set {ra:.1f} h old "
+    "then) and blue's {bk:.1f} km ({ba:.1f} h old) in quadrature, by " + ELSET_MODEL + "."
+)
 
 
 def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
@@ -2497,7 +2598,11 @@ def _row_uncertainty(row: Sequence[OutcomeMetrics]) -> str:
         )
     found = getattr(cell, "ca_computed", None)
     if found is not None:
-        return _ROW_RK45 if found.propagator == RESPONSE_PROPAGATOR else _ROW_COMPUTED
+        rk45 = found.propagator == RESPONSE_PROPAGATOR
+        error = getattr(cell, "ca_elset_error", None)
+        if error is not None:
+            return (_ROW_RK45_ELSET if rk45 else _ROW_COMPUTED_ELSET).format(elset=_ROW_ELSET.format(**error.words()))
+        return _ROW_RK45 if rk45 else _ROW_COMPUTED
     if cell.ca_refusal is None:
         return _ROW_LOOKUP
     return _ROW_NOT_COMPUTED if cell.ca_refusal.startswith(_NOT_COMPUTED) else _ROW_REFUSED
@@ -2588,6 +2693,9 @@ class _Built(NamedTuple):
     figures:   _Figures
     tca_hours: float
     bases:     OutcomeBases
+    # The closest approach the cell shows, km, when it is not the one scored: a computed miss whose score reads its
+    # element-set band's lower edge (SPC-202). None: the figure scored is the figure shown.
+    shown_km:  float | None = None
 
 
 def _outcome(
@@ -2598,7 +2706,7 @@ def _outcome(
     return OutcomeMetrics(
         custody_maintained=figures.custody_maintained,
         custody_gap_hours=round(figures.custody_gap_hours, 2),
-        closest_approach_km=round(figures.closest_approach_km, 1),
+        closest_approach_km=round(figures.closest_approach_km if built.shown_km is None else built.shown_km, 1),
         time_to_closest_hours=round(built.tca_hours, 2),
         delta_v_cost_km_s=round(figures.delta_v_km_s, 5),
         composite_score=round(_score(scenario, friendly, figures), 6),
@@ -2741,13 +2849,14 @@ class Sampler(Protocol):
 
     *tick* is passed only when the evaluation runs under a RunControl (SPC-113), so a sampler that takes three
     arguments still serves an evaluation without one; *keep_at_s* only when a game tree asks for its turn boundary
-    (SPC-140); *red_then* only when the row carries later burns of a transfer (SPC-184).
+    (SPC-140); *red_then* only when the row carries later burns of a transfer (SPC-184); *elset_error* only when the
+    samples draw element-set error (SPC-202), which is every bound row under that rule.
     """
 
     def __call__(  # noqa: PLR0913 - the series' own keywords, each passed only when used
         self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
         tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ..., keep_at_s: Sequence[float] = ...,
-        red_then: Sequence[ManoeuvreHypothesis] = ...,
+        red_then: Sequence[ManoeuvreHypothesis] = ..., elset_error: ElsetError | None = ...,
     ) -> SeparationSeries: ...
 
 
@@ -2846,6 +2955,13 @@ _SAMPLED_CA_NOTE = (
     "sets are within their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not "
     "sampled, {ours}"
 )
+#: _SAMPLED_CA_NOTE once each sample draws element-set error (SPC-202): SAMPLED_ELSET in place of its last clause.
+_SAMPLED_CA_NOTE_ELSET = (
+    "P5 of {n} sampled misses, known to within {hw:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
+    "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated "
+    "with the blue asset over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element "
+    "sets are within their limits, by RK45 with J2 and exponential drag; {elset}; {ours}"
+)
 _NO_BURN_ENDING = "and our response is not applied to the blue orbit"
 _BURN_ENDING = "and our burn is applied to the blue asset in every sample"
 _SAMPLED_TIME_NOTE = (
@@ -2877,6 +2993,25 @@ _RESULT_CAVEAT_WITH_BURNS = (
     "score values closest approach in orders of magnitude from the {keep} km keep-out distance to 50,000 km, so "
     "the sampled spread moves it by at most {delta:.4f} here."
 )
+#: _RESULT_CAVEAT and _RESULT_CAVEAT_WITH_BURNS once each sample draws element-set error (SPC-202).
+_RESULT_CAVEAT_ELSET = (
+    "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers the "
+    "hypothesis, its delta-V, pointing, timing and drag, and each object's element-set error along track, drawn in "
+    "every sample from " + ELSET_MODEL + ", at its set's age at the scenario epoch: {ages}. Element-set error across "
+    "track, and the hypothesis being wrong, are not in it. Our response is not applied to the blue orbit yet, so "
+    "every response in a sampled row has the same closest approach. The score values closest approach in orders of "
+    "magnitude from the {keep} km keep-out distance to 50,000 km, so the sampled spread moves it by at most "
+    "{delta:.4f} here."
+)
+_RESULT_CAVEAT_WITH_BURNS_ELSET = (
+    "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers the "
+    "hypothesis, its delta-V, pointing, timing and drag, and each object's element-set error along track, drawn in "
+    "every sample from " + ELSET_MODEL + ", at its set's age at the scenario epoch: {ages}. Element-set error across "
+    "track, the hypothesis being wrong and our burn's execution error are not in it. A response with a target "
+    "separation applies our burn, sized on the hypothesis's nominal burn, to the blue asset in every sample, so its "
+    "cells differ from the rest of the row. The score values closest approach in orders of magnitude from the "
+    "{keep} km keep-out distance to 50,000 km, so the sampled spread moves it by at most {delta:.4f} here."
+)
 #: Shown with the sampled caveat when any cell is sampled (SPC-117): what a converged band is, in the operator's terms.
 CONVERGED_MEANS = (
     "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is larger "
@@ -2884,6 +3019,16 @@ CONVERGED_MEANS = (
     "on how close is too close for your asset, which this page is not told. It says nothing about element-set error "
     "or the hypothesis being wrong."
 )
+#: CONVERGED_MEANS once each sample draws element-set error (SPC-202).
+CONVERGED_MEANS_ELSET = (
+    "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is larger "
+    "(95 % bootstrap): more samples would move them by less than that. Whether a move that size matters depends "
+    "on how close is too close for your asset, which this page is not told. It says nothing about whether the "
+    "element-set error drawn is right, " + ELSET_MODEL + ", at each set's age at the scenario epoch ({ages}), or "
+    "about the hypothesis being wrong."
+)
+#: Both sets' ages at the scenario epoch, in the result's sentences under SPC-202's rule.
+ELSET_AGES = "red's set {ra:.1f} h old and blue's {ba:.1f} h old"
 #: The hover on a lookup cell's closest approach (SPC-115): it has no band to show.
 LOOKUP_CELL_TITLE = "Lookup: a fixed figure, with no distribution."
 #: Shown once under the sampled caveat when any cell is sampled (SPC-115).
@@ -2939,6 +3084,9 @@ class _Row(NamedTuple):
     then:       tuple[ManoeuvreHypothesis, ...] = ()
     # Every burn of the row's transfer is at or before the red element set's epoch, so none is applied (SPC-184).
     none_applied: bool = False
+    # Each side's element-set error at the scenario epoch, which every sample draws (SPC-202); None under the rule
+    # of 0.28.0 to 0.31.0.
+    elset_error: ElsetError | None = None
 
 
 def _refusal(sentence: str) -> str:
@@ -3359,6 +3507,8 @@ def _sample(
         kwargs["keep_at_s"] = tuple(keep_at_s)
     if row.then:
         kwargs["red_then"] = row.then
+    if row.elset_error is not None:
+        kwargs["elset_error"] = row.elset_error
     return sampler(row.hypothesis, cast("BlueTrack", row.blue_track), row.window, **kwargs)
 
 
@@ -3413,6 +3563,33 @@ def _eligible_rows(scenario: Scenario) -> list[_Row | None]:
     return [_eligible_row(a, red, blue, blue_track, window, scenario) for a in scenario.adversary_actions]
 
 
+def sample_error(scenario: Scenario) -> ElsetError | None:
+    """Each bound side's element-set error at the scenario epoch, for every sample to draw (SPC-202); None under the
+    rule of 0.28.0 to 0.31.0, or with either side unbound."""
+    binding = scenario.binding
+    if scenario.miss_rule is not MissRule.ELSET_ERROR or binding is None or binding.red is None or binding.blue is None:
+        return None
+    if binding.red.epoch is None or binding.blue.epoch is None:
+        return None   # an age unknown: the row is refused before it runs, so nothing is drawn
+    at = elset_error_at(binding, scenario.epoch_utc)
+    return ElsetError(red_km=at.red_km, blue_km=at.blue_km)
+
+
+def elset_error_at(binding: ScenarioBinding, at: datetime) -> ElsetErrorAt:
+    """Both bound element sets' along-track error at *at* by spectre/astro/along_track.py's model, with each set's
+    age then (SPC-202). Only a computed or sampled cell asks, and both of its sets are current, so both epochs are
+    known."""
+    red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
+    red_epoch, blue_epoch = cast("datetime", red.epoch), cast("datetime", blue.epoch)
+    return ElsetErrorAt(
+        at=at,
+        red_age_h=(at - red_epoch).total_seconds() / _SECONDS_PER_HOUR,
+        blue_age_h=(at - blue_epoch).total_seconds() / _SECONDS_PER_HOUR,
+        red_km=elset_position_error_km(red.tle, red_epoch, at),
+        blue_km=elset_position_error_km(blue.tle, blue_epoch, at),
+    )
+
+
 # PLR0913, PLR0917: one row's action, the two bound sides, blue's state and the window, all shared by the scenario.
 def _eligible_row(  # noqa: PLR0913, PLR0917
     action: AdversaryAction, red: BoundElset, blue: BoundElset, blue_track: BlueTrack | None,
@@ -3429,6 +3606,7 @@ def _eligible_row(  # noqa: PLR0913, PLR0917
         horizon_s=scenario.horizon_hours * _SECONDS_PER_HOUR, none_applied=burns.all_dropped,
         # A burn due after the span searched ends is handed to no sample, so no figure flies it.
         then=tuple(h for h in burns.then if h.epoch_utc < end),
+        elset_error=sample_error(scenario),
     )
 
 
@@ -3588,18 +3766,19 @@ def _plan_row(
     return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget, responses, keep_at_s)
 
 
-def _sampled_bases(series: SeparationSeries, horizon_hours: float, *, burnt: bool = False) -> OutcomeBases:
+def _sampled_bases(
+    series: SeparationSeries, horizon_hours: float, *, burnt: bool = False, drawn: ElsetErrorAt | None = None,
+) -> OutcomeBases:
     n, span = len(series.approaches), series.window.span_s / _SECONDS_PER_HOUR
     ours = _BURN_ENDING if burnt else _NO_BURN_ENDING
+    note = (_SAMPLED_CA_NOTE if drawn is None else _SAMPLED_CA_NOTE_ELSET).format(
+        n=n, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours, ours=ours,
+        elset="" if drawn is None else SAMPLED_ELSET.format(**drawn.words()),
+    )
     return outcome_bases(
         custody_maintained=LOOKUP_BASES.custody_maintained,
         custody_gap_hours=LOOKUP_BASES.custody_gap_hours,
-        closest_approach_km=FigureBasis(
-            Basis.SAMPLED,
-            _SAMPLED_CA_NOTE.format(
-                n=n, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours, ours=ours,
-            ),
-        ),
+        closest_approach_km=FigureBasis(Basis.SAMPLED, note),
         time_to_closest_hours=FigureBasis(
             Basis.SAMPLED, _SAMPLED_TIME_NOTE.format(n=n, span=span, horizon=horizon_hours),
         ),
@@ -3638,7 +3817,10 @@ def _sampled_cell(
     scores = np.array([
         _score(scenario, friendly, figures._replace(closest_approach_km=a.miss_km)) for a in series.approaches
     ])
-    bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt))
+    drawn = None if series.elset_error is None else elset_error_at(
+        cast("ScenarioBinding", scenario.binding), scenario.epoch_utc,
+    )
+    bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt, drawn=drawn))
     built = _Built(figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, bases)
     tca, sampled_tca = _sampled_tca(scenario, series)
     return _outcome(
@@ -3652,6 +3834,7 @@ def _sampled_cell(
         ca_half_width_km=series.percentile_half_width_km,
         score_percentiles={k: float(np.percentile(scores, k)) for k in _PERCENTILE_KEYS},
         score_std=float(np.std(scores)),
+        ca_elset_error=drawn,
     )
 
 
@@ -3662,7 +3845,11 @@ def _sampled_tca(scenario: Scenario, series: SeparationSeries) -> tuple[TcaUncer
     speeds = series.closing_speeds_km_s
     speed = speeds[index] if speeds else math.nan
     start = series.window.start_utc
-    tca = _tca_uncertainty(cast("ScenarioBinding", scenario.binding), start, approach, speed, series.window.span_s)
+    binding = cast("ScenarioBinding", scenario.binding)
+    tca = (
+        _tca_uncertainty(binding, start, approach, speed, series.window.span_s) if series.elset_error is None
+        else _drawn_tca_uncertainty(binding, scenario.epoch_utc, series.window, (approach, speed))
+    )
     hours = np.array([a.tca_s for a in series.approaches]) / _SECONDS_PER_HOUR
     p5, p95 = (float(p) for p in np.percentile(hours, (5, 95)))
     return tca, SampledTca(approach.tca_utc(start), approach.tca_s / _SECONDS_PER_HOUR, p5, p95)
@@ -3679,10 +3866,12 @@ def _tca_histogram(scenario: Scenario, series: SeparationSeries) -> TcaHistogram
     offset_h = (start - scenario.epoch_utc).total_seconds() / _SECONDS_PER_HOUR
     shown = [(a, v) for a, v in zip(series.approaches, speeds, strict=True) if not a.at_window_edge]
     closing = sum(a.at_window_edge and a.tca_s > 0.0 for a in series.approaches)
+    drawn = series.elset_error is not None
     return tca_histogram(
         [offset_h + a.tca_s / _SECONDS_PER_HOUR for a, _ in shown],
-        [_tca_uncertainty(binding, start, a, v, span).sigma_s for a, v in shown],
-        n_closing=closing, n_opening=series.n_at_window_edge - closing,
+        [(_drawn_tca_uncertainty(binding, scenario.epoch_utc, series.window, (a, v)) if drawn
+          else _tca_uncertainty(binding, start, a, v, span)).sigma_s for a, v in shown],
+        n_closing=closing, n_opening=series.n_at_window_edge - closing, undrawn=drawn,
     )
 
 
@@ -3943,12 +4132,34 @@ COMPUTED_CAVEAT = (
     "approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as "
     "1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it."
 )
+#: COMPUTED_CAVEAT once the band is shown beside the miss (SPC-202).
+COMPUTED_CAVEAT_ELSET = (
+    "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the pair "
+    "goes if the red track does not move, so every row whose action does not move it shares one figure. Our "
+    "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
+    "approach, and the ranking within it is decided by lookup figures. Element-set error, by " + ELSET_MODEL + ", "
+    "is shown beside each computed miss as a band, the miss less and plus both sets' error at the closest approach "
+    "in quadrature (1 sigma), read at each set's age then ({ages} at the scenario epoch, older by the time to the "
+    "closest approach), and the score reads the band's lower edge: Claude's choice, since you read the closer case "
+    "to answer whether it can reach one of yours."
+)
 #: COMPUTED_CAVEAT once a response's burn is sized (SPC-121).
 COMPUTED_CAVEAT_WITH_BURNS = (
     "Computed cells propagate both bound orbits as their element sets stand, with no red burn, so every row whose "
     "action does not move the red track shares its no-burn figure. A response with a target separation applies our "
     "burn to the blue asset, so its cells differ from the rest of the row. Element-set error, which the sweep takes "
     "as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in any of them."
+)
+#: COMPUTED_CAVEAT_WITH_BURNS once the band is shown beside the miss (SPC-202).
+COMPUTED_CAVEAT_WITH_BURNS_ELSET = (
+    "Computed cells propagate both bound orbits as their element sets stand, with no red burn, so every row whose "
+    "action does not move the red track shares its no-burn figure. A response with a target separation applies our "
+    "burn to the blue asset, so its cells differ from the rest of the row. Element-set error, by " + ELSET_MODEL + ", "
+    "is shown beside each computed miss as a band, the miss less and plus both sets' error at the closest approach "
+    "in quadrature (1 sigma), read at each set's age then ({ages} at the scenario epoch, older by the time to the "
+    "closest approach), and the score reads the band's lower edge: Claude's choice, since you read the closer case "
+    "to answer whether it can reach one of yours. Our burn is sized on the miss itself, not the band, so a response "
+    "whose burn is sized scores its own band's lower edge, short of its target by its error."
 )
 #: Shown with the result once a response's burn put every computed cell on RK45 (SPC-121).
 RK45_FOR_BURNS = (
@@ -4159,7 +4370,13 @@ def _with_burns(
     return ComputedPlan(sized.before, None, responses=sized.responses, sgp4_reference=found)
 
 
-def _computed_bases(scenario: Scenario, found: ElsetApproach, *, burnt: bool = False) -> OutcomeBases:
+#: The clause of _COMPUTED_CA_NOTE and _RK45_CA_NOTE that COMPUTED_ELSET takes the place of (SPC-202).
+_NOT_IN_IT = "element-set error is not in it"
+
+
+def _computed_bases(
+    scenario: Scenario, found: ElsetApproach, *, burnt: bool = False, error: ElsetErrorAt | None = None,
+) -> OutcomeBases:
     binding = cast("ScenarioBinding", scenario.binding)   # plan_computed computes only when both sides are bound
     red, blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
     rk45 = found.propagator == RESPONSE_PROPAGATOR
@@ -4168,6 +4385,9 @@ def _computed_bases(scenario: Scenario, found: ElsetApproach, *, burnt: bool = F
         horizon=scenario.horizon_hours, re=red.epoch, be=blue.epoch, step=found.window.step_s,
         burn=_RK45_BURN_NOTE if burnt else _RK45_NO_BURN_NOTE,
     )
+    if error is not None:
+        clause = COMPUTED_ELSET.format(low=lower_edge_km(found.approach.miss_km, error.combined_km), **error.words())
+        note = note.replace(_NOT_IN_IT, clause)
     return outcome_bases(
         custody_maintained=LOOKUP_BASES.custody_maintained,
         custody_gap_hours=LOOKUP_BASES.custody_gap_hours,
@@ -4181,19 +4401,24 @@ def _computed_cell(
     adversary: AdversaryAction, scenario: Scenario, found: ElsetApproach, custody: _RowCustody | None,
     response: _ResponseCell,
 ) -> OutcomeMetrics:
-    """A cell scored on the computed miss, unrounded, with its time the computed TCA; the rest are lookups, but our
-    delta-V where this response's burn was sized (SPC-121)."""
+    """A cell showing the computed miss, with its time the computed TCA; the rest are lookups, but our delta-V where
+    this response's burn was sized (SPC-121). It is scored on the miss, unrounded, or, under SPC-202's rule, on the
+    lower edge of its element-set band: the miss less both sets' error at the TCA in quadrature, never below 0."""
     friendly = response.friendly
-    figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=found.approach.miss_km)
-    bases = response.bases(_computed_bases(scenario, found, burnt=response.burnt))
-    built = _Built(response.figures(figures), found.approach.tca_s / _SECONDS_PER_HOUR, bases)
-    tca = _tca_uncertainty(
-        cast("ScenarioBinding", scenario.binding), found.window.start_utc, found.approach, found.closing_speed_km_s,
-        found.window.span_s,
+    binding = cast("ScenarioBinding", scenario.binding)
+    miss = found.approach.miss_km
+    error = (
+        elset_error_at(binding, found.approach.tca_utc(found.window.start_utc))
+        if scenario.miss_rule is MissRule.ELSET_ERROR else None
     )
+    scored = miss if error is None else lower_edge_km(miss, error.combined_km)
+    figures = _lookup_figures(adversary, friendly, scenario)._replace(closest_approach_km=scored)
+    bases = response.bases(_computed_bases(scenario, found, burnt=response.burnt, error=error))
+    built = _Built(response.figures(figures), found.approach.tca_s / _SECONDS_PER_HOUR, bases, shown_km=miss)
+    tca = _tca_uncertainty(binding, found.window.start_utc, found.approach, found.closing_speed_km_s, found.window.span_s)
     return _outcome(
         scenario, friendly, built, custody, ca_computed=found, tca_uncertainty=tca, ca_response=response.figure,
-        response_refusal=response.refusal,
+        response_refusal=response.refusal, ca_elset_error=error,
     )
 
 
@@ -4224,12 +4449,28 @@ def _tca_uncertainty(
     """The TCA's uncertainty: both bound element sets' position error at the TCA, in quadrature, over the closing
     speed (SPC-118). Only a computed or sampled cell asks, and both of its element sets are current, so both epochs
     are known."""
-    at = approach.tca_utc(start)
-    errors = (
-        elset_position_error_km(elset.tle, cast("datetime", elset.epoch), at)
-        for elset in (cast("BoundElset", binding.red), cast("BoundElset", binding.blue))
-    )
-    return tca_uncertainty(math.hypot(*errors), speed_km_s, span_s, at_edge=approach.at_window_edge)
+    error = elset_error_at(binding, approach.tca_utc(start))
+    return tca_uncertainty(error.combined_km, speed_km_s, span_s, at_edge=approach.at_window_edge)
+
+
+def _undrawn_error_km(binding: ScenarioBinding, drawn_at: datetime, at: datetime) -> float:
+    """What every sample's draw at *drawn_at* leaves out of both sets' element-set error at *at*, km (SPC-202): each
+    set's error at *at* less its error at *drawn_at* in quadrature, both sides in quadrature; 0 at *drawn_at*."""
+    then, now = elset_error_at(binding, drawn_at), elset_error_at(binding, at)
+    red = max(now.red_km ** 2 - then.red_km ** 2, 0.0)
+    blue = max(now.blue_km ** 2 - then.blue_km ** 2, 0.0)
+    return math.sqrt(red + blue)
+
+
+def _drawn_tca_uncertainty(
+    binding: ScenarioBinding, drawn_at: datetime, window: SeparationWindow, found: tuple[ClosestApproach, float],
+) -> TcaUncertainty:
+    """A sampled TCA's uncertainty under SPC-202's rule: every sample drew both sets' error at *drawn_at*, so the
+    samples' TCAs spread by it already, and the ± holds only its growth from then to this TCA. *found* is the
+    sample's approach and its closing speed, km/s."""
+    approach, speed_km_s = found
+    error_km = _undrawn_error_km(binding, drawn_at, approach.tca_utc(window.start_utc))
+    return tca_uncertainty(error_km, speed_km_s, window.span_s, at_edge=approach.at_window_edge, undrawn=True)
 
 
 def _propagator_gap(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]]) -> float | None:
@@ -5051,7 +5292,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
     """*scenario* as its provenance hashes it: the operator's own, every field, except that a permitted response omits
     its veto and reason, so a scenario with nothing vetoed hashes as it did before vetoes existed and a 0.28.0 record's
     input hashes still match its replay (SPC-195). The remainder row is derived, so left out, as is each row's flag;
-    and the 0.29.0 rule is left out, so a record 0.28.0 or 0.29.0 wrote hashes as it did then (SPC-203)."""
+    and the 0.29.0 rule is left out, so a record 0.28.0 or 0.29.0 wrote hashes as it did then (SPC-203); so is the
+    miss rule of 0.28.0 to 0.31.0, so a record those releases wrote hashes as it did then (SPC-202)."""
     plain = dataclasses.asdict(without_remainder(scenario))
     for response in plain["friendly_responses"]:
         if not response["vetoed"]:
@@ -5060,6 +5302,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
         del action["remainder"]
     if scenario.probability_rule is ProbabilityRule.SHARES:
         del plain["probability_rule"]
+    if scenario.miss_rule is MissRule.POINT:
+        del plain["miss_rule"]
     return plain
 
 

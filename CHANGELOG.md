@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-12
+
+**Element-set error in the miss (evaluation F-11), and the console's script under a policy with no inline script or eval (F-08).**
+
+### Changed
+- Every sampled closest approach now draws each object's element-set error along track, 1 sigma from the sweep's own age model (1 km plus 2 km a day in LEO, 2 km plus 1 km a day at GEO; tuned, not sourced), red and blue each their own, seeded so an evaluation repeats. Every computed miss shows a 1-sigma band beside it, the two sets' errors in quadrature at the time of closest approach, and the score reads its lower edge. Every sentence that said element-set error was not in a figure now names the error, its model and the ages read. Records of 0.28.0 to 0.31.0 replay under the rule they were evaluated by (stored inputs version 4). No stored record's or reference case's pick changed; a burn sized short of the error now buys less than its target says, and the result says so (SPC-202).
+- The Content Security Policy's `script-src` is `'self'` alone: every inline script, event-handler attribute and `hx-on` moved into first-party files under `spectre/web/static/js/`, htmx runs with eval and script tags off, and browser tests drive every control under the policy (SPC-199).
+
+### Added
+- `docs/threat-model-decision-engine.md`: a draft engine threat model by the 7 ISN 2023/09 principles, 11 threats each with what exists, what remains and its owner, for the owner's security lead to review and sign (SPC-199).
+
 ## [0.31.0] - 2026-11-12
 
 **Operator output: 4, the recommended response, states how far a weight must move to change it (evaluation F-16), and collect-first advice is tied to the decision it informs (F-14).**

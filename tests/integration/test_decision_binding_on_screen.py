@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from spectre.domain.decision import BINDING_NOTE, COMPUTED_CAVEAT, CUSTODY_NOTE
+from spectre.domain.decision import BINDING_NOTE, COMPUTED_CAVEAT_ELSET, CUSTODY_NOTE
 from tests.integration.test_decision_input_validation import _evaluate, _form
 from tests.integration.test_form_labels import _unlabelled
 from tests.unit.test_elset_freshness import _checksummed, _tle
@@ -205,7 +205,9 @@ class TestTheResult:
         text = _flat(re.sub(r"<[^>]+>", "", bound.text))
         assert re.search(r"\d+\.\d km \(computed\)", text)
         assert re.search(r"Computed: \d[\d.,]* km at \d{4}-\d\d-\d\d \d\d:\d\d UTC( ± [^,]+)?, \d+(\.\d+)? h after the scenario epoch; SGP4, no burn\.", text)
-        assert COMPUTED_CAVEAT in text
+        # The band beside the miss, with both sets' ages at the scenario epoch, which the wall clock sets (SPC-202).
+        before, after = (re.escape(part) for part in COMPUTED_CAVEAT_ELSET.split("{ages}"))
+        assert re.search(before + r"red's set \d+\.\d h old and blue's \d+\.\d h old" + after, html.unescape(text))
         # The no-action row at the form's P 0.6 and the remainder of P, 0.4, a no-action row too (SPC-203).
         assert "Phase 3 · computed closest approach in 2 cells · sampled in 0 cells" in text
         unbound = _flat(re.sub(r"<[^>]+>", "", _evaluate(client, auth_cookie, _form(adv_type=["no_action"])).text))

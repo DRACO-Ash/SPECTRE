@@ -45,25 +45,16 @@ V0.36: 4 items, 720 priced min, gates browser, container, lint, quality, sast, t
   lane 1 (360m): SPC-190
   lane 2 (360m): SPC-220, SPC-221, SPC-222
 
-V0.37: 3 items, 360 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 6h00 to 6h00 (middle 6h00), people's time 0 min, evidence: settings (nothing measured yet)
+V0.37: 4 items, 480 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 8h00 to 8h00 (middle 8h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-225       120m  fills the release to its floor
     SPC-226       120m  fills the release to its floor
     SPC-224       120m  fills the release to its floor
+    SPC-230       120m  fills the release to its floor
   lane 1 (240m): SPC-224, SPC-226
-  lane 2 (120m): SPC-225
+  lane 2 (240m): SPC-225, SPC-230
 
-V0.38: 1 items, 900 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 15h00 to 15h00 (middle 15h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-199       900m  placed alone: it does not fit any release
-  lane 1 (900m): SPC-199
-
-V0.39: 1 items, 900 priced min, gates container, lint, quality, sast, tests
-  forecast 15h00 to 15h00 (middle 15h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-202       900m  placed alone: it does not fit any release
-  lane 1 (900m): SPC-202
-
-V0.40: 1 items, 900 priced min, gates container, lint, quality, sast, tests
+V0.38: 1 items, 900 priced min, gates container, lint, quality, sast, tests
   forecast 15h00 to 15h00 (middle 15h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-209       900m  placed alone: it does not fit any release
   lane 1 (900m): SPC-209
@@ -80,6 +71,8 @@ waiting: SPC-227 - needs an owner answer
 
 waiting: SPC-228 - needs an owner answer
 
+waiting: SPC-229 - needs an owner answer
+
 off path: SPC-072 - research: no release gate
 
 off path: SPC-081 - research: no release gate
@@ -93,7 +86,5 @@ off path: SPC-084 - research: no release gate
 off path: SPC-085 - research: no release gate
 
 off path: SPC-151 - research: no release gate
-WARNING SPC-199: needs 900 min, over the 840 cap on its own
-WARNING SPC-202: needs 900 min, over the 840 cap on its own
 WARNING SPC-209: needs 900 min, over the 840 cap on its own
 WARNING SPC-032: cannot be placed, its dependencies never become ready

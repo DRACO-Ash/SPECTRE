@@ -19,7 +19,8 @@ says so before comparing anything and again in its verdict. A record written by 
 across versions, and the report says so first, from the version inside the hashed inputs. A record written by 0.28.0
 or 0.29.0 was evaluated with each row weighed by its P over the rows' sum and no remainder of P (SPC-203): its stored
 inputs read under that rule, so the replay reproduces what the operator was shown, and the report says so first too.
-Nothing here imports the web layer.
+So does a record written by 0.28.0 to 0.31.0, evaluated before SPC-202 with no element-set error in any closest
+approach: it is replayed under that rule, and the report says so first. Nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -29,7 +30,14 @@ from dataclasses import dataclass
 from typing import Literal
 
 import spectre
-from spectre.domain.decision import FriendlyResponse, ProbabilityRule, Scenario, ScenarioResult, SelectorStrategy
+from spectre.domain.decision import (
+    FriendlyResponse,
+    MissRule,
+    ProbabilityRule,
+    Scenario,
+    ScenarioResult,
+    SelectorStrategy,
+)
 from spectre.domain.decision_inputs import StoredInputs
 from spectre.domain.decision_tree import evaluate_tree
 from spectre.domain.rule_comparison import RULE_WORDS, RULES, label, matrix_picks
@@ -47,6 +55,13 @@ LEGACY_SHARES = (
     "rows' P, which could exceed 1, and weighed no remainder of P as no adversary action. Its stored inputs say so, "
     "and the replay evaluates it under that rule, as it was evaluated then; this code evaluates a new scenario with "
     "the rows' P summing to at most 1 and the remainder weighed as a row of its own."
+)
+#: Said first for a record 0.28.0 to 0.31.0 wrote: it is replayed under the miss rule it was evaluated under (SPC-202).
+LEGACY_POINT = (
+    "This record was evaluated before SPC-202, when no closest approach held element-set error: a computed miss was "
+    "scored as it stood, and a sampled band covered the burn's spread alone. Its stored inputs say so, and the "
+    "replay evaluates it under that rule, as it was evaluated then; this code draws each object's element-set error "
+    "in every sample and scores a computed miss on the lower edge of its element-set band."
 )
 BUDGET_RAN_OUT = (
     "The evaluation recorded ran out of its time budget, so part of it was not sampled or built; the replay runs in "
@@ -121,6 +136,8 @@ class Replay:
     budget_ran_out:   bool = False
     #: Whether the record was evaluated under the rule 0.28.0 and 0.29.0 weighed P by (SPC-203).
     legacy_shares:    bool = False
+    #: Whether the record was evaluated under the miss rule of 0.28.0 to 0.31.0 (SPC-202).
+    legacy_point:     bool = False
 
     @property
     def across_versions(self) -> bool:
@@ -132,10 +149,10 @@ class Replay:
 
     @property
     def preamble(self) -> tuple[str, ...]:
-        """What is said before anything is compared: the version line, the line saying a record of 0.28.0 or 0.29.0
-        is replayed under the rule it was evaluated by, and the budget line when it ran out."""
+        """What is said before anything is compared: the version line, the lines saying a record of 0.28.0 to 0.31.0
+        is replayed under the rules it was evaluated by, and the budget line when it ran out."""
         return _first_lines(self.recorded_version, self.running_version, budget_ran_out=self.budget_ran_out,
-                            legacy_shares=self.legacy_shares)
+                            legacy=(self.legacy_shares, self.legacy_point))
 
     @property
     def report(self) -> tuple[str, ...]:
@@ -164,9 +181,12 @@ def version_line(recorded: str, running: str) -> str:
     return ACROSS_VERSIONS.format(recorded=recorded, running=running)
 
 
-def _first_lines(recorded: str, running: str, *, budget_ran_out: bool, legacy_shares: bool = False) -> tuple[str, ...]:
-    return (version_line(recorded, running), *((LEGACY_SHARES,) if legacy_shares else ()),
-            *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
+def _first_lines(
+    recorded: str, running: str, *, budget_ran_out: bool, legacy: tuple[bool, bool] = (False, False),
+) -> tuple[str, ...]:
+    shares, point = legacy
+    return (version_line(recorded, running), *((LEGACY_SHARES,) if shares else ()),
+            *((LEGACY_POINT,) if point else ()), *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
 
 
 def _legacy(stored: StoredInputs) -> bool:
@@ -174,12 +194,17 @@ def _legacy(stored: StoredInputs) -> bool:
     return stored.scenario.probability_rule is ProbabilityRule.SHARES
 
 
+def _legacy_point(stored: StoredInputs) -> bool:
+    """Whether *stored* was evaluated under the miss rule of 0.28.0 to 0.31.0, no element-set error (SPC-202)."""
+    return stored.scenario.miss_rule is MissRule.POINT
+
+
 def said_first(stored: StoredInputs, running: str) -> tuple[str, ...]:
     """What a replay of *stored* says before it evaluates anything, read from the hashed inputs alone: the version
-    that wrote them against *running*, whether it was evaluated under the rule 0.28.0 and 0.29.0 weighed P by, and
-    whether the evaluation recorded ran out of its time budget."""
+    that wrote them against *running*, whether it was evaluated under the rule 0.28.0 and 0.29.0 weighed P by, whether
+    under the miss rule of 0.28.0 to 0.31.0, and whether the evaluation recorded ran out of its time budget."""
     return _first_lines(stored.code_version, running, budget_ran_out=stored.budget_ran_out,
-                        legacy_shares=_legacy(stored))
+                        legacy=(_legacy(stored), _legacy_point(stored)))
 
 
 def input_hashes(result: ScenarioResult) -> list[dict[str, str | None]]:
@@ -297,5 +322,5 @@ def replay(
         stored.code_version, spectre.__version__ if running is None else running,
         (*_checks(stored, recorded, kept), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
          *_scores(stored, result)),
-        budget_ran_out=stored.budget_ran_out, legacy_shares=_legacy(stored),
+        budget_ran_out=stored.budget_ran_out, legacy_shares=_legacy(stored), legacy_point=_legacy_point(stored),
     )

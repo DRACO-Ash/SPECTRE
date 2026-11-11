@@ -1011,13 +1011,16 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
     other forty-three were invisible only because their lines had not changed.
     This pins the whole population rather than the sample.
 
-    The shared handler lives in base.html as spectreActivate(event); an element
-    opts in with tabindex="0" onkeydown="spectreActivate(event)".
+    The shared handler is the keydown listener in static/js/core.js; an element
+    opts in with tabindex="0" data-activate. It was spectreActivate(event) in
+    base.html, called from an onkeydown attribute, until the policy stopped
+    allowing inline handlers (SPC-199); a click is data-action now.
     """
 
     _TEMPLATES = _REPO_ROOT / "spectre" / "web" / "templates"
-    _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bonclick\b[^>]*>", re.IGNORECASE | re.DOTALL)
-    _KEYBOARD = re.compile(r"\bon(keydown|keypress|keyup)\b", re.IGNORECASE)
+    _CORE = _REPO_ROOT / "spectre" / "web" / "static" / "js" / "core.js"
+    _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bdata-action=[^>]*>", re.IGNORECASE | re.DOTALL)
+    _KEYBOARD = re.compile(r"\bdata-activate\b", re.IGNORECASE)
     _TABINDEX = re.compile(r'\btabindex\s*=\s*"(-?\d+)"', re.IGNORECASE)
 
     def _answers_the_keyboard(self, element: str) -> bool:
@@ -1026,7 +1029,7 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         Neither <tr> nor <th> is focusable by default, and those two tags
         are the whole population this class matches, so nothing natively
         focusable is dragged in by requiring the attribute. Until this was
-        added the test accepted an onkeydown with no tabindex, which is the
+        added the test accepted a key opt-in with no tabindex, which is the
         exact shape its own failure message tells the author to fix: the
         element never receives the key event, so the keyboard equivalent is
         dead while the test reports green.
@@ -1052,15 +1055,26 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         assert not offenders, (
             f"{len(offenders)} clickable <tr>/<th> are unreachable from the "
             f"keyboard, for want of a handler or of a focusable tabindex: "
-            f'{offenders[:8]}. Add tabindex="0" onkeydown="spectreActivate(event)".'
+            f'{offenders[:8]}. Add tabindex="0" data-activate.'
         )
 
+    def test_the_population_is_where_we_think_it_is(self) -> None:
+        """Fifty-odd headers and rows opt in; if the scan found none, the check above would pass vacuously."""
+        found = sum(len(self._CLICKABLE.findall(p.read_text(encoding="utf-8")))
+                    for p in self._TEMPLATES.rglob("*.html"))
+        assert found >= 50
+
+    def _keydown_listener(self) -> str:
+        core = self._CORE.read_text(encoding="utf-8")
+        start = core.index("document.addEventListener('keydown'")
+        return core[start:core.index("});", start)]
+
     def test_the_shared_handler_exists(self) -> None:
-        """Every opt-in above calls it, so its absence breaks all of them at once."""
-        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
-        assert "function spectreActivate" in base, (
-            "spectreActivate is gone from base.html, so every onkeydown that "
-            "calls it is now a silent no-op"
+        """Every opt-in above relies on it, so its absence breaks all of them at once."""
+        handler = self._keydown_listener()
+        assert "data-activate" in handler and "el.click()" in handler, (
+            "the keydown listener in core.js no longer clicks an opted-in element, "
+            "so every data-activate is now a silent no-op"
         )
 
     def test_the_handler_ignores_events_from_nested_controls(self) -> None:
@@ -1073,13 +1087,13 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         while working perfectly with a mouse, because the mouse path had a
         stopPropagation guard and the key path had none.
         """
-        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
-        handler = base.split("function spectreActivate", 1)[1].split("</script>", 1)[0]
-        assert "e.target !== e.currentTarget" in handler, (
-            "spectreActivate no longer checks that the opted-in element is the "
+        handler = self._keydown_listener()
+        assert "var el = event.target;" in handler and "el.hasAttribute('data-activate')" in handler, (
+            "the keydown listener no longer checks that the opted-in element is the "
             "one with focus, so every nested button, link and input inside an "
             "activatable row is now unreachable from the keyboard"
         )
+        assert "closest(" not in handler, "an ancestor's opt-in must not answer a nested control's key"
 
 
 class TestThePackagerShipsWhatTheGatesRead:
@@ -1491,32 +1505,34 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         args.append(current.strip())
         return [a for a in args if a]
 
+    _SWEEP_JS = _REPO_ROOT / "spectre" / "web" / "static" / "js" / "sweep.js"
+
+    @classmethod
+    def _registered_arguments(cls) -> list[str]:
+        """The data-* names the loadInEngine action passes, in order, from its registration in sweep.js.
+
+        The call moved from an onclick attribute in each template to one listener (SPC-199); each argument is
+        still read from the Load button's own data-* attribute (audit F-038).
+        """
+        script = cls._SWEEP_JS.read_text(encoding="utf-8")
+        start = script.index("SPECTRE.action('loadInEngine'")
+        call = script[start:script.index("});", start)]
+        inner = call[call.index("loadInEngine(", len("SPECTRE.action('loadInEngine'")) + len("loadInEngine("):]
+        args = cls._split_arguments(inner, 0)
+        names = [re.fullmatch(r"el\.dataset\.(\w+)", a.strip()) for a in args]
+        assert all(names), f"loadInEngine is called with something other than the button's data-*: {args}"
+        return [n.group(1) for n in names if n]
+
     @classmethod
     def _load_call(cls, markup: str) -> list[str]:
-        """The arguments of the one loadInEngine CALL in ``markup``.
-
-        Anchored on the onclick= attribute, which keeps the function's own
-        declaration and any prose about it out of the match. threat_sweep.html
-        holds the declaration as well as a call.
-        """
-        calls = [
-            (m.start(), cls._split_arguments(markup, m.end()))
-            for m in re.finditer(r'onclick="[^"]*?\bloadInEngine\(', markup)
-        ]
-        assert len(calls) == 1, (
-            f"expected exactly one loadInEngine call site, found {len(calls)}"
-        )
-        start, args = calls[0]
-        # Arguments read as this.dataset.x come from the data-x attribute on
-        # the same element, which precedes the handler (audit F-038).
+        """The arguments the one Load button in ``markup`` passes to loadInEngine, resolved from its data-*."""
+        sites = [m.start() for m in re.finditer(r'data-action="loadInEngine"', markup)]
+        assert len(sites) == 1, f"expected exactly one loadInEngine control, found {len(sites)}"
+        tag = markup[markup.rfind("<button", 0, sites[0]):markup.find(">", sites[0])]
         resolved = []
-        for arg in args:
-            ref = re.fullmatch(r"this\.dataset\.(\w+)", arg.strip())
-            if not ref:
-                resolved.append(arg)
-                continue
-            attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
-            assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
+        for name in cls._registered_arguments():
+            attrs = re.findall(rf'data-{name}="([^"]*)"', tag)
+            assert attrs, f"the Load button has no data-{name} attribute for loadInEngine"
             resolved.append(attrs[-1])
         return resolved
 
@@ -1537,8 +1553,8 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
         table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
 
-        declared = re.search(r"function\s+loadInEngine\(([^)]*)\)", table)
-        assert declared, "threat_sweep.html no longer declares loadInEngine"
+        declared = re.search(r"function\s+loadInEngine\(([^)]*)\)", self._SWEEP_JS.read_text(encoding="utf-8"))
+        assert declared, "sweep.js no longer declares loadInEngine"
         params = [p.strip() for p in declared.group(1).split(",") if p.strip()]
         assert params == ["redSat", "blueSat", "epoch", "method"], (
             f"loadInEngine's signature changed to {params}; this test's "

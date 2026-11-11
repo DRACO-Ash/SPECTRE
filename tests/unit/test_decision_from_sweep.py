@@ -34,6 +34,8 @@ from tests.unit._i13 import i13_problems
 from tests.unit.test_elset_freshness import _tle
 
 _NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
+#: Where the panel's rendered rows end: the row builder's template follows, holding an empty row (SPC-199).
+_ROW_TEMPLATE = '<template id="adv-row-template">'
 _SWEPT = _NOW - timedelta(minutes=10)
 _RED_TLE = _tle(_NOW - timedelta(hours=5), satno=50322)
 _BLUE_TLE = _tle(_NOW - timedelta(hours=5), satno=40001)
@@ -456,7 +458,7 @@ class TestThePanelRendersUnderStrictUndefined:
         page = self._render(pol=None, prefill=_open(state))
         assert page.count('name="hyp_detected" value="1"') == 1
         assert "Fixed at 03:00 UTC on 4 Nov from the sweep" in page
-        rows = page.split("<script>", 1)[0]
+        rows = page.split(_ROW_TEMPLATE, 1)[0]
         blocks = re.findall(r'<details class="adv-hypothesis"[^>]*>.*?</details>', rows, re.S)
         assert len(blocks) == 2
         # Each filled hypothesis opens, so the operator sees what was filled without expanding it.
@@ -468,7 +470,7 @@ class TestThePanelRendersUnderStrictUndefined:
             assert [f is not None and " readonly" in f.group(0) for f in fields] == [False, True], name
 
     def test_a_plain_panel_row_is_closed_and_editable(self) -> None:
-        plain = self._render(pol=None).split("<script>", 1)[0]
+        plain = self._render(pol=None).split(_ROW_TEMPLATE, 1)[0]
         assert re.search(r'<details class="adv-hypothesis"[^>]*\sopen>', plain) is None
         assert " readonly" not in plain
 

@@ -186,13 +186,7 @@ Observability:{{ intel.obs_level }}
           style="font-size:0.65rem; font-weight:700; padding:0.25rem 0.6rem;
                  border-color:var(--ops-blue); color:var(--ops-blue)"
           data-clip="{{ _clip_text | e }}"
-          onclick="(function(btn){
-            navigator.clipboard.writeText(btn.dataset.clip).then(function(){
-              var orig = btn.textContent;
-              btn.textContent = '\u2713 Copied';
-              setTimeout(function(){ btn.textContent = orig; }, 1600);
-            });
-          })(this)"
+          data-action="copyClip"
           title="Copy intercept summary to clipboard">
     &#8686; Copy
   </button>
@@ -442,9 +436,7 @@ Observability:{{ intel.obs_level }}
    § 6 — Trade-space trigger script (keep existing)
    ══════════════════════════════════════════════════════════════════════════════ #}
 {% if intercept_history and intercept_history|length > 1 %}
-<script>
-if (typeof _spectreRenderTradeSpace === 'function') _spectreRenderTradeSpace();
-</script>
+<span hidden data-init="trade-space-render"></span>
 {% endif %}
 
 {% endif %}

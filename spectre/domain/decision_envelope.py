@@ -42,6 +42,16 @@ DEEP_SPACE_GEO = (
     "engine's GEO rules of thumb, tuned rather than sourced (SPC-215 will source them), so its age and the "
     "uncertainty of its time of closest approach may be misstated. Its figures stand, flagged."
 )
+#: What an unvalidated or unsourced error model misstates under SPC-202's rule, where it also sets every sample's draw,
+#: every computed band and the closest-approach figure and score that read them.
+_MISSTATED_ELSET = (
+    "so its age, the element-set error drawn in every sample and set beside every computed miss, the closest "
+    "approach and score that read that error, and the uncertainty of its time of closest approach may be misstated"
+)
+_MISSTATED = "so its age and the uncertainty of its time of closest approach may be misstated"
+#: DEEP_SPACE and DEEP_SPACE_GEO under SPC-202's rule (evaluation F-11).
+DEEP_SPACE_ELSET = DEEP_SPACE.replace(_MISSTATED, _MISSTATED_ELSET)
+DEEP_SPACE_GEO_ELSET = DEEP_SPACE_GEO.replace(_MISSTATED, _MISSTATED_ELSET)
 #: An element set whose object is below the re-entry floor at an instant searched: no computed miss is shown.
 DECAYED = (
     "The {side} element set {name} puts its object below the {floor:g} km re-entry floor at an instant searched: it "
@@ -49,9 +59,9 @@ DECAYED = (
 )
 
 
-def _deep_space(elset: BoundElset) -> str | None:
-    """The flag for *elset* when SGP4 propagates it with SDP4; None otherwise, or when it does not parse, which the
-    engine's own checks refuse elsewhere."""
+def _deep_space(elset: BoundElset, *, elset_error: bool) -> str | None:
+    """The flag for *elset* when SGP4 propagates it with SDP4, in its SPC-202 form where *elset_error*; None otherwise,
+    or when it does not parse, which the engine's own checks refuse elsewhere."""
     try:
         orbit = TLEOrbit(elset.tle)
     except TLE_ERRORS:
@@ -59,16 +69,20 @@ def _deep_space(elset: BoundElset) -> str | None:
     if not orbit.deep_space or elset.limit_hours is None:
         return None
     # The regime the staleness limit and the error model are chosen by (web.elsets, astro.along_track).
-    sentence = DEEP_SPACE_GEO if regime_from_tle(elset.tle) == "GEO" else DEEP_SPACE
+    geo = regime_from_tle(elset.tle) == "GEO"
+    sentences = (DEEP_SPACE_GEO_ELSET, DEEP_SPACE_ELSET) if elset_error else (DEEP_SPACE_GEO, DEEP_SPACE)
+    sentence = sentences[0] if geo else sentences[1]
     return sentence.format(side=elset.side, name=elset.name, period=orbit.period_minutes, limit=elset.limit_hours)
 
 
 def envelope_lines(scenario: Scenario, decayed: tuple[str, str, float] | None = None) -> tuple[str, ...]:
     """Each breach of the operating envelope *scenario* shows, in a sentence: each bound set on SDP4, red first, and
-    *decayed*, the side, name and floor of the set the SGP4 search refused below the re-entry floor, when it did."""
+    *decayed*, the side, name and floor of the set the SGP4 search refused below the re-entry floor, when it did. Under
+    SPC-202's rule a flag says the error model also sets the closest approach and the score."""
     binding = scenario.binding
     bound = () if binding is None else binding.bound
-    lines = [line for line in (_deep_space(elset) for elset in bound) if line is not None]
+    elset_error = scenario.miss_rule.name == "ELSET_ERROR"   # MissRule by name: nothing from the engine at run time
+    lines = [line for line in (_deep_space(elset, elset_error=elset_error) for elset in bound) if line is not None]
     if decayed is not None:
         side, name, floor = decayed
         lines.append(DECAYED.format(side=side, name=name, floor=floor))

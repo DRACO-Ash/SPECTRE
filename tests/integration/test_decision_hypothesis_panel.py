@@ -115,7 +115,8 @@ class TestThePanel:
     def test_an_added_row_has_the_same_labelled_fields(self, client: Any, auth_cookie: str) -> None:
         """H2."""
         html = _panel(client, auth_cookie)
-        builder = html[html.index("function addAdvRow()"):html.index("function addFrRow()")]
+        # The row builder's markup is a <template> the panel carries (SPC-199).
+        builder = html[html.index('<template id="adv-row-template">'):html.index('<template id="fr-row-template">')]
         assert '<details class="adv-hypothesis"' in builder
         assert builder.count(">Manoeuvre hypothesis (optional)<") == 1
         for name in _FIELDS:

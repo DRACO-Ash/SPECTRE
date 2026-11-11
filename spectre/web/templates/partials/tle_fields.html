@@ -34,5 +34,5 @@
 {% endif %}
 <label for="{{ _side }}-tle-text" class="visually-hidden">Two-line element set</label>
 <textarea id="{{ _side }}-tle-text" name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required
-          oninput="var m = this.form ? this.form.querySelector('[name=elset_mode]') : null; if (m) { m.remove(); }"
+          data-action-input="dropElsetMode"
           title="Two-line element set: paste lines 1 and 2 exactly as provided by UDL or Space-Track. Editing a fetched set makes it a manual one">{{ tle }}</textarea>

@@ -144,10 +144,12 @@ class TestTheControls:
         # The lazy load sits on a slot inside the hero, so a filled panel swapped in replaces it and its trigger.
         assert "hx-get" not in hero.group(0).split(">", 1)[0]
         assert 'hx-get="/plan/decision/panel"' in hero.group(1)
-        assert "function openDecisionPanel()" in page
+        # The page's script moved to static/js/operator.js (SPC-199).
+        script = (_ROOT / "spectre" / "web" / "static" / "js" / "operator.js").read_text(encoding="utf-8")
+        assert "function openDecisionPanel()" in script
         # One delegated listener opens the engine after a control's request succeeds, so no control needs an
-        # hx-on handler, which htmx compiles with new Function under the CSP's 'unsafe-eval' gap.
-        listener = re.search(r"addEventListener\('htmx:afterRequest', function \(e\) \{(.*?)\}\);", page, re.S)
+        # hx-on handler, which htmx compiles with new Function, which the policy refuses.
+        listener = re.search(r"addEventListener\('htmx:afterRequest', function \(e\) \{(.*?)\}\);", script, re.S)
         assert listener is not None
         assert "data-opens-decision" in listener.group(1) and "e.detail.successful" in listener.group(1)
         assert "openDecisionPanel()" in listener.group(1)

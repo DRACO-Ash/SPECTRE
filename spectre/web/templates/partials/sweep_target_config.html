@@ -116,7 +116,7 @@
             hx-target="#manual-tle-list"
             hx-swap="outerHTML"
             hx-include="[name='manual_name'],[name='manual_tle'],[name='manual_confidence']"
-            hx-on::after-request="if (event.detail.successful) { document.getElementById('ts-manual-name').value=''; document.getElementById('ts-manual-tle').value=''; }"
+            data-after-request="clearManualTarget"
             style="margin-bottom:0.4rem">Add TLE</button>
   </div>
 

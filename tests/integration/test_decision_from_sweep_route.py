@@ -49,6 +49,8 @@ from tests.unit.test_elset_freshness import _tle
 _NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
 _SWEPT = _NOW - timedelta(minutes=10)
 _DEPART = _NOW + timedelta(hours=1)
+#: Where the panel's rendered rows end: the row builder's template follows, holding an empty row (SPC-199).
+_ROW_TEMPLATE = '<template id="adv-row-template">'
 
 
 def _entry(target: str = "ALPHA") -> ThreatSweepEntry:
@@ -104,8 +106,8 @@ def _text(page: str) -> str:
 
 
 def _field(page: str, name: str) -> list[str]:
-    """Each rendered field called *name*, leaving out the row builder's script, which emits an empty row."""
-    rendered = page.split("<script>", 1)[0]
+    """Each rendered field called *name*, leaving out the row builder's template, which holds an empty row."""
+    rendered = page.split(_ROW_TEMPLATE, 1)[0]
     return [m.group(0) for m in re.finditer(rf'<(?:input|select)[^>]*name="{name}"[^>]*>', rendered)]
 
 
@@ -125,7 +127,7 @@ class TestTheFilledPanel:
         assert f'value="{_DEPART.isoformat()}"' in _field(page, "hyp_burn_at")[0]
         assert 'type="hidden"' in _field(page, "hyp_burn_at")[0]
         assert 'value="7"' in _field(page, "horizon_hours")[0]
-        assert "var _advCount = 1;" in page
+        assert '<div id="adv-rows" data-row-count="1">' in page
 
     def test_probability_and_confidence_keep_the_engines_defaults(self, client: Any, auth_cookie: str,
                                                                   held: Any) -> None:
@@ -162,7 +164,7 @@ class TestTheFilledPanel:
         page = _open(client, auth_cookie)
         assert [f'value="{v}"' in f for f, v in zip(_field(page, "hyp_detected"), ("", "1"), strict=True)] == [
             True, True]
-        assert "var _advCount = 2;" in page
+        assert '<div id="adv-rows" data-row-count="2">' in page
         rows = page[:page.index("+ Add Adversary Action")]
         blocks = re.findall(r'<details class="adv-hypothesis".*?</details>', rows, re.S)
         assert [_unlabelled(block) for block in blocks] == [[], []]

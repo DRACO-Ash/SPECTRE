@@ -32,13 +32,19 @@ import pytest
 
 from spectre.astro import monte_carlo
 from spectre.astro.closest_approach import ClosestApproach
-from spectre.astro.elset_approach import ElsetApproach, ElsetFailure, elset_closest_approach
+from spectre.astro.elset_approach import (
+    ElsetApproach,
+    ElsetFailure,
+    elset_closest_approach,
+    elset_position_error_km,
+)
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow
 from spectre.domain import decision
 from spectre.domain.decision import (
     LOOKUP_BASES,
     BoundElset,
     ComputedPlan,
+    MissRule,
     OutcomeMetrics,
     ScenarioBinding,
     ScenarioResult,
@@ -46,6 +52,7 @@ from spectre.domain.decision import (
     outcome_bases,
     plan_computed,
 )
+from spectre.domain.decision_figures import ELSET_MODEL
 from spectre.domain.provenance import Basis, FigureBasis
 from tests.unit._decision_reference import EPOCH, GEO_DRIFT_IN, PLANE_CHANGE
 from tests.unit.test_decision_figure_basis import _render
@@ -280,14 +287,21 @@ class TestTheEdgesAndTheNotes:
         assert _cells(computed, _MANOEUVRE)[0].ca_computed_caveat is None
 
     def test_the_basis_notes_name_sgp4_both_objects_and_both_epochs(self, computed: ScenarioResult) -> None:
-        """D10."""
+        """D10. Since SPC-202 the note names the element-set band beside the miss in place of "element-set error is not
+        in it": both sets 1.0 km plus 2 km a day at 1,410.93 s old, 1.03 km each, 1.46 km in quadrature, 1.5 shown."""
         bases = _cells(computed, _NO_ACTION)[0].figure_bases
+        tca = EPOCH + timedelta(seconds=_reference().approach.tca_s)
+        each = elset_position_error_km(PLANE_CHANGE.red_tle, EPOCH, tca)
+        low = _reference().approach.miss_km - math.hypot(each, each)
         assert bases.closest_approach_km == FigureBasis(
             Basis.COMPUTED,
             "smallest separation of the bound red track RED_PC and blue asset BLUE_PC over 1.0 h of the 1 h horizon "
             "from the scenario epoch, both propagated by SGP4 from their element sets (red epoch 2026-10-17 12:00 "
             "UTC, blue epoch 2026-10-17 12:00 UTC) with no burn, sampled every 60 s and each local minimum refined "
-            "to 0.01 s; element-set error is not in it, and our response is not applied to the blue orbit",
+            f"to 0.01 s; element-set error is beside it as a band, not in the figure: {math.hypot(each, each):.1f} km "
+            f"(1 sigma) at the closest approach, red's {each:.1f} km (0.4 h old then) and blue's {each:.1f} km (0.4 h "
+            f"old) combined in quadrature, by {ELSET_MODEL}; the score reads the band's lower edge, {low:.1f} km, the "
+            "miss less 1 sigma, and our response is not applied to the blue orbit",
         )
         assert bases.time_to_closest_hours == FigureBasis(
             Basis.COMPUTED,
@@ -397,11 +411,14 @@ class TestOnlySgp4AndTheScore:
         assert result.propagator_gap_km is None
         assert result.propagator_line is None
 
-    def test_the_score_follows_the_computed_miss(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """D13: with all the weight on closest approach, the score is the closest-approach term at the unrounded miss:
-        10.4036 km is just outside the default 10 km keep-out, so ln(50,000 / miss) / ln 5,000 (SPC-191); the lookup's
-        5,000 km is ln 10 / ln 5,000 = 0.270346."""
-        scenario = _scenario(binding=_binding())
+    @pytest.mark.parametrize("rule", [MissRule.ELSET_ERROR, MissRule.POINT])
+    def test_the_score_follows_the_computed_miss(self, monkeypatch: pytest.MonkeyPatch, rule: MissRule) -> None:
+        """D13: with all the weight on closest approach, the score is the closest-approach term at the unrounded miss
+        under the rule before SPC-202: 10.4036 km is just outside the default 10 km keep-out, so ln(50,000 / miss) /
+        ln 5,000 (SPC-191); the lookup's 5,000 km is ln 10 / ln 5,000 = 0.270346. Under SPC-202's rule it is the term
+        at the band's lower edge, the miss less both sets' error at the TCA in quadrature: 10.4036 - 1.4605 = 8.9432
+        km, inside the keep-out, so the full penalty, 1."""
+        scenario = dataclasses.replace(_scenario(binding=_binding()), miss_rule=rule)
         for name in ("w_custody", "w_dv_cost", "w_time_to_exec", "w_reversibility"):
             setattr(scenario, name, 0.0)
         scenario.w_closest_approach = 1.0
@@ -416,9 +433,14 @@ class TestOnlySgp4AndTheScore:
         result = evaluate_scenario(scenario, sampler=_never)
         miss = _reference().approach.miss_km
         assert miss != round(miss, 1)
-        assert scored.count(miss) == 12   # every computed cell scores on 10.4036 km, never on the 10.4 shown
+        tca = EPOCH + timedelta(seconds=_reference().approach.tca_s)
+        error = math.hypot(*(elset_position_error_km(tle, EPOCH, tca) for tle in (PLANE_CHANGE.red_tle, PLANE_CHANGE.blue_tle)))
+        read = miss if rule is MissRule.POINT else miss - error
+        assert scored.count(read) == 12   # every computed cell scores on this, never on the 10.4 shown
         for cell in _cells(result, _NO_ACTION):
-            assert cell.composite_score == round(math.log(50_000.0 / miss) / math.log(5_000.0), 6)
+            assert cell.closest_approach_km == round(miss, 1)
+            expected = 1.0 if read <= 10.0 else math.log(50_000.0 / read) / math.log(5_000.0)
+            assert cell.composite_score == round(expected, 6)
         lookup = evaluate_scenario(dataclasses.replace(scenario, binding=None))
         assert _cells(lookup, _NO_ACTION)[_NO_ACTION].composite_score == 0.270346
 
@@ -429,8 +451,13 @@ _COMPUTED_CAVEAT = (
     "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the "
     "pair goes if the red track does not move, so every row whose action does not move it shares one figure. Our "
     "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
-    "approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as "
-    "1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it."
+    "approach, and the ranking within it is decided by lookup figures. Element-set error, by "
+    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus "
+    "2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond, is shown beside each computed miss as a band, "
+    "the miss less and plus both sets' error at the closest approach in quadrature (1 sigma), read at each set's age "
+    "then (red's set 0.0 h old and blue's 0.0 h old at the scenario epoch, older by the time to the closest "
+    "approach), and the score reads the band's lower edge: Claude's choice, since you read the closer case to "
+    "answer whether it can reach one of yours."
 )
 
 
@@ -447,9 +474,16 @@ class TestWhatTheResultSays:
         assert "Score: lookup in every cell." in computed.basis_lines
 
     def test_a_computed_row_says_it_has_no_spread(self, computed: ScenarioResult) -> None:
+        """Since SPC-202 each computed row names its first cell's band: plane_change's TCA 0.4 h after both epochs,
+        each set 1.03 km by 1 km plus 2 km a day, 1.46 km in quadrature, 1.5 shown."""
+        tca = EPOCH + timedelta(seconds=_reference().approach.tca_s)
+        each = elset_position_error_km(PLANE_CHANGE.red_tle, EPOCH, tca)
         assert computed.row_uncertainty == (
             "Not computed, so no spread: the cells say why.",
-            *(("Computed by SGP4 with no burn: one figure, no spread; element-set error is not in it.",) * 3),
+            *(("Computed by SGP4 with no burn: one figure, no spread, with element-set error as a band beside it; "
+               f"the score reads its lower edge. The band is {math.hypot(each, each):.1f} km (1 sigma) at the first "
+               f"cell's closest approach, red's {each:.1f} km (its set 0.4 h old then) and blue's {each:.1f} km "
+               f"(0.4 h old) in quadrature, by {ELSET_MODEL}.",) * 3),
         )
 
     def test_the_propagator_line_states_the_measured_gap(self, monkeypatch: pytest.MonkeyPatch) -> None:

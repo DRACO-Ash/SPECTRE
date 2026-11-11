@@ -8,7 +8,9 @@ nothing else stood in the way. Names come from UDL notifications, the HRR
 list and free text, and are treated as untrusted.
 
 The values now travel in ``data-*`` attributes, which the browser hands to the
-handler as strings and never compiles.
+handler as strings and never compiles. Since SPC-199 there is no handler
+attribute at all: the button names its action in data-action and a listener in
+static/js reads the data-* values, and the policy refuses inline handlers.
 """
 
 from __future__ import annotations
@@ -60,7 +62,7 @@ def test_a_hostile_name_reaches_the_load_button_only_as_data() -> None:
     )
     parser = _Buttons()
     parser.feed(html)
-    load = next(b for b in parser.found if "loadInEngine" in (b.get("onclick") or ""))
-    assert _PAYLOAD not in (load["onclick"] or ""), "the name reached the handler source"
+    load = next(b for b in parser.found if b.get("data-action") == "loadInEngine")
+    assert not [name for name in load if name.startswith("on")], "the button carries a handler attribute"
     assert load["data-red"] == _PAYLOAD
     assert load["data-blue"] == _PAYLOAD
