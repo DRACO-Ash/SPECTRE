@@ -73,17 +73,30 @@
 {# ── The sweep's Threat picture for the bound red track (SPC-171): the range, Understanding and decide-by, each a
      sentence of its own (I13), the collect-first advice and the rows it lists, never scored, and the expected-value
      guidance. Context only: nothing here moves a figure or fills P or Conf. The picture is read at any age, and each
-     line, like each row's Understanding, carries that age in words beside it (SPC-181). One div with no div inside. ── #}
+     line, like each row's Understanding, carries that age in words beside it (SPC-181). The advice is judged by the
+     primary rule's pick, the recommendation shown, read from "rules" (SPC-204): it collects first only for a cue
+     whose outcomes change that pick, and otherwise says the collection cannot change it. The action line is said for
+     what it is, in a sentence of its own. One div with no div inside. ── #}
+{% set rules_shown = rules if rules is defined else none %}
 {% set threat_lines = result.threat_lines if result.threat_lines is defined else () %}
+{% if rules_shown is not none %}
+{% set collection = rules_shown.collection %}
+{% set collection_rows = rules_shown.collection_rows %}
+{% else %}
 {% set collection = result.collection if result.collection is defined else none %}
+{% set collection_rows = result.collection_rows if result.collection_rows is defined else () %}
+{% endif %}
 {% set guidance = result.objective_guidance if result.objective_guidance is defined else none %}
 {% if threat_lines or collection is not none or guidance is not none %}
 <div role="note" class="threat-context" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.4rem">
   {% for line in threat_lines %}<p class="threat-line" style="margin:0.1rem 0">{{ line }}</p>{% endfor %}
   {% if collection is not none %}
   <p class="collection-advice" data-advice="{{ collection.advice.name | lower }}" style="margin:0.1rem 0; font-weight:700; color:var(--gold)">{{ collection.sentence }}</p>
+  {% if collection.action_line is defined and collection.action_line %}
+  <p class="action-line" style="margin:0.1rem 0">{{ collection.action_line }}</p>
   {% endif %}
-  {% for row in (result.collection_rows if result.collection_rows is defined else ()) %}
+  {% endif %}
+  {% for row in collection_rows %}
   <p class="collection-row" style="margin:0.1rem 0">{{ row.sentence }}</p>
   {% endfor %}
   {% if guidance is not none %}
@@ -188,7 +201,6 @@
      an older caller renders the rule used. A primary rule with no pick, expected value with every row at P 0 or any
      rule with every response marked not permitted (SPC-195), shows no recommendation, and the primary line below
      says why. #}
-  {% set rules_shown = rules if rules is defined else none %}
   {% set headline = rules_shown.headline if rules_shown is not none else result.robust_best_response %}
   <div class="headline-pick" style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
     {% if headline is none %}No recommendation{% else %}{{ headline.name }}{% endif %}
@@ -201,6 +213,30 @@
     Cost: <strong>{{ headline.cost }}</strong>{% if hb is not none %} {{ modelled.mark(hb.cost) }}{% endif %} ·
     Reversibility: <strong>{{ headline.reversibility }}</strong>{% if hb is not none %} {{ modelled.mark(hb.reversibility) }}{% endif %} ·
     Time to execute: <strong>{{ headline.time_to_execute_hours }}h</strong>{% if hb is not none %} {{ modelled.mark(hb.time_to_execute) }}{% endif %}
+  </div>
+  {% endif %}
+  {# ── The recommendation's weight stability (SPC-205, evaluation F-16): the smallest change of one weight, the others
+       scaled to keep the sum 1, that changes the primary rule's pick, in words, then every weight in a details
+       element with what the search rests on; the rule chosen's beside it when that is another rule; and that a
+       game tree's picks are not covered. Read from "rules", which only the route passes. No script. ── #}
+  {% if rules_shown is not none %}
+  <div role="note" class="weight-stability-note" style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem; overflow-wrap:anywhere">
+    <p class="weight-stability" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:var(--text-primary)">{{ rules_shown.stability.line }} {{ modelled.mark(rules_shown.stability_mark) }}</p>
+    {% if rules_shown.stability.weight_lines %}
+    <details class="weight-stability-detail" style="margin:0.1rem 0">
+      <summary style="cursor:pointer; font-size:0.6rem">Every weight, and what moving it alone does</summary>
+      <ul style="margin:0.15rem 0; padding-left:1rem">
+        {% for line in rules_shown.stability.weight_lines %}<li style="font-size:0.6rem">{{ line }}</li>{% endfor %}
+      </ul>
+      <p style="margin:0.1rem 0; font-size:0.6rem">{{ rules_shown.stability_basis }}</p>
+    </details>
+    {% endif %}
+    {% if rules_shown.chosen_stability is not none %}
+    <p class="chosen-weight-stability" style="margin:0.1rem 0; font-size:0.6rem">{{ rules_shown.chosen_stability.line }} {{ modelled.mark(rules_shown.stability_mark) }}</p>
+    {% endif %}
+    {% if rules_shown.tree_not_covered is not none %}
+    <p class="tree-not-covered" style="margin:0.1rem 0; font-size:0.6rem">{{ rules_shown.tree_not_covered }}</p>
+    {% endif %}
   </div>
   {% endif %}
   {# ── Every rule's pick side by side (SPC-194, evaluation F-03): each rule with its meaning, whether they agree,

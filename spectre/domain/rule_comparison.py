@@ -16,6 +16,10 @@ cautious and the probability-weighted picks differed. Every result is now read u
   there (SPC-200, evaluation F-31), so nothing is starred under it either.
 ● A response marked not permitted (SPC-195) is never any rule's pick, here or on the tree, and with every response
   so marked no rule has a pick: nothing is recommended and every line says why.
+● Beside the headline, its weight stability (SPC-205, evaluation F-16): the smallest change of one weight that
+  changes the primary rule's pick, weight_stability's own, the record's too; and the chosen rule's beside it when that
+  is another rule. A game tree's picks are not covered, and a line says so.
+● The collect-first advice judged by the primary rule's pick, the recommendation shown (SPC-204, evaluation F-14).
 
 Nothing here changes a figure, a pick or the rule the evaluation ran under: every pick is read from the result.
 Imports the Decision Engine and its tree selectors, never the reverse; nothing here imports the web layer.
@@ -28,6 +32,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from spectre.domain.decision import (
+    CollectionRow,
     FriendlyResponse,
     Scenario,
     ScenarioResult,
@@ -35,7 +40,16 @@ from spectre.domain.decision import (
     find_robust_response,
     permitted_responses,
 )
+from spectre.domain.provenance import FigureBasis
+from spectre.domain.threat_understanding import CollectionAdvice
 from spectre.domain.tree_selectors import select
+from spectre.domain.weight_stability import (
+    STABILITY_BASIS,
+    STABILITY_MARK,
+    TREE_NOT_COVERED,
+    WeightStability,
+    weight_stability,
+)
 
 #: The three rules, in the order every result, record and page lists them.
 RULES: tuple[SelectorStrategy, ...] = (
@@ -92,6 +106,8 @@ STAR_CHOSEN_NO_PRIMARY = (
 STAR_NO_WEIGHT = "Nothing is starred: {chosen}, the rule chosen, " + NO_PICK + "."
 #: With every response marked not permitted, nothing is starred (SPC-195).
 STAR_NOTHING = "Nothing is starred: every response is marked not permitted."
+#: Who the chosen rule's weight stability is about, when it is not the primary rule (SPC-205).
+CHOSEN_SUBJECT = "{Rule}'s pick, the rule chosen,"
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,10 @@ class RuleComparison:
     rule with no pick, and empty for one turn or a tree with no turn built; *tree_agree* None then. *headline* is None
     when the primary rule has no pick. *star_line* says what the matrix's star marks. *caveat* is the guidance the
     results give when expected value's probability is not earned, whatever rule ran; None when it is earned.
+    *stability* is the headline's weight stability (SPC-205), *chosen_stability* the chosen rule's pick's when that
+    is another rule, else None, and *tree_not_covered* the line saying a tree's picks are not covered, None for one
+    turn. *collection* and *collection_rows* are the collect-first advice and rows judged by the primary rule's pick
+    (SPC-204), None and none with no Threat picture.
     """
 
     picks:        tuple[RulePick, ...]
@@ -139,7 +159,14 @@ class RuleComparison:
     primary_line: str
     star_line:    str
     caveat:       str | None
+    stability:    WeightStability
+    chosen_stability: WeightStability | None
+    tree_not_covered: str | None
+    collection:   CollectionAdvice | None
+    collection_rows: tuple[CollectionRow, ...]
     basis:        str = PICKS_BASIS
+    stability_basis: str = STABILITY_BASIS
+    stability_mark: FigureBasis = STABILITY_MARK
 
     @property
     def differs(self) -> bool:
@@ -205,6 +232,11 @@ def compare_rules(result: ScenarioResult, primary: SelectorStrategy) -> RuleComp
         primary=primary, chosen=chosen, headline=matrix[primary],
         primary_line=_primary_line(primary, chosen, matrix, none),
         star_line=_star_line(result, primary, matrix), caveat=expected_value_caveat(result),
+        stability=weight_stability(result, primary),
+        chosen_stability=None if chosen is primary else weight_stability(
+            result, chosen, subject=CHOSEN_SUBJECT.format(Rule=RULE_WORDS[chosen].capitalize())),
+        tree_not_covered=TREE_NOT_COVERED if result.scenario.turns > 1 else None,
+        collection=result.collection_under(primary), collection_rows=result.collection_rows_under(primary),
     )
 
 

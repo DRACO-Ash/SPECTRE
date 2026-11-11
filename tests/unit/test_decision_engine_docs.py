@@ -396,3 +396,72 @@ class TestWhatAMixedResponseCouldGuarantee:
 
     def test_the_guide_says_which_way_the_floor_points_on_a_lower_is_better_score(self) -> None:
         assert "a floor on the outcome: its score can be no worse than that" in _flat(_guide_strings())
+
+
+class TestCollectFirstTiedToTheRecommendation:
+    """SPC-204 (evaluation F-14): both descriptions say the engine collects first only for a collection that can
+    change its recommended response, which none can while the matrix reads no Threat band, and describe the action
+    line as what it is."""
+
+    @pytest.mark.parametrize("claim", [
+        "SPC-204", "F-14", "cannot change the recommended response", "the outcome matrix reads no Threat band",
+        "the Threat band at which the owner may set that a response changes", "tuned, not sourced",
+    ])
+    def test_both_say_it(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    @pytest.mark.parametrize("claim", [
+        "the same cell step", "with no picture in them", "no collection the picture holds can change the recommended "
+        "response",
+    ])
+    def test_both_say_the_relevance_is_the_engines_own_evaluation_and_where_it_is_said(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_neither_says_the_advice_changes_by_itself_while_saying_a_figure_builder_must_be_extended(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "must extend this" not in text
+            assert "a test stand-in that lets the picture move a score" not in text
+
+    def test_neither_says_the_line_is_where_the_recommendation_changes(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section(),
+                     _flat(_read("docs/threat_confidence_concept.md"))):
+            assert "where the recommendation changes" not in text
+            assert "where the recommended response changes" not in text
+            assert "at which the operator's response changes" not in text
+
+
+class TestTheWeightStability:
+    """SPC-205 (evaluation F-16): both descriptions say the results show the smallest change of one weight that
+    changes the recommendation, exact and not sampled, beside it and on the record, and that a tree is not covered."""
+
+    @pytest.mark.parametrize("claim", [
+        "SPC-205", "F-16", "weight stability", "exact, not sampled", "scaled in proportion to keep the sum 1",
+        "details", "not permitted", "game tree's picks are not covered", "weight_stability",
+    ])
+    def test_both_say_it(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_the_phase_document_records_its_choices_as_claudes_and_the_probe_it_reproduces(self) -> None:
+        doc = _read("docs/decision_engine_phases.md")
+        section = _flat(doc[doc.index("## The weight stability beside the recommendation (SPC-205)"):
+                            doc.index("## What remains out of scope")])
+        assert "**Status: built" in section
+        assert "awaiting the owner's ruling" in section
+        for figure in ("0.089", "0.082", "0.0889", "0.0818", "0.165"):
+            assert figure in section, figure
+        assert "sampled scenario" in section
+
+    @pytest.mark.parametrize("claim", [
+        "rounded down", "rounded away from the panel's", "6 decimal places, as the engine",
+    ])
+    def test_both_say_the_words_never_overstate_and_the_engines_rounding_is_read(self, claim: str) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert claim.lower() in text.lower(), claim
+
+    def test_neither_says_a_change_is_rounded_to_the_nearest(self) -> None:
+        for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):
+            assert "the nearest, so a change" not in text
+            assert "within 1e-12" not in text

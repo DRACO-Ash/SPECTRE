@@ -1497,11 +1497,26 @@ def _section_13_decision_engine(doc: Document) -> None:
         "holds one picture, so a later sweep of another red track replaces it, as does a sweep whose model failed: "
         "sweep the bound red track again to read one. A decide-by that has passed by the evaluation is said again "
         "against the evaluation: when it was, and when the intercept could arrive, counted from the evaluation, not "
-        "the sweep. An old picture may no longer hold: weigh its age, or sweep again. If the Threat range straddles "
-        "the line "
-        "where the recommendation changes and a collection that could settle it lands before decide-by, the "
-        "guidance says collect first and names it; otherwise it says act on the ceiling. Collections are listed "
-        "beside the ranking and never scored, so the recommendation is always one of your own responses."
+        "the sweep. An old picture may no longer hold: weigh its age, or sweep again. The sweep's advice is judged "
+        "against the action line, the Threat band at which the owner may set that a response changes, HIGH by "
+        "default, tuned, not sourced, and the results say so in a sentence of their own. If the Threat range "
+        "straddles the action line and a collection that could take the range off it lands before decide-by, the "
+        "sweep would collect first; otherwise it says act on the ceiling. Collections are listed beside the ranking "
+        "and never scored, so the recommendation is always one of your own responses."
+    )
+    _add_body(doc,
+        "The Decision Engine collects first only for a collection whose outcomes give different recommended "
+        "responses, and that lands before decide-by (SPC-204, finding F-14 of the independent evaluation). It builds "
+        "the matrix again under each of the collection's outcomes, the benign and the hostile, through "
+        "the same cell step the evaluation ran, from plans made with no picture in them, and compares the "
+        "recommendation under each. Today the outcome matrix reads no Threat band, so the two are always the same, "
+        "and in place of collect first the results say, for example: 'Collecting \"pull its element-set history\" "
+        "would narrow the Threat range but cannot change the recommended response: the outcome matrix reads no "
+        "Threat band.' Do not delay your decision for it. Where the sweep says act on the ceiling, or that the range "
+        "is below the action line, and the picture holds a collection, the results add: "
+        "'No collection the picture holds can change the recommended response: the outcome matrix reads no Threat "
+        "band.' Should a later release let a band move a figure, the advice follows, naming the recommendation under "
+        "each outcome."
     )
 
     _add_heading_h2(doc, "Selector Rules")
@@ -1544,6 +1559,24 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "agreeing with another rule, and nothing is starred under it.")
     _add_bullet(doc, "When the time budget stopped a game tree before its last turn, the line on each rule's turn-1 "
                 "pick names the turns you asked for and the turns built in full.")
+    _add_body(doc,
+        "Beside the recommendation the results give its weight stability (SPC-205, finding F-16 of the independent "
+        "evaluation): the smallest change of one weight, the other four scaled in proportion to keep the sum 1 as "
+        "the panel scales them, that changes the pick, and what it makes it, for example 'The recommendation holds "
+        "unless a weight moves by at least 0.165: our delta-V's weight from 0.200 to 0.034 makes it manoeuvre "
+        "(F0).' Open 'Every weight' (a details element) for each weight lowered and raised, or that no value from 0 "
+        "to 1 changes it. It is exact, not sampled: each score is linear in the moved weight, so every point where "
+        "the pick can change is found. Each score is rounded to 6 decimal places, as the engine rounds it, and a tie "
+        "goes to the response listed first, as the engine breaks it. The change is rounded down, so 'at least' is "
+        "never more than it, and the weight's value is rounded away from the panel's, so the pick named is the "
+        "engine's there. A response marked not permitted is never the pick it names. If you chose a rule other than "
+        "the primary rule, its pick's stability is shown beside it. The game tree's picks are not covered: a line "
+        "says so when you asked for more than one turn, and on the record. Your decision record keeps the "
+        "recommendation's line in its own column, weight_stability; a record from before reads 'Weight stability: "
+        "not recorded'. A small change here means "
+        "the recommendation rests on a judgement of the weights as much as on the figures: the weights are not yet "
+        "cited (SPC-151)."
+    )
     _add_body(doc,
         "Under expected value, a bound row whose Understanding is LOW, or any row whose P you never edited, "
         "carries a line saying expected value rests on a probability the evidence has not earned, and names "

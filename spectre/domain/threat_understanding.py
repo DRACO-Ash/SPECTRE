@@ -71,6 +71,7 @@ from spectre.domain.warning_change import Change
 
 __all__ = [
     "ACTION_LINE",
+    "ACTION_LINE_MEANS",
     "ASSESSED_LABEL_EXTRACTION",
     "ASSUMED_FIGURE_EXTRACTION",
     "CATALOGUE_FIELD_EXTRACTION",
@@ -1942,26 +1943,40 @@ def _duration(hours: float) -> str:
 
 # ── Collect first (section 4.10, read by the Decision Engine, SPC-171) ────────
 
-#: The action line A: the Threat band at which the operator's recommended response changes. The operator's to set;
-#: HIGH until they do. Tuned, not sourced.
+#: The action line A: the Threat band at which the owner may set that a response changes; HIGH by default, and no
+#: control sets it yet. Tuned, not sourced. The sweep's collect-first advice narrows the range against it; whether a
+#: collection can change the Decision Engine's recommended response is the engine's to say (SPC-204, evaluation F-14).
 ACTION_LINE: Band = Band.HIGH
+#: What the action line is, said beside every advice that names it (SPC-204): not where the response changes, which
+#: the line alone cannot show.
+ACTION_LINE_MEANS = (
+    f"The action line is the Threat band at which the owner may set that a response changes: Threat "
+    f"{ACTION_LINE.name} by default, tuned, not sourced."
+)
 
 
 class Advice(Enum):
-    """What the threat range says to do before deciding, against the action line."""
+    """What the threat range says to do before deciding, against the action line.
+
+    CANNOT_CHANGE_RESPONSE is the Decision Engine's alone (SPC-204): a collection the sweep would collect first that
+    would narrow the range but cannot change the engine's recommended response.
+    """
 
     COLLECT_FIRST = "collect first"
     ACT_ON_CEILING = "act on the ceiling"
     BELOW_ACTION_LINE = "below the action line"
+    CANNOT_CHANGE_RESPONSE = "cannot change the recommended response"
 
 
 @dataclass(frozen=True)
 class CollectionAdvice:
-    """The advice, the cue it names when it is to collect first, and the sentence the operator reads."""
+    """The advice, the cue it names when it is to collect first, the sentence the operator reads, and what the
+    action line is, in a sentence of its own, when the advice names it ("" when it does not)."""
 
     advice: Advice
     cue: Cue | None
     sentence: str
+    action_line: str = ACTION_LINE_MEANS
 
 
 def _when(moment: datetime) -> str:
@@ -1974,9 +1989,10 @@ def _narrows(cue: Cue) -> bool:
     return cue.steps > 0 and cue.fed
 
 
-def _decides(cue: Cue, action_line: Band) -> bool:
+def _takes_off_the_line(cue: Cue, action_line: Band) -> bool:
     """A cue with an outcome that takes the range off the action line: its benign ceiling falls under it, or its
-    hostile floor reaches it. One that leaves the range across the line either way cannot change the decision."""
+    hostile floor reaches it. One that leaves the range across the line either way cannot take it off the line;
+    whether any cue can change the Decision Engine's recommended response is the engine's to say (SPC-204)."""
     return cue.benign[1] < action_line or cue.hostile[0] >= action_line
 
 
@@ -1990,7 +2006,7 @@ def landing_cues(cues: Iterable[Cue], *, now: datetime, decide_at: datetime | No
     if decide_at is None:
         return ()
     return tuple(sorted(
-        (c for c in cues if _narrows(c) and _decides(c, action_line) and now + timedelta(hours=c.hours) <= decide_at),
+        (c for c in cues if _narrows(c) and _takes_off_the_line(c, action_line) and now + timedelta(hours=c.hours) <= decide_at),
         key=_rank,
     ))
 
@@ -2017,23 +2033,24 @@ def collection_advice(span: tuple[Band, Band], cues: Iterable[Cue], *, now: date
     could move the range off the line on one of its outcomes, whose result SPECTRE can read, lands by decide-by: the
     best such cue by steps per hour is named. *decide_at* is the sweep's decide-by, which already subtracts the
     response time, so nothing is taken off again; with none set, no cue can be shown to land in time, so the cautious
-    reading acts on the ceiling.
+    reading acts on the ceiling. The advice narrows the range: whether a collection can change the Decision Engine's
+    recommended response is the engine's to say (decision.ScenarioResult.collection_under, SPC-204).
     """
     floor, ceiling = span
-    line = f"Threat {action_line.name}, where your response changes"
+    line = f"the action line at Threat {action_line.name}"
     if ceiling < action_line:
         return CollectionAdvice(Advice.BELOW_ACTION_LINE, None,
                                 f"Below the action line: the Threat ceiling is {ceiling.name}, under {line}.")
     act = f"Act on the ceiling: treat it as Threat {ceiling.name}."
     if floor >= action_line:
         return CollectionAdvice(Advice.ACT_ON_CEILING, None, f"{act} The Threat floor is already {floor.name}, at or "
-                                f"above {line}, so no collection changes the decision.")
+                                f"above {line}, so no collection could take the range below it.")
     runs = f"The Threat range runs from {floor.name} to {ceiling.name}, across {line}"
     held = tuple(cues)
     landing = landing_cues(held, now=now, decide_at=decide_at, action_line=action_line)
     if not landing or decide_at is None:
         narrowing = [c for c in held if _narrows(c)]
-        why = _no_cue_in_time(narrowing, [c for c in narrowing if _decides(c, action_line)], decide_at, now)
+        why = _no_cue_in_time(narrowing, [c for c in narrowing if _takes_off_the_line(c, action_line)], decide_at, now)
         return CollectionAdvice(Advice.ACT_ON_CEILING, None, f"{act} {runs}, and {why}.")
     cue = landing[0]
     return CollectionAdvice(Advice.COLLECT_FIRST, cue, (

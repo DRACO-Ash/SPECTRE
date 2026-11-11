@@ -12,7 +12,10 @@ the rule used differed (SPC-194), and the evaluation's canonical inputs with the
 (SPC-193, evaluation F-02), from which replay_record evaluates the scenario again and sets the result against the
 record. Since SPC-195 each response a record lists carries its reason when it was marked not permitted, so the
 records page says which were and why; no vetoed response is ever held as a pick, and one may be recorded as the
-operator's decision only with a rationale.
+operator's decision only with a rationale. Since SPC-205 a record keeps the recommendation's weight stability as the
+results said it, weight_stability's own line, in a column of its own: worked out when the record is written, since
+the stored inputs hold the scores but not the figures each score's terms come from, and working them out again would
+mean evaluating the scenario again.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from spectre.domain.decision import FriendlyResponse, ScenarioResult, SelectorSt
 from spectre.domain.decision_inputs import InputsRefusedError, StoredInputs, read_inputs, store_inputs
 from spectre.domain.decision_replay import Evaluate, Named, Recorded, Replay, input_hashes, replay
 from spectre.domain.rule_comparison import RULE_WORDS, RULES, expected_value_caveat, matrix_picks
+from spectre.domain.weight_stability import TREE_NOT_COVERED, weight_stability
 from spectre.web.log_safety import log_safe
 from spectre.web.models import DecisionRecord, User
 
@@ -206,7 +210,7 @@ def new_record(
         responses=json.dumps(_responses(result)),
         turns=scenario.turns, keep_out_km=scenario.keep_out_km,
         primary_rule=primary.value, rule_differed=result.robust_strategy is not primary,
-        inputs=inputs, inputs_sha256=inputs_sha256,
+        inputs=inputs, inputs_sha256=inputs_sha256, weight_stability=_kept(weight_stability(result, primary).line),
     )
 
 
@@ -431,6 +435,11 @@ _WHY_P0 = "since every row had P 0"
 _WHY_VETOED = "since every response was marked not permitted"
 #: Each response a record lists as marked not permitted, with its reason (SPC-195).
 _NOT_PERMITTED = "Not permitted: {name} ({id}): {reason}"
+#: The recommendation's weight stability as the record holds it (SPC-205), and what a record from before says.
+_STABILITY = "Weight stability: {line}"
+NO_STABILITY = (
+    "Weight stability: not recorded; this record was written by a version of SPECTRE that did not record it."
+)
 #: The rule used and its pick, on a record that holds a primary rule, whose results named the primary's pick the
 #: recommendation; and on one from before, whose results recommended the rule used's pick alone.
 _USED = "Rule used: {rule}, picking {pick}."
@@ -468,11 +477,19 @@ class ListedRecord:
     used: str
     #: Each response marked not permitted, with its reason (SPC-195); empty when none was.
     not_permitted: tuple[str, ...] = ()
+    #: The recommendation's weight stability as the results said it, or that the record holds none (SPC-205).
+    stability: str = NO_STABILITY
 
     @property
     def primary_recorded(self) -> bool:
         """Whether the record holds a primary rule: one written since 0.28.0, whose results showed all three picks."""
         return self.primary != _PRIMARY_UNRECORDED
+
+    @property
+    def tree_not_covered(self) -> str | None:
+        """For a record of more than one turn that holds a weight stability, that the game tree's picks are not
+        covered by it, as the results said (SPC-205); None otherwise."""
+        return TREE_NOT_COVERED if self.turns > 1 and self.stability != NO_STABILITY else None
 
 
 def as_entered(km: float) -> str:
@@ -536,4 +553,5 @@ def listed(row: DecisionRecord, viewer: Operator) -> ListedRecord:
         not_permitted=tuple(
             _NOT_PERMITTED.format(name=r["name"], id=r["id"], reason=r["not_permitted"]) for r in _vetoed(row)
         ),
+        stability=NO_STABILITY if row.weight_stability is None else _STABILITY.format(line=row.weight_stability),
     )

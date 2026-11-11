@@ -50,6 +50,7 @@ _ENGINE = (
     "spectre/domain/rule_comparison.py", "spectre/domain/decision_inputs.py", "spectre/domain/decision_replay.py",
     "spectre/domain/decision_figures.py", "spectre/domain/decision_transfer.py", "spectre/domain/decision_judgement.py",
     "spectre/domain/decide_by.py", "spectre/domain/notso_prior.py", "spectre/domain/decision_envelope.py",
+    "spectre/domain/weight_stability.py",
 )
 #: The lookup model's functions, which hold no bare number but these.
 _LOOKUP_MODEL = ("_lookup_figures", "_lookup_cell")

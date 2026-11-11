@@ -140,7 +140,8 @@ class DecisionRecord(Base):
 
     Since 0.28.0 it also holds the deployment's primary rule and whether the rule used differed (SPC-194), and the
     evaluation's canonical inputs with their SHA-256, element-set text included, so the recommendation can be replayed
-    from the record alone (SPC-193, F-02). No retention is applied; how long records are kept and who may read them
+    from the record alone (SPC-193, F-02), and since SPC-205 the recommendation's weight stability as the results
+    said it. No retention is applied; how long records are kept and who may read them
     is the owner's decision (SPC-228), and it covers the stored inputs too.
 
     Only generic types, so the table is the same on SQLite and PostgreSQL. Operator text is Text, never
@@ -203,3 +204,7 @@ class DecisionRecord(Base):
     #: record written before 0.28.0, which cannot be replayed.
     inputs: Mapped[str | None] = mapped_column(Text, nullable=True)
     inputs_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The recommendation's weight stability as the results said it (SPC-205, evaluation F-16): the overall smallest
+    #: change of one weight that changes the primary rule's pick on the one-turn matrix, or why there is none to show.
+    #: None on a record written before it was recorded, which init_db upgrades in place.
+    weight_stability: Mapped[str | None] = mapped_column(Text, nullable=True)

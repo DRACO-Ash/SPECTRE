@@ -6,8 +6,9 @@ lost (SPC-179) and the record of whether each P was edited (SPC-183); for the sc
 Claude's design choices, not rulings; for the decision record of SPC-192; and for every rule's pick side by side
 with a primary rule (SPC-194) and replay from the stored record (SPC-193); for responses the operator marks not
 permitted (SPC-195); for the judgement basis, the lookup register and the code version on the results (SPC-196);
-and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); and for what P means, a
-probability over mutually exclusive actions with the remainder weighed (SPC-203).
+and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); for what P means, a
+probability over mutually exclusive actions with the remainder weighed (SPC-203); and for collect first tied to the
+engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205).
 The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
 why.*
 
@@ -287,9 +288,13 @@ section 7.5, and section 9, decision 9.
   shown as the sweep worded it. One that has passed by the evaluation is said again against the evaluation: when it
   was, and when the intercept could arrive, in hours after the evaluation, or that it could have arrived before it.
   So the line never says "Decide by" a past time, and it agrees with the advice below it.
-● When the Threat range straddles the line where the recommended response changes and a collection that could move
-  it off that line lands before decide-by, the guidance says collect first and names the collection; with no such
-  collection, or decide-by passed, it says act on the ceiling.
+● The sweep's advice is judged against the action line: the Threat band at which the owner may set that a response
+  changes, HIGH by default, tuned, not sourced, said in a sentence of its own beside every advice that names it.
+  When the Threat range straddles it and a collection that could move the range off it lands before decide-by, the
+  sweep would collect first; with no such collection, or decide-by passed, it says act on the ceiling.
+● The engine collects first only for a collection whose outcomes give different recommended responses (SPC-204, set
+  out below). The outcome matrix reads no Threat band, so none does, and the advice says the collection would narrow
+  the Threat range but cannot change the recommended response, and never says to delay the decision for it.
 ● Collections are listed beside the ranking, never scored, so the recommendation is always one of the operator's own
   rows.
 ● Under expected value, a bound row whose Understanding is LOW, or any row whose P the form records as never
@@ -874,10 +879,142 @@ happens was never weighed. Gates were not reassessed; their ratings stand until 
     SPC-203; the rule field is kept so the document says the rule it was evaluated by.
   ■ The sum is checked at Evaluate, not as each field changes, as every other panel number is.
 
+## Collect first tied to the recommendation (SPC-204)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-14 (High) found that the collect-first advice rested on Threat range band
+steps against a fixed, unsourced action line, and tied that line to a change in the operator's response, but the
+threat picture moves no figure in the matrix, so no collection outcome could change the engine's
+recommendation: probe P-10 evaluated one bound scenario under opposite pictures and found the matrix and the pick
+identical, while one picture was told to collect first. Gates were not reassessed; their ratings stand until the
+evaluation is repeated.
+
+● **Decision relevance, computed from the engine** (the brief's choice of what, Claude's of how). For a scenario
+  with a threat picture and a cue, `decision.cue_relevance` takes the recommended response under each of the cue's
+  outcomes, the picture's range moved to the cue's benign and to its hostile floor and ceiling, with the rule judged
+  by. Each outcome's matrix is the evaluation the engine would run under that picture: `ScenarioResult.matrix_under`
+  runs the same cell step the evaluation ran, `_build_matrix`, under the outcome's picture, from the plans the
+  evaluation made. Those plans (sampling, the computed approach and burns, custody, the span searched) are made from
+  the scenario with no picture in them, so no band can reach one, and a band can reach a figure or a score only in
+  the cell step, which is run again. Each picture's matrix is built once per result. A test sets the relevance
+  against a whole new evaluation under each outcome's picture, under every rule, on the lookup path, on P-10's bound
+  scenario and with a test stand-in that moves figures: they agree. The outcome matrix reads no Threat band, so the
+  two picks are always the same, and that is a tested, stated result, not an assumption: should a later release let
+  a band move a figure, the advice follows, as the stand-in shows.
+● **The advice in the engine** (the brief's choice). Where the sweep would collect first, the engine collects first
+  only for a cue whose outcomes give different recommended responses and that lands by decide-by, and then names the
+  recommended response under each outcome. With no such cue it names the sweep's cue and says so in words, never
+  recommending delay: "Collecting "pull its element-set history" would narrow the Threat range but cannot change
+  the recommended response: the outcome matrix reads no Threat band." Where the sweep says act on the ceiling or
+  below the action line, its advice stands, and when the picture holds a cue and none of them can change the
+  recommended response, a sentence says so: "No collection the picture holds can change the recommended response:
+  the outcome matrix reads no Threat band." A collect-first row is listed only for a cue that is collected first.
+● **The action line is described as what it is** (the brief's choice). The old wording, which tied the line to a
+  change in the operator's response, is gone from every sentence, the operator guide included, and a test finds it
+  in any case, spacing or quotation. The advice names "the action line at Threat HIGH" and says in a
+  sentence of its own: "The action line is the Threat band at which the owner may set that a response changes:
+  Threat HIGH by default, tuned, not sourced." The sweep's own advice keeps its range-narrowing purpose with this
+  wording.
+● **What moved.** Probe P-10 inverted: the same bound scenario under opposite pictures now gives advice that says
+  the collection cannot change the recommendation, and nothing in the engine says collect first
+  (`tests/unit/test_decision_relevance.py`). Every engine test of collect first and its rows now runs with a test
+  stand-in, `tests/unit/_band_stand_in.py`, that lets the picture move figures, and says so. The sweep's advice to
+  act on the ceiling, or that the range is below the line, now carries the sentence above when the picture holds a
+  cue. No pick, figure or score changed.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ Relevance is judged by the primary rule's pick on the results page, since that is the recommendation shown; a
+    result read on its own judges it by the rule the evaluation ran.
+  ■ The sweep's own gates stand beneath it: the range must straddle the action line and the cue must be able to take
+    the range off it, as well as change the pick and land by decide-by. Relevance is added, not substituted, so the
+    action line stays the owner's knob.
+  ■ The matrix under another picture is built again from the evaluation's plans, not by a whole new evaluation,
+    which would sample and propagate again for each outcome. To make that the same evaluation, every plan is now
+    made from the scenario with its picture taken out, which changes nothing today, since no plan read it. A result
+    the engine did not build, which holds no plans, scores each cell again from the figures it was built from.
+  ■ The test stand-in moves two figures of the response the band disfavours, custody for the whole horizon and a
+    closest approach inside the keep-out distance, rather than one: neither alone moves the picks of every fixture
+    that reads it.
+  ■ Where an outcome's picture moves a cell but not the pick, the advice says that under either outcome the engine
+    recommends the same response. It says the outcome matrix reads no Threat band only when no outcome of any cue the
+    picture holds moves any cell, so the reason is earned for the whole picture, not assumed from one cue.
+  ■ The advice that cannot change the recommendation names the sweep's cue in quotation marks, since a cue is worded
+    as an instruction, and carries no action-line sentence, since it does not judge against the line.
+  ■ The sentence beside the sweep's other advice is added only when the picture holds a cue and none can change the
+    recommended response. Where a cue could but lands after decide-by, the sweep's advice to act on the ceiling stands
+    alone. "Treat it as Threat CRITICAL" is the sweep's wording, kept: the sentence beside it says the matrix reads no
+    Threat band.
+
+## The weight stability beside the recommendation (SPC-205)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-16 (High) found the default weights uncited direct ratings and no weight
+stability computed or shown, though in the bound scenarios of probe P-16 moving our delta-V's weight by 0.089 (0.20
+to 0.111), or reversibility's by 0.082, flipped the pick under minimax and expected value. Gates were not reassessed;
+their ratings stand until the evaluation is repeated.
+
+● **One function in the domain** (the brief's choice). `spectre/domain/weight_stability.py` `weight_stability`
+  takes a rule's pick on the one-turn matrix and, for each of the five weights, finds the smallest change of that
+  weight that changes the pick, in each direction, the other four scaled in proportion to keep the sum 1, as the
+  panel's normalisation scales them, and what it changes to; or that no change from 0 to 1 does. The results page
+  and the decision record both read it.
+● **Exact, not sampled** (the brief's choice). For fixed cell figures every composite score is linear in the moved
+  weight along that path, its five terms (`decision.score_terms`, from the figures the engine kept unrounded on each
+  cell) weighed by the moved weights. The pick can change only where two responses' expected-value lines cross, or
+  where the row-wise maxima or minima of two responses meet for minimax and minimin, which is where a line of one
+  meets a line of the other. Every such point inside 0 to 1 is found and the pick read at each and between each. A
+  response marked not permitted is never a pick it reports.
+● **Ties and rounding as the engine has them** (the brief's choice of what, Claude's of how). The engine rounds each
+  composite score and picks on the rounded scores, a tie going to the first permitted response, as
+  `find_robust_response` decides. At each point read the search scores every cell as the engine would at those
+  weights, rounds it to 6 decimal places, as the engine rounds it, and aggregates and picks as
+  `find_robust_response` does. So a tie the rounding makes is the
+  engine's tie, and only a move that breaks it the engine's way changes the pick; and where two lines meet but the
+  rounded scores part them, the rounding decides, as it does in the engine. A change at the point itself reads "at"
+  and "at least"; one only beyond it, "past" and "more than".
+● **The words never overstate** (Claude's choice). Each change is rounded down to 3 decimal places, so "at least" or
+  "more than" is never above the exact change. The weight's value it names is rounded away from the panel's, and the
+  engine's pick there is checked to be the one the line names; where 3 places would pass a further change, a place
+  more is shown. A change found only where every response scores alike says so, and that the first listed takes it.
+● **On the page** (the brief's choice). Beside the recommendation, in words: "The recommendation holds unless a
+  weight moves by at least 0.165: our delta-V's weight from 0.200 to 0.034 makes it manoeuvre (F0)." A details
+  element lists every weight, lowered and raised, with what the search rests on. A rule chosen other than the
+  primary rule has its pick's line beside it. The game tree's picks are not covered, and a line says so, on the
+  results and on the records page for a record of more than one turn.
+● **On the record** (the brief's choice of what, Claude's of which). A new column, `weight_stability`, holds the
+  recommendation's line as the results said it, written with the record; init_db adds it to an older database in
+  place, and a record from before reads "Weight stability: not recorded". It is stored, not derived, because the
+  stored inputs hold each cell's score but not the figures its terms come from, so deriving it would mean evaluating
+  the scenario again, sampled rows included. The stored inputs are unchanged, at version 3, and versions 1 to 3
+  still read and replay.
+● **What moved.** Probe P-16's bound scenarios, through the real engine (`tests/unit/test_weight_stability.py`):
+  under the score scales P-16 measured, those of 0.24.2, restored by a test stand-in, the computed scenario gives
+  0.0889 on our delta-V (0.200 to 0.111) and 0.0818 on reversibility under minimax, and 0.0873 and 0.0807 under
+  expected value; the sampled scenario gives 0.0889 and 0.0818 under both rules, as P-16 measured; each to the
+  manoeuvre (F0), within P-16's 0.001 scan step. Custody 0.65, closest approach 0.75 (0.705 under expected value on
+  the computed scenario, where P-16's scan found 0.706) and time to execute 0.9 match P-16 too. Under the scales
+  built since SPC-191 the same scenarios hold until our delta-V's weight falls by 0.165, or, on the computed scenario
+  under expected value, by more than 0.154. A whole evaluation with the weight moved by 0.154 still picks the sensor
+  retask, and at 0.045 the manoeuvre. A brute-force fine scan through the engine's own scoring, done in the test
+  only, agrees with the exact search on every weight, direction and rule. No pick, figure or score changed; the
+  composite score is the same float as before, its terms now named.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ The chosen rule's pick has its own line whenever the rule chosen is not the primary rule, even when the two
+    pick alike, since the weights can move the two picks apart.
+  ■ Weights that do not sum to 1, as a scenario built in code may hold, are read over their sum, as the panel scales
+    them; a weight that carries the whole weight cannot be moved in proportion, and its line says so. Every weight at
+    0 gives no stability, and the line says why.
+  ■ A change under 0.001 is said to be under 0.001, and the pick then holds only at the panel's weights; the line
+    says which way the weight moves to change it.
+  ■ The points are where the unrounded lines meet; the rounded pick turns within a millionth or so of each. Where
+    two responses' unrounded aggregates stay within one rounding step of each other over a stretch of the weight,
+    the engine's pick there turns on the rounding, and the point is still placed where the lines meet.
+  ■ The record stores the recommendation's line alone, not the chosen rule's or every weight's.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
-  ranking a weighted heuristic.
+  ranking a weighted heuristic. Since SPC-205 the results show how far one weight can move before the
+  recommendation changes; swing-weight elicitation remains SPC-151.
 ● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
 ● **Element-set error is not sampled.** A sampled band can be narrower than element-set error; a per-cell comparison
   needs the regime on the bound element set and is a follow-up.
@@ -904,3 +1041,5 @@ happens was never weighed. Gates were not reassessed; their ratings stand until 
 | SPC-195 | A response marked not permitted, shown with its reason and never picked | Built |
 | SPC-200, SPC-201 | The operating envelope written down and checked, and one acceptance check for every element set | Built |
 | SPC-203 | P summing to at most 1, the remainder weighed as no adversary action, each row's share shown | Built |
+| SPC-204 | Collect first only for a collection that can change the recommended response; the action line described as what it is | Built |
+| SPC-205 | The smallest change of one weight that changes the recommendation, beside it and on the record | Built |

@@ -1265,3 +1265,12 @@ Element-set integrity at ingest (evaluation F-25), the operating envelope (F-09)
 | Code Quality | **HYGIENE** | None made for the gate. New modules `astro/elset_check.py` and `domain/decision_envelope.py`; the check wired into every ingest path; the remainder of P in the engine; stored inputs version 3 | `scripts/check-quality.sh` against 0.29.0 passed all five legs. The full suite (9,551 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.31.0
+
+Weight stability (evaluation F-16) and collect-first advice tied to the decision (F-14).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New module `domain/weight_stability.py`; decision relevance in `decision.py`; one column on `decision_records` | `scripts/check-quality.sh` against 0.30.0 passed all five legs. The full suite (9,688 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

@@ -9,6 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-12
+
+**Operator output: 4, the recommended response, states how far a weight must move to change it (evaluation F-16), and collect-first advice is tied to the decision it informs (F-14).**
+
+### Added
+- Weight stability beside the recommendation: for each of the five weights, the others rescaled in proportion, the smallest change in each direction that changes the pick and what it changes to, or that none within 0 to 1 does, for the primary rule's headline and the chosen rule's pick when it differs. Exact, from the breakpoints where the linear scores cross, not sampled; vetoed responses are never reported; the tree's picks are not covered, and the page says so. On the evaluation's bound scenario the delta-V weight moving by 0.089 changes the pick. The decision record stores the line (SPC-205).
+
+### Changed
+- Collect-first advice in the Decision Engine is computed from the engine: the recommended response under each of a cue's outcomes. Today the outcome matrix reads no Threat band, so no collection can change the recommendation, and the advice says so and recommends no delay. "Where your response changes" is gone from every sentence; the action line is described as the Threat band at which the owner may set that a response changes, HIGH by default, tuned, not sourced (SPC-204).
+
 ## [0.30.0] - 2026-11-11
 
 **Inputs the engine accepts: element-set integrity (evaluation F-25), a written operating envelope (F-09) and what P means (F-12).**

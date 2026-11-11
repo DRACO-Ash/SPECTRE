@@ -92,10 +92,16 @@ scenario, and wherever nothing is computed or sampled, labelled as lookups.
 A scenario bound to a red track may carry the Threat picture the sweep held
 for it (SPC-171): its range, Understanding, cues and decide-by. It moves no
 figure. It gives the collect-first advice of the Threat Understanding
-concept, section 4.10, and a collect-first row for each cue that needs an
-analyst or a sensor; it is shown beside the probability and confidence,
-which it never fills; and under expected value it says when the probability
-has not been earned and what minimax would recommend.
+concept, section 4.10, only for a cue whose outcomes give different
+recommended responses, the matrix built again under each outcome's picture
+through the same cell step from the evaluation's plans, which hold no
+picture (SPC-204, evaluation F-14): the matrix reads no Threat band, so none
+does, and the advice says a collection would narrow the range but cannot
+change the recommendation, beside the sweep's own advice to act on the
+ceiling too. A collect-first row is listed for each such cue that needs an
+analyst or a sensor; the picture is shown beside the probability and
+confidence, which it never fills; and under expected value it says when the
+probability has not been earned and what minimax would recommend.
 
 P is the chance of each adversary action, the actions mutually exclusive (SPC-203, evaluation F-12): the rows' P
 sum to at most 1, within P_SUM_TOLERANCE, and the scenario refuses more. When they sum below 1, with_remainder adds
@@ -1109,6 +1115,10 @@ class OutcomeMetrics:
     response_refusal:     str | None = None
     # The samples' TCAs as a histogram, binned no finer than each is known (SPC-124); only on a sampled cell.
     tca_histogram:        TcaHistogram | None = None
+    # The figures the composite score was built from, unrounded (SPC-205, SPC-204): what the weight stability and a
+    # cue's outcomes score again, so neither reads the rounded figures shown. Set by the engine on every cell it builds;
+    # None on a cell built by hand, which is then scored again from the figures shown.
+    score_figures:        _Figures | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         sampled = _cell_bases(self).closest_approach_km.kind is Basis.SAMPLED
@@ -1538,6 +1548,25 @@ class ScenarioBinding:
 
 #: A collect-first row's time-to-execute note: the cue's duration is a tuned lookup, not a measured time.
 COLLECTION_NOTE = "collection to narrow the threat range: the cue's tuned duration, a lookup"
+#: Why a collection the sweep would collect first cannot change the recommended response (SPC-204, evaluation F-14):
+#: under no outcome's picture of any cue the picture holds does any cell of the matrix move, which is so while no
+#: figure reads a Threat band. Computed every time from the matrix built again, never assumed.
+NO_BAND_READ = "the outcome matrix reads no Threat band"
+CANNOT_CHANGE = (
+    'Collecting "{observation}" would narrow the Threat range but cannot change the recommended response: {why}.'
+)
+#: The same, where an outcome's picture moves a cell of the matrix but not the pick.
+SAME_EITHER_WAY = (
+    'Collecting "{observation}" would narrow the Threat range, but under either of its outcomes the engine '
+    "recommends {pick}."
+)
+#: Said beside the sweep's advice to act on the ceiling, or that the range is below the action line, when the picture
+#: holds a cue and none of them can change the recommended response (SPC-204); the reason as above, or where a cue's
+#: outcome moves a cell but no pick, that each cue's outcomes agree.
+NONE_CAN_CHANGE = "No collection the picture holds can change the recommended response: {why}."
+EACH_THE_SAME = "each cue's two outcomes give the same one"
+#: What collect first adds when a cue's outcomes do change the recommended response: the pick under each.
+OUTCOME_PICKS = "Under its benign outcome the engine recommends {benign}; under its hostile outcome, {hostile}."
 #: Where the expected-value selector's weight has not been earned (concept section 7.5, item 4): Understanding LOW, or
 #: a row whose P the form records as never edited, not one merely holding 0.5 (the owner's ruling of 2026-11-05 on
 #: concept section 9, decision 11, SPC-183).
@@ -1646,21 +1675,28 @@ class ThreatPicture:
         return (f"{passed}, and the intercept it was set against could have arrived at {_when(self.arrival)}, before "
                 "this evaluation.")
 
-    def advice(self, now: datetime) -> CollectionAdvice:
-        """Collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10), with the
-        picture's age beside it."""
-        advice = collection_advice((self.floor, self.ceiling), self.cues, now=now, decide_at=self.decide_at)
+    def advice(self, now: datetime, cues: tuple[Cue, ...] | None = None) -> CollectionAdvice:
+        """The sweep's collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10),
+        over *cues*, every cue held when None, with the picture's age beside it."""
+        advice = self.unaged(now, cues)
         return dataclasses.replace(advice, sentence=_beside(advice.sentence, self.age(now)))
 
-    def collection_rows(self, now: datetime) -> tuple[CollectionRow, ...]:
-        """One row per cue that needs someone outside SPECTRE, when the advice at *now* is to collect first.
+    def unaged(self, now: datetime, cues: tuple[Cue, ...] | None = None) -> CollectionAdvice:
+        """The advice as advice() gives it, before the picture's age is put beside it."""
+        held = self.cues if cues is None else cues
+        return collection_advice((self.floor, self.ceiling), held, now=now, decide_at=self.decide_at)
+
+    def collection_rows(self, now: datetime, cues: tuple[Cue, ...] | None = None) -> tuple[CollectionRow, ...]:
+        """One row per cue of *cues*, every cue held when None, that needs someone outside SPECTRE, when the sweep's
+        advice over them at *now* is to collect first.
 
         Only a cue that could move the range off the action line, whose result SPECTRE can read, landing by
         decide-by, is listed. A cue SPECTRE runs itself is named by the advice and lists no row.
         """
-        if self.advice(now).advice is not Advice.COLLECT_FIRST:
+        held = self.cues if cues is None else cues
+        if self.unaged(now, held).advice is not Advice.COLLECT_FIRST:
             return ()
-        landing = landing_cues(self.cues, now=now, decide_at=self.decide_at)
+        landing = landing_cues(held, now=now, decide_at=self.decide_at)
         return tuple(CollectionRow(c.observation, c.hours, self.age(now)) for c in landing if not c.inside_spectre)
 
 
@@ -1968,6 +2004,12 @@ class ScenarioResult:
     # Each breach of the operating envelope the bound element sets show, in a sentence: a set on SDP4, flagged, and a
     # set whose object is below the re-entry floor, refused (SPC-200, docs/decision-engine-envelope.md).
     envelope:               tuple[str, ...] = ()
+    # What the matrix was built from, its picture taken out (SPC-204): each row's plan, its transfer and the end of the
+    # span searched, so the matrix can be built again under another Threat picture. None on a result built by hand.
+    matrix_plan:            MatrixPlan | None = field(default=None, compare=False, repr=False)
+    # The matrix built again under each picture's (floor, ceiling), each once (matrix_under).
+    _built_under:           dict[tuple[Band, Band], list[list[OutcomeMetrics]]] = field(
+        default_factory=dict, init=False, compare=False, repr=False)
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -2036,15 +2078,71 @@ class ScenarioResult:
 
     @property
     def collection(self) -> CollectionAdvice | None:
-        """Collect first, act on the ceiling, or below the action line, at the scenario epoch; None with no picture."""
-        picture = self._picture()
-        return None if picture is None else picture.advice(self.scenario.epoch_utc)
+        """The engine's advice at the scenario epoch under the rule the evaluation ran; None with no picture."""
+        return self.collection_under(self.robust_strategy)
 
     @property
     def collection_rows(self) -> tuple[CollectionRow, ...]:
-        """The collect-first rows at the scenario epoch, listed beside the ranking; none with no picture."""
+        """The collect-first rows at the scenario epoch under the rule the evaluation ran; none with no picture."""
+        return self.collection_rows_under(self.robust_strategy)
+
+    def _deciding(self, picture: ThreatPicture, rule: SelectorStrategy) -> tuple[Cue, ...]:
+        """The picture's cues whose outcomes give different recommended responses under *rule* (SPC-204)."""
+        return tuple(cue for cue in picture.cues if cue_relevance(self, cue, rule).changes)
+
+    def collection_under(self, rule: SelectorStrategy) -> CollectionAdvice | None:
+        """Collect first, act on the ceiling, below the action line, or cannot change the recommended response, at
+        the scenario epoch, judged by *rule*'s pick; None with no picture (SPC-204, evaluation F-14).
+
+        Where the sweep would collect first, the engine collects first only for a cue whose outcomes give different
+        recommended responses and that lands by decide-by, naming the pick under each outcome. With no such cue the
+        advice names the sweep's cue and says it would narrow the Threat range but cannot change the recommended
+        response, and why, as the matrix built again under each outcome shows. Where the sweep acts on the ceiling or
+        finds the range below the action line, its advice stands, and when the picture holds a cue and none of them
+        can change the recommended response, a sentence says so.
+        """
         picture = self._picture()
-        return () if picture is None else picture.collection_rows(self.scenario.epoch_utc)
+        if picture is None:
+            return None
+        now = self.scenario.epoch_utc
+        swept = picture.unaged(now)
+        relevance = {cue: cue_relevance(self, cue, rule) for cue in picture.cues}
+        # The matrix is said to read no Threat band only when no cue's outcome moved a cell: earned, not assumed.
+        band_read = any(seen.moved for seen in relevance.values())
+        if swept.advice is not Advice.COLLECT_FIRST:
+            return _with_none_can_change(swept, picture, now, relevance, band_read)
+        named = picture.unaged(now, tuple(cue for cue, seen in relevance.items() if seen.changes))
+        if named.advice is Advice.COLLECT_FIRST:
+            chosen = relevance[cast("Cue", named.cue)]
+            picks = OUTCOME_PICKS.format(benign=_named(chosen.benign), hostile=_named(chosen.hostile))
+            return dataclasses.replace(named, sentence=_beside(f"{named.sentence} {picks}", picture.age(now)))
+        cue = cast("Cue", swept.cue)
+        sentence = (SAME_EITHER_WAY.format(observation=cue.observation, pick=_named(relevance[cue].benign))
+                    if band_read else CANNOT_CHANGE.format(observation=cue.observation, why=NO_BAND_READ))
+        return CollectionAdvice(Advice.CANNOT_CHANGE_RESPONSE, cue, _beside(sentence, picture.age(now)), action_line="")
+
+    def matrix_under(self, floor: Band, ceiling: Band) -> list[list[OutcomeMetrics]]:
+        """The outcome matrix with the picture's range at *floor* to *ceiling*: built again through the engine's own
+        cell step from the plans this evaluation made, the evaluation the engine runs under that picture (SPC-204).
+        Each picture's matrix is built once. A result the engine did not build holds no plans, so each of its cells
+        is scored again from the figures it was built from under that picture instead. Its scenario holds a picture.
+        """
+        key = (floor, ceiling)
+        if key not in self._built_under:
+            held = cast("ThreatPicture", self.scenario.threat)
+            outcome = dataclasses.replace(self.scenario, threat=dataclasses.replace(held, floor=floor, ceiling=ceiling))
+            self._built_under[key] = (_rescored(self, outcome) if self.matrix_plan is None
+                                      else _build_matrix(outcome, self.matrix_plan))
+        return self._built_under[key]
+
+    def collection_rows_under(self, rule: SelectorStrategy) -> tuple[CollectionRow, ...]:
+        """The collect-first rows at the scenario epoch, judged by *rule*'s pick, listed beside the ranking: one per
+        cue that needs someone outside SPECTRE whose outcomes change the recommended response; none with no
+        picture, and none unless the engine collects first."""
+        picture = self._picture()
+        if picture is None:
+            return ()
+        return picture.collection_rows(self.scenario.epoch_utc, self._deciding(picture, rule))
 
     @property
     def threat_lines(self) -> tuple[str, ...]:
@@ -2504,6 +2602,7 @@ def _outcome(
         time_to_closest_hours=round(built.tca_hours, 2),
         delta_v_cost_km_s=round(figures.delta_v_km_s, 5),
         composite_score=round(_score(scenario, friendly, figures), 6),
+        score_figures=figures,
         figure_bases=_custody_bases(built.bases, custody),
         custody_state=None if custody is None else custody.state,
         # Not rounded: a degraded span under 0.005 h is still degraded, and the cell's reading is read off it.
@@ -2591,8 +2690,9 @@ def _norm_dv(delta_v_km_s: float) -> float:
     return min(math.log1p(from_km_s(delta_v_km_s)) / math.log1p(MAX_BURN_M_S), 1.0)
 
 
-def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) -> float:
-    """The composite score (higher = worse), unrounded.
+def score_terms(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) -> tuple[float, ...]:
+    """The composite score's five terms before the weights, each in [0, 1], in the order of the weights: custody,
+    closest approach, our delta-V, time to execute and reversibility.
 
     Each component is normalised to [0, 1] with domain assumptions:
     custody loss 0 when maintained, 1 for a full-horizon gap, each hour degraded
@@ -2600,7 +2700,7 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
     by _norm_ca, in orders of magnitude from the scenario's keep-out distance to
     50,000 km; our delta-V by _norm_dv, in orders of magnitude up to the 1,000 m/s
     per-burn limit (SPC-191); time to execute 0 to the full horizon;
-    reversibility inverted, a reward.
+    reversibility inverted, a reward. The weight stability reads them (SPC-205): the score is linear in each weight.
     """
     custody_h     = figures.custody_gap_hours + DEGRADED_CUSTODY_WEIGHT * figures.custody_degraded_hours
     norm_custody  = 0.0 if figures.custody_maintained else min(custody_h / scenario.horizon_hours, 1.0)
@@ -2608,7 +2708,23 @@ def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) ->
     norm_dv       = _norm_dv(figures.delta_v_km_s)
     norm_time     = min(friendly.time_to_execute_hours / scenario.horizon_hours, 1.0)
     norm_rev      = 1.0 - friendly.reversibility          # reward reversibility → lower score
+    return norm_custody, norm_ca, norm_dv, norm_time, norm_rev
 
+
+def cell_figures(cell: OutcomeMetrics) -> _Figures:
+    """The figures *cell*'s score was built from: those the engine kept, unrounded, or, on a cell built by hand, the
+    figures it shows (SPC-205)."""
+    kept = getattr(cell, "score_figures", None)
+    if kept is not None:
+        return cast("_Figures", kept)
+    return _Figures(cell.custody_maintained, cell.custody_gap_hours, cell.closest_approach_km, cell.delta_v_cost_km_s,
+                    getattr(cell, "custody_degraded_hours", 0.0))
+
+
+def _score(scenario: Scenario, friendly: FriendlyResponse, figures: _Figures) -> float:
+    """The composite score (higher = worse), unrounded: score_terms weighted by the scenario's weights, added in the
+    order the score has always added them, so every score is the same float as before SPC-205."""
+    norm_custody, norm_ca, norm_dv, norm_time, norm_rev = score_terms(scenario, friendly, figures)
     return (
         scenario.w_custody          * norm_custody
         + scenario.w_closest_approach * norm_ca
@@ -4145,6 +4261,27 @@ class _RowPlan(NamedTuple):
     custody:  _RowCustody | None = None
 
 
+class MatrixPlan(NamedTuple):
+    """What an evaluation builds its matrix from, besides the scenario (SPC-204): each row's plan, made with no
+    Threat picture in it, each row's transfer, and the end of the span searched."""
+
+    rows:      tuple[_RowPlan, ...]
+    transfers: tuple[RowBurns | None, ...]
+    end:       datetime
+
+
+def _build_matrix(scenario: Scenario, plan: MatrixPlan) -> list[list[OutcomeMetrics]]:
+    """The outcome matrix of *scenario* from *plan*: every cell from its row's plan, its figures' bases naming the
+    row's burns. The one cell step, run by the evaluation and again under another Threat picture (SPC-204)."""
+    return [
+        [
+            _burns_named(_cell(adversary, friendly, scenario, row, j), burns, plan.end)
+            for j, friendly in enumerate(scenario.friendly_responses)
+        ]
+        for adversary, row, burns in zip(scenario.adversary_actions, plan.rows, plan.transfers, strict=True)
+    ]
+
+
 def _cell(
     adversary: AdversaryAction, friendly: FriendlyResponse, scenario: Scenario, plan: _RowPlan, column: int = 0,
 ) -> OutcomeMetrics:
@@ -4380,6 +4517,79 @@ def _expected_value_pick(
     remainder rule the shares sum to 1 (SPC-203), and find_robust_response gives no pick when every share is 0,
     which only a replayed 0.28.0 or 0.29.0 record can hold (SPC-200)."""
     return min(allowed, key=lambda j: _expected(shares, outcome_matrix, j))
+
+
+# ── Whether a collection can change the recommended response (SPC-204, evaluation F-14) ──
+
+def _with_none_can_change(
+    swept: CollectionAdvice, picture: ThreatPicture, now: datetime, relevance: Mapping[Cue, CueRelevance],
+    band_read: bool,
+) -> CollectionAdvice:
+    """The sweep's advice to act on the ceiling, or that the range is below the action line, with the picture's age
+    beside it; and when the picture holds a cue and none of them can change the recommended response, saying so."""
+    if not relevance or any(seen.changes for seen in relevance.values()):
+        return dataclasses.replace(swept, sentence=_beside(swept.sentence, picture.age(now)))
+    why = EACH_THE_SAME if band_read else NO_BAND_READ
+    none_can = NONE_CAN_CHANGE.format(why=why)
+    return dataclasses.replace(swept, sentence=_beside(f"{swept.sentence} {none_can}", picture.age(now)))
+
+
+@dataclass(frozen=True)
+class CueRelevance:
+    """The recommended response under each of a cue's outcomes: *benign* with the picture's range at the cue's
+    benign (floor, ceiling), *hostile* at its hostile one, each None when the rule has no pick. *moved* is whether
+    either outcome's picture moves any score in the matrix."""
+
+    cue:     Cue
+    benign:  FriendlyResponse | None
+    hostile: FriendlyResponse | None
+    moved:   bool
+
+    @property
+    def changes(self) -> bool:
+        """Whether collecting it could change the recommended response: its two outcomes give different picks."""
+        return self.benign is not self.hostile
+
+
+def cue_relevance(result: ScenarioResult, cue: Cue, rule: SelectorStrategy) -> CueRelevance:
+    """*rule*'s pick on *result*'s matrix with the picture's range moved to each of *cue*'s outcomes.
+
+    The matrix under each outcome's picture is the one the engine builds under it (ScenarioResult.matrix_under): its
+    cell step run again from the evaluation's plans, which are built with no picture in them, so the evaluation the
+    engine would run under that picture. A band that moved any figure or score would move a cell here. The picks are
+    find_robust_response's on each matrix, and *moved* is whether either differs from the matrix built again under
+    the picture held. *result*'s scenario must hold a picture.
+    """
+    held = cast("ThreatPicture", result.scenario.threat)
+    as_held = result.matrix_under(held.floor, held.ceiling)
+    picks: list[FriendlyResponse | None] = []
+    moved = False
+    for floor, ceiling in (cue.benign, cue.hostile):
+        matrix = result.matrix_under(floor, ceiling)
+        moved = moved or matrix != as_held
+        outcome = dataclasses.replace(result.scenario, threat=dataclasses.replace(held, floor=floor, ceiling=ceiling))
+        picks.append(find_robust_response(outcome, matrix, rule))
+    return CueRelevance(cue, picks[0], picks[1], moved)
+
+
+def _rescored(result: ScenarioResult, outcome: Scenario) -> list[list[OutcomeMetrics]]:
+    """*result*'s matrix, for a result the engine did not build, with each cell's score moved by what *outcome*'s
+    picture changes of it, scored again from the figures the cell was built from; a cell it does not move is the
+    cell itself."""
+    rows = []
+    for row in result.outcome_matrix:
+        cells = []
+        for friendly, cell in zip(outcome.friendly_responses, row, strict=True):
+            figures = cell_figures(cell)
+            shift = _score(outcome, friendly, figures) - _score(result.scenario, friendly, figures)
+            cells.append(cell if shift == 0.0 else dataclasses.replace(cell, composite_score=cell.composite_score + shift))
+        rows.append(cells)
+    return rows
+
+
+def _named(response: FriendlyResponse | None) -> str:
+    """A pick as the advice names it, or that there is none."""
+    return "no response" if response is None else f"{response.name} ({response.id})"
 
 
 # ── The interval on a NOTSO-derived P, carried into the pick (SPC-132) ─────────
@@ -4785,21 +4995,20 @@ def _evaluate(
 
     # Build outcome matrix: a lookup in every cell but those of a row sampled, computed or refused. One budget
     # covers the sampled rows and the computed rows' burns (SPC-113, SPC-121), and a tree's later turns (SPC-140).
-    pre = _pre_plan(scenario, rk45=tree_turn_s is not None)
+    # Each plan is made from the scenario with its Threat picture taken out, so no band reaches one: a band can reach
+    # a figure only in the cell step, which the matrix under another picture runs again (SPC-204).
+    planning = scenario if scenario.threat is None else dataclasses.replace(scenario, threat=None)
+    pre = _pre_plan(planning, rk45=tree_turn_s is not None)
     budget = None if run is None else _Budget(run, pre.ready)
-    plan = _plan_sampling(scenario, sampler, budget, pre, keep_at_s)
-    computed = _plan_computed(scenario, pre, budget)
-    custody = _custody_plan(scenario)
+    plan = _plan_sampling(planning, sampler, budget, pre, keep_at_s)
+    computed = _plan_computed(planning, pre, budget)
+    custody = _custody_plan(planning)
     red = None if scenario.binding is None else scenario.binding.red
     transfers = tuple(_row_burns(action, red) for action in scenario.adversary_actions)
-    end = scenario.epoch_utc + timedelta(seconds=_searched_span_s(scenario))
-    outcome_matrix = [
-        [
-            _burns_named(_cell(adversary, friendly, scenario, _RowPlan(sampling, computed, held), j), burns, end)
-            for j, friendly in enumerate(scenario.friendly_responses)
-        ]
-        for adversary, sampling, held, burns in zip(scenario.adversary_actions, plan, custody, transfers, strict=True)
-    ]
+    end = scenario.epoch_utc + timedelta(seconds=_searched_span_s(planning))
+    rows = tuple(_RowPlan(sampling, computed, held) for sampling, held in zip(plan, custody, strict=True))
+    matrix_plan = MatrixPlan(rows, transfers, end)
+    outcome_matrix = _build_matrix(scenario, matrix_plan)
     _require_one_propagator(outcome_matrix)
 
     # Rank per adversary action
@@ -4833,6 +5042,7 @@ def _evaluate(
         row_burns=transfers,
         budget_ran_out=_ran_out(budget),
         envelope=envelope_lines(scenario, None if computed is None else computed.decayed),
+        matrix_plan=matrix_plan,
     )
     return result, TurnOne(pre, plan, computed, budget)
 

@@ -1,11 +1,15 @@
 """The Decision Engine reads Threat Understanding: collect first, and the minimax guidance (SPC-171).
 
 The operator's fourth output is the recommended response. Concept section
-4.10: when the threat range straddles the action line, the band where the
-recommended response changes, and a cue SPECTRE can read lands before
-decide-by, the advice is to collect first, naming the cue; when nothing lands
-in time, or decide-by has passed, it is to act on the ceiling. Only a cue
-with an outcome that takes the range off the line counts. Section 7.5: cues
+4.10: when the threat range straddles the action line, the Threat band at
+which the owner may set that a response changes (HIGH by default, tuned, not
+sourced), and a cue SPECTRE can read lands before decide-by, the sweep's
+advice is to collect first, naming the cue; when nothing lands in time, or
+decide-by has passed, it is to act on the ceiling. Only a cue with an outcome
+that takes the range off the line counts. The engine collects first only for
+such a cue whose outcomes give different recommended responses (SPC-204), which
+the matrix, reading no Threat band, never gives, so the engine's tests of
+collect first put the stand-in of tests/unit/_band_stand_in.py in place. Section 7.5: cues
 that need an analyst or a sensor become collection rows, each named by its cue,
 timed by its lookup duration and labelled "collection to narrow the threat
 range", listed beside the ranking and never scored in it (concept section 9,
@@ -41,6 +45,7 @@ from spectre.domain.decision import (
 )
 from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
+from tests.unit._band_stand_in import band_moves_a_figure  # noqa: F401 (a fixture, used by name)
 from tests.unit._i13 import i13_problems
 
 _NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
@@ -83,9 +88,10 @@ class TestCollectFirst:
         assert advice.cue == _cue()
         assert advice.sentence == (
             "Collect first: pull its element-set history, about 30 min, lands before decide-by at 15:00 UTC on 4 Nov. "
-            "The Threat range runs from MEDIUM to CRITICAL, across Threat HIGH, where your response changes, and "
-            "this could raise the Threat floor to HIGH."
+            "The Threat range runs from MEDIUM to CRITICAL, across the action line at Threat HIGH, and this could "
+            "raise the Threat floor to HIGH."
         )
+        assert advice.action_line == tu.ACTION_LINE_MEANS
 
     def test_the_same_range_with_decide_by_passed_is_act_on_the_ceiling(self) -> None:
         advice = _advice(decide_at=_NOW - timedelta(minutes=1))
@@ -93,7 +99,7 @@ class TestCollectFirst:
         assert advice.cue is None
         assert advice.sentence == (
             "Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from MEDIUM to CRITICAL, across "
-            "Threat HIGH, where your response changes, and decide-by has passed."
+            "the action line at Threat HIGH, and decide-by has passed."
         )
 
     def test_with_no_decide_by_no_collection_can_be_shown_to_land_in_time(self) -> None:
@@ -133,15 +139,15 @@ class TestCollectFirst:
         advice = _advice(floor=Band.HIGH)
         assert advice.advice is tu.Advice.ACT_ON_CEILING
         assert advice.sentence == (
-            "Act on the ceiling: treat it as Threat CRITICAL. The Threat floor is already HIGH, at or above Threat "
-            "HIGH, where your response changes, so no collection changes the decision."
+            "Act on the ceiling: treat it as Threat CRITICAL. The Threat floor is already HIGH, at or above the "
+            "action line at Threat HIGH, so no collection could take the range below it."
         )
 
     def test_a_ceiling_under_the_action_line_is_below_it(self) -> None:
         advice = _advice(floor=Band.MINIMAL, ceiling=Band.MEDIUM)
         assert advice.advice is tu.Advice.BELOW_ACTION_LINE
         assert advice.sentence == (
-            "Below the action line: the Threat ceiling is MEDIUM, under Threat HIGH, where your response changes."
+            "Below the action line: the Threat ceiling is MEDIUM, under the action line at Threat HIGH."
         )
 
     def test_the_action_line_is_the_operators_to_set(self) -> None:
@@ -157,7 +163,7 @@ class TestCollectFirst:
         assert advice.cue is None
         assert advice.sentence == (
             "Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from LOW to CRITICAL, across "
-            "Threat HIGH, where your response changes, and no collection SPECTRE can read could move it off that line."
+            "the action line at Threat HIGH, and no collection SPECTRE can read could move it off that line."
         )
 
     @pytest.mark.parametrize(("benign", "hostile"), [
@@ -194,7 +200,8 @@ class TestCollectFirst:
     {"floor": Band.HIGH}, {"floor": Band.LOW, "ceiling": Band.MEDIUM}, {"floor": Band.LOW, "cues": (_UNDECIDING,)},
 ])
 def test_every_advice_sentence_keeps_i13(kw: dict[str, Any]) -> None:
-    for part in _advice(**kw).sentence.split(". "):
+    advice = _advice(**kw)
+    for part in (*advice.sentence.split(". "), advice.action_line):
         assert i13_problems(part) == [], part
 
 
@@ -247,8 +254,12 @@ class TestThePictureBelongsToTheBoundRedTrack:
             _picture(floor=Band.CRITICAL, ceiling=Band.MEDIUM)
 
 
+@pytest.mark.usefixtures("band_moves_a_figure")
 class TestCollectFirstRows:
     """A collect-first row is listed beside the ranking, never scored in it.
+
+    The engine lists rows only when it collects first, which needs a cue whose outcomes change its recommended
+    response: the stand-in (tests/unit/_band_stand_in.py) lets the picture move a figure, so here they do.
 
     Nothing in SPECTRE tasks a sensor and collecting moves no figure until what it finds is in the sweep, so a row
     scored as a sensor retask would win on a custody credit and a cost and reversibility made up for it.
@@ -307,11 +318,14 @@ class TestCollectFirstRows:
     def test_with_no_picture_no_row_is_listed(self) -> None:
         assert evaluate_scenario(_scenario()).collection_rows == ()
 
+
+
+class TestThePictureMovesNoFigure:
     def test_figure_bases_stay_as_they_are(self) -> None:
-        """Every cell reads the same with the picture held and its collection listed."""
+        """Every cell reads the same with the picture held as with none: the engine's matrix reads no Threat band."""
         plain = evaluate_scenario(_scenario())
         collected = evaluate_scenario(_scenario(_picture()))
-        assert collected.collection_rows
+        assert collected.collection is not None
         assert collected.outcome_matrix == plain.outcome_matrix
         assert collected.basis_lines == plain.basis_lines
 
@@ -440,13 +454,16 @@ class TestThePicturesAgeBesideEveryFigureItFeeds:
     def test_the_age_is_in_words_rounded_down(self, age: timedelta, words: str) -> None:
         assert decision.picture_age_words(age) == words
 
+    @pytest.mark.usefixtures("band_moves_a_figure")
     def test_a_picture_hours_old_carries_its_age_beside_every_sentence_it_feeds(self) -> None:
         picture = _picture(assessed_at=_NOW - timedelta(hours=3, minutes=10))
         result = evaluate_scenario(_scenario(picture), SelectorStrategy.EXPECTED_VALUE)
         assert result.threat_lines[0] == f"Threat range for RED_X: from MEDIUM to CRITICAL ({self._OLD}, at 05:50 UTC on 4 Nov)."
         assert all(line.endswith(f"({self._OLD}).") for line in result.threat_lines[1:])
         assert result.collection is not None and result.collection.advice is tu.Advice.COLLECT_FIRST
-        assert result.collection.sentence.endswith(f"could raise the Threat floor to HIGH ({self._OLD}).")
+        assert result.collection.sentence.endswith(
+            f"could raise the Threat floor to HIGH. Under its benign outcome the engine recommends Watch (F2); under "
+            f"its hostile outcome, Evade (F1) ({self._OLD}).")
         assert [row.sentence.split(". ")[0] for row in result.collection_rows] == [
             f"{_RECORD}, 4 h: collection to narrow the threat range: the cue's tuned duration, a lookup ({self._OLD})",
         ]
@@ -466,8 +483,9 @@ class TestThePicturesAgeBesideEveryFigureItFeeds:
         assert result.collection is not None
         assert result.collection.sentence == (
             "Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from MEDIUM to CRITICAL, across "
-            "Threat HIGH, where your response changes, and decide-by has passed (from the sweep's picture assessed "
-            "2 d 1 h before this evaluation)."
+            "the action line at Threat HIGH, and decide-by has passed. No collection the picture holds can change the "
+            "recommended response: the outcome matrix reads no Threat band (from the sweep's picture assessed 2 d 1 h "
+            "before this evaluation)."
         )
         assert result.collection_rows == ()
 

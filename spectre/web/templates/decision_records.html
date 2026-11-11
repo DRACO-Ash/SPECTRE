@@ -5,7 +5,9 @@
    names whose each is) and current_user. Every field is the operator's text or the engine's, and autoescaped. Each
    figure says its basis: the one-turn matrix's pick, a tree's own turn-1 pick, which rules' picks the results showed
    and when expected value's probability is not earned. Each response marked not permitted is listed with its
-   reason (SPC-195), and a decision that chose one says so. No script and no handler attribute. #}
+   reason (SPC-195), and a decision that chose one says so. The recommendation's weight stability is shown as the
+   results said it, or that the record holds none, and on a record of more than one turn that the tree's picks are not
+   covered (SPC-205). No script and no handler attribute. #}
 {% block title %}SPECTRE: Decision records{% endblock %}
 
 {# The bar holds only the way back, so it fits a phone's width beside the logo; who is signed in, and Sign Out, sit
@@ -66,6 +68,10 @@
     <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-primary)">{{ r.used }}</p>
     {% endif %}
     <p class="record-primary" style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-primary)">{{ r.primary }}</p>
+    <p class="record-stability" style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">{{ r.stability }}</p>
+    {% if r.tree_not_covered %}
+    <p class="record-tree-not-covered" style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">{{ r.tree_not_covered }}</p>
+    {% endif %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--text-dim)">All three rules on the same matrix, {% if r.primary_recorded %}as the results showed them side by side{% else %}worked out for this record; the results showed {{ r.rule }}'s pick alone{% endif %}: {% for rule, pick in r.picks %}{% if loop.first %}{{ rule | capitalize }}{% else %}{{ rule }}{% endif %} picks {{ pick }}{% if not loop.last %}, {% else %}.{% endif %}{% endfor %}</p>
     {% if r.caveat %}
     <p style="margin:0.1rem 0 0; font-size:0.72rem; color:var(--gold)">{{ r.caveat }}</p>

@@ -186,6 +186,8 @@ async def _apply_migrations(conn: Any) -> None:
         # The evaluation's canonical inputs and their SHA-256 (SPC-193): none on a record written by 0.27.0.
         ("decision_records", "inputs", "TEXT"),
         ("decision_records", "inputs_sha256", "VARCHAR(64)"),
+        # The recommendation's weight stability as the results said it (SPC-205): none on a record written before.
+        ("decision_records", "weight_stability", "TEXT"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

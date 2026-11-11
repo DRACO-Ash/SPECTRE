@@ -2047,7 +2047,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/domain/threat_understanding.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.31.0",
+  "actualNote": "not measured: built by workflow agents (build interrupted by a container restart and resumed, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-205",
@@ -2059,7 +2063,11 @@
   "note": "Evaluation finding F-16 (High, §1b, §1h, L1, L3), evaluation/EVALUATION.md. Remediation: show the smallest single-weight change that flips the pick (exact, since the score is linear in the weights); swing-weight elicitation (SPC-151). Closing evidence: the stability line on screen matching P-16.",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.31.0",
+  "actualNote": "not measured: built by workflow agents (build interrupted by a container restart and resumed, three reviews, fix), so no honest per-item time exists"
  },
  {
   "ref": "SPC-206",
