@@ -7,6 +7,8 @@ burn, and 3.085 m/s retrograde in-track at the epoch reaches 20 km; plane_change
 
 from __future__ import annotations
 
+import dataclasses
+import math
 from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any
@@ -69,8 +71,18 @@ def scenario(
     rows: Sequence[AdversaryAction], responses: Sequence[FriendlyResponse], *, turns: int = 2,
     horizon_h: float = 6.0, bind: ReferenceCase | ScenarioBinding | None = COPLANAR_LEO,
 ) -> Scenario:
-    """A scenario bound on both sides to a reference case, or to the binding given, or unbound for None."""
+    """A scenario bound on both sides to a reference case, or to the binding given, or unbound for None.
+
+    Each row's P is set to its share of the rows' sum, so the rows' P sum to 1 and the engine adds no remainder row
+    (SPC-203): these cases test the tree's mechanics, and every share, so every expected-value pick and update, is the
+    one the rows gave before. A row whose P was never edited must hold the panel's default, and one carrying a NOTSO
+    suggestion the suggestion's P, so rows holding either are taken as given. The remainder's own tests build their
+    rows apart (tests/unit/test_decision_p_remainder.py).
+    """
     held = binding(bind) if isinstance(bind, ReferenceCase) else bind
+    total = math.fsum(row.probability for row in rows)
+    if total > 0.0 and all(row.probability_edited and row.accepted_prior is None for row in rows):
+        rows = [dataclasses.replace(row, probability=row.probability / total) for row in rows]
     return Scenario(
         name="Tree", epoch_utc=EPOCH, adversary_actions=list(rows), friendly_responses=list(responses),
         horizon_hours=horizon_h, binding=held, turns=turns,

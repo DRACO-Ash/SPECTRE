@@ -4,7 +4,8 @@
    basis kind in words and its place on the plan in words, so nothing rests on colour alone; long words wrap, so it
    reads at phone width. No handler attribute and no script. A branch whose own response is marked not permitted
    (SPC-195) is greyed, with "Not permitted:" and its reason in words beside its heading, and every branch below it
-   is greyed, saying it follows that response; no plan mark falls on any of them. #}
+   is greyed, saying it follows that response; no plan mark falls on any of them. A branch whose red move is the
+   remainder of P (SPC-203) says beside its heading that the move is the engine's remainder, not the operator's row. #}
 <section class="decision-tree" aria-labelledby="decision-tree-heading"
          style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem; overflow-wrap:anywhere">
   <h3 id="decision-tree-heading" style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 0.4rem">{{ tree.heading }}</h3>
@@ -40,7 +41,7 @@
     <li style="margin:0.15rem 0 0.15rem {{ '0' if node.turn == 1 else '0.6rem' }}">
       <details class="tree-node" data-turn="{{ node.turn }}" data-permitted="{{ 'no' if node.not_permitted else 'yes' }}" style="border-left:2px {{ 'dashed' if node.not_permitted else 'solid' }} var(--border); padding-left:0.4rem">
         <summary style="cursor:pointer; font-size:0.62rem; color:{{ 'var(--text-dim)' if node.not_permitted else 'var(--text-primary)' }}">
-          <strong>{{ node.heading }}</strong>{% if node.not_permitted %} <span class="not-permitted" style="font-style:italic; color:var(--text-dim)">{{ node.not_permitted }}</span>{% endif %}{% if node.on_plan %} <span class="tree-plan" style="color:var(--ops-blue); font-weight:700">&#9733; {{ node.plan }}</span>{% endif %}:
+          <strong>{{ node.heading }}</strong>{% if node.remainder is defined and node.remainder %} <span class="tree-remainder" style="font-style:italic; color:var(--text-dim)">{{ node.remainder }}</span>{% endif %}{% if node.not_permitted %} <span class="not-permitted" style="font-style:italic; color:var(--text-dim)">{{ node.not_permitted }}</span>{% endif %}{% if node.on_plan %} <span class="tree-plan" style="color:var(--ops-blue); font-weight:700">&#9733; {{ node.plan }}</span>{% endif %}:
           <span style="color:var(--text-dim)">{{ node.summary }}</span>
         </summary>
         <p class="tree-path" style="font-size:0.6rem; color:var(--text-dim); margin:0.15rem 0">{{ node.path }}</p>

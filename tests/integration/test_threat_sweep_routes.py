@@ -55,7 +55,7 @@ class TestManualTargets:
 
     @pytest.mark.parametrize(
         "case",
-        [("", _BLUE_GEO, "Target name is required"), ("X", "", "TLE is required"), ("X", "not a tle", "Invalid TLE")],
+        [("", _BLUE_GEO, "Target name is required"), ("X", "", "TLE is required"), ("X", "not a tle", "The element set for X was refused: it does not hold two element lines.")],
     )
     def test_bad_input_is_refused_with_a_reason(
         self, client: Any, auth_cookie: str, sweep_state: Any, case: tuple[str, str, str],
@@ -110,7 +110,10 @@ class TestSweep:
         resp = _post(client, auth_cookie, "sweep", {
             "red_sat": "RED-GEO", "tgt_group": "none", "manual_red_tle": "garbage",
         })
-        assert "Manual red TLE invalid" in resp.text
+        assert (
+            "The element set for the manual red track was refused: it does not hold two element lines. It was not "
+            "stored; the registered element set is used instead." in resp.text
+        )
         assert sweep_state.last_threat_assessment is not None
 
 

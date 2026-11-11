@@ -206,7 +206,8 @@ class TestTheResult:
         assert re.search(r"\d+\.\d km \(computed\)", text)
         assert re.search(r"Computed: \d[\d.,]* km at \d{4}-\d\d-\d\d \d\d:\d\d UTC( ± [^,]+)?, \d+(\.\d+)? h after the scenario epoch; SGP4, no burn\.", text)
         assert COMPUTED_CAVEAT in text
-        assert "Phase 3 · computed closest approach in 1 cells · sampled in 0 cells" in text
+        # The no-action row at the form's P 0.6 and the remainder of P, 0.4, a no-action row too (SPC-203).
+        assert "Phase 3 · computed closest approach in 2 cells · sampled in 0 cells" in text
         unbound = _flat(re.sub(r"<[^>]+>", "", _evaluate(client, auth_cookie, _form(adv_type=["no_action"])).text))
         assert "(computed)" not in unbound and "Phase 1" in unbound
 
@@ -271,31 +272,54 @@ class TestTheResult:
         red = _line(_binding_block(resp.text), "Red")
         assert re.search(r"Data mode SIMULATED <span[^>]*>SIMULATED</span>, training\.", red)
 
-    @pytest.mark.parametrize(("field", "shown"), [
-        ("A0001", "SATNO 100001."),
-        ("I0001", "SATNO unreadable."),
-    ])
-    def test_an_alpha5_catalogue_number_is_read_and_a_bad_letter_is_not(
-        self, client: Any, auth_cookie: str, held: Any, field: str, shown: str,
-    ) -> None:
-        _hold(held, red_tle=_alpha5(_tle(datetime.now(tz=UTC) - timedelta(hours=5), satno=50322), field))
+    def test_an_alpha5_catalogue_number_is_read(self, client: Any, auth_cookie: str, held: Any) -> None:
+        _hold(held, red_tle=_alpha5(_tle(datetime.now(tz=UTC) - timedelta(hours=5), satno=50322), "A0001"))
         resp = _evaluate(client, auth_cookie, _form(red_sat="RX"))
         assert resp.status_code == 200
         assert "error-msg" not in resp.text
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
-        assert f"Red: RX (RX), {shown}" in text
+        assert "Red: RX (RX), SATNO 100001." in text
         assert "None" not in text.replace("None of these", "")   # the decision choice (SPC-192) is words
 
-    def test_an_unreadable_epoch_renders(self, client: Any, auth_cookie: str, held: Any) -> None:
+    def test_a_bad_letter_is_refused_by_the_acceptance_check(self, client: Any, auth_cookie: str, held: Any) -> None:
+        """I is no Alpha-5 letter, so the catalogue number does not read and the set is not bound (SPC-201)."""
+        _hold(held, red_tle=_alpha5(_tle(datetime.now(tz=UTC) - timedelta(hours=5), satno=50322), "I0001"))
+        resp = _evaluate(client, auth_cookie, _form(red_sat="RX"))
+        assert resp.status_code == 200
+        assert (
+            "The element set for red track RX was refused: the catalogue number on line 1 cannot be read. Nothing "
+            "was bound; add a sound element set for it." in resp.text
+        )
+
+    def test_an_unreadable_epoch_is_refused_by_the_acceptance_check(
+        self, client: Any, auth_cookie: str, held: Any,
+    ) -> None:
+        """A held set whose epoch does not read is never bound (SPC-201); the result's "Epoch unreadable" line is
+        held below, for a binding built in code."""
         line1, line2 = _tle(datetime.now(tz=UTC)).split("\n")
         _hold(held, red_tle=f"{line1[:20]}000{line1[23:]}\n{line2}")
         resp = _evaluate(client, auth_cookie, _form(red_sat="RX"))
         assert resp.status_code == 200
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
+        assert "the epoch cannot be read. Nothing was bound; add a sound element set for it." in text
+        assert "Evaluation error" not in text
+
+    def test_a_binding_built_in_code_still_renders_what_it_cannot_read(self) -> None:
+        """The result never reads more into a set than it holds, however it was bound: an unreadable number and
+        epoch are said in words, as before the acceptance check (SPC-201) kept such sets from the panel."""
+        from spectre.domain.decision import ScenarioBinding, evaluate_scenario
+        from spectre.domain.models import RedTrack
+        from spectre.web.decision_binding import bound_elset
+        from tests.unit.test_decision_figure_basis import _render
+        from tests.unit.test_decision_sampled import _scenario
+
+        line1, line2 = _alpha5(_tle(datetime.now(tz=UTC)), "I0001").split("\n")
+        unread = f"{line1[:20]}000{line1[23:]}\n{line2}"
+        binding = ScenarioBinding(red=bound_elset("red", RedTrack(name="RX", tle=unread), datetime.now(tz=UTC)))
+        text = _flat(re.sub(r"<[^>]+>", "", _render(evaluate_scenario(_scenario(binding=binding)))))
+        assert "Red: RX (RX), SATNO unreadable." in text
         assert "Epoch unreadable" in text
         assert "Its epoch cannot be read, so its age is unknown; read it as out of date." in text
-        assert "None" not in text.replace("None of these", "")   # the decision choice (SPC-192) is words
-        assert "Evaluation error" not in text
 
     def test_a_vanished_object_is_refused_inline(self, client: Any, auth_cookie: str, held: Any) -> None:
         _hold(held)

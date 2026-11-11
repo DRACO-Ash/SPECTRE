@@ -31,7 +31,7 @@ from spectre.web.decision_job import server_starting, server_stopping
 from spectre.web.format_units import format_m_s, format_tof_label
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
-from spectre.web.planning_state import set_default_hrr_objects, set_default_hrr_tles
+from spectre.web.planning_state import set_default_elset_refusals, set_default_hrr_objects, set_default_hrr_tles
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
@@ -43,7 +43,7 @@ from spectre.web.routes.plan import router as plan_router
 from spectre.web.routes.pol import router as pol_router
 from spectre.web.routes.threat import router as threat_router
 from spectre.web.routes.training import router as training_router
-from spectre.web.routes.udl import _parse_created_at, parse_hrr_notification
+from spectre.web.routes.udl import _parse_created_at, elset_refusals, parse_hrr_notification
 from spectre.web.routes.udl import router as udl_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -151,10 +151,15 @@ def _load_hrr_from_disk() -> None:
 
         # Element sets, where the list carried them. A real JCO notification
         # does not, so this is empty for an operator-supplied file and the
-        # sweep still needs a UDL fetch, exactly as before.
-        tles = {o["satno"]: o["tle"] for o in objects if o.get("tle")}
-        modes = {o["satno"]: o.get("tle_data_mode", "REAL") for o in objects if o.get("tle")}
+        # sweep still needs a UDL fetch, exactly as before. A set the
+        # acceptance check refused was not carried by the parser, and the log
+        # names it and what failed; no operator is signed in yet, so each new
+        # session's run log says it too (SPC-201).
+        carried = [o for o in objects if o.get("tle")]
+        tles = {o["satno"]: o["tle"] for o in carried}
+        modes = {o["satno"]: o.get("tle_data_mode", "REAL") for o in carried}
         set_default_hrr_tles(tles, modes)
+        set_default_elset_refusals(elset_refusals(objects))
 
         logger.info(
             "HRR pre-load: %d Blue + %d Red = %d satellites from %s (%s)",

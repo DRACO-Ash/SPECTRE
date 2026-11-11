@@ -304,10 +304,15 @@ class TestThePrimaryRuleOnTheRecord:
         )
 
     def test_with_every_row_at_p_zero_expected_value_holds_no_pick(self) -> None:
+        """A record 0.29.0 wrote with every row at P 0 holds no expected-value pick. This code never writes one: the
+        remainder of P carries the weight (SPC-203), and a result under the 0.29.0 rule is never stored again. So the
+        record is written here and its expected-value columns set as 0.29.0 set them; the page reads only those."""
         from tests.unit.test_decision_rule_comparison import _ONE_WAY, _scored
 
-        row = new_record(_scored(_ONE_WAY, SelectorStrategy.MINIMAX, p=0.0), Operator(7, "alice"), _EPOCH,
-                         primary=SelectorStrategy.EXPECTED_VALUE)
+        scored = _scored(_ONE_WAY, SelectorStrategy.MINIMAX)
+        row = new_record(scored, Operator(7, "alice"), _EPOCH, primary=SelectorStrategy.EXPECTED_VALUE)
+        assert row.expected_value_id
+        row.expected_value_id, row.expected_value_name = "", ""
         row.id = 4
         assert (row.expected_value_id, row.expected_value_name) == ("", "")
         shown = listed(row, Operator(7, "alice"))

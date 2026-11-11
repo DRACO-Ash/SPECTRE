@@ -60,8 +60,9 @@ def _bases(**kinds: Basis) -> OutcomeBases:
 
 
 def _scenario(n_friendly: int = 2) -> Scenario:
+    # P 1: the one action listed is certain, so the engine adds no remainder row (SPC-203); these tests count cells.
     adversary = [AdversaryAction(id="A1", name="Approach", action_type=ActionType.MANOEUVRE,
-                                 probability=0.6, confidence=0.8)]
+                                 probability=1.0, confidence=0.8)]
     friendly = [
         FriendlyResponse(id=f"F{j}", name=f"F{j}", action_type=ActionType.MANOEUVRE, cost=0.3,
                          reversibility=0.5, time_to_execute_hours=6.0)

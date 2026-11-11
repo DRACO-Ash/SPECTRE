@@ -5,7 +5,9 @@ three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degrad
 lost (SPC-179) and the record of whether each P was edited (SPC-183); for the score scales of SPC-191, which are
 Claude's design choices, not rulings; for the decision record of SPC-192; and for every rule's pick side by side
 with a primary rule (SPC-194) and replay from the stored record (SPC-193); for responses the operator marks not
-permitted (SPC-195); and for the judgement basis, the lookup register and the code version on the results (SPC-196).
+permitted (SPC-195); for the judgement basis, the lookup register and the code version on the results (SPC-196);
+and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); and for what P means, a
+probability over mutually exclusive actions with the remainder weighed (SPC-203).
 The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
 why.*
 
@@ -174,13 +176,16 @@ and the code version was never shown. Gate G5 was rated Red; that rating stands 
   lookups only where nothing is computed or sampled (SPC-125): custody before it is read, our delta-V where no burn is
   sized, and a refused row's closest approach. Each is marked lookup.
 ● **Bound** (SPC-100): a scenario may be bound to one held red track and one held blue asset. The result names
-  them, shows each element set's epoch and age at evaluation against its regime's limit (72 h for GEO and deep space,
-  24 h otherwise) and puts both element sets in its provenance. The lookup model refuses a bound scenario, so no bound
+  them, shows each element set's epoch and age at evaluation against its regime's limit (72 h for GEO and a perigee
+  beyond GEO, 24 h otherwise, HEO and Molniya-class included) and puts both element sets in its provenance. The lookup model refuses a bound scenario, so no bound
   figure rests on a lookup constant where a computed or sampled figure exists.
-● **P and Conf** are the operator's. P weights expected value. Conf records how sure the intelligence behind P is
-  and moves no figure (SPC-161). Neither is ever filled in unasked.
+● **P and Conf** are the operator's. P is the chance of the row's action, the rows mutually exclusive, so their P
+  sum to at most 1, and the rest is weighed as a row of the engine's own, no adversary action (SPC-203, set out
+  below). P weights expected value. Conf records how sure the intelligence behind P is and moves no figure
+  (SPC-161). Neither is ever filled in unasked.
 ● **Three rules pick the response**: minimax (least worst case, the default and the cautious rule), expected value
-  (least probability-weighted score) and minimin (least best case, the optimistic rule, not a robust one).
+  (least probability-weighted score) and minimin (least best case, the optimistic rule, not a robust one). Each
+  reads the remainder row as it reads the operator's rows.
 
 Key files: `spectre/domain/decision.py` (the model and `evaluate_scenario`), `spectre/web/routes/decision.py` (the
 panel, binding, evaluation and job routes), `spectre/web/decision_binding.py`, `spectre/web/decision_custody.py`,
@@ -232,7 +237,9 @@ tests/unit/test_decision_reference_cases.py.
 ● **Computed closest approach** (SPC-120): with both sides bound, a row whose action does not move red (no action,
   a sensor retask, a posture change) gets the pair's closest approach with no burn, propagated by SGP4 from both
   element sets, searched every 60 s with each local minimum refined to 0.01 s. A manoeuvre row with no hypothesis is
-  refused, saying to add one: where red goes if it does not move is not the outcome of a manoeuvre.
+  refused, saying to add one: where red goes if it does not move is not the outcome of a manoeuvre. Since SPC-200 the
+  search holds the RK45 path's re-entry floor, 100 km: an object below it at any instant searched has decayed, and
+  every computed cell is refused, saying so.
 ● **One propagator per figure**: computed is SGP4 on both objects, sampled is RK45 on both. When a matrix holds
   both, the result states the measured gap between the two propagators.
 ● **The span searched** (SPC-118) runs from the scenario epoch to the earlier of the horizon's end and the moment
@@ -378,7 +385,9 @@ Decisions taken building it, Claude's and not rulings:
 ● P carries an exact 95 in 100 Poisson interval on the events counted, its edges rounded outward. Under expected
   value the result says whether the pick holds across each row's interval, naming the P where it would change, and
   with two or more such rows across every corner of their joint range. Minimax and minimin read no probability and
-  show no interval.
+  show no interval. Since SPC-203 the remainder of P takes up each move, a P is checked only up to where the rows'
+  P reach 1, and the joint range is the box of the intervals cut where they would sum above 1; with the rows' P at
+  exactly 1 no remainder row is evaluated, so nothing is checked and the line says so.
 ● The results show a NOTSO timeline per applied suggestion: covered periods, gaps and each counted notice, readable
   without colour.
 
@@ -582,10 +591,12 @@ repeated.
   When they do not, a line says "The rules disagree:" and names each pick with the rules that make it, as in
   "minimax and expected value pick Avoid (F1); minimin picks Hold (F0)". Under expected value, when its probability
   is not earned, the existing guidance stays beside its pick, whichever rule ran; it says what minimax picks, not
-  what it recommends, since the recommendation is the primary rule's. With every row at P 0, expected value has no
-  weight to pick on: it has no pick, on the matrix as on the tree, the page says so, and it is never counted as
-  agreeing with another rule. (`find_robust_response` alone would name the first response, since SPC-195 the first
-  not marked not permitted, a tie it has not earned.)
+  what it recommends, since the recommendation is the primary rule's. Since SPC-203 a row at P 0 leaves its weight
+  to the remainder of P, so expected value always has weight to pick on. Only a record 0.28.0 or 0.29.0 wrote,
+  replayed under the rule it was evaluated by, can hold every row at P 0 with nothing to weigh: expected value then
+  has no pick, on the matrix as on the tree, the replay says so, and it is never counted as agreeing with another
+  rule. `find_robust_response` itself gives no pick there (SPC-200, evaluation F-31), so nothing is starred
+  under expected value either.
 ● **A tree's turn-1 pick under each rule.** Where a game tree was built, each rule's turn-1 pick is
   `tree_selectors.select` over the tree already built, turns built in full only; nothing is sampled again. A second
   line says whether the rules agree on turn 1, flagged in the same colour as a disagreement on the matrix. It names
@@ -651,7 +662,8 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
   the one running, it says the comparison is across versions, and the verdict says so too. When the evaluation recorded ran out of its
   300 s budget, a sampled row refused, a burn left unsized or a tree built in part, the stored inputs say so; the
   replay runs in full with no budget, so it says before comparing that what the budget left out may differ, and the
-  verdict says so again if the replay differs. A record with no stored inputs is said to hold none, with no version
+  verdict says so again if the replay differs. A record written by 0.28.0 or 0.29.0 is replayed under the rule it was
+  evaluated by, and the command says so first too (SPC-203, set out below). A record with no stored inputs is said to hold none, with no version
   line. It exits 0 when the replay matches, 1 when it differs, 2 for a usage error and 3 when there is nothing to
   replay, or no database at the configured SQLite path.
 ● **It writes nothing.** A SQLite database is opened read-only, and one that is not at the configured path is not
@@ -661,7 +673,8 @@ exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evalua
   24 and 28 October 2026 that holding cached data is acceptable. docs/SECURITY.md lists it, and the owner's open
   retention ruling (SPC-228) now covers the stored inputs too.
 ● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, when built; since SPC-195 the
-  document is written as version 2, and version 1 is still read (see the next section).
+  document is written as version 2, and since SPC-203 as version 3, versions 1 and 2 still read (see the next two
+  sections).
   Replay runs with no wall-time budget, so an evaluation the 300 s budget cut short, a sampled row refused or a tree
   built in part, is replayed in full and the comparison may then differ; the stored inputs record whether the budget
   ran out, so the report says why, and names where. The code version is stored in the document, so it is covered by
@@ -711,8 +724,9 @@ response by response, with a reason in words.
   vetoed response as their decision, but only with a rationale; the decision select labels it as marked not
   permitted, and the decision, on the results and on the records page, says it was marked not permitted, with its
   reason.
-● **Stored inputs, version 2** (Claude's choice). The stored inputs now write version 2 of their document, which
-  holds each response's veto and reason. A record written by 0.28.0 holds version 1, with no veto: it is still read,
+● **Stored inputs, version 2** (Claude's choice). The stored inputs wrote version 2 of their document, which
+  holds each response's veto and reason, and version 3 since SPC-203, which keeps it (set out in the next section).
+  A record written by 0.28.0 holds version 1, with no veto: it is still read,
   every response permitted, and replays as before. A version 1 document holding a veto is refused, naming where.
   The scenario's provenance hash leaves out the veto of a response that is permitted, so a scenario with nothing
   vetoed hashes exactly as it did in 0.28.0, and such a record's input hashes still match its replay; a veto changes
@@ -721,6 +735,144 @@ response by response, with a reason in words.
 ● **Not built.** Scenario-level constraints, a constraint applied across responses or tied to a rule set, wait on
   the constraint libraries above. The veto weighs nothing: it is not a penalty in the score, and no score or weight
   changes with it.
+
+## Element-set integrity and the operating envelope (SPC-201, SPC-200)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed in the
+envelope document.** Evaluation finding F-25 (Critical, gate G9), with F-34, found that element sets from UDL reached
+the engine with no checksum or range check: probe P-14 changed one digit of an inclination, 97.4 to 98.4 degrees, with
+the old checksum, and the computed miss moved from 10.4 to 13.4 km with no flag; the background refresh replaced a
+good held set with it; an inclination of 597.4 degrees was accepted. Finding F-09 (Critical, gate G10), with F-30 and
+F-31, found no stated operating design domain, and decayed objects passing silently; F-29 found deep-space orbits
+evaluated with no regime statement, which this closes in part, by a flag, leaving the limits sourced for them to
+SPC-215. Gates G9 and G10 were rated Red; those ratings stand until the evaluation is repeated.
+
+● **The operating envelope is written down** in docs/decision-engine-envelope.md: the regimes, element-set ages,
+  horizons, scenario sizes, turns and inputs the engine is fit for, each with where in the code it is enforced and
+  what lies outside it. `tests/unit/test_decision_engine_envelope.py` holds every row to the code.
+● **One acceptance check for an element set** (`spectre/astro/elset_check.py`): both line numbers, lengths,
+  checksums and plain ASCII characters; one readable catalogue number on both lines, and the number asked for when a
+  set is fetched for one; an epoch that reads as a day of its year; every field the check reads written in the
+  format's own characters, so a corruption the checksum cannot see, such as a 0 changed to e, is refused; the
+  inclination, eccentricity, mean motion and the three angles inside their ranges; and an orbit SGP4 can start from.
+  B* and the two derivatives of the mean motion are checked as readable, not against a range, since none is
+  sourced. Every path an element set enters by runs it, the Pattern of Life history behind custody included, and the
+  binder runs it again. A refused set is not stored and never replaces a held one; the refusal is logged without the
+  set's text and shown in a sentence naming the object and what failed, on the page or, where the path has none, in
+  the run log. The bundled watchlist passes in full.
+● **Checked at evaluation entry.** Each bound set on SDP4, SGP4's deep-space branch, is flagged under "Outside the
+  operating envelope" on the result, not refused: for a GEO set, its staleness limit and element-set error model are
+  the GEO rules of thumb, tuned rather than sourced; for any other orbit on SDP4 they are rules of thumb set for LEO
+  and GEO, not validated for it. Limits sourced for them are SPC-215. An object below the re-entry floor at an
+  instant the SGP4 search reads, or that SGP4 itself reports decayed, is refused there and said once on the result
+  (F-30). All 5 weights at 0 are
+  refused beside the form, and expected value with every row at P 0 gives no pick and says so (F-31); since SPC-203 the remainder of P
+  carries the weight the rows leave, so that arises only replaying a record 0.28.0 or 0.29.0 wrote.
+
+## What P means: the remainder of P (SPC-203)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-12 (High) found that expected value divided each P by the sum over the
+rows entered, with no residual row and no check that P sums to 1, so a single row at P 0.1 was evaluated exactly as
+at P 1.0 (probe P-03b): a 1 in 10 manoeuvre was weighed as certain, and the chance that none of the listed actions
+happens was never weighed. Gates were not reassessed; their ratings stand until the evaluation is repeated.
+
+● **P is a probability over mutually exclusive actions** (the brief's choice). The rows' P must sum to at most 1,
+  with a tolerance of 1e-9 for rounding (`P_SUM_TOLERANCE`, in docs/lookup-register.md). A sum above it is refused
+  at the panel, before anything runs, and by the Scenario itself, with the same sentence: "Your rows' P sum to 1.5,
+  above 1. P is the chance of each adversary action, and the rows must be mutually exclusive, so their P sum to at
+  most 1; the engine weighs the rest as no adversary action. Lower the P of one or more rows." The sum is said to
+  the ninth decimal at most, so floating-point noise never reaches the page.
+● **The remainder row** (the brief's choice). When the sum is below 1, the engine adds one row of its own, last: "No
+  adversary action (remainder of P)", a no-action row at 1 less the sum. It is evaluated as any no-action row, a
+  lookup unbound and computed where both sides are bound, and every rule reads it: minimax, minimin and expected
+  value, the three picks side by side, the game tree, where it is one of red's moves in every turn, the update after
+  turn 1, the NOTSO interval lines and the record. In the matrix and the rankings it is named in full and labelled
+  "the engine's remainder, not your row"; its source line gives its P and the sum it rests on; on the tree each of
+  its branches says beside its heading "(red's move here is the engine's remainder, not your row)"; and the banner
+  counts the operator's actions "and the remainder of P". At a sum of exactly 1, within the tolerance, nothing is
+  added.
+● **The tree counts the remainder as a red move, and says so** (Claude's choice). A tree weighs the remainder only
+  if it branches on it, so it is one of red's moves in the branch count, the cost, the largest depth that fits and
+  whether a run is needed. An operator who listed 3 rows at P 0.3 has 4 red moves: against 3 responses that is 1,884
+  branches over 3 turns, past the 1,000 cap, where 3 rows summing to 1 make 819 and fit. Every size or cost refusal,
+  at the panel and before a run, and the built tree's lines, then add "Red's moves count the remainder of P, the
+  engine's no-action row, beside your 3 rows: rows whose P sum to 1 leave no remainder, and one red move fewer."
+● **Beside an operator's own no-action row the remainder is still its own row** (the brief's choice, and why). The
+  operator's no-action row is one of the actions they listed, at the P they gave it, a judgement about that action;
+  the remainder is the chance that none of the listed actions happens, which the operator did not state. Folding it
+  into their row would change their P unasked and lose which part is theirs. The two rows' cells are alike, and the
+  remainder's source line says why it stands apart.
+● **The share beside each P** (the brief's choice). Each row shows "Share=" beside its P: the share of expected value
+  it takes, which is its P, marked with its P's basis. The share is written exactly as the P beside it is (Claude's
+  choice), so the two always read alike: the operator's P as entered, "P=0.0 · Share=0.0", and the remainder's, 1
+  less their sum, to the ninth decimal at most for both, so floating-point noise never reaches the page. The
+  remainder's P is marked with the weakest basis of the operator's P it rests on, and it shows "Conf: none".
+● **The panel's default stays 0.5** (the brief's choice). It is already marked as the panel's default until edited
+  (SPC-183). Three new rows sum to 1.5 and are refused until the operator sets P; the guide says so.
+● **NOTSO suggestions** (the brief's choice). A ticked suggestion replaces its row's P, so the route applies the
+  suggestions before it builds the scenario and sums the P as they will be evaluated; a sum above 1 they make is
+  refused naming the rows that carry them, as in "With the NOTSO suggestion applied to row 1, your rows' P sum to
+  1.02, above 1." Typed P that a suggestion replaces are not summed.
+● **What moved.** Re-derived from each matrix's own cells, not pasted:
+  ■ Probe P-03b inverted: one manoeuvre row against Hold and Avoid (cost 0.1). At P 1.0 expected value picks Avoid;
+    at P 0.1 the remainder's 0.9 of no adversary action, against which Hold scores least, takes it to Hold, and
+    minimin moves from Avoid to Hold for the same reason. Before, both P gave Avoid under every rule.
+  ■ The integration form's single manoeuvre row at P 0.6 against Hold and Avoid (the veto tests' two responses):
+    minimin moves from Avoid (F2) to Hold (F1), its best case now the remainder's 0.4 of no adversary action;
+    minimax and expected value stay on Avoid. The veto tests now post P 1, so every rule still picks one response.
+  ■ Every row at P 0 through the panel: expected value had no pick; it now picks the best response against no
+    adversary action, Hold (F1) on the form.
+  ■ A record of 0.29.0 at P 0.1 (`tests/unit/_decision_records_0_29_0.json`): expected value picked Avoid then and
+    would pick Hold now; the replay reproduces Avoid, as the operator was shown.
+  ■ Fixtures whose P summed above 1 were set to each row's old share of the sum, so every pinned expected-value pick
+    and score holds. Three fixtures took new P to sum to at most 1, and no test pinned their expected-value pick:
+    the judgement fixture (0.6 to 0.4 beside an untouched 0.5) moves from Avoid (R2) to Hold (R1), and the
+    understanding fixture at its default P (its other row 0.7 to 0.5) from Watch (F2) to Evade (F1); the stored
+    inputs' lookup fixture keeps its picks.
+  ■ No reference case's pick changed: its one no-action row at P 0.5 now has the remainder row beside it, with the
+    same cells, and Hold is still the pick under all three rules at both window starts.
+● **Stored inputs, version 3** (the brief's choice of what, Claude's of how). The remainder row is derived, never
+  stored as a row: version 3 adds the scenario's probability rule and, beside the rows, the remainder's id, name and
+  P, or null, and its score row after theirs. The reader refuses a remainder that is not the one the rows leave, a
+  version 3 document whose P sum above 1, and a version 3 document under any rule but the remainder rule: a result
+  under the 0.29.0 rule is only ever a replay of an older record, a replay writes no record, and the writer refuses
+  to store one. So only a version 1 or 2 document reads as evaluated before SPC-203, and only its replay says so.
+  The reader names a document's schema, then its version, before checking its fields, so a document of a version this
+  code does not read is refused for that version, not for a field this version would hold. The scenario's provenance
+  hash leaves out the remainder row and each
+  row's flag, and leaves out the rule for a record of 0.28.0 or 0.29.0, so those records' input hashes still match.
+● **Records of 0.28.0 and 0.29.0 replay as they were evaluated** (the brief's choice of what, Claude's of how).
+  Versions 1 and 2 hold no probability rule, and read as the rule those releases evaluated by, `ProbabilityRule.SHARES`:
+  each row weighed by its P over the rows' sum, with no remainder, P summing above 1 included. The replay therefore
+  reproduces every pick and score exactly, and says first that the record was evaluated under that rule and that
+  this code evaluates a new scenario with the remainder.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ A Scenario field, `probability_rule`, carries the rule, so one engine evaluates both, rather than a second code
+    path for replay; a scenario built in code or on the panel takes the remainder rule.
+  ■ The remainder row is added at evaluation (`with_remainder`), not held by the Scenario the operator built, so the
+    record stores the operator's rows and the result shows the rows the engine weighed.
+  ■ The tolerance works both ways: a sum within 1e-9 below 1 adds no remainder row, as one within 1e-9 above it is
+    read as 1. The sum is added exactly (`math.fsum`), so 0.1, 0.2 and 0.7 sum to 1.
+  ■ The remainder row has no Conf, and its P is marked with the weakest basis of the operator's P, since it is 1 less
+    their sum; it is not listed among the judgement inputs, since nothing on the panel sets it.
+  ■ The NOTSO interval checks hold the other rows at their P with the remainder taking up the move; a P is checked
+    no higher than the rows can sum to 1, and rows moved together over the corners of their box cut where the sum
+    would pass 1 (the box's corners within the sum and the points on its edges where the sum reaches 1). The update
+    after turn 1 reads each share's range over the same corners.
+  ■ With the rows' P at exactly 1 no remainder row is evaluated, so no NOTSO interval is checked, alone or together:
+    a higher P is refused, and a lower one leaves a remainder of P whose cells this evaluation does not hold. 0.29.0
+    checked such an interval by rescaling the rows' shares; this code does not, and the line says why and that with
+    the rows' P summing below 1 the remainder row is evaluated and the interval checked. Evaluating a remainder row
+    at P 0 for the check alone would add a row the brief rules out at a sum of 1, and its cells to the record. The
+    update then reads its shares at the P entered.
+  ■ The tree counts the remainder as a red move in its size and cost, and every refusal of size or cost says so,
+    rather than leave it out of the count and build a tree that does not weigh it.
+  ■ On the tree, the label sits beside a remainder branch's heading, not inside it, so the heading keeps its one
+    form, "Turn 1 of 2: red No adversary action (remainder of P), our Hold".
+  ■ Version 3 holds the remainder rule alone, so a version 3 record can never replay as one evaluated before
+    SPC-203; the rule field is kept so the document says the rule it was evaluated by.
+  ■ The sum is checked at Evaluate, not as each field changes, as every other panel number is.
 
 ## What remains out of scope
 
@@ -750,3 +902,5 @@ response by response, with a reason in words.
 | 5 | A NOTSO suggestion for P and Conf, its interval, and its timeline | Built |
 | 4 | A game tree of up to three turns, its picks, the update after turn 1, and its view | Built |
 | SPC-195 | A response marked not permitted, shown with its reason and never picked | Built |
+| SPC-200, SPC-201 | The operating envelope written down and checked, and one acceptance check for every element set | Built |
+| SPC-203 | P summing to at most 1, the remainder weighed as no adversary action, each row's share shown | Built |

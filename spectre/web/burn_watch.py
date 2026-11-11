@@ -105,7 +105,7 @@ def still_wanted(state: SessionState, key: SessionKey, watch: BurnWatch) -> str:
 
 async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
     """The epoch of the newest element set UDL holds for the object; raises when it cannot say."""
-    from spectre.web.elsets import _epoch_of
+    from spectre.web.elsets import RefusedElset, _epoch_of
     from spectre.web.routes.udl import fetch_tle_for_satno
 
     if not state.udl_username or not state.udl_password:
@@ -117,6 +117,9 @@ async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
     )
     if newest is None:
         raise LookupError("UDL returned no element set")
+    if isinstance(newest, RefusedElset):
+        # A set the acceptance check refuses says nothing trustworthy, its epoch included (SPC-201).
+        raise _StatedError(newest.sentence(f"{watch.red_name} ({watch.red_satno})", outcome=_EPOCH_NOT_READ))
     return _epoch_of(newest[0])
 
 
@@ -127,6 +130,10 @@ def _first_line(change: WarningChange) -> str:
 def _burn_when(burns: list[Any]) -> str:
     """When the latest of the burns happened, as the operator reads it: "at X", or "between X and Y" if undated."""
     return when_burned(max(burns, key=lambda m: m.burn_window[0]))
+
+
+#: What a refused set leaves the watch's check unable to say (SPC-201).
+_EPOCH_NOT_READ = "Its epoch was not read, so this check could not say whether a newer set has arrived."
 
 
 class _StatedError(Exception):

@@ -153,8 +153,9 @@ class TestThePosteriorAfterTurnOne:
         burn, _ = posteriors(scenario, likelihood(scenario, _TURN_S))
         assert "row 1, Evasive, 0.66 of the weight, from your P;" in burn.line
         assert "row 2, Evasive, 0.33 of the weight" in burn.line
+        # The still row at 0.3, so the rows' P sum to 1 beside the untouched 0.5 (SPC-203); it gives no burn.
         untouched = _scenario([dataclasses.replace(_evasive(), probability_edited=False), _evasive(2.0, "A2", 0.2),
-                               cases.still()])
+                               dataclasses.replace(cases.still(), probability=0.3)])
         burn, _ = posteriors(untouched, likelihood(untouched, _TURN_S))
         assert "row 1, Evasive, 0.71 of the weight, from the default P of 0.5, untouched;" in burn.line
         # SPC-183: a 0.5 the operator edited to is their own P, not the untouched default.
@@ -185,7 +186,9 @@ class TestThePosteriorAfterTurnOne:
         least with row 1 at its low edge and most at its high edge, and row 2's the other way round."""
         prior = _prior(0.13)
         rows = [dataclasses.replace(_evasive(p=0.13), accepted_prior=prior), _evasive(2.0, "A2", 0.1), cases.still()]
-        scenario = _scenario(rows)
+        # The rows' P sum to 0.73, so the engine weighs 0.27 as no adversary action, a row that gives no burn, and
+        # row 1's interval stays inside the 0.4 the other rows leave it (SPC-203).
+        scenario = decision.with_remainder(_scenario(rows))
         burn, _ = posteriors(scenario, likelihood(scenario, _TURN_S))
         interval = prior.interval
         lo, hi = interval.checked_low, interval.high
@@ -207,7 +210,7 @@ class TestThePosteriorAfterTurnOne:
         corner and the row at P 0 none."""
         prior = _prior(0.04, events=3)
         rows = [dataclasses.replace(_evasive(p=0.04), accepted_prior=prior), _evasive(2.0, "A2", 0.0), cases.still()]
-        scenario = _scenario(rows)
+        scenario = decision.with_remainder(_scenario(rows))
         burn, _ = posteriors(scenario, likelihood(scenario, _TURN_S))
         assert burn.shares[:2] == (1.0, 0.0)
         assert burn.ranges[:2] == ((1.0, 1.0), (0.0, 0.0))

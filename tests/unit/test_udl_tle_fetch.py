@@ -74,10 +74,15 @@ class TestParseTleEpoch:
 # FastAPI's test client so we stay purely unit-level.
 
 
+def _with_checksum(body: str) -> str:
+    """*body*, 68 columns, with its modulo-10 checksum in column 69."""
+    return body + str(sum(int(c) if c.isdigit() else int(c == "-") for c in body) % 10)
+
+
 def _make_udl_record(satno: int, epoch_str: str = "26025.79842163") -> dict:
-    """Build a minimal UDL elset record dict."""
-    line1 = f"1 {satno:05d}U 12075A   {epoch_str}  .00000000  00000 0  10000-2 0  9999 0"
-    line2 = f"2 {satno:05d}   0.0678 359.1324 0003806 313.0884 153.0596 1.00261563 00000 6"
+    """Build a minimal UDL elset record dict: a sound element set, as the acceptance check requires (SPC-201)."""
+    line1 = _with_checksum(f"1 {satno:05d}U 12075A   {epoch_str}  .00000000  00000-0  10000-2 0  999")
+    line2 = _with_checksum(f"2 {satno:05d}   0.0678 359.1324 0003806 313.0884 153.0596  1.00261563    0")
     return {
         "objectName": f"SAT-{satno}",
         "line1": line1,

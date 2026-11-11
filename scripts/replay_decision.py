@@ -6,8 +6,9 @@ SPECTRE_SQLITE_DIR, as the server reads it), rebuilds the scenario from the reco
 again under the stored rule, and prints whether the recommendation, the three rules' picks, a tree's turn-1 pick and
 every composite score match the record exactly, with the record's own rule, code version and input hash columns set
 against its hashed inputs. Before replaying it says which code version wrote the hashed inputs and, when it was
-another, that the comparison is across versions, and whether the evaluation recorded ran out of its time budget. It
-writes nothing: a SQLite database is opened read-only, and one that is not there is not created.
+another, that the comparison is across versions; for a record 0.28.0 or 0.29.0 wrote, that it is replayed under the
+rule it was evaluated by, each row weighed by its P over the rows' sum with no remainder of P (SPC-203); and whether
+the evaluation recorded ran out of its time budget. It writes nothing: a SQLite database is opened read-only, and one that is not there is not created.
 
     python scripts/replay_decision.py RECORD_ID
 

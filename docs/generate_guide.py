@@ -1325,10 +1325,30 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_heading_h2(doc, "Bind the Scenario to Real Objects")
     _add_body(doc,
         "Under 'Bind to real objects', choose a held red track and a held blue asset. The results then name them, "
-        "show each element set's epoch and its age against its limit (72 hours at GEO and in deep space, 24 hours "
-        "otherwise), and record both in the result's provenance. Unbound, every figure is a lookup. Bound, the "
+        "show each element set's epoch and its age against its limit (72 hours for GEO or a perigee beyond GEO, 24 "
+        "hours otherwise, Molniya-class and other HEO orbits included), and record both in the result's provenance. Unbound, every figure is a lookup. Bound, the "
         "engine computes or samples what it can, and never falls back on a lookup constant where a computed or "
         "sampled figure exists."
+    )
+    _add_body(doc,
+        "Every element set passes one acceptance check before SPECTRE holds it, whichever way it arrives: from UDL, "
+        "pasted by you, in a Pattern of Life history, from the bundled watchlist or from a training scenario. Both "
+        "lines must carry their line numbers and good checksums in plain ASCII and one catalogue number, "
+        "which must be for the number asked when a set is fetched for one; a readable epoch; every field "
+        "written as the format writes it, B* and the drag terms included, so a 0 changed to a letter is caught "
+        "though the checksum cannot see it; every orbital element inside its range; and an orbit SGP4 can start from. A set that "
+        "fails is not stored and never replaces a set already held; you are told which object and what failed, "
+        "on the page or, where the path has no page of its own, in the run log, and the log records the same "
+        "without the set's text. A scenario checks its sets again when you bind it."
+    )
+    _add_body(doc,
+        "The conditions the engine is fit for, and where each is enforced, are in "
+        "docs/decision-engine-envelope.md. Under 'Outside the operating envelope', the results flag a bound object "
+        "on SDP4, SGP4's deep-space branch, which SGP4 uses from a period of about 225 minutes. Its figures stand. "
+        "For a GEO set, its staleness limit and element-set error model are the "
+        "GEO rules of thumb, tuned rather than sourced; for HEO, Molniya-class and other orbits on SDP4 they are rules of thumb set for LEO and GEO, "
+        "not validated for it. An object below the 100 km re-entry floor at any moment searched, or that SGP4 "
+        "reports decayed, has decayed: no closest approach is computed from it, and the results say so. With all 5 weights at 0, Evaluate is refused, since every score would be 0."
     )
     _add_body(doc,
         "In the threat sweep, each entry that arrives has a Decide control. It opens the panel already bound to the "
@@ -1355,7 +1375,8 @@ def _section_13_decision_engine(doc: Document) -> None:
         ["Field", "Description"],
         [
             ["Name and type", "A label, and Manoeuvre, Sensor Retask, Posture Change or No Action"],
-            ["P", "Your assessed likelihood [0 to 1] that red takes this action; expected value weighs by it"],
+            ["P", "Your assessed chance [0 to 1] that red takes this action; the rows must be mutually "
+             "exclusive, so their P sum to at most 1, and expected value weighs each row by its P"],
             ["Conf", "How sure the intelligence behind P is [0 to 1]; it is recorded and moves no figure"],
             ["Custody gap share", "Wherever custody is not read: the share of the horizon [0 to 1] custody is "
              "lost after an unanswered manoeuvre (default 0.7), a rule of thumb. A bound red track's custody "
@@ -1370,6 +1391,34 @@ def _section_13_decision_engine(doc: Document) -> None:
         "and it is applied only while it is still the one shown. Gaps in the NOTSO cache are never read as quiet, "
         "and nothing is offered below 3 events."
     )
+    _add_body(doc,
+        "P is a probability over mutually exclusive actions (SPC-203, evaluation finding F-12). Before, expected "
+        "value divided each P by the sum of the rows' P, so one row at P 0.1 was weighed exactly as at P 1, as "
+        "certain, and the chance that none of your actions happens was never weighed. Now:"
+    )
+    _add_bullet(doc, "Your rows' P must sum to at most 1. Evaluate refuses a sum above 1 with a sentence naming the "
+                "sum, before anything runs. A new row starts at P 0.5, marked as the panel's default until you edit "
+                "it, so three new rows sum to 1.5 and are refused until you set their P.")
+    _add_bullet(doc, "A NOTSO suggestion you tick replaces its row's P, so the sum is read with the suggestions "
+                "applied; a sum above 1 they make is refused, naming the rows that carry them.")
+    _add_bullet(doc, "When your rows' P sum below 1, the engine adds a row of its own, last: No adversary action "
+                "(remainder of P), at 1 less the sum of your rows' P. It is evaluated as any no-action row, a lookup "
+                "or computed where bound, and minimax, minimin, expected value, the rules side by side, the game "
+                "tree and the decision record all read it. It is labelled as the engine's remainder, not your row, "
+                "and it has no Conf. A no-action row of your own is one of your actions at the P you gave it, so the "
+                "remainder still stands as a row of its own beside it. At a sum of exactly 1 nothing is added.")
+    _add_bullet(doc, "Each row shows, beside its P, the share of expected value it takes, which is its P, written "
+                "as the P beside it is.")
+    _add_bullet(doc, "A NOTSO interval on P is checked only up to where your rows' P reach 1, the remainder taking "
+                "up each move. With your rows' P at exactly 1 no remainder row is evaluated, so the interval is not "
+                "checked: a lower P would leave a remainder this evaluation holds no cells for. The results say so; "
+                "set your rows' P to sum below 1 and the interval is checked.")
+    _add_bullet(doc, "On a game tree the remainder is one of red's moves in every turn, so it adds to the tree's "
+                "branches and cost: three rows summing below 1 make four red moves. A depth refused for size or "
+                "cost says so, and rows whose P sum to 1 make one red move fewer.")
+    _add_bullet(doc, "A decision record written by 0.28.0 or 0.29.0 is replayed under the rule it was evaluated by, "
+                "each row's P over the rows' sum and no remainder, even where its P sum above 1, and the replay "
+                "command says so before it compares anything.")
 
     _add_heading_h2(doc, "Friendly Responses and Our Burns")
     _add_body(doc,
@@ -1489,9 +1538,10 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "The evaluation still runs under the rule you chose: the matrix's star and the ranking's blue "
                 "highlights mark that rule's pick, and a line above the matrix says so, naming the primary rule's "
                 "pick beside it when the two rules differ.")
-    _add_bullet(doc, "With every row at P 0, expected value has no weight to pick on: the results say it has no "
-                "pick, and never count it as agreeing with another rule. If it is the primary rule, the headline "
-                "reads No recommendation.")
+    _add_bullet(doc, "With every row at P 0, the remainder of P carries the whole weight, so expected value picks "
+                "the best response against no adversary action. Only replaying a record 0.28.0 or 0.29.0 wrote can "
+                "find expected value with no weight to pick on: the replay then says it has no pick, never counts it as "
+                "agreeing with another rule, and nothing is starred under it.")
     _add_bullet(doc, "When the time budget stopped a game tree before its last turn, the line on each rule's turn-1 "
                 "pick names the turns you asked for and the turns built in full.")
     _add_body(doc,
@@ -1512,7 +1562,7 @@ def _section_13_decision_engine(doc: Document) -> None:
     )
     _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
                 "most) or by cost, is refused as soon as you press Evaluate, naming the largest depth that would "
-                "fit. A tree missing what it needs still evaluates as one turn, and the results say why.")
+                "fit. The remainder of P counts as one of red's moves, and the refusal says so. A tree missing what it needs still evaluates as one turn, and the results say why.")
     _add_bullet(doc, "A row carrying several burns of one transfer refuses the tree: equal turns put a row's burn "
                 "at the same time in every turn, so they cannot give each burn a turn of its own. The result is "
                 "one turn and says so.")

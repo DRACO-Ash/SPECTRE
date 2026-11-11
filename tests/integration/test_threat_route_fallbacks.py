@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from spectre.domain.models import RedTrack, ThreatTarget
+from spectre.web.elsets import ElsetHistory
 from spectre.web.routes import threat, udl
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
@@ -33,7 +34,7 @@ from tests.integration.test_threat_screen_route import _ASSET_TLE, _RED_TLE
 _NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 
 # _BLUE_GEO half a degree further on: what two providers agree on after the cache was filled.
-_BLUE_GEO_AGREED = _BLUE_GEO.replace("  11.0000  1.00270000", "  11.5000  1.00270000")
+_BLUE_GEO_AGREED = _BLUE_GEO.replace("  11.0000  1.00270000    16", "  11.5000  1.00270000    11")
 
 _HELD = (
     "red_tracks", "manual_sweep_tles", "last_threat_assessment", "hrr_objects", "udl_username",
@@ -178,9 +179,9 @@ class TestTheGroupPrefetchCounts:
             seen.append(("current", satno, kwargs))
             return None if satno == 90005 else (_BLUE_GEO, "TEST")
 
-        async def history(satno: int, _user: str, _password: str, **kwargs: Any) -> list[str]:
+        async def history(satno: int, _user: str, _password: str, **kwargs: Any) -> ElsetHistory:
             seen.append(("history", satno, kwargs))
-            return histories.get(satno, [])
+            return ElsetHistory(histories.get(satno, []))
 
         monkeypatch.setattr(udl, "fetch_tle_for_satno", current)
         monkeypatch.setattr(udl, "fetch_tle_history_for_satno", history)

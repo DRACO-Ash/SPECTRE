@@ -11,8 +11,9 @@ cautious and the probability-weighted picks differed. Every result is now read u
   shown beside it, so no rule chosen after the fact can hide the primary's answer. The matrix's star marks the rule
   chosen, and a line says so beside the primary rule's pick.
 ● With every row at P 0, expected value has no weight to pick on: it has no pick, on the matrix as on the tree, and
-  is never counted as agreeing with another rule. find_robust_response would still name the first response not
-  marked not permitted there.
+  is never counted as agreeing with another rule. Since SPC-203 the remainder of P carries the weight the rows
+  leave, so this arises only replaying a record 0.28.0 or 0.29.0 wrote, and find_robust_response gives no pick
+  there (SPC-200, evaluation F-31), so nothing is starred under it either.
 ● A response marked not permitted (SPC-195) is never any rule's pick, here or on the tree, and with every response
   so marked no rule has a pick: nothing is recommended and every line says why.
 
@@ -87,14 +88,8 @@ STAR_CHOSEN_NO_PRIMARY = (
     "\u2605 and the blue highlights mark {pick}, the pick of {chosen}, the rule chosen; the deployment's primary rule, "
     "{primary}, " + NO_PICK + ", so no recommendation is shown above."
 )
-STAR_NONE = (
-    "\u2605 and the blue highlights mark {pick} only as the first response: {chosen}, the rule chosen, " + NO_PICK + "."
-)
-#: The same, when a response before it is marked not permitted, so the one marked is the first a rule may pick.
-STAR_NONE_PERMITTED_FIRST = (
-    "\u2605 and the blue highlights mark {pick} only as the first response not marked not permitted: {chosen}, the "
-    "rule chosen, " + NO_PICK + "."
-)
+#: Under expected value with every row at P 0, nothing is starred: the rule has no pick (SPC-200, evaluation F-31).
+STAR_NO_WEIGHT = "Nothing is starred: {chosen}, the rule chosen, " + NO_PICK + "."
 #: With every response marked not permitted, nothing is starred (SPC-195).
 STAR_NOTHING = "Nothing is starred: every response is marked not permitted."
 
@@ -155,20 +150,10 @@ class RuleComparison:
 def matrix_picks(result: ScenarioResult) -> dict[SelectorStrategy, FriendlyResponse | None]:
     """Each rule's pick on *result*'s matrix, by find_robust_response; nothing on *result* is changed.
 
-    Expected value has none when every row has P 0, as on the tree (tree_selectors): find_robust_response would name
-    the first response not marked not permitted there, a tie it has not earned. With every response so marked, no
-    rule has a pick.
+    Expected value has none when every row has P 0, as on the tree (tree_selectors), and find_robust_response says so
+    itself (SPC-200). With every response marked not permitted, no rule has a pick.
     """
-    return {
-        rule: None if rule is SelectorStrategy.EXPECTED_VALUE and not _weighted(result.scenario)
-        else find_robust_response(result.scenario, result.outcome_matrix, rule)
-        for rule in RULES
-    }
-
-
-def _weighted(scenario: Scenario) -> bool:
-    """Whether any row's P is above 0, so expected value has a weight to pick on."""
-    return sum(action.probability for action in scenario.adversary_actions) > 0.0
+    return {rule: find_robust_response(result.scenario, result.outcome_matrix, rule) for rule in RULES}
 
 
 def no_pick(scenario: Scenario) -> str:
@@ -304,15 +289,12 @@ def _star_line(
     result: ScenarioResult, primary: SelectorStrategy, matrix: dict[SelectorStrategy, FriendlyResponse | None],
 ) -> str:
     """What the matrix's star and the ranking's highlights mark: the rule chosen's pick, said beside the primary's;
-    nothing, with every response marked not permitted."""
+    nothing, with every response marked not permitted, or under expected value with every row at P 0."""
     best = result.robust_best_response
+    chosen = result.robust_strategy
     if best is None:
-        return STAR_NOTHING
-    chosen, starred = result.robust_strategy, label(best)
-    if matrix[chosen] is None:
-        first_vetoed = result.scenario.friendly_responses[0].vetoed
-        star = STAR_NONE_PERMITTED_FIRST if first_vetoed else STAR_NONE
-        return star.format(pick=starred, chosen=RULE_WORDS[chosen])
+        return STAR_NO_WEIGHT.format(chosen=RULE_WORDS[chosen]) if permitted_responses(result.scenario) else STAR_NOTHING
+    starred = label(best)
     if chosen is primary:
         return STAR_PRIMARY.format(pick=starred, chosen=RULE_WORDS[chosen])
     primary_pick = matrix[primary]

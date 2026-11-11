@@ -285,7 +285,8 @@ def _sampled_scenario(*responses: FriendlyResponse, n: int = 100, real: bool = F
     hypothesis = _evasive_quarter(n) if real else _evasive(n)
     return Scenario(
         name="Evade", epoch_utc=EPOCH,
-        adversary_actions=[AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 0.5, 0.7, hypothesis=hypothesis)],
+        # P 1: the one action, certain, so no remainder row is computed beside the sampled row (SPC-203).
+        adversary_actions=[AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 1.0, 0.7, hypothesis=hypothesis)],
         friendly_responses=list(responses), horizon_hours=1.0,
         binding=ScenarioBinding(red=_elset("red"), blue=_elset("blue")),
     )
@@ -380,7 +381,8 @@ class TestTheCost:
         ]
         return Scenario(
             name="Cap", epoch_utc=EPOCH,
-            adversary_actions=[AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 0.5, 0.7, hypothesis=_steady(500))],
+            # P 1: the one action, certain, so no remainder row of no adversary action is costed beside it (SPC-203).
+            adversary_actions=[AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 1.0, 0.7, hypothesis=_steady(500))],
             friendly_responses=responses, horizon_hours=horizon,
             binding=ScenarioBinding(red=_elset("red"), blue=_elset("blue")),
         )
@@ -476,8 +478,11 @@ class TestWhatTheResultSays:
             raise AssertionError("a gap was measured")
 
         monkeypatch.setattr(decision, "rk45_sgp4_gap_km", gap)
-        scenario = _sampled_scenario(_hold(), _avoid(), n=50)
-        scenario.adversary_actions.append(AdversaryAction("A1", "Drift", ActionType.NO_ACTION, 0.5, 0.7))
+        sampled = _sampled_scenario(_hold(), _avoid(), n=50)
+        scenario = dataclasses.replace(sampled, adversary_actions=[
+            dataclasses.replace(sampled.adversary_actions[0], probability=0.5),
+            AdversaryAction("A1", "Drift", ActionType.NO_ACTION, 0.5, 0.7),
+        ])
         monkeypatch.setattr(
             decision, "hypothesis_response_plan", lambda *_a, **_k: (_sized_stub(BlueBurn(0.0, (0.00547, 0.0, 0.0))),),
         )

@@ -1981,7 +1981,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/elsets.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-201",
@@ -1995,7 +1999,11 @@
    "spectre/web/elsets.py",
    "spectre/web/routes/operator.py",
    "spectre/web/routes/udl.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-202",
@@ -2022,7 +2030,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/domain/tree_selectors.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-204",
@@ -2166,7 +2178,7 @@
   "group": "eval-trial",
   "minutes": 360,
   "task": "F-29: deep-space orbits are evaluated with no regime statement; a Molniya-class orbit gets the LEO 24 h staleness li…",
-  "note": "Evaluation finding F-29 (Medium, G10, L2), evaluation/EVALUATION.md. Remediation: regime-specific limits and error rates; flag SDP4 cells. Closing evidence: a test per regime.",
+  "note": "Evaluation finding F-29 (Medium, G10, L2), evaluation/EVALUATION.md. Remediation: regime-specific limits and error rates; flag SDP4 cells. Closing evidence: a test per regime. 0.30.0 flags SDP4 sets as outside the envelope; the sourced limits and error rates remain open.",
   "files": [
    "spectre/astro/along_track.py",
    "spectre/web/elsets.py"
@@ -2183,7 +2195,11 @@
   "files": [
    "spectre/astro/elset_approach.py",
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-217",
@@ -2196,7 +2212,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-218",
@@ -2272,7 +2292,11 @@
   "note": "Evaluation finding F-34 (Low, L2), evaluation/EVALUATION.md. Remediation: field range checks at ingest, with F-25. Closing evidence: a test refusing 597.4°.",
   "files": [
    "spectre/web/elsets.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
  },
  {
   "ref": "SPC-224",

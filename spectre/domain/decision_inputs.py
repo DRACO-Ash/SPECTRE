@@ -12,6 +12,13 @@ A decision record now keeps one JSON document holding:
 Version 2 (SPC-195) adds each response's veto and reason. Version 1, written by 0.28.0, holds neither and is still
 read, every response permitted, exactly as a 0.28.0 scenario was; a version 1 document holding a veto is refused.
 
+Version 3 (SPC-203) adds the scenario's probability rule and, beside the rows, the remainder of P the engine weighed
+as no adversary action, or null. The remainder row is derived, never stored as a row: the document holds the
+operator's rows, the remainder's id, name and P, and a score row for it after theirs, and the reader refuses a
+remainder that is not the one the rows leave. Versions 1 and 2, written by 0.28.0 and 0.29.0, are read under the rule
+those releases evaluated by, each row weighed by its P over the rows' sum with no remainder, P summing above 1
+included, so they replay as they were evaluated then.
+
 The text is canonical (keys sorted, no spaces, ASCII with every other character escaped, no NaN), so the same inputs
 give the same text and its SHA-256 identifies them; a U+0000 is stored escaped, so PostgreSQL's text takes it.
 
@@ -46,12 +53,15 @@ from spectre.domain.decision import (
     BoundElset,
     FriendlyResponse,
     HypothesisSource,
+    ProbabilityRule,
     Scenario,
     ScenarioBinding,
     ScenarioResult,
     Seen,
     SelectorStrategy,
     ThreatPicture,
+    with_remainder,
+    without_remainder,
 )
 from spectre.domain.decision_figures import ResponseBurnSpec
 from spectre.domain.decision_transfer import TransferBurn
@@ -60,15 +70,22 @@ from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
 from spectre.domain.threat_understanding import Cue, Dimension, Understanding
 
-#: What the document is, and the version of it this code writes (SPC-195: each response's veto and reason).
+#: What the document is, and the version of it this code writes (SPC-203: the probability rule and the remainder).
 SCHEMA = "spectre.decision-inputs"
-VERSION = 2
-#: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed.
-VERSIONS = (1, 2)
+VERSION = 3
+#: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed; versions
+#: 1 and 2, written by 0.28.0 and 0.29.0, hold no probability rule, and read under the rule they were evaluated by.
+VERSIONS = (1, 2, 3)
 #: The response fields version 2 added (SPC-195), which a version 1 document never holds.
 _VETO_FIELDS = frozenset({"vetoed", "veto_reason"})
-#: The document's own fields, every one required.
+#: The scenario field version 3 added (SPC-203), and the rule a document without it was evaluated by.
+_RULE_FIELD = "probability_rule"
+_RULE_BEFORE: dict[str, Any] = {_RULE_FIELD: ProbabilityRule.SHARES}
+#: The document's own fields, every one required: version 3 adds the remainder of P (SPC-203).
 _TOP = ("schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out")
+_TOPS: dict[int, tuple[str, ...]] = {1: _TOP, 2: _TOP, 3: (*_TOP, "remainder")}
+#: The first version holding the remainder of P (SPC-203).
+_REMAINDER_SINCE = 3
 
 
 class InputsRefusedError(ValueError):
@@ -205,12 +222,13 @@ _STATE: Codec = (
 @dataclass(frozen=True)
 class _Shape:
     """A dataclass written as an object of its own init fields, each by its codec or as a single value. *omit* names
-    fields an earlier version of the document never held: they are neither written nor read, so each takes its
-    default."""
+    fields an earlier version of the document never held, or a field never stored: they are neither written nor
+    read, so each takes its value in *fill*, or else its default."""
 
     kind:    type
     special: Mapping[str, Codec]
     omit:    frozenset[str] = frozenset()
+    fill:    Mapping[str, Any] = dataclasses.field(default_factory=dict)
     codecs:  dict[str, Codec] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
@@ -230,7 +248,8 @@ class _Shape:
 
     def read(self, value: Any, where: str) -> Any:
         fields = _exactly(value, self.names, where)
-        return self.kind(**{name: read(fields[name], f"{where}.{name}") for name, (_write, read) in self.codecs.items()})
+        read_in = {name: read(fields[name], f"{where}.{name}") for name, (_write, read) in self.codecs.items()}
+        return self.kind(**read_in, **self.fill)
 
     @property
     def codec(self) -> Codec:
@@ -270,9 +289,10 @@ _PRIOR = _Shape(NotsoPrior, {
     "mapped": _many(_enum(NOTSOType)), "basis": _FIGURE_BASIS.codec, "cover": _many(_pair(_MOMENT)),
     "counted": _many(_COUNTED.codec), "until": _optional(_MOMENT),
 })
+#: A row as stored: the operator's, never the remainder row, which is derived (SPC-203), so its flag is not stored.
 _ACTION = _Shape(AdversaryAction, {
     "action_type": _enum(ActionType), "hypothesis": _optional(_HYPOTHESIS.codec), "accepted_prior": _optional(_PRIOR.codec),
-})
+}, omit=frozenset({"remainder"}))
 _BURN_SPEC = _Shape(ResponseBurnSpec, {"axis": _enum(BurnAxis)})
 _RESPONSE_CODECS: dict[str, Codec] = {"action_type": _enum(ActionType), "burn": _optional(_BURN_SPEC.codec)}
 _RESPONSE = _Shape(FriendlyResponse, _RESPONSE_CODECS)
@@ -291,16 +311,44 @@ _SCENARIO_CODECS: dict[str, Codec] = {
     "epoch_utc": _MOMENT, "adversary_actions": _many(_ACTION.codec, list), "binding": _optional(_BINDING.codec),
     "threat": _optional(_PICTURE.codec), "observed": _optional(_enum(Seen)),
 }
-#: The scenario as each version holds it: version 1's responses carry no veto.
+def _write_rule(rule: ProbabilityRule) -> str:
+    """The remainder rule, the one version 3 holds. A scenario under the 0.29.0 rule is only ever a replay of a record
+    0.28.0 or 0.29.0 wrote, and a replay writes no record, so one is never stored again (SPC-203)."""
+    if rule is not ProbabilityRule.REMAINDER:
+        raise ValueError(
+            "a scenario under the 0.29.0 rule is never stored again: version 3 holds the remainder rule alone, and "
+            "only versions 1 and 2, which 0.28.0 and 0.29.0 wrote, read as the 0.29.0 rule"
+        )
+    return rule.value
+
+
+def _read_rule(value: Any, where: str) -> ProbabilityRule:
+    """The remainder rule, and no other: a version 3 document under the 0.29.0 rule would replay as evaluated before
+    SPC-203, which no version 3 record was."""
+    if value != ProbabilityRule.REMAINDER.value:
+        raise _refuse(where, f"version 3 holds the remainder rule alone, not {value!r}; the 0.29.0 rule is read only "
+                             "from versions 1 and 2, which 0.28.0 and 0.29.0 wrote")
+    return ProbabilityRule.REMAINDER
+
+
+#: Version 3's probability rule: the remainder rule, written and read, and no other (SPC-203).
+_REMAINDER_RULE: Codec = (_write_rule, _read_rule)
+#: The scenario as each version holds it: version 1's responses carry no veto, and neither version 1 nor 2 holds the
+#: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203).
 _SCENARIOS: dict[int, _Shape] = {
-    1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)}),
-    2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)}),
+    1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)},
+              omit=frozenset({_RULE_FIELD}), fill=_RULE_BEFORE),
+    2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)},
+              omit=frozenset({_RULE_FIELD}), fill=_RULE_BEFORE),
+    3: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
+                         _RULE_FIELD: _REMAINDER_RULE}),
 }
 
 
 def encode_scenario(scenario: Scenario) -> dict[str, Any]:
-    """*scenario* as plain JSON values, every field of every part of it, as this version writes it."""
-    return _SCENARIOS[VERSION].write(scenario)
+    """*scenario* as plain JSON values, every field of every part of it, as this version writes it: the operator's
+    rows alone, since the remainder row is derived (SPC-203)."""
+    return _SCENARIOS[VERSION].write(without_remainder(scenario))
 
 
 def decode_scenario(document: Any, where: str = "scenario", version: int = VERSION) -> Scenario:
@@ -316,14 +364,25 @@ def decode_scenario(document: Any, where: str = "scenario", version: int = VERSI
 
 # ── The document ──
 
+def _remainder_of(scenario: Scenario) -> dict[str, Any] | None:
+    """The remainder row *scenario* is evaluated with, as the document holds it beside the rows: its id, name and P;
+    None when the rows leave none (SPC-203)."""
+    rows = with_remainder(scenario).adversary_actions
+    if not rows or not rows[-1].remainder:
+        return None
+    return {"id": rows[-1].id, "name": rows[-1].name, "probability": rows[-1].probability}
+
+
 def inputs_document(result: ScenarioResult) -> dict[str, Any]:
-    """The canonical inputs of *result*: its scenario, the rule it ran under, its composite scores rows by responses,
-    the code version that computed them, and whether its time budget ran out."""
+    """The canonical inputs of *result*: its scenario, the operator's rows alone, the rule it ran under, its composite
+    scores rows by responses, the remainder row's after theirs, the remainder of P, the code version that computed
+    them, and whether its time budget ran out."""
     return {
         "schema": SCHEMA, "version": VERSION,
         "code_version": "" if result.provenance is None else result.provenance.code_version,
         "rule": result.robust_strategy.value,
         "scenario": encode_scenario(result.scenario),
+        "remainder": _remainder_of(result.scenario),
         "scores": [[cell.composite_score for cell in row] for row in result.outcome_matrix],
         "budget_ran_out": result.budget_ran_out,
     }
@@ -373,27 +432,39 @@ def _parsed(text: str, sha256: str) -> dict[str, Any]:
 
 
 def _scores(value: Any, scenario: Scenario) -> tuple[tuple[float, ...], ...]:
-    """The composite scores, one row per adversary row and one number per response; canonical JSON holds no NaN."""
+    """The composite scores, one row per row evaluated, the remainder row's last where the rows leave one (SPC-203),
+    and one number per response; canonical JSON holds no NaN."""
     rows = _list_in(value, "scores")
     wide = len(scenario.friendly_responses)
-    if len(rows) != len(scenario.adversary_actions) or any(len(_list_in(row, "scores")) != wide for row in rows):
+    evaluated = len(with_remainder(scenario).adversary_actions)
+    if len(rows) != evaluated or any(len(_list_in(row, "scores")) != wide for row in rows):
         raise _refuse("scores", "they do not fit the scenario's rows and responses")
     return tuple(
         tuple(_number_in(x, f"scores[{i}][{j}]") for j, x in enumerate(row)) for i, row in enumerate(rows)
     )
 
 
+def _version(value: Any) -> int:
+    """A version this code reads, or refused naming every version it knows."""
+    if type(value) is not int or value not in VERSIONS:
+        known = ", ".join(str(v) for v in VERSIONS[:-1]) + f" and {VERSIONS[-1]}"
+        raise _refuse("version", f"version {value!r} is not one this code reads; it knows versions {known}")
+    return value
+
+
 def read_inputs(text: str, sha256: str) -> StoredInputs:
     """The stored inputs *text*, whose SHA-256 was stored as *sha256*, read strictly; InputsRefusedError otherwise."""
-    document = _exactly(_parsed(text, sha256), _TOP, "")
-    if document["schema"] != SCHEMA:
+    document = _parsed(text, sha256)
+    # The schema, then the version, where the document holds them, before its fields, so a document of another schema
+    # or of a version this code does not read is named for it, not for a field this version would hold.
+    if "schema" in document and document["schema"] != SCHEMA:
         raise _refuse("schema", f"{document['schema']!r} is not {SCHEMA}")
-    version = document["version"]
-    if type(version) is not int or version not in VERSIONS:
-        known = " and ".join(str(v) for v in VERSIONS)
-        raise _refuse("version", f"version {version!r} is not one this code reads; it knows versions {known}")
+    version = _version(document["version"]) if "version" in document else VERSION
+    document = _exactly(document, _TOPS[version], "")
     rule = _enum(SelectorStrategy)[1](document["rule"], "rule")
     scenario = decode_scenario(document["scenario"], version=version)
+    if version >= _REMAINDER_SINCE and document["remainder"] != _remainder_of(scenario):
+        raise _refuse("remainder", f"it is not the remainder of P the rows leave, {_remainder_of(scenario)!r}")
     return StoredInputs(
         scenario, rule, _scores(document["scores"], scenario), _text_in(document["code_version"], "code_version"),
         _plain("bool")[1](document["budget_ran_out"], "budget_ran_out"),

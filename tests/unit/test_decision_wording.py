@@ -38,8 +38,9 @@ def _manoeuvre_only(binding: ScenarioBinding | None) -> Scenario:
     """One manoeuvre with no hypothesis: every figure a lookup, custody the worst case once red is read."""
     return Scenario(
         name="Wording", epoch_utc=_EPOCH, horizon_hours=1.0, binding=binding,
+        # P 1: the manoeuvre alone, certain, so no remainder row of no adversary action joins it (SPC-203).
         adversary_actions=[AdversaryAction(id="A1", name="Approach", action_type=ActionType.MANOEUVRE,
-                                           probability=0.6, confidence=0.7)],
+                                           probability=1.0, confidence=0.7)],
         friendly_responses=[FriendlyResponse(id="F1", name="Hold", action_type=ActionType.NO_ACTION, cost=0.0,
                                              reversibility=1.0, time_to_execute_hours=1.0)],
     )

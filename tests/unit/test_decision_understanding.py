@@ -221,7 +221,9 @@ def _scenario(picture: Any = None, *, probability: float = 0.3, bound: bool = Tr
     adversary = [
         AdversaryAction(id="A1", name="Approach", action_type=ActionType.MANOEUVRE, probability=probability,
                         confidence=0.6, probability_edited=edited),
-        AdversaryAction(id="A2", name="Hold", action_type=ActionType.NO_ACTION, probability=0.7, confidence=0.4),
+        # The rest of P, so the rows' P sum to 1 and the engine adds no remainder row (SPC-203): 0.7 beside 0.3.
+        AdversaryAction(id="A2", name="Hold", action_type=ActionType.NO_ACTION, probability=1.0 - probability,
+                        confidence=0.4),
     ]
     friendly = [
         FriendlyResponse(id="F1", name="Evade", action_type=ActionType.MANOEUVRE, cost=0.4, reversibility=0.5,

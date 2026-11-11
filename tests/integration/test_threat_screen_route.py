@@ -22,12 +22,12 @@ pytestmark = pytest.mark.anyio
 # A real GEO element set, used as a manual asset so the screen can run without
 # a UDL session.
 _ASSET_TLE = (
-    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9995\n"
-    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46210"
+    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9998\n"
+    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46216"
 )
 _RED_TLE = (
-    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
-    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
+    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9992\n"
+    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26266"
 )
 
 
@@ -51,7 +51,10 @@ class TestTheScreenRefusesClearly:
     def test_an_invalid_manual_tle_says_why(self, client: object, auth_cookie: str) -> None:
         resp = _screen(client, auth_cookie, manual_asset_tle="not a tle at all")
         assert resp.status_code == 200
-        assert "Manual asset TLE invalid" in resp.text
+        assert (
+            "The element set for the manual asset was refused: it does not hold two element lines. It was not stored."
+            in resp.text
+        )
 
     def test_an_uncached_asset_says_what_to_do(self, client: object, auth_cookie: str) -> None:
         resp = _screen(client, auth_cookie, asset_satno="99999")

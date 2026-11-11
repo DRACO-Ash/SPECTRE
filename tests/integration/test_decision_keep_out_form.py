@@ -35,7 +35,8 @@ def _flat(page: str) -> str:
 
 
 def _scored(client: Any, cookie: str, **overrides: Any) -> tuple[list[str], str]:
-    resp = _evaluate(client, cookie, _form(**overrides))
+    """Each cell's score and the page's text, the form's one row at P 1, certain, so no remainder row (SPC-203)."""
+    resp = _evaluate(client, cookie, _form(**{"adv_prob": ["1.0"], **overrides}))
     assert resp.status_code == 200
     assert "error-msg" not in resp.text, resp.text
     return _SCORE.findall(resp.text), _flat(resp.text)

@@ -19,6 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
+from spectre.astro.elset_check import history_refusal
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
@@ -358,6 +359,8 @@ def _analyse_merged(
     pol.duplicate_epoch_sets = dropped.duplicate_epoch
     pol.bad_provenance_sets = dropped.bad_provenance
     pol.other_object_sets = dropped.other_object
+    pol.refused_element_sets = dropped.refused
+    pol.refused_failures = dropped.refusals
     pol.history_truncated_at = _archive_end_if_capped(history.archive_text)
     return pol, quality_flags
 
@@ -436,7 +439,23 @@ async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
         return None, "The element-set history could not be analysed."
     if analysed is None:
         return None, "No usable element sets were in the UDL history."
+    _log_refused(state, analysed[0])
     return analysed[0], ""
+
+
+def history_refused(pol: Any) -> str | None:
+    """The sentence saying which sets of *pol*'s history the acceptance check refused, or None (SPC-201)."""
+    count = getattr(pol, "refused_element_sets", 0)
+    if not count:
+        return None
+    return history_refusal(f"{pol.name} ({pol.satno})", count, pol.refused_failures)
+
+
+def _log_refused(state: Any, pol: Any) -> None:
+    """Say in the operator's run log which history sets were refused, when any were."""
+    sentence = history_refused(pol)
+    if sentence is not None:
+        state.append_log(f"[POL] {sentence}")
 
 
 def burn_verdicts(pol: Any, assessment: PolAssessment) -> dict[datetime, BurnNormality]:
@@ -537,6 +556,7 @@ async def pol_analyse(
             )
         pol, quality_flags = analysed
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
+        _log_refused(state, pol)
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
             f"[POL] Analysed {satno}: {pol.tle_count} TLEs, "
@@ -745,6 +765,7 @@ def _detection_view(pol: object) -> dict[str, object]:
         "duplicate_epoch_sets": getattr(pol, "duplicate_epoch_sets", 0),
         "bad_provenance_sets":  getattr(pol, "bad_provenance_sets", 0),
         "other_object_sets":    getattr(pol, "other_object_sets", 0),
+        "refused_sentence":     history_refused(pol),
         "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
         "confirmed":            len(getattr(pol, "manoeuvres", [])),
         "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +12,7 @@ from spectre.domain.decision import (
     AdversaryAction,
     FriendlyResponse,
     OutcomeMetrics,
+    ProbabilityRule,
     Scenario,
     SelectorStrategy,
     compute_outcome_metrics,
@@ -199,8 +201,9 @@ class TestRankResponses:
 
 class TestFindRobustResponse:
     def _two_adversary_scenario(self):
-        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE)
-        a2 = _adv(id="A2", atype=ActionType.NO_ACTION)
+        # Equal P that sum to 1 (SPC-203): each row's share is 0.5, as it was at P 0.6 each before, so no remainder.
+        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.5)
+        a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.5)
         r1 = _fr(id="R1", atype=ActionType.MANOEUVRE, cost=0.4, rev=0.7)
         r2 = _fr(id="R2", atype=ActionType.SENSOR_RETASK, cost=0.1, rev=0.9)
         r3 = _fr(id="R3", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)
@@ -253,15 +256,17 @@ class TestFindRobustResponse:
         s, om = self._two_adversary_scenario()
         assert find_robust_response(s, om, strategy).id == pick
 
-    def test_expected_value_with_no_probability_mass_takes_the_first_response(self):
-        """With every probability zero, every response's expected score is 0
-        and the first listed is returned, not a division by zero."""
+    def test_expected_value_with_no_probability_mass_has_no_pick(self):
+        """Under the rule a record 0.28.0 or 0.29.0 wrote is replayed by, with every probability zero, expected value
+        has no weight to pick on: no pick, never the first listed by row order and never a division by zero (SPC-200,
+        evaluation F-31). Under the remainder rule the remainder carries the whole weight (SPC-203,
+        tests/unit/test_decision_p_remainder.py)."""
         a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.0)
         a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.0)
         rs = [_fr(id="R1", cost=0.4, rev=0.7), _fr(id="R2", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)]
-        s = _scenario([a1, a2], rs)
+        s = dataclasses.replace(_scenario([a1, a2], rs), probability_rule=ProbabilityRule.SHARES)
         om = [[compute_outcome_metrics(a, r, s) for r in rs] for a in (a1, a2)]
-        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE).id == "R1"
+        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE) is None
 
     def test_no_friendly_raises(self):
         s  = _scenario(fr_list=[])
@@ -281,15 +286,17 @@ class TestEvaluateScenario:
         assert result.outcome_matrix[0][0].composite_score == 0.243769   # as test_returns_outcome_metrics
 
     def test_outcome_matrix_shape(self):
-        adv_list = [_adv(id=f"A{i}") for i in range(3)]
+        """Three rows at P 0.3 leave 0.1, which the engine weighs as a fourth row of its own (SPC-203)."""
+        adv_list = [_adv(id=f"A{i}", prob=0.3) for i in range(3)]
         fr_list  = [_fr(id=f"R{i}")  for i in range(2)]
         s        = _scenario(adv_list, fr_list)
         result   = evaluate_scenario(s)
-        assert len(result.outcome_matrix) == 3
+        assert len(result.outcome_matrix) == 4
+        assert result.scenario.adversary_actions[3].remainder
         assert len(result.outcome_matrix[0]) == 2
 
     def test_ranked_per_adversary_shape(self):
-        adv_list = [_adv(id=f"A{i}") for i in range(2)]
+        adv_list = [_adv(id=f"A{i}", prob=0.5) for i in range(2)]
         fr_list  = [_fr(id=f"R{i}")  for i in range(3)]
         s        = _scenario(adv_list, fr_list)
         result   = evaluate_scenario(s)

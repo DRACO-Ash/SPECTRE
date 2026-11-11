@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from spectre.astro.constants import regimes_compatible
+from spectre.astro.elset_check import HELD_KEPT
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
     InterceptSolution,
@@ -70,6 +71,7 @@ from spectre.domain.models import (
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, INTENT_LABELS, dominant_axis
 from spectre.web.deps import render
+from spectre.web.elsets import RefusedElset
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -1257,10 +1259,12 @@ async def clear_history(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 class _Fetched(NamedTuple):
-    """An element set and the UDL dataMode it is known to have."""
+    """An element set and the UDL dataMode it is known to have, and the sentence refusing what UDL answered when the
+    acceptance check refused it and the set held was kept (SPC-201)."""
 
     tle: str
     mode: str
+    refused: str = ""
 
 
 def _held_mode(state: object, tle: str) -> str:
@@ -1304,6 +1308,8 @@ async def _refetch_tles(
             data_mode=data_mode,
             source=getattr(state, "udl_tle_source", ""),
         )
+        if isinstance(result, RefusedElset):
+            return _Fetched(tle, _held_mode(state, tle), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
         return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
@@ -1311,6 +1317,12 @@ async def _refetch_tles(
 
 
 _UDL_DATA_MODES = frozenset({"REAL", "SIMULATED", "EXERCISE", "TEST"})
+
+
+def _with_refusals(label: str, *fetched: _Fetched) -> str:
+    """*label*, followed by each sentence refusing a set UDL answered with, when the held set was kept (SPC-201)."""
+    refusals = [f.refused for f in fetched if f.refused]
+    return " ".join([f"{label}.", *refusals]) if refusals else label
 
 
 async def _resolve_provenance(
@@ -1326,7 +1338,7 @@ async def _resolve_provenance(
         red, blue = await _refetch_tles(red_tle, blue_tle, mode, state)
     else:
         red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
-    label = red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}"
+    label = _with_refusals(red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}", red, blue)
     if mode and mode not in _UDL_DATA_MODES:
         # Never sent to UDL (SPC-025), and said, so the held sets are not
         # mistaken for a fresh fetch in the mode asked for.

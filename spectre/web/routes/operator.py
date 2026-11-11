@@ -10,12 +10,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, tle_checksum_valid
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
-from spectre.web.elsets import provenance
+from spectre.web.elsets import RefusedElset, provenance, refused
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -94,19 +93,23 @@ def _add_refusal(name: str, tle: str) -> str | None:
 
     The add routes used to accept an empty name and any text as a TLE, and
     the bad TLE then failed far from here, in whichever solver met it first
-    (audit F-267).
+    (audit F-267). The element set must pass the acceptance check, whose
+    sentence names the object and what failed (SPC-201).
     """
     if not name:
         return "A name is required."
-    lines = [ln.strip() for ln in tle.splitlines() if ln.strip()]
-    if len(lines) < 2 or not lines[-2].startswith("1 ") or not lines[-1].startswith("2 "):  # noqa: PLR2004
-        return "The TLE needs its line 1 and line 2."
-    if not (tle_checksum_valid(lines[-2]) and tle_checksum_valid(lines[-1])):
-        return "A TLE line fails its checksum: check it was copied whole (audit F-272)."
-    try:
-        TLEOrbit(tle)
-    except TLE_ERRORS:
-        return "The TLE could not be parsed."
+    # The one acceptance check every ingest path runs (SPC-201): line numbers, checksums (audit F-272), one
+    # catalogue number and every field in its range.
+    return refused(name, tle)
+
+
+def _fetch_error(got: tuple[str, str] | RefusedElset | None, name: str, satno: int) -> str | None:
+    """Why a quick-add fetch gave nothing to add, or None when it gave a set: no answer, or a set the acceptance
+    check refused, named as the operator knows it (SPC-201)."""
+    if isinstance(got, RefusedElset):
+        return got.sentence(f"{name} ({satno})")
+    if got is None or not got[0]:
+        return f"TLE fetch failed for {name} ({satno})."
     return None
 
 
@@ -180,13 +183,12 @@ async def quick_add_blue_asset(
         data_mode=state.udl_data_mode or "REAL",
         source=state.udl_tle_source,
     )
-    tle = _result[0] if _result else None
-    if not tle:
-        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
-               "error": f"TLE fetch failed for {clean_name} ({satno})."}
+    error = _fetch_error(_result, clean_name, satno)
+    if error is not None or not isinstance(_result, tuple):
+        ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": error}
         return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
-    asset = BlueAsset(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
+    asset = BlueAsset(name=clean_name, tle=_result[0], data_mode=_result[1])
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
 
@@ -241,13 +243,12 @@ async def quick_add_red_track(
         data_mode=state.udl_data_mode or "REAL",
         source=state.udl_tle_source,
     )
-    tle = _result[0] if _result else None
-    if not tle:
-        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
-               "error": f"TLE fetch failed for {clean_name} ({satno})."}
+    error = _fetch_error(_result, clean_name, satno)
+    if error is not None or not isinstance(_result, tuple):
+        ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": error}
         return _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
-    track = RedTrack(name=clean_name, tle=tle, data_mode=_result[1] if _result else "REAL")
+    track = RedTrack(name=clean_name, tle=_result[0], data_mode=_result[1])
     state.red_tracks.append(track)
     state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
 

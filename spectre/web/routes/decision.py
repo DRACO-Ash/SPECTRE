@@ -58,6 +58,7 @@ from spectre.domain.decision import (
     SelectorStrategy,
     longest_horizon_h,
     needs_a_run,
+    p_sum_problem,
     pre_manoeuvre_state,
 )
 from spectre.domain.decision_figures import ResponseBurnSpec
@@ -122,8 +123,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/decision", tags=["decision"])
 
-# Weights summing to less than this are treated as unset rather than scaled up.
-_MIN_WEIGHT_TOTAL = 0.01
+# All five weights at 0 are refused (SPC-200, evaluation F-31); any total above 0 is scaled to 1.
+_WEIGHTS_ALL_ZERO = (
+    "Every scoring weight is 0, so every score would be 0 and no rule could pick a response on them. Set at least "
+    "one weight above 0."
+)
 # Rows per side, as README.md documents, and the longest horizon in hours.
 _MAX_ROWS = 5
 _MAX_HORIZON_H = 720.0
@@ -752,10 +756,8 @@ def _strategy(raw: str) -> SelectorStrategy:
 
 
 def _normalised_weights(*weights: float) -> tuple[float, ...]:
-    """Scale the scoring weights to sum to one; all-zero weights are left as given."""
+    """Scale the scoring weights to sum to one; _parse has refused a total of 0 (SPC-200, evaluation F-31)."""
     total = sum(weights)
-    if total < _MIN_WEIGHT_TOTAL:
-        total = 1.0
     return tuple(w / total for w in weights)
 
 
@@ -1025,6 +1027,9 @@ def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
         inputs.number(w, "each scoring weight")
         for w in (form.w_custody, form.w_ca, form.w_dv, form.w_time, form.w_rev)
     ]
+    if inputs.problem is None and sum(weights) <= 0.0:
+        # Every score would be 0 and every pick a tie broken by row order: a recommendation with no basis (F-31).
+        inputs.refuse(_WEIGHTS_ALL_ZERO)
     keep_out = inputs.number(form.keep_out_km, "the keep-out distance (km)", MAX_KEEP_OUT_KM, low=MIN_KEEP_OUT_KM)
     adversary = _AdversaryColumns(
         form.adv_ids or [], form.adv_names or [], form.adv_types or [],
@@ -1077,17 +1082,18 @@ async def decision_evaluate(
     if hypotheses.problem is not None:
         return _err(hypotheses.problem)
     binding, custody = await _with_custody(state, bound.binding, now)
-    # The sweep's picture for this red track, beside the rows: its collect-first rows are listed, never scored (SPC-171).
-    scenario = _scenario(form, parsed, hypotheses.carried, binding, now)
-    scenario = dataclasses.replace(scenario, threat=held_picture(state, binding, now))
-    # Each NOTSO suggestion the operator ticked, applied only while it is the one shown (SPC-130).
+    # Each NOTSO suggestion the operator ticked, applied only while it is the one shown (SPC-130), before the scenario
+    # is built, so the rows' P are summed as they will be evaluated: at most 1 (SPC-203).
     applied = await asyncio.to_thread(
-        apply_priors, state, scenario.adversary_actions, form.adv_priors or [],
+        apply_priors, state, _adversary_rows(parsed.adversary, hypotheses.carried), form.adv_priors or [],
         None if binding is None else binding.red, (parsed.horizon, now),
     )
-    if applied.problem is not None:
-        return _err(applied.problem)
-    scenario = dataclasses.replace(scenario, adversary_actions=applied.actions)
+    problem = applied.problem or p_sum_problem(applied.actions)
+    if problem is not None:
+        return _err(problem)
+    # The sweep's picture for this red track, beside the rows: its collect-first rows are listed, never scored (SPC-171).
+    scenario = _scenario(form, parsed, applied.actions, binding, now)
+    scenario = dataclasses.replace(scenario, threat=held_picture(state, binding, now))
     # A turn depth whose tree cannot fit is refused here, naming the largest that would, before anything runs (SPC-142).
     too_deep = await asyncio.to_thread(depth_refusal, scenario)
     if too_deep is not None:
@@ -1119,15 +1125,15 @@ def _custody_reader(state: SessionState, now: datetime, fetch: str) -> CustodyRe
 
 
 def _scenario(
-    form: _ScenarioForm, parsed: _Parsed, hypotheses: list[AdversaryHypothesis | None],
-    binding: ScenarioBinding | None, now: datetime,
+    form: _ScenarioForm, parsed: _Parsed, rows: list[AdversaryAction], binding: ScenarioBinding | None, now: datetime,
 ) -> Scenario:
-    """The scenario the form describes, at epoch *now*."""
+    """The scenario the form describes, at epoch *now*, with its adversary *rows* as built and any NOTSO suggestion
+    applied."""
     w_custody_n, w_ca_n, w_dv_n, w_time_n, w_rev_n = _normalised_weights(*parsed.weights)
     return Scenario(
         name=form.scenario_name,
         epoch_utc=now,
-        adversary_actions=_adversary_rows(parsed.adversary, hypotheses),
+        adversary_actions=rows,
         friendly_responses=_vetoed(_friendly_rows(
             form.fr_ids or [], form.fr_names or [], form.fr_types or [], parsed.friendly, parsed.burns,
         ), parsed.vetoes),

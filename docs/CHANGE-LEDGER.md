@@ -1256,3 +1256,12 @@ Vetoes before aggregation (evaluation F-04) and the judgement basis with a looku
 | Code Quality | **HYGIENE** | None made for the gate. New module `domain/decision_judgement.py`; vetoes in the decision engine, selectors, comparison, stored inputs (version 2) and record | `scripts/check-quality.sh` against 0.28.0 passed all five legs. The full suite (9,222 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.30.0
+
+Element-set integrity at ingest (evaluation F-25), the operating envelope (F-09) and what P means (F-12).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New modules `astro/elset_check.py` and `domain/decision_envelope.py`; the check wired into every ingest path; the remainder of P in the engine; stored inputs version 3 | `scripts/check-quality.sh` against 0.29.0 passed all five legs. The full suite (9,551 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

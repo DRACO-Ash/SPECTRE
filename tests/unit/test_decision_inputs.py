@@ -61,11 +61,11 @@ _BURN_3 = EPOCH + timedelta(minutes=70)
 
 def _still_rows() -> list[AdversaryAction]:
     return [
-        AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, 0.4, 0.6, description="from the west"),
+        AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, 0.2, 0.6, description="from the west"),
         AdversaryAction("A2", "Hold", ActionType.NO_ACTION, 0.5, 0.7, probability_edited=False,
                         custody_gap_fraction=0.25),
-        AdversaryAction("A3", "Retask", ActionType.SENSOR_RETASK, 0.1, 0.0),
-        AdversaryAction("A4", "Posture", ActionType.POSTURE_CHANGE, 1.0, 1.0),
+        AdversaryAction("A3", "Retask", ActionType.SENSOR_RETASK, 0.05, 0.0),
+        AdversaryAction("A4", "Posture", ActionType.POSTURE_CHANGE, 0.25, 1.0),
     ]
 
 
@@ -275,10 +275,11 @@ class TestTheStoredDocument:
     def test_the_same_inputs_store_the_same_text(self) -> None:
         assert store_inputs(_result(_entered())) == store_inputs(_result(_entered()))
 
-    def test_it_names_its_schema_version_rule_scores_and_code_version(self) -> None:
+    def test_it_names_its_schema_version_rule_remainder_scores_and_code_version(self) -> None:
         result = _result(_lookup(), SelectorStrategy.MINIMIN)
         document = json.loads(store_inputs(result)[0])
-        assert set(document) == {"schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out"}
+        assert set(document) == {"schema", "version", "code_version", "rule", "scenario", "remainder", "scores",
+                                 "budget_ran_out"}
         assert (document["schema"], document["version"], document["rule"]) == (SCHEMA, VERSION, "minimin")
         assert len(document["scores"]) == 4 and {len(row) for row in document["scores"]} == {3}
 
@@ -334,12 +335,12 @@ class TestStrictRefusal:
         _assert_refused(canonical_json(document), sha256, "SHA-256")
 
     def test_an_unknown_version_is_refused(self) -> None:
-        _assert_refused(*_stored({**_document(), "version": VERSION + 1}), "version 3", "knows versions 1 and 2")
+        _assert_refused(*_stored({**_document(), "version": VERSION + 1}), "version 4", "knows versions 1, 2 and 3")
 
     def test_a_version_that_is_not_a_whole_number_is_refused(self) -> None:
         text, sha256 = _stored({**_document(), "version": 2.0})
         assert '"version":2.0' in text
-        _assert_refused(text, sha256, "version 2.0", "knows versions 1 and 2")
+        _assert_refused(text, sha256, "version 2.0", "knows versions 1, 2 and 3")
 
     def test_a_truth_value_is_not_a_score(self) -> None:
         document = _document()

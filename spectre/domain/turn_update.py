@@ -25,11 +25,23 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from spectre.domain.custody import Custody, Horizon, LossCause, custody_over_horizon
-from spectre.domain.decision import AdversaryAction, Scenario, Seen, _untouched
+from spectre.domain.decision import (
+    AdversaryAction,
+    ProbabilityRule,
+    Scenario,
+    Seen,
+    _untouched,
+    joint_points,
+    moved_weights,
+    row_shares,
+)
 from spectre.domain.provenance import Basis, FigureBasis
+
+if TYPE_CHECKING:
+    from spectre.domain.notso_prior import NotsoPrior
 
 __all__ = [
     "INDEPENDENT_TURNS", "LIKELIHOOD_MODEL", "POSTERIOR_EVERY_ROW", "POSTERIOR_NO_WEIGHT", "POSTERIOR_NOTE",
@@ -77,6 +89,7 @@ _RANGE = ", {low} to {high} across the NOTSO intervals"
 _FROM_NOTSO = "the NOTSO suggestion you applied"
 _FROM_DEFAULT = "the default P of 0.5, untouched"
 _FROM_OWN = "your P"
+_FROM_REMAINDER = "the engine's remainder of P, the chance that none of your actions happens"
 _GIVES = "{lead} {row}, {name}, gives {seen}"
 POSTERIOR_NOTE = (
     "the rows' P restricted to those that give what turn 1 shows, renormalised, under the custody rule as the "
@@ -141,28 +154,31 @@ class Posterior(NamedTuple):
     basis:  FigureBasis
 
 
-def _span(action: AdversaryAction) -> tuple[float, float]:
-    """A row's P across its NOTSO interval, from the edge a pick is checked from; its own P alone when it has none."""
-    if action.accepted_prior is None:
-        return action.probability, action.probability
-    interval = action.accepted_prior.interval
+def _span(prior: NotsoPrior) -> tuple[float, float]:
+    """A NOTSO P's interval, from the edge a pick is checked from."""
+    interval = prior.interval
     return interval.checked_low, interval.high
 
 
 def share_ranges(scenario: Scenario, members: Sequence[int]) -> tuple[tuple[float, float], ...]:
-    """Each member's share of the weight, least and most, across the NOTSO intervals of all the members.
+    """Each member's share of the weight, least and most, across the NOTSO intervals of the rows that carry one.
 
-    A share rises with its own P and falls with each other's, so its least is at its own low edge with the others
-    high, and its most the other way round. The caller has checked that the members' P are not all 0, and a NOTSO
-    P and the edge it is checked from are never 0, so no corner divides by 0.
+    A share is a member's P over the members' sum, a ratio of two lines in the moved P, so its least and its most
+    fall on corners of the region those P may take together (decision.joint_points): under the remainder rule the
+    box of the intervals cut where the rows' P would sum above 1, the remainder row taking up each move (SPC-203).
+    With the rows' P at 1 no remainder row was evaluated to take up a move, so the shares are read at the P entered.
+    A corner where the members have no weight between them is passed over.
     """
-    spans = [_span(scenario.adversary_actions[i]) for i in members]
-    ranges = []
-    for m, (low, high) in enumerate(spans):
-        others_high = sum(s[1] for n, s in enumerate(spans) if n != m)
-        others_low = sum(s[0] for n, s in enumerate(spans) if n != m)
-        ranges.append((low / (low + others_high), high / (high + others_low)))
-    return tuple(ranges)
+    row_shares(scenario)   # refuses rows that leave a remainder of P they do not hold
+    rows = scenario.adversary_actions
+    spans = {i: _span(a.accepted_prior) for i, a in enumerate(rows) if a.accepted_prior is not None}
+    if scenario.probability_rule is ProbabilityRule.REMAINDER and not (rows and rows[-1].remainder):
+        spans = {}
+    order = sorted(spans)
+    corners = joint_points(scenario, spans)
+    points = [moved_weights(scenario, dict(zip(order, corner, strict=True))) for corner in corners]
+    shares = [[w[m] / total for m in members] for w in points if (total := sum(w[m] for m in members)) > 0.0]
+    return tuple((min(s[k] for s in shares), max(s[k] for s in shares)) for k in range(len(members)))
 
 
 def _down(value: float) -> str:
@@ -174,6 +190,8 @@ def _up(value: float) -> str:
 
 
 def _source(action: AdversaryAction) -> str:
+    if action.remainder:
+        return _FROM_REMAINDER
     if action.accepted_prior is not None:
         return _FROM_NOTSO
     return _FROM_DEFAULT if _untouched(action) else _FROM_OWN

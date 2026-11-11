@@ -19,6 +19,7 @@ from spectre.domain.decision import (
     ActionType,
     AdversaryAction,
     FriendlyResponse,
+    ProbabilityRule,
     Scenario,
     ScenarioResult,
     SelectorStrategy,
@@ -53,9 +54,14 @@ _TWO_AND_ONE = ((0.9, 0.5, 0.95), (0.1, 0.4, 0.25))
 _ONE_WAY = ((0.9, 0.2, 0.95), (0.6, 0.1, 0.65))
 
 
-def _scenario(*, edited: bool = True, p: float = 0.5) -> Scenario:
+#: The rule a record 0.28.0 or 0.29.0 wrote is replayed by: only under it can every row be at P 0 with nothing to
+#: weigh, since the remainder of P carries the rest under this code's rule (SPC-203).
+_BEFORE = ProbabilityRule.SHARES
+
+
+def _scenario(*, edited: bool = True, p: float = 0.5, rule: ProbabilityRule = ProbabilityRule.REMAINDER) -> Scenario:
     return Scenario(
-        name="Approach on BLUE-1", epoch_utc=_EPOCH,
+        name="Approach on BLUE-1", epoch_utc=_EPOCH, probability_rule=rule,
         adversary_actions=[
             AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, p, 0.7, probability_edited=edited),
             AdversaryAction("A2", "Hold course", ActionType.NO_ACTION, p, 0.7, probability_edited=edited),
@@ -70,9 +76,9 @@ def _scenario(*, edited: bool = True, p: float = 0.5) -> Scenario:
 
 
 def _scored(scores: tuple[tuple[float, ...], ...], rule: SelectorStrategy = _MINIMAX, *, edited: bool = True,
-            p: float = 0.5) -> ScenarioResult:
+            p: float = 0.5, of_p: ProbabilityRule = ProbabilityRule.REMAINDER) -> ScenarioResult:
     """A real result with its matrix's composite scores set to *scores* and its pick under *rule* taken again."""
-    result = evaluate_scenario(_scenario(edited=edited, p=p), rule)
+    result = evaluate_scenario(_scenario(edited=edited, p=p, rule=of_p), rule)
     matrix = [
         [dataclasses.replace(cell, composite_score=score) for cell, score in zip(row, row_scores, strict=True)]
         for row, row_scores in zip(result.outcome_matrix, scores, strict=True)
@@ -203,9 +209,12 @@ class TestThePrimaryRule:
         assert RULE_WORDS == {_MINIMAX: "minimax", _MINIMIN: "minimin", _EV: "expected value"}
 
 
-def _tree_result(rule: SelectorStrategy = _MINIMAX, *, p: tuple[float, float] = (0.25, 0.75)) -> ScenarioResult:
+def _tree_result(
+    rule: SelectorStrategy = _MINIMAX, *, p: tuple[float, float] = (0.25, 0.75),
+    of_p: ProbabilityRule = ProbabilityRule.REMAINDER,
+) -> ScenarioResult:
     """A two-turn result over the hand-built tree of test_tree_selectors, its selection under *rule*."""
-    scenario = _tree_scenario(p=p)
+    scenario = dataclasses.replace(_tree_scenario(p=p), probability_rule=of_p)
     result = evaluate_scenario(scenario, rule)
     roots = _tree(2, 2, 2, _two_turn_score)
     selection = select(scenario, roots, 2, rule, matrix_pick=0)
@@ -245,8 +254,9 @@ class TestEachRulesTurnOnePickOnTheTree:
             assert "disagree on turn 1" in compared.tree_line
 
     def test_a_rule_with_no_pick_says_why(self) -> None:
-        """Every row at P 0 leaves expected value no weight to pick on; minimax and minimin still pick."""
-        result = _tree_result(p=(0.0, 0.0))
+        """Every row at P 0, under the rule a record 0.28.0 or 0.29.0 wrote, leaves expected value no weight to pick
+        on; minimax and minimin still pick."""
+        result = _tree_result(p=(0.0, 0.0), of_p=_BEFORE)
         picks = tree_turn_one_picks(result)
         assert picks[_EV] is None
         assert picks[_MINIMAX] is not None and picks[_MINIMIN] is not None
@@ -271,7 +281,7 @@ class TestEachRulesTurnOnePickOnTheTree:
     def test_whether_the_rules_agree_on_the_tree_is_said_apart(self) -> None:
         agreeing = compare_rules(_tree_result(), _MINIMAX)
         assert agreeing.tree_agree is (agreeing.tree_line is not None and "all three rules agree" in agreeing.tree_line)
-        split = compare_rules(_tree_result(p=(0.0, 0.0)), _MINIMAX)
+        split = compare_rules(_tree_result(p=(0.0, 0.0), of_p=_BEFORE), _MINIMAX)
         assert split.tree_agree is False
         assert compare_rules(_scored(_THREE_WAYS), _MINIMAX).tree_agree is None
 
@@ -296,11 +306,13 @@ def test_every_selector_strategy_has_words_and_a_meaning(rule: SelectorStrategy)
 
 
 class TestEveryRowAtPZero:
-    """With every row at P 0, expected value has no weight to pick on: it has no pick, on the matrix as on the tree,
-    and nothing counts it as agreeing with another rule."""
+    """With every row at P 0, under the rule a record 0.28.0 or 0.29.0 wrote is replayed by, expected value has no
+    weight to pick on: it has no pick, on the matrix as on the tree, and nothing counts it as agreeing with another
+    rule. Under this code's rule the remainder of P carries the whole weight (tests/unit/test_decision_p_remainder.py).
+    """
 
     def test_expected_value_has_no_pick_on_the_matrix(self) -> None:
-        result = _scored(_ONE_WAY, p=0.0)
+        result = _scored(_ONE_WAY, p=0.0, of_p=_BEFORE)
         assert matrix_picks(result)[_EV] is None
         compared = compare_rules(result, _MINIMAX)
         (ev,) = [pick for pick in compared.picks if pick.rule is _EV]
@@ -314,7 +326,7 @@ class TestEveryRowAtPZero:
         )
 
     def test_a_row_above_p_zero_gives_it_a_pick(self) -> None:
-        result = _scored(_ONE_WAY, p=0.0)
+        result = _scored(_ONE_WAY, p=0.0, of_p=_BEFORE)
         rows = [dataclasses.replace(result.scenario.adversary_actions[0], probability=0.1),
                 result.scenario.adversary_actions[1]]
         weighted = dataclasses.replace(result, scenario=dataclasses.replace(result.scenario, adversary_actions=rows))
@@ -323,13 +335,13 @@ class TestEveryRowAtPZero:
         assert ev.id == "R2"
 
     def test_a_primary_rule_with_no_pick_shows_no_recommendation(self) -> None:
-        compared = compare_rules(_scored(_ONE_WAY, _EV, p=0.0), _EV)
+        compared = compare_rules(_scored(_ONE_WAY, _EV, p=0.0, of_p=_BEFORE), _EV)
         assert compared.headline is None
         assert compared.primary_line == (
             "This deployment's primary rule is expected value, the rule chosen: it has no pick, since every row has "
             "P 0, so no recommendation is shown."
         )
-        other = compare_rules(_scored(_ONE_WAY, _MINIMAX, p=0.0), _EV)
+        other = compare_rules(_scored(_ONE_WAY, _MINIMAX, p=0.0, of_p=_BEFORE), _EV)
         assert other.headline is None
         assert other.primary_line == (
             "This deployment's primary rule is expected value: it has no pick, since every row has P 0. You chose "
@@ -341,13 +353,12 @@ class TestEveryRowAtPZero:
         )
 
     def test_a_chosen_rule_with_no_pick_says_so_beside_the_primary(self) -> None:
-        compared = compare_rules(_scored(_ONE_WAY, _EV, p=0.0), _MINIMAX)
+        compared = compare_rules(_scored(_ONE_WAY, _EV, p=0.0, of_p=_BEFORE), _MINIMAX)
         assert compared.headline is not None and compared.headline.id == "R2"
         assert compared.primary_line == (
             "This deployment's primary rule is minimax: it picks Avoid (R2). You chose expected value: it has no pick, "
             "since every row has P 0. The recommendation shown is the primary rule's pick."
         )
         assert compared.star_line == (
-            "\u2605 and the blue highlights mark Hold (R1) only as the first response: expected value, the rule chosen, "
-            "has no pick, since every row has P 0."
+            "Nothing is starred: expected value, the rule chosen, has no pick, since every row has P 0."
         )

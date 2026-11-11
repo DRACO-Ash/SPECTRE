@@ -63,10 +63,11 @@ def _record(scenario: Scenario, rule: SelectorStrategy) -> DecisionRecord:
 
 
 class TestTheStoredInputsCarryTheVeto:
-    def test_this_code_writes_version_2(self) -> None:
-        assert VERSION == 2
+    def test_this_code_writes_a_version_holding_the_veto(self) -> None:
+        """Version 2 added the veto; version 3 (SPC-203) keeps it."""
+        assert VERSION == 3
         text, _sha256 = store_inputs(evaluate_scenario(_vetoed(_lookup(), 1)))
-        assert json.loads(text)["version"] == 2
+        assert json.loads(text)["version"] == 3
 
     def test_each_response_holds_its_veto_and_reason(self) -> None:
         encoded = encode_scenario(_vetoed(_lookup(), 1))
@@ -116,10 +117,11 @@ class TestARecordWrittenBy0280StillReadsAndReplays:
         with pytest.raises(InputsRefusedError, match=r"friendly_responses\[0\].*unknown field veto_reason, vetoed"):
             read_inputs(text, sha256_of(text))
 
-    def test_a_version_this_code_does_not_know_is_refused_naming_both_it_knows(self) -> None:
+    def test_a_version_this_code_does_not_know_is_refused_naming_every_one_it_knows(self) -> None:
         document: dict[str, Any] = json.loads(store_inputs(evaluate_scenario(_lookup()))[0])
-        text = canonical_json({**document, "version": 3})
-        with pytest.raises(InputsRefusedError, match="version 3 is not one this code reads; it knows versions 1 and 2"):
+        text = canonical_json({**document, "version": 4})
+        with pytest.raises(InputsRefusedError,
+                           match="version 4 is not one this code reads; it knows versions 1, 2 and 3"):
             read_inputs(text, sha256_of(text))
 
     def test_its_scenario_hashes_as_0280_hashed_it(self) -> None:

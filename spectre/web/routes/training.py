@@ -42,6 +42,7 @@ from spectre.training.tutorials import get_tutorial, tutorials_for_level
 from spectre.web.auth import require_login
 from spectre.web.database import get_db
 from spectre.web.deps import render
+from spectre.web.elsets import refused
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 
@@ -296,6 +297,12 @@ def _preload_training_objects(scenario: Any, owner: User) -> None:
         for obj in scenario.objects:
             held: list[Any] = state.blue_assets if obj.side == "blue" else state.red_tracks
             if any(obj.satno == getattr(h, "satno", None) or obj.name == h.name for h in held):
+                continue
+            # The one acceptance check every ingest path runs (SPC-201): a refused set is never loaded, and the
+            # operator's run log says so, naming the object and what failed.
+            refusal = refused(obj.name, obj.tle)
+            if refusal is not None:
+                state.append_log(f"[TRAINING] {refusal}")
                 continue
             model = BlueAsset if obj.side == "blue" else RedTrack
             held.append(model(name=obj.name, tle=obj.tle, training=True, data_mode="SYNTHETIC"))

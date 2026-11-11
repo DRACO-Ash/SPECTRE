@@ -21,10 +21,11 @@ import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.elset_check import check_elset, tle_epoch
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
-from spectre.web.elsets import refresh_held_elsets
+from spectre.web.elsets import ElsetHistory, RefusedElset, log_refusal, refresh_held_elsets, refused
 from spectre.web.interaction_store import hold_conjunctions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
@@ -51,28 +52,12 @@ _ELSET_REFRESH_TEMPLATE = "partials/elset_refresh_note.html"
 def _parse_tle_epoch(line1: str) -> datetime | None:
     """Parse TLE line 1 epoch field (0-indexed cols 18-31, format YYDDD.FFFFFFFF) to UTC datetime.
 
-    Returns None if the field cannot be parsed.
+    Returns None if the field cannot be parsed. The element-set acceptance check reads the epoch the same way, so
+    one reading serves both (SPC-201).
     """
-    try:
-        epoch_str = line1[18:32].strip()
-        year_2d = int(epoch_str[:2])
-        day_frac = float(epoch_str[2:])
-        year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
-        day_int = int(day_frac)
-        # Day 0 or 367 is a corrupt field, not a date a timedelta should
-        # quietly roll into the neighbouring year (audit F-255).
-        if not 1 <= day_int <= _DAYS_IN_LEAP_YEAR:
-            return None
-        frac = day_frac - day_int
-        return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_int - 1 + frac)
-    except (ValueError, IndexError):
-        return None
+    return tle_epoch(line1)
 
 _UDL_BASE = UDL_BASE_URL
-_DAYS_IN_LEAP_YEAR = 366
-# TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
-# than this cannot hold one and is logged whole rather than sliced to nothing.
-_TLE_EPOCH_FIELD_END = 32
 
 # One wording for the one action an operator can take about it, used by every
 # route that can be reached without credentials. It is also the literal whose
@@ -118,7 +103,7 @@ async def fetch_tle_history_for_satno(
     window_hours: float = 24.0,
     data_mode: str = "REAL",
     source: str = "",
-) -> list[str]:
+) -> ElsetHistory:
     """Fetch all TLEs for a SATNO within a recent time window from UDL.
 
     Queries ``/elset`` (not ``/elset/current``) to retrieve every element set
@@ -127,6 +112,9 @@ async def fetch_tle_history_for_satno(
 
     Returns a list of ``"line1\\nline2"`` strings — one per UDL record.
     Returns an empty list on failure so callers can fall back gracefully.
+    A set the acceptance check refuses, its catalogue number included, is
+    left out and kept on the list's ``refused`` so the caller can say so
+    (SPC-201).
 
     Parameters
     ----------
@@ -167,7 +155,7 @@ async def fetch_tle_history_for_satno(
         data = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_history_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc, limit=500))
-        return []
+        return ElsetHistory()
 
     records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
     tles: list[str] = []
@@ -176,22 +164,40 @@ async def fetch_tle_history_for_satno(
         line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
         if line1 and line2:
             tles.append(f"{line1}\n{line2}")
+    # Every set feeds the clustering that chooses the cached one, so a set the acceptance check refuses, another
+    # object's included, is dropped here, counted and its failures logged without its text (SPC-201).
+    checks = [check_elset(tle, satno) for tle in tles]
+    history = ElsetHistory(
+        (tle for tle, check in zip(tles, checks, strict=True) if check.accepted),
+        [check for check in checks if not check.accepted],
+    )
+    if history.refused:
+        logger.warning(
+            "fetch_tle_history_for_satno(%s): %d element sets refused: %s",
+            log_safe(satno), len(history.refused), log_safe([c.failures for c in history.refused], limit=1000),
+        )
 
-    logger.debug("fetch_tle_history_for_satno(%s): %d TLEs in %.0fh window", satno, len(tles), window_hours)
-    return tles
+    logger.debug("fetch_tle_history_for_satno(%s): %d TLEs in %.0fh window", satno, len(history), window_hours)
+    return history
 
 
 async def fetch_tle_for_satno(
     satno: int, username: str, password: str,
     data_mode: str = "REAL",
     source: str = "",
-) -> tuple[str, str] | None:
+) -> tuple[str, str] | RefusedElset | None:
     """Fetch current TLE for a SATNO from UDL.
 
     Returns ``('line1\\nline2', 'DATA_MODE_TAG')`` or ``None`` on failure.
     The element set is the newest complete one UDL returns, and the second
     element is that record's ``dataMode`` (upper-cased), so callers can keep
     the provenance of the set they hold.
+
+    The newest set must pass the acceptance check (SPC-201), and be for
+    *satno*: when it does not, a RefusedElset comes back in its place, its
+    failures logged without the set's text, and the caller stores nothing and
+    says why. An older set from another source is not taken instead: the
+    newest is what UDL holds now.
     """
     try:
         async with httpx.AsyncClient() as client:
@@ -222,7 +228,12 @@ async def fetch_tle_for_satno(
 
     rec = _select_latest_elset(complete)
     data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
-    return (f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}", data_mode_tag)
+    tle = f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}"
+    check = check_elset(tle, satno)
+    if not check.accepted:
+        log_refusal(check.refusal(f"SATNO {satno}, as UDL answered it,"))
+        return RefusedElset(satno, check)
+    return (tle, data_mode_tag)
 
 
 #: Background tasks started at UDL login. The loop holds only weak references
@@ -600,7 +611,9 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
     """Log the record field names and every candidate's parsed line 1 epoch.
 
     Field names drift between UDL sources and a wrong pick is only ever
-    diagnosed from the epochs that were on offer, so both go in the log.
+    diagnosed from the epochs that were on offer, so both go in the log: the
+    epoch as read, never the set's own text, since a set the acceptance check
+    refuses must not reach the log in any part (SPC-201).
     """
     # Everything logged here comes off the wire, the record's own field names
     # included, and a newline in any of it forges an audit entry
@@ -614,18 +627,16 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
         # neutralised at any limit.
         logger.info("UDL elset record keys: %s", log_safe(list(sample.keys()), limit=2000))
         # Also check for any epoch-like top-level field
-        for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
+        for key in ("epoch", "EPOCH", "epochDate"):
             if key in sample:
                 logger.info("  record[%r] = %s", key, log_safe(str(sample[key])[:80]))
 
-    # Log every candidate's TLE line1 epoch for diagnostics.
+    # Log every candidate's line 1 epoch, as read, for diagnostics.
     for i, candidate in enumerate(records):
-        l1_raw = _elset_line(candidate, 1)
-        ep = _parse_tle_epoch(l1_raw)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         logger.info(
-            "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
+            "  record[%d] parsed_epoch=%s  objectName=%s",
             i,
-            log_safe(l1_raw[18:_TLE_EPOCH_FIELD_END] if len(l1_raw) > _TLE_EPOCH_FIELD_END else l1_raw),
             ep.isoformat() if ep else "None",
             log_safe(candidate.get("objectName") or candidate.get(_UDL_NAME_KEY_UPPER) or "?"),
         )
@@ -843,6 +854,11 @@ async def fetch_tle(
             _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
         )
+
+    # The set fills the form only once it passes the acceptance check, as the set for the number asked (SPC-201).
+    refusal = refused(f"{name} ({satno})", tle, satno=satno)
+    if refusal is not None:
+        return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": refusal})
 
     # TLE epoch metadata for the partial
     tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
@@ -1093,20 +1109,28 @@ async def fetch_hrr_objects(
     return hrr_blue, hrr_red, days_used, None
 
 
-def _hrr_elset_fields(sat: dict[str, Any]) -> dict[str, str]:
+def _hrr_elset_fields(sat: dict[str, Any], label: str) -> dict[str, str]:
     """Return the optional element-set fields for one HRR entry, or nothing.
 
     Both lines must be present to be usable: half a TLE is not a degraded
-    TLE, it is an unparseable one.
+    TLE, it is an unparseable one. A set the acceptance check refuses is not
+    carried: the entry holds the sentence saying so, naming the object as
+    *label*, in its place (SPC-201).
     """
     line1 = str(sat.get("line1") or "").strip()
     line2 = str(sat.get("line2") or "").strip()
-    if line1 and line2:
-        return {
-            "tle": f"{line1}\n{line2}",
-            "tle_data_mode": str(sat.get("tleDataMode") or "REAL").strip().upper(),
-        }
-    return {}
+    if not (line1 and line2):
+        return {}
+    tle = f"{line1}\n{line2}"
+    refusal = refused(label, tle)
+    if refusal is not None:
+        return {"tle_refusal": refusal}
+    return {"tle": tle, "tle_data_mode": str(sat.get("tleDataMode") or "REAL").strip().upper()}
+
+
+def elset_refusals(objects: list[dict[str, Any]]) -> list[str]:
+    """The sentence for each HRR entry whose element set the acceptance check refused, in order."""
+    return [str(o["tle_refusal"]) for o in objects if o.get("tle_refusal")]
 
 
 def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1118,7 +1142,9 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
     notification does not, so the live path is unaffected; the bundled
     bootstrap list does, which is what lets a fresh instance run before anyone
     has connected to UDL. Where present it is carried through as ``tle`` with
-    its ``tle_data_mode``, so the interface can mark where it came from.
+    its ``tle_data_mode``, so the interface can mark where it came from, once
+    it passes the acceptance check; a refused one is carried as the sentence
+    ``tle_refusal`` instead (SPC-201).
     """
     msg_body: list[dict[str, Any]] = notification.get("msgBody") or []
     created_at = str(notification.get("createdAt") or "").strip()
@@ -1140,8 +1166,8 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
             "orbit_regime": orbit_regime,
             "created_at": created_at,
         }
-        # Optional element set, carried through only when the source has one.
-        entry.update(_hrr_elset_fields(sat))
+        # Optional element set, carried through only when the source has one and it passes the check.
+        entry.update(_hrr_elset_fields(sat, f"{name} ({satno})"))
         if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
@@ -1178,8 +1204,11 @@ async def fetch_hrr(
             "partials/hrr_panel.html", {**_empty_err, "error": error},
         )
 
-    # Cache all HRR objects in session state for threat sweep use.
+    # Cache all HRR objects in session state for threat sweep use. A set the acceptance check refused was not
+    # carried: the run log says so, naming the object (SPC-201).
     state.hrr_objects = hrr_blue + hrr_red
+    for refusal in elset_refusals(state.hrr_objects):
+        state.append_log(f"[HRR] {refusal}")
 
     state.append_log(
         f"[HRR] lookback={days_used}d — "

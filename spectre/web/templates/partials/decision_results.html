@@ -11,7 +11,10 @@
    The sweep's Threat picture for the bound red track (SPC-171): its lines, the collect-first advice, the
    expected-value guidance, each row's Understanding and the collect-first rows, each guarded too. A response marked
    not permitted (SPC-195) is greyed, with "Not permitted:" and its reason in words beside it in the matrix and the
-   rankings; it carries no rank and no star, and with every response so marked nothing is starred. #}
+   rankings; it carries no rank and no star, and with every response so marked nothing is starred. The remainder of
+   P (SPC-203), where the rows' P sum below 1, is a row of the engine's own, last, named in full and labelled as the
+   engine's remainder, not the operator's row, in the matrix and the rankings; each row shows beside its P the share
+   of expected value it takes, written as its P is so the two read alike, each guarded so an older result renders. #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
@@ -19,6 +22,8 @@
 {# The rule chosen's pick, which the star and the blue highlights mark; none when every response is not permitted. #}
 {% set best = result.robust_best_response %}
 {% set binding = result.scenario.binding if result.scenario.binding is defined else none %}
+{# The remainder row's label in words (SPC-203): the engine's, not the operator's. #}
+{% set remainder_label = result.remainder_label if result.remainder_label is defined else "" %}
 
 {# ── Bound to (SPC-100): which real objects this scenario is about, and how old their orbits were at
      evaluation. A sampled row (SPC-112) and a computed row (SPC-120) below read them. One div with no div
@@ -53,6 +58,17 @@
   Scenario not bound to a red track or blue asset.
   {% endif %}
 </div>
+
+{# ── The operating envelope (SPC-200, docs/decision-engine-envelope.md): each breach a bound element set shows, in a
+     sentence of its own. A set on SDP4 is flagged and its figures stand; a set whose object is below the re-entry
+     floor gives no computed figure, and its cells say so too. Guarded, so an older result renders. ── #}
+{% set envelope = result.envelope if result.envelope is defined else () %}
+{% if envelope %}
+<div role="note" class="operating-envelope" style="font-size:0.62rem; color:var(--gold); margin-bottom:0.4rem; overflow-wrap:anywhere">
+  <strong style="text-transform:uppercase; letter-spacing:0.05em">Outside the operating envelope</strong>
+  {% for line in envelope %}<p class="envelope-breach" style="margin:0.1rem 0; font-size:0.62rem">{{ line }}</p>{% endfor %}
+</div>
+{% endif %}
 
 {# ── The sweep's Threat picture for the bound red track (SPC-171): the range, Understanding and decide-by, each a
      sentence of its own (I13), the collect-first advice and the rows it lists, never scored, and the expected-value
@@ -90,7 +106,8 @@
       </span>
     </div>
     <span style="font-size:0.65rem; color:var(--text-dim)">
-      {{ adv | length }} adversary action(s) × {{ fr | length }} response(s)
+      {% set listed = adv | rejectattr("remainder", "true") | list if adv and adv[0].remainder is defined else adv %}
+      {{ listed | length }} adversary action(s){% if listed | length < adv | length %} and the remainder of P{% endif %} × {{ fr | length }} response(s)
     </span>
   </div>
 
@@ -264,12 +281,20 @@
       {% set i = loop.index0 %}
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.25rem 0.35rem">
+          {% set is_remainder = a.remainder is defined and a.remainder %}
+          {% if is_remainder %}
+          <div class="remainder-row" style="font-weight:600; color:var(--gold)">{{ a.name }}: {{ remainder_label }}</div>
+          {% else %}
           <div style="font-weight:600; color:var(--gold)">{{ a.name | truncate(22, True, '…') }}</div>
-          {# Type, P, Conf and the gap share each carry their basis, judgement or lookup (SPC-196). #}
+          {% endif %}
+          {# Type, P, Conf and the gap share each carry their basis, judgement or lookup (SPC-196); the share of
+             expected value each row takes sits beside its P (SPC-203). #}
           {% set rb = result.row_input_bases[i] if result.row_input_bases is defined and result.row_input_bases | length > i else none %}
+          {% set share = result.row_share_texts[i] if result.row_share_texts is defined and result.row_share_texts | length > i else none %}
+          {% set p_text = result.row_p_texts[i] if result.row_p_texts is defined and result.row_p_texts | length > i else a.probability %}
           <div style="font-size:0.58rem; color:var(--text-dim)">
             {{ a.action_type.value | replace('_',' ') | title }}{% if rb is not none %} {{ modelled.mark(rb.action_type) }}{% endif %} ·
-            P={{ a.probability }}{% if rb is not none %} {{ modelled.mark(rb.probability) }}{% endif %} · Conf={{ a.confidence }}{% if rb is not none %} {{ modelled.mark(rb.confidence) }}{% endif %}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
+            P={{ p_text }}{% if rb is not none %} {{ modelled.mark(rb.probability) }}{% endif %}{% if share is not none %} · <span class="row-share">Share={{ share }}{% if rb is not none and rb.share is defined %} {{ modelled.mark(rb.share) }}{% endif %}</span>{% endif %} · {% if is_remainder %}Conf: none{% else %}Conf={{ a.confidence }}{% if rb is not none %} {{ modelled.mark(rb.confidence) }}{% endif %}{% endif %}{% if a.custody_gap_fraction is defined and a.action_type.value == "manoeuvre"
               and (result.row_custody is not defined or result.row_custody | length <= i or result.row_custody[i] is none) %} · <span class="row-gap" title="The rule of thumb loses custody for this share of the horizon when the response neither manoeuvres nor retasks a sensor; Conf moves no figure">Gap={{ a.custody_gap_fraction }}</span>{% if rb is not none %} {{ modelled.mark(rb.custody_gap_fraction) }}{% endif %}{% endif %}
           </div>
           {% if result.row_sources is defined and result.row_sources | length > i %}
@@ -541,8 +566,8 @@
   {% for a in adv %}
   {% set i = loop.index0 %}
   <div style="margin-bottom:0.5rem">
-    <div style="font-size:0.63rem; font-weight:700; color:var(--gold); margin-bottom:0.2rem">
-      {{ a.name }}
+    <div{% if a.remainder is defined and a.remainder %} class="remainder-ranking"{% endif %} style="font-size:0.63rem; font-weight:700; color:var(--gold); margin-bottom:0.2rem">
+      {{ a.name }}{% if a.remainder is defined and a.remainder %}: {{ remainder_label }}{% endif %}
     </div>
     <div style="display:flex; gap:0.4rem; flex-wrap:wrap">
       {% set ranked = result.ranked_cells[i] if result.ranked_cells is defined else [] %}

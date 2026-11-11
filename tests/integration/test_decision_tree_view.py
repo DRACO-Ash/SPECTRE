@@ -183,7 +183,7 @@ class TestTheForm:
         form = _form(
             horizon_hours="6", red_sat="RX", blue_sat="BY", turns="3",
             adv_id=["A1", "A2", "A3", "A4"], adv_name=["S1", "S2", "S3", "S4"], adv_type=["no_action"] * 4,
-            adv_prob=["0.5"] * 4, adv_conf=["0.7"] * 4,
+            adv_prob=["0.25"] * 4, adv_conf=["0.7"] * 4,
             fr_id=["F1", "F2", "F3"], fr_name=["H1", "H2", "H3"], fr_type=["no_action"] * 3, fr_cost=["0.2"] * 3,
             fr_rev=["0.8"] * 3, fr_time=["1"] * 3,
         )

@@ -105,7 +105,7 @@ class TestLoadFromNotso:
 
     def test_loading_is_not_applying(self, client: Any, auth_cookie: str, held: Any) -> None:  # noqa: F811
         page = _text(_results(client, auth_cookie, adv_loaded=["A1"]))
-        assert "P=0.6 (judgement) · Conf=0.7 (judgement)" in page
+        assert "P=0.6 (judgement) · Share=0.6 (judgement) · Conf=0.7 (judgement)" in page
         assert "P and Conf are your own." in page
 
     def test_the_load_control_sets_what_it_would_otherwise_take_from_the_evaluate_form(
@@ -231,7 +231,7 @@ class TestTheIntervalInTheResults:
     ) -> None:
         page = _text(_results(client, auth_cookie, adv_prior=[f"A1|{_P}|"], strategy="expected_value"))
         assert "Row 1, Approach: expected value recommends Hold at every P across its NOTSO interval, 0.02 to " \
-               "0.17, with the other rows held at their P." in page
+               "0.17, with the other rows held at their P and the remainder of P taking up the difference." in page
 
     def test_under_minimax_it_says_minimax_reads_no_probability_and_shows_no_interval(
         self, client: Any, auth_cookie: str, held: Any,  # noqa: F811

@@ -178,10 +178,10 @@ class TestExpectedValueWithTheUpdate:
         assert line in selection.lines
 
     def test_with_every_p_at_0_turn_one_has_no_pick(self) -> None:
-        """36."""
-        selection = select(
-            _scenario(p=(0.0, 0.0)), _tree(2, 2, 2, _two_turn_score), 2, _EV, matrix_pick=0,
-        )
+        """36. Under the rule a record 0.28.0 or 0.29.0 wrote is replayed by: under this code's the remainder of P
+        carries the weight every row at P 0 leaves (SPC-203)."""
+        before = dataclasses.replace(_scenario(p=(0.0, 0.0)), probability_rule=decision.ProbabilityRule.SHARES)
+        selection = select(before, _tree(2, 2, 2, _two_turn_score), 2, _EV, matrix_pick=0)
         assert selection.picks == (TurnPick(1, (), None, (None, None)),)
         assert NO_PICK_FIRST in selection.lines
 

@@ -684,6 +684,7 @@
     {% if detection.duplicate_epoch_sets %}● {{ detection.duplicate_epoch_sets }} repeated an epoch already held and were dropped{% endif %}
     {% if detection.bad_provenance_sets %}● {{ detection.bad_provenance_sets }} carried provenance in an unusable shape and were dropped{% endif %}
     {% if detection.other_object_sets %}● {{ detection.other_object_sets }} belonged to another object and were dropped{% endif %}
+    {% if detection.refused_sentence %}● {{ detection.refused_sentence }}{% endif %}
     {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
     {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
     <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>

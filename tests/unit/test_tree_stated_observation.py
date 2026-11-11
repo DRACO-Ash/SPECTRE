@@ -13,7 +13,7 @@ import dataclasses
 
 import pytest
 
-from spectre.domain.decision import Scenario, Seen
+from spectre.domain.decision import ProbabilityRule, Scenario, Seen
 from spectre.domain.tree_selectors import (
     NO_OBSERVATION,
     OBSERVED,
@@ -167,7 +167,8 @@ class TestThePlan:
         assert not follows_picks(scenario, selection, [(0, 1), (0, 1)])
 
     def test_nothing_is_on_the_plan_where_there_is_no_pick(self) -> None:
-        scenario = _scenario(p=(0.0, 0.0))
+        """Every row at P 0 under the rule a record 0.28.0 or 0.29.0 wrote is replayed by (SPC-203)."""
+        scenario = dataclasses.replace(_scenario(p=(0.0, 0.0)), probability_rule=ProbabilityRule.SHARES)
         selection = select(scenario, _tree(2, 2, 2, _two_turn_score), 2, _EV, matrix_pick=0)
         assert not any(follows_picks(scenario, selection, [(a, r)]) for a in range(2) for r in range(2))
 

@@ -32,7 +32,7 @@ from typing import Any, NamedTuple
 
 from spectre.astro.along_track import position_error_km
 from spectre.astro.elset_approach import ElsetFailure, burn_approach
-from spectre.astro.monte_carlo import SeparationWindow
+from spectre.astro.monte_carlo import REENTRY_FLOOR_KM, SeparationWindow
 from spectre.config.settings import get_settings
 from spectre.domain import interaction_graph as ig
 from spectre.web.elsets import elset_age, limit_hours_for_regime
@@ -67,6 +67,11 @@ _UNNUMBERED = "an unnumbered object"
 _NOT_REAL = "it was not filed as REAL data, so it says nothing about the object itself"
 _NO_BEFORE_EPOCH = "the red element set from before the burn has no readable epoch"
 _SGP4_FAILED = "SGP4 could not propagate the {side} element set"
+#: The SGP4 search's altitude floor, the RK45 path's own (SPC-200, evaluation F-30).
+_DECAYED = (
+    "the {side} object is below the {floor:g} km re-entry floor at an instant searched, so it has decayed or is "
+    "decaying"
+)
 _NOT_SEARCHED = "Closest approaches were computed for the first {cap} targets in reach; {more} more were not searched."
 _PROBE = ("{n} UDL conjunction{s} {are} held from the lookup at {at:%Y-%m-%d %H:%M} UTC. Their field names are "
           "inferred and unverified (SPC-033), so each is graded as a probe.")
@@ -240,7 +245,8 @@ def _search(burns: Sequence[ig.Burn], before_tle: str, after_tle: str, target: T
     found = burn_approach((before_tle, before.epoch), (after_tle, red_after.epoch or now),
                           (target.tle or "", blue.epoch or now), SeparationWindow(start, (end - start).total_seconds()))
     if isinstance(found, ElsetFailure):
-        return _SGP4_FAILED.format(side=found.side)
+        failed = _DECAYED if found.reason == "reentered" else _SGP4_FAILED
+        return failed.format(side=found.side, floor=REENTRY_FLOOR_KM)
     return ig.Miss(target=target.name, target_satno=target.satno, ours=target.ours, source=ig.MissSource.COMPUTED,
                    tca=found.after_tca, after_km=found.after.approach.miss_km,
                    before_km=found.before.approach.miss_km, before_at=before.epoch, margin_km=found.margin_km)

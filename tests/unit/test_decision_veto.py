@@ -31,7 +31,7 @@ from spectre.domain.rule_comparison import NONE_PERMITTED, compare_rules, matrix
 from spectre.domain.tree_selectors import EXCLUDED, NO_PICK_VETOED_FIRST, TurnPick, select
 from tests.unit._i13 import i13_problems
 from tests.unit.test_decision_prior_interval import _both_applied, _prior, _result
-from tests.unit.test_decision_rule_comparison import _ONE_WAY, _scenario, _scored
+from tests.unit.test_decision_rule_comparison import _BEFORE, _ONE_WAY, _scenario, _scored
 from tests.unit.test_decision_tree_select import _still
 from tests.unit.test_tree_selectors import _scenario as _tree_scenario
 from tests.unit.test_tree_selectors import _tree, _two_turn_score
@@ -153,16 +153,16 @@ class TestTheInverseOfProbeP06OnTheMatrix:
         assert _forced(_scenario(), tied, rule).robust_best_response.id == "R1"
         assert _forced(_veto(_scenario(), 0), tied, rule).robust_best_response.id == "R2"
 
-    def test_with_every_p_at_0_expected_value_names_no_vetoed_response(self) -> None:
-        scenario = _veto(_scenario(p=0.0), 0)
-        pick = find_robust_response(scenario, evaluate_scenario(scenario).outcome_matrix, _EV)
-        assert pick is not None and pick.id == "R2"
+    def test_with_every_p_at_0_expected_value_names_no_response(self) -> None:
+        """Every row at P 0 under the rule a record 0.28.0 or 0.29.0 wrote: expected value has no pick (SPC-200), so it
+        can name no vetoed response either. Under the remainder rule the remainder carries the weight (SPC-203)."""
+        scenario = _veto(_scenario(p=0.0, rule=_BEFORE), 0)
+        assert find_robust_response(scenario, evaluate_scenario(scenario).outcome_matrix, _EV) is None
 
-    def test_with_every_p_at_0_the_star_says_it_marks_the_first_response_not_marked(self) -> None:
-        compared = compare_rules(evaluate_scenario(_veto(_scenario(p=0.0), 0), _EV), _MINIMAX)
+    def test_with_every_p_at_0_nothing_is_starred_and_the_star_line_says_why(self) -> None:
+        compared = compare_rules(evaluate_scenario(_veto(_scenario(p=0.0, rule=_BEFORE), 0), _EV), _MINIMAX)
         assert compared.star_line == (
-            "\u2605 and the blue highlights mark Avoid (R2) only as the first response not marked not permitted: "
-            "expected value, the rule chosen, has no pick, since every row has P 0."
+            "Nothing is starred: expected value, the rule chosen, has no pick, since every row has P 0."
         )
 
     def test_the_result_lists_each_vetoed_response_with_its_reason(self) -> None:
@@ -313,15 +313,17 @@ class TestTheNotsoIntervalNamesNoVetoedResponse:
         assert "above P 0.171 it recommends Watch" in free
         (line,) = _vetoed_result(_result([[0.9, 0.2], [0.1, 0.3]]), 1).interval_lines
         assert line == ("Row 1, Approach: expected value recommends Evade at every P across its NOTSO interval, "
-                        "0.04 to 0.30, with the other rows held at their P.")
+                        "0.04 to 0.30, with the other rows held at their P and the remainder of P taking up the "
+                        "difference.")
 
     def test_a_vetoed_response_is_not_the_pick_it_changes_to_with_rows_moved_together(self) -> None:
         # Moved together, rows 1 and 2 take expected value from Watch to Wait, until Wait is vetoed.
         free = _both_applied(_result([[0.96, 0.01, 0.78], [0.82, 0.89, 0.74]], other_p=0.13), _prior(), _prior())
-        assert free.interval_lines[-1].endswith("it recommends Wait.")
+        assert free.interval_lines[-1].endswith("it recommends Wait, with the remainder of P taking up the difference.")
         vetoed = _both_applied(
             _vetoed_result(_result([[0.96, 0.01, 0.78], [0.82, 0.89, 0.74]], other_p=0.13), 2), _prior(), _prior(),
         )
         assert vetoed.interval_lines[-1] == (
-            "Moved together across their NOTSO intervals, rows 1 and 2's P keep expected value at Watch throughout."
+            "Moved together across their NOTSO intervals, rows 1 and 2's P keep expected value at Watch throughout, "
+            "with the remainder of P taking up the difference."
         )

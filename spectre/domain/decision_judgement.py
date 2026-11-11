@@ -48,7 +48,7 @@ from spectre.domain.decision import (
 )
 from spectre.domain.decision_figures import DEFAULT_BUDGET_KM_S
 from spectre.domain.manoeuvre_calibration import from_km_s
-from spectre.domain.provenance import Basis, FigureBasis
+from spectre.domain.provenance import Basis, FigureBasis, weakest
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -111,6 +111,19 @@ _DETECTED = FigureBasis(
 )
 _SPREAD = FigureBasis(Basis.JUDGEMENT, "your judgement, entered on the panel in place of the archetype's spread")
 _SAMPLES = FigureBasis(Basis.JUDGEMENT, f"{_KEPT}; with fewer than 50 the row is not sampled")
+#: The remainder row's inputs (SPC-203): the engine's, by definition, never the operator's.
+_REMAINDER_TYPE = FigureBasis(
+    Basis.LOOKUP, "the engine's remainder: no adversary action, the chance that none of your actions happens",
+)
+_REMAINDER_P = "1 less the sum of your rows' P, so it rests on them and is no stronger than the weakest of them"
+_REMAINDER_NONE = FigureBasis(Basis.LOOKUP, "none: the engine's remainder has no Conf and no gap share")
+#: What a row's share of expected value rests on: its P, since the rows' P and the remainder sum to 1 (SPC-203).
+_SHARE = "the share of expected value this row takes: its P, since the rows' P and the remainder of P sum to 1"
+
+
+def _share(probability: FigureBasis) -> FigureBasis:
+    """A row's share of expected value, which is its P, so rests on what its P rests on (SPC-203)."""
+    return FigureBasis(probability.kind, _SHARE)
 
 #: What a response's cost moves, by its action type, as the lookup model reads it (compute_outcome_metrics).
 _COST_READS: dict[ActionType, str] = {
@@ -157,12 +170,14 @@ class JudgementLine:
 
 @dataclass(frozen=True)
 class RowInputs:
-    """The bases of an adversary row's type, P, Conf and custody gap share, as its matrix row shows them."""
+    """The bases of an adversary row's type, P, Conf and custody gap share, as its matrix row shows them, and of the
+    share of expected value it takes, which is its P (SPC-203)."""
 
     action_type: FigureBasis
     probability: FigureBasis
     confidence: FigureBasis
     custody_gap_fraction: FigureBasis
+    share: FigureBasis
 
 
 @dataclass(frozen=True)
@@ -185,8 +200,17 @@ def row_inputs(action: AdversaryAction) -> RowInputs:
     prior = action.accepted_prior
     if prior is not None:
         confidence = _CONF if prior.confidence is None else prior.basis
-        return RowInputs(_YOURS, prior.basis, confidence, _GAP)
-    return RowInputs(_YOURS, _DEFAULT_P if _untouched(action) else _P, _CONF, _GAP)
+        return RowInputs(_YOURS, prior.basis, confidence, _GAP, _share(prior.basis))
+    probability = _DEFAULT_P if _untouched(action) else _P
+    return RowInputs(_YOURS, probability, _CONF, _GAP, _share(probability))
+
+
+def remainder_inputs(scenario: Scenario) -> RowInputs:
+    """The remainder row's type, P and Conf (SPC-203): its type is the engine's by definition; its P the rest of the
+    operator's, so it rests on their P and is marked with the weakest of their bases; it has no Conf."""
+    kinds = [row_inputs(a).probability.kind for a in scenario.adversary_actions if not a.remainder]
+    p = FigureBasis(weakest(*kinds), _REMAINDER_P)
+    return RowInputs(_REMAINDER_TYPE, p, _REMAINDER_NONE, _REMAINDER_NONE, _share(p))
 
 
 def response_inputs(_response: FriendlyResponse) -> ResponseInputs:
@@ -293,6 +317,8 @@ def judgement_lines(
     lines += [_response_line(response) for response in scenario.friendly_responses]
     loses_custody = any(r.action_type not in _HOLDS_CUSTODY for r in scenario.friendly_responses)
     for i, action in enumerate(scenario.adversary_actions):
+        if action.remainder:   # the engine's own row, not an input on the panel (SPC-203)
+            continue
         read = i < len(row_custody) and row_custody[i] is not None
         sampled = i < len(row_sampled) and row_sampled[i]
         gap_read = action.action_type is ActionType.MANOEUVRE and not read and loses_custody

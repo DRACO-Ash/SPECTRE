@@ -97,6 +97,12 @@ analyst or a sensor; it is shown beside the probability and confidence,
 which it never fills; and under expected value it says when the probability
 has not been earned and what minimax would recommend.
 
+P is the chance of each adversary action, the actions mutually exclusive (SPC-203, evaluation F-12): the rows' P
+sum to at most 1, within P_SUM_TOLERANCE, and the scenario refuses more. When they sum below 1, with_remainder adds
+the engine's own row last, "No adversary action (remainder of P)", a no-action row at the rest of P, which every rule,
+the tree and the record read. A scenario read from a record 0.28.0 or 0.29.0 wrote keeps the rule it was evaluated
+under, ProbabilityRule.SHARES: each row weighed by its P over the rows' sum, with no remainder.
+
 A scenario may run 2 or 3 turns (SPC-140): spectre/domain/decision_tree.py's evaluate_tree builds the game tree
 beside the matrix, which is its turn 1, and puts every computed cell on RK45 for both orbits even when nothing burns,
 so no figure in a tree is SGP4. evaluate_scenario evaluates one turn, as before, and carries no tree.
@@ -178,6 +184,7 @@ from spectre.domain.custody import (
     custody_over_horizon,
     span_text,
 )
+from spectre.domain.decision_envelope import envelope_lines
 from spectre.domain.decision_figures import (
     NOMINAL_BURN,
     ResponseBurnSpec,
@@ -231,6 +238,19 @@ class ActionType(Enum):
     SENSOR_RETASK    = "sensor_retask"
     POSTURE_CHANGE   = "posture_change"
     NO_ACTION        = "no_action"
+
+
+class ProbabilityRule(StrEnum):
+    """What the rows' P mean to expected value (SPC-203, evaluation F-12).
+
+    REMAINDER: each P is the chance of its action, the actions mutually exclusive, so the rows' P sum to at most 1
+    and the rest is no adversary action, which the engine weighs as a row of its own. SHARES: the rule of 0.28.0 and
+    0.29.0, each row weighed by its P over the rows' sum, with no remainder; it is read only from a record those
+    releases wrote, so the replay evaluates it as it was evaluated then.
+    """
+
+    REMAINDER = "remainder"
+    SHARES = "shares"
 
 
 class SelectorStrategy(Enum):
@@ -832,9 +852,27 @@ DEFAULT_TIME_TO_EXECUTE_H = 6.0
 #: The horizon a scenario takes, and a new panel starts at, unless one is given, hours.
 DEFAULT_HORIZON_H = 72.0
 
+#: How far above 1 the rows' P may sum and still be read as 1, and how far below 1 before a remainder is weighed: the
+#: rounding of adding fractions, not a judgement (SPC-203).
+P_SUM_TOLERANCE = 1e-9
+#: The engine's own row for the chance that none of the operator's actions happens (SPC-203).
+REMAINDER_ID = "remainder"
+REMAINDER_NAME = "No adversary action (remainder of P)"
+#: Beside the remainder row's name in the matrix and the rankings (SPC-203).
+REMAINDER_LABEL = "the engine's remainder, not your row"
+#: Why a sum of P above 1 is refused, at the panel and in the scenario (SPC-203).
+P_SUM_REFUSED = (
+    "{lead}, above 1. P is the chance of each adversary action, and the rows must be mutually exclusive, so their P "
+    "sum to at most 1; the engine weighs the rest as no adversary action. Lower the P of one or more rows."
+)
+_P_SUM_TYPED = "Your rows' P sum to {total}"
+_P_SUM_SUGGESTED = "With the NOTSO {suggestions} applied to {rows}, your rows' P sum to {total}"
+
 #: Beside the adversary rows on the panel: what each of a row's three numbers means and what reads it (SPC-161).
 ADVERSARY_FIELDS_NOTE = (
-    "P: how likely you judge this action, from 0 to 1; the expected-value selector weights each row by it. "
+    "P: how likely you judge this action, from 0 to 1; the rows must be mutually exclusive, so their P sum to at "
+    "most 1, and the engine weighs the rest as no adversary action. The expected-value selector weights each row "
+    "by its P. "
     "Conf: how sure the intelligence behind P is, from 0 to 1; it is recorded and moves no figure. "
     "Gap: the share of the horizon we lose custody for if this action is a manoeuvre and our response neither "
     "manoeuvres nor retasks a sensor, a rule of thumb; a bound red track's custody replaces it once read."
@@ -871,6 +909,9 @@ class AdversaryAction:
     # of 2026-11-05, concept section 9, decision 11, SPC-183), so a deliberate 0.5 is the operator's own. A row
     # built in code states its P, so it is True unless the form says otherwise.
     probability_edited: bool = True
+    # The engine's own row for the rest of P (SPC-203), never the operator's: with_remainder adds it, and it is never
+    # stored as a row.
+    remainder: bool = False
 
     def __post_init__(self) -> None:
         _require_fraction("AdversaryAction", "probability", self.probability)
@@ -887,6 +928,15 @@ class AdversaryAction:
             )
         if self.accepted_prior is not None:
             _require_accepted(self)
+        if self.remainder:
+            _require_remainder_row(self)
+
+
+def _require_remainder_row(action: AdversaryAction) -> None:
+    """The remainder row is the engine's no-action row, as it builds it: no hypothesis, no suggestion (SPC-203)."""
+    built = (action.id, action.name, action.action_type, action.hypothesis, action.accepted_prior)
+    if built != (REMAINDER_ID, REMAINDER_NAME, ActionType.NO_ACTION, None, None):
+        raise ValueError(f"the remainder row is the engine's {REMAINDER_NAME}, a no-action row with nothing else")
 
 
 def _require_accepted(action: AdversaryAction) -> None:
@@ -1683,6 +1733,9 @@ class Scenario:
     # The miss at or inside which closest approach scores its full penalty, km (SPC-191): set on the panel, and
     # DEFAULT_KEEP_OUT_KM, Claude's choice and unsourced, for a scenario opened from the sweep or built in code.
     keep_out_km:        float = DEFAULT_KEEP_OUT_KM
+    # What the rows' P mean to expected value (SPC-203): REMAINDER, unless the scenario was read from a record 0.28.0
+    # or 0.29.0 wrote, which is replayed under the rule it was evaluated under, SHARES.
+    probability_rule:   ProbabilityRule = ProbabilityRule.REMAINDER
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -1694,10 +1747,116 @@ class Scenario:
         _require_turns(self.turns)
         _require_observed(self.observed)
         _require_keep_out(self.keep_out_km)
+        _require_probabilities(self)
 
 
 #: The most turns a game tree runs (SPC-140): a fourth would multiply the branches past what one evaluation builds.
 MAX_TURNS = 3
+
+
+# ── What P means (SPC-203, evaluation F-12) ───────────────────────────────────
+
+def _sum_text(total: float) -> str:
+    """A sum of P as the operator reads it: to the ninth decimal at most, with no floating-point noise."""
+    return f"{total:.9f}".rstrip("0").rstrip(".")
+
+
+def rows_listed(rows: Sequence[int]) -> str:
+    """Rows by their numbers on the panel: "row 1", "rows 1 and 3", "rows 1, 2 and 4"."""
+    numbers = [str(r + 1) for r in rows]
+    if len(numbers) == 1:
+        return f"row {numbers[0]}"
+    return f"rows {', '.join(numbers[:-1])} and {numbers[-1]}"
+
+
+def p_sum_refusal(total: float, suggested: Sequence[int] = ()) -> str:
+    """Why rows whose P sum to *total*, above 1, are refused; *suggested* are the rows carrying an applied NOTSO
+    suggestion, named when there are any, since it is their P that the suggestions set."""
+    if not suggested:
+        return P_SUM_REFUSED.format(lead=_P_SUM_TYPED.format(total=_sum_text(total)))
+    words = "suggestion" if len(suggested) == 1 else "suggestions"
+    lead = _P_SUM_SUGGESTED.format(suggestions=words, rows=rows_listed(suggested), total=_sum_text(total))
+    return P_SUM_REFUSED.format(lead=lead)
+
+
+def p_sum_problem(actions: Sequence[AdversaryAction]) -> str | None:
+    """Why *actions* are refused, their P summing above 1, naming the rows carrying an applied NOTSO suggestion; None
+    when their P sum to at most 1 within P_SUM_TOLERANCE (SPC-203). The panel asks it before a scenario is built."""
+    total = rows_p_sum(actions)
+    if total <= 1.0 + P_SUM_TOLERANCE:
+        return None
+    return p_sum_refusal(total, [i for i, a in enumerate(actions) if a.accepted_prior is not None])
+
+
+def rows_p_sum(actions: Sequence[AdversaryAction]) -> float:
+    """The operator's rows' P added up exactly (math.fsum), the remainder row left out."""
+    return math.fsum(a.probability for a in actions if not a.remainder)
+
+
+def _rest(scenario: Scenario) -> float | None:
+    """The remainder of P the engine weighs as no adversary action, or None: at 1 within P_SUM_TOLERANCE, and
+    under the 0.29.0 rule, which weighs none."""
+    if scenario.probability_rule is ProbabilityRule.SHARES:
+        return None
+    rest = 1.0 - rows_p_sum(scenario.adversary_actions)
+    return rest if rest > P_SUM_TOLERANCE else None
+
+
+def _require_probabilities(scenario: Scenario) -> None:
+    """Under the remainder rule, the rows' P sum to at most 1 within P_SUM_TOLERANCE, and a remainder row, where one
+    is held, is the last row, held once, at exactly the rest of P; under the 0.29.0 rule none is held (SPC-203)."""
+    rows = scenario.adversary_actions
+    held = [i for i, a in enumerate(rows) if a.remainder]
+    if scenario.probability_rule is ProbabilityRule.SHARES:
+        if held:
+            raise ValueError("a scenario under the 0.29.0 rule weighs no remainder, so holds no remainder row")
+        return
+    total = rows_p_sum(rows)
+    if total > 1.0 + P_SUM_TOLERANCE:
+        raise ValueError(p_sum_refusal(total))
+    if held and (held != [len(rows) - 1] or rows[-1].probability != _rest(scenario)):
+        raise ValueError("a scenario holds its remainder row once, last, at 1 less the sum of its rows' P")
+
+
+def remainder_row(rest: float) -> AdversaryAction:
+    """The engine's row for the chance *rest* that none of the operator's actions happens: no adversary action."""
+    return AdversaryAction(REMAINDER_ID, REMAINDER_NAME, ActionType.NO_ACTION, rest, 0.0, remainder=True)
+
+
+def with_remainder(scenario: Scenario) -> Scenario:
+    """*scenario* as the engine evaluates it: the operator's rows and, when their P sum below 1, the remainder row
+    last, carrying the rest. *scenario* itself when it already is, so adding it twice adds one row."""
+    rest = _rest(scenario)
+    rows = [a for a in scenario.adversary_actions if not a.remainder]
+    if not rows:   # nothing listed, so nothing to be the rest of: _evaluate refuses it as before
+        return scenario
+    wanted = [*rows, *(() if rest is None else (remainder_row(rest),))]
+    if wanted == scenario.adversary_actions:
+        return scenario
+    return dataclasses.replace(scenario, adversary_actions=wanted)
+
+
+def without_remainder(scenario: Scenario) -> Scenario:
+    """The operator's own scenario: *scenario* with any remainder row taken out, as the record stores it."""
+    rows = [a for a in scenario.adversary_actions if not a.remainder]
+    if len(rows) == len(scenario.adversary_actions):
+        return scenario
+    return dataclasses.replace(scenario, adversary_actions=rows)
+
+
+def row_shares(scenario: Scenario) -> tuple[float, ...]:
+    """The share of expected value each of *scenario*'s rows takes, in order: its P, the remainder row included,
+    under the remainder rule; under the 0.29.0 rule its P over the rows' sum, or 0 when every P is 0.
+
+    A scenario whose P leave a remainder it does not hold has no shares: with_remainder gives the rows to weigh.
+    """
+    weights = [a.probability for a in scenario.adversary_actions]
+    if scenario.probability_rule is ProbabilityRule.REMAINDER:
+        if scenario.adversary_actions and not scenario.adversary_actions[-1].remainder and _rest(scenario) is not None:
+            raise ValueError("these rows leave a remainder of P that no row weighs: evaluate with_remainder(scenario)")
+        return tuple(weights)
+    total = sum(weights)
+    return tuple(w / total if total > 0.0 else 0.0 for w in weights)
 
 
 def _require_turns(turns: object) -> None:
@@ -1718,6 +1877,27 @@ OWN_VALUES = "P and Conf are your own."
 #: A row whose P the form records as never edited (SPC-183): its P is the panel's default, only its Conf the
 #: operator's.
 DEFAULT_P_VALUES = f"P {DEFAULT_PROBABILITY} is the panel's default, never edited; Conf is your own."
+
+
+#: The remainder row's own words, where a row's source goes (SPC-203).
+REMAINDER_SOURCE = (
+    "This row is the engine's remainder, not your row: its P, {p}, is 1 less the sum of your rows' P, {total}, the "
+    "chance that none of the actions you listed happens. It is evaluated as any no-action row, and it has no Conf."
+)
+#: Beside it, when the operator listed a no-action row of their own (SPC-203).
+REMAINDER_BESIDE_NO_ACTION = (
+    " Your own no-action row is one of the actions you listed, at the P you gave it; this row is the chance that "
+    "none of them happens, so it is weighed apart from yours."
+)
+
+
+def remainder_source(scenario: Scenario) -> str:
+    """What the remainder row rests on: the rest of the operator's P, and why it stands apart from a no-action row
+    of theirs (SPC-203)."""
+    rest = scenario.adversary_actions[-1].probability
+    line = REMAINDER_SOURCE.format(p=_sum_text(rest), total=_sum_text(rows_p_sum(scenario.adversary_actions)))
+    listed = any(a.action_type is ActionType.NO_ACTION and not a.remainder for a in scenario.adversary_actions)
+    return line + REMAINDER_BESIDE_NO_ACTION if listed else line
 
 
 def _row_source(action: AdversaryAction) -> str:
@@ -1785,6 +1965,9 @@ class ScenarioResult:
     # Whether the evaluation's time budget ran out (SPC-113, SPC-140): a row it refused for want of time, a burn it
     # left unsized, or a tree it stopped part-way. A replay runs in full, so it says so (SPC-193, evaluation F-02).
     budget_ran_out:         bool = False
+    # Each breach of the operating envelope the bound element sets show, in a sentence: a set on SDP4, flagged, and a
+    # set whose object is below the re-entry floor, refused (SPC-200, docs/decision-engine-envelope.md).
+    envelope:               tuple[str, ...] = ()
 
     # The flag and basis are worked out from the cells, so the page says what
     # the outcomes rest on (audit F-S05-02, and the "modelled estimate" banner
@@ -1910,9 +2093,37 @@ class ScenarioResult:
         return None
 
     @property
+    def row_shares(self) -> tuple[float, ...]:
+        """The share of expected value each row takes, shown beside its P: P itself, the remainder row included
+        (SPC-203)."""
+        return row_shares(self.scenario)
+
+    @property
+    def row_p_texts(self) -> tuple[str, ...]:
+        """Each row's P as the page shows it: the operator's as entered; the remainder's, 1 less their sum, to the
+        ninth decimal at most, with no floating-point noise (SPC-203)."""
+        return tuple(_sum_text(a.probability) if a.remainder else str(a.probability)
+                     for a in self.scenario.adversary_actions)
+
+    @property
+    def row_share_texts(self) -> tuple[str, ...]:
+        """Each row's share as the page shows it: under the remainder rule its P, written as the P beside it is, so
+        the two read alike; under the 0.29.0 rule its P over the rows' sum, to the ninth decimal at most."""
+        if self.scenario.probability_rule is ProbabilityRule.REMAINDER:
+            return self.row_p_texts
+        return tuple(_sum_text(share) for share in self.row_shares)
+
+    @property
+    def remainder_label(self) -> str:
+        """What the page says beside the remainder row's name (SPC-203)."""
+        return REMAINDER_LABEL
+
+    @property
     def row_sources(self) -> tuple[str, ...]:
         """Per adversary row, whose P and Conf they are: the operator's own, or a NOTSO suggestion applied (SPC-130)."""
-        return tuple(_row_source(a) for a in self.scenario.adversary_actions)
+        return tuple(
+            remainder_source(self.scenario) if a.remainder else _row_source(a) for a in self.scenario.adversary_actions
+        )
 
     @property
     def interval_lines(self) -> tuple[str, ...]:
@@ -2139,10 +2350,13 @@ class ScenarioResult:
 
     @property
     def row_input_bases(self) -> tuple[RowInputs, ...]:
-        """Per adversary row, the basis of its P, Conf and custody gap share, as its matrix row marks them."""
-        from spectre.domain.decision_judgement import row_inputs
+        """Per adversary row, the basis of its P, Conf and custody gap share, as its matrix row marks them; the
+        remainder row's are the engine's (SPC-203)."""
+        from spectre.domain.decision_judgement import remainder_inputs, row_inputs
 
-        return tuple(row_inputs(a) for a in self.scenario.adversary_actions)
+        return tuple(
+            remainder_inputs(self.scenario) if a.remainder else row_inputs(a) for a in self.scenario.adversary_actions
+        )
 
     @property
     def response_input_bases(self) -> dict[str, ResponseInputs]:
@@ -3201,7 +3415,7 @@ def needs_a_run(scenario: Scenario) -> bool:
     """
     if scenario.turns > 1 and _tree_bound(scenario):
         return True
-    pre = _pre_plan(scenario)
+    pre = _pre_plan(with_remainder(scenario))
     return pre.ready > 0 or pre.sizing
 
 
@@ -3231,8 +3445,9 @@ def plan_sampling(
     a time on this thread, and a series with a failed sample or not converged
     is refused. Under *run*, the rest share its budget in order: a row it
     does not cover is refused, naming it, and a stop raises
-    EvaluationStoppedError.
+    EvaluationStoppedError. The remainder row, where the rows' P leave one, is a row like any other (SPC-203).
     """
+    scenario = with_remainder(scenario)
     pre = _pre_plan(scenario)
     budget = None if run is None else _Budget(run, pre.ready)
     return _plan_sampling(scenario, sampler, budget, pre)
@@ -3554,6 +3769,11 @@ _NOT_COMPUTED_SGP4 = (
     _NOT_COMPUTED + "SGP4 could not propagate the {side} element set across the horizon, so a miss without those "
     "instants could hide the closest."
 )
+#: The RK45 path's altitude floor on the SGP4 path (SPC-200, evaluation F-30).
+_NOT_COMPUTED_DECAYED = (
+    _NOT_COMPUTED + "the {side} object is below the {floor:g} km re-entry floor at an instant searched, so it has "
+    "decayed or is decaying and a miss computed from it would not be earned."
+)
 _NOT_A_BURN = (
     _NOT_COMPUTED + "a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show "
     "only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row."
@@ -3725,6 +3945,8 @@ class ComputedPlan(NamedTuple):
     responses: tuple[SizedBurn | BurnRefusal, ...] = ()
     sgp4_reference: ElsetApproach | None = None
     response_refusal: str | None = None
+    # The side, name and floor of a bound set whose object was below the re-entry floor at an instant searched.
+    decayed: tuple[str, str, float] | None = None
 
 
 def _earned_s(elset: BoundElset) -> float:
@@ -3755,6 +3977,7 @@ def _searched_span_s(scenario: Scenario) -> float:
 
 def plan_computed(scenario: Scenario) -> ComputedPlan | None:
     """The bound pair's closest approach, or why not; None unless bound on both sides (SPC-120, SPC-121)."""
+    scenario = with_remainder(scenario)
     return _plan_computed(scenario, _pre_plan(scenario), None)
 
 
@@ -3780,8 +4003,9 @@ def _plan_computed(scenario: Scenario, pre: _PrePlan, budget: _Budget | None) ->
     One search per scenario, shared by every computed row and response: our response is not applied to the blue
     orbit yet (SPC-121). It runs from the scenario epoch to the earlier of the horizon's end and the moment
     either element set passes its limit, since past that a computed miss would rest on an out-of-date orbit.
-    Refused, as sampling refuses it, when either orbit is out of date or of unknown age, and when SGP4 cannot
-    propagate either element set at any instant searched.
+    Refused, as sampling refuses it, when either orbit is out of date or of unknown age, when SGP4 cannot
+    propagate either element set at any instant searched, and when either object is below the re-entry floor at
+    any instant searched (SPC-200), which the plan carries for the result's envelope line.
     """
     binding = scenario.binding
     red, blue = (None, None) if binding is None else (binding.red, binding.blue)
@@ -3792,6 +4016,10 @@ def _plan_computed(scenario: Scenario, pre: _PrePlan, budget: _Budget | None) ->
         return ComputedPlan(None, _refusal(_NOT_COMPUTED_STALE.format(side=side)))
     window = SeparationWindow(start_utc=scenario.epoch_utc, span_s=_searched_span_s(scenario))
     found = elset_closest_approach(red.tle, blue.tle, window)
+    if isinstance(found, ElsetFailure) and found.reason == "reentered":
+        decayed = red if found.side == "red" else blue
+        sentence = _NOT_COMPUTED_DECAYED.format(side=found.side, floor=REENTRY_FLOOR_KM)
+        return ComputedPlan(None, _refusal(sentence), decayed=(found.side, decayed.name, REENTRY_FLOOR_KM))
     if isinstance(found, ElsetFailure):
         return ComputedPlan(None, _refusal(_NOT_COMPUTED_SGP4.format(side=found.side)))
     if not (pre.sizing or pre.rk45):
@@ -4059,6 +4287,26 @@ def _custody_plan(scenario: Scenario) -> tuple[_RowCustody | None, ...]:
     return tuple(_row_custody(action, red, scenario) for action in scenario.adversary_actions)
 
 
+def expected_scores(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]],
+) -> tuple[float | None, ...]:
+    """Each response's expected score on *matrix*, each row weighed by its share (row_shares); None for a response
+    marked not permitted, which no rule weighs (SPC-195). *scenario* is the one evaluated, its remainder row held."""
+    shares = row_shares(scenario)
+    if len(matrix) != len(shares):
+        raise ValueError(f"the matrix holds {len(matrix)} rows and the scenario {len(shares)}")
+    return tuple(
+        None if response.vetoed else _expected(shares, matrix, j)
+        for j, response in enumerate(scenario.friendly_responses)
+    )
+
+
+def _expected(shares: Sequence[float], matrix: Sequence[Sequence[OutcomeMetrics]], j: int) -> float:
+    """Response *j*'s expected score: each row's score weighed by its share, added in row order as 0.29.0 added it,
+    so a record that release wrote replays to the same float."""
+    return sum(shares[i] * matrix[i][j].composite_score for i in range(len(shares)))
+
+
 # ── Response ranking ──────────────────────────────────────────────────────────
 
 def rank_responses(
@@ -4096,8 +4344,10 @@ def find_robust_response(
     Returns
     -------
     The ``FriendlyResponse`` that is robust under the chosen strategy, or None when every response is marked not
-    permitted. A response marked not permitted is removed before any rule aggregates, so it is never the pick, and
-    a tie is broken among the permitted responses alone (SPC-195).
+    permitted, or under expected value when every row has P 0, which leaves it no weight to pick on (SPC-200,
+    evaluation F-31; the tree's selectors already give none there). A response marked not permitted is removed
+    before any rule aggregates, so it is never the pick, and a tie is broken among the permitted responses alone
+    (SPC-195).
     """
     n_adversary = len(scenario.adversary_actions)
 
@@ -4111,7 +4361,10 @@ def find_robust_response(
         best_j = min(allowed, key=lambda j: max(outcome_matrix[i][j].composite_score for i in range(n_adversary)))
 
     elif strategy == SelectorStrategy.EXPECTED_VALUE:
-        best_j = _expected_value_pick([a.probability for a in scenario.adversary_actions], outcome_matrix, allowed)
+        shares = row_shares(scenario)
+        if sum(shares) <= 0.0:
+            return None  # every share 0: only a 0.28.0 or 0.29.0 record replayed (SPC-200, SPC-203)
+        best_j = _expected_value_pick(shares, outcome_matrix, allowed)
 
     else:  # MINIMIN: minimise the best-case score, the optimistic rule
         best_j = min(allowed, key=lambda j: min(outcome_matrix[i][j].composite_score for i in range(n_adversary)))
@@ -4120,30 +4373,34 @@ def find_robust_response(
 
 
 def _expected_value_pick(
-    probabilities: Sequence[float], outcome_matrix: Sequence[Sequence[OutcomeMetrics]], allowed: Sequence[int],
+    shares: Sequence[float], outcome_matrix: Sequence[Sequence[OutcomeMetrics]], allowed: Sequence[int],
 ) -> int:
-    """The index, among *allowed*, of the response with the least expected score, each row weighed by its share of
-    *probabilities*.
-
-    The first such response wins a tie.
-    """
-    total_p = sum(probabilities)
-    if total_p <= 0:
-        total_p = 1.0
-    return min(allowed, key=lambda j: sum(
-        (probabilities[i] / total_p) * outcome_matrix[i][j].composite_score for i in range(len(probabilities))
-    ))
+    """The index, among *allowed*, of the response with the least expected score, each row weighed by its share in
+    *shares* (row_shares). The first such response wins a tie. Every caller holds some weight: under the
+    remainder rule the shares sum to 1 (SPC-203), and find_robust_response gives no pick when every share is 0,
+    which only a replayed 0.28.0 or 0.29.0 record can hold (SPC-200)."""
+    return min(allowed, key=lambda j: _expected(shares, outcome_matrix, j))
 
 
 # ── The interval on a NOTSO-derived P, carried into the pick (SPC-132) ─────────
 
 _INTERVAL_HOLDS = (
-    "{row}: expected value recommends {pick} at every P across its NOTSO interval, {low} to {high:.2f}, with the "
-    "other rows held at their P."
+    "{row}: expected value recommends {pick} at every P across its NOTSO interval, {low} to {high:.2f}{capped}, "
+    "{held}."
 )
 _INTERVAL_MOVES = (
-    "{row}: expected value recommends {pick} at P {p:.2f}, but not across its NOTSO interval, {low} to {high:.2f}: "
-    "{changes}, with the other rows held at their P."
+    "{row}: expected value recommends {pick} at P {p:.2f}, but not across its NOTSO interval, {low} to "
+    "{high:.2f}{capped}: {changes}, {held}."
+)
+#: Under the remainder rule, a P whose interval reaches past where the rows' P sum to 1 (SPC-203).
+_CAPPED = ", checked to P {cap}, past which the rows' P would sum above 1, which is refused"
+#: Under the remainder rule, with the rows' P at 1 no remainder row was evaluated, so no other P can be checked: a
+#: lower one leaves a remainder whose cells this evaluation does not hold (SPC-203).
+_INTERVAL_UNCHECKED = (
+    "{row}: expected value's pick is not checked across its NOTSO interval, {low} to {high:.2f}: your rows' P sum to "
+    "1, so a higher P for this row would sum above 1, which is refused, and a lower one would leave a remainder of "
+    "P, whose row this evaluation did not evaluate, since your rows left none. With your rows' P summing below 1 the "
+    "remainder row is evaluated, and this interval is checked."
 )
 _BELOW = "below P {at:.3f} it recommends {pick}"
 _ABOVE = "above P {at:.3f} it recommends {pick}"
@@ -4152,7 +4409,14 @@ _JOINT_MOVES = (
     "Moved together across their NOTSO intervals, {rows} P do not keep expected value at {pick}: with {corner}, it "
     "recommends {other}{held}."
 )
+_JOINT_UNCHECKED = (
+    "Moved together across their NOTSO intervals, {rows} P are not checked: your rows' P sum to 1, so any lower sum "
+    "would leave a remainder of P, whose row this evaluation did not evaluate, since your rows left none. With your "
+    "rows' P summing below 1 the remainder row is evaluated, and they are checked."
+)
 _JOINT_HELD = ", with the other rows held at their P"
+#: Under the remainder rule, what takes up a moved P: the remainder row (SPC-203).
+_REMAINDER_TAKES = "the remainder of P taking up the difference"
 #: The finest step a P is shown to.
 _HUNDREDTH = 0.01
 _PROBABILITY_IGNORED = (
@@ -4173,16 +4437,48 @@ class IntervalPick(NamedTuple):
     above:  tuple[float, int] | None
 
 
-def _crossings(row: int, probabilities: Sequence[float], matrix: Sequence[Sequence[OutcomeMetrics]]) -> list[float]:
+def _held_remainder(scenario: Scenario) -> bool:
+    """Whether *scenario* holds the remainder row, which takes up any move of a row's P (SPC-203)."""
+    return bool(scenario.adversary_actions) and scenario.adversary_actions[-1].remainder
+
+
+def moved_weights(scenario: Scenario, moved: Mapping[int, float]) -> list[float]:
+    """Each row's P with each row in *moved* at its P there, the others held, and the remainder row, where one is
+    held, at 1 less the rest, so it takes up the move (SPC-203). Off the region a caller keeps to it can fall below
+    0; under the 0.29.0 rule nothing takes up a move."""
+    weights = [moved.get(i, a.probability) for i, a in enumerate(scenario.adversary_actions)]
+    if _held_remainder(scenario):
+        weights[-1] = 1.0 - math.fsum(weights[:-1])
+    return weights
+
+
+def _shares_of(scenario: Scenario, weights: Sequence[float]) -> list[float]:
+    """*weights* as expected value weighs them: as they are under the remainder rule, over their sum under 0.29.0's."""
+    if scenario.probability_rule is ProbabilityRule.REMAINDER:
+        return list(weights)
+    total = sum(weights)
+    return [w / total if total > 0.0 else 0.0 for w in weights]
+
+
+def _pick_at(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], allowed: Sequence[int], moved: Mapping[int, float],
+) -> int:
+    return _expected_value_pick(_shares_of(scenario, moved_weights(scenario, moved)), matrix, allowed)
+
+
+def _crossings(scenario: Scenario, row: int, matrix: Sequence[Sequence[OutcomeMetrics]]) -> list[float]:
     """Each P for *row* at which two responses' expected scores are equal, the other rows held.
 
-    Every response's expected score shares the one total, so each is ordered by its weighted sum, which is a line
-    in the row's P: B_j + p s_j. Two lines cross at (B_k - B_j) / (s_j - s_k).
+    Every response's weighted sum is a line in the row's P, B_j + p s_j: s_j is the row's score less, under the
+    remainder rule, the remainder row's, which gives up what the row takes. Under the 0.29.0 rule every response
+    shares the one total, so the same lines order them. Two lines cross at (B_k - B_j) / (s_j - s_k).
     """
     n = len(matrix[0])
-    held = [sum(probabilities[i] * matrix[i][j].composite_score for i in range(len(probabilities)) if i != row)
-            for j in range(n)]
-    slope = [matrix[row][j].composite_score for j in range(n)]
+    at_zero = moved_weights(scenario, {row: 0.0})
+    held = [sum(at_zero[i] * matrix[i][j].composite_score for i in range(len(at_zero)) if i != row) for j in range(n)]
+    last = len(matrix) - 1
+    given = [matrix[last][j].composite_score if _held_remainder(scenario) else 0.0 for j in range(n)]
+    slope = [matrix[row][j].composite_score - given[j] for j in range(n)]
     return [(held[k] - held[j]) / (slope[j] - slope[k])
             for j in range(n) for k in range(j + 1, n) if not math.isclose(slope[j], slope[k])]
 
@@ -4204,43 +4500,78 @@ def _first_change(
 def interval_pick(
     scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], row: int, span: tuple[float, float],
 ) -> IntervalPick:
-    """Expected value's pick as *row*'s P moves across *span*, low and high, the other rows held at their P."""
-    probabilities = [a.probability for a in scenario.adversary_actions]
-    centre = probabilities[row]
-
+    """Expected value's pick as *row*'s P moves across *span*, low and high, the other rows held at their P and, under
+    the remainder rule, the remainder row taking up the move. *span* is one the remainder rule takes (row_cap)."""
+    centre = scenario.adversary_actions[row].probability
     allowed = permitted_responses(scenario)
 
     def pick_at(p: float) -> int:
-        return _expected_value_pick([*probabilities[:row], p, *probabilities[row + 1:]], matrix, allowed)
+        return _pick_at(scenario, matrix, allowed, {row: p})
 
     low, high = span
-    points = sorted({low, high, centre, *(c for c in _crossings(row, probabilities, matrix) if low < c < high)})
+    points = sorted({low, high, centre, *(c for c in _crossings(scenario, row, matrix) if low < c < high)})
     pick = pick_at(centre)
     below = [p for p in points if p <= centre][::-1]
     above = [p for p in points if p >= centre]
     return IntervalPick(row, pick, _first_change(pick_at, pick, below), _first_change(pick_at, pick, above))
 
 
+def row_cap(scenario: Scenario, row: int) -> float | None:
+    """The most *row*'s P can be, the other rows held, before the rows' P sum above 1: 1 less the others; None under
+    the 0.29.0 rule, which holds no sum to 1 (SPC-203)."""
+    if scenario.probability_rule is ProbabilityRule.SHARES:
+        return None
+    others = [a for i, a in enumerate(scenario.adversary_actions) if i != row]
+    return 1.0 - rows_p_sum(others)
+
+
+def _corner_points(
+    corner: tuple[float, ...], spans: Sequence[tuple[float, float]], budget: float,
+) -> list[tuple[float, ...]]:
+    """*corner* of the box of *spans* where its P fit *budget*; where they do not, each point on an edge from it at
+    which they reach *budget* exactly, the box's corners past the budget being refused."""
+    if math.fsum(corner) <= budget + P_SUM_TOLERANCE:
+        return [corner]
+    found = []
+    for k, (low, high) in enumerate(spans):
+        at = budget - math.fsum(corner[:k] + corner[k + 1:])
+        if low < at < high:
+            found.append((*corner[:k], at, *corner[k + 1:]))
+    return found
+
+
+def joint_points(scenario: Scenario, spans: Mapping[int, tuple[float, float]]) -> list[tuple[float, ...]]:
+    """Every corner of the region the rows in *spans* may take together, one P per row in row order: the corners of
+    their box; under the remainder rule, the box cut where the rows' P would sum above 1, its corners being those of
+    the box within the sum and the points on the box's edges where the sum reaches 1 (SPC-203)."""
+    rows = sorted(spans)
+    corners = itertools.product(*(spans[r] for r in rows))
+    if scenario.probability_rule is ProbabilityRule.SHARES:
+        return list(corners)
+    budget = 1.0 - rows_p_sum([a for i, a in enumerate(scenario.adversary_actions) if i not in spans])
+    found: list[tuple[float, ...]] = []
+    for corner in corners:
+        found += [point for point in _corner_points(corner, [spans[r] for r in rows], budget) if point not in found]
+    return found
+
+
 def joint_pick(
     scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], spans: Mapping[int, tuple[float, float]],
 ) -> tuple[int, tuple[tuple[float, ...], int] | None]:
     """Expected value's pick with each row in *spans* moved across its span, low and high, together, the other rows
-    held at their P; and the first corner of that box, one P per row in row order, at which the pick changes, with
-    the response it changes to, or None when it holds.
+    held at their P; and the first corner of that region (joint_points), one P per row in row order, at which the
+    pick changes, with the response it changes to, or None when it holds.
 
-    Each response's region of the box, where it is the pick, is the set of P at which its weighted sum is no more
-    than each other's, every one a line in the P: an intersection of half-spaces, so convex. A convex region that
-    holds every corner of the box holds the whole box, so the corners alone say whether the pick changes anywhere.
+    Each response's region, where it is the pick, is the set of P at which its weighted sum is no more than each
+    other's, every one a line in the P, the remainder's P too: an intersection of half-spaces, so convex. A convex
+    region that holds every corner of a polytope holds the whole of it, so the corners alone say whether the pick
+    changes anywhere.
     """
-    probabilities = [a.probability for a in scenario.adversary_actions]
     allowed = permitted_responses(scenario)
-    pick = _expected_value_pick(probabilities, matrix, allowed)
+    pick = _pick_at(scenario, matrix, allowed, {})
     rows = sorted(spans)
-    for corner in itertools.product(*(spans[r] for r in rows)):
-        moved = list(probabilities)
-        for r, p in zip(rows, corner, strict=True):
-            moved[r] = p
-        found = _expected_value_pick(moved, matrix, allowed)
+    for corner in joint_points(scenario, spans):
+        found = _pick_at(scenario, matrix, allowed, dict(zip(rows, corner, strict=True)))
         if found != pick:
             return pick, (corner, found)
     return pick, None
@@ -4251,13 +4582,31 @@ def _edge(value: float) -> str:
     return f"{value:.2f}" if value >= _HUNDREDTH else f"{value:.3f}"
 
 
+def _unchecked(scenario: Scenario) -> bool:
+    """Under the remainder rule with the rows' P at 1, no remainder row was evaluated, so no P but those entered can
+    be checked (SPC-203)."""
+    return scenario.probability_rule is ProbabilityRule.REMAINDER and not _held_remainder(scenario)
+
+
+def _joint_held(scenario: Scenario, rows: Sequence[int]) -> str:
+    """What the joint line says holds still: the other rows, and under the remainder rule what takes up the move."""
+    others = len(rows) < sum(not a.remainder for a in scenario.adversary_actions)
+    takes = _held_remainder(scenario)
+    if others and takes:
+        return f"{_JOINT_HELD} and {_REMAINDER_TAKES}"
+    if takes:
+        return f", with {_REMAINDER_TAKES}"
+    return _JOINT_HELD if others else ""
+
+
 def _joint_line(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], rows: Sequence[int]) -> str:
     """Whether expected value's pick holds with *rows* moved together across their NOTSO intervals."""
+    if _unchecked(scenario):
+        return _JOINT_UNCHECKED.format(rows=_rows_named(rows))
     intervals = {r: cast("NotsoPrior", scenario.adversary_actions[r].accepted_prior).interval for r in rows}
     pick, change = joint_pick(scenario, matrix, {r: (i.checked_low, i.high) for r, i in intervals.items()})
     names = [r.name for r in scenario.friendly_responses]
-    common = {"rows": _rows_named(rows), "pick": names[pick],
-              "held": _JOINT_HELD if len(rows) < len(scenario.adversary_actions) else ""}
+    common = {"rows": _rows_named(rows), "pick": names[pick], "held": _joint_held(scenario, rows)}
     if change is None:
         return _JOINT_HOLDS.format(**common)
     corner, other = change
@@ -4271,14 +4620,28 @@ def _row_label(action: AdversaryAction, row: int) -> str:
     return f"Row {row + 1}, {action.name}" if action.name else f"Row {row + 1}"
 
 
+def _single_held(scenario: Scenario) -> str:
+    """What the single-row line says holds still, and under the remainder rule what takes up the move."""
+    held = _JOINT_HELD.removeprefix(", ")
+    return f"{held} and {_REMAINDER_TAKES}" if _held_remainder(scenario) else held
+
+
 def _interval_line(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], row: int) -> str:
-    """What expected value recommends across *row*'s NOTSO interval, and the P at which it changes, if it does."""
+    """What expected value recommends across *row*'s NOTSO interval, and the P at which it changes, if it does; under
+    the remainder rule, checked no higher than the rows' P can sum to 1 (SPC-203)."""
     action = scenario.adversary_actions[row]
     interval = cast("NotsoPrior", action.accepted_prior).interval
-    found = interval_pick(scenario, matrix, row, (interval.checked_low, interval.high))
-    names = [r.name for r in scenario.friendly_responses]
     low = f"{interval.low:.2f}" if interval.low > 0.0 else "under 0.01"
-    common = {"row": _row_label(action, row), "pick": names[found.pick], "low": low, "high": interval.high}
+    label = _row_label(action, row)
+    if _unchecked(scenario):
+        return _INTERVAL_UNCHECKED.format(row=label, low=low, high=interval.high)
+    cap = row_cap(scenario, row)
+    high = interval.high if cap is None else min(interval.high, cap)
+    capped = "" if high == interval.high else _CAPPED.format(cap=_edge(high))
+    found = interval_pick(scenario, matrix, row, (interval.checked_low, high))
+    names = [r.name for r in scenario.friendly_responses]
+    common = {"row": label, "pick": names[found.pick], "low": low, "high": interval.high, "capped": capped,
+              "held": _single_held(scenario)}
     changes = [line.format(at=side[0], pick=names[side[1]])
                for line, side in ((_BELOW, found.below), (_ABOVE, found.above)) if side is not None]
     if not changes:
@@ -4287,10 +4650,7 @@ def _interval_line(scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]
 
 
 def _rows_named(rows: Sequence[int]) -> str:
-    numbers = [str(r + 1) for r in rows]
-    if len(numbers) == 1:
-        return f"row {numbers[0]}'s"
-    return f"rows {', '.join(numbers[:-1])} and {numbers[-1]}'s"
+    return f"{rows_listed(rows)}'s"
 
 
 def interval_lines(
@@ -4416,6 +4776,8 @@ def _evaluate(
     keep_at_s = () if tree_turn_s is None else (tree_turn_s,)
     if not scenario.adversary_actions:
         raise ValueError("Scenario must have at least one adversary action")
+    # The rows as the engine weighs them: the operator's, and the remainder of P as a row of its own (SPC-203).
+    scenario = with_remainder(scenario)
     if not scenario.friendly_responses:
         raise ValueError("Scenario must have at least one friendly response")
 
@@ -4470,18 +4832,24 @@ def _evaluate(
         row_starts=tuple(_start_line(burns, scenario.epoch_utc) for burns in transfers),
         row_burns=transfers,
         budget_ran_out=_ran_out(budget),
+        envelope=envelope_lines(scenario, None if computed is None else computed.decayed),
     )
     return result, TurnOne(pre, plan, computed, budget)
 
 
 def _hashed(scenario: Scenario) -> dict[str, Any]:
-    """*scenario* as its provenance hashes it: every field, except that a permitted response omits its veto and
-    reason, so a scenario with nothing vetoed hashes as it did before vetoes existed and a 0.28.0 record's input
-    hashes still match its replay (SPC-195)."""
-    plain = dataclasses.asdict(scenario)
+    """*scenario* as its provenance hashes it: the operator's own, every field, except that a permitted response omits
+    its veto and reason, so a scenario with nothing vetoed hashes as it did before vetoes existed and a 0.28.0 record's
+    input hashes still match its replay (SPC-195). The remainder row is derived, so left out, as is each row's flag;
+    and the 0.29.0 rule is left out, so a record 0.28.0 or 0.29.0 wrote hashes as it did then (SPC-203)."""
+    plain = dataclasses.asdict(without_remainder(scenario))
     for response in plain["friendly_responses"]:
         if not response["vetoed"]:
             del response["vetoed"], response["veto_reason"]
+    for action in plain["adversary_actions"]:
+        del action["remainder"]
+    if scenario.probability_rule is ProbabilityRule.SHARES:
+        del plain["probability_rule"]
     return plain
 
 

@@ -99,7 +99,7 @@ def _four_by_four(hypotheses: bool | Sequence[bool] = False) -> Scenario:
     mask = [hypotheses] * len(ActionType) if isinstance(hypotheses, bool) else list(hypotheses)
     adversaries = [
         AdversaryAction(
-            id=f"A{i}", name=t.value, action_type=t, probability=0.25 + 0.1 * i, confidence=0.7,
+            id=f"A{i}", name=t.value, action_type=t, probability=(5 + 2 * i) / 32, confidence=0.7,
             hypothesis=AdversaryHypothesis.from_archetype(keys[i], _AT_BURN) if mask[i] else None,
         )
         for i, t in enumerate(ActionType)

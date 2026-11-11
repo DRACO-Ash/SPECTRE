@@ -49,7 +49,7 @@ _ENGINE = (
     _DECISION, "spectre/domain/decision_tree.py", "spectre/domain/tree_selectors.py", "spectre/domain/turn_update.py",
     "spectre/domain/rule_comparison.py", "spectre/domain/decision_inputs.py", "spectre/domain/decision_replay.py",
     "spectre/domain/decision_figures.py", "spectre/domain/decision_transfer.py", "spectre/domain/decision_judgement.py",
-    "spectre/domain/decide_by.py", "spectre/domain/notso_prior.py",
+    "spectre/domain/decide_by.py", "spectre/domain/notso_prior.py", "spectre/domain/decision_envelope.py",
 )
 #: The lookup model's functions, which hold no bare number but these.
 _LOOKUP_MODEL = ("_lookup_figures", "_lookup_cell")
@@ -225,6 +225,21 @@ class TestTheRegisterMatchesTheCode:
     ])
     def test_it_lists_the_lookups_the_finding_names(self, register: list[Entry], name: str) -> None:
         assert name in {e.name for e in register}
+
+    @pytest.mark.parametrize(("path", "name"), [
+        ("spectre/astro/propagator.py", "TLE_LINE_LENGTH"),
+        ("spectre/astro/propagator.py", "SGP4_DECAYED"),
+        ("spectre/astro/elset_check.py", "_ANGLES[0].low"),
+        ("spectre/astro/elset_check.py", "_ANGLES[0].high"),
+        ("spectre/astro/elset_check.py", "_ANGLES[1].high"),
+        ("spectre/astro/elset_check.py", "_FIRST_YEAR_OF_THE_1900S"),
+        ("spectre/web/elsets.py", "_REFUSAL_LOG_LIMIT"),
+    ])
+    def test_it_lists_the_numbers_that_decide_what_element_set_is_accepted(
+        self, register: list[Entry], path: str, name: str,
+    ) -> None:
+        """SPC-201 added numbers that decide what the engine accepts outside its own modules (review of SPC-201)."""
+        assert (path, name) in {(e.path, e.name) for e in register}
 
     def test_the_owners_rulings_are_named_where_they_exist(self, register: list[Entry]) -> None:
         by_name = {e.name: e for e in register}

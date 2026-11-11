@@ -268,7 +268,10 @@ class TestPatternOfLifeElementSets:
         )
         line1, line2 = _STUB_TLE.split("\n")
         # Same length in, same length out, so column positions downstream hold.
-        hot = line1[:7] + payload + line1[7 + len(payload):]
+        hot = line1[:7] + payload + line1[7 + len(payload):68]
+        # Its checksum made good, as an attacker would: the element-set acceptance check passes it (SPC-201), and the
+        # escaping is still what keeps it inert.
+        hot += str(sum(int(c) if c.isdigit() else int(c == "-") for c in hot) % 10)
         merged = f"{hot}\n{line2}\n{second}"
 
         async def _stub_history(

@@ -113,6 +113,7 @@ from spectre.domain.decision import (
     evaluate_scenario,
     outcome_bases,
     sized_burns,
+    with_remainder,
 )
 from spectre.domain.decision_figures import ResponseFigure, TcaUncertainty
 from spectre.domain.decision_transfer import MAX_BURN_M_S
@@ -215,6 +216,12 @@ _LARGEST_ONE = (
     "responses for a tree."
 )
 TREE_DEEPEST = "Built in full to turn {k} of {turns}: no figure or pick is shown below turn {k}."
+#: Where the rows' P leave a remainder, the tree's lines and every size or cost refusal say it counts as a red move,
+#: so a tree that fits when the P sum to 1 and not below says why (SPC-203).
+TREE_REMAINDER_COUNTED = (
+    "Red's moves count the remainder of P, the engine's no-action row, beside your {listed}: rows whose P sum to 1 "
+    "leave no remainder, and one red move fewer."
+)
 _WHY_TURN_ONE = "is refused in turn 1, as its cell says"
 _WHY_FAILED = "lost {k} of {n} samples, which failed to propagate"
 _WHY_UNCONVERGED = "did not converge: its P5, P50 and P95 are known only to within {hw:.1f} km"
@@ -227,7 +234,7 @@ SENTENCES: tuple[str, ...] = (
     TREE_HEADER, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, TREE_RED_AGAIN, TREE_RESPONSE_AGAIN,
     TREE_UNBOUND, TREE_LOOKUP_ROW, TREE_REFUSED_ROW, TREE_SEVERAL_BURNS, TREE_BUDGET_TURN_ONE, TREE_BURN_OUTSIDE,
     TREE_OVER_BRANCHES, TREE_OVER_CAP, TREE_BUDGET,
-    TREE_BRANCH_REFUSED, TREE_DEPTH_BRANCHES, TREE_DEPTH_COST, TREE_DEEPEST,
+    TREE_BRANCH_REFUSED, TREE_DEPTH_BRANCHES, TREE_DEPTH_COST, TREE_DEEPEST, TREE_REMAINDER_COUNTED,
 )
 
 _NODE_LABEL = "Turn {k} of {turns}, {path}: "
@@ -441,7 +448,9 @@ def _turn_one_extra_s(sizes: _Sizes) -> float:
 
 def tree_cost(scenario: Scenario) -> float:
     """What the tree costs, sample-hours, before anything runs: turn 1 as one evaluation with every computed cell
-    on RK45, and what the later turns add, on the cap's own model (SPC-113, SPC-121)."""
+    on RK45, and what the later turns add, on the cap's own model (SPC-113, SPC-121). The remainder row, where the
+    rows' P leave one, is one of red's moves like any other (SPC-203)."""
+    scenario = with_remainder(scenario)
     sizes = _sizes(scenario)
     later = sum(_turn_cost_s(sizes, k) for k in range(2, sizes.turns + 1))
     return _turn_one_cost_h(scenario) + (_turn_one_extra_s(sizes) + later) / _SECONDS_PER_HOUR
@@ -449,6 +458,7 @@ def tree_cost(scenario: Scenario) -> float:
 
 def largest_tree(scenario: Scenario) -> int:
     """The most turns, the span split equally among them, that fit the branch cap and the cost cap; 1 when none."""
+    scenario = with_remainder(scenario)
     rows, responses = len(scenario.adversary_actions), len(scenario.friendly_responses)
     fits = 1
     for k in range(2, MAX_TURNS + 1):
@@ -514,6 +524,22 @@ def _burn_outside(scenario: Scenario) -> str | None:
     return None
 
 
+def remainder_counted(scenario: Scenario) -> str | None:
+    """That red's moves count the remainder of P, where *scenario*, as the engine weighs it, holds the remainder row;
+    else None (SPC-203)."""
+    rows = scenario.adversary_actions
+    if not rows or not rows[-1].remainder:
+        return None
+    listed = len(rows) - 1
+    return TREE_REMAINDER_COUNTED.format(listed="row" if listed == 1 else f"{listed} rows")
+
+
+def _counted(refusal: str, scenario: Scenario) -> str:
+    """*refusal* of a tree's size or cost, and, where the remainder counts as a red move, the sentence saying so."""
+    counted = remainder_counted(scenario)
+    return refusal if counted is None else f"{refusal} {counted}"
+
+
 def _fits(scenario: Scenario) -> str:
     k = largest_tree(scenario)
     return _FITS.format(k=k) if 1 < k < scenario.turns else _NONE_FITS
@@ -524,19 +550,19 @@ def _over_branches(scenario: Scenario) -> str | None:
     nodes = branches(rows, responses, scenario.turns)
     if nodes <= MAX_TREE_BRANCHES:
         return None
-    return TREE_OVER_BRANCHES.format(
+    return _counted(TREE_OVER_BRANCHES.format(
         turns=scenario.turns, rows=rows, responses=responses, nodes=nodes, cap=MAX_TREE_BRANCHES, fits=_fits(scenario),
-    )
+    ), scenario)
 
 
 def _over_cap(scenario: Scenario) -> str | None:
     total = tree_cost(scenario)
     if total <= MAX_SAMPLE_HOURS:
         return None
-    return TREE_OVER_CAP.format(
+    return _counted(TREE_OVER_CAP.format(
         turns=scenario.turns, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
         fits=_fits(scenario),
-    )
+    ), scenario)
 
 
 #: What a tree needs before its size is counted: both sides bound and current, an orbit from every row, one burn a
@@ -555,7 +581,7 @@ def _first_problem(scenario: Scenario, checks: Sequence[Callable[[Scenario], str
 
 def refused_before_run(scenario: Scenario) -> str | None:
     """Why a tree of *scenario.turns* turns is not built, checked in order before anything runs; None to build it."""
-    return _first_problem(scenario, (*_SHAPE_CHECKS, *_FIT_CHECKS))
+    return _first_problem(with_remainder(scenario), (*_SHAPE_CHECKS, *_FIT_CHECKS))
 
 
 def depth_refusal(scenario: Scenario) -> str | None:
@@ -564,6 +590,7 @@ def depth_refusal(scenario: Scenario) -> str | None:
     It names the largest depth that would fit at the same sizes. None when it fits, for one turn, and when the
     tree is refused for another reason first: the result then states that reason beside the one-turn matrix.
     """
+    scenario = with_remainder(scenario)
     if scenario.turns == 1 or _first_problem(scenario, _SHAPE_CHECKS) is not None:
         return None
     k = largest_tree(scenario)
@@ -571,15 +598,15 @@ def depth_refusal(scenario: Scenario) -> str | None:
     rows, responses = len(scenario.adversary_actions), len(scenario.friendly_responses)
     nodes = branches(rows, responses, scenario.turns)
     if nodes > MAX_TREE_BRANCHES:
-        return TREE_DEPTH_BRANCHES.format(
+        return _counted(TREE_DEPTH_BRANCHES.format(
             turns=scenario.turns, rows=rows, responses=responses, nodes=nodes, cap=MAX_TREE_BRANCHES, largest=largest,
-        )
+        ), scenario)
     total = tree_cost(scenario)
     if total > MAX_SAMPLE_HOURS:
-        return TREE_DEPTH_COST.format(
+        return _counted(TREE_DEPTH_COST.format(
             turns=scenario.turns, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
             largest=largest,
-        )
+        ), scenario)
     return None
 
 
@@ -1133,7 +1160,9 @@ def _lines(scenario: Scenario) -> tuple[str, ...]:
         TREE_RED_AGAIN.format(row=i + 1, name=a.name, offset=_offset_s(scenario, a) / _SECONDS_PER_HOUR)
         for i, a in enumerate(scenario.adversary_actions) if a.hypothesis is not None
     )
-    return (header, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, *again, TREE_RESPONSE_AGAIN)
+    counted = remainder_counted(scenario)
+    return (header, *(() if counted is None else (counted,)), TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS,
+            *again, TREE_RESPONSE_AGAIN)
 
 
 def _windows(scenario: Scenario) -> tuple[SeparationWindow, ...]:
@@ -1191,7 +1220,8 @@ def evaluate_tree(
     One turn is evaluate_scenario exactly, with no tree. A tree refused before anything runs keeps the one-turn
     result and says why. Otherwise turn 1 is the matrix, with every computed cell on RK45, and the later turns are
     built under the same budget; a stop raises EvaluationStoppedError, as one turn's does. *strategy* then picks
-    over the turns built in full (SPC-141); the matrix's own pick is unchanged.
+    over the turns built in full (SPC-141); the matrix's own pick is unchanged. Red's moves are the rows as the engine
+    weighs them, the remainder of P among them (SPC-203).
     """
     if scenario.turns == 1:
         return evaluate_scenario(scenario, strategy, sampler=sampler, run=run)
@@ -1201,6 +1231,7 @@ def evaluate_tree(
         return dataclasses.replace(result, tree=GameTree(scenario.turns, (), (), 0, refusal, (refusal,)))
     turn_s = _searched_span_s(scenario) / scenario.turns
     result, one = _evaluate(scenario, strategy, sampler, run, turn_s)
+    scenario = result.scenario
     tree = _build(scenario, result, one)
     _require_tree_propagator(tree, result.outcome_matrix)
     if tree.complete_turns > 0:

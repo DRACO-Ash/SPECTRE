@@ -5,21 +5,27 @@ does not say how old its orbit is reads as current whatever the epoch, and in
 service a 13-day-old GEO set was briefed as if it were today's.
 
 Staleness uses the thresholds the TLE filter already applies to data gaps
-(spectre.config.constants.TLE_FILTER): 72 hours for GEO and deep space, where
-tracking updates are slower and the orbit changes slowly, and 24 hours for
-everything else.
+(spectre.config.constants.TLE_FILTER): 72 hours for the regimes GEO and DEEP
+(a perigee beyond GEO), where tracking updates are slower and the orbit changes
+slowly, and 24 hours for everything else, HEO and Molniya-class included.
+
+Every element set the session is about to hold passes the one acceptance check first (SPC-201, evaluation F-25):
+refused names the set's failures in a sentence, logs it without the set's text, and the caller stores nothing.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from spectre.astro.elset_check import HELD_KEPT, NOT_STORED, ElsetCheck, check_elset, history_refusal
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.config.constants import TLE_FILTER
 from spectre.data.intel import satno_from_tle
+from spectre.web.log_safety import log_safe
 from spectre.web.planning_state import ElsetRefresh, SessionState
 
 logger = logging.getLogger(__name__)
@@ -35,6 +41,59 @@ _SYNTHETIC = "SYNTHETIC"
 
 #: Parallel UDL requests during a refresh, the bound the sweep's own fetch uses.
 _REFRESH_CONCURRENCY = 10
+
+
+#: The longest refusal sentence the log keeps: a name and every failure the check can name fit well inside it.
+_REFUSAL_LOG_LIMIT = 1000
+
+
+def log_refusal(sentence: str) -> None:
+    """Log a refusal sentence: it names the object and what failed, never the set's text (SPC-201)."""
+    logger.warning("%s", log_safe(sentence, limit=_REFUSAL_LOG_LIMIT))
+
+
+def refused(name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None) -> str | None:
+    """The sentence refusing *tle* for the object *name*, logged, or None when the acceptance check accepts it. With
+    *satno*, a set for another catalogue number is refused too."""
+    check = check_elset(tle, satno)
+    if check.accepted:
+        return None
+    sentence = check.refusal(name, outcome=outcome)
+    log_refusal(sentence)
+    return sentence
+
+
+@dataclass(frozen=True)
+class RefusedElset:
+    """An element set UDL answered with that the acceptance check refused: nothing was stored (SPC-201).
+
+    fetch_tle_for_satno returns it in place of the set, so each caller can name the object as its operator knows
+    it and say what became of any set already held.
+    """
+
+    satno: int
+    check: ElsetCheck
+
+    def sentence(self, name: str, *, outcome: str = NOT_STORED) -> str:
+        return self.check.refusal(name, outcome=outcome)
+
+
+class ElsetHistory(list[str]):
+    """The element sets a history fetch kept, in order, and the check of each it refused (SPC-201).
+
+    A list, so a caller that reads only the sets reads it as before; one that can tell the operator asks for the
+    refusal sentence.
+    """
+
+    def __init__(self, kept: Iterable[str] = (), refused: Sequence[ElsetCheck] = ()) -> None:
+        super().__init__(kept)
+        self.refused: tuple[ElsetCheck, ...] = tuple(refused)
+
+    def refusal(self, name: str) -> str | None:
+        """The sentence saying which sets in the history for *name* were refused and why; None when none was."""
+        if not self.refused:
+            return None
+        return history_refusal(name, len(self.refused), [f for check in self.refused for f in check.failures])
 
 
 def provenance(claimed: str) -> str:
@@ -147,7 +206,8 @@ def _write_back(state: SessionState, item: _Held, tle: str, mode: str) -> None:
 async def _refresh_one(
     state: SessionState, item: _Held, credentials: tuple[str, str], sem: asyncio.Semaphore,
 ) -> str:
-    """Fetch the newest set for *item* and keep it if it is newer: 'updated', 'current' or 'failed'."""
+    """Fetch the newest set for *item* and keep it if it is newer: 'updated', 'current' or 'failed', or the sentence
+    refusing what UDL answered, when the held set is kept (SPC-201)."""
     from spectre.web.routes.udl import fetch_tle_for_satno
 
     # A UDL set is refreshed in its own mode: one fetched as EXERCISE while the
@@ -160,6 +220,8 @@ async def _refresh_one(
         )
     if got is None:
         return "failed"
+    if isinstance(got, RefusedElset):
+        return got.sentence(item.label, outcome=HELD_KEPT)
     tle, mode = got
     if item.mode == _SYNTHETIC or _is_newer(tle, item.tle):
         _write_back(state, item, tle, mode)
@@ -188,15 +250,17 @@ async def refresh_held_elsets(state: SessionState, username: str, password: str)
             refresh.updated.append(item.label)
         elif outcome == "current":
             refresh.current += 1
+        elif isinstance(outcome, str) and outcome != "failed":
+            refresh.refused.append(outcome)
         else:
             refresh.failed.append(item.label)
     refresh.running = False
     refresh.finished_at = datetime.now(tz=UTC)
     state.append_log(
         f"[UDL] Element sets refreshed: {len(refresh.updated)} updated, "
-        f"{refresh.current} already current, {len(refresh.failed)} failed"
+        f"{refresh.current} already current, {len(refresh.failed)} failed, {len(refresh.refused)} refused"
     )
     logger.info(
-        "Element set refresh: %d updated, %d current, %d failed",
-        len(refresh.updated), refresh.current, len(refresh.failed),
+        "Element set refresh: %d updated, %d current, %d failed, %d refused",
+        len(refresh.updated), refresh.current, len(refresh.failed), len(refresh.refused),
     )

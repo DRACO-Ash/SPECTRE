@@ -1,12 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.30: 3 items, 840 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-201       120m  fills the release to its floor
-    SPC-200       360m  fills the release to its floor
-    SPC-203       360m  fills the release to its floor
-  lane 1 (840m): SPC-201, SPC-200, SPC-203
-
 V0.31: 2 items, 720 priced min, gates container, lint, quality, sast, tests
   forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-204       360m  fills the release to its floor
@@ -45,29 +38,26 @@ V0.35: 4 items, 720 priced min, gates browser, container, lint, quality, sast, t
     SPC-215       360m  fills the release to its floor
     SPC-213       120m  fills the release to its floor
     SPC-214       120m  fills the release to its floor
-    SPC-216       120m  fills the release to its floor
-  lane 1 (360m): SPC-213, SPC-214, SPC-216
+    SPC-219       120m  fills the release to its floor
+  lane 1 (360m): SPC-213, SPC-214, SPC-219
   lane 2 (360m): SPC-215
 
 V0.36: 4 items, 720 priced min, gates browser, container, lint, quality, sast, tests
   forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-217       120m  fills the release to its floor
-    SPC-219       120m  fills the release to its floor
+    SPC-222       120m  fills the release to its floor
     SPC-220       120m  fills the release to its floor
+    SPC-221       120m  fills the release to its floor
     SPC-190       360m  fills the release to its floor
   lane 1 (360m): SPC-190
-  lane 2 (360m): SPC-217, SPC-219, SPC-220
+  lane 2 (360m): SPC-220, SPC-221, SPC-222
 
-V0.37: 6 items, 720 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 12h00 to 12h00 (middle 12h00), people's time 0 min, evidence: settings (nothing measured yet)
+V0.37: 3 items, 360 priced min, gates browser, container, lint, quality, sast, tests
+  forecast 6h00 to 6h00 (middle 6h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-225       120m  fills the release to its floor
-    SPC-222       120m  fills the release to its floor
-    SPC-223       120m  fills the release to its floor
     SPC-226       120m  fills the release to its floor
-    SPC-221       120m  fills the release to its floor
     SPC-224       120m  fills the release to its floor
-  lane 1 (360m): SPC-223, SPC-226, SPC-224
-  lane 2 (360m): SPC-221, SPC-222, SPC-225
+  lane 1 (240m): SPC-224, SPC-226
+  lane 2 (120m): SPC-225
 
 V0.38: 1 items, 900 priced min, gates browser, container, lint, quality, sast, tests
   forecast 15h00 to 15h00 (middle 15h00), people's time 0 min, evidence: settings (nothing measured yet)

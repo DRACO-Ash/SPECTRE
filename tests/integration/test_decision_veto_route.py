@@ -31,9 +31,11 @@ from tests.unit.test_decision_tree_select import _still
 _REASON = "ROE 4: no burn towards a third party's asset."
 _PAYLOAD = "<script>alert('xss')</script>"
 _RESPONSE_RELOAD_WORDS = "The response fields do not match the friendly rows; reload the panel."
+#: The form's one manoeuvre row at P 1, certain, so every rule picks the same response with nothing vetoed: at its
+#: P of 0.6, the remainder of P, 0.4 of no adversary action, takes minimin to Hold while minimax keeps Avoid (SPC-203).
 _TWO = {
     "fr_id": ["F1", "F2"], "fr_name": ["Hold", "Avoid"], "fr_type": ["no_action", "manoeuvre"],
-    "fr_cost": ["0.0", "0.3"], "fr_rev": ["1.0", "0.8"], "fr_time": ["0.1", "4"],
+    "fr_cost": ["0.0", "0.3"], "fr_rev": ["1.0", "0.8"], "fr_time": ["0.1", "4"], "adv_prob": ["1.0"],
 }
 
 

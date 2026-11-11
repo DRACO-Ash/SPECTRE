@@ -9,6 +9,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-11
+
+**Inputs the engine accepts: element-set integrity (evaluation F-25), a written operating envelope (F-09) and what P means (F-12).**
+
+### Added
+- One acceptance check for an element set, run on every path one enters by (UDL fetches, the background refresh, the operator's pages, the sweep, the bundled data and the binder): both line checksums and line numbers, one readable catalogue number on both lines (and the one asked for), an epoch that reads, the format's own characters, inclination, eccentricity, mean motion and the three angles in range, and an orbit SGP4 can start from. A refused set is not stored and never replaces a held one; the refusal is logged without the set's text and said in a sentence naming the object (SPC-201, evaluation F-25 and F-34).
+- `docs/decision-engine-envelope.md`: the operating design domain, every row held to the code by a test. Checked at entry: an object below the re-entry floor, or reported decayed by SGP4, is refused on the SGP4 path as on RK45; a set on SDP4, the deep-space branch, is flagged with its limits named as rules of thumb not validated for it (sourced limits are SPC-215); all five weights at 0 are refused (SPC-200, evaluation F-09, F-30, F-31).
+
+### Changed
+- P is a probability over mutually exclusive adversary actions: the rows' P must sum to at most 1, and a sum above it is refused at the panel and by the scenario, naming the sum. Below 1 the engine adds one row of its own, "No adversary action (remainder of P)", weighed by every rule, the comparison, the tree and the record, labelled as the engine's, not the operator's. Each row shows its share beside its P. Some picks move as intended: a single manoeuvre row at P 0.1 no longer reads as certain. Three rows left at the default 0.5 are refused until P is set (SPC-203, evaluation F-12).
+- Stored inputs are written at schema version 3, holding the probability rule; records written by 0.28.0 and 0.29.0 read under the rule they were evaluated by and replay exactly, and the replay says so.
+
 ## [0.29.0] - 2026-11-11
 
 **Operator output: 4, the recommended response, can exclude responses the operator marks not permitted (evaluation F-04), and every input says whether it is the operator's judgement (F-05).**

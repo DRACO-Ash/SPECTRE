@@ -195,7 +195,7 @@ class TestTheEnginePage:
         text = _text(_page(client, auth_cookie, strategy=strategy))
         assert "Not ranked against your responses" in text
         assert f"{_RECORD} Type:" not in text and "Type: Sensor Retask" not in text
-        assert "1 adversary action(s) × 1 response(s)" in text
+        assert "1 adversary action(s) and the remainder of P × 1 response(s)" in text
         assert "collect first Hold" not in text and "minimax recommends analyst" not in text.lower()
 
     def test_the_same_range_with_decide_by_passed_acts_on_the_ceiling(
@@ -275,7 +275,7 @@ class TestTheEnginePage:
     ) -> None:
         held.threat_picture = _picture(understanding=level)
         text = _text(_page(client, auth_cookie))
-        assert "P=0.3 (judgement) · Conf=0.6 (judgement)" in text
+        assert "P=0.3 (judgement) · Share=0.3 (judgement) · Conf=0.6 (judgement)" in text
         assert (f"Understanding {level.name}: shown beside P and Conf as context; it fills neither (from the sweep's "
                 "picture assessed 20 min before this evaluation).") in text
 
@@ -307,7 +307,8 @@ class TestAProbabilityNotPosted:
         resp = _evaluate(client, auth_cookie, form)
         assert resp.status_code == 200 and "error-msg" not in resp.text
         text = _text(resp.text)
-        assert f"P={decision.DEFAULT_PROBABILITY:g} (lookup) · Conf=0.6 (judgement)" in text
+        default = f"{decision.DEFAULT_PROBABILITY:g}"
+        assert f"P={default} (lookup) · Share={default} (lookup) · Conf=0.6 (judgement)" in text
         assert "Expected value rests on a probability the evidence has not earned." in text
 
 

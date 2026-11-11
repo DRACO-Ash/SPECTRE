@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from spectre.config import settings as settings_module
-from spectre.domain.decision import Scenario, ScenarioResult, SelectorStrategy
+from spectre.domain.decision import ProbabilityRule, Scenario, ScenarioResult, SelectorStrategy
 from spectre.domain.rule_comparison import MEANINGS, PICKS_BASIS, compare_rules
 from spectre.web.decision_job import evaluated_line
 from spectre.web.decision_record import Operator, listed
@@ -25,7 +25,7 @@ from spectre.web.routes import decision as decision_routes
 from tests.integration.test_decision_input_validation import _evaluate, _form
 from tests.integration.test_decision_record_route import _records, _sign_in
 from tests.integration.test_xss_escaping import _assert_inert
-from tests.unit.test_decision_rule_comparison import _ONE_WAY, _THREE_WAYS, _scored, _tree_result
+from tests.unit.test_decision_rule_comparison import _BEFORE, _ONE_WAY, _THREE_WAYS, _scored, _tree_result
 
 _ENV = "SPECTRE_PRIMARY_RULE"
 
@@ -240,10 +240,13 @@ class TestHowTheLinesRead:
     def test_a_disagreement_on_the_tree_is_flagged_as_on_the_matrix(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, p: tuple[float, float], agree: str, colour: str,
     ) -> None:
-        def evaluate(scenario: Scenario, strategy: SelectorStrategy = SelectorStrategy.MINIMAX) -> ScenarioResult:
-            return _tree_result(strategy, p=p)
+        # Every row at P 0 leaves expected value no pick only under the rule a record 0.28.0 or 0.29.0 wrote (SPC-203).
+        of_p = _BEFORE if p == (0.0, 0.0) else ProbabilityRule.REMAINDER
 
-        expected = compare_rules(_tree_result(p=p), SelectorStrategy.MINIMAX)
+        def evaluate(scenario: Scenario, strategy: SelectorStrategy = SelectorStrategy.MINIMAX) -> ScenarioResult:
+            return _tree_result(strategy, p=p, of_p=of_p)
+
+        expected = compare_rules(_tree_result(p=p, of_p=of_p), SelectorStrategy.MINIMAX)
         assert expected.tree_agree is (agree == "yes")
         monkeypatch.setattr(decision_routes, "evaluate_tree", evaluate)
         # The hand-built tree has no orbits for the tree view to draw; the line under test sits above it.
@@ -257,35 +260,30 @@ class TestHowTheLinesRead:
 
 
 class TestEveryRowAtPZero:
-    """A real evaluation with its only row at P 0: expected value has no weight to pick on, and says so."""
+    """A real evaluation with its only row at P 0: the remainder of P, no adversary action, carries the whole weight,
+    so expected value picks the best response against it, and nothing says it has no pick (SPC-203). Before, it had
+    no weight to pick on; only a record 0.28.0 or 0.29.0 wrote can still say so."""
 
-    def test_the_results_say_expected_value_has_no_pick(self, client: TestClient) -> None:
+    def test_expected_value_picks_against_the_remainder(self, client: TestClient) -> None:
         cookie = _sign_in(client, "rules_p0")
         text = _flat(_evaluate(client, cookie, _form(adv_prob=["0"])).text)
-        assert "Expected value: no pick, since every row has P 0" in text
-        assert ("The rules disagree: minimax and minimin pick Hold (F1); expected value has no pick, since every row "
-                "has P 0.") in text
+        assert "Expected value: Hold (F1)" in text
+        assert "no pick" not in text
+        assert "All three rules agree: each picks Hold (F1)." in text
+        assert "No adversary action (remainder of P): the engine's remainder, not your row" in text
         (row,) = _records(client, "rules_p0")
-        assert (row.expected_value_id, row.expected_value_name) == ("", "")
-        page = _flat(client.get("/plan/decision/records", cookies={"spectre_session": cookie}).text)
-        assert "expected value picks nothing, since every row had P 0." in page
+        assert (row.expected_value_id, row.expected_value_name) == ("F1", "Hold")
 
-    def test_a_primary_rule_with_no_pick_shows_no_recommendation(
+    def test_a_primary_rule_of_expected_value_has_a_recommendation(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv(_ENV, "expected_value")
         cookie = _sign_in(client, "rules_p0_primary")
         page = _evaluate(client, cookie, _form(adv_prob=["0"], strategy="expected_value")).text
         headline = re.search(r'class="headline-pick"[^>]*>\s*([^<]+?)\s*<', page)
-        assert headline is not None and headline.group(1) == "No recommendation"
-        assert ("This deployment's primary rule is expected value, the rule chosen: it has no pick, since every row "
-                "has P 0, so no recommendation is shown.") in _flat(page)
+        assert headline is not None and headline.group(1) == "Hold"
         (row,) = _records(client, "rules_p0_primary")
-        assert (row.recommended_id, row.recommended_name) == ("", "")
-        listed_page = _flat(client.get("/plan/decision/records", cookies={"spectre_session": cookie}).text)
-        assert "Rule used: expected value, with no pick, since every row had P 0." in listed_page
-        assert ("Primary rule: expected value, the rule used; it had no pick, since every row had P 0, so no "
-                "recommendation was shown.") in listed_page
+        assert (row.recommended_id, row.recommended_name) == ("F1", "Hold")
 
 
 class TestTheSessionLog:

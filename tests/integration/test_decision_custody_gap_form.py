@@ -24,8 +24,9 @@ _SCORE = re.compile(r'data-figure="composite_score"[^>]*>\s*([0-9.]+)\s*<', re.S
 
 
 def _scores(client: Any, cookie: str, **overrides: Any) -> list[str]:
-    """Each cell's score on the page for one manoeuvre row against doing nothing, where custody is lost."""
-    resp = _evaluate(client, cookie, _form(fr_type=["no_action"], **overrides))
+    """Each cell's score on the page for one manoeuvre row against doing nothing, where custody is lost; the row at
+    P 1, certain, so no remainder row joins it (SPC-203)."""
+    resp = _evaluate(client, cookie, _form(fr_type=["no_action"], **{"adv_prob": ["1.0"], **overrides}))
     assert resp.status_code == 200
     assert "error-msg" not in resp.text
     scores = _SCORE.findall(resp.text)

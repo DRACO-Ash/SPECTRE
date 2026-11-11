@@ -128,7 +128,7 @@ def _scenario(
     carried = hypotheses or {}
     adversaries = [
         AdversaryAction(
-            id=f"A{i}", name=t.value, action_type=t, probability=0.25 + 0.1 * i, confidence=0.7,
+            id=f"A{i}", name=t.value, action_type=t, probability=(5 + 2 * i) / 32, confidence=0.7,
             hypothesis=carried.get(i),
         )
         for i, t in enumerate(ActionType)

@@ -52,7 +52,9 @@ def _evasive_at(at: datetime, n_samples: int = 50) -> AdversaryHypothesis:
 
 def _one_row(hypothesis: AdversaryHypothesis, *, age_h: float, horizon_h: float = 48.0, still: bool = False) -> Scenario:
     """One manoeuvre row carrying *hypothesis*, and a no-action row when *still*; one no-action response."""
-    actions = [AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 0.5, 0.7, hypothesis=hypothesis)]
+    # Alone, the action is certain, P 1, so no remainder row is computed beside it (SPC-203); with the still row,
+    # the two share P equally.
+    actions = [AdversaryAction("A0", "Evade", ActionType.MANOEUVRE, 0.5 if still else 1.0, 0.7, hypothesis=hypothesis)]
     if still:
         actions.append(AdversaryAction("A1", "Hold", ActionType.NO_ACTION, 0.5, 0.7))
     return Scenario(

@@ -89,7 +89,7 @@ def _binding() -> ScenarioBinding:
 def _four_by_four(binding: ScenarioBinding | None = None) -> Scenario:
     """One adversary row and one friendly row per action type: 16 pairings."""
     adversaries = [
-        AdversaryAction(id=f"A{i}", name=t.value, action_type=t, probability=0.25 + 0.1 * i, confidence=0.7)
+        AdversaryAction(id=f"A{i}", name=t.value, action_type=t, probability=(5 + 2 * i) / 32, confidence=0.7)
         for i, t in enumerate(ActionType)
     ]
     friendlies = [

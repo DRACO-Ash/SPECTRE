@@ -96,6 +96,26 @@ class TestTheOperatorGuide:
         assert 'marker = "\\u25CF " if level == 0 else "  \\u25A0 "' in source
 
 
+class TestTheGuideStatesTheEnvelope:
+    """SPC-200 and SPC-201: the operator guide says what the engine accepts, flags and refuses."""
+
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            "Outside the operating envelope", "docs/decision-engine-envelope.md", "acceptance check",
+            "never replaces a set already held", "re-entry floor", "SDP4", "all 5 weights at 0",
+            "nothing is starred", "GEO rules of thumb, tuned rather than sourced", "in the run log",
+            "for the number asked", "B*", "or a perigee beyond GEO",
+        ],
+    )
+    def test_its_decision_engine_section_states_the_envelope(self, claim: str) -> None:
+        assert claim.lower() in _guide_section().lower()
+
+    def test_it_never_says_a_geo_set_rests_on_rules_not_validated_for_it(self) -> None:
+        """A GEO set is on SDP4 and its limit is the GEO one (review of SPC-200)."""
+        assert "(GEO, HEO and other orbits over 225 minutes)" not in _guide_section()
+
+
 class TestClaimsTheCodeBearsOut:
     """Each pins a claim a review found untrue of the code, in the corrected words (SPC-152)."""
 

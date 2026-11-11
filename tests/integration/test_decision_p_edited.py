@@ -135,5 +135,5 @@ class TestEvaluateReadsTheRecord:
         ))
         assert resp.status_code == 200 and "error-msg" not in resp.text
         text = _text(resp.text)
-        assert f"P={_P} (lookup) · Conf=0.7 (judgement)" in text
+        assert f"P={_P} (lookup) · Share={_P} (lookup) · Conf=0.7 (judgement)" in text
         assert _GUIDANCE not in text

@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, cast
 
-from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s, permitted_responses
+from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s, permitted_responses, row_shares
 from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.turn_update import Posterior, Seen, likelihood, model_lines, posteriors, seen_after, seen_lines
 
@@ -159,9 +159,8 @@ class _Member(NamedTuple):
 class _Selector:
     def __init__(self, scenario: Scenario, strategy: SelectorStrategy, turns: int, turn_s: float) -> None:
         self.scenario, self.strategy, self.turns, self.turn_s = scenario, strategy, turns, turn_s
-        p = [a.probability for a in scenario.adversary_actions]
-        total = sum(p)
-        self.shares = [x / total if total > 0.0 else 0.0 for x in p]
+        # Each red move's share: its P, the remainder of P a move of its own (SPC-203); over their sum under 0.29.0's rule.
+        self.shares = list(row_shares(scenario))
         self.allowed = set(permitted_responses(scenario))
         self.found: dict[After, TurnPick] = {}
 

@@ -252,6 +252,17 @@ class TestComputedApproaches:
         assert sentence == ("computed closest approach with BLUE-1 not counted: SGP4 could not propagate the blue "
                             "element set.")
 
+    def test_an_object_below_the_reentry_floor_is_refused_and_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The SGP4 search's altitude floor (SPC-200, evaluation F-30) is named, not read as a propagation failure."""
+        from spectre.astro.elset_approach import ElsetFailure
+
+        monkeypatch.setattr(store, "burn_approach", lambda *_a: ElsetFailure("red", "reentered"))
+        burn = _burn(EPOCH - timedelta(hours=1))
+        _, (sentence,) = store.computed_misses([burn], _BEFORE_TLE, _AFTER_TLE,
+                                               [store.Target("BLUE-1", "40001", True, _BLUE_TLE)], EPOCH)
+        assert sentence == ("computed closest approach with BLUE-1 not counted: the red object is below the 100 km "
+                            "re-entry floor at an instant searched, so it has decayed or is decaying.")
+
     def test_at_most_8_targets_are_searched_and_the_rest_are_named_as_not_searched(self) -> None:
         burn = _burn(EPOCH - timedelta(hours=1))
         targets = [store.Target(f"BLUE-{k}", f"4000{k}", True, _BLUE_TLE) for k in range(store.MAX_COMPUTED + 2)]

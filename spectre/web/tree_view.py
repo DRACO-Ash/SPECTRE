@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from spectre.domain.custody import span_text
-from spectre.domain.decision import ScenarioResult, SelectorStrategy
+from spectre.domain.decision import REMAINDER_LABEL, ScenarioResult, SelectorStrategy
 from spectre.domain.decision_figures import TcaUncertainty
 from spectre.domain.decision_tree import GameNode, GameTree, PathFigures
 from spectre.domain.provenance import FigureBasis
@@ -42,6 +42,8 @@ HEADING_NOT_BUILT = "Game tree: {turns} turns asked for, none built"
 UPDATE_HEADING = "The update after turn 1"
 UPDATE_HEADING_NO_PROBABILITY = "What each turn lets us see"
 _HEADING = "Turn {k} of {turns}: red {action}, our {response}"
+#: Beside the heading of a branch whose red move is the remainder of P: the engine's, not the operator's (SPC-203).
+REMAINDER_BESIDE = f"(red's move here is {REMAINDER_LABEL})"
 #: A branch below one whose response is marked not permitted (SPC-195): its sequence is excluded too.
 _FOLLOWS = "Excluded: it follows {response} in turn {k}, which is marked not permitted."
 _PATH = "Rests on: {steps}."
@@ -101,6 +103,8 @@ class NodeView:
     #: "Not permitted:" and the reason when this branch's own response is marked so (SPC-195); else, when an earlier
     #: turn's response along its sequence is, that it follows that response; else empty.
     not_permitted: str = ""
+    #: REMAINDER_BESIDE when this branch's red move is the remainder of P, the engine's row (SPC-203); else empty.
+    remainder: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,6 +165,9 @@ class _Builder:
     def __init__(self, result: ScenarioResult, tree: GameTree) -> None:
         self.result, self.tree = result, tree
         self.actions = [a.name for a in result.scenario.adversary_actions]
+        # The remainder of P, red's move of no adversary action, is the engine's row, and beside its heading the branch
+        # says so (SPC-203).
+        self.beside = [REMAINDER_BESIDE if a.remainder else "" for a in result.scenario.adversary_actions]
         self.responses = [f.name for f in result.scenario.friendly_responses]
         self.vetoes = [f.not_permitted or "" for f in result.scenario.friendly_responses]
 
@@ -185,7 +192,7 @@ class _Builder:
             ),
             on, plan, self.figures(node),
             tuple(self.node(child, steps) for child in node.children),
-            self.vetoes[node.response] or self.follows(before),
+            self.vetoes[node.response] or self.follows(before), self.beside[node.action],
         )
 
     def follows(self, before: Sequence[tuple[int, int]]) -> str:

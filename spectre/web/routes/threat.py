@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse
 
 from spectre.astro.along_track import position_error_km, shift_along_track
 from spectre.astro.constants import normalise_regime, regimes_compatible
+from spectre.astro.elset_check import HELD_KEPT
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
     Burn,
@@ -99,7 +100,7 @@ from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
 from spectre.web.decision_threat import hold_threat_picture
 from spectre.web.deps import render
-from spectre.web.elsets import elset_age, limit_hours_for_regime
+from spectre.web.elsets import RefusedElset, elset_age, limit_hours_for_regime, refused
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -316,12 +317,8 @@ def _manual_target_error(existing: list[dict[str, str]], name: str, tle: str, co
     first = next((message for failed, message in problems if failed), None)
     if first:
         return first
-    try:
-        TLEOrbit(tle)
-    # BLE001: any parse failure is the operator's to see, with its reason.
-    except Exception as exc:  # noqa: BLE001
-        return f"Invalid TLE: {exc}"
-    return None
+    # The one acceptance check every ingest path runs (SPC-201); its sentence names what failed, never the text.
+    return refused(name, tle)
 
 
 @router.post("/add-manual-tle", response_model=None)
@@ -394,7 +391,7 @@ async def target_config(
 
 async def _prefetch_group_tle(
     state: object, satno_str: str, sem: asyncio.Semaphore, window_hours: float,
-) -> bool:
+) -> bool | str:
     """Bring one HRR object's element set up to date, history included.
 
     Lifted whole out of ``fetch_targets``, where it was a closure counting
@@ -402,6 +399,10 @@ async def _prefetch_group_tle(
     ends the call holding a usable element set, which is what the status
     panel counts as fetched: one that already held a REAL one counts without
     a call being made.
+
+    A set the acceptance check refuses is not stored: the sentence saying so,
+    naming the object, comes back in place of False (SPC-201). A history set
+    it refuses is left out of the clustering and said in the run log.
 
     The credential check is kept even though the caller has already made it.
     Session state is shared, and dropping a guard because it looks redundant
@@ -421,6 +422,8 @@ async def _prefetch_group_tle(
         )
         if not result:
             return False
+        if isinstance(result, RefusedElset):
+            return result.sentence(_hrr_label(state, satno_str))
         tle, dm = result
         state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
         state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
@@ -432,7 +435,11 @@ async def _prefetch_group_tle(
             source=state.udl_tle_source,  # type: ignore[attr-defined]
         )
         if len(history) > 1:
-            state.hrr_tle_multiset[satno_str] = history  # type: ignore[attr-defined]
+            state.hrr_tle_multiset[satno_str] = list(history)  # type: ignore[attr-defined]
+        # A history set the acceptance check refused was left out of the clustering: the run log says so (SPC-201).
+        refusal = history.refusal(_hrr_label(state, satno_str))
+        if refusal is not None:
+            state.append_log(f"[UDL] {refusal}")  # type: ignore[attr-defined]
     return True
 
 
@@ -497,8 +504,9 @@ async def fetch_targets(
     outcomes = await asyncio.gather(*[
         _prefetch_group_tle(state, s, sem, _window_hours) for s in satnos
     ])
-    fetched = sum(1 for ok in outcomes if ok)
+    fetched = sum(1 for ok in outcomes if ok is True)
     failed = len(outcomes) - fetched
+    refusals = [outcome for outcome in outcomes if isinstance(outcome, str)]
 
     total = len(satnos)
     group_label = f"{side.title()} HRR Rank {rank}" if rank is not None else "all HRR objects"
@@ -508,7 +516,7 @@ async def fetch_targets(
     )
 
     return render(request, "partials/sweep_fetch_status.html", {
-        "error": None, "fetched": fetched, "total": total, "failed": failed,
+        "error": None, "fetched": fetched, "total": total, "failed": failed, "refused": refusals,
     })
 
 
@@ -520,6 +528,16 @@ _EVENT_TO_LOCATION = {
     EventType.DESCENDING_NODE: "desc_node",
 }
 
+
+
+def _hrr_label(state: object, satno: str) -> str:
+    """An HRR object as the operator knows it: its watchlist name and number, or the number alone."""
+    name = next(
+        (str(o.get("name") or "").strip() for o in state.hrr_objects  # type: ignore[attr-defined]
+         if str(o.get("satno") or "").strip() == satno),
+        "",
+    )
+    return f"{name} ({satno})" if name else satno
 
 
 def _needs_live_tle(state: object, satno: str) -> bool:
@@ -1241,6 +1259,10 @@ def _parse_target_group(tgt_group: str) -> _TargetGroup:
     )
 
 
+#: What became of a refused manual red element set: the sweep flies the registered one instead.
+_MANUAL_RED_REFUSED = "It was not stored; the registered element set is used instead."
+
+
 def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
     """Accept a pasted red element set, or record why it was rejected.
 
@@ -1250,11 +1272,10 @@ def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
     """
     if not raw:
         return None
-    try:
-        TLEOrbit(raw)  # validate
-    # BLE001: operator input, reported not raised.
-    except Exception as exc:  # noqa: BLE001
-        errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
+    # The one acceptance check every ingest path runs (SPC-201).
+    refusal = refused("the manual red track", raw, outcome=_MANUAL_RED_REFUSED)
+    if refusal is not None:
+        errors.append(refusal)
         return None
     return raw
 
@@ -1360,7 +1381,9 @@ async def _fetch_missing_target_tles(
                 data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
-            if _result:
+            if isinstance(_result, RefusedElset):
+                errors.append(_result.sentence(f"{t.target_name} ({t.target_satno})"))
+            elif _result:
                 tle, dm = _result
                 state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
                 state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
@@ -2910,13 +2933,15 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
     user: str = state.udl_username  # type: ignore[attr-defined]
     password: str = state.udl_password  # type: ignore[attr-defined]
 
-    async def _fetch_one(actor: ThreatActor) -> bool:
+    async def _fetch_one(actor: ThreatActor) -> bool | str:
         async with sem:
             got = await fetch_tle_for_satno(
                 int(actor.actor_satno), user, password,
                 data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
+            if isinstance(got, RefusedElset):
+                return got.sentence(f"{actor.actor_name} ({actor.actor_satno})", outcome=HELD_KEPT)
             if not got:
                 return False
             tle, mode = got
@@ -2927,7 +2952,8 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
     held = "screened on the set already held"
     return [
-        f"{a.actor_name} ({a.actor_satno}): live element set not fetched"
+        outcome if isinstance(outcome, str)
+        else f"{a.actor_name} ({a.actor_satno}): live element set not fetched"
         + (f" ({_refusal_reason(outcome)}); {held}" if isinstance(outcome, BaseException) else f"; {held}")
         for a, outcome in zip(missing, outcomes, strict=True)
         if outcome is not True
@@ -3070,11 +3096,10 @@ def _resolve_asset(
 ) -> _ResolvedAsset:
     """Resolve the blue asset from a watchlist selection or a pasted TLE."""
     if manual_tle:
-        try:
-            TLEOrbit(manual_tle)
-        # BLE001: operator input, reported not raised.
-        except Exception as exc:  # noqa: BLE001
-            return _ResolvedAsset(error=f"Manual asset TLE invalid: {exc}")
+        # The one acceptance check every ingest path runs (SPC-201).
+        refusal = refused("the manual asset", manual_tle)
+        if refusal is not None:
+            return _ResolvedAsset(error=refusal)
         satno = str(satno_from_tle(manual_tle) or asset_satno)
         return _ResolvedAsset(
             tle=manual_tle,

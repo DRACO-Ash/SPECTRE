@@ -16,8 +16,10 @@ identical inputs repeat exactly (evaluation probe P-15). The replay is set again
 The replay runs with no wall-time budget. An evaluation whose budget ran out, a row refused or a tree built in part,
 is replayed in full, so what the budget left out may differ: the stored inputs say whether it ran out, and the report
 says so before comparing anything and again in its verdict. A record written by another code version is replayed
-across versions, and the report says so first, from the version inside the hashed inputs. Nothing here imports the
-web layer.
+across versions, and the report says so first, from the version inside the hashed inputs. A record written by 0.28.0
+or 0.29.0 was evaluated with each row weighed by its P over the rows' sum and no remainder of P (SPC-203): its stored
+inputs read under that rule, so the replay reproduces what the operator was shown, and the report says so first too.
+Nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import spectre
-from spectre.domain.decision import FriendlyResponse, Scenario, ScenarioResult, SelectorStrategy
+from spectre.domain.decision import FriendlyResponse, ProbabilityRule, Scenario, ScenarioResult, SelectorStrategy
 from spectre.domain.decision_inputs import StoredInputs
 from spectre.domain.decision_tree import evaluate_tree
 from spectre.domain.rule_comparison import RULE_WORDS, RULES, label, matrix_picks
@@ -38,6 +40,13 @@ SAME_VERSION = "This record was written by SPECTRE {version}, the version runnin
 ACROSS_VERSIONS = (
     "This record was written by SPECTRE {recorded} and the running code is {running}: the replay is compared across "
     "versions, so a difference may come from the code rather than the inputs."
+)
+#: Said first for a record 0.28.0 or 0.29.0 wrote: it is replayed under the rule it was evaluated under (SPC-203).
+LEGACY_SHARES = (
+    "This record was evaluated before SPC-203, when expected value weighed each row by its P over the sum of the "
+    "rows' P, which could exceed 1, and weighed no remainder of P as no adversary action. Its stored inputs say so, "
+    "and the replay evaluates it under that rule, as it was evaluated then; this code evaluates a new scenario with "
+    "the rows' P summing to at most 1 and the remainder weighed as a row of its own."
 )
 BUDGET_RAN_OUT = (
     "The evaluation recorded ran out of its time budget, so part of it was not sampled or built; the replay runs in "
@@ -110,6 +119,8 @@ class Replay:
     running_version:  str
     comparisons:      tuple[Comparison, ...]
     budget_ran_out:   bool = False
+    #: Whether the record was evaluated under the rule 0.28.0 and 0.29.0 weighed P by (SPC-203).
+    legacy_shares:    bool = False
 
     @property
     def across_versions(self) -> bool:
@@ -121,8 +132,10 @@ class Replay:
 
     @property
     def preamble(self) -> tuple[str, ...]:
-        """What is said before anything is compared: the version line, and the budget line when it ran out."""
-        return _first_lines(self.recorded_version, self.running_version, budget_ran_out=self.budget_ran_out)
+        """What is said before anything is compared: the version line, the line saying a record of 0.28.0 or 0.29.0
+        is replayed under the rule it was evaluated by, and the budget line when it ran out."""
+        return _first_lines(self.recorded_version, self.running_version, budget_ran_out=self.budget_ran_out,
+                            legacy_shares=self.legacy_shares)
 
     @property
     def report(self) -> tuple[str, ...]:
@@ -151,14 +164,22 @@ def version_line(recorded: str, running: str) -> str:
     return ACROSS_VERSIONS.format(recorded=recorded, running=running)
 
 
-def _first_lines(recorded: str, running: str, *, budget_ran_out: bool) -> tuple[str, ...]:
-    return (version_line(recorded, running), *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
+def _first_lines(recorded: str, running: str, *, budget_ran_out: bool, legacy_shares: bool = False) -> tuple[str, ...]:
+    return (version_line(recorded, running), *((LEGACY_SHARES,) if legacy_shares else ()),
+            *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
+
+
+def _legacy(stored: StoredInputs) -> bool:
+    """Whether *stored* was evaluated under the rule 0.28.0 and 0.29.0 weighed P by (SPC-203)."""
+    return stored.scenario.probability_rule is ProbabilityRule.SHARES
 
 
 def said_first(stored: StoredInputs, running: str) -> tuple[str, ...]:
     """What a replay of *stored* says before it evaluates anything, read from the hashed inputs alone: the version
-    that wrote them against *running*, and whether the evaluation recorded ran out of its time budget."""
-    return _first_lines(stored.code_version, running, budget_ran_out=stored.budget_ran_out)
+    that wrote them against *running*, whether it was evaluated under the rule 0.28.0 and 0.29.0 weighed P by, and
+    whether the evaluation recorded ran out of its time budget."""
+    return _first_lines(stored.code_version, running, budget_ran_out=stored.budget_ran_out,
+                        legacy_shares=_legacy(stored))
 
 
 def input_hashes(result: ScenarioResult) -> list[dict[str, str | None]]:
@@ -247,14 +268,15 @@ def _hashes(recorded: Recorded, result: ScenarioResult) -> list[Comparison]:
 
 
 def _scores(stored: StoredInputs, result: ScenarioResult) -> list[Comparison]:
-    scenario = stored.scenario
+    """Every score, row by row as the replay evaluated them, the remainder row's last where the rows leave one
+    (SPC-203); the stored inputs hold a score row for each, which their reader checks."""
     return [
         Comparison(
             f"Score, row {i + 1} ({action.id}), response {j + 1} ({response.id})", repr(stored.scores[i][j]),
             repr(result.outcome_matrix[i][j].composite_score), kind="score",
         )
-        for i, action in enumerate(scenario.adversary_actions)
-        for j, response in enumerate(scenario.friendly_responses)
+        for i, action in enumerate(result.scenario.adversary_actions)
+        for j, response in enumerate(result.scenario.friendly_responses)
     ]
 
 
@@ -275,5 +297,5 @@ def replay(
         stored.code_version, spectre.__version__ if running is None else running,
         (*_checks(stored, recorded, kept), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
          *_scores(stored, result)),
-        budget_ran_out=stored.budget_ran_out,
+        budget_ran_out=stored.budget_ran_out, legacy_shares=_legacy(stored),
     )

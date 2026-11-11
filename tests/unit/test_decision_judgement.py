@@ -49,7 +49,7 @@ _EPOCH = datetime(2026, 4, 10, tzinfo=UTC)
 
 def _scenario(**kw: object) -> Scenario:
     rows = [
-        AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, 0.6, 0.8),
+        AdversaryAction("A1", "Approach", ActionType.MANOEUVRE, 0.4, 0.8),
         AdversaryAction("A2", "Quiet", ActionType.NO_ACTION, 0.5, 0.4, probability_edited=False),
     ]
     responses = [
@@ -173,7 +173,7 @@ class TestEveryJudgementInputIsTagged:
 
     def test_each_rows_type_p_conf_and_custody_gap_share(self) -> None:
         text = _sentences(_scenario())
-        assert ("Approach (A1): type manoeuvre (judgement), P 0.6 (judgement), Conf 0.8 (judgement), custody gap "
+        assert ("Approach (A1): type manoeuvre (judgement), P 0.4 (judgement), Conf 0.8 (judgement), custody gap "
                 "share 0.7 (judgement). Its type selects its lookup closest approach and custody rule; P weights it "
                 "under expected value; Conf moves no figure. The gap share sets its custody gap by rule of thumb "
                 "against a response that neither manoeuvres nor retasks a sensor.") in text
@@ -185,7 +185,7 @@ class TestEveryJudgementInputIsTagged:
     def test_a_custody_gap_share_no_figure_reads_is_not_listed(self) -> None:
         """Read custody replaces the rule of thumb, so the share enters nothing (SPC-123); a still row has none."""
         text = _sentences(_scenario(), ("Custody read from the bound red track.", None))
-        assert "Approach (A1): type manoeuvre (judgement), P 0.6 (judgement), Conf 0.8 (judgement)." in text
+        assert "Approach (A1): type manoeuvre (judgement), P 0.4 (judgement), Conf 0.8 (judgement)." in text
         assert "custody gap share" not in text
 
     @pytest.mark.parametrize("kind", [ActionType.MANOEUVRE, ActionType.SENSOR_RETASK])
@@ -284,8 +284,16 @@ class TestThePageTagsThem:
 
     def test_each_rows_p_and_conf_in_the_matrix_carry_their_basis(self) -> None:
         text = _text(_render(evaluate_scenario(_scenario())))
-        assert "Manoeuvre (judgement) · P=0.6 (judgement) · Conf=0.8 (judgement) · Gap=0.7 (judgement)" in text
-        assert "No Action (judgement) · P=0.5 (lookup) · Conf=0.4 (judgement)" in text
+        assert ("Manoeuvre (judgement) · P=0.4 (judgement) · Share=0.4 (judgement) · Conf=0.8 (judgement) · "
+                "Gap=0.7 (judgement)") in text
+        assert "No Action (judgement) · P=0.5 (lookup) · Share=0.5 (lookup) · Conf=0.4 (judgement)" in text
+
+    def test_the_remainder_row_is_the_engines_and_rests_on_the_weakest_of_the_rows_p(self) -> None:
+        """Rows at P 0.4, the operator's judgement, and 0.5, the panel's default, leave 0.1 (SPC-203)."""
+        text = html.unescape(_text(_render(evaluate_scenario(_scenario()))))
+        assert "No adversary action (remainder of P): the engine's remainder, not your row" in text
+        assert "No Action (lookup) · P=0.1 (judgement) · Share=0.1 (judgement) · Conf: none" in text
+        assert "No adversary action (remainder of P) (remainder)" not in _sentences(_scenario()), "not a panel input"
 
     def test_every_existing_figure_mark_is_unchanged(self) -> None:
         html = _render(evaluate_scenario(_scenario()))

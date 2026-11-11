@@ -81,22 +81,25 @@ class TestTheRowCarriesWhatItAccepted:
 
 class TestTheResultSaysWhoseValuesTheyAre:
     def test_own_values_say_so(self) -> None:
-        assert evaluate_scenario(_scenario(_row(0.3, 0.6))).row_sources == ("P and Conf are your own.",)
+        """The row at P 0.3 leaves 0.7, the engine's remainder row, whose own line follows (SPC-203)."""
+        own, remainder = evaluate_scenario(_scenario(_row(0.3, 0.6))).row_sources
+        assert own == "P and Conf are your own."
+        assert remainder.startswith("This row is the engine's remainder, not your row: its P, 0.7, is 1 less")
 
     def test_an_accepted_suggestion_says_so_with_its_basis(self) -> None:
         prior = _prior()
-        (line,) = evaluate_scenario(_scenario(_row(prior=prior))).row_sources
+        line, _remainder = evaluate_scenario(_scenario(_row(prior=prior))).row_sources
         assert line == f"P 0.13 and Conf 0.30 are the NOTSO suggestion you applied. {prior.basis_line} Conf line."
 
     def test_an_accepted_suggestion_with_no_confidence_keeps_the_operators_conf(self) -> None:
         prior = _prior(confidence=None)
-        (line,) = evaluate_scenario(_scenario(_row(confidence=0.7, prior=prior))).row_sources
+        line, _remainder = evaluate_scenario(_scenario(_row(confidence=0.7, prior=prior))).row_sources
         assert line.startswith("P 0.13 is the NOTSO suggestion you applied; Conf is your own.")
 
     def test_a_p_never_edited_is_the_panels_default_and_only_conf_is_the_operators(self) -> None:
         """SPC-183: the form records this P as never edited, so the line does not call it the operator's own."""
         row = dataclasses.replace(_row(0.5, 0.6), probability_edited=False)
-        assert evaluate_scenario(_scenario(row)).row_sources == (decision.DEFAULT_P_VALUES,)
+        assert evaluate_scenario(_scenario(row)).row_sources[0] == decision.DEFAULT_P_VALUES
         assert decision.DEFAULT_P_VALUES == "P 0.5 is the panel's default, never edited; Conf is your own."
 
     def test_no_source_line_breaks_i13(self) -> None:

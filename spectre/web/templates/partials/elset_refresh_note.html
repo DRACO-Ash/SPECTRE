@@ -12,8 +12,11 @@
 <div id="elset-refresh-note" class="field-meta" aria-live="polite">
   Element sets refreshed from UDL at <strong>{{ refresh.finished_at.strftime('%H:%M UTC') }}</strong>:
   {{ refresh.updated | length }} updated, {{ refresh.current }} already current{% if refresh.failed %},
-  <span class="badge-warn" title="Kept as held: {{ refresh.failed | join(', ') }}">{{ refresh.failed | length }} not refreshed</span>{% endif %}.
+  <span class="badge-warn" title="Kept as held: {{ refresh.failed | join(', ') }}">{{ refresh.failed | length }} not refreshed</span>{% endif %}{% if refresh.refused %},
+  <span class="badge-warn">{{ refresh.refused | length }} refused</span>{% endif %}.
   Sets entered by hand are never overwritten.
+  {#- Each set the acceptance check refused, named in a sentence: the held set was kept (SPC-201). -#}
+  {% for sentence in refresh.refused %}<span class="elset-refused" style="display:block">{{ sentence }}</span>{% endfor %}
 </div>
 {% if announce and refresh.updated %}
 <script>

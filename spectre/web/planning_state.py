@@ -37,8 +37,10 @@ class ElsetRefresh:
     """The refresh of every held element set made when UDL connects.
 
     *updated*, *failed* name each object ("red SY-12 02"); *current* counts
-    the ones UDL had nothing newer for. *announced* is set once the page has
-    been told the refresh finished, so it is told once.
+    the ones UDL had nothing newer for; *refused* holds the sentence for each
+    object whose newest set the acceptance check refused, the held set kept
+    (SPC-201). *announced* is set once the page has been told the refresh
+    finished, so it is told once.
     """
 
     started_at: datetime
@@ -47,6 +49,7 @@ class ElsetRefresh:
     updated: list[str] = field(default_factory=list)
     current: int = 0
     failed: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)
     announced: bool = False
 
 
@@ -222,6 +225,8 @@ def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
         if _default_hrr_tles:
             state.hrr_tle_cache.update(_default_hrr_tles)
             state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
+        for sentence in _default_elset_refusals:
+            state.append_log(f"[HRR] {sentence}")
         _store[key] = (now, state)
         logger.debug("Created new session state for account %d", key.user_id)
     return _store[key][1]
@@ -346,3 +351,14 @@ def set_default_hrr_tles(tles: dict[str, str], modes: dict[str, str]) -> None:
 def get_default_hrr_tles() -> tuple[dict[str, str], dict[str, str]]:
     """Return the default element sets and their provenance."""
     return _default_hrr_tles, _default_hrr_tle_modes
+
+
+#: The sentence for each element set of the default watchlist the acceptance check refused at start-up (SPC-201).
+#: No operator is signed in then, so each new session's run log carries them.
+_default_elset_refusals: list[str] = []
+
+
+def set_default_elset_refusals(sentences: list[str]) -> None:
+    """Store the refusals of the default watchlist's element sets, for each new session's run log."""
+    global _default_elset_refusals  # noqa: PLW0603 - boot-time default state, as the setters above
+    _default_elset_refusals = list(sentences)

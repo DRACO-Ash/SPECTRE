@@ -22,13 +22,13 @@ from typing import Literal, NamedTuple, Protocol
 from spectre.data.intel import satno_from_tle
 from spectre.domain.decision import BoundElset, ScenarioBinding
 from spectre.domain.models import BlueAsset, RedTrack
-from spectre.domain.provenance import tle_input
-from spectre.web.elsets import elset_age
+from spectre.web.elsets import elset_age, refused
 from spectre.web.planning_state import SessionState
 
 _NOT_HELD = "{kind} {name} is no longer held in this session. Choose another or leave it unbound."
 _SAME_SATNO = "Red and blue are the same object (SATNO {satno}). Bind two different objects."
-_SAME_ELSET = "Red and blue hold the same element set. Bind two different objects."
+#: What became of a held set the acceptance check refuses at binding (SPC-201).
+_NOT_BOUND = "Nothing was bound; add a sound element set for it."
 
 
 class BindOutcome(NamedTuple):
@@ -76,11 +76,25 @@ def _held[T: (RedTrack, BlueAsset)](objects: Iterable[T], stk_name: str) -> T | 
 
 
 def _same_object(red: BoundElset, blue: BoundElset) -> str | None:
-    """The refusal when red and blue are one object, by catalogue number or by identical element set."""
+    """The refusal when red and blue are one object, by catalogue number. Every set bound has passed the
+    acceptance check, which reads its catalogue number (SPC-201), so two identical sets share one and are caught
+    here; no comparison of the text is needed."""
     if red.satno is not None and red.satno == blue.satno:
         return _SAME_SATNO.format(satno=red.satno)
-    if tle_input("", red.tle).sha256 == tle_input("", blue.tle).sha256:
-        return _SAME_ELSET
+    return None
+
+
+def _unsound(*held: tuple[str, RedTrack | BlueAsset | None]) -> str | None:
+    """The sentence refusing the first held set the acceptance check refuses, or None (SPC-201).
+
+    Every ingest path runs the check before storing a set; the binder runs it again, so a set held by any other
+    route, or before the check existed, never reaches the engine.
+    """
+    for kind, obj in held:
+        if obj is not None:
+            refusal = refused(f"{kind} {obj.name}", obj.tle, outcome=_NOT_BOUND)
+            if refusal is not None:
+                return refusal
     return None
 
 
@@ -92,6 +106,9 @@ def bind_scenario(state: SessionState, red_sat: str, blue_sat: str, now: datetim
     blue_obj = _held(state.blue_assets, blue_sat) if blue_sat else None
     if blue_sat and blue_obj is None:
         return BindOutcome(None, _NOT_HELD.format(kind="Blue asset", name=blue_sat))
+    unsound = _unsound(("red track", red_obj), ("blue asset", blue_obj))
+    if unsound is not None:
+        return BindOutcome(None, unsound)
     red = None if red_obj is None else bound_elset("red", red_obj, now)
     blue = None if blue_obj is None else bound_elset("blue", blue_obj, now)
     if red is None and blue is None:

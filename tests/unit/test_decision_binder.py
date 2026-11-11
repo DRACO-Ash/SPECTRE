@@ -116,9 +116,11 @@ def test_red_and_blue_cannot_be_one_object() -> None:
     assert bind_scenario(state, "RX", "BY", _NOW) == BindOutcome(
         None, "Red and blue are the same object (SATNO 50322). Bind two different objects.",
     )
+    # Two sets that are not element sets are refused by the acceptance check before they are compared (SPC-201).
     same = _state([RedTrack("RX", "not a tle")], [BlueAsset("BY", "  not a tle  ")])
     assert bind_scenario(same, "RX", "BY", _NOW) == BindOutcome(
-        None, "Red and blue hold the same element set. Bind two different objects.",
+        None, "The element set for red track RX was refused: it does not hold two element lines. Nothing was bound; "
+        "add a sound element set for it.",
     )
 
 

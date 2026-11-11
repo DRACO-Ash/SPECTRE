@@ -214,16 +214,18 @@ class TestDecisionRoutes:
     def test_decision_evaluate_fills_short_rows_and_labels_the_result(
         self, client: object, auth_cookie: str,
     ) -> None:
-        """Rows the form sends short get named defaults, and the page says modelled."""
+        """Rows the form sends short get named defaults, and the page says modelled. Row 2 takes the default P of
+        0.5, so row 1 posts 0.3 to keep the rows' P at most 1 (SPC-203)."""
         resp = client.post(  # type: ignore[attr-defined]
             "/plan/decision/evaluate",
             data={
                 "scenario_name": "Short rows", "horizon_hours": "72", "keep_out_km": "10",
                 "adv_id": ["A1", "A2"], "adv_name": ["Approach"], "adv_type": ["manoeuvre", "not-a-type"],
-                "adv_prob": ["0.7"],
+                "adv_prob": ["0.3"],
                 "fr_id": ["F1", "F2"], "fr_name": ["Evasion"], "fr_type": ["manoeuvre"],
                 "fr_cost": ["0.3"],
-                "w_custody": "0", "w_ca": "0", "w_dv": "0", "w_time": "0", "w_rev": "0",
+                # One weight above 0: all five at 0 are refused (SPC-200, evaluation F-31).
+                "w_custody": "0", "w_ca": "0.25", "w_dv": "0", "w_time": "0", "w_rev": "0",
                 "strategy": "not-a-strategy",
             },
             cookies={"spectre_session": auth_cookie},

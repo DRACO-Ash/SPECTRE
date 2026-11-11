@@ -126,8 +126,8 @@ class TestThePage:
         ]
         scenario = Scenario("page", _EPOCH, rows, [_HOLD], horizon_hours=72.0)
         text = _text(_render(evaluate_scenario(scenario)))
-        assert "P=0.6 (judgement) · Conf=0.8 (judgement) · Gap=0.4 (judgement)" in text
-        assert "P=0.4 (judgement) · Conf=0.3 (judgement)" in text and "Gap=0.9" not in text
+        assert "P=0.6 (judgement) · Share=0.6 (judgement) · Conf=0.8 (judgement) · Gap=0.4 (judgement)" in text
+        assert "P=0.4 (judgement) · Share=0.4 (judgement) · Conf=0.3 (judgement)" in text and "Gap=0.9" not in text
         bound = _burn_at_quarter_hour(_scenario(binding=_custodied()))
         assert "Gap=" not in _render(evaluate_scenario(bound, sampler=_Fake())), "the red track's custody sets it"
 
