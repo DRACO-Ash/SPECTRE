@@ -96,7 +96,6 @@ Claude Craft Prompt to create a persona.txt
 Claude Craft prompt to create a Persona for a UI_UX Developer for OW Applications
 Claude Persona
 Desktop.ini
-Dockerfile.verify
 ENV/
 HRR_List.json
 MANIFEST
@@ -137,3 +136,9 @@ share/python-wheels/
 /var/
 venv/
 wheels/
+
+# Written by scripts/verify-container.sh and removed by its exit trap; a run killed
+# outright can still leave them. The CA file is the build host's proxy certificate
+# and must never be committed.
+.Dockerfile.verify
+.verify-proxy-ca.crt

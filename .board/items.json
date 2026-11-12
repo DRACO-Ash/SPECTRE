@@ -2405,5 +2405,131 @@
   "files": [
    "scripts/smoke-browser.py"
   ]
+ },
+ {
+  "ref": "SPC-231",
+  "priority": "high",
+  "order": 0,
+  "group": "port",
+  "minutes": 720,
+  "task": "Port the small charming-dirac changes: base image 3.12.16, Grype gate, temp-file clean-up, SGP4-XP and UCT refusal, actor eligibility (15-year cut), ages for every target flown, includes(), true closest-approach figures, option colours",
+  "note": "Owner ruling 2026-11-12: port the small changes as V0.33. From charming-dirac 59a6612, d056c6d, ce216a0, 7ed9d0b (refusal only), 1357a67 with 0f5fa30, 03b7507, 7bf8af8, d2e6513 (figures only, keep-and-label), 30ff084 (CSS only). Not built or scanned as an image here: no Docker daemon (SPC-236).",
+  "files": [
+   "Dockerfile",
+   "scripts/verify-container.sh",
+   "spectre/astro/elset_check.py",
+   "spectre/domain/actor_eligibility.py",
+   "spectre/astro/maneuvers.py"
+  ],
+  "state": "built",
+  "est": 720,
+  "version": "0.33.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-232",
+  "priority": "high",
+  "order": 1,
+  "group": "port",
+  "minutes": 840,
+  "task": "Port the UDL archive-first fetch from every provider, recording the provider (charming-dirac 7ed9d0b, 5751c3e)",
+  "note": "Owner ruling 2026-11-12: then the rest. The refusal of SGP4-XP and UCT sets landed in 0.33.0; this is the fetch order, the provider field and the source list.",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/web/elsets.py"
+  ]
+ },
+ {
+  "ref": "SPC-233",
+  "priority": "high",
+  "order": 2,
+  "group": "port",
+  "minutes": 600,
+  "task": "Port the Sonar rules checker gating new code only, and clear its findings in 0.32.0's JavaScript (charming-dirac c930087)",
+  "note": "Owner ruling 2026-11-12: latent Code Quality issues are converted as touched; the checker gates new code only. The comparison counted 55 findings in the JavaScript 0.32.0 moved out of templates.",
+  "files": [
+   "scripts/check-quality.sh",
+   "spectre/web/static/js/"
+  ]
+ },
+ {
+  "ref": "SPC-234",
+  "priority": "high",
+  "order": 3,
+  "group": "port",
+  "minutes": 840,
+  "task": "Port the engineering parts of the NOTSO realistic intercepts with a Max delta-V default of 171.8 m/s and its evidence data (charming-dirac d3447e2)",
+  "note": "Owner ruling 2026-11-12: Max delta-V default 171.8 m/s from NOTSO, overruling R7. manoeuvre_evidence.json may be ported; the NOTSO export itself is not.",
+  "files": [
+   "spectre/astro/maneuvers.py",
+   "spectre/data/"
+  ]
+ },
+ {
+  "ref": "SPC-235",
+  "priority": "low",
+  "order": 4,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 5,
+  "task": "Retire the claude/charming-dirac-qcrnpv branch once SPC-232 to SPC-234 are built",
+  "note": "Deleting a remote branch is the owner's call. The branch holds the NOTSO export (U//DS-JCO-NOTIF) in a public repository; history keeps it after the branch is deleted.",
+  "files": []
+ },
+ {
+  "ref": "SPC-236",
+  "priority": "high",
+  "order": 5,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Run scripts/verify-container.sh on a machine with Docker; the Grype stage must end PASS, not SKIPPED",
+  "note": "0.33.0 moved the base image to Python 3.12.16 (digest 935c3c5b...) and added the Grype stage. Neither the image build nor the scan could run here: no Docker daemon.",
+  "files": [
+   "Dockerfile",
+   "Dockerfile.docker-only",
+   "scripts/verify-container.sh"
+  ]
+ },
+ {
+  "ref": "SPC-237",
+  "priority": "med",
+  "order": 6,
+  "group": "port",
+  "minutes": 240,
+  "task": "V-bar hop entry burn always fires outward radial, whichever side the target is on",
+  "note": "Found by the 0.33.0 review (plausible, not flown). vbar_hop_intercept fires +b_hat, which drifts red backwards in the linear model; for a target ahead the recorded burn moves red away. The 0.33.0 miss figure uses abs(on_axis), so both sides read the same closest approach. Pre-existing in the solver; fly both sides to confirm, then sign the burn by the target's side.",
+  "files": [
+   "spectre/astro/maneuvers.py"
+  ]
+ },
+ {
+  "ref": "SPC-238",
+  "priority": "low",
+  "order": 7,
+  "group": "port",
+  "minutes": 180,
+  "task": "A flown closest-approach search that cannot run fails the method on the manoeuvre page",
+  "note": "Found by the 0.33.0 review. _flown_closest_km calls closest_approach, which raises when no sample is finite or past 100,000 samples (an R-bar time of about 70 days or more in LEO). Inside the sweep the figure is skipped, so a method can succeed there and fail on the manoeuvre page. Fix: return NaN and show 'not computed' in intercept_result.html and all_intercepts_result.html, never NaN as a number.",
+  "files": [
+   "spectre/astro/maneuvers.py",
+   "spectre/web/templates/partials/intercept_result.html",
+   "spectre/web/templates/partials/all_intercepts_result.html"
+  ]
+ },
+ {
+  "ref": "SPC-239",
+  "priority": "med",
+  "order": 8,
+  "group": "port",
+  "minutes": 180,
+  "task": "Asset screen judges a payload's age from the cached element set before it refreshes the live ones",
+  "note": "Found by the 0.33.0 review (plausible). threat.py selects candidates through _resolve_hrr_tle before _refresh_actor_tles runs, so on a first screen an old payload with nothing cached is screened, and on the next it is left out. The bundled synthetic sets all carry designator 20001A, so from 2036 every bundled object with no intel record would be cut.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/domain/actor_eligibility.py"
+  ]
  }
 ]

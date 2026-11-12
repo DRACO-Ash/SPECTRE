@@ -19,7 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
-from spectre.astro.elset_check import history_refusal
+from spectre.astro.elset_check import history_refusal, refused_type
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
@@ -32,7 +32,7 @@ from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
 from spectre.domain.pol_assessment import PolAssessment, assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
-from spectre.web.elsets import elset_age, limit_hours_for_regime
+from spectre.web.elsets import elset_age, limit_hours_for_regime, log_skipped_by_type
 from spectre.web.format_units import to_m_s
 from spectre.web.interaction_store import held_interactions
 from spectre.web.log_safety import log_safe
@@ -119,10 +119,14 @@ def _parse_udl_elset_response(
     metadata: dict[str, tuple[str, str]] = {}
     rms_metadata: dict[str, float | None] = {}
     sat_name: str = ""
-    for rec in records:
-        l1 = _first(rec, "line1", "TLE_LINE1", "tle1")
-        l2 = _first(rec, "line2", "TLE_LINE2", "tle2")
-        if l1.startswith("1 ") and l2.startswith("2 "):
+    # An SGP4-XP set or an uncorrelated track is known by its record, which the parser past this point never sees,
+    # so the acceptance check's type and correlation test (spectre.astro.elset_check) is applied here, by record.
+    paired = [(f"{_first(rec, 'line1', 'TLE_LINE1', 'tle1')}\n{_first(rec, 'line2', 'TLE_LINE2', 'tle2')}", rec)
+              for rec in records if isinstance(rec, dict)]
+    log_skipped_by_type("PoL UDL history", paired)
+    for tle, rec in paired:
+        l1, l2 = tle.split("\n")
+        if l1.startswith("1 ") and l2.startswith("2 ") and not refused_type(tle, rec):
             lines += [l1, l2]
             metadata[l1] = (_first(rec, "dataMode", "data_mode"), _first(rec, "source"))
             rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")

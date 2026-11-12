@@ -1284,3 +1284,13 @@ Element-set error in the miss (evaluation F-11) and a script policy with no inli
 | DAST | **EVIDENCED** | `script-src 'self'`, no `'unsafe-inline'` or `'unsafe-eval'` | The header is asserted on every page by tests. | Then a page or fragment still needs a script the policy refuses; the browser console names it. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.33.0
+
+The small changes from the charming-dirac branch (owner ruling 2026-11-12).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Container Scanning | **EVIDENCED** | Base image `python:3.12-slim-bookworm@sha256:935c3c5b...`, Python 3.12.16 | The previous digest 6a0e06f5 carries Python 3.12.15, affected by CVE-2026-115557; the new digest's configuration reads PYTHON_VERSION=3.12.16, read from mirror.gcr.io and confirmed on Docker Hub. Not built or scanned here: no Docker daemon. | Then the scanner names a package in the new image; `scripts/verify-container.sh` with its Grype stage, run where Docker is available, names it first (SPC-236). |
+| Code Quality | **EVIDENCED** | New module `spectre/domain/actor_eligibility.py`; changes to `elset_check.py`, `maneuvers.py`, three routes and `theme-boot.js` | `scripts/check-quality.sh` against 0.32.0: 0 findings on changed lines, changed-line coverage 100%, duplication 0%. | Then the platform applies a rule the local checker does not carry; SPC-233 ports the Sonar rules checker. |
+| Other gates | **HYGIENE** | None | No dependency change. | n/a. |
+

@@ -10,7 +10,7 @@
   try {
     var t = localStorage.getItem('spectre-theme');
     var valid = ['ops', 'steel'];
-    if (t && valid.indexOf(t) !== -1) {
+    if (t && valid.includes(t)) {
       root.setAttribute('data-theme', t);
       root.setAttribute('data-spectre-theme', t === 'steel' ? 'light' : 'dark');
     } else if (t) {

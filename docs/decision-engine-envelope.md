@@ -50,6 +50,8 @@ The bundled watchlist, `spectre/data/hrr_default.json`, passes in full.
 | Right ascension of the node, argument of perigee, mean anomaly | 0 to 360 degrees each | `spectre/astro/elset_check.py` `_ANGLES` | none | Refused, naming the field and its value |
 | Eccentricity | 0 to under 1: 7 digits after an implied decimal point | `spectre/astro/elset_check.py` `_ECCENTRICITY` | none | Refused: the field cannot be read |
 | Mean motion | Above 0 revolutions a day, and finite | `spectre/astro/elset_check.py` `_MEAN_MOTION` | none | Refused: not above 0, or cannot be read |
+| Ephemeris type | 0, SGP4, the only type the propagators here read: the UDL record's ephemType when it carries one, else line 1 column 63, a blank read as 0 | `spectre/astro/elset_check.py` `_SGP4_TYPE` | `0` | Refused, naming the type: a type 4 set is SGP4-XP, whose line 1 fields carry other terms, and SGP4 propagates it without an error to a wrong orbit. Every path refuses it, the UDL history included; the log counts what was skipped by type and provider, without the set's text |
+| Correlated to the object | A set UDL has correlated to the object it is filed under | `spectre/astro/elset_check.py` `_is_uct` | none | Refused: a record whose uct flag is true is an uncorrelated track. When the newest set a fetch answers with is refused for this or for its type, the page says so and no older set is taken in its place |
 | An orbit SGP4 can start from | Once every field is in its range, SGP4 starts from the set with no error of its own | `spectre/astro/propagator.py` `TLEOrbit.init_error` | none | Refused, naming SGP4's error: fields each in range can still describe an orbit inside the Earth, such as 20 revolutions a day |
 | A set held before the check, or by any other route | Checked again when a scenario binds it | `spectre/web/decision_binding.py` `bind_scenario` | none | Refused beside the form: nothing is bound |
 
@@ -140,6 +142,10 @@ These are Claude's choices, not rulings, and await the owner's:
   no range, since none is sourced; a B* that reads but is absurd is not refused.
 ● **The number asked for.** A set fetched for one catalogue number and answered for another is refused, so a sound
   set for the wrong object never replaces a held one.
+● **SGP4 sets only.** An SGP4-XP set is well formed and SGP4 starts from it, so no other test catches it; the check
+  reads its ephemeris type, and refuses an uncorrelated track by the UDL record's own flag. The newest set is still
+  the one fetched: when it is refused for its type, nothing is stored and the operator is told, rather than an older
+  set of another provider being taken without a word.
 ● **The columns stored are the columns checked.** The Pattern of Life parser keeps each line to its 69 columns, so
   it checks those, and text past column 69 is cut, not a reason to refuse.
 ● **The run log where there is no page.** Paths with no page of their own, and the start-up load, which no operator

@@ -84,6 +84,9 @@ router = APIRouter(prefix="/plan/maneuver")
 _INTERCEPT_RESULT_TEMPLATE = "partials/intercept_result.html"
 _ALL_INTERCEPTS_TEMPLATE = "partials/all_intercepts_result.html"
 _HOP_TYPE_LABEL = "Hop Type"
+#: What a hop's miss is: the closest it brings red to the target, not the separation asked for or the distance it
+#: travels (charming-dirac d2e6513).
+_LABEL_CLOSEST_APPROACH = "Closest approach"
 
 # Human-readable altitude hint for each orbit regime — used in error messages.
 _REGIME_ALT_HINT: dict[str, str] = {
@@ -340,7 +343,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "R-Bar (radial)"},
-                {"label": "Separation", "value": f"{miss:.2f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": f"{miss:.1f} km"},
                 {"label": "Burns", "value": "1 radial impulse"},
             ]
         ),
@@ -348,7 +351,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "V-Bar (along-track)"},
-                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": f"{miss:.1f} km"},
                 {"label": "Burns", "value": "2 radial (entry + correction)"},
                 {"label": "Signature", "value": "Low — mimics perturbation drift"},
             ]
@@ -357,7 +360,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "H-Bar (orbit-normal)"},
-                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": f"{miss:.1f} km"},
                 {"label": "Burns", "value": "Normal burns at node crossings"},
                 {"label": "Signature", "value": "Low — ACS/propellant settling cover"},
             ]
@@ -548,20 +551,20 @@ _SummaryBuilder = Callable[[InterceptResult, float, float, str, str], str]
 _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.RBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"R-Bar hop places {result.red_name} {miss:.1f} km radially from "
+            f"R-Bar hop: {result.red_name} comes within {miss:.1f} km of "
             f"{result.blue_name} using {dv:.0f} m/s \u0394V in {tof_label}."
         ),
     InterceptMethod.VBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"V-Bar hop sequence advances {result.red_name} {miss:.1f} km along V-bar "
-            f"toward {result.blue_name} via {len(result.burns)} burns "
+            f"V-Bar hop sequence along V-bar: {result.red_name} comes within {miss:.1f} km "
+            f"of {result.blue_name} via {len(result.burns)} burns "
             f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — each hop mimics natural drift."
         ),
     InterceptMethod.HBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"H-Bar hop sequence advances {result.red_name} {miss:.1f} km in orbit-normal "
-            f"toward {result.blue_name} via {len(result.burns)} normal burns "
+            f"H-Bar hop sequence in orbit-normal: {result.red_name} comes within {miss:.1f} km "
+            f"of {result.blue_name} via {len(result.burns)} normal burns "
             f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — consistent with ACS activity."
         ),

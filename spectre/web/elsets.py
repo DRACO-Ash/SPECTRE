@@ -17,11 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from spectre.astro.elset_check import HELD_KEPT, NOT_STORED, ElsetCheck, check_elset, history_refusal
+from spectre.astro.elset_check import (
+    HELD_KEPT,
+    NOT_STORED,
+    ElsetCheck,
+    check_elset,
+    history_refusal,
+    refused_type,
+)
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.config.constants import TLE_FILTER
 from spectre.data.intel import satno_from_tle
@@ -52,10 +60,31 @@ def log_refusal(sentence: str) -> None:
     logger.warning("%s", log_safe(sentence, limit=_REFUSAL_LOG_LIMIT))
 
 
-def refused(name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None) -> str | None:
+def log_skipped_by_type(subject: str, sets: Iterable[tuple[str, Mapping[str, object]]]) -> None:
+    """Log the UDL sets for *subject* ("SATNO 90002") passed over for their type or correlation, counted by type
+    and provider, never their text.
+
+    How often providers file SGP4-XP sets and uncorrelated tracks for the objects operators hold is the evidence a
+    later SGP4-XP propagator would be judged on, so each skip is counted where it happens.
+    """
+    counts: Counter[tuple[str, str]] = Counter()
+    for tle, record in sets:
+        kind = refused_type(tle, record)
+        if kind:
+            counts[(kind, str(record.get("source") or "an unnamed source").strip())] += 1
+    if counts:
+        named = "; ".join(f"{n} {kind} from {source}" for (kind, source), n in counts.items())
+        logger.info("%s: element sets skipped by type: %s", log_safe(subject), log_safe(named, limit=500))
+
+
+def refused(
+    name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None,
+    record: Mapping[str, object] | None = None,
+) -> str | None:
     """The sentence refusing *tle* for the object *name*, logged, or None when the acceptance check accepts it. With
-    *satno*, a set for another catalogue number is refused too."""
-    check = check_elset(tle, satno)
+    *satno*, a set for another catalogue number is refused too; *record*, the UDL record it came in, adds that
+    record's ephemeris type and UCT flag to the check."""
+    check = check_elset(tle, satno, record=record)
     if check.accepted:
         return None
     sentence = check.refusal(name, outcome=outcome)

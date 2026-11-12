@@ -25,7 +25,14 @@ from spectre.astro.elset_check import check_elset, tle_epoch
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
-from spectre.web.elsets import ElsetHistory, RefusedElset, log_refusal, refresh_held_elsets, refused
+from spectre.web.elsets import (
+    ElsetHistory,
+    RefusedElset,
+    log_refusal,
+    log_skipped_by_type,
+    refresh_held_elsets,
+    refused,
+)
 from spectre.web.interaction_store import hold_conjunctions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
@@ -158,15 +165,18 @@ async def fetch_tle_history_for_satno(
         return ElsetHistory()
 
     records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-    tles: list[str] = []
+    sets: list[tuple[str, dict[str, Any]]] = []
     for rec in records:
         line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
         line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
         if line1 and line2:
-            tles.append(f"{line1}\n{line2}")
+            sets.append((f"{line1}\n{line2}", rec))
     # Every set feeds the clustering that chooses the cached one, so a set the acceptance check refuses, another
-    # object's included, is dropped here, counted and its failures logged without its text (SPC-201).
-    checks = [check_elset(tle, satno) for tle in tles]
+    # object's included, is dropped here, counted and its failures logged without its text (SPC-201). Each record
+    # goes to the check with its set, so an SGP4-XP set or an uncorrelated track is refused by its own fields.
+    tles = [tle for tle, _ in sets]
+    checks = [check_elset(tle, satno, record=rec) for tle, rec in sets]
+    log_skipped_by_type(f"SATNO {satno}", sets)
     history = ElsetHistory(
         (tle for tle, check in zip(tles, checks, strict=True) if check.accepted),
         [check for check in checks if not check.accepted],
@@ -229,8 +239,10 @@ async def fetch_tle_for_satno(
     rec = _select_latest_elset(complete)
     data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
     tle = f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}"
-    check = check_elset(tle, satno)
+    # An SGP4-XP set or an uncorrelated track is refused by the record's own fields, and named in the log by type.
+    check = check_elset(tle, satno, record=rec)
     if not check.accepted:
+        log_skipped_by_type(f"SATNO {satno}", [(tle, rec)])
         log_refusal(check.refusal(f"SATNO {satno}, as UDL answered it,"))
         return RefusedElset(satno, check)
     return (tle, data_mode_tag)
@@ -856,7 +868,7 @@ async def fetch_tle(
         )
 
     # The set fills the form only once it passes the acceptance check, as the set for the number asked (SPC-201).
-    refusal = refused(f"{name} ({satno})", tle, satno=satno)
+    refusal = refused(f"{name} ({satno})", tle, satno=satno, record=rec)
     if refusal is not None:
         return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": refusal})
 

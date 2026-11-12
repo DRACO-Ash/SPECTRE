@@ -20,6 +20,10 @@ from the bundled data:
 ● inclination from 0 to 180 degrees, eccentricity from 0 to under 1, mean motion above 0, and the right ascension of
   the ascending node, the argument of perigee and the mean anomaly from 0 to 360 degrees, each written in digits and
   one decimal point;
+● an ephemeris type of 0, SGP4, read from the UDL record's ephemType when it carries one, else from line 1 column 63
+  (a blank reads as 0): a type 4 set is SGP4-XP, whose line 1 fields carry other terms, and the sgp4 package
+  propagates it without an error to a wrong orbit;
+● not an uncorrelated track: a UDL record whose uct flag is true is not yet tied to the object it is filed under;
 ● and, once all of those pass, SGP4 starting from it without an error of its own: fields each inside their range can
   still describe an orbit inside the Earth.
 
@@ -33,7 +37,7 @@ failure in words and never quotes the set's text, so it can be logged and shown 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import NamedTuple
@@ -41,7 +45,10 @@ from typing import NamedTuple
 from spectre.astro.catalogue import catalogue_number
 from spectre.astro.propagator import TLE_LINE_LENGTH, TLEOrbit, tle_checksum_valid
 
-__all__ = ["HELD_KEPT", "NOT_STORED", "TLE_LINE_LENGTH", "ElsetCheck", "check_elset", "history_refusal", "tle_epoch"]
+__all__ = [
+    "HELD_KEPT", "NOT_STORED", "TLE_LINE_LENGTH", "ElsetCheck", "check_elset", "history_refusal", "refused_type",
+    "tle_epoch",
+]
 #: What a refusal says became of the set, when nothing was held for it.
 NOT_STORED = "It was not stored."
 #: The same, when a set already held for the object was kept in its place.
@@ -93,6 +100,11 @@ _MEAN_MOTION = slice(52, 63)
 _CATALOGUE = slice(2, 7)
 _EPOCH = slice(18, 32)
 #: Line 1's drag fields, in the columns of the published format, each with the pattern it must match.
+#: Line 1 column 63: the ephemeris type. 0 is SGP4, the only type the propagators here read; 4 is SGP4-XP.
+_EPHEMERIS_TYPE = slice(62, 63)
+_SGP4_TYPE = 0
+_SGP4_XP_TYPE = 4
+_UCT_FAILS = "it is an uncorrelated track (UCT), not a set correlated to the object"
 _DRAG: tuple[tuple[str, slice, re.Pattern[str]], ...] = (
     ("the first derivative of the mean motion", slice(33, 43), _DECIMAL),
     ("the second derivative of the mean motion", slice(44, 52), _IMPLIED_EXPONENT),
@@ -217,9 +229,62 @@ def _ranges(line2: str) -> list[str]:
     return failures
 
 
-def check_elset(tle: str, satno: int | None = None) -> ElsetCheck:
+def _read_type(text: str) -> int | None:
+    """One ephemeris-type field: a blank read as 0, a number as itself, anything else None."""
+    text = text.strip()
+    if not text:
+        return _SGP4_TYPE
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
+def _ephemeris_type(line1: str, record: Mapping[str, object] | None) -> int | None:
+    """The set's ephemeris type, from line 1 column 63 and the record's ephemType when it carries a non-blank one.
+    Either source can refuse the set: None when either does not read, else the first that is not 0, else 0. A
+    record's 0 never hides a type 4 written on line 1."""
+    texts = [line1[_EPHEMERIS_TYPE]]
+    field = (record or {}).get("ephemType")
+    if field is not None and str(field).strip():
+        texts.insert(0, str(field))
+    kinds = [_read_type(text) for text in texts]
+    if None in kinds:
+        return None
+    return next((kind for kind in kinds if kind != _SGP4_TYPE), _SGP4_TYPE)
+
+
+def _is_uct(record: Mapping[str, object] | None) -> bool:
+    """UDL's uct is a JSON boolean; only true marks a track not yet correlated to the object."""
+    return (record or {}).get("uct") is True
+
+
+def _kind(line1: str, record: Mapping[str, object] | None) -> list[tuple[str, str]]:
+    """Each type or correlation failure as (the sentence's clause, a few words for the log): a set SGP4 would
+    misread, and a track not tied to the object."""
+    found = []
+    kind = _ephemeris_type(line1, record)
+    if kind is None:
+        found.append(("its ephemeris type cannot be read", "an unreadable ephemeris type"))
+    elif kind == _SGP4_XP_TYPE:
+        found.append((f"it is an SGP4-XP set (ephemeris type {kind}), which SGP4 would propagate to a wrong orbit "
+                       "without an error", f"SGP4-XP (type {kind})"))
+    elif kind != _SGP4_TYPE:
+        found.append((f"its ephemeris type is {kind}, not {_SGP4_TYPE}, the SGP4 type every propagator here assumes",
+                       f"ephemeris type {kind}"))
+    if _is_uct(record):
+        found.append((_UCT_FAILS, "UCT"))
+    return found
+
+
+def refused_type(tle: str, record: Mapping[str, object] | None = None) -> str:
+    """What *tle* is refused as by its type or correlation, in a few words for the log ("SGP4-XP (type 4)", "UCT");
+    "" when neither refuses it. Never the set's text."""
+    lines = _lines(tle)
+    return ", ".join(words for _, words in _kind(lines[-2] if len(lines) > 1 else "", record))
+
+
+def check_elset(tle: str, satno: int | None = None, *, record: Mapping[str, object] | None = None) -> ElsetCheck:
     """Whether *tle* may be stored, and each reason it may not (see the module's list). With *satno*, the set must
-    also be for that catalogue number: an answer for another object is not the set asked for."""
+    also be for that catalogue number: an answer for another object is not the set asked for. *record* is the UDL
+    record the set came in, when it came from UDL: its ephemType and uct flag are read from it."""
     lines = _lines(tle)
     if len(lines) < 2:  # noqa: PLR2004 - two element lines
         return ElsetCheck((_TWO_LINES,))
@@ -232,6 +297,7 @@ def check_elset(tle: str, satno: int | None = None) -> ElsetCheck:
         failures.append("the epoch cannot be read")
     failures += _drag(line1)
     failures += _ranges(line2)
+    failures += [clause for clause, _ in _kind(line1, record)]
     if not failures:
         code = TLEOrbit(tle).init_error
         if code:

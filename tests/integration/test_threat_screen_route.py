@@ -260,3 +260,66 @@ class TestTheRangeAndUnderstandingColumns:
         # The history is held, so its cue is no longer to pull it, and its burns are judged.
         assert "Raise it by: pull its element-set history" not in flat
         assert "Behaviour not earned" not in flat
+
+
+class TestOnlyPayloadsThatCanActAreScreened:
+    """charming-dirac 0.6.6 named a CZ-3B rocket body the most dangerous actor against AEHF-1 (1357a67, 0f5fa30)."""
+
+    @staticmethod
+    def _run(client: object, cookie: str, objects: list[dict[str, object]], cache: dict[str, str]) -> str:
+        state = session_state(cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
+        state.hrr_objects = objects
+        state.hrr_tle_cache.update(cache)
+        try:
+            resp = _screen(client, cookie, asset_satno="30793", max_dv_m_s=5000)
+        finally:
+            state.hrr_objects = saved_objects
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
+        assert resp.status_code == 200  # type: ignore[attr-defined]
+        return " ".join(resp.text.split())  # type: ignore[attr-defined]
+
+    def test_a_rocket_body_and_an_old_payload_are_left_out_and_named(self, client: object, auth_cookie: str) -> None:
+        old_payload = _RED_TLE.replace("16065A  ", "04042A  ", 1)
+        text = self._run(client, auth_cookie, [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "28451", "name": "FENGYUN 2C", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "28452", "name": "FENGYUN 1C DEB", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"41838": _RED_TLE, "100141": _RED_TLE, "28451": old_payload, "28452": _RED_TLE, "30793": _ASSET_TLE})
+        assert "1 candidate actor(s) in GEO" in text, "only SJ-17 is screened"
+        assert (
+            '<p class="field-meta" role="note">Not screened, as not able to act: '
+            "1 debris: FENGYUN 1C DEB (named as debris); 1 past working life: FENGYUN 2C (launched 2004); "
+            "1 rocket body: CZ-3B R/B (named as rocket body). A payload is taken to be past its working life 15 "
+            "years after launch, an assumption, unless the intelligence record holds it as operational or "
+            "degraded.</p>"
+        ) in text
+
+    def test_the_catalogue_type_is_read_once_it_has_loaded(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stage named like a payload is caught by the UDL on-orbit catalogue's objectType."""
+        monkeypatch.setattr(
+            "spectre.web.planning_state.get_onorbit_catalog",
+            lambda: [{"satNo": 99001, "objectType": "ROCKET BODY", "launchDate": "2024-01-01"}],
+        )
+        text = self._run(client, auth_cookie, [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "99001", "name": "SHIJIAN STAGE", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"41838": _RED_TLE, "99001": _RED_TLE, "30793": _ASSET_TLE})
+        assert "SHIJIAN STAGE (catalogued as rocket body)" in text
+        assert "1 candidate actor(s) in GEO" in text
+
+    def test_a_watchlist_of_nothing_that_can_act_says_so(self, client: object, auth_cookie: str) -> None:
+        text = self._run(client, auth_cookie, [
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"30793": _ASSET_TLE})
+        assert (
+            "No red HRR object in a regime compatible with GEO can act. Not screened, as not able to act: "
+            "1 rocket body: CZ-3B R/B (named as rocket body)."
+        ) in text

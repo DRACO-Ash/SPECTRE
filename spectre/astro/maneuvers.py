@@ -8,11 +8,15 @@ state vectors.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
+from spectre.astro.closest_approach import closest_approach
 from spectre.astro.constants import MU_EARTH, R_EARTH
 from spectre.astro.cw_geometry import CWState, _cw_propagate, _eci_to_hill_matrix, _initial_hill_state
 from spectre.astro.kepler import propagate_two_body
@@ -353,8 +357,9 @@ def phasing_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        # The closure is at the chaser's radius, so the radial gap remains.
-        miss_distance_km=abs(r_red - r_blue),
+        # How close the phasing orbit brings the chaser, flown: the radial gap alone (F-025) said nothing of the
+        # along-track or out-of-plane error (charming-dirac d2e6513).
+        miss_distance_km=_flown_closest_km(sv_red, dv1_vec, blue_orbit, result.time_to_intercept_s, mu),
     )
 
 
@@ -414,7 +419,8 @@ def cw_radial_intercept(
         total_delta_v=cw.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=desired_separation_km,
+        # The separation asked for is from red's own orbit, not from the target: the hop is flown instead.
+        miss_distance_km=_flown_closest_km(sv_red, dv_vec, blue_orbit, time_s, mu),
     )
 
 
@@ -501,9 +507,9 @@ def vbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    v_hat_d = sv_red.v / sv_red.v_mag
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        v_hat_d = sv_red.v / sv_red.v_mag
         along_track_sep = abs(float(np.dot(dr, v_hat_d)))
         hop_distance_km = max(along_track_sep / n_hops, 1.0)
 
@@ -534,7 +540,7 @@ def vbar_hop_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_hop_closest_km(dr, v_hat_d, result.total_advance_km),
     )
 
 
@@ -571,11 +577,9 @@ def hbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    n_hat0 = _unit_normal(sv_red)
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        h_vec0 = np.cross(sv_red.r, sv_red.v)
-        h_mag0 = float(np.linalg.norm(h_vec0))
-        n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
         cross_track_sep = abs(float(np.dot(dr, n_hat0)))
         hop_distance_km = max(cross_track_sep / n_hops, 1.0)
 
@@ -601,7 +605,7 @@ def hbar_hop_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_hop_closest_km(dr, n_hat0, result.total_advance_km),
     )
 
 
@@ -710,7 +714,9 @@ def plane_change_intercept(
             total_delta_v=dv_mag,
             departure_epoch=t_burn,
             arrival_epoch=t_burn,
-            miss_distance_km=0.0,
+            # Aligning the planes does nothing to the along-track gap, so the miss is the closest approach over the
+            # revolution after the burn. It was 0.0, and a GEO target 610 km away read as reached (d2e6513).
+            miss_distance_km=_flown_closest_km(sv_burn, dv_vec, blue_orbit, period_s, mu),
         )
     # Different altitudes: a Hohmann-like transfer with the plane change on
     # the slower burn, as combined_altitude_plane_change prices it.
@@ -1719,6 +1725,68 @@ def _coast(sv: StateVector, dv: np.ndarray, until: datetime, mu: float) -> State
 def _separation(sv: StateVector, target: TLEOrbit) -> float:
     """Distance (km) from *sv* to *target* at the same epoch."""
     return float(np.linalg.norm(sv.r - target.propagate(sv.epoch).r))
+
+
+#: Samples per revolution when the closest approach of a flown burn is searched for; closest_approach refines each
+#: minimum it finds. One every 15 minutes at GEO and one a minute in LEO, against relative motion that, after a
+#: plane change or a phasing burn, changes over the whole revolution (charming-dirac d2e6513 sampled at this rate).
+_APPROACH_SAMPLES_PER_REV = 96
+#: The closest approach's time is refined to this, in seconds: the miss is all that is reported, and a second of
+#: relative motion moves it by metres at most.
+_APPROACH_TCA_TOLERANCE_S = 1.0
+
+
+#: True while a caller that reads no miss runs the solvers: the threat sweep, which decides arrival by method and
+#: shows no miss. Flying each burn costs a few milliseconds a solve, and the sweep makes thousands (it took a 24-target
+#: GEO sweep from 0.7 s to 1.2 s), so inside it the flown figure is NaN, not computed, and nothing there reads it.
+_MISS_NOT_READ: ContextVar[bool] = ContextVar("_MISS_NOT_READ", default=False)
+
+
+@contextmanager
+def miss_not_read() -> Iterator[None]:
+    """Run the solvers inside this block without flying their burns for a miss; each flown miss is NaN."""
+    token = _MISS_NOT_READ.set(True)
+    try:
+        yield
+    finally:
+        _MISS_NOT_READ.reset(token)
+
+
+def _flown_closest_km(sv: StateVector, dv: np.ndarray, target: TLEOrbit, span_s: float, mu: float) -> float:
+    """The closest *target* comes to an object that burns *dv* at *sv* and coasts two-body for *span_s* seconds.
+
+    The search is spectre.astro.closest_approach (SPC-102), sampled _APPROACH_SAMPLES_PER_REV times a revolution
+    of the orbit after the burn. A span of 0 is the separation at the burn itself. NaN inside miss_not_read.
+    """
+    if _MISS_NOT_READ.get():
+        return math.nan
+
+    def separation(t: float) -> float:
+        return _separation(_coast(sv, dv, sv.epoch + timedelta(seconds=t), mu), target)
+
+    if not span_s > 0.0:
+        return separation(0.0)
+    r, v = sv.r, sv.v + dv
+    energy = float(np.dot(v, v)) / 2.0 - mu / float(np.linalg.norm(r))
+    period_s = 2.0 * math.pi * math.sqrt((-mu / (2.0 * energy)) ** 3 / mu) if energy < 0.0 else span_s
+    step_s = min(period_s / _APPROACH_SAMPLES_PER_REV, span_s)
+    return closest_approach(separation, span_s, step_s=step_s, tolerance_s=_APPROACH_TCA_TOLERANCE_S).miss_km
+
+
+def _hop_closest_km(separation: np.ndarray, axis: np.ndarray, advance_km: float) -> float:
+    """The closest a hop sequence along *axis* comes to the target, in the sequence's own linear model.
+
+    Hops advance along one axis only, toward the target: V-bar hops along-track, H-bar hops cross-track. The path
+    comes closest where it is level with the target on that axis, or at its end when it stops short; what is left
+    is that shortfall and the whole of the separation off the axis. The miss used to be the sequence's total
+    advance, the distance it travels, so an H-bar sequence read 3 km from a target it left 600 km away.
+    """
+    on_axis = float(np.dot(separation, axis))
+    off_axis = float(np.linalg.norm(separation - on_axis * axis))
+    shortfall = abs(on_axis) - advance_km
+    # NaN-safe (charming-dirac 5e13b5b): max(0.0, nan) is 0.0, which would read a failed figure as reaching it.
+    along = shortfall if math.isnan(shortfall) or shortfall > 0.0 else 0.0
+    return math.hypot(along, off_axis)
 
 def _make_burn(
     number: int,

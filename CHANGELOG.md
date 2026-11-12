@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-12
+
+**The small changes from the charming-dirac branch, ported by the owner's ruling of 2026-11-12.**
+
+### Changed
+- Base image moved to the current `python:3.12-slim-bookworm` build, Python 3.12.16, clearing CVE-2026-115557; pinned by digest in both Dockerfiles. Not built or scanned here, as no Docker daemon was available (SPC-231, SPC-236).
+- An SGP4-XP element set (ephemeris type 4, or any type but 0) or an uncorrelated track is refused by the one acceptance check on every ingest path, history included. The newest set is still the one taken; when it is refused, nothing is stored and the page says why. The log counts what was skipped by type and provider, never the set's text (SPC-231).
+- Asset screening no longer treats rocket bodies, debris, decayed objects, or payloads over 15 years old with no intelligence record as actors, and names each one it leaves out. The 15-year working life is an assumption, stated on the page (owner ruling 2026-11-12; SPC-231).
+- Plane change, phasing and the R-bar, V-bar and H-bar hops report their true closest approach to the target. Previously these figures were 0, the radial gap, the separation asked for, or the distance travelled. A figure that cannot be computed never reads as reaching the target. No row's arrival status changed; rows that do not reach the target stay listed and labelled (owner ruling 2026-11-12; SPC-231).
+- The sweep's element-set ages line covers every target flown, including those where every method failed or went over budget, but never one skipped for its regime (SPC-231).
+- The pre-paint theme script tests membership with `includes()`; open dropdown lists take the theme's colours (SPC-231).
+
+### Added
+- `scripts/verify-container.sh` runs Grype and fails on any fixable High or Critical finding. A scan that cannot run is reported SKIPPED, never passed. A failed check no longer leaves the proxy CA certificate or the patched Dockerfile in the repository, and git ignores both (SPC-231).
+
 ## [0.32.0] - 2026-11-12
 
 **Element-set error in the miss (evaluation F-11), and the console's script under a policy with no inline script or eval (F-08).**

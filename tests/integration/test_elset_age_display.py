@@ -70,6 +70,62 @@ class TestTheSweep:
         assert "2.0 h" in text, "the interceptor's age"
         assert "1 stale" in text and "BLUE-GEO" in text, "the stale target is named"
 
+    def test_ages_are_stated_even_when_nothing_reaches_the_target(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        """charming-dirac 0.6.8 failed the App Store's Test stage at 12:07 UTC on the test above (03b7507).
+
+        Target ages were taken from the targets with a solution, so with none there were none, and a stale target
+        set can be why nothing reaches it. A 1 mm/s budget makes "nothing reaches it" hold at any hour.
+        """
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL"),
+        ]
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "max_dv_m_s": "0.001"})
+        text = " ".join(resp.text.split())
+        assert "No intercept solutions found" in text
+        assert "1 stale</span>: BLUE-GEO." in text
+
+    def test_a_target_skipped_for_its_regime_is_not_aged(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        """Only targets actually flown are aged: a LEO set the GEO interceptor never flew against is not one."""
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL"),
+        ]
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        _add_manual(client, auth_cookie, "BLUE-LEO", _tle(datetime.now(tz=UTC) - timedelta(days=20), leo=True,
+                                                         satno=90003))
+        resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "max_dv_m_s": "0.001"})
+        text = " ".join(resp.text.split())
+        assert "BLUE-LEO: skipped" in text and "(regime mismatch)" in text
+        assert "1 stale</span>: BLUE-GEO." in text
+
+    def test_a_set_found_mismatched_after_the_cap_is_not_aged(self) -> None:
+        """The cap reads the cache before the last-chance fetch; the runner reads the frozen sets after it. A target
+        whose fetched set turns out LEO is skipped by the runner, so it was not flown and is not aged."""
+        from spectre.domain.models import ThreatTarget
+        from spectre.web.routes.threat import _elset_ages, _FrozenTargets, _SweepBasis
+
+        now = datetime.now(tz=UTC)
+        geo = ThreatTarget(target_name="BLUE-GEO", target_satno="90002", target_source="hrr", hrr_rank=1)
+        leo = ThreatTarget(target_name="BLUE-LEO", target_satno="90003", target_source="hrr", hrr_rank=1)
+        none = ThreatTarget(target_name="NO-SET", target_satno="90004", target_source="hrr", hrr_rank=1)
+        basis = _SweepBasis(
+            targets=[geo, leo, none], manual_tle_by_name={},
+            frozen=_FrozenTargets({"90002": _tle(now - timedelta(days=5), satno=90002),
+                                   "90003": _tle(now - timedelta(days=9), leo=True, satno=90003)}),
+            red_regime="GEO", max_dv_m_s=500.0, blue_satnos=frozenset(), now=now,
+        )
+        ages = _elset_ages(_tle(now - timedelta(hours=2)), basis, now)
+        assert (ages["count"], ages["stale"]) == (1, ["BLUE-GEO"])
+        assert ages["red"].label == "2.0 h"
+
     def test_a_stale_interceptor_is_flagged(self, client: Any, auth_cookie: str, red_state: Any) -> None:
         from spectre.domain.models import RedTrack
 

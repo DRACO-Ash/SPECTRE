@@ -13,6 +13,10 @@
       {{ "%.1f" | format(elapsed_s) }}s
     </span>
   </div>
+  {# Who was left out as not able to act, and why: a stage or an old payload must not vanish unsaid (1357a67). #}
+  {% if not_screened is defined and not_screened %}
+  <p class="field-meta" role="note">{{ not_screened }}</p>
+  {% endif %}
 
   {% include "partials/_provenance_banner.html" %}
 

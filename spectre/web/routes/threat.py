@@ -33,6 +33,7 @@ from spectre.astro.maneuvers import (
     hohmann_intercept,
     lambert_intercept,
     min_time_intercept_wrapper,
+    miss_not_read,
     phasing_intercept,
     plane_change_intercept,
     vbar_hop_intercept,
@@ -43,6 +44,7 @@ from spectre.config.settings import get_settings
 from spectre.data.intel import get_intel, satno_from_tle
 from spectre.domain import interaction_graph as ig
 from spectre.domain import threat_understanding as tu
+from spectre.domain.actor_eligibility import WORKING_LIFE_YEARS, Exclusion, why_not_an_actor
 from spectre.domain.custody import Custody, CustodyStatus, age_text
 from spectre.domain.decide_by import (
     DecideBy,
@@ -836,29 +838,31 @@ def _sweep_all_methods(
     notes: dict[str, str] = refusals if refusals is not None else {}
     budget = request.max_dv_m_s
 
-    for location, epoch in epochs:
-        for name, solver, extra in _SWEEP_METHODS:
-            kwargs = dict(extra)
-            if name == "min_time":
-                kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
-            try:
-                sol = solver(
-                    red_tle=request.red_tle,
-                    blue_tle=request.target_tle,
-                    manoeuvre_start=epoch,
-                    **kwargs,
-                )
-                # plane_change can report a signed figure; cost is a magnitude.
-                cost_m_s = from_km_s(abs(sol.total_delta_v))
-                if cost_m_s <= budget:
-                    entries.append(_sol_to_entry(
-                        sol, request.target, epoch, location, name, request.regime,
-                    ))
-                else:
-                    notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
-            # BLE001: one refusal is recorded and the sweep continues.
-            except Exception as exc:  # noqa: BLE001
-                notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
+    # The sweep decides arrival by method and shows no miss, so the solvers do not fly their burns for one.
+    with miss_not_read():
+        for location, epoch in epochs:
+            for name, solver, extra in _SWEEP_METHODS:
+                kwargs = dict(extra)
+                if name == "min_time":
+                    kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
+                try:
+                    sol = solver(
+                        red_tle=request.red_tle,
+                        blue_tle=request.target_tle,
+                        manoeuvre_start=epoch,
+                        **kwargs,
+                    )
+                    # plane_change can report a signed figure; cost is a magnitude.
+                    cost_m_s = from_km_s(abs(sol.total_delta_v))
+                    if cost_m_s <= budget:
+                        entries.append(_sol_to_entry(
+                            sol, request.target, epoch, location, name, request.regime,
+                        ))
+                    else:
+                        notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
+                # BLE001: one refusal is recorded and the sweep continues.
+                except Exception as exc:  # noqa: BLE001
+                    notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
 
     # A method that solved at any epoch did produce a solution for this
     # target; listing it as refused contradicted the table beside it (F-125).
@@ -1131,33 +1135,84 @@ def _regime_of_tle(tle: str) -> str:
         return ""
 
 
-def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
-    """Candidate threat actors for an asset in *asset_regime*.
+def _catalogue_index() -> dict[str, dict[str, Any]]:
+    """The UDL on-orbit catalogue keyed by catalogue number; empty before it loads.
+
+    Both spellings of the number are read, satNo and satno, so a change of key
+    shape cannot quietly switch the type test off.
+    """
+    from spectre.web.planning_state import get_onorbit_catalog
+
+    index: dict[str, dict[str, Any]] = {}
+    for rec in get_onorbit_catalog():
+        satno = str(rec.get("satNo") or rec.get("satno") or "").strip()
+        if satno:
+            index[satno] = rec
+    return index
+
+
+def _red_in_reach(obj: dict[str, Any], asset_regime: str) -> ThreatActor | None:
+    """*obj* as a candidate actor: a red HRR object with a number, in a regime that could reach *asset_regime*."""
+    country = str(obj.get("country") or "").strip().upper()
+    satno = str(obj.get("satno") or "").strip()
+    if country not in _RED_COUNTRIES or not satno:
+        return None
+    obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
+    if asset_regime and obj_regime and not regimes_compatible(asset_regime, obj_regime):
+        return None
+    return ThreatActor(
+        actor_name=str(obj.get("name") or satno).strip(),
+        actor_satno=satno,
+        country=country,
+        hrr_rank=obj.get("rank"),
+        regime=obj_regime,
+    )
+
+
+def _build_actor_list(
+    state: object, asset_regime: str, this_year: int,
+) -> tuple[list[ThreatActor], list[tuple[str, Exclusion]]]:
+    """Candidate threat actors for an asset in *asset_regime*, and who was left out and why.
 
     Red HRR objects whose regime could physically reach the asset's. The filter
     is ``regimes_compatible`` rather than equality on purpose: a GTO or HEO
     object crosses both the LEO and GEO belts, so excluding it would be a false
     negative on exactly the case worth catching.
+
+    Of those, only payloads that can still act are actors
+    (``spectre.domain.actor_eligibility``): rocket bodies, debris, decayed
+    objects and payloads past their working life in *this_year* come back as
+    exclusions, each with its reason, so the page can name them.
     """
     actors: list[ThreatActor] = []
+    excluded: list[tuple[str, Exclusion]] = []
+    catalogue = _catalogue_index()
     for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        country = str(obj.get("country") or "").strip().upper()
-        if country not in _RED_COUNTRIES:
+        actor = _red_in_reach(obj, asset_regime)
+        if actor is None:
             continue
-        satno = str(obj.get("satno") or "").strip()
-        if not satno:
-            continue
-        obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
-        if asset_regime and obj_regime and not regimes_compatible(asset_regime, obj_regime):
-            continue
-        actors.append(ThreatActor(
-            actor_name=str(obj.get("name") or satno).strip(),
-            actor_satno=satno,
-            country=country,
-            hrr_rank=obj.get("rank"),
-            regime=obj_regime,
-        ))
-    return actors
+        satno = actor.actor_satno
+        reason = why_not_an_actor(
+            actor.actor_name, catalogue.get(satno), _resolve_hrr_tle(state, satno), get_intel(satno), this_year,
+        )
+        if reason is None:
+            actors.append(actor)
+        else:
+            excluded.append((actor.actor_name, reason))
+    return actors, excluded
+
+
+def _exclusion_note(excluded: list[tuple[str, Exclusion]]) -> str:
+    """One sentence naming each object left out of the screen and why, with the working-life assumption."""
+    by_kind: dict[str, list[str]] = {}
+    for name, reason in excluded:
+        by_kind.setdefault(reason.kind, []).append(f"{name} ({reason.detail})")
+    parts = [f"{len(names)} {kind}: {', '.join(names)}" for kind, names in sorted(by_kind.items())]
+    return (
+        f"Not screened, as not able to act: {'; '.join(parts)}. A payload is taken to be past its working life "
+        f"{WORKING_LIFE_YEARS} years after launch, an assumption, unless the intelligence record holds it as "
+        "operational or degraded."
+    )
 
 
 # PLR0913, PLR0917: the inputs of one actor's assessment.
@@ -1580,14 +1635,19 @@ def _red_recorded_mode(state: object, red_sat: str, red_satno: str | None) -> st
     return None if mode is None else str(mode)
 
 
-def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
-    """The interceptor's element set age and the swept targets', stale ones named."""
+def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, Any]:
+    """The interceptor's element set age and that of every target flown, stale ones named.
+
+    Every target the runner flew, not only those that produced an approach: a stale set can be why nothing reached
+    a target, and listing ages only beside solutions hid it exactly then (charming-dirac 03b7507). A target the
+    runner skipped, for a regime mismatch or for want of a set, was never flown, so it is not aged.
+    """
     targets = []
-    for group in grouped:
-        tle = _target_tle(state, group["target"])
+    for target in basis.targets:
+        tle = None if _not_flown(basis, target) else _flown_tle(basis, target)
         age = elset_age(tle, now) if tle else None
         if age is not None:
-            targets.append((group["target"].target_name, age))
+            targets.append((target.target_name, age))
     return {
         "red": elset_age(red_tle, now),
         "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
@@ -2195,8 +2255,7 @@ def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: date
 
 def _not_flown(basis: _SweepBasis, target: ThreatTarget) -> str:
     """Why the sweep runner skipped *target*, as ``_run_target_sweep`` decides it; ``""`` when it was flown."""
-    tle = (basis.manual_tle_by_name.get(target.target_name) if target.target_source == "manual"
-           else basis.frozen.hrr_tle_cache.get(target.target_satno))
+    tle = _flown_tle(basis, target)
     if not tle:
         return "no element set"
     try:
@@ -2900,7 +2959,7 @@ async def threat_sweep(
         "manual_red_confidence": stated_confidence,
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
-        "elset_ages": _elset_ages(state, red_tle, grouped, now),
+        "elset_ages": _elset_ages(red_tle, basis, now),
         "red_history": red_history,
         "warning_change": warning_change,
         "decide_by": decide,
@@ -3037,15 +3096,18 @@ class _Candidates(NamedTuple):
     red_population: int = 0
     notes: list[str] = []
     error: str = ""
+    #: The sentence naming the objects left out as not able to act, and why; "" when none was.
+    not_screened: str = ""
 
 
-def _select_candidates(state: object, asset_regime: str) -> _Candidates:
+def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
     """Choose which red objects to screen against this asset.
 
     Every empty outcome carries a different sentence. An operator reading
     "no candidates" has to be able to tell a missing watchlist from a
     watchlist whose red objects are all in the wrong regime, because one is a
-    setup problem and the other is a finding.
+    setup problem and the other is a finding; and both from a watchlist whose
+    red objects in reach are all stages, debris or past their working life.
     """
     if not state.hrr_objects:  # type: ignore[attr-defined]
         return _Candidates(error=(
@@ -3058,7 +3120,12 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
         1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
-    actors = _build_actor_list(state, asset_regime)
+    actors, excluded = _build_actor_list(state, asset_regime, this_year)
+    not_screened = _exclusion_note(excluded) if excluded else ""
+    if not actors and excluded:
+        return _Candidates(error=(
+            f"No red HRR object in a regime compatible with {asset_regime or 'this asset'} can act. {not_screened}"
+        ))
     if not actors:
         return _Candidates(error=(
             f"No red HRR objects are in a regime compatible with "
@@ -3074,7 +3141,7 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
         )
         actors = actors[:_MAX_SCREEN_ACTORS]
 
-    return _Candidates(actors=actors, red_population=red_population, notes=notes)
+    return _Candidates(actors=actors, red_population=red_population, notes=notes, not_screened=not_screened)
 
 
 class _ResolvedAsset(NamedTuple):
@@ -3243,7 +3310,7 @@ async def threat_screen(
     )
 
     # ── Enumerate candidate actors ───────────────────────────────────────────
-    candidates = _select_candidates(state, asset_regime)
+    candidates = _select_candidates(state, asset_regime, now.year)
     if candidates.error:
         return _fail(candidates.error)
     actors = candidates.actors
@@ -3297,6 +3364,7 @@ async def threat_screen(
         "method_refusals": method_refusals,
         "profiles_by_actor": profiles_by_actor,
         "errors": errors,
+        "not_screened": candidates.not_screened,
         "error": None,
         "band_colours": _BAND_COLOURS,
         "actor_modes": actor_modes,
