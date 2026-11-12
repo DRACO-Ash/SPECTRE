@@ -505,11 +505,24 @@ def _section_03_getting_started(doc: Document) -> None:
 
     _add_heading_h2(doc, "TLE Source Provider")
     _add_body(doc,
-        "UDL aggregates TLEs from multiple source providers (e.g., 18 SDS, LeoLabs). "
-        "When you connect, SPECTRE automatically discovers available sources for your "
-        "account by probing the ISS elset. A 'TLE Source' selector appears in the "
-        "UDL panel. Leave it blank to accept UDL's default, or select a specific "
-        "provider to pin all subsequent TLE fetches to that source."
+        "UDL holds element sets from several providers (for example 18th SPCS, ExoAnalytic, KBR, KRTL, LeoLabs "
+        "and NorthStar). A latest fetch, whether from the TLE panel, a quick-add, a sweep or the refresh at "
+        "connect, asks UDL's element set archive over the last 72 hours first and takes the newest set any "
+        "provider filed; only when the archive holds none in that window does it ask UDL's current catalogue. "
+        "If that newest set is refused, for example because it is an SGP4-XP set, nothing is stored and you are "
+        "told; an older set is never taken in its place."
+    )
+    _add_body(doc,
+        "When you connect, SPECTRE lists the providers that filed for the ISS over the last day, and adds every "
+        "provider the refresh at connect finds on the sets you hold. The list is cleared when you disconnect. A "
+        "'TLE Source' selector appears in the UDL panel: leave it blank to take the newest set from every "
+        "provider, or choose one to narrow every latest fetch to that provider."
+    )
+    _add_body(doc,
+        "A set fetched from UDL keeps the provider that filed it. The red card shows it beside the data mode "
+        "(Provider: LeoLabs \u00b7 REAL, for example), or says the set was entered by hand, and the sweep names "
+        "the interceptor's provider beside its element set age. Editing a fetched set's text makes it your own, "
+        "so its data mode and provider are dropped."
     )
 
     _add_heading_h2(doc, "Setting Scenario Time")
@@ -2184,7 +2197,7 @@ def _section_18_glossary(doc: Document) -> None:
         ["HRR", "High Rate Revisit — JCO satellite watchlist identifying high-priority objects by threat rank."],
         ["Pattern of Life (PoL)", "Analysis of a satellite's full TLE history to characterise manoeuvre behaviour and detect anomalies."],
         ["PoL Status", "Classification of a satellite's historical behaviour: NOMINAL (routine station-keeping), ANOMALOUS (unusual or large manoeuvres), or SUSPICIOUS (evasive or targeting behaviour)."],
-        ["TLE Source", "The UDL data provider (e.g. 18 SDS, LeoLabs) whose elsets are used for TLE fetches."],
+        ["TLE Source", "The UDL provider (for example 18th SPCS or LeoLabs) a latest fetch is narrowed to; blank takes the newest set from every provider."],
         ["Drift Phase", "A continuous period of east-west longitude drift at a measurable rate, detected from successive GEO elsets."],
         ["NOTSO", "Notice to Space Operators — formal pre-manoeuvre notification filed with USSPACECOM by spacecraft operators."],
         ["Phantom NOTSO", "A NOTSO filed but for which no corresponding manoeuvre was detected in TLE analysis."],

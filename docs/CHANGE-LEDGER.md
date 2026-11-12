@@ -1294,3 +1294,13 @@ The small changes from the charming-dirac branch (owner ruling 2026-11-12).
 | Code Quality | **EVIDENCED** | New module `spectre/domain/actor_eligibility.py`; changes to `elset_check.py`, `maneuvers.py`, three routes and `theme-boot.js` | `scripts/check-quality.sh` against 0.32.0: 0 findings on changed lines, changed-line coverage 100%, duplication 0%. | Then the platform applies a rule the local checker does not carry; SPC-233 ports the Sonar rules checker. |
 | Other gates | **HYGIENE** | None | No dependency change. | n/a. |
 
+## 0.34.0
+
+The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c3e).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `spectre/web/routes/udl.py`, `elsets.py`, four routes, three templates and `operator.js` | `scripts/check-quality.sh` against 0.33.0: 0 findings on changed lines, changed-line coverage 100%, duplication 0.8%. The repeated literals the archive fetch would have taken to 3 or more uses (python:S1192) are named constants. | Then the platform applies a rule the local checker does not carry; SPC-233 ports the Sonar rules checker. |
+| DAST | **EVIDENCED** | A hidden form input and a provider name shown on two pages | The provider is bounded to 64 characters and kept only for a UDL mode; templates escape it; no inline script (the browser tests run under `script-src 'self'`). | Then a page reflects the field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

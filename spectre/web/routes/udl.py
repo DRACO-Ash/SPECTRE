@@ -15,7 +15,7 @@ from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from math import inf
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
@@ -65,6 +65,12 @@ def _parse_tle_epoch(line1: str) -> datetime | None:
     return tle_epoch(line1)
 
 _UDL_BASE = UDL_BASE_URL
+# The element set archive and the current catalogue, each asked from several
+# places, and the timestamp format UDL's epoch and createdAt filters take (UTC,
+# microseconds). Each is one definition rather than repeated literals (python:S1192).
+_ELSET_URL = f"{_UDL_BASE}/elset"
+_ELSET_CURRENT_URL = f"{_UDL_BASE}/elset/current"
+_UDL_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
 # One wording for the one action an operator can take about it, used by every
 # route that can be reached without credentials. It is also the literal whose
@@ -136,14 +142,9 @@ async def fetch_tle_history_for_satno(
     source:
         Optional TLE source provider filter.
     """
-    from datetime import timedelta
-
-    since = datetime.now(UTC) - timedelta(hours=window_hours)
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-
     params: dict[str, Any] = {
         "satNo":  satno,
-        "epoch":  f">{since_str}",
+        "epoch":  _epoch_after(window_hours),
     }
     if data_mode != "REAL":
         params["dataMode"] = data_mode
@@ -153,7 +154,7 @@ async def fetch_tle_history_for_satno(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
+                _ELSET_URL,
                 params=params,
                 auth=(username, password),
                 timeout=15.0,
@@ -191,61 +192,123 @@ async def fetch_tle_history_for_satno(
     return history
 
 
+#: How far back the archive is searched for the newest element set. A set
+#: older than this is stale in every regime (TLE_FILTER's GEO and deep-space
+#: limit, 72 hours, is the longest), so past it the current catalogue's answer
+#: is as good as any.
+_NEWEST_WINDOW_H = 72.0
+#: The ISS archive window source discovery reads: every active provider files for it within a day.
+_DISCOVERY_WINDOW_H = 24.0
+#: The archive answer spans every provider over three days, so it is given
+#: longer than the current catalogue's single set per provider.
+_ARCHIVE_TIMEOUT_S = 20.0
+_CURRENT_TIMEOUT_S = 15.0
+
+
+def _epoch_after(hours: float) -> str:
+    """A UDL epoch filter for element sets newer than *hours* before now."""
+    since = datetime.now(UTC) - timedelta(hours=hours)
+    return f">{since.strftime(_UDL_TIME_FORMAT)}Z"
+
+
+def _complete_records(records: list[Any]) -> list[dict[str, Any]]:
+    """The records in a UDL elset answer that carry both element lines."""
+    return [r for r in records if isinstance(r, dict) and _elset_line(r, 1) and _elset_line(r, 2)]
+
+
+async def _newest_records(
+    client: httpx.AsyncClient, satno: int, auth: tuple[str, str], data_mode: str, source: str,
+) -> list[Any]:
+    """The records a latest fetch chooses the newest set from. HTTP errors propagate.
+
+    The archive over the last ``_NEWEST_WINDOW_H`` hours is asked first: it
+    holds every provider's sets. ``/elset/current`` asked with no source was
+    seen to answer for 18th SPCS alone, so a GEO object came back three days
+    old while commercial providers had filed sets that day (charming-dirac
+    0.6.5; the owner's observation, to be confirmed against live UDL). The
+    current catalogue answers only when the archive holds no complete set in
+    the window, and its answer comes back as UDL gave it, so a record missing
+    a line can still be named as such. *source*, when the operator has chosen
+    one, narrows both. dataMode is sent only when it is not REAL.
+    """
+    base: dict[str, Any] = {"satNo": satno}
+    if data_mode != "REAL":
+        base["dataMode"] = data_mode
+    if source:
+        base["source"] = source
+    window = {**base, "epoch": _epoch_after(_NEWEST_WINDOW_H)}
+    resp = await client.get(_ELSET_URL, params=window, auth=auth, timeout=_ARCHIVE_TIMEOUT_S)
+    resp.raise_for_status()
+    archived = _complete_records(_normalise_elset_records(resp.json()))
+    if archived:
+        return archived
+    resp = await client.get(_ELSET_CURRENT_URL, params=base, auth=auth, timeout=_CURRENT_TIMEOUT_S)
+    resp.raise_for_status()
+    return _normalise_elset_records(resp.json())
+
+
+class FetchedElset(NamedTuple):
+    """One element set fetched from UDL, with its data mode and the provider that filed it."""
+
+    tle: str
+    data_mode: str
+    source: str
+
+
 async def fetch_tle_for_satno(
     satno: int, username: str, password: str,
     data_mode: str = "REAL",
     source: str = "",
-) -> tuple[str, str] | RefusedElset | None:
-    """Fetch current TLE for a SATNO from UDL.
+) -> FetchedElset | RefusedElset | None:
+    """The newest element set UDL holds for *satno*, from any provider, or from *source* when one is named.
 
-    Returns ``('line1\\nline2', 'DATA_MODE_TAG')`` or ``None`` on failure.
-    The element set is the newest complete one UDL returns, and the second
-    element is that record's ``dataMode`` (upper-cased), so callers can keep
-    the provenance of the set they hold.
+    Returns the set with the record's ``dataMode`` (upper-cased) and the
+    provider that filed it (its ``source``), so callers keep its provenance,
+    or None on failure or when UDL holds no complete set. The archive over the
+    last three days is asked first, then the current catalogue (see
+    ``_newest_records``).
 
     The newest set must pass the acceptance check (SPC-201), and be for
     *satno*: when it does not, a RefusedElset comes back in its place, its
     failures logged without the set's text, and the caller stores nothing and
-    says why. An older set from another source is not taken instead: the
-    newest is what UDL holds now.
+    says why. An older set, from the same provider or another, is not taken
+    instead: the newest is what UDL holds now.
     """
     try:
         async with httpx.AsyncClient() as client:
-            params: dict[str, Any] = {"satNo": satno}
-            if data_mode != "REAL":
-                params["dataMode"] = data_mode
-            if source:
-                params["source"] = source
-            resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
-                params=params,
-                auth=(username, password),
-                timeout=10.0,
-            )
-        resp.raise_for_status()
-        data = resp.json()
+            records = await _newest_records(client, satno, (username, password), data_mode, source)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc))
         return None
 
-    # /elset/current keeps one current element set per source and answers in
-    # no order, so the first record can be a source that last updated days
-    # ago. Only complete records are candidates, and the newest of them wins.
-    records: list[Any] = data if isinstance(data, list) else [data]
-    complete = [r for r in records if isinstance(r, dict) and _elset_line(r, 1) and _elset_line(r, 2)]
+    # UDL answers in no order, and the archive holds several providers' sets,
+    # so the newest complete record is chosen rather than the first.
+    complete = _complete_records(records)
     if not complete:
         return None
 
-    rec = _select_latest_elset(complete)
-    data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
-    tle = f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}"
+    # Records tied at the newest epoch are none of them older, so the first the check accepts is taken; the order
+    # UDL listed them in must not decide whether the fetch is refused. Only when every one is refused is it.
+    newest = _tied_at_newest(complete, _select_latest_elset(complete))
     # An SGP4-XP set or an uncorrelated track is refused by the record's own fields, and named in the log by type.
-    check = check_elset(tle, satno, record=rec)
-    if not check.accepted:
-        log_skipped_by_type(f"SATNO {satno}", [(tle, rec)])
-        log_refusal(check.refusal(f"SATNO {satno}, as UDL answered it,"))
-        return RefusedElset(satno, check)
-    return (tle, data_mode_tag)
+    checked = [(rec, f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}") for rec in newest]
+    checks = [check_elset(tle, satno, record=rec) for rec, tle in checked]
+    refused = [(tle, rec) for (rec, tle), check in zip(checked, checks, strict=True) if not check.accepted]
+    if refused:
+        log_skipped_by_type(f"SATNO {satno}", refused)
+    for (rec, tle), check in zip(checked, checks, strict=True):
+        if check.accepted:
+            data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
+            return FetchedElset(tle, data_mode_tag, str(rec.get("source") or "").strip())
+    log_refusal(checks[0].refusal(f"SATNO {satno}, as UDL answered it,"))
+    return RefusedElset(satno, checks[0])
+
+
+def _tied_at_newest(records: list[Any], chosen: Any) -> list[Any]:
+    """*chosen* and every other record whose line 1 epoch equals it, in a stable order: provider, then set text."""
+    epoch = _parse_tle_epoch(_elset_line(chosen, 1))
+    tied = [r for r in records if r is chosen or (epoch is not None and _parse_tle_epoch(_elset_line(r, 1)) == epoch)]
+    return sorted(tied, key=lambda r: (str(r.get("source") or ""), _elset_line(r, 1), _elset_line(r, 2)))
 
 
 #: Background tasks started at UDL login. The loop holds only weak references
@@ -333,32 +396,35 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         logger.warning("Background: on-orbit catalog fetch failed: %s", log_safe(exc, limit=500))
 
 
-async def _discover_tle_sources(username: str, password: str, state: SessionState) -> None:
-    """Probe UDL to discover available TLE source providers for this session.
+def remember_sources(state: SessionState, sources: list[str]) -> None:
+    """Add *sources* to the providers the TLE Source list offers, each once, in order; a blank one never."""
+    named = {src.strip() for src in sources if src.strip()}
+    state.udl_available_sources = sorted(set(state.udl_available_sources) | named)
 
-    Fetches ISS (SATNO 25544) with a wide window and collects unique ``source``
-    field values from the returned records.  Results are stored on *state*.
-    Silent on failure — source discovery is best-effort.
+
+async def _discover_tle_sources(username: str, password: str, state: SessionState) -> None:
+    """Probe UDL for the TLE source providers this session can choose from.
+
+    Reads the ISS's archive over the last day and adds every ``source`` on
+    it to the list. ``/elset/current``, asked before, was seen to answer for
+    18th SPCS alone when no source is given, so the list offered one provider.
+    The ISS is a LEO object, so the providers the connect-time refresh sees on
+    the held sets are added as it runs. Silent on failure: source discovery is
+    best-effort, and a failed probe leaves the list alone.
     """
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
-                params={"satNo": 25544},
+                _ELSET_URL,
+                params={"satNo": 25544, "epoch": _epoch_after(_DISCOVERY_WINDOW_H)},
                 auth=(username, password),
                 timeout=15.0,
             )
         resp.raise_for_status()
-        data = resp.json()
-        records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-        sources = sorted({
-            str(rec.get("source") or "").strip()
-            for rec in records
-            if rec.get("source") and str(rec.get("source")).strip()
-        })
-        state.udl_available_sources = sources
-        logger.info("UDL TLE sources discovered: %s", log_safe(sources))
-    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the default source list
+        records = _normalise_elset_records(resp.json())
+        remember_sources(state, [str(rec.get("source") or "") for rec in records if isinstance(rec, dict)])
+        logger.info("UDL TLE sources discovered: %s", log_safe(state.udl_available_sources))
+    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the source list as it was
         logger.warning("_discover_tle_sources failed (non-critical): %s", log_safe(exc, limit=500))
 
 
@@ -383,7 +449,7 @@ async def udl_login(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
+                _ELSET_CURRENT_URL,
                 params={"satNo": 25544},
                 auth=(username, password),
                 timeout=10.0,
@@ -420,6 +486,8 @@ async def udl_login(
 
     state.udl_username = username
     state.udl_password = password
+    # Discovery adds to the list, so a login on another account without a logout between must not inherit it.
+    state.udl_available_sources = []
     state.append_log(f"[UDL] Connected as {username}")
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
@@ -547,6 +615,9 @@ async def udl_logout(
     state.udl_username = None
     state.udl_password = None
     state.elset_refresh = None
+    # Discovery and the refresh add to the provider list rather than replace
+    # it, so the next login, perhaps on another account, starts from empty.
+    state.udl_available_sources = []
     # The login's background tasks hold the password; stop them too (F-143).
     _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
@@ -578,32 +649,32 @@ def _tle_precheck_error(state: SessionState, mode: str, data_mode: str | None) -
     return None
 
 
-def _elset_request_spec(
-    state: SessionState,
-    satno: int,
-    mode: str,
-    data_mode: str,
-) -> tuple[str, dict[str, Any], float]:
-    """Return the (url, params, timeout) for the elset query *mode* calls for.
+def _epoch_request_params(state: SessionState, satno: int, data_mode: str) -> dict[str, Any]:
+    """The /elset query for epoch mode: up to ten elsets at or before scenario start.
 
-    Epoch mode asks /elset for up to ten elsets at or before scenario start;
-    latest mode asks /elset/current, which takes no epoch filter. dataMode is
-    sent only when it is not REAL, and the operator's source override applies
-    to the current-elset query alone.
+    dataMode is sent only when it is not REAL. The operator's source override
+    does not apply: the epoch search reaches back past any one provider.
     """
-    if mode == "epoch":
-        epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
-        params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
-        if data_mode != "REAL":
-            params["dataMode"] = data_mode
-        return f"{_UDL_BASE}/elset", params, 10.0
-
-    latest_params: dict[str, Any] = {"satNo": satno}
+    epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+    params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
     if data_mode != "REAL":
-        latest_params["dataMode"] = data_mode
-    if state.udl_tle_source:
-        latest_params["source"] = state.udl_tle_source
-    return f"{_UDL_BASE}/elset/current", latest_params, 15.0
+        params["dataMode"] = data_mode
+    return params
+
+
+async def _panel_records(client: httpx.AsyncClient, state: Any, satno: int, mode: str, dm: str) -> list[Any]:
+    """The records the TLE panel's *mode* query answers with. HTTP errors propagate.
+
+    Latest mode is the newest set from every provider, or the operator's
+    chosen source, as every other latest fetch takes it (``_newest_records``).
+    Both credentials are set once _tle_precheck_error has passed.
+    """
+    auth = (state.udl_username or "", state.udl_password or "")
+    if mode != "epoch":
+        return await _newest_records(client, satno, auth, dm, state.udl_tle_source)
+    resp = await client.get(_ELSET_URL, params=_epoch_request_params(state, satno, dm), auth=auth, timeout=10.0)
+    resp.raise_for_status()
+    return _normalise_elset_records(resp.json())
 
 
 def _normalise_elset_records(data: Any) -> list[Any]:
@@ -691,7 +762,7 @@ def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any 
 def _select_latest_elset(records: list[Any]) -> Any:
     """Return the record with the newest TLE epoch.
 
-    /elset/current can answer with several records and does not order them,
+    UDL answers in no order, and the archive holds several providers' sets,
     so the newest is chosen here rather than taken on trust. A record missing
     a line cannot be used, so a complete one is preferred whenever any is.
     """
@@ -747,26 +818,15 @@ def _fields_side(request: Request) -> str:
     return _FIELDS_SIDES.get(request.headers.get("HX-Target", ""), "tle")
 
 
-async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[Any, str | None]:
-    """The TLE fetch's UDL request: ``(data, None)``, or ``(None, the sentence to show)``.
+async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[list[Any], str | None]:
+    """The TLE fetch's UDL records: ``(records, None)``, or ``([], the sentence to show)``.
 
     Lifted out of ``fetch_tle`` whole, which sat at the complexity limit of
     15 (SPC-060). The detail of a failure goes to the log, never the page.
     """
     try:
         async with httpx.AsyncClient() as client:
-            url, params, timeout = _elset_request_spec(state, satno, mode, dm)
-            resp = await client.get(
-                url,
-                params=params,
-                # Both credentials are non-None once _tle_precheck_error has
-                # passed, but that narrowing happens in the caller's helper, so
-                # mypy cannot see it here.
-                auth=(state.udl_username, state.udl_password),
-                timeout=timeout,
-            )
-        resp.raise_for_status()
-        return resp.json(), None
+            return await _panel_records(client, state, satno, mode, dm), None
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:300].strip() or "(empty)"
         # The remote response body cannot go into the record verbatim
@@ -775,12 +835,12 @@ async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[Any, 
             "UDL returned %s for SATNO %s: %s",
             log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
         )
-        return None, _udl_refused("TLE fetch", exc.response.status_code)
+        return [], _udl_refused("TLE fetch", exc.response.status_code)
     except httpx.TimeoutException:
-        return None, "UDL request timed out."
+        return [], "UDL request timed out."
     except httpx.RequestError as exc:
         logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
-        return None, _udl_unreachable("TLE fetch")
+        return [], _udl_unreachable("TLE fetch")
 
 
 @router.get("/tle", response_model=None)
@@ -797,7 +857,8 @@ async def fetch_tle(
 
     Two modes are supported:
 
-    * ``latest`` — uses ``/elset/current`` to retrieve the most recent available elset.
+    * ``latest``: the newest elset from any provider, or the chosen TLE Source: the
+      archive over the last 72 hours first, then ``/elset/current`` (see ``_newest_records``).
     * ``epoch`` — fetches up to 10 elsets with epoch ≤ scenario start time, then selects
       the one whose epoch is closest to (but not after) the scenario start.  Requires
       scenario time to be set first.  A staleness warning is shown
@@ -822,12 +883,9 @@ async def fetch_tle(
         )
 
     # ── Fetch from UDL ───────────────────────────────────────────────────────
-    data, fetch_error = await _get_elsets(state, satno, mode, dm)
+    records, fetch_error = await _get_elsets(state, satno, mode, dm)
     if fetch_error is not None:
         return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": fetch_error})
-
-    # Normalise: /elset/current may return a single dict or a list
-    records = _normalise_elset_records(data)
 
     if not records:
         return render(request,
@@ -896,6 +954,8 @@ async def fetch_tle(
             # The record's own mode, else the one this fetch asked for: the
             # session mode is the wrong fallback once a request names its own.
             "elset_mode": str(rec.get("dataMode") or dm).strip().upper(),
+            # The provider that filed it, so the add records where the set came from.
+            "elset_source": str(rec.get("source") or "").strip(),
             "data_mode_override": bool(data_mode.strip()),
             "error": None,
             "fields_side": _empty["fields_side"],
@@ -917,7 +977,7 @@ _SV_MAX_RESULTS = 100
 def _sv_window_start() -> str:
     """The UDL epoch filter bound, :data:`_SV_WINDOW_DAYS` before now."""
     start = datetime.now(UTC) - timedelta(days=_SV_WINDOW_DAYS)
-    return start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return f"{start.strftime(_UDL_TIME_FORMAT)}Z"
 
 
 def _newest_state_vector(data: object) -> dict[str, Any] | None:
@@ -1495,7 +1555,7 @@ def _notso_query(latest: datetime | None) -> dict[str, str | int]:
 
     since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
     return {
-        "createdAt":  f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z",
+        "createdAt":  f">{since.strftime(_UDL_TIME_FORMAT)}Z",
         "dataMode":   "REAL",
         "msgType":    "TACREP_NOTSO",
         "source":     "JCO",

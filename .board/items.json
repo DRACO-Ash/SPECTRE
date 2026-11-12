@@ -2437,7 +2437,11 @@
   "files": [
    "spectre/web/routes/udl.py",
    "spectre/web/elsets.py"
-  ]
+  ],
+  "state": "built",
+  "est": 840,
+  "version": "0.34.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-233",
@@ -2530,6 +2534,20 @@
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/domain/actor_eligibility.py"
+  ]
+ },
+ {
+  "ref": "SPC-240",
+  "priority": "high",
+  "order": 9,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Live UDL checks for the archive-first fetch: what /elset/current answers with no source, archive query time for a busy GEO object, and each provider's ephemType",
+  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks.",
+  "files": [
+   "spectre/web/routes/udl.py"
   ]
  }
 ]

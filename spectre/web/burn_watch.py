@@ -120,7 +120,7 @@ async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
     if isinstance(newest, RefusedElset):
         # A set the acceptance check refuses says nothing trustworthy, its epoch included (SPC-201).
         raise _StatedError(newest.sentence(f"{watch.red_name} ({watch.red_satno})", outcome=_EPOCH_NOT_READ))
-    return _epoch_of(newest[0])
+    return _epoch_of(newest.tle)
 
 
 def _first_line(change: WarningChange) -> str:

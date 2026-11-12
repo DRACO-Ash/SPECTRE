@@ -27,10 +27,13 @@
 <input id="{{ _side }}-tle-name" name="name" placeholder="Name (e.g. Alpha)" value="{{ name }}" required
        title="Short name for this satellite, used as the object identifier in all panels" />
 {% if elset_mode is defined and elset_mode %}
-{# The UDL data mode this set was fetched in, so the add records it as a UDL
-   set that the connect-time refresh may update. Editing the text makes it
-   the operator's own, so the tag is dropped. #}
+{# The UDL data mode this set was fetched in, and the provider that filed it,
+   so the add records it as a UDL set that the connect-time refresh may update.
+   Editing the text makes it the operator's own, so both tags are dropped. #}
 <input type="hidden" name="elset_mode" value="{{ elset_mode }}" />
+{% if elset_source is defined and elset_source %}
+<input type="hidden" name="elset_source" value="{{ elset_source }}" />
+{% endif %}
 {% endif %}
 <label for="{{ _side }}-tle-text" class="visually-hidden">Two-line element set</label>
 <textarea id="{{ _side }}-tle-text" name="tle" placeholder="TLE lines 1 &amp; 2" rows="2" required

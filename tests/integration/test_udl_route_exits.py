@@ -18,7 +18,7 @@ import html
 import logging
 from collections.abc import Coroutine, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 
 import httpx
@@ -43,6 +43,14 @@ _L1_LATER = "1 25544U 98067A   26027.00000000  .00000000  00000-0  10000-2 0  99
 _L2 = "2 25544  51.6400 359.1324 0003806 313.0884 153.0596 15.50000000 00009"
 
 
+class _FixedClock(datetime):
+    """The UDL module's ``datetime`` with ``now`` held at the scenario start, 26 January 2026, UTC."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> datetime:  # type: ignore[override]
+        return _SCENARIO_START.astimezone(tz)
+
+
 @pytest.fixture
 def udl(monkeypatch: pytest.MonkeyPatch) -> UdlStub:
     for name in ("_udl_auth_limiter", "_udl_data_limiter", "_udl_sync_limiter"):
@@ -54,7 +62,8 @@ def udl(monkeypatch: pytest.MonkeyPatch) -> UdlStub:
 def state(auth_cookie: str) -> Iterator[Any]:
     """The signed-in session, connected to UDL in REAL with no scenario time."""
     held = session_state(auth_cookie)
-    names = ("udl_username", "udl_password", "udl_data_mode", "udl_tle_source", "scenario_start", "elset_refresh")
+    names = ("udl_username", "udl_password", "udl_data_mode", "udl_tle_source", "scenario_start", "elset_refresh",
+             "udl_available_sources")
     saved = {name: getattr(held, name) for name in names}
     held.udl_username, held.udl_password, held.udl_data_mode = "op", "pw", "REAL"
     held.udl_tle_source, held.scenario_start = "", None
@@ -127,6 +136,17 @@ class TestLogin:
         assert started == ["_fetch_onorbit_background", "_discover_tle_sources", "refresh_held_elsets"]
 
 
+    def test_a_new_login_does_not_offer_the_last_accounts_providers(
+        self, op: Operator, udl: UdlStub, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def spawn(coro: Coroutine[Any, Any, None], _owner: Any) -> None:
+            coro.close()
+
+        monkeypatch.setattr(udl_routes, "_spawn", spawn)
+        op.state.udl_available_sources = ["EXO", "LeoLabs"]
+        op.post("/udl/login", username="analyst", password="pw")
+        assert op.state.udl_available_sources == [], "discovery adds to the list, so another account's stayed"
+
 class TestSessionSettings:
     def test_a_source_is_set_and_a_blank_one_resets_to_the_default(self, op: Operator) -> None:
         assert "TLE Source: 18SDS" in op.post("/udl/tle-source", tle_source=" 18SDS ")
@@ -141,8 +161,10 @@ class TestSessionSettings:
         cancelled: list[Any] = []
         monkeypatch.setattr(udl_routes, "_cancel_session_tasks", cancelled.append)
         op.state.elset_refresh = object()
+        op.state.udl_available_sources = ["EXO", "LeoLabs"]
         op.post("/udl/logout")
         assert (op.state.udl_username, op.state.udl_password, op.state.elset_refresh) == (None, None, None)
+        assert op.state.udl_available_sources == [], "the next login, perhaps on another account, offered these"
         assert cancelled == [session_key_for(op.cookie)], "the tasks holding this operator's password were not stopped"
         assert op.state.log_entries[-1] == "[UDL] Disconnected"
 
@@ -159,15 +181,42 @@ class TestTleFetch:
         assert "26025.79842163" in page, "the set before the scenario start was not the one chosen"
         assert "26027.00000000" not in page
 
-    def test_the_operators_source_goes_with_a_latest_fetch_only(self, op: Operator, udl: UdlStub) -> None:
-        """The source picks among current sets; the epoch search reaches back past any one provider."""
+    def test_a_latest_fetch_asks_the_archive_over_72_hours_with_the_operators_source(
+        self, op: Operator, udl: UdlStub, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Latest mode asked /elset/current, seen to answer for 18th SPCS alone with no source (charming-dirac 7ed9d0b).
+
+        It now asks the archive over the last 72 hours first, narrowed to the operator's source when one is
+        chosen; the epoch search still reaches back past any one provider.
+        """
+        monkeypatch.setattr(udl_routes, "datetime", _FixedClock)
         op.state.udl_tle_source, op.state.scenario_start = "18SDS", _SCENARIO_START
         udl.answer = reply([{"line1": _L1, "line2": _L2}])
         op.get("/udl/tle", satno=25544)
         op.get("/udl/tle", satno=25544, mode="epoch")
-        assert udl.paths[0].endswith("/elset/current")
-        assert udl.params(0) == {"satNo": "25544", "source": "18SDS"}
+        assert udl.paths == ["/udl/elset", "/udl/elset"], "the current catalogue was asked although the archive held a set"
+        assert udl.params(0) == {"satNo": "25544", "epoch": ">2026-01-23T00:00:00.000000Z", "source": "18SDS"}
         assert "source" not in udl.params(1)
+
+    def test_a_latest_fetch_takes_the_newest_set_from_every_provider_and_carries_its_provider(
+        self, op: Operator, udl: UdlStub,
+    ) -> None:
+        udl.answer = reply([{"line1": _L1, "line2": _L2, "source": "18th SPCS"},
+                            {"line1": _L1_LATER, "line2": _L2, "source": "LeoLabs"}])
+        page = op.get("/udl/tle", satno=25544)
+        assert "26027.00000000" in page, "the newest set across providers was not the one chosen"
+        assert '<input type="hidden" name="elset_source" value="LeoLabs" />' in page
+
+    def test_a_latest_fetch_falls_back_to_the_current_catalogue_when_the_archive_is_empty(
+        self, op: Operator, udl: UdlStub,
+    ) -> None:
+        current = {"line1": _L1, "line2": _L2, "source": "18th SPCS"}
+        udl.answer = lambda request: httpx.Response(
+            200, json=current if request.url.path.endswith("/elset/current") else [])
+        page = op.get("/udl/tle", satno=25544)
+        assert udl.paths == ["/udl/elset", "/udl/elset/current"]
+        assert "epoch" not in udl.params(1), "the current catalogue takes no epoch"
+        assert "26025.79842163" in page
 
     def test_an_elset_with_no_second_line_is_refused_not_shown(self, op: Operator, udl: UdlStub) -> None:
         """Audit F-140: it rendered as success with a TLE of a bare newline."""

@@ -230,9 +230,9 @@ class TestTheProbe:
         _, state = owner
         asked: list[Any] = []
 
-        async def newest(satno: int, user: str, password: str, **kw: Any) -> tuple[str, str]:
+        async def newest(satno: int, user: str, password: str, **kw: Any) -> udl.FetchedElset:
             asked.append((satno, user, password, kw))
-            return _base(), "18SDS"
+            return udl.FetchedElset(_base(), "REAL", "18th SPCS")
 
         monkeypatch.setattr(udl, "fetch_tle_for_satno", newest)
         epoch = await burn_watch._probe(state, _watch(state))

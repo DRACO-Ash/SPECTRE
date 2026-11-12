@@ -191,6 +191,34 @@ from the adversary's fastest credible approach minus your own response latency.
 That single number, on every screen, would change how the tool is used more
 than any new calculation.
 
+## Element set providers on UDL (SPC-232)
+
+**What changed.** A latest fetch asks UDL's element set archive over the last
+72 hours first, across every provider or the one chosen in TLE Source, and
+takes the newest set; the current catalogue (`/elset/current`) answers only
+when the archive holds no complete set in that window. If the newest set is
+refused, an SGP4-XP set or an uncorrelated track among them, nothing is stored
+and the operator is told; an older set is not taken in its place. Each held
+red track and blue asset records the provider that filed its set.
+
+FACT (the owner's UDL element set epoch chart, 28 October 2026): the element
+set providers on UDL are 18th SPCS, ExoAnalytic (EXO), KBR, KRTL, LeoLabs and
+NorthStar. 18th SPCS filed several hundred an hour until about midnight and
+almost none after; the five commercial providers filed through the whole day,
+EXO, KBR and NorthStar at around 100 an hour. The chart is a snapshot of one
+day and is kept with its date.
+
+UNKNOWN, for a live probe with the owner's UDL account:
+● whether `/elset/current` asked with no source answers for 18th SPCS alone,
+  as charming-dirac 0.6.5 recorded from TJS-3, or with one set per provider,
+  as the code comment before this change said;
+● the ephemType each provider files in. The deployment log records every set
+  refused for its type ("element sets skipped by type: ... from ..."), which is
+  the evidence an SGP4-XP propagator would be judged on;
+● how long a 72-hour archive query takes for a busy GEO object, against the
+  20 second timeout, and whether UDL limits the connect-time refresh, which
+  asks for up to 10 held sets at once.
+
 ## What I would do in what order
 
 1. Phase 1 wiring. Largest gain, least risk, uses only what is built.

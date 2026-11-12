@@ -128,10 +128,10 @@ class TestTheUdlFetch:
         _no_set_text(logged)
 
     def test_a_good_set_is_returned_as_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from spectre.web.routes.udl import fetch_tle_for_satno
+        from spectre.web.routes.udl import FetchedElset, fetch_tle_for_satno
 
         UdlStub(reply([_record(_GOOD, "EXERCISE")])).install(monkeypatch)
-        assert asyncio.run(fetch_tle_for_satno(_SATNO, "u", "p")) == (_GOOD, "EXERCISE")
+        assert asyncio.run(fetch_tle_for_satno(_SATNO, "u", "p")) == FetchedElset(_GOOD, "EXERCISE", "")
 
     def test_the_history_fetch_drops_a_refused_set_and_keeps_the_rest(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,

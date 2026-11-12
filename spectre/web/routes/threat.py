@@ -61,6 +61,7 @@ from spectre.domain.manoeuvre_calibration import (
     to_km_s,
 )
 from spectre.domain.models import (
+    RedTrack,
     SweepBurn,
     ThreatActor,
     ThreatAssessment,
@@ -201,6 +202,7 @@ async def red_orbit_info(
             "epoch_str": epoch_str,
             "age": elset_age(track.tle, datetime.now(tz=UTC)),
             "data_mode": track.data_mode,
+            "elset_source": track.elset_source,
             "lon_deg": lon_deg,
             "inc_deg": inc_deg,
             "period_min": period_min,
@@ -426,9 +428,8 @@ async def _prefetch_group_tle(
             return False
         if isinstance(result, RefusedElset):
             return result.sentence(_hrr_label(state, satno_str))
-        tle, dm = result
-        state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
-        state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
+        state.hrr_tle_cache[satno_str] = result.tle  # type: ignore[attr-defined]
+        state.hrr_tle_data_mode[satno_str] = result.data_mode  # type: ignore[attr-defined]
         # Also fetch multi-provider history for clustering.
         history = await fetch_tle_history_for_satno(
             int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
@@ -1439,9 +1440,8 @@ async def _fetch_missing_target_tles(
             if isinstance(_result, RefusedElset):
                 errors.append(_result.sentence(f"{t.target_name} ({t.target_satno})"))
             elif _result:
-                tle, dm = _result
-                state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
-                state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
+                state.hrr_tle_cache[t.target_satno] = _result.tle  # type: ignore[attr-defined]
+                state.hrr_tle_data_mode[t.target_satno] = _result.data_mode  # type: ignore[attr-defined]
             else:
                 errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
@@ -1628,11 +1628,27 @@ def _red_recorded_mode(state: object, red_sat: str, red_satno: str | None) -> st
     Confidence reads an unrecorded mode as UNKNOWN, not REAL (concept 6.2,
     SPC-160); the provenance banner's REAL default is a later item's.
     """
-    for track in state.red_tracks:  # type: ignore[attr-defined]
-        if track.stk_name == red_sat:
-            return str(track.data_mode)
+    track = _red_track(state, red_sat)
+    if track is not None:
+        return str(track.data_mode)
     mode = state.hrr_tle_data_mode.get(red_satno or "")  # type: ignore[attr-defined]
     return None if mode is None else str(mode)
+
+
+def _red_track(state: object, red_sat: str) -> RedTrack | None:
+    """The session's red track called *red_sat*, or None."""
+    return next((t for t in state.red_tracks if t.stk_name == red_sat), None)  # type: ignore[attr-defined]
+
+
+def _red_track_source(state: object, red_sat: str, flown_tle: str) -> str:
+    """The UDL provider of the red track's element set, or empty when none is recorded or another set was flown.
+
+    A set pasted into the sweep overrides the track's, and came from no UDL provider, so it is never given one.
+    """
+    track = _red_track(state, red_sat)
+    if track is None or track.tle.strip() != flown_tle.strip():
+        return ""
+    return track.elset_source
 
 
 def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, Any]:
@@ -2960,6 +2976,7 @@ async def threat_sweep(
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
         "elset_ages": _elset_ages(red_tle, basis, now),
+        "red_elset_source": _red_track_source(state, red_sat, red_tle),
         "red_history": red_history,
         "warning_change": warning_change,
         "decide_by": decide,
@@ -3003,9 +3020,8 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
                 return got.sentence(f"{actor.actor_name} ({actor.actor_satno})", outcome=HELD_KEPT)
             if not got:
                 return False
-            tle, mode = got
-            state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
-            state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+            state.hrr_tle_cache[actor.actor_satno] = got.tle  # type: ignore[attr-defined]
+            state.hrr_tle_data_mode[actor.actor_satno] = got.data_mode  # type: ignore[attr-defined]
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)

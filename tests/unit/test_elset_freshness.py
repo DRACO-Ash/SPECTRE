@@ -20,6 +20,7 @@ import pytest
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.elsets import elset_age, refresh_held_elsets
 from spectre.web.planning_state import SessionState
+from spectre.web.routes.udl import FetchedElset
 
 _NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 _GEO_LINE2 = "2 50322   0.1200  96.0000 0002000 270.0000 264.0000  1.00273791 10006"
@@ -67,8 +68,8 @@ class TestTheNewestEpochIsTaken:
         stale, fresh = _NOW - timedelta(days=13), _NOW - timedelta(hours=6)
         with _udl_answering([_record(stale, source="LAGGING"), _record(fresh)]):
             got = await fetch_tle_for_satno(50322, "u", "p")
-        assert got is not None
-        assert got[0] == _tle(fresh), "the first record was taken, not the newest"
+        assert isinstance(got, FetchedElset)
+        assert got.tle == _tle(fresh), "the first record was taken, not the newest"
 
     @pytest.mark.asyncio
     async def test_the_newest_complete_record_wins_over_a_newer_empty_one(self) -> None:
@@ -78,8 +79,8 @@ class TestTheNewestEpochIsTaken:
         empty["line1"] = empty["line2"] = ""
         with _udl_answering([empty, good]):
             got = await fetch_tle_for_satno(50322, "u", "p")
-        assert got is not None
-        assert got[0] == f"{good['line1']}\n{good['line2']}"
+        assert isinstance(got, FetchedElset)
+        assert got.tle == f"{good['line1']}\n{good['line2']}"
 
     @pytest.mark.asyncio
     async def test_the_mode_is_the_chosen_records_own(self) -> None:
@@ -89,8 +90,8 @@ class TestTheNewestEpochIsTaken:
         newer = _record(_NOW - timedelta(hours=1), mode="TEST")
         with _udl_answering([older, newer]):
             got = await fetch_tle_for_satno(50322, "u", "p")
-        assert got is not None
-        assert got[1] == "TEST"
+        assert isinstance(got, FetchedElset)
+        assert got.data_mode == "TEST"
 
 
 class TestElementSetAge:
@@ -124,8 +125,13 @@ def _state_holding(*tracks: RedTrack, blue: tuple[BlueAsset, ...] = ()) -> Sessi
     return state
 
 
-def _fetch_returning(by_satno: dict[int, tuple[str, str] | None]) -> Any:
-    async def fake(satno: int, *_args: object, **_kwargs: object) -> tuple[str, str] | None:
+def _got(tle: str, mode: str = "REAL", source: str = "18th SPCS") -> FetchedElset:
+    """What the fetch answers with: the set, its data mode and the provider that filed it."""
+    return FetchedElset(tle, mode, source)
+
+
+def _fetch_returning(by_satno: dict[int, FetchedElset | None]) -> Any:
+    async def fake(satno: int, *_args: object, **_kwargs: object) -> FetchedElset | None:
         return by_satno.get(satno)
 
     return patch("spectre.web.routes.udl.fetch_tle_for_satno", side_effect=fake)
@@ -137,7 +143,7 @@ class TestRefreshAtConnect:
         track = RedTrack(name="SY-12 02", tle=_tle(_NOW - timedelta(days=13)), data_mode="REAL")
         state = _state_holding(track)
         fresh = _tle(_NOW - timedelta(hours=6))
-        with _fetch_returning({50322: (fresh, "REAL")}):
+        with _fetch_returning({50322: _got(fresh)}):
             await refresh_held_elsets(state, "u", "p")
         assert track.tle == fresh
         refresh = state.elset_refresh
@@ -151,7 +157,7 @@ class TestRefreshAtConnect:
         track = RedTrack(name="Hypothetical", tle=pasted)
         assert track.data_mode == "MANUAL", "a pasted set is MANUAL unless it came from UDL"
         state = _state_holding(track)
-        with _fetch_returning({50322: (_tle(_NOW), "REAL")}) as fetch:
+        with _fetch_returning({50322: _got(_tle(_NOW))}) as fetch:
             await refresh_held_elsets(state, "u", "p")
         assert track.tle == pasted
         fetch.assert_not_called()
@@ -161,7 +167,7 @@ class TestRefreshAtConnect:
         held = _tle(_NOW - timedelta(hours=2))
         track = RedTrack(name="SY-12 02", tle=held, data_mode="REAL")
         state = _state_holding(track)
-        with _fetch_returning({50322: (_tle(_NOW - timedelta(days=3)), "REAL")}):
+        with _fetch_returning({50322: _got(_tle(_NOW - timedelta(days=3)))}):
             await refresh_held_elsets(state, "u", "p")
         assert track.tle == held
         assert state.elset_refresh is not None
@@ -183,7 +189,7 @@ class TestRefreshAtConnect:
         state.hrr_tle_data_mode = {"50322": "REAL", "39034": "SYNTHETIC"}
         fresh = _tle(_NOW - timedelta(hours=1))
         real_39034 = _tle(_NOW - timedelta(hours=3), satno=39034)
-        with _fetch_returning({50322: (fresh, "REAL"), 39034: (real_39034, "REAL")}):
+        with _fetch_returning({50322: _got(fresh), 39034: _got(real_39034)}):
             await refresh_held_elsets(state, "u", "p")
         assert state.hrr_tle_cache["50322"] == fresh
         assert state.hrr_tle_cache["39034"] == real_39034, "a synthetic set is replaced whatever its epoch"
@@ -194,7 +200,7 @@ class TestRefreshAtConnect:
         asset = BlueAsset(name="Alpha", tle=_tle(_NOW - timedelta(days=5), satno=41866), data_mode="REAL")
         state = _state_holding(blue=(asset,))
         fresh = _tle(_NOW - timedelta(hours=2), satno=41866)
-        with _fetch_returning({41866: (fresh, "REAL")}):
+        with _fetch_returning({41866: _got(fresh)}):
             await refresh_held_elsets(state, "u", "p")
         assert asset.tle == fresh
 
@@ -202,16 +208,16 @@ class TestRefreshAtConnect:
     async def test_a_training_object_is_left_alone(self) -> None:
         track = RedTrack(name="Drill", tle=_tle(_NOW - timedelta(days=13)), training=True, data_mode="REAL")
         state = _state_holding(track)
-        with _fetch_returning({50322: (_tle(_NOW), "REAL")}) as fetch:
+        with _fetch_returning({50322: _got(_tle(_NOW))}) as fetch:
             await refresh_held_elsets(state, "u", "p")
         fetch.assert_not_called()
 
 
-def _fetch_recording(by_satno: dict[int, tuple[str, str] | None]) -> tuple[Any, list[str]]:
+def _fetch_recording(by_satno: dict[int, FetchedElset | None]) -> tuple[Any, list[str]]:
     """Like _fetch_returning, and also records the data mode each fetch asked UDL for."""
     asked: list[str] = []
 
-    async def fake(satno: int, *_args: object, data_mode: str = "REAL", **_kwargs: object) -> tuple[str, str] | None:
+    async def fake(satno: int, *_args: object, data_mode: str = "REAL", **_kwargs: object) -> FetchedElset | None:
         asked.append(data_mode)
         return by_satno.get(satno)
 
@@ -231,7 +237,7 @@ class TestRefreshKeepsEachSetsOwnMode:
         track = RedTrack(name="SY-12 02", tle=_tle(_NOW - timedelta(days=3)), data_mode="EXERCISE")
         state = _state_holding(track)
         state.udl_data_mode = "REAL"
-        fetch, asked = _fetch_recording({50322: (_tle(_NOW - timedelta(hours=1)), "REAL")})
+        fetch, asked = _fetch_recording({50322: _got(_tle(_NOW - timedelta(hours=1)))})
         with fetch:
             await refresh_held_elsets(state, "u", "p")
         assert asked == ["EXERCISE"], "the refresh asked UDL in the session mode, not the track's own"
@@ -260,3 +266,42 @@ class TestRefreshKeepsEachSetsOwnMode:
         with fetch:
             await refresh_held_elsets(state, "u", "p")
         assert asked == ["EXERCISE"]
+
+
+class TestTheRefreshRecordsTheProvider:
+    """The provider that filed a refreshed set is kept with it and offered in the TLE Source list (7ed9d0b).
+
+    The red card and the sweep name it; before, a held set carried its data mode alone, which the card called
+    its source.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_refreshed_track_and_asset_carry_their_new_provider(self) -> None:
+        track = RedTrack(name="TJS-3", tle=_tle(_NOW - timedelta(days=3)), data_mode="REAL", elset_source="18th SPCS")
+        asset = BlueAsset(name="Alpha", tle=_tle(_NOW - timedelta(days=5), satno=41866), data_mode="REAL")
+        state = _state_holding(track, blue=(asset,))
+        with _fetch_returning({
+            50322: _got(_tle(_NOW - timedelta(hours=2)), source="ExoAnalytic"),
+            41866: _got(_tle(_NOW - timedelta(hours=1), satno=41866), source="LeoLabs"),
+        }):
+            await refresh_held_elsets(state, "u", "p")
+        assert (track.elset_source, asset.elset_source) == ("ExoAnalytic", "LeoLabs")
+
+    @pytest.mark.asyncio
+    async def test_an_older_answer_keeps_the_held_provider(self) -> None:
+        held = _tle(_NOW - timedelta(hours=2))
+        track = RedTrack(name="TJS-3", tle=held, data_mode="REAL", elset_source="KBR")
+        state = _state_holding(track)
+        with _fetch_returning({50322: _got(_tle(_NOW - timedelta(days=2)), source="18th SPCS")}):
+            await refresh_held_elsets(state, "u", "p")
+        assert (track.tle, track.elset_source) == (held, "KBR")
+
+    @pytest.mark.asyncio
+    async def test_every_provider_the_refresh_sees_is_offered(self) -> None:
+        """Discovery reads the ISS, a LEO object; a GEO provider is learnt from the held GEO sets."""
+        track = RedTrack(name="TJS-3", tle=_tle(_NOW - timedelta(hours=2)), data_mode="REAL")
+        state = _state_holding(track)
+        state.udl_available_sources = ["18th SPCS"]
+        with _fetch_returning({50322: _got(_tle(_NOW - timedelta(days=2)), source="NorthStar")}):
+            await refresh_held_elsets(state, "u", "p")
+        assert state.udl_available_sources == ["18th SPCS", "NorthStar"], "a provider seen only on an older set too"

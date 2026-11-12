@@ -175,9 +175,9 @@ class TestTheGroupPrefetchCounts:
         seen: list[tuple[str, int, dict[str, Any]]] = []
         histories = {90004: [_BLUE_GEO, _RED_GEO], 90006: [_BLUE_GEO]}
 
-        async def current(satno: int, _user: str, _password: str, **kwargs: Any) -> tuple[str, str] | None:
+        async def current(satno: int, _user: str, _password: str, **kwargs: Any) -> udl.FetchedElset | None:
             seen.append(("current", satno, kwargs))
-            return None if satno == 90005 else (_BLUE_GEO, "TEST")
+            return None if satno == 90005 else udl.FetchedElset(_BLUE_GEO, "TEST", "LeoLabs")
 
         async def history(satno: int, _user: str, _password: str, **kwargs: Any) -> ElsetHistory:
             seen.append(("history", satno, kwargs))

@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from spectre.web.routes import maneuver
+from spectre.web.routes.udl import FetchedElset
 from tests.integration.test_all_intercepts_ranking import _BLUE_GEO, _RED_GEO
 
 
@@ -37,9 +38,9 @@ async def test_an_unknown_mode_is_refused_and_never_sent(monkeypatch: pytest.Mon
 async def test_a_known_mode_is_still_fetched(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[str] = []
 
-    async def fetch(*_a: Any, data_mode: str = "", **_k: Any) -> tuple[str, str]:
+    async def fetch(*_a: Any, data_mode: str = "", **_k: Any) -> FetchedElset:
         sent.append(data_mode)
-        return _RED_GEO, data_mode
+        return FetchedElset(_RED_GEO, data_mode, "18th SPCS")
 
     monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", fetch)
     _, _, label = await maneuver._resolve_provenance(_RED_GEO, _BLUE_GEO, "exercise", _state())

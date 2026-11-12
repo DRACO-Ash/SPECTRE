@@ -706,10 +706,11 @@ SPECTRE.init('reread-red-card', function () {
 });
 
 /* ── TLE fields (partials/tle_fields.html) ──────────────────────────────────
-   Editing a fetched set makes it the operator's own, so the UDL data mode it was tagged with is dropped. */
+   Editing a fetched set makes it the operator's own, so the UDL data mode and provider it was tagged with are
+   dropped. */
 SPECTRE.action('dropElsetMode', function (el) {
-  var m = el.form ? el.form.querySelector('[name=elset_mode]') : null;
-  if (m) { m.remove(); }
+  if (!el.form) { return; }
+  el.form.querySelectorAll('[name=elset_mode], [name=elset_source]').forEach(function (tag) { tag.remove(); });
 });
 
 /* ── Red track and blue asset forms (operator.html) ─────────────────────────

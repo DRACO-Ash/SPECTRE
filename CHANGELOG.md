@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-12
+
+**The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c3e).**
+
+### Changed
+- A latest fetch, from the TLE panel, quick-add, the sweep or the refresh at connect, takes the newest set any UDL provider filed in the last 72 hours, or the chosen TLE Source, falling back to the current catalogue. Sets tied at the newest epoch are none of them older: the one the acceptance check passes is taken, whatever order UDL lists them in. When every newest set is refused, nothing is stored and no older set is taken, as before (SPC-232).
+- The TLE Source list lists every provider on the ISS's 24-hour archive and every provider the held sets came from, and is cleared at disconnect and at each new connection (SPC-232).
+- The repeated UDL path and timestamp literals are named constants (SPC-232).
+
+### Added
+- Held red tracks and blue assets keep the provider that filed their set. The red card and the sweep name it, the sweep only for the set it flew, never a pasted one; a training set reads as SYNTHETIC; editing the set by hand drops it (SPC-232).
+- `docs/BUILD-STATE-AND-ROADMAP.md` lists UDL's element-set providers as of 28 October 2026, and what is still unknown about them (SPC-232).
+
 ## [0.33.0] - 2026-11-12
 
 **The small changes from the charming-dirac branch, ported by the owner's ruling of 2026-11-12.**

@@ -52,7 +52,37 @@ class TestTheRedCard:
         card = _card(client, auth_cookie, "NEW")
         assert "5.0 h old" in card
         assert "old STALE" not in card
-        assert "REAL" in card, "the card says where the set came from"
+        assert "Provider:</strong> not recorded &middot; REAL" in card, "the card says where the set came from"
+
+    def test_the_provider_and_the_data_mode_are_stated_apart(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        """REAL is a data mode. The card called it the source and never named the provider (7ed9d0b)."""
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="TJS3", tle=_tle(datetime.now(tz=UTC)), data_mode="REAL", elset_source="ExoAnalytic"),
+        ]
+        card = _card(client, auth_cookie, "TJS3")
+        assert "Provider:</strong> ExoAnalytic &middot; REAL" in card
+        assert "Source:</strong> REAL" not in card
+
+    def test_a_hand_entered_set_says_so(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [RedTrack(name="HAND", tle=_tle(datetime.now(tz=UTC)))]
+        card = _card(client, auth_cookie, "HAND")
+        assert "Source:</strong> entered by hand" in card
+        assert "Provider:" not in card
+
+    def test_a_synthetic_set_is_not_given_a_udl_provider(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        """A training scenario's set is SYNTHETIC: neither entered by hand nor filed by a UDL provider."""
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [RedTrack(name="DRILL", tle=_tle(datetime.now(tz=UTC)), data_mode="SYNTHETIC")]
+        card = _card(client, auth_cookie, "DRILL")
+        assert "Source:</strong> SYNTHETIC" in card
+        assert "Provider:" not in card
 
 
 class TestTheSweep:
@@ -60,7 +90,8 @@ class TestTheSweep:
         from spectre.domain.models import RedTrack
 
         red_state.red_tracks = [
-            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL"),
+            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL",
+                     elset_source="18th SPCS"),
         ]
         _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
         resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
@@ -68,7 +99,24 @@ class TestTheSweep:
         text = " ".join(resp.text.split())
         assert "Element set ages" in text
         assert "2.0 h" in text, "the interceptor's age"
+        assert "</span>, from 18th SPCS." in text, "and the provider that filed it"
         assert "1 stale" in text and "BLUE-GEO" in text, "the stale target is named"
+
+    def test_a_pasted_interceptor_set_is_not_given_the_tracks_provider(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [
+            RedTrack(name="RED-GEO", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=2)), data_mode="REAL",
+                     elset_source="18th SPCS"),
+        ]
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        pasted = _tle(datetime.now(tz=UTC) - timedelta(hours=5))
+        resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "manual_red_tle": pasted})
+        text = " ".join(resp.text.split())
+        assert "5.0 h" in text, "the pasted set is the one aged"
+        assert ", from " not in text, "the pasted set came from no UDL provider"
 
     def test_ages_are_stated_even_when_nothing_reaches_the_target(
         self, client: Any, auth_cookie: str, red_state: Any,
@@ -135,6 +183,7 @@ class TestTheSweep:
         text = " ".join(resp.text.split())
         assert "Element set ages" in text
         assert "Interceptor" in text and "STALE" in text
+        assert ", from " not in text, "a hand-entered interceptor has no provider to name"
 
 
 class TestTheRefreshNote:
@@ -178,8 +227,65 @@ class TestProvenanceIsRecorded:
         self, client: Any, auth_cookie: str, red_state: Any,
     ) -> None:
         red_state.red_tracks = []
-        self._add(client, auth_cookie, {"name": "FETCHED", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "real"})
+        self._add(client, auth_cookie, {
+            "name": "FETCHED", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "real", "elset_source": " LeoLabs ",
+        })
         assert red_state.red_tracks[-1].data_mode == "REAL"
+        assert red_state.red_tracks[-1].elset_source == "LeoLabs"
+
+    def test_a_provider_without_a_udl_mode_is_dropped(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        """Editing a fetched set drops its mode tag; the provider must not outlive it."""
+        red_state.red_tracks = []
+        self._add(client, auth_cookie, {"name": "EDITED", "tle": _tle(datetime.now(tz=UTC)), "elset_source": "EXO"})
+        assert (red_state.red_tracks[-1].data_mode, red_state.red_tracks[-1].elset_source) == ("MANUAL", "")
+
+    def test_a_provider_is_bounded(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        """It arrives in a form field, so it is cut to 64 characters before it is kept."""
+        red_state.red_tracks = []
+        self._add(client, auth_cookie, {
+            "name": "LONG", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "REAL", "elset_source": "P" * 500,
+        })
+        assert red_state.red_tracks[-1].elset_source == "P" * 64
+
+    def test_a_blue_asset_keeps_its_provider_too(self, client: Any, auth_cookie: str, red_state: Any) -> None:
+        from tests.conftest import csrf_headers
+
+        saved = list(red_state.blue_assets)
+        red_state.blue_assets = []
+        try:
+            resp = client.post("/assets/blue", data={
+                "name": "ALPHA", "tle": _tle(datetime.now(tz=UTC)), "elset_mode": "REAL", "elset_source": "KRTL",
+            }, cookies={"spectre_session": auth_cookie}, headers=csrf_headers(auth_cookie))
+            assert resp.status_code == 200
+            assert red_state.blue_assets[-1].elset_source == "KRTL"
+        finally:
+            red_state.blue_assets = saved
+
+    @pytest.mark.parametrize("side", ["red", "blue"])
+    def test_a_quick_add_keeps_the_provider_the_fetch_found(
+        self, client: Any, auth_cookie: str, red_state: Any, side: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.web.routes.udl import FetchedElset
+        from tests.conftest import csrf_headers
+
+        tle = _tle(datetime.now(tz=UTC))
+
+        async def fetched(*_args: object, **_kwargs: object) -> FetchedElset:
+            return FetchedElset(tle, "REAL", "NorthStar")
+
+        monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", fetched)
+        held = red_state.red_tracks if side == "red" else red_state.blue_assets
+        saved = (list(held), red_state.udl_username, red_state.udl_password)
+        held.clear()
+        red_state.udl_username, red_state.udl_password = "u", "p"
+        try:
+            resp = client.post(f"/assets/{side}/quick-add", data={"satno": "50322", "name": "TJS-3"},
+                               cookies={"spectre_session": auth_cookie}, headers=csrf_headers(auth_cookie))
+            assert resp.status_code == 200
+            assert [(o.tle, o.data_mode, o.elset_source) for o in held] == [(tle, "REAL", "NorthStar")]
+        finally:
+            held[:] = saved[0]
+            red_state.udl_username, red_state.udl_password = saved[1], saved[2]
 
     @pytest.mark.parametrize("claimed", ["", "SYNTHETIC", "made up"])
     def test_anything_else_is_manual(self, client: Any, auth_cookie: str, red_state: Any, claimed: str) -> None:

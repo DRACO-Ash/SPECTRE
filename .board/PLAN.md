@@ -1,10 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.34: 1 items, 840 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 14h00 to 14h00 (middle 14h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-232       840m  fills the release to its floor
-  lane 1 (840m): SPC-232
-
 V0.35: 3 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-233       600m  fills the release to its floor
@@ -95,6 +90,8 @@ waiting: SPC-229 - needs an owner answer
 waiting: SPC-235 - needs an owner answer
 
 waiting: SPC-236 - needs an owner answer
+
+waiting: SPC-240 - needs an owner answer
 
 off path: SPC-072 - research: no release gate
 

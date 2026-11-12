@@ -1313,7 +1313,7 @@ async def _refetch_tles(
         )
         if isinstance(result, RefusedElset):
             return _Fetched(tle, _held_mode(state, tle), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
-        return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
+        return _Fetched(result.tle, result.data_mode) if result else _Fetched(tle, _held_mode(state, tle))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue

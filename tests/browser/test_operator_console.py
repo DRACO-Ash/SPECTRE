@@ -173,16 +173,17 @@ class TestFetchBySatno:
         assert "satno=25544" in requests[-1]
         _assert_clean(console)
 
-    def test_editing_a_fetched_set_drops_its_data_mode(self, console: Console) -> None:
+    def test_editing_a_fetched_set_drops_its_data_mode_and_provider(self, console: Console) -> None:
         page = console.open()
         console.inject(
-            _render("partials/tle_fields.html", name="ALPHA", tle=_RED_GEO, elset_mode="REAL", tle_epoch_str=None,
-                    tle_age_days=None, error=None, fields_side="red"),
+            _render("partials/tle_fields.html", name="ALPHA", tle=_RED_GEO, elset_mode="REAL", elset_source="EXO",
+                    tle_epoch_str=None, tle_age_days=None, error=None, fields_side="red"),
             "#red-tle-fields",
         )
-        assert page.locator('#red-track-form [name="elset_mode"]').count() == 1
+        tags = '#red-track-form [name="elset_mode"], #red-track-form [name="elset_source"]'
+        assert page.locator(tags).count() == 2
         page.type("#red-tle-text", " ")
-        assert page.locator('#red-track-form [name="elset_mode"]').count() == 0
+        assert page.locator(tags).count() == 0, "an edited set kept a UDL tag"
         _assert_clean(console)
 
     def test_adding_a_red_track_lists_it_and_keeps_the_typed_fields(self, console: Console) -> None:

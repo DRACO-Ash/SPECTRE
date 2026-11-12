@@ -121,11 +121,11 @@ def _make_user():
 
 
 class TestFetchTleLatestMode:
-    """Tests for mode='latest' (GET /udl/elset/current per UDL API spec)."""
+    """Tests for mode='latest': the /elset archive over the last 72 hours first, then /elset/current."""
 
     @pytest.mark.asyncio
-    async def test_latest_calls_elset_current(self, mock_state) -> None:
-        """latest mode must use /elset/current (UDL spec: no epoch required)."""
+    async def test_latest_asks_the_archive_over_72_hours_first(self, mock_state) -> None:
+        """latest mode asks /elset with an epoch window; /elset/current answered for 18th SPCS alone."""
         record = _make_udl_record(39034)
 
         with (
@@ -154,10 +154,10 @@ class TestFetchTleLatestMode:
 
             call_args = mock_client.get.call_args
             url = call_args[0][0]
-            assert "/elset/current" in url
-            # Confirm no epoch query parameter is sent
+            assert url.endswith("/elset"), "the current catalogue was asked although the archive held a set"
+            assert mock_client.get.call_count == 1
             params = call_args[1].get("params", {})
-            assert "epoch" not in params
+            assert str(params["epoch"]).startswith(">")
 
     @pytest.mark.asyncio
     async def test_latest_no_udl_creds_returns_error(self, mock_state) -> None:
