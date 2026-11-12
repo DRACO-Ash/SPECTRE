@@ -71,8 +71,6 @@ waiting: SPC-236 - needs an owner answer
 
 waiting: SPC-240 - needs an owner answer
 
-waiting: SPC-241 - needs an owner answer
-
 off path: SPC-072 - research: no release gate
 
 off path: SPC-081 - research: no release gate

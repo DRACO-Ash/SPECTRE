@@ -201,7 +201,7 @@ state it (959 on-station burns by 129 satellites, 28 April 2022 to 27 March 2026
 cache): Seen before (within this satellite's own busiest 14 days), Possible (within 171.8 m/s, the most any
 satellite spent) or Unrealistic. The NOTSO cache can raise a satellite's own figures, but never the 171.8 m/s
 ceiling, which sets Possible against Unrealistic for every satellite: that comes from the shipped, reviewed record only
-(lead's ruling in review of SPC-234). The panel's sentence about the record describes the shipped record. A malformed
+(lead's ruling in review of SPC-234, confirmed by the owner on 2026-11-12). The panel's sentence about the record describes the shipped record. A malformed
 cache record is skipped on its own; catalogue numbers are compared without leading zeros ("05678" is 5678); the
 merge is recomputed only when the cache has changed. A plan is not an arrival when the target is already within the
 radius with no burn over the same window (flown as a baseline): such rows read "Already within" and never count.

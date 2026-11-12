@@ -323,8 +323,8 @@ budget share is taken against it. That record is a floor on what satellites have
 done, not a ceiling on what they could do: a satellite that has never shown a
 large on-station burn may still hold the propellant for one. The operator can
 type any figure, and rows above it are still listed. The threat sweep and asset
-screening keep `DEFAULT_SWEEP_BUDGET_M_S` at 500 m/s, so this paragraph's warning
-about the sweep stands unchanged.
+screening keep `DEFAULT_SWEEP_BUDGET_M_S` at 500 m/s (confirmed by the owner on
+2026-11-12), so this paragraph's warning about the sweep stands unchanged.
 
 Recording it here so it is not "fixed" later by someone matching on the number.
 

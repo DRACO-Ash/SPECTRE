@@ -2487,7 +2487,7 @@
   "group": "port",
   "minutes": 840,
   "task": "Port the engineering parts of the NOTSO realistic intercepts with a Max delta-V default of 171.8 m/s and its evidence data (charming-dirac d3447e2)",
-  "note": "Owner ruling 2026-11-12: Max delta-V default 171.8 m/s from NOTSO, overruling R7. manoeuvre_evidence.json may be ported; the NOTSO export itself is not.",
+  "note": "Owner ruling 2026-11-12: Max delta-V default 171.8 m/s from NOTSO, overruling R7. manoeuvre_evidence.json may be ported; the NOTSO export itself is not. Owner confirmed 2026-11-12: 171.8 m/s for the Intercept Engine only, sweep and asset screening keep 500 m/s; the fleet ceiling comes from the shipped record only, live cache data raises a satellite's own figures.",
   "files": [
    "spectre/astro/maneuvers.py",
    "spectre/data/"
@@ -2594,6 +2594,8 @@
   "note": "0.36.0 ships the derived file. The 0.36.0 review found only catalogue numbers, satellite names, counts, ISO dates and delta-V figures, no personal data or message text; fleet.source names the export file (notification_2026-03-27..., 3,124 messages). The derived file carries no marking. If the control does carry over, the file and its fleet.source come out of the repository and the release.",
   "files": [
    "spectre/data/manoeuvre_evidence.json"
-  ]
+  ],
+  "state": "closed",
+  "supersededBy": "Owner ruling 2026-11-12: the U//DS-JCO-NOTIF control does not carry over to the derived file; keep spectre/data/manoeuvre_evidence.json in the repository."
  }
 ]
