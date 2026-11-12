@@ -17,22 +17,37 @@ range it takes over those intervals, and every share is shown rounded down, so n
 The rule is the custody rule, not calibrated against any outcome, so the posterior is a lookup.
 
 Nothing here writes a probability into a row; the selectors show the posterior only under expected value, the one
-rule that reads P. Under minimax and minimin the same model says only what each turn lets us see (SPC-142). Imports the Decision Engine, never the reverse; nothing here imports the web layer.
+rule that reads P. Under minimax and minimin the same model says only what each turn lets us see (SPC-142).
+
+Where each turn starts is the engine's (design D3, SPC-187, the owner's ruling of 2026-11-05): ``turn_plan`` places
+each boundary from the rows' burn times so every burn falls inside its own turn, and the operator never sets a
+length. A row's burns fall one to a turn: taken in turn 1, its burn j falls in turn j at its own time; taken in turn
+k, its burn j falls in turn k + j - 1, the same time after that turn starts, and one that would fall after the last
+turn is not made. Each boundary is the equal split where that falls after every row's burn of the turn ending and by
+every row's next burn, and midway between them where it does not, or midway to the span's end with no next burn.
+A record 0.23.0 to 0.36.0 wrote holds equal turns (TurnRule.EQUAL), with each row's one burn at its offset after
+every turn starts, and is built as it was then. Imports the Decision Engine, never the reverse; nothing here
+imports the web layer.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 from spectre.domain.custody import Custody, Horizon, LossCause, custody_over_horizon
 from spectre.domain.decision import (
+    MAX_TURNS,
     AdversaryAction,
     ProbabilityRule,
     Scenario,
     Seen,
+    TurnRule,
+    _row_burns,
+    _searched_span_s,
     _untouched,
     joint_points,
     moved_weights,
@@ -41,15 +56,22 @@ from spectre.domain.decision import (
 from spectre.domain.provenance import Basis, FigureBasis
 
 if TYPE_CHECKING:
+    from spectre.astro.monte_carlo import ManoeuvreHypothesis
+    from spectre.domain.decision_transfer import RowBurns
     from spectre.domain.notso_prior import NotsoPrior
 
 __all__ = [
     "INDEPENDENT_TURNS", "LIKELIHOOD_MODEL", "POSTERIOR_EVERY_ROW", "POSTERIOR_NO_WEIGHT", "POSTERIOR_NOTE",
-    "POSTERIOR_ONE_ROW", "POSTERIOR_SHARES", "SEEN_MODEL", "SENTENCES", "Posterior", "Seen", "burns_on", "likelihood",
-    "model_lines", "posteriors", "seen_after", "seen_lines", "share_ranges",
+    "POSTERIOR_ONE_ROW", "POSTERIOR_SHARES", "SEEN_MODEL", "SENTENCES", "TREE_BURN_OUTSIDE_TURN", "TREE_NO_BOUNDARY",
+    "TREE_TOO_FEW_TURNS", "Posterior", "Seen", "TurnPlan", "burns_on", "likelihood", "model_lines", "plan_or_equal",
+    "posteriors", "row_hypotheses", "seen_after", "seen_lines", "share_ranges", "turn_plan",
 ]
 
 _SECONDS_PER_HOUR = 3600.0
+#: Where a boundary goes when the equal split does not fall between the burns it must separate: midway between
+#: the latest burn of the turn ending and the earliest of the turn after, or the span's end with no burn after it
+#: (SPC-187). Claude's choice, not sourced.
+_MIDWAY = 0.5
 #: A moment within this of a turn's boundary is on it: burn times are kept to the microsecond.
 _ON_THE_BOUNDARY_H = 1e-3 / _SECONDS_PER_HOUR
 _HUNDREDTHS = 100
@@ -96,37 +118,233 @@ POSTERIOR_NOTE = (
     "likelihood model, a lookup"
 )
 
+# Why the engine sets no turns (SPC-187): the tree is refused before anything runs and the one-turn result stands.
+TREE_TOO_FEW_TURNS = (
+    "No tree built: row {row}, {name}, makes {n} burns of one transfer within the span searched, and every burn falls "
+    "inside a turn of its own, so it needs {n} turns, more than the {turns} asked for. This result is one turn."
+)
+TREE_NO_BOUNDARY = (
+    "No tree built: row {late}, {late_name}, makes burn {j1} at {h1:.2f} h, no later than row {early}, {early_name}, "
+    "makes burn {j} at {h0:.2f} h, so no turn {j} can end after every row's burn {j} and by every row's burn {j1}. "
+    "This result is one turn."
+)
+TREE_BURN_OUTSIDE_TURN = (
+    "No tree built: {what} at {h:.2f} h after turn {k} starts falls outside that turn, {turn_h:.2f} h long. The "
+    "engine sets each turn from the rows' burn times so every burn falls inside its own turn; take fewer turns. This "
+    "result is one turn."
+)
+
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
     LIKELIHOOD_MODEL, SEEN_MODEL, INDEPENDENT_TURNS, POSTERIOR_SHARES, POSTERIOR_ONE_ROW, POSTERIOR_EVERY_ROW, POSTERIOR_NO_WEIGHT,
+    TREE_TOO_FEW_TURNS, TREE_NO_BOUNDARY, TREE_BURN_OUTSIDE_TURN,
 )
+
+
+# ── Where each turn starts (design D3, SPC-187) ──────────────────────────────
+
+@dataclass(frozen=True)
+class TurnPlan:
+    """Where each turn of a game tree starts, seconds after the scenario epoch, and when each row burns in its turns.
+
+    *starts_s* holds turn 1's start, 0, then each boundary; *span_s* ends the last turn. *burns_s* holds, per row,
+    each of its burns' seconds after its own turn starts, burn 1 first: empty for a row that does not burn.
+    """
+
+    starts_s: tuple[float, ...]
+    span_s:   float
+    burns_s:  tuple[tuple[float, ...], ...]
+
+    @property
+    def turns(self) -> int:
+        return len(self.starts_s)
+
+    def start_s(self, k: int) -> float:
+        """Turn *k*'s start, from 1."""
+        return self.starts_s[k - 1]
+
+    def end_s(self, k: int) -> float:
+        """Turn *k*'s end: the next turn's start, or the span's end for the last."""
+        return self.starts_s[k] if k < self.turns else self.span_s
+
+    def length_s(self, k: int) -> float:
+        return self.end_s(k) - self.start_s(k)
+
+    def move_burns_s(self, row: int, k: int) -> tuple[float, ...]:
+        """Row *row*'s burns when it is red's move in turn *k*, seconds after the scenario epoch: its burn j in turn
+        k + j - 1, the same time after that turn starts as in turn j; one that would fall after the last turn is not
+        made."""
+        return tuple(self.start_s(k + j) + d for j, d in enumerate(self.burns_s[row]) if k + j <= self.turns)
+
+
+def row_hypotheses(scenario: Scenario, action: AdversaryAction) -> tuple[tuple[int, ManoeuvreHypothesis], ...]:
+    """Each burn *action*'s row applies within the span searched, numbered as the transfer numbers it, as the matrix
+    samples it (SPC-184); empty with no hypothesis. Under equal turns, the row's first burn alone, as it was then."""
+    if action.hypothesis is None:
+        return ()
+    if scenario.turn_rule is TurnRule.EQUAL:
+        return ((1, action.hypothesis.hypothesis),)
+    red = None if scenario.binding is None else scenario.binding.red
+    burns = cast("RowBurns", _row_burns(action, red))
+    # A row whose every burn is dropped is refused before any tree is planned (decision._after_burn): its own burn 1.
+    numbers = burns.applied or (1,)
+    end = scenario.epoch_utc + timedelta(seconds=_searched_span_s(scenario))
+    later = [(k, h) for k, h in zip(numbers[1:], burns.then, strict=True) if h.epoch_utc < end]
+    return ((numbers[0], burns.first), *later)
+
+
+def _stated_offsets(scenario: Scenario) -> list[tuple[float, ...]]:
+    """Each row's first burn as stated, seconds after the scenario epoch: the one burn equal turns read."""
+    return [
+        () if a.hypothesis is None else ((a.hypothesis.hypothesis.epoch_utc - scenario.epoch_utc).total_seconds(),)
+        for a in scenario.adversary_actions
+    ]
+
+
+def _equal(span_s: float, offsets: Sequence[tuple[float, ...]], turns: int) -> TurnPlan:
+    """Equal turns over *span_s*, each row's first burn at its offset after every turn starts (the rule to 0.36.0)."""
+    return TurnPlan(tuple(k * span_s / turns for k in range(turns)), span_s, tuple(o[:1] for o in offsets))
+
+
+def _boundary(scenario: Scenario, previous: float, offsets: Sequence[tuple[float, ...]], at: tuple[int, int],
+              span_s: float) -> float | str:
+    """Where turn j ends, *at* being (j, turns): after every row's burn j and by every row's burn j + 1, at the
+    equal split where that falls between them, else midway, to the span's end with no burn j + 1; or why no
+    moment does."""
+    j, turns = at
+    ending = [(o[j - 1], i) for i, o in enumerate(offsets) if len(o) >= j]
+    following = [(o[j], i) for i, o in enumerate(offsets) if len(o) > j]
+    lo, early = max(ending, default=(previous, -1))
+    lo = max(lo, previous)
+    hi, late = min(following, default=(span_s, -1))
+    if hi <= lo:
+        rows = scenario.adversary_actions
+        return TREE_NO_BOUNDARY.format(
+            late=late + 1, late_name=rows[late].name, j1=j + 1, h1=hi / _SECONDS_PER_HOUR,
+            early=early + 1, early_name=rows[early].name, j=j, h0=lo / _SECONDS_PER_HOUR,
+        )
+    equal = j * span_s / turns
+    return equal if lo < equal <= hi else lo + _MIDWAY * (hi - lo)
+
+
+def _outside(scenario: Scenario, plan: TurnPlan) -> str | None:
+    """The first burn that falls outside a turn it is made in, red's rows first, then our responses; None for none."""
+    for i, action in enumerate(scenario.adversary_actions):
+        numbered = row_hypotheses(scenario, action)
+        for j, ((number, _), d) in enumerate(zip(numbered, plan.burns_s[i], strict=True)):
+            refused = _first_outside(plan, _burn_name(scenario, i, number), d, range(j + 1, plan.turns + 1))
+            if refused is not None:
+                return refused
+    for response in scenario.friendly_responses:
+        if response.burn is not None:
+            d = response.time_to_execute_hours * _SECONDS_PER_HOUR
+            refused = _first_outside(plan, f"{response.name}'s burn", d, range(1, plan.turns + 1))
+            if refused is not None:
+                return refused
+    return None
+
+
+def _burn_name(scenario: Scenario, row: int, number: int = 1) -> str:
+    """A row's burn as a refusal names it: "Name's burn", or "Name's burn 2" for a transfer."""
+    action = scenario.adversary_actions[row]
+    several = len(row_hypotheses(scenario, action)) > 1
+    return f"{action.name}'s burn {number}" if several else f"{action.name}'s burn"
+
+
+def _first_outside(plan: TurnPlan, what: str, d: float, turns: Sequence[int]) -> str | None:
+    """*what*, *d* seconds after each of *turns* starts, refused in the first it falls outside; None for none."""
+    for k in turns:
+        if not 0.0 <= d < plan.length_s(k):
+            return TREE_BURN_OUTSIDE_TURN.format(
+                what=what, h=d / _SECONDS_PER_HOUR, k=k, turn_h=plan.length_s(k) / _SECONDS_PER_HOUR,
+            )
+    return None
+
+
+def _engine(scenario: Scenario, span_s: float, offsets: Sequence[tuple[float, ...]]) -> TurnPlan | str:
+    """The turns the engine sets from the rows' burn times (SPC-187), or why it can set none."""
+    turns = scenario.turns
+    for i, o in enumerate(offsets):
+        name = scenario.adversary_actions[i].name
+        if o and o[0] >= span_s:
+            # Its first burn falls after the span searched, so in no turn: refused before any boundary is placed.
+            return TREE_BURN_OUTSIDE_TURN.format(what=_burn_name(scenario, i), h=o[0] / _SECONDS_PER_HOUR, k=1,
+                                                 turn_h=span_s / _SECONDS_PER_HOUR)
+        if len(o) > turns:
+            return TREE_TOO_FEW_TURNS.format(row=i + 1, name=name, n=len(o), turns=turns)
+    starts = [0.0]
+    for j in range(1, turns):
+        placed = _boundary(scenario, starts[-1], offsets, (j, turns), span_s)
+        if isinstance(placed, str):
+            return placed
+        starts.append(placed)
+    plan = TurnPlan(tuple(starts), span_s, tuple(tuple(t - starts[j] for j, t in enumerate(o)) for o in offsets))
+    return _outside(scenario, plan) or plan
+
+
+def turn_plan(scenario: Scenario) -> TurnPlan | str:
+    """Where each of *scenario.turns* turns starts and when each row burns in them, or why no turns fit (D3).
+
+    Under the engine's rule (SPC-187) each boundary is set from the rows' burn times so every burn falls inside its
+    own turn, a transfer's burns one to a turn; refused when a transfer has more burns than turns, when no moment
+    falls between one row's burn and another's next, or when a burn made again, or a response's burn, falls outside a
+    turn it is made in. Under equal turns, the rule of 0.23.0 to 0.36.0, the span is split equally, and decision_tree
+    checks each burn as it did then.
+    """
+    span_s = _searched_span_s(scenario)
+    if scenario.turn_rule is TurnRule.EQUAL:
+        return _equal(span_s, _stated_offsets(scenario), scenario.turns)
+    offsets = [
+        tuple((h.epoch_utc - scenario.epoch_utc).total_seconds() for _, h in row_hypotheses(scenario, action))
+        for action in scenario.adversary_actions
+    ]
+    return _engine(scenario, span_s, offsets)
+
+
+def plan_or_equal(scenario: Scenario) -> TurnPlan:
+    """The turns the engine sets, or equal turns where it sets none: only a selector over nodes a test gives asks for
+    turns no tree was built over."""
+    plan = turn_plan(scenario)
+    if isinstance(plan, TurnPlan):
+        return plan
+    return _equal(_searched_span_s(scenario), _stated_offsets(scenario), scenario.turns)
+
+
+def _as_plan(scenario: Scenario, turns: TurnPlan | float) -> TurnPlan:
+    """*turns* as a plan: a length in seconds is equal turns of it, each row's first burn at its offset after every
+    turn starts, as before SPC-187."""
+    if isinstance(turns, TurnPlan):
+        return turns
+    return _equal(MAX_TURNS * turns, _stated_offsets(scenario), MAX_TURNS)
 
 
 # ── What a turn shows ────────────────────────────────────────────────────────
 
-def burns_on(scenario: Scenario, red_path: Sequence[int], turn_s: float) -> tuple[datetime, ...]:
-    """Each red burn on *red_path*, the move in turn k burning its stated offset after turn k starts."""
-    burns = []
-    for k, a in enumerate(red_path):
-        hypothesis = scenario.adversary_actions[a].hypothesis
-        if hypothesis is not None:
-            offset = hypothesis.hypothesis.epoch_utc - scenario.epoch_utc
-            burns.append(scenario.epoch_utc + timedelta(seconds=k * turn_s) + offset)
-    return tuple(burns)
+def burns_on(scenario: Scenario, red_path: Sequence[int], turns: TurnPlan | float) -> tuple[datetime, ...]:
+    """Each red burn on *red_path*, the move in turn k making its burns as *turns* places them: a TurnPlan, or a
+    length in seconds for equal turns, each burn its stated offset after turn k starts."""
+    plan = _as_plan(scenario, turns)
+    return tuple(
+        scenario.epoch_utc + timedelta(seconds=s)
+        for k, a in enumerate(red_path, start=1) for s in plan.move_burns_s(a, k)
+    )
 
 
-def seen_after(scenario: Scenario, red_path: Sequence[int], turn_s: float) -> Seen:
-    """What we see of red at the end of turn len(*red_path*), red having made its moves on *red_path* so far."""
+def seen_after(scenario: Scenario, red_path: Sequence[int], turns: TurnPlan | float) -> Seen:
+    """What we see of red at the end of turn len(*red_path*), red having made its moves on *red_path* so far, the
+    turns as *turns* places them."""
+
     red = None if scenario.binding is None else scenario.binding.red
     if red is None or red.custody is None or red.custody.state is Custody.DEGRADED:
         return Seen.NOTHING   # degraded is neither held through a turn nor lost at a burn from held (D10, SPC-179)
-    burns = burns_on(scenario, red_path, turn_s)
+    plan = _as_plan(scenario, turns)
+    burns = burns_on(scenario, red_path, plan)
     over = custody_over_horizon(
         red.custody, elset_hours=red.age_hours, limit_hours=red.limit_hours,
         horizon=Horizon(scenario.epoch_utc, scenario.horizon_hours, min(burns, default=None)),
     )
     k = len(red_path)
-    end_h, start_h = k * turn_s / _SECONDS_PER_HOUR, (k - 1) * turn_s / _SECONDS_PER_HOUR
+    end_h, start_h = plan.end_s(k) / _SECONDS_PER_HOUR, plan.start_s(k) / _SECONDS_PER_HOUR
     lost = over.lost_from_h
     if lost is None or lost >= end_h - _ON_THE_BOUNDARY_H:
         return Seen.NO_BURN
@@ -135,9 +353,9 @@ def seen_after(scenario: Scenario, red_path: Sequence[int], turn_s: float) -> Se
     return Seen.NOTHING
 
 
-def likelihood(scenario: Scenario, turn_s: float) -> tuple[Seen, ...]:
+def likelihood(scenario: Scenario, turns: TurnPlan | float) -> tuple[Seen, ...]:
     """Per row, what turn 1 shows when red takes it: the one thing under which that row's likelihood is 1."""
-    return tuple(seen_after(scenario, (i,), turn_s) for i in range(len(scenario.adversary_actions)))
+    return tuple(seen_after(scenario, (i,), turns) for i in range(len(scenario.adversary_actions)))
 
 
 # ── The posterior after turn 1 ───────────────────────────────────────────────

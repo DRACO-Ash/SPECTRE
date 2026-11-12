@@ -1779,10 +1779,13 @@ class TurnBurn(NamedTuple):
 
     The hypothesis gives the nominal delta-V and its RIC direction, the spreads, the B* after the burn and the seed;
     its own epoch and pre-manoeuvre state are not read, since each sample burns from where its last turn left it.
+    *then* holds a transfer's later burns (SPC-187), each with its own hypothesis and seed and its time after this
+    turn's start, made in time order after this one; one past the turn's end is kept for the turn after to make.
     """
 
     hypothesis: ManoeuvreHypothesis
     at_s: float
+    then: tuple[tuple[ManoeuvreHypothesis, float], ...] = ()
 
 
 class ContinuedRed(NamedTuple):
@@ -1814,13 +1817,28 @@ def _nominal_draw(hypothesis: ManoeuvreHypothesis) -> np.ndarray:
     return np.array([*(hypothesis.delta_v_magnitude_km_s * unit), 0.0, 0.0])
 
 
-def _drawn_burns(burn: TurnBurn | None, draw: np.ndarray | None) -> tuple[RedBurn, ...]:
+def _drawn_burns(burn: TurnBurn | None, draw: np.ndarray | None,
+                 later: Sequence[np.ndarray] = ()) -> tuple[RedBurn, ...]:
     """This turn's burn as *draw* says, at its time plus the draw's timing offset, clamped to the window start:
-    before it, red was in the turn before, whose figures are already taken."""
+    before it, red was in the turn before, whose figures are already taken. *later* holds the sample's draw of each
+    of the transfer's later burns (SPC-187), each made no earlier than the first, as a transfer is in turn 1."""
     if burn is None or draw is None:
         return ()
     at_s = max(burn.at_s + float(draw[3]), 0.0)
-    return (RedBurn(at_s, draw[:3].copy(), burn.hypothesis.bstar_post + float(draw[4])),)
+    first = RedBurn(at_s, draw[:3].copy(), burn.hypothesis.bstar_post + float(draw[4]))
+    return (first, *(
+        RedBurn(max(t_s + float(d[3]), at_s), d[:3].copy(), h.bstar_post + float(d[4]))
+        for (h, t_s), d in zip(burn.then, later, strict=True)
+    ))
+
+
+def nominal_turn_burns(burn: TurnBurn | None) -> tuple[RedBurn, ...]:
+    """A turn's burns as stated, undispersed, timed from the turn's start: what our burn is sized against (SPC-187)."""
+    if burn is None:
+        return ()
+    return tuple(
+        RedBurn(t_s, _nominal_draw(h)[:3], h.bstar_post) for h, t_s in ((burn.hypothesis, burn.at_s), *burn.then)
+    )
 
 
 def _continued_red(
@@ -1847,13 +1865,13 @@ def _continued_red(
 
 
 def nominal_continued_arc(
-    state: np.ndarray, bstar: float, burn: TurnBurn | None, span_s: float,
+    state: np.ndarray, bstar: float, burn: TurnBurn | None, span_s: float, pending: Sequence[RedBurn] = (),
 ) -> tuple[_Trajectory, float] | None:
     """Red from *state* with the burn as stated, undispersed, and the B* it ends on; what our burn is sized
-    against in a later turn (SPC-140), as nominal_red_arc is in the first. None when a solve fails."""
+    against in a later turn (SPC-140), as nominal_red_arc is in the first. *pending* holds a transfer's burns the
+    turns before left to this one, as stated (SPC-187). None when a solve fails."""
     try:
-        draw = None if burn is None else _nominal_draw(burn.hypothesis)
-        red = _continued_red(state, bstar, _drawn_burns(burn, draw), span_s)
+        red = _continued_red(state, bstar, (*pending, *nominal_turn_burns(burn)), span_s)
     except (ReenteredError, ArithmeticError, ValueError):   # numpy's LinAlgError is a ValueError
         return None
     return None if red is None else (red.arc, red.bstar_at(span_s))
@@ -1887,10 +1905,10 @@ def continue_series(
 
     Sample k starts from ``red.states[k]`` at the window start, flying ``red.bstars[k]``. With a burn, it burns again with
     the spread drawn afresh, draw k for sample k, in the RIC frame of its own state at its burn, and flies the
-    hypothesis's B* after it plus its draw's offset. A burn its last turn drew past that turn's end
-    (``red.pending``) is made first, when it falls. Each blue is a trajectory from the window start, as the
-    tree carried it. Sample order is kept, so turn k's sample is turn 1's. *tick* and *keep_at_s* serve as in
-    run_separation_series. With ``red.blue_shift_s`` (SPC-202), sample k searches each blue read that many seconds on
+    hypothesis's B* after it plus its draw's offset, then any later burns of its transfer (SPC-187), each drawn from
+    its own seed. A burn its last turn drew past that turn's end (``red.pending``) is made first, when it falls. Each
+    blue is a trajectory from the window start, as the tree carried it. Sample order is kept, so turn k's sample is
+    turn 1's. *tick* and *keep_at_s* serve as in run_separation_series. With ``red.blue_shift_s`` (SPC-202), sample k searches each blue read that many seconds on
     along its own orbit, as the turn that drew the shift did, so each blue arc must run that far past each end
     (rk45_arc's *pad_s*). Raises ValueError for a window the helper would refuse.
     """
@@ -1898,13 +1916,15 @@ def continue_series(
     started = time.monotonic()
     n, burn = len(red.states), red.burn
     draws = None if burn is None else generate_samples(replace(burn.hypothesis, n_samples=n))
+    later = [] if burn is None else [generate_samples(replace(h, n_samples=n)) for h, _ in burn.then]
     keeper = _Keeper(keep_at_s, n, len(blues), window) if keep_at_s else None
     outcomes: list[tuple[Sampled | str, ...]] = []
     shifts = np.zeros(n) if red.blue_shift_s is None else np.asarray(red.blue_shift_s, dtype=float)
     for k in range(n):
         moved = [_shifted(blue, float(shifts[k])) for blue in blues]
         keep = _hearing(keeper, k, moved, float(shifts[k]))
-        burns = (*(red.pending[k] if red.pending else ()), *_drawn_burns(burn, None if draws is None else draws[k]))
+        drawn = _drawn_burns(burn, None if draws is None else draws[k], [d[k] for d in later])
+        burns = (*(red.pending[k] if red.pending else ()), *drawn)
         outcomes.append(_continue_sample((red.states[k], float(red.bstars[k])), burns, window, moved, keep))
         if tick is not None:
             tick(k + 1, n)

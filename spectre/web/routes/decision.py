@@ -838,9 +838,6 @@ class _PriorQuery(BaseModel):
     adv_names:     list[str] = Field(default_factory=list, alias="adv_name")
     adv_types:     list[str] = Field(default_factory=list, alias="adv_type")
     adv_priors:    list[str] = Field(default_factory=list, alias="adv_prior")
-    # The rows loaded from NOTSO (SPC-131): each loaded row's hidden field, and the id of the row whose Load from
-    # NOTSO control sent this request.
-    adv_loaded:    list[str] = Field(default_factory=list, alias="adv_loaded")
     # Each row's P as posted, and the rows recorded as edited by an earlier change (SPC-183).
     adv_probs:     list[str] = Field(default_factory=list, alias="adv_prob")
     adv_p_edited:  list[str] = Field(default_factory=list, alias="adv_p_edited")
@@ -858,8 +855,7 @@ def _prior_context(state: SessionState, query: _PriorQuery, now: datetime) -> di
     red = None if bound.binding is None else bound.binding.red
     if red is None:
         return {"note": bound.problem or NO_RED, "rows": [], "edited": edited}
-    asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors,
-                      query.adv_loaded)
+    asked = RowsAsked(query.adv_ids[:_MAX_ROWS], query.adv_names, query.adv_types, query.adv_priors)
     return {"note": "", "rows": row_views(state, asked, red, (hours, now)), "edited": edited}
 
 
@@ -869,10 +865,11 @@ async def decision_prior_region(
     query: Annotated[_PriorQuery, Query()],
     current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
-    """The NOTSO suggestion beside each adversary row, with its basis and a labelled control to apply it (SPC-130).
+    """The NOTSO suggestion beside every adversary row, with its basis and a labelled control to apply it (SPC-130).
 
-    The panel asks again on every change, sending its fields, so the suggestion follows the red track, the horizon
-    and each row's type. Nothing fills P or Conf here; a tick is applied at Evaluate, and only while it still matches.
+    The panel asks as it opens and again on every change, sending its fields, so every row's suggestion shows at
+    once (SPC-185) and follows the red track, the horizon and each row's type. Nothing fills P or Conf here; a tick
+    is applied at Evaluate, and only while it still matches.
     """
     context = await asyncio.to_thread(_prior_context, get_session_state(current_user), query, _utc_now())
     return render(request, "partials/decision_prior.html", context)

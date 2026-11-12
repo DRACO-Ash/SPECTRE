@@ -1324,3 +1324,13 @@ Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2), 
 | DAST | **EVIDENCED** | Three new form fields and three now bounded | Every numeric field on both Intercept Engine routes refuses infinity, NaN and out-of-range values with a 422; satellite names from the record and cache are autoescaped (a `<script>` name renders escaped); no inline script. | Then a page reflects a field unescaped or a value reaches a 500; the report names the page and parameter. |
 | Secret and data scanning | **HYGIENE** | `spectre/data/manoeuvre_evidence.json` added | Catalogue numbers, satellite names, counts, ISO dates and delta-V figures only; no personal data or message text. The export it was built from is not in this branch. Its dissemination marking is the owner's to confirm (SPC-241). | Then the scanner names a field in the file; it comes out with its `fleet.source`. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.37.0
+
+Turns set by the engine, chains counted once, and suggestions shown at once (owner rulings of 2026-11-05).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision_tree.py`, `turn_update.py`, `threat_understanding.py`, `decision.py`, `decision_prior.py`, `interaction_graph.py`, the Decision Engine routes and panel | `scripts/sonar_rules.py 6ff5e5e`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.36.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | One form control and one hidden field removed from the Decision Engine panel | Fewer inputs; seed names are autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |

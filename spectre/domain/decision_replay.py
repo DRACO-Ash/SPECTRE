@@ -20,7 +20,9 @@ across versions, and the report says so first, from the version inside the hashe
 or 0.29.0 was evaluated with each row weighed by its P over the rows' sum and no remainder of P (SPC-203): its stored
 inputs read under that rule, so the replay reproduces what the operator was shown, and the report says so first too.
 So does a record written by 0.28.0 to 0.31.0, evaluated before SPC-202 with no element-set error in any closest
-approach: it is replayed under that rule, and the report says so first. Nothing here imports the web layer.
+approach: it is replayed under that rule, and the report says so first. So does a record of a game tree written by
+0.28.0 to 0.36.0, built over equal turns before SPC-187 let the engine set them from the rows' burn times: it is
+replayed over equal turns, as it was built. Nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from spectre.domain.decision import (
     Scenario,
     ScenarioResult,
     SelectorStrategy,
+    TurnRule,
 )
 from spectre.domain.decision_inputs import StoredInputs
 from spectre.domain.decision_tree import evaluate_tree
@@ -62,6 +65,12 @@ LEGACY_POINT = (
     "scored as it stood, and a sampled band covered the burn's spread alone. Its stored inputs say so, and the "
     "replay evaluates it under that rule, as it was evaluated then; this code draws each object's element-set error "
     "in every sample and scores a computed miss on the lower edge of its element-set band."
+)
+#: Said first for a record of a game tree 0.28.0 to 0.36.0 wrote: it is replayed over its equal turns (SPC-187).
+LEGACY_TURNS = (
+    "This record's game tree was built before SPC-187, over equal turns, the span searched split equally among them. "
+    "Its stored inputs say so, and the replay builds it over those turns, as it was built then; this code sets each "
+    "turn from the rows' burn times, so every burn falls inside its own turn."
 )
 BUDGET_RAN_OUT = (
     "The evaluation recorded ran out of its time budget, so part of it was not sampled or built; the replay runs in "
@@ -138,6 +147,8 @@ class Replay:
     legacy_shares:    bool = False
     #: Whether the record was evaluated under the miss rule of 0.28.0 to 0.31.0 (SPC-202).
     legacy_point:     bool = False
+    #: Whether the record is a game tree built over the equal turns of 0.28.0 to 0.36.0 (SPC-187).
+    legacy_turns:     bool = False
 
     @property
     def across_versions(self) -> bool:
@@ -149,10 +160,10 @@ class Replay:
 
     @property
     def preamble(self) -> tuple[str, ...]:
-        """What is said before anything is compared: the version line, the lines saying a record of 0.28.0 to 0.31.0
+        """What is said before anything is compared: the version line, the lines saying a record of 0.28.0 to 0.36.0
         is replayed under the rules it was evaluated by, and the budget line when it ran out."""
         return _first_lines(self.recorded_version, self.running_version, budget_ran_out=self.budget_ran_out,
-                            legacy=(self.legacy_shares, self.legacy_point))
+                            legacy=(self.legacy_shares, self.legacy_point, self.legacy_turns))
 
     @property
     def report(self) -> tuple[str, ...]:
@@ -182,11 +193,10 @@ def version_line(recorded: str, running: str) -> str:
 
 
 def _first_lines(
-    recorded: str, running: str, *, budget_ran_out: bool, legacy: tuple[bool, bool] = (False, False),
+    recorded: str, running: str, *, budget_ran_out: bool, legacy: tuple[bool, bool, bool] = (False, False, False),
 ) -> tuple[str, ...]:
-    shares, point = legacy
-    return (version_line(recorded, running), *((LEGACY_SHARES,) if shares else ()),
-            *((LEGACY_POINT,) if point else ()), *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
+    said = [line for line, held in zip((LEGACY_SHARES, LEGACY_POINT, LEGACY_TURNS), legacy, strict=True) if held]
+    return (version_line(recorded, running), *said, *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
 
 
 def _legacy(stored: StoredInputs) -> bool:
@@ -199,12 +209,18 @@ def _legacy_point(stored: StoredInputs) -> bool:
     return stored.scenario.miss_rule is MissRule.POINT
 
 
+def _legacy_turns(stored: StoredInputs) -> bool:
+    """Whether *stored* is a game tree built over the equal turns of 0.28.0 to 0.36.0 (SPC-187); one turn has none."""
+    return stored.scenario.turns > 1 and stored.scenario.turn_rule is TurnRule.EQUAL
+
+
 def said_first(stored: StoredInputs, running: str) -> tuple[str, ...]:
     """What a replay of *stored* says before it evaluates anything, read from the hashed inputs alone: the version
     that wrote them against *running*, whether it was evaluated under the rule 0.28.0 and 0.29.0 weighed P by, whether
-    under the miss rule of 0.28.0 to 0.31.0, and whether the evaluation recorded ran out of its time budget."""
+    under the miss rule of 0.28.0 to 0.31.0, whether a game tree built over equal turns, and whether the evaluation
+    recorded ran out of its time budget."""
     return _first_lines(stored.code_version, running, budget_ran_out=stored.budget_ran_out,
-                        legacy=(_legacy(stored), _legacy_point(stored)))
+                        legacy=(_legacy(stored), _legacy_point(stored), _legacy_turns(stored)))
 
 
 def input_hashes(result: ScenarioResult) -> list[dict[str, str | None]]:
@@ -323,4 +339,5 @@ def replay(
         (*_checks(stored, recorded, kept), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
          *_scores(stored, result)),
         budget_ran_out=stored.budget_ran_out, legacy_shares=_legacy(stored), legacy_point=_legacy_point(stored),
+        legacy_turns=_legacy_turns(stored),
     )

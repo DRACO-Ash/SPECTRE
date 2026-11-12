@@ -25,6 +25,10 @@ those releases evaluated by, MissRule.POINT, the computed miss scored as it stan
 spread alone, so they replay as they were evaluated then. Nothing else in the document changed: each element set's
 text, epoch and age were stored already, and they are what the error is read from.
 
+Version 5 (SPC-187) adds the scenario's turn rule: a game tree's turns set by the engine from the rows' burn times,
+every burn inside its own turn. Versions 1 to 4, written by 0.28.0 to 0.36.0, are read under the equal turns those
+releases built every tree over, TurnRule.EQUAL, so a tree they recorded replays exactly as it was built then.
+
 The text is canonical (keys sorted, no spaces, ASCII with every other character escaped, no NaN), so the same inputs
 give the same text and its SHA-256 identifies them; a U+0000 is stored escaped, so PostgreSQL's text takes it.
 
@@ -67,6 +71,7 @@ from spectre.domain.decision import (
     Seen,
     SelectorStrategy,
     ThreatPicture,
+    TurnRule,
     with_remainder,
     without_remainder,
 )
@@ -77,13 +82,14 @@ from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
 from spectre.domain.threat_understanding import Cue, Dimension, Understanding
 
-#: What the document is, and the version of it this code writes (SPC-202: the miss rule).
+#: What the document is, and the version of it this code writes (SPC-187: the turn rule).
 SCHEMA = "spectre.decision-inputs"
-VERSION = 4
+VERSION = 5
 #: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed; versions
 #: 1 and 2, written by 0.28.0 and 0.29.0, hold no probability rule, and read under the rule they were evaluated by;
-#: versions 1 to 3, written by 0.28.0 to 0.31.0, hold no miss rule, and read under the rule they were evaluated by.
-VERSIONS = (1, 2, 3, 4)
+#: versions 1 to 3, written by 0.28.0 to 0.31.0, hold no miss rule, and read under the rule they were evaluated by;
+#: versions 1 to 4, written by 0.28.0 to 0.36.0, hold no turn rule, and read as the equal turns they were built over.
+VERSIONS = (1, 2, 3, 4, 5)
 #: The response fields version 2 added (SPC-195), which a version 1 document never holds.
 _VETO_FIELDS = frozenset({"vetoed", "veto_reason"})
 #: The scenario field version 3 added (SPC-203), and the rule a document without it was evaluated by.
@@ -92,9 +98,14 @@ _RULE_BEFORE: dict[str, Any] = {_RULE_FIELD: ProbabilityRule.SHARES}
 #: The scenario field version 4 added (SPC-202), and the rule a document without it was evaluated by.
 _MISS_FIELD = "miss_rule"
 _MISS_BEFORE: dict[str, Any] = {_MISS_FIELD: MissRule.POINT}
+#: The scenario field version 5 added (SPC-187), and the rule a document without it was built by.
+_TURN_FIELD = "turn_rule"
+_TURNS_BEFORE: dict[str, Any] = {_TURN_FIELD: TurnRule.EQUAL}
 #: The document's own fields, every one required: version 3 adds the remainder of P (SPC-203).
 _TOP = ("schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out")
-_TOPS: dict[int, tuple[str, ...]] = {1: _TOP, 2: _TOP, 3: (*_TOP, "remainder"), 4: (*_TOP, "remainder")}
+_TOPS: dict[int, tuple[str, ...]] = {
+    1: _TOP, 2: _TOP, 3: (*_TOP, "remainder"), 4: (*_TOP, "remainder"), 5: (*_TOP, "remainder"),
+}
 #: The first version holding the remainder of P (SPC-203).
 _REMAINDER_SINCE = 3
 
@@ -364,22 +375,51 @@ def _read_miss(value: Any, where: str) -> MissRule:
     return MissRule.ELSET_ERROR
 
 
+def _write_turns(rule: TurnRule) -> str:
+    """The engine's turns, the one rule version 5 holds. A scenario over equal turns is only ever a replay of a record
+    0.28.0 to 0.36.0 wrote, and a replay writes no record, so one is never stored again (SPC-187)."""
+    if rule is not TurnRule.BURNS:
+        raise ValueError(
+            "a scenario over the equal turns of 0.23.0 to 0.36.0 is never stored again: version 5 holds the engine's "
+            "turns alone, and only versions 1 to 4, which 0.28.0 to 0.36.0 wrote, read as equal turns"
+        )
+    return rule.value
+
+
+def _read_turns(value: Any, where: str) -> TurnRule:
+    """The engine's turns, and no other: a version 5 document over equal turns would replay as built before SPC-187,
+    which no version 5 record was."""
+    if value != TurnRule.BURNS.value:
+        raise _refuse(where, f"version 5 holds the engine's turns alone, not {value!r}; equal turns are read only from "
+                             "versions 1 to 4, which 0.28.0 to 0.36.0 wrote")
+    return TurnRule.BURNS
+
+
 #: Version 3's probability rule: the remainder rule, written and read, and no other (SPC-203).
 _REMAINDER_RULE: Codec = (_write_rule, _read_rule)
 #: Version 4's miss rule: the element-set error rule, written and read, and no other (SPC-202).
 _ELSET_RULE: Codec = (_write_miss, _read_miss)
+#: Version 5's turn rule: the engine's turns, written and read, and no other (SPC-187).
+_ENGINE_TURNS: Codec = (_write_turns, _read_turns)
 #: The scenario as each version holds it: version 1's responses carry no veto; neither version 1 nor 2 holds the
-#: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203); and none of versions 1 to 3
-#: holds the miss rule, so each reads as the rule 0.28.0 to 0.31.0 evaluated by (SPC-202).
+#: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203); none of versions 1 to 3
+#: holds the miss rule, so each reads as the rule 0.28.0 to 0.31.0 evaluated by (SPC-202); and none of versions 1 to 4
+#: holds the turn rule, so each reads as the equal turns 0.28.0 to 0.36.0 built every tree over (SPC-187).
 _SCENARIOS: dict[int, _Shape] = {
     1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)},
-              omit=frozenset({_RULE_FIELD, _MISS_FIELD}), fill={**_RULE_BEFORE, **_MISS_BEFORE}),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD}),
+              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE}),
     2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)},
-              omit=frozenset({_RULE_FIELD, _MISS_FIELD}), fill={**_RULE_BEFORE, **_MISS_BEFORE}),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD}),
+              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE}),
     3: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
-                         _RULE_FIELD: _REMAINDER_RULE}, omit=frozenset({_MISS_FIELD}), fill=_MISS_BEFORE),
+                         _RULE_FIELD: _REMAINDER_RULE}, omit=frozenset({_MISS_FIELD, _TURN_FIELD}),
+              fill={**_MISS_BEFORE, **_TURNS_BEFORE}),
     4: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
-                         _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE}),
+                         _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE}, omit=frozenset({_TURN_FIELD}),
+              fill=_TURNS_BEFORE),
+    5: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
+                         _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE, _TURN_FIELD: _ENGINE_TURNS}),
 }
 
 

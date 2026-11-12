@@ -1,10 +1,11 @@
-"""Load from NOTSO per adversary row, the interval beside it, and the NOTSO timeline in the results (SPC-131, SPC-132).
+"""Every row's NOTSO suggestion as the panel opens, its interval, and the NOTSO timeline (SPC-185, SPC-132).
 
 Concept section 7.5: P and Conf are never filled in on the operator's behalf.
-The panel lists each adversary row with a labelled "Load from NOTSO" control;
-nothing is worked out for a row until the operator loads it, and loading
-shows the suggestion, its basis and its interval with the control that
-applies it: loading is not applying. Evaluate records each applied suggestion
+Owner ruling of 2026-11-05 on concept section 9, decision 16 (SPC-185): every
+row's suggestion is loaded when the panel opens and follows every change, so
+each row shows its suggestion, its basis and its interval with the control
+that applies it at once, with no control to load it. Applying stays the
+operator's tick, honoured at Evaluate: showing is not applying. Evaluate records each applied suggestion
 with the notices behind it on a timeline, dated, with the covered periods and
 the gaps named in words. Under expected value the result says whether the pick
 changes across each applied P's interval; under minimax it says minimax reads
@@ -23,11 +24,9 @@ import pytest
 
 from spectre.web import decision_prior
 from tests.integration.test_decision_prior_route import (
-    _INHERITED,
     _P,
     _evaluate,
     _form,
-    _lineage,
     _text,
     _write_cache,
     held,  # noqa: F401  (the fixture, used by name)
@@ -55,88 +54,61 @@ def _results(client: Any, cookie: str, **form: Any) -> str:
     return resp.text
 
 
-class TestLoadFromNotso:
-    def test_each_row_has_a_labelled_load_control_and_nothing_is_worked_out_until_it_is_pressed(
+class TestEveryRowLoadsAsThePanelOpens:
+    def test_every_row_shows_its_suggestion_unticked_with_no_load_control(
         self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
     ) -> None:
         raw = _region(client, auth_cookie, adv_id=["A1", "A2"], adv_name=["Approach", "Hold"],
                       adv_type=["manoeuvre", "manoeuvre"])
-        assert len(_loads(raw)) == 2
-        assert 'name="adv_loaded" value="A1"' in _loads(raw)[0]
-        assert 'aria-label="Load from NOTSO for row 2"' in _loads(raw)[1]
-        assert ">Load from NOTSO</button>" in raw.replace("\n", "").replace("  ", "")
-        assert "NOTSO suggestion for RX" not in _text(raw)
-        assert 'name="adv_prior"' not in raw
-
-    def test_loading_a_row_shows_its_suggestion_its_interval_and_the_control_to_apply_it_unticked(
-        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
-    ) -> None:
-        raw = _region(client, auth_cookie, adv_loaded=["A1"])
-        page = _text(raw)
-        assert f"NOTSO suggestion for RX: P {_P}." in page
-        assert f"P {_P} lies in 0.02 to 0.17, an exact Poisson interval, 95 in 100, on the 5 reported events" in page
-        assert f'value="A1|{_P}|"' in raw
+        assert _loads(raw) == []
+        assert "Load from NOTSO" not in raw
+        assert 'name="adv_loaded"' not in raw
+        assert _text(raw).count(f"NOTSO suggestion for RX: P {_P}.") == 2
+        assert re.findall(r'name="adv_prior" value="([^"]+)"', raw) == [f"A1|{_P}|", f"A2|{_P}|"]
         assert " checked" not in raw
-        assert _loads(raw) == []
 
-    def test_a_loaded_row_stays_loaded_when_the_form_changes(
-        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
-    ) -> None:
-        raw = _region(client, auth_cookie, adv_loaded=["A1"])
-        assert re.search(r'<input type="hidden" name="adv_loaded" value="A1">', raw)
-
-    def test_loading_one_row_leaves_the_others_unloaded(
-        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
-    ) -> None:
-        raw = _region(client, auth_cookie, adv_id=["A1", "A2"], adv_name=["Approach", "Hold"],
-                      adv_type=["manoeuvre", "manoeuvre"], adv_loaded=["A2"])
-        assert len(_loads(raw)) == 1
-        assert 'value="A1"' in _loads(raw)[0]
-        assert re.findall(r'name="adv_prior" value="([^"]+)"', raw) == [f"A2|{_P}|"]
-
-    def test_a_ticked_row_counts_as_loaded_without_its_hidden_field(
-        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
-    ) -> None:
-        # Its suggestion was shown to tick it, so a change in the form keeps it shown, ticked, and keeps it loaded.
-        raw = _region(client, auth_cookie, adv_prior=[f"A1|{_P}|"])
-        assert _loads(raw) == []
-        assert re.search(r'<input type="hidden" name="adv_loaded" value="A1">', raw)
-        assert re.search(rf'name="adv_prior" value="A1\|{_P}\|" checked', raw)
-
-    def test_loading_is_not_applying(self, client: Any, auth_cookie: str, held: Any) -> None:  # noqa: F811
-        page = _text(_results(client, auth_cookie, adv_loaded=["A1"]))
-        assert "P=0.6 (judgement) · Share=0.6 (judgement) · Conf=0.7 (judgement)" in page
-        assert "P and Conf are your own." in page
-
-    def test_the_load_control_sets_what_it_would_otherwise_take_from_the_evaluate_form(
-        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
-    ) -> None:
-        # Inside the form, a button htmx sends from takes the form's target, indicator and disabled element unless it
-        # sets its own: its reply would land in the results, and the form's submit button, which it does not hold,
-        # makes htmx throw.
-        panel = client.get("/plan/decision/panel", cookies={"spectre_session": auth_cookie}).text
-        form = re.search(r"<form\b[^>]*>", panel)
-        region = re.search(r'<div class="adv-priors"[^>]*>', panel)
-        assert form is not None
-        assert region is not None
-        # The region's reply swapped in where htmx puts it, inside the panel's own form and region.
-        page = f"{form.group(0)}{region.group(0)}{_region(client, auth_cookie)}</div></form>"
-        *around, (_, button) = _lineage(page, "adv-prior-load")
-        taken = {name for _, attrs in around for name in attrs if name in _INHERITED}
-        assert {"hx-target", "hx-indicator", "hx-disabled-elt"} <= taken
-        assert sorted(name for name in taken if name not in button) == []
-        assert (button["hx-get"], button["hx-target"], button["hx-swap"]) == (
-            "/plan/decision/prior", "closest .adv-priors", "innerHTML")
-        assert button["hx-include"] == "closest form"
-        assert [name for name in button if name.startswith(("on", "hx-on"))] == []
-
-    def test_the_panel_says_nothing_is_loaded_until_asked(
+    def test_each_row_shows_its_interval_and_the_control_to_apply_it(
         self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
     ) -> None:
         page = _text(_region(client, auth_cookie))
-        assert "Nothing is read from NOTSO for a row until you load it; loading fills neither P nor Conf." in page
+        assert f"NOTSO suggestion for RX: P {_P}." in page
+        assert f"P {_P} lies in 0.02 to 0.17, an exact Poisson interval, 95 in 100, on the 5 reported events" in page
+        assert "Apply this suggestion to row 1's P at Evaluate, in place of the values typed" in page
 
-    def test_a_row_name_in_the_load_control_is_escaped(
+    def test_the_panel_asks_for_every_row_as_it_opens_and_on_every_change(
+        self, client: Any, auth_cookie: str,
+    ) -> None:
+        panel = client.get("/plan/decision/panel", cookies={"spectre_session": auth_cookie}).text
+        region = re.search(r'<div class="adv-priors"[^>]*>', panel)
+        assert region is not None
+        assert 'hx-get="/plan/decision/prior"' in region.group(0)
+        assert 'hx-trigger="load, change from:closest form"' in region.group(0)
+
+    def test_a_ticked_row_stays_ticked_while_its_suggestion_is_the_one_shown(
+        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
+    ) -> None:
+        raw = _region(client, auth_cookie, adv_prior=[f"A1|{_P}|"])
+        assert re.search(rf'name="adv_prior" value="A1\|{_P}\|" checked', raw)
+
+    def test_a_load_field_from_an_older_page_changes_nothing(
+        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
+    ) -> None:
+        assert _region(client, auth_cookie, adv_loaded=["A1"]) == _region(client, auth_cookie)
+
+    def test_showing_is_not_applying(self, client: Any, auth_cookie: str, held: Any) -> None:  # noqa: F811
+        page = _text(_results(client, auth_cookie))
+        assert "P=0.6 (judgement) · Share=0.6 (judgement) · Conf=0.7 (judgement)" in page
+        assert "P and Conf are your own." in page
+
+    def test_the_panel_says_the_suggestion_fills_nothing_until_ticked(
+        self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
+    ) -> None:
+        page = _text(_region(client, auth_cookie))
+        assert ("Each row's NOTSO suggestion is shown as the panel opens. It fills neither P nor Conf: tick it to "
+                "apply it at Evaluate.") in page
+        assert i13_problems(page) == []
+
+    def test_a_row_name_is_escaped(
         self, client: Any, auth_cookie: str, held: Any,  # noqa: F811
     ) -> None:
         raw = _region(client, auth_cookie, adv_id=['A1"><script>x</script>'])

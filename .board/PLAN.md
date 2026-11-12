@@ -1,15 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.37: 5 items, 780 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-180        90m  fills the release to its floor
-    SPC-185       120m  fills the release to its floor
-    SPC-182        90m  fills the release to its floor
-    SPC-186       120m  fills the release to its floor
-    SPC-187       360m  fills the release to its floor
-  lane 1 (360m): SPC-187
-  lane 2 (420m): SPC-182, SPC-186, SPC-185, SPC-180
-
 V0.38: 5 items, 780 priced min, gates browser, container, lint, quality, sast, tests
   forecast 13h00 to 13h00 (middle 13h00), people's time 0 min, evidence: settings (nothing measured yet)
     SPC-189       180m  fills the release to its floor

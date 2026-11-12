@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-12
+
+**Turns set by the engine, chains counted once, and suggestions shown at once (owner rulings of 2026-11-05).**
+
+### Changed
+- The game tree's turns are set by the engine from the rows' burn times, so every burn falls inside its own turn and a transfer of several burns gets a turn per burn; the operator never sets a length. A row whose first burn falls past the span searched is refused by name. Records from 0.28.0 to 0.36.0 replay exactly over their equal turns (stored inputs version 5) (SPC-187).
+- Copies in one source chain no longer fold a reading: the chain's strongest reading counts once at its best reliability, so a new copy does not widen the Threat range. The one exception is decision 7: a floor a later unusual or unprecedented burn has ended is tested on its own reliability, so no later copy revives it, and a newer reading from its chain replaces it. The 20 pinned legacy verdicts are unchanged (SPC-186).
+- Any collection with value above 0 whose result SPECTRE can read may trigger collect first, whether or not it could take the Threat range off the action line (SPC-182).
+- Every adversary row's NOTSO suggestion shows as soon as the Decision Engine panel opens, with no Load from NOTSO control; applying it is still the operator's tick, honoured at Evaluate. The cache is read once per request, not once per row (SPC-185).
+- A path propagated from a hostile seed names the seed by name and catalogue number on screen and in the ledger, and the docs no longer say the seed list may become classified (SPC-180).
+
 ## [0.36.0] - 2026-11-12
 
 **Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2).**

@@ -281,6 +281,19 @@ class MissRule(StrEnum):
     POINT = "point"
 
 
+class TurnRule(StrEnum):
+    """How a game tree splits the span searched into turns (design D3; SPC-187, the owner's ruling of 2026-11-05).
+
+    BURNS: the engine sets each turn from the rows' burn times, so every burn falls inside its own turn, a transfer's
+    burns one to a turn; the operator never sets a length (spectre.domain.turn_update.turn_plan). EQUAL: the rule
+    of 0.23.0 to 0.36.0, equal turns, a row of several burns refusing the tree; it is read only from a record those
+    releases wrote, so the replay builds its tree as it was built then.
+    """
+
+    BURNS = "burns"
+    EQUAL = "equal"
+
+
 class SelectorStrategy(Enum):
     MINIMAX           = "minimax"           # minimise worst-case cost
     EXPECTED_VALUE    = "expected_value"    # minimise expected cost (uses probability)
@@ -1756,8 +1769,8 @@ class ThreatPicture:
         """One row per cue of *cues*, every cue held when None, that needs someone outside SPECTRE, when the sweep's
         advice over them at *now* is to collect first.
 
-        Only a cue that could move the range off the action line, whose result SPECTRE can read, landing by
-        decide-by, is listed. A cue SPECTRE runs itself is named by the advice and lists no row.
+        Only a cue with value above 0, whose result SPECTRE can read, landing by decide-by, is listed (SPC-182). A
+        cue SPECTRE runs itself is named by the advice and lists no row.
         """
         held = self.cues if cues is None else cues
         if self.unaged(now, held).advice is not Advice.COLLECT_FIRST:
@@ -1827,7 +1840,8 @@ class Scenario:
     # beside the rows and read by the collect-first advice; it moves no figure.
     threat:             ThreatPicture | None = None
     # How many turns the game tree runs (SPC-140): red moves and we respond, then red may move again. One turn is the
-    # outcome matrix alone; evaluate_tree builds 2 or 3 over the span searched, split equally.
+    # outcome matrix alone; evaluate_tree builds 2 or 3 over the span searched, each turn set by the engine from the
+    # rows' burn times (turn_rule, SPC-187).
     turns:              int = 1
     # What the operator states turn 1 of the tree showed of red (SPC-142). Under expected value the update after
     # turn 1 is shown for it alone; None when nothing was stated, and then nothing is updated. It moves no figure.
@@ -1841,6 +1855,9 @@ class Scenario:
     # What a propagated closest approach holds of element-set error (SPC-202): ELSET_ERROR, unless the scenario was
     # read from a record 0.28.0 to 0.31.0 wrote, which is replayed as it was evaluated, POINT.
     miss_rule:          MissRule = MissRule.ELSET_ERROR
+    # How a game tree's turns are set (SPC-187): BURNS, by the engine from the rows' burn times, unless the scenario
+    # was read from a record 0.23.0 to 0.36.0 wrote, which is replayed with the equal turns it was built with, EQUAL.
+    turn_rule:          TurnRule = TurnRule.BURNS
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -5295,7 +5312,9 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
     its veto and reason, so a scenario with nothing vetoed hashes as it did before vetoes existed and a 0.28.0 record's
     input hashes still match its replay (SPC-195). The remainder row is derived, so left out, as is each row's flag;
     and the 0.29.0 rule is left out, so a record 0.28.0 or 0.29.0 wrote hashes as it did then (SPC-203); so is the
-    miss rule of 0.28.0 to 0.31.0, so a record those releases wrote hashes as it did then (SPC-202)."""
+    miss rule of 0.28.0 to 0.31.0, so a record those releases wrote hashes as it did then (SPC-202); and so is the turn
+    rule where it sets nothing, one turn, or is the equal turns of 0.23.0 to 0.36.0, so a record those releases wrote,
+    and any one-turn scenario, hashes as it did then (SPC-187)."""
     plain = dataclasses.asdict(without_remainder(scenario))
     for response in plain["friendly_responses"]:
         if not response["vetoed"]:
@@ -5306,6 +5325,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
         del plain["probability_rule"]
     if scenario.miss_rule is MissRule.POINT:
         del plain["miss_rule"]
+    if scenario.turns == 1 or scenario.turn_rule is TurnRule.EQUAL:
+        del plain["turn_rule"]
     return plain
 
 

@@ -4,10 +4,11 @@ Concept section 4.9 and 8: seeds are analyst-adjudicated hostile objects.
 Suspicion flows from an object to the seeds it has approached, at most two
 hops away: the object approached the seed (one hop), or approached an object
 that approached it (two). A third hop adds nothing, and nothing flows from a
-benign seed. The list is owner data, possibly classified (section 9,
-decision 5): it is read from a configured path, never bundled, validated
-strictly, and a malformed list is refused whole with a reason that never
-repeats its contents.
+benign seed. The list is deployment data that never becomes classified
+(section 9, decision 5): it is read from a configured path, never bundled,
+validated strictly, and a malformed list is refused whole with a reason that
+never repeats its contents. A path names its seed by catalogue number and
+name (decision 15, SPC-180).
 """
 
 from __future__ import annotations
@@ -172,3 +173,21 @@ class TestThePaths:
         seeds = _seeds(("901", "902", "903"))
         assert seed_paths("100", edges, seeds) == seed_paths("100", list(reversed(edges)), seeds)
         assert [(p.hops, p.seed) for p in seed_paths("100", edges, seeds)] == [(1, "901"), (1, "902"), (2, "903")]
+
+
+class TestAPathNamesItsSeed:
+    """Concept section 9, decisions 5 and 15 (SPC-180): the seed is named by catalogue number and name."""
+
+    def test_one_hop_names_the_seed_it_approached(self) -> None:
+        (path,) = seed_paths("100", [_edge("100", "900")], _seeds(("900",)))
+        assert (path.seed_name, path.seed_label) == ("OBJ-900", "OBJ-900 (900)")
+
+    def test_two_hops_name_the_seed_at_the_far_end_not_the_object_passed(self) -> None:
+        (path,) = seed_paths("100", [_edge("100", "200"), _edge("200", "900")], _seeds(("900",)))
+        assert (path.seed_name, path.seed_label) == ("OBJ-900", "OBJ-900 (900)")
+
+    @pytest.mark.parametrize("name", ["", "  ", "900", "0900"])
+    def test_a_seed_held_by_number_alone_is_named_by_its_number(self, name: str) -> None:
+        edge = Edge("100", name, False, Change.NEWLY_IN_REACH, None, 3.0, _NOW, (_BURN,), target_satno="900")
+        (path,) = seed_paths("100", [edge], _seeds(("900",)))
+        assert (path.seed_name, path.seed_label) == ("", "900")

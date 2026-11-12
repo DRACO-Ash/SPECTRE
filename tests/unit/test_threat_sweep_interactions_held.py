@@ -227,7 +227,30 @@ class TestAConfiguredSeedReachesTheRedModel:
         understanding = threat._red_understanding(red, worst, now)
         assert understanding is not None
         assert [r.item.label for r in understanding.range.ledger if r.item.derived_from == f"seed:{_SATNO}"] == [
-            "1 hop from a hostile seed, through BLUE-1"]
+            "1 hop from hostile seed BLUE-1 (40001)"]
+
+    def test_the_sweep_page_names_the_seed_on_screen_and_in_the_ledger(
+            self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Concept section 9, decisions 5 and 15 (SPC-180): the seed is named by catalogue number and name.
+        from tests.unit.test_threat_understanding_display import _block, _render, _strip, _text
+
+        seeds = tmp_path / "seeds.json"
+        seeds.write_text(json.dumps({"seeds": [{"satno": "40001", "disposition": "hostile"}]}), encoding="utf-8")
+        monkeypatch.setenv("SPECTRE_HOSTILE_SEEDS", str(seeds))
+        monkeypatch.setattr(threat, "get_intel", lambda _s: None)
+        monkeypatch.setattr(threat, "catalogue_entry", lambda _s: None)
+        history, now = _after_raises()
+        held = _hold(_state(), (_figures(_IN_REACH), ((), ())), history, _basis(now), _SATNO)
+        context = threat.ConfidenceContext(data_mode="REAL", custody=Custody.HELD)
+        red = threat._Red(_SATNO, "", "LEO", history, _HELD, context, held.edges, held.notes, held.paths)
+        from tests.unit.test_threat_sweep_template import _context
+
+        worst = _context()["worst_coa"]
+        shadowed = threat._with_understanding(worst, threat._red_understanding(red, worst, now), held.notes)
+        page = _render("partials/threat_sweep.html", _context(worst_coa=shadowed))
+        ledger = _text(_block(page, '<details class="tu-ledger"', "details"))
+        assert "1 hop from hostile seed BLUE-1 (40001)" in ledger
+        assert "1 hop from hostile seed BLUE-1 (40001)" in _strip(page)
 
 
 class TestTheSweepsOneCall:

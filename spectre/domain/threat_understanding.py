@@ -16,8 +16,10 @@ Capability, Behaviour, Interactions) is a noisy-OR across its groups, so it
 never falls when an independent group is added.
 
 A reading (a floor raised or a ceiling lowered) applies only when its
-dimension is earned, its own q is high enough and it is the strongest of its
-group: a weaker copy is folded, its reading as well as its coverage. The
+dimension is earned and it is the strongest reading of its group: any
+reading from a source chain counts once, at the chain's best reliability, so
+a new copy never widens the range (concept section 9, decision 6, SPC-186);
+a weaker reading in the chain is folded, and a copy's coverage counts once. The
 floor is what the evidence proves at least; the ceiling is what it cannot
 yet rule out; ACCESS, the geometry, bounds both. Suspicion persists and
 trust decays: a floor earned when it was judged stays until a later burn is
@@ -619,6 +621,7 @@ class _Engine:
         self._q: dict[tuple[int, datetime], float] = {}
         self._vouching: dict[tuple[frozenset[int], datetime], dict[Dimension, float]] = {}
         self._leaders: dict[datetime, dict[tuple[Dimension, str], int]] = {}
+        self._chain_q: dict[datetime, dict[tuple[Dimension, str], float]] = {}
         self.voided = frozenset(i for i in range(len(items)) if self._is_voided(i))
         self.live = frozenset(range(len(items))) - self.voided
 
@@ -641,26 +644,46 @@ class _Engine:
             self._vouching[key] = _cover(_group_bests(qs))
         return self._vouching[key]
 
-    def leaders(self, at: datetime) -> dict[tuple[Dimension, str], int]:
-        """The member of each group whose reading may apply at *at*: the strongest held then.
+    def _lead_key(self, index: int, at: datetime) -> tuple[int, int, float]:
+        """How strongly a member leads its group at *at*: a reading still live, then the strongest reading, then q.
 
-        A weaker copy is folded, its reading with its coverage (I2). On equal q
-        the stronger reading leads, so a coverage-only figure from the same
-        history never displaces it by the order items arrive in. A ROUTINE
-        verdict leads nothing, as it vouches for nothing (I9).
+        A floor a later unusual or unprecedented burn has ended (decision 7)
+        leads only where no live reading in its chain can, so that burn still
+        ends it beside a newer reading from the same chain.
+        """
+        rank = _reading_rank(self.items[index])
+        live = rank > 0 and not self.ended(index, at)
+        return int(live) + int(rank > 0), rank, self.q(index, at)
+
+    def leaders(self, at: datetime) -> dict[tuple[Dimension, str], int]:
+        """The member of each group whose reading may apply at *at*: the strongest reading held then.
+
+        Any reading from a source chain counts once, at the chain's best
+        reliability (``chain_q``), so a new copy never widens the range (concept
+        section 9, decision 6, SPC-186): a copy with no reading, however strong,
+        never displaces a reading, and a weaker reading in the chain is folded.
+        On equal readings the stronger q leads. A ROUTINE verdict leads nothing,
+        as it vouches for nothing (I9).
         """
         if at not in self._leaders:
             best: dict[tuple[Dimension, str], int] = {}
+            chain: dict[tuple[Dimension, str], float] = {}
             for i in sorted(self.live):
                 item = self.items[i]
                 if item.routine or not self.visible(i, at):
                     continue
-                key = (self.q(i, at), _reading_rank(item))
+                chain[item.group] = max(self.q(i, at), chain.get(item.group, 0.0))
                 held = best.get(item.group)
-                if held is None or key > (self.q(held, at), _reading_rank(self.items[held])):
+                if held is None or self._lead_key(i, at) > self._lead_key(held, at):
                     best[item.group] = i
             self._leaders[at] = best
+            self._chain_q[at] = chain
         return self._leaders[at]
+
+    def chain_q(self, group: tuple[Dimension, str], at: datetime) -> float:
+        """The best reliability among the members of *group* that may lead at *at*: the q its reading counts at."""
+        self.leaders(at)
+        return self._chain_q[at].get(group, 0.0)
 
     def bests(self, members: frozenset[int]) -> dict[tuple[Dimension, str], int]:
         """The strongest item of each coverage group now; the first in canonical order on a tie."""
@@ -674,12 +697,23 @@ class _Engine:
     def coverage(self, members: frozenset[int]) -> dict[Dimension, float]:
         return _cover({g: self.q(i, self.now) for g, i in self.bests(members).items()})
 
+    def ended(self, index: int, at: datetime) -> bool:
+        """A floor a later unusual or unprecedented burn has ended by *at* (decision 7)."""
+        return self.items[index].floor_to is not None and self.superseded(index, at)
+
+    def reading_q(self, index: int, at: datetime) -> float:
+        """The q a reading is tested on at *at*: its chain's best (SPC-186), or its own once a later burn has ended
+        it, so no later copy can lend it a q and revive what decision 7 ended."""
+        if self.ended(index, at):
+            return self.q(index, at)
+        return self.chain_q(self.items[index].group, at)
+
     def applicable(self, index: int, at: datetime, members: frozenset[int]) -> bool:
-        """Section 4.6 at *at*: its group's leader, its own q high enough, its dimension earned."""
+        """Section 4.6 at *at*: its group's leader, its reading's q high enough, its dimension earned."""
         item = self.items[index]
         if self.leaders(at).get(item.group) != index or (item.impaired_status and not self.corroborated):
             return False
-        return self.q(index, at) >= _READING_Q and self.vouching(members, at)[item.dimension] >= EARNED
+        return self.reading_q(index, at) >= _READING_Q and self.vouching(members, at)[item.dimension] >= EARNED
 
     def superseded(self, index: int, at: datetime) -> bool:
         """A hostile burn judged after the item, by *at*: a floor from before it no longer persists.
@@ -815,11 +849,18 @@ class _Ledger:
         if item.counts_with and index in self.outcome.in_effect:
             # Its reading applies; only its coverage folds into the chain it derives from.
             return Status.COUNTED, f"its coverage counts once, with {self.label(best)}"
+        if index in self.outcome.in_effect:
+            q = self.engine.reading_q(index, self.engine.now)
+            if self.engine.ended(index, self.engine.now):
+                return Status.COUNTED, f"its reading counts once, at its own q {q:.2f}, since a later burn ended it"
+            # The chain's strongest reading, read at the best reliability its chain holds (SPC-186).
+            return Status.COUNTED, (f"its reading counts once, at its source chain's best reliability, q {q:.2f} "
+                                    f"from {self.label(best)}")
         return Status.FOLDED, f"same source chain as {self.label(best)}; not counted again"
 
     def unapplied(self, index: int) -> tuple[Status, str]:
         item = self.engine.items[index]
-        q = self.engine.q(index, self.engine.now)
+        q = self.engine.reading_q(index, self.engine.now)
         if item.impaired_status and not self.engine.corroborated:
             return Status.UNCORROBORATED, "not corroborated: " + "; ".join(self.uncorroborated())
         leader = self.leaders.get(item.group, index)
@@ -1562,22 +1603,28 @@ def _propagation_item(path: SeedPath, at: datetime, grades: Mapping[str, str],
                       judged: Mapping[datetime, Normality], hours: Callable[[float], str]) -> EvidenceItem:
     """One path to a hostile seed: the weakest edge's grades, its extraction halved for each hop, floor MEDIUM.
 
-    The label names the edge the object flew, not the seed: the seed list may
-    be classified (section 9, decision 5), so the page names no seed beyond
-    the object the operator already sees approached.
+    The label names the seed by name and catalogue number, and with two hops
+    the object passed through: the seed list never becomes classified
+    (section 9, decisions 5 and 15, SPC-180).
     """
     items = [_edge_item(edge, grades, judged, hours) for edge in path.edges]
     weakest = min(items, key=lambda item: reliability(item, at))
     routine = items[0].routine
-    plural = "" if path.hops == 1 else "s"
     return replace(
         weakest,
-        label=f"{path.hops} hop{plural} from a hostile seed, through {path.edges[0].target}",
+        label=_seed_path_label(path),
         derived_from=f"{_SEED_ROOT}{path.edges[0].actor}", counts_with=items[0].derived_from,
         extraction=weakest.extraction * _HOP_FACTOR ** path.hops,
         floor_to=None if routine else _SEED_FLOOR, routine=routine,
         note=_SEED_ROUTINE if routine else _SEED_NOTE.format(whose=_SEED_WHOSE[path.hops]),
     )
+
+
+def _seed_path_label(path: SeedPath) -> str:
+    """"1 hop from hostile seed NAME (satno)", or with two hops ", through" the object passed."""
+    if path.hops == 1:
+        return f"1 hop from hostile seed {path.seed_label}"
+    return f"{path.hops} hops from hostile seed {path.seed_label}, through {path.edges[0].target}"
 
 
 def propagation_items(paths: Iterable[SeedPath], at: datetime, grades: Mapping[str, str] = PROVIDER_GRADES, *,
@@ -1997,33 +2044,27 @@ def _when(moment: datetime) -> str:
 
 
 def _narrows(cue: Cue) -> bool:
-    """A cue that could move a band, whose result SPECTRE can read: anything else leaves the range on screen as it is."""
+    """A cue with value above 0, whose result SPECTRE can read: anything else leaves the range on screen as it is.
+
+    Any such cue counts, whether or not one of its outcomes takes the range off the action line (the owner's ruling
+    of 2026-11-05 on concept section 9, decision 10, SPC-182). A cue SPECTRE cannot read never counts, however much
+    it could move: its result never lands in the model, so it cannot be collected before decide-by. Whether any cue
+    can change the Decision Engine's recommended response is the engine's to say (SPC-204).
+    """
     return cue.steps > 0 and cue.fed
 
 
-def _takes_off_the_line(cue: Cue, action_line: Band) -> bool:
-    """A cue with an outcome that takes the range off the action line: its benign ceiling falls under it, or its
-    hostile floor reaches it. One that leaves the range across the line either way cannot take it off the line;
-    whether any cue can change the Decision Engine's recommended response is the engine's to say (SPC-204)."""
-    return cue.benign[1] < action_line or cue.hostile[0] >= action_line
-
-
-def landing_cues(cues: Iterable[Cue], *, now: datetime, decide_at: datetime | None,
-                 action_line: Band = ACTION_LINE) -> tuple[Cue, ...]:
-    """The cues that could move the range off *action_line*, whose result SPECTRE can read, landing by *decide_at*,
-    best first.
+def landing_cues(cues: Iterable[Cue], *, now: datetime, decide_at: datetime | None) -> tuple[Cue, ...]:
+    """The cues with value above 0, whose result SPECTRE can read, landing by *decide_at*, best first.
 
     None with no decide-by: no cue can be shown to land in time.
     """
     if decide_at is None:
         return ()
-    return tuple(sorted(
-        (c for c in cues if _narrows(c) and _takes_off_the_line(c, action_line) and now + timedelta(hours=c.hours) <= decide_at),
-        key=_rank,
-    ))
+    return tuple(sorted((c for c in cues if _narrows(c) and now + timedelta(hours=c.hours) <= decide_at), key=_rank))
 
 
-def _no_cue_in_time(narrowing: list[Cue], deciding: list[Cue], decide_at: datetime | None, now: datetime) -> str:
+def _no_cue_in_time(narrowing: list[Cue], decide_at: datetime | None, now: datetime) -> str:
     """Why nothing is collected first, though the range straddles the line."""
     if decide_at is None:
         return "no decide-by is set to collect against"
@@ -2031,8 +2072,6 @@ def _no_cue_in_time(narrowing: list[Cue], deciding: list[Cue], decide_at: dateti
         return "decide-by has passed"
     if not narrowing:
         return "no collection SPECTRE can read would narrow it"
-    if not deciding:
-        return "no collection SPECTRE can read could move it off that line"
     return f"no collection SPECTRE can read lands before decide-by at {_when(decide_at)}"
 
 
@@ -2041,10 +2080,10 @@ def collection_advice(span: tuple[Band, Band], cues: Iterable[Cue], *, now: date
     """Section 4.10: collect first, act on the ceiling, or below the action line, for the range *span*, its
     (floor, ceiling).
 
-    Collect first only when the range straddles the line (floor below it, ceiling at or above it) and a cue that
-    could move the range off the line on one of its outcomes, whose result SPECTRE can read, lands by decide-by: the
-    best such cue by steps per hour is named. *decide_at* is the sweep's decide-by, which already subtracts the
-    response time, so nothing is taken off again; with none set, no cue can be shown to land in time, so the cautious
+    Collect first only when the range straddles the line (floor below it, ceiling at or above it) and a cue with value
+    above 0, whose result SPECTRE can read, lands by decide-by: the best such cue by steps per hour is named
+    (SPC-182). *decide_at* is the sweep's decide-by, which already subtracts the response time, so nothing is taken
+    off again; with none set, no cue can be shown to land in time, so the cautious
     reading acts on the ceiling. The advice narrows the range: whether a collection can change the Decision Engine's
     recommended response is the engine's to say (decision.ScenarioResult.collection_under, SPC-204).
     """
@@ -2059,10 +2098,9 @@ def collection_advice(span: tuple[Band, Band], cues: Iterable[Cue], *, now: date
                                 f"above {line}, so no collection could take the range below it.")
     runs = f"The Threat range runs from {floor.name} to {ceiling.name}, across {line}"
     held = tuple(cues)
-    landing = landing_cues(held, now=now, decide_at=decide_at, action_line=action_line)
+    landing = landing_cues(held, now=now, decide_at=decide_at)
     if not landing or decide_at is None:
-        narrowing = [c for c in held if _narrows(c)]
-        why = _no_cue_in_time(narrowing, [c for c in narrowing if _takes_off_the_line(c, action_line)], decide_at, now)
+        why = _no_cue_in_time([c for c in held if _narrows(c)], decide_at, now)
         return CollectionAdvice(Advice.ACT_ON_CEILING, None, f"{act} {runs}, and {why}.")
     cue = landing[0]
     return CollectionAdvice(Advice.COLLECT_FIRST, cue, (

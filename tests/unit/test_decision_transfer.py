@@ -41,6 +41,7 @@ from spectre.domain.decision import (
     Scenario,
     ScenarioBinding,
     ScenarioResult,
+    TurnRule,
     evaluate_scenario,
 )
 from spectre.domain.decision_transfer import MAX_TRANSFER_BURNS, TransferBurn, row_burns
@@ -375,14 +376,27 @@ class TestTheResultAndTheLedgerNameEveryBurn:
 # ── The game tree ──
 
 class TestTheGameTreeRefusesARowOfSeveralBurns:
-    def test_the_tree_is_refused_naming_why_and_the_one_turn_result_stands(self) -> None:
-        scenario = dataclasses.replace(_with(_transfer()), turns=2)
+    def test_over_equal_turns_the_tree_is_refused_naming_why_and_the_one_turn_result_stands(self) -> None:
+        # A record 0.28.0 to 0.36.0 wrote is built over equal turns, as it was then (SPC-187).
+        scenario = dataclasses.replace(_with(_transfer()), turns=2, turn_rule=TurnRule.EQUAL)
         assert decision_tree.refused_before_run(scenario) == (
             "No tree built: row 1, manoeuvre, carries 3 burns of one transfer. Equal turns put a row's burn at the "
             "same time after every turn starts, so they cannot give each of its burns a turn of its own. This result "
             "is one turn."
         )
         assert decision_tree.depth_refusal(scenario) is None
+
+    def test_the_engines_turns_refuse_it_only_with_fewer_turns_than_burns(self) -> None:
+        # Owner ruling of 2026-11-05 on D3 (SPC-187): every burn falls inside a turn of its own.
+        scenario = dataclasses.replace(_with(_transfer()), turns=2)
+        assert decision_tree.refused_before_run(scenario) == (
+            "No tree built: row 1, manoeuvre, makes 3 burns of one transfer within the span searched, and every burn "
+            "falls inside a turn of its own, so it needs 3 turns, more than the 2 asked for. This result is one turn."
+        )
+        assert decision_tree.depth_refusal(scenario) is None
+        # With three turns its burns fit, one to a turn: what refuses it then is its size.
+        three = decision_tree.refused_before_run(dataclasses.replace(scenario, turns=3))
+        assert three is not None and three.startswith("No tree built: 3 turns of 4 red moves and 4 responses make ")
 
     def test_every_tree_refusal_is_in_the_sentences_the_house_checks_run_on(self) -> None:
         unlisted = [name for name in dir(decision_tree) if name.startswith("TREE_")

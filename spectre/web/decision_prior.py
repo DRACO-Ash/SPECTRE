@@ -1,10 +1,12 @@
 """The NOTSO prior beside each adversary row, and applying the ones the operator ticked (SPC-130).
 
-The panel lists each adversary row with a labelled "Load from NOTSO" control
-(SPC-131). A row loaded shows the P and Conf the bound red track's NOTSO
-history suggests, with what they rest on, P's interval (SPC-132) and a
-labelled control to apply them; or why none is offered. Loading is not
-applying, and nothing is filled in on the operator's behalf (Threat
+Every adversary row's suggestion is loaded when the panel opens, and again
+on every change in the form (SPC-185, the owner's ruling of 2026-11-05 on
+concept section 9, decision 16). Each row shows the P and Conf the bound red
+track's NOTSO history suggests, with what they rest on, P's interval
+(SPC-132) and a labelled control to apply them; or why none is offered.
+Showing is not applying: applying stays the operator's tick, honoured at
+Evaluate, and nothing is filled in on the operator's behalf (Threat
 Understanding concept, section 7.5, items 2 and 3).
 
 The suggestion is read from the NOTSO cache the operator syncs and, for Conf,
@@ -101,10 +103,16 @@ def launch_year(tle: str) -> int | None:
     return None
 
 
-def offered_prior(
-    state: Any, red: BoundElset, action_type: ActionType, horizon_hours: float, now: datetime,
-) -> NotsoPrior | NoPrior:
-    """The NOTSO prior for *action_type* by the bound *red* over *horizon_hours*, or why none is offered."""
+class _Read(NamedTuple):
+    """What every suggestion for the bound red track rests on: the cache's cover, red's notices and its profile."""
+
+    cover:   Any
+    notices: list[NOTSORecord]
+    profile: Any | None
+
+
+def _read(state: Any, red: BoundElset, now: datetime) -> _Read | NoPrior:
+    """The NOTSO cache read once for *red* at *now*, or why no suggestion can be offered for any row."""
     if red.satno is None:
         return NoPrior(_NO_SATNO.format(red=red.stk_name))
     cache = get_notso_cache()
@@ -114,8 +122,38 @@ def offered_prior(
         return NoPrior(_UNDATED.format(n=held) if held else _EMPTY_CACHE)
     # The one grammar the NOTSO panel parses its cached records with.
     notices = notsos_from_cache_records(cache.get_for_satno(red.satno), red.satno)
-    return notso_prior(red.stk_name, action_type, notices, cover=cover, horizon_hours=horizon_hours,
-                       profile=_profile(state, red.satno, notices), launched=launch_year(red.tle), until=now)
+    return _Read(cover, notices, _profile(state, red.satno, notices))
+
+
+class _Offering:
+    """One request's suggestions for the bound red track: the cache read once, when first asked, and each action
+    type's suggestion worked out once, however many rows share it (SPC-185 asks for every row on every change)."""
+
+    def __init__(self, state: Any, red: BoundElset, horizon_hours: float, now: datetime) -> None:
+        self.state, self.red, self.horizon_hours, self.now = state, red, horizon_hours, now
+        self.found: dict[ActionType, NotsoPrior | NoPrior] = {}
+        self.base: _Read | NoPrior | None = None
+
+    def prior(self, action_type: ActionType) -> NotsoPrior | NoPrior:
+        if action_type not in self.found:
+            if self.base is None:
+                self.base = _read(self.state, self.red, self.now)
+            self.found[action_type] = self._work_out(self.base, action_type)
+        return self.found[action_type]
+
+    def _work_out(self, base: _Read | NoPrior, action_type: ActionType) -> NotsoPrior | NoPrior:
+        if isinstance(base, NoPrior):
+            return base
+        red = self.red
+        return notso_prior(red.stk_name, action_type, base.notices, cover=base.cover, horizon_hours=self.horizon_hours,
+                           profile=base.profile, launched=launch_year(red.tle), until=self.now)
+
+
+def offered_prior(
+    state: Any, red: BoundElset, action_type: ActionType, horizon_hours: float, now: datetime,
+) -> NotsoPrior | NoPrior:
+    """The NOTSO prior for *action_type* by the bound *red* over *horizon_hours*, or why none is offered."""
+    return _Offering(state, red, horizon_hours, now).prior(action_type)
 
 
 def horizon(raw: str) -> float | None:
@@ -161,19 +199,11 @@ def _applied(action: AdversaryAction, prior: NotsoPrior) -> AdversaryAction:
     )
 
 
-class _Ask(NamedTuple):
-    """What a suggestion is worked out from: the session, the bound red track, the horizon and the scenario epoch."""
-
-    state: Any
-    red:   BoundElset | None
-    when:  tuple[float, datetime]
-
-
-def _apply_one(ask: _Ask, action: AdversaryAction, tick: Tick, row: int) -> AdversaryAction | str:
-    """*action* with its ticked suggestion applied, or why it cannot be."""
-    if ask.red is None:
+def _apply_one(offering: _Offering | None, action: AdversaryAction, tick: Tick, row: int) -> AdversaryAction | str:
+    """*action* with its ticked suggestion applied, or why it cannot be; *offering* is None with no red track."""
+    if offering is None:
         return _TICK_NO_RED.format(row=row)
-    prior = offered_prior(ask.state, ask.red, action.action_type, *ask.when)
+    prior = offering.prior(action.action_type)
     if isinstance(prior, NoPrior):
         return _TICK_NONE.format(row=row, reason=prior.reason)
     if prior.token != tick.token:
@@ -193,11 +223,11 @@ def apply_priors(
     if read is None:
         return Applied([], _UNREADABLE)
     by_id = {t.row_id: t for t in read}
-    ask = _Ask(state, red, when)
+    offering = None if red is None else _Offering(state, red, *when)
     out: list[AdversaryAction] = []
     for row, action in enumerate(actions, start=1):
         tick = by_id.get(action.id)
-        built = action if tick is None else _apply_one(ask, action, tick, row)
+        built = action if tick is None else _apply_one(offering, action, tick, row)
         if isinstance(built, str):
             return Applied([], built)
         out.append(built)
@@ -208,8 +238,7 @@ def apply_priors(
 
 
 class RowView(NamedTuple):
-    """One adversary row as the region lists it: its number, id, name and action, and, once the operator has loaded
-    it from NOTSO, its prior or why none (SPC-131); an unloaded row holds neither."""
+    """One adversary row as the region lists it: its number, id, name and action, and its prior or why none."""
 
     row:    int
     row_id: str
@@ -218,7 +247,6 @@ class RowView(NamedTuple):
     prior:  NotsoPrior | None
     reason: str
     ticked: bool
-    loaded: bool = True
 
 
 def _action_type(raw: str) -> ActionType:
@@ -229,37 +257,27 @@ def _action_type(raw: str) -> ActionType:
 
 
 class RowsAsked(NamedTuple):
-    """The adversary rows the panel posts, as parallel columns, the ticks it holds and the rows loaded from NOTSO."""
+    """The adversary rows the panel posts, as parallel columns, and the ticks it holds."""
 
     ids:    Sequence[str]
     names:  Sequence[str]
     types:  Sequence[str]
     ticks:  Sequence[str]
-    loaded: Sequence[str] = ()
-
-
-def _unloaded(row: int, row_id: str, name: str, action: ActionType) -> RowView:
-    return RowView(row=row, row_id=row_id, name=name, action=action.value.replace("_", " "), prior=None, reason="",
-                   ticked=False, loaded=False)
 
 
 def row_views(
     state: Any, asked: RowsAsked, red: BoundElset, when: tuple[float, datetime],
 ) -> list[RowView]:
-    """Each posted row, with its prior once loaded from NOTSO; a tick stays ticked only while it is the suggestion
-    shown now. A row ticked counts as loaded, since its suggestion was shown to tick it; no other row's NOTSO
-    history is read until the operator loads it (SPC-131)."""
+    """Every posted row with its prior, read as the panel opens and on every change (SPC-185); a tick stays ticked
+    only while it is the suggestion shown now."""
     read = ticks(asked.ticks) or []
     shown = {(t.row_id, t.token) for t in read}
-    loaded = {*asked.loaded, *(t.row_id for t in read)}
+    offering = _Offering(state, red, *when)
     views: list[RowView] = []
     for i, row_id in enumerate(asked.ids):
         action = _action_type(asked.types[i] if i < len(asked.types) else "")
         name = asked.names[i] if i < len(asked.names) else ""
-        if row_id not in loaded:
-            views.append(_unloaded(i + 1, row_id, name, action))
-            continue
-        offered = offered_prior(state, red, action, *when)
+        offered = offering.prior(action)
         prior = offered if isinstance(offered, NotsoPrior) else None
         views.append(RowView(
             row=i + 1, row_id=row_id, name=name,

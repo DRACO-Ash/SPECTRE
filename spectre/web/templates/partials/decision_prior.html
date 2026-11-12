@@ -1,30 +1,19 @@
 {# The NOTSO suggestion beside each adversary row (SPC-130), swapped into the panel's .adv-priors region.
    Context: note (str), why no row can be offered anything yet, or blank; rows (list of decision_prior.RowView),
-   each with its number, id, name, action, whether the operator has loaded it from NOTSO (SPC-131), and, once
-   loaded, its prior (NotsoPrior|None) or the reason none is offered, and whether its apply control is ticked.
-   A row not loaded shows only its labelled Load from NOTSO control, which asks this region again with the row's id;
-   a loaded row keeps a hidden field so it stays loaded when the form changes. Nothing here fills P or Conf: loading
-   is not applying, a ticked control is applied at Evaluate, and only while the suggestion is still the one shown
-   (concept section 7.5, items 2 and 3). The control sits inside the evaluate form, so it sets its own target,
-   swap, indicator, disabled element and include, which htmx would otherwise take from the form.
+   each with its number, id, name, action, its prior (NotsoPrior|None) or the reason none is offered, and whether
+   its apply control is ticked. Every row's suggestion shows as the panel opens (SPC-185). Nothing here fills P or
+   Conf: showing is not applying, a ticked control is applied at Evaluate, and only while the suggestion is still
+   the one shown (concept section 7.5, items 2 and 3).
    edited (list of row ids) is the record of the rows whose P the operator edited (SPC-183), carried in a hidden
    field per row whatever else the region says, so the next change and Evaluate send it back. #}
 {% for row_id in edited %}<input type="hidden" name="adv_p_edited" value="{{ row_id }}">
 {% endfor %}{% if note %}
 <p class="adv-prior-note">{{ note }}</p>
 {% else %}
-<p class="adv-prior-note" style="margin:0 0 0.2rem">Nothing is read from NOTSO for a row until you load it; loading fills neither P nor Conf.</p>
+<p class="adv-prior-note" style="margin:0 0 0.2rem">Each row's NOTSO suggestion is shown as the panel opens. It fills neither P nor Conf: tick it to apply it at Evaluate.</p>
 {% for r in rows %}
 <div class="adv-prior" style="margin:0 0 0.3rem">
   <div style="font-weight:600">Row {{ r.row }}{% if r.name %}, {{ r.name }}{% endif %} ({{ r.action }})</div>
-  {% if not r.loaded %}
-  <button type="button" class="btn-secondary adv-prior-load" name="adv_loaded" value="{{ r.row_id }}"
-          aria-label="Load from NOTSO for row {{ r.row }}"
-          hx-get="/plan/decision/prior" hx-include="closest form" hx-target="closest .adv-priors" hx-swap="innerHTML"
-          hx-indicator="this" hx-disabled-elt="this"
-          style="font-size:0.6rem; margin-top:0.15rem">Load from NOTSO</button>
-  {% else %}
-  <input type="hidden" name="adv_loaded" value="{{ r.row_id }}">
   {% if r.prior is not none %}
   <p style="margin:0.1rem 0 0">{{ r.prior.suggestion }}</p>
   <p style="margin:0.1rem 0 0">{{ r.prior.basis_line }}</p>
@@ -36,7 +25,6 @@
   </label>
   {% else %}
   <p style="margin:0.1rem 0 0">{{ r.reason }}</p>
-  {% endif %}
   {% endif %}
 </div>
 {% endfor %}

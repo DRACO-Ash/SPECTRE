@@ -93,8 +93,6 @@ def _region(client: Any, cookie: str, **params: Any) -> str:
     query: dict[str, Any] = {"horizon_hours": "72", "adv_id": ["A1"], "adv_name": ["Approach"],
                              "adv_type": ["manoeuvre"], "red_sat": "RX"}
     query.update(params)
-    # Each row as the operator loaded it from NOTSO (SPC-131): nothing is worked out for a row until it is.
-    query.setdefault("adv_loaded", query["adv_id"])
     resp = client.get("/plan/decision/prior", params=query, cookies={"spectre_session": cookie})
     assert resp.status_code == 200
     return resp.text
@@ -421,3 +419,36 @@ class TestTheLaunchYear:
     ])
     def test_it_is_read_from_the_international_designator(self, tle: str, year: int | None) -> None:
         assert decision_prior.launch_year(tle) == year
+
+
+class TestEachRequestReadsTheCacheOnce:
+    """SPC-185 asks for every row on every change, so the cache's cover, the red track's notices and its profile
+    are read once per request, and each action type's suggestion is worked out once, however many rows share it."""
+
+    def test_five_rows_of_two_types_read_the_cache_once_and_work_out_two_suggestions(
+        self, client: Any, auth_cookie: str, held: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cache = decision_prior.get_notso_cache()
+        calls: dict[str, int] = {"cover": 0, "records": 0, "prior": 0}
+        real_cover, real_records, real_prior = cache.covered_periods, cache.get_for_satno, decision_prior.notso_prior
+
+        def cover(*args: Any) -> Any:
+            calls["cover"] += 1
+            return real_cover(*args)
+
+        def records(*args: Any) -> Any:
+            calls["records"] += 1
+            return real_records(*args)
+
+        def prior(*args: Any, **kwargs: Any) -> Any:
+            calls["prior"] += 1
+            return real_prior(*args, **kwargs)
+
+        monkeypatch.setattr(cache, "covered_periods", cover)
+        monkeypatch.setattr(cache, "get_for_satno", records)
+        monkeypatch.setattr(decision_prior, "notso_prior", prior)
+        ids = ["A1", "A2", "A3", "A4", "A5"]
+        types = ["manoeuvre", "manoeuvre", "no_action", "manoeuvre", "no_action"]
+        page = _text(_region(client, auth_cookie, adv_id=ids, adv_name=ids, adv_type=types))
+        assert calls == {"cover": 1, "records": 1, "prior": 2}
+        assert page.count(f"NOTSO suggestion for RX: P {_P}.") == 3

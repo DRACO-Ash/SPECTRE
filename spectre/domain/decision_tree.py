@@ -14,8 +14,14 @@ end made then, in the turn after. Its delta-V is our burns added up, its custody
 horizon with every red burn on it, and its score the one-turn weighted sum on those figures, a lookup; each carries
 its basis.
 
+The engine sets each turn from the rows' burn times so every burn falls inside its own turn (design D3, SPC-187,
+spectre.domain.turn_update.turn_plan): a transfer's burns fall one to a turn, each carried into the turn it falls in
+as the matrix flew it, and the operator never sets a length. A record 0.23.0 to 0.36.0 wrote is built over the equal
+turns it was built over then, a row of several burns refusing it.
+
 A tree is checked before anything runs: both sides bound and current, every row with a propagated orbit to carry
-on, every burn inside its own turn, the branches under MAX_TREE_BRANCHES and the cost under the cap. A tree that
+on, turns the engine can set with every burn inside its own, the branches under MAX_TREE_BRANCHES and the cost under
+the cap. A tree that
 does not fit says so and the result is one turn. While it runs it shares the evaluation's budget: once spent, the
 tree stops at the deepest turn built in full and says so; a branch that fails or does not converge keeps the turns
 built in full and says which. Nothing is cut short silently.
@@ -40,6 +46,7 @@ from spectre.astro.monte_carlo import (
     BlueBurn,
     BlueTrack,
     ContinuedRed,
+    ManoeuvreHypothesis,
     RedBurn,
     ReenteredError,
     Sampled,
@@ -55,6 +62,7 @@ from spectre.astro.monte_carlo import (
     moved_states,
     nominal_continued_arc,
     nominal_red_arc,
+    nominal_turn_burns,
     rk45_arc,
     run_separation_series,
     searched_approach,
@@ -97,6 +105,7 @@ from spectre.domain.decision import (
     ScenarioResult,
     SelectorStrategy,
     TurnOne,
+    TurnRule,
     _Budget,
     _BudgetSpentError,
     _drawn_tca_uncertainty,
@@ -126,6 +135,15 @@ from spectre.domain.decision_figures import ELSET_MODEL, ElsetErrorAt, ResponseF
 from spectre.domain.decision_transfer import MAX_BURN_M_S
 from spectre.domain.provenance import Basis, FigureBasis, weakest
 from spectre.domain.tree_selectors import TreeSelection, select
+from spectre.domain.turn_update import (
+    TREE_BURN_OUTSIDE_TURN,
+    TREE_NO_BOUNDARY,
+    TREE_TOO_FEW_TURNS,
+    TurnPlan,
+    plan_or_equal,
+    row_hypotheses,
+    turn_plan,
+)
 
 #: The most branches one evaluation builds: the sum over turns k of (rows x responses) to the k (design D6).
 MAX_TREE_BRANCHES = 1_000
@@ -139,6 +157,12 @@ TREE_HEADER = (
     "{turn_h:.1f} h of the {span_h:.1f} h searched; turn 2 starts at {t2:%H:%M} UTC{t3}."
 )
 _TREE_HEADER_T3 = " and turn 3 at {t3:%H:%M} UTC"
+#: The header when the engine sets the turns (SPC-187); TREE_HEADER is for the equal turns of a record written before.
+TREE_HEADER_BURNS = (
+    "A {turns}-turn tree: {rows} red moves and {responses} responses each turn, {nodes:,} branches. The engine sets "
+    "each turn from the rows' burn times, so every burn falls inside its own turn: {lengths}, of the {span_h:.1f} h "
+    "searched; turn 2 starts at {t2:%H:%M} UTC{t3}."
+)
 TREE_PROPAGATOR = (
     "Every figure in the tree is RK45 with J2 and exponential drag for both orbits, from their SGP4 states at the "
     "scenario epoch: no element set exists for an orbit after a burn, so each turn starts where the one before left "
@@ -158,6 +182,12 @@ TREE_RED_AGAIN = (
     "drawn afresh for each sample from where that sample's last turn left it; a sample whose drawn time falls after "
     "its turn ends still burns then, in the turn after."
 )
+#: A transfer's line (SPC-187): each of its burns falls in a turn of its own, the same time after that turn starts.
+TREE_TRANSFER_AGAIN = (
+    "Row {row}, {name}: its {n} burns fall one to a turn, {offsets} after each turn starts; taken again in a later "
+    "turn, it makes them the same way from that turn on, with its spread drawn afresh for each sample, and a burn "
+    "that would fall after the last turn is not made."
+)
 TREE_RESPONSE_AGAIN = (
     "Each response executes its time to execute after each turn starts; a target separation is sized again against "
     "red's nominal burn in that turn."
@@ -175,9 +205,9 @@ TREE_REFUSED_ROW = (
     "No tree built: row {row}, {name}, has no propagated orbit for turn 2 to start from, since its closest approach "
     "is refused: its cell says why. This result is one turn."
 )
-# D3 places a row's burn at one offset in every turn, so a transfer's later burns have no turn of their own: unequal
-# turns, set by the engine, are SPC-187 (owner ruling, 2026-11-05). Until then a row of several burns refuses the
-# tree, and the one-turn result stands with this reason (D7, SPC-184).
+# Equal turns place a row's burn at one offset in every turn, so a transfer's later burns have no turn of their own: a
+# record 0.23.0 to 0.36.0 wrote, built over equal turns, is refused for a row of several burns with this reason (D7,
+# SPC-184). The engine's own turns give each burn a turn (SPC-187).
 TREE_SEVERAL_BURNS = (
     "No tree built: row {row}, {name}, carries {n} burns of one transfer. Equal turns put a row's burn at the same "
     "time after every turn starts, so they cannot give each of its burns a turn of its own. This result is one turn."
@@ -238,10 +268,13 @@ _WHY_RK45 = "could not be put on RK45 within the budget"
 
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
-    TREE_HEADER, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, TREE_RED_AGAIN, TREE_RESPONSE_AGAIN,
+    TREE_HEADER, TREE_HEADER_BURNS, TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS, TREE_RED_AGAIN,
+    TREE_TRANSFER_AGAIN, TREE_RESPONSE_AGAIN,
     TREE_UNBOUND, TREE_LOOKUP_ROW, TREE_REFUSED_ROW, TREE_SEVERAL_BURNS, TREE_BUDGET_TURN_ONE, TREE_BURN_OUTSIDE,
     TREE_OVER_BRANCHES, TREE_OVER_CAP, TREE_BUDGET,
     TREE_BRANCH_REFUSED, TREE_DEPTH_BRANCHES, TREE_DEPTH_COST, TREE_DEEPEST, TREE_REMAINDER_COUNTED,
+    # Why the engine sets no turns (SPC-187), worded beside the turns it sets.
+    TREE_TOO_FEW_TURNS, TREE_NO_BOUNDARY, TREE_BURN_OUTSIDE_TURN,
 )
 
 _NODE_LABEL = "Turn {k} of {turns}, {path}: "
@@ -426,26 +459,29 @@ def branches(rows: int, responses: int, turns: int) -> int:
 
 class _Sizes(NamedTuple):
     """What a tree's cost is counted from: each row's samples (0 for a row that does not move red), the responses,
-    how many of them burn, the span searched and the turns."""
+    how many of them burn, and the turns, which run the span searched."""
 
     samples:   tuple[int, ...]
     responses: int
     burning:   int
-    span_s:    float
-    turns:     int
+    plan:      TurnPlan
 
     @property
-    def turn_s(self) -> float:
-        return self.span_s / self.turns
+    def span_s(self) -> float:
+        return self.plan.span_s
+
+    @property
+    def turns(self) -> int:
+        return self.plan.turns
 
 
 def _sizes(scenario: Scenario) -> _Sizes:
+    """Counted over the engine's turns, or equal turns where it sets none, since a size is counted before why."""
     return _Sizes(
         tuple(0 if a.hypothesis is None else a.hypothesis.hypothesis.n_samples for a in scenario.adversary_actions),
         len(scenario.friendly_responses),
         sum(f.burn is not None for f in scenario.friendly_responses),
-        _searched_span_s(scenario),
-        scenario.turns,
+        plan_or_equal(scenario),
     )
 
 
@@ -462,13 +498,16 @@ def _turn_cost_s(sizes: _Sizes, k: int) -> float:
     """What turn *k* costs, seconds of sample time: red's arcs, each searched against every blue path that shares
     its red path, a slice search for each before the last turn, a blue arc per branch, and the sizing of each
     burning response, 2 arcs and MAX_SIZING_TRIALS trials, against each red path and blue path before it."""
-    rest = sizes.span_s - (k - 1) * sizes.turn_s
+    rest = sizes.span_s - sizes.plan.start_s(k)
     per = rest + SET_UP_S_PER_SAMPLE
     rows = len(sizes.samples)
     blues = sizes.responses**k
     arcs = _red_arcs(sizes.samples, k)
     searches = arcs * (blues - 1) * _BURN_SEARCH_FRACTION * per
-    slices = arcs * blues * _BURN_SEARCH_FRACTION * (sizes.turn_s + SET_UP_S_PER_SAMPLE) if k < sizes.turns else 0.0
+    slices = (
+        arcs * blues * _BURN_SEARCH_FRACTION * (sizes.plan.length_s(k) + SET_UP_S_PER_SAMPLE)
+        if k < sizes.turns else 0.0
+    )
     sizing_paths = rows**k * sizes.responses ** (k - 1) if sizes.burning else 0
     sizing = sizing_paths * (2 + MAX_SIZING_TRIALS * sizes.burning) * per
     return float(arcs * per + searches + slices + rows**k * blues * per + sizing)
@@ -479,7 +518,7 @@ def _turn_one_extra_s(sizes: _Sizes) -> float:
     blue, and blue's and red's nominal arcs integrated again for each row."""
     variants = 1 + sizes.burning
     searched = sum(max(n, 1) for n in sizes.samples) * variants
-    slices = searched * _BURN_SEARCH_FRACTION * (sizes.turn_s + SET_UP_S_PER_SAMPLE)
+    slices = searched * _BURN_SEARCH_FRACTION * (sizes.plan.length_s(1) + SET_UP_S_PER_SAMPLE)
     return slices + len(sizes.samples) * (variants + 1) * (sizes.span_s + SET_UP_S_PER_SAMPLE)
 
 
@@ -494,7 +533,8 @@ def tree_cost(scenario: Scenario) -> float:
 
 
 def largest_tree(scenario: Scenario) -> int:
-    """The most turns, the span split equally among them, that fit the branch cap and the cost cap; 1 when none."""
+    """The most turns, each set as the scenario's rule sets it, that fit the branch cap and the cost cap; 1 when
+    none."""
     scenario = with_remainder(scenario)
     rows, responses = len(scenario.adversary_actions), len(scenario.friendly_responses)
     fits = 1
@@ -528,7 +568,10 @@ def _lookup_row(scenario: Scenario) -> str | None:
 
 
 def _several_burns(scenario: Scenario) -> str | None:
-    """The first row carrying more than one burn of a transfer, which equal turns cannot place (SPC-184)."""
+    """The first row carrying more than one burn of a transfer, which equal turns cannot place (SPC-184); the
+    engine's own turns place every burn (SPC-187), so only a record built over equal turns asks."""
+    if scenario.turn_rule is not TurnRule.EQUAL:
+        return None
     for i, action in enumerate(scenario.adversary_actions):
         if action.hypothesis is not None and action.hypothesis.then:
             return TREE_SEVERAL_BURNS.format(row=i + 1, name=action.name, n=len(action.hypothesis.then) + 1)
@@ -552,6 +595,10 @@ def _burns(scenario: Scenario) -> Iterator[tuple[str, float]]:
 
 
 def _burn_outside(scenario: Scenario) -> str | None:
+    """A burn outside its turn: the engine's turns say which (SPC-187); equal turns check each burn as before."""
+    if scenario.turn_rule is not TurnRule.EQUAL:
+        plan = turn_plan(scenario)
+        return plan if isinstance(plan, str) else None
     turn_s = _searched_span_s(scenario) / scenario.turns
     for name, at_s in _burns(scenario):
         if not 0.0 <= at_s < turn_s:
@@ -603,7 +650,7 @@ def _over_cap(scenario: Scenario) -> str | None:
 
 
 #: What a tree needs before its size is counted: both sides bound and current, an orbit from every row, one burn a
-#: row, every burn inside its turn. Then what it fits: the branch cap and the cost cap.
+#: row under equal turns, every burn inside its turn. Then what it fits: the branch cap and the cost cap.
 _SHAPE_CHECKS = (_unbound, _lookup_row, _several_burns, _burn_outside)
 _FIT_CHECKS = (_over_branches, _over_cap)
 
@@ -778,6 +825,9 @@ class _Carry(NamedTuple):
     pending:       tuple[tuple[RedBurn, ...], ...] = ()
     # Each sample's blue, read that many seconds on along its own orbit: its element-set draw (SPC-202); None for none.
     blue_shift_s:  np.ndarray | None = None
+    # A transfer's burns past the turn's end as stated, timed from the next turn's start: what our burn is sized
+    # against there makes them (SPC-187); empty for none.
+    nominal_pending: tuple[RedBurn, ...] = ()
 
 
 class _Drawn(NamedTuple):
@@ -790,12 +840,24 @@ class _Drawn(NamedTuple):
 
 
 class _RedTurn(NamedTuple):
-    """Red's move in a turn: its burn, if any, its nominal arc and the B* it ends on, and what was drawn at the turn's
-    start, if anything."""
+    """Red's move in a turn: its burn, if any, its nominal arc and the B* it ends on, what was drawn at the turn's
+    start, if anything, and every burn red makes as stated from the turn's start on, timed from it (SPC-187)."""
 
     burn:    TurnBurn | None
     nominal: tuple[Trajectory, float]
     drawn:   _Drawn | None = None
+    nominal_burns: tuple[RedBurn, ...] = ()
+
+
+def _after(burns: Sequence[RedBurn], at_s: float) -> tuple[RedBurn, ...]:
+    """The burns past *at_s*, timed from it: what the turn starting there still has to make."""
+    return tuple(b._replace(at_s=b.at_s - at_s) for b in burns if b.at_s > at_s)
+
+
+def _bstar_at(burns: Sequence[RedBurn], at_s: float, before: float) -> float:
+    """The B* red flies at *at_s*: after its latest burn by then, or *before* with none."""
+    made = [b for b in sorted(burns, key=lambda b: b.at_s) if b.at_s <= at_s]
+    return made[-1].bstar_after if made else before
 
 
 @dataclass(eq=False)
@@ -864,7 +926,9 @@ class _Tree:
         binding = cast("ScenarioBinding", scenario.binding)
         self.red, self.blue = cast("BoundElset", binding.red), cast("BoundElset", binding.blue)
         self.span_s = _searched_span_s(scenario)
-        self.turn_s = self.span_s / scenario.turns
+        # The tree was not refused before it ran, so the engine's turns, or equal ones for a record, were set (SPC-187).
+        self.plan = cast("TurnPlan", turn_plan(scenario))
+        self.hyps = [row_hypotheses(scenario, a) for a in scenario.adversary_actions]
         # Turn 1's matrix propagated both element sets from the epoch already, or the tree was refused at its root.
         self.red0 = cast("BlueTrack", elset_state(self.red.tle, scenario.epoch_utc))
         self.blue0 = cast("BlueTrack", elset_state(self.blue.tle, scenario.epoch_utc))
@@ -934,10 +998,12 @@ class _Tree:
         if series is None:
             raise self._row_refused(i, spent=sampling.spent)
         kept = series.kept
-        hypothesis = cast("AdversaryHypothesis", self.scenario.adversary_actions[i].hypothesis).hypothesis
+        hypothesis, later = self.hyps[i][0][1], tuple(h for _, h in self.hyps[i][1:])
         # The series integrated blue over the span already, so its arc does not re-enter here.
         blue = rk45_arc(self.blue0.state_eci_km, self.span_s, self.blue0.bstar)
-        nominal = nominal_red_arc(hypothesis, self.window)
+        nominal = nominal_red_arc(hypothesis, self.window, later)
+        length = self.plan.length_s(1)
+        stated = TurnBurn(hypothesis, self._from_epoch_s(hypothesis), tuple((h, self._from_epoch_s(h)) for h in later))
         if kept is None or blue is None or nominal is None:
             raise self._refuse([(i, 0)], _WHY_ARC)
         burns = sized_burns(sampling.sized)
@@ -949,8 +1015,9 @@ class _Tree:
             arc = blue if burn is None else self._burnt(blue, burn, self.span_s, [(i, j)])
             variant = 0 if burn is None else burns.index(burn) + 1
             carry = _Carry(
-                kept.red[:, 0, :], kept.bstar, nominal(self.turn_s), hypothesis.bstar_post, arc(self.turn_s),
+                kept.red[:, 0, :], kept.bstar, nominal(length), hypothesis.bstar_post, arc(length),
                 kept.slice_min_km[variant], kept.pending, None if self.error is None else kept.blue_shift_s,
+                _after(nominal_turn_burns(stated), length),
             )
             roots.append(self._root(i, j, cell, carry, sampled=True))
         return roots
@@ -964,8 +1031,9 @@ class _Tree:
         pair = rk45_pair(self.red.tle, self.blue.tle, self.window)
         if isinstance(pair, ElsetFailure):
             raise self._refuse([(i, 0)], _WHY_ARC)
-        slice_window = SeparationWindow(self.scenario.epoch_utc, self.turn_s)
-        red_at = pair.red(self.turn_s)
+        length = self.plan.length_s(1)
+        slice_window = SeparationWindow(self.scenario.epoch_utc, length)
+        red_at = pair.red(length)
         roots = []
         for j in range(len(self.scenario.friendly_responses)):
             cell = self._cell(i, j)
@@ -974,11 +1042,14 @@ class _Tree:
             arc = pair.blue if burn is None else self._burnt(pair.blue, burn, self.span_s, [(i, j)])
             sliced = searched_approach(pair.red, arc, slice_window).approach.miss_km
             carry = _Carry(
-                red_at[None, :], np.array([self.red0.bstar]), red_at, self.red0.bstar, arc(self.turn_s),
-                np.array([sliced]),
+                red_at[None, :], np.array([self.red0.bstar]), red_at, self.red0.bstar, arc(length), np.array([sliced]),
             )
             roots.append(self._root(i, j, cell, carry, sampled=False))
         return roots
+
+    def _from_epoch_s(self, hypothesis: ManoeuvreHypothesis) -> float:
+        """When a burn is stated, seconds after the scenario epoch."""
+        return float((hypothesis.epoch_utc - self.scenario.epoch_utc).total_seconds())
 
     def _burnt(self, arc: Trajectory, burn: BlueBurn, end_s: float, steps: Sequence[tuple[int, int]]) -> Trajectory:
         try:
@@ -992,7 +1063,8 @@ class _Tree:
     def _root(self, i: int, j: int, cell: OutcomeMetrics, carry: _Carry, *, sampled: bool) -> _Branch:
         action, friendly = self.scenario.adversary_actions[i], self.scenario.friendly_responses[j]
         hypothesis = action.hypothesis
-        burn_utc = None if hypothesis is None else hypothesis.hypothesis.epoch_utc
+        # The earliest burn the row applies, as custody reads it (SPC-184).
+        burn_utc = self.hyps[i][0][1].epoch_utc if self.hyps[i] else None
         step = PathStep(action, friendly, _delta_v(cell), burn_utc, cell.figure_bases.delta_v_cost_km_s.kind)
         seed = 0 if hypothesis is None else hypothesis.hypothesis.random_seed
         figures = _cell_figures(cell, carry.slices)
@@ -1020,31 +1092,39 @@ class _Tree:
                 children += self._continue(k, group, a)
         return children
 
-    def _seed(self, k: int, red_path: Sequence[int], action: AdversaryAction) -> int:
-        base = 0 if action.hypothesis is None else action.hypothesis.hypothesis.random_seed
-        return int(np.random.SeedSequence([base, k, *red_path]).generate_state(1)[0])
+    def _seeded(self, k: int, red_path: Sequence[int], hypothesis: ManoeuvreHypothesis) -> ManoeuvreHypothesis:
+        """*hypothesis* drawing afresh in turn *k* on *red_path*, from its own seed, the turn and the path."""
+        seed = int(np.random.SeedSequence([hypothesis.random_seed, k, *red_path]).generate_state(1)[0])
+        return dataclasses.replace(hypothesis, random_seed=seed)
 
-    def _turn_burn(self, k: int, red_path: Sequence[int], action: AdversaryAction) -> TurnBurn | None:
-        if action.hypothesis is None:
+    def _turn_burn(self, k: int, red_path: Sequence[int], a: int) -> TurnBurn | None:
+        """Row *a*'s burns as red's move in turn *k*, timed from the turn's start: its burn j the same time after turn
+        k + j - 1 starts as in turn j, and none past the last turn (SPC-187)."""
+        hyps = self.hyps[a]
+        if not hyps:
             return None
-        hypothesis = dataclasses.replace(action.hypothesis.hypothesis, random_seed=self._seed(k, red_path, action))
-        return TurnBurn(hypothesis, _offset_s(self.scenario, action))
+        offsets, start = self.plan.burns_s[a], self.plan.start_s(k)
+        then = tuple(
+            (self._seeded(k, red_path, h), self.plan.start_s(k + j) + d - start)
+            for j, ((_, h), d) in enumerate(zip(hyps, offsets, strict=True)) if j > 0 and k + j <= self.plan.turns
+        )
+        return TurnBurn(self._seeded(k, red_path, hyps[0][1]), offsets[0], then)
 
     def _window(self, k: int) -> SeparationWindow:
-        at_s = (k - 1) * self.turn_s
+        at_s = self.plan.start_s(k)
         return SeparationWindow(self.scenario.epoch_utc + timedelta(seconds=at_s), self.span_s - at_s)
 
     def _continue(self, k: int, group: Sequence[_Branch], a: int) -> list[_Branch]:
-        action = self.scenario.adversary_actions[a]
         red_path = (*group[0].red_path, a)
         carry = cast("_Carry", group[0].carry)
         window = self._window(k)
-        burn = self._turn_burn(k, red_path, action)
+        burn = self._turn_burn(k, red_path, a)
         self._may_start()
-        nominal = nominal_continued_arc(carry.nominal, carry.nominal_bstar, burn, window.span_s)
+        nominal = nominal_continued_arc(carry.nominal, carry.nominal_bstar, burn, window.span_s, carry.nominal_pending)
         if nominal is None:
             raise self._refuse([*group[0].steps, (a, 0)], _WHY_ARC)
-        turn = _RedTurn(burn, nominal, self._draw(carry, burn, [*group[0].steps, (a, 0)]))
+        stated = (*carry.nominal_pending, *nominal_turn_burns(burn))
+        turn = _RedTurn(burn, nominal, self._draw(carry, burn, [*group[0].steps, (a, 0)]), stated)
         pad = shift_pad_s(carry.blue_shift_s if turn.drawn is None else turn.drawn.blue_shift_s)
         blues = [blue for parent in group for blue in self._responses(k, parent, (a, pad), window, nominal[0])]
         sampled = group[0].sampled or burn is not None
@@ -1121,7 +1201,7 @@ class _Tree:
         shifts = None if carry.blue_shift_s is None else np.repeat(carry.blue_shift_s, reps)
         self._may_start()
         tick = None if self.budget is None else self.budget.sampling()
-        keep = (self.turn_s,) if k < self.scenario.turns else ()
+        keep = (self.plan.length_s(k),) if k < self.scenario.turns else ()
         red_on = ContinuedRed(starts, bstars, burn, pending, shifts)
         out = continue_series(red_on, [b.arc for b in blues], window, tick=tick, keep_at_s=keep)
         found = []
@@ -1134,7 +1214,7 @@ class _Tree:
         return found
 
     def _computed(self, k: int, red: Trajectory, blues: Sequence[_Blue], window: SeparationWindow) -> list[_Found]:
-        slice_window = SeparationWindow(window.start_utc, self.turn_s)
+        slice_window = SeparationWindow(window.start_utc, self.plan.length_s(k))
         found = []
         for blue in blues:
             approach = searched_approach(red, blue.arc, window)
@@ -1153,7 +1233,7 @@ class _Tree:
         carry = cast("_Carry", parent.carry)
         if red.drawn is not None:
             carry = carry._replace(red=red.drawn.red, red_bstar=red.drawn.red_bstar, blue_shift_s=red.drawn.blue_shift_s)
-        burn, (nominal, nominal_bstar) = red.burn, red.nominal
+        burn = red.burn
         friendly = self.scenario.friendly_responses[blue.column]
         delta_v = blue.response.figures(_lookup_figures(action, friendly, self.scenario)).delta_v_km_s
         burn_utc = None if burn is None else window.start_utc + timedelta(seconds=burn.at_s)
@@ -1163,12 +1243,12 @@ class _Tree:
         closest = self._path_closest(steps, paired_minima(carry.slices, found.misses), seed)
         path = path_figures(self.scenario, walk, closest, sampled=sampled, elset=self._path_error(found, window, sampled=sampled))
         start = TurnStart(
-            (k - 1) * self.turn_s, carry.red, carry.red_bstar,
+            self.plan.start_s(k), carry.red, carry.red_bstar,
             tuple(s.red_burn_utc for s in parent.walk if s.red_burn_utc is not None), carry.blue,
             parent.path.delta_v_km_s, seed, carry.nominal, carry.nominal_bstar,
         )
         figures = self._figures(steps, found, blue.response, path, delta_v)
-        nxt = None if k == self.scenario.turns else self._carry(found, carry, (nominal, nominal_bstar), blue.arc)
+        nxt = None if k == self.scenario.turns else self._carry(found, carry, red, (blue.arc, self.plan.length_s(k)))
         branch = _Branch(k, steps, start, figures, path, walk, nxt, sampled)
         parent.children.append(branch)
         self.built += 1
@@ -1188,18 +1268,22 @@ class _Tree:
             return elset_error_at(cast("ScenarioBinding", self.scenario.binding), self.scenario.epoch_utc)
         return self._error_at(found, window)
 
-    def _carry(self, found: _Found, carry: _Carry, nominal: tuple[Trajectory, float], blue: Trajectory) -> _Carry:
+    def _carry(self, found: _Found, carry: _Carry, turn: _RedTurn, blue: tuple[Trajectory, float]) -> _Carry:
+        """What the next turn starts from, *blue* being our arc this turn and this turn's length: each orbit at the
+        turn's end, and red's burns still to come, drawn and as stated (SPC-187)."""
+        arc, length = blue
+        nominal = turn.nominal[0]
         kept = None if found.series is None else found.series.kept
         pending: tuple[tuple[RedBurn, ...], ...] = ()
         shifts = None
         if kept is None:
-            red, bstar = nominal[0](self.turn_s)[None, :], carry.red_bstar
+            red, bstar = nominal(length)[None, :], carry.red_bstar
         else:
             red, bstar, pending = kept.red[:, 0, :], kept.bstar, kept.pending
             shifts = None if self.error is None else kept.blue_shift_s
         return _Carry(
-            red, bstar, nominal[0](self.turn_s), nominal[1], blue(self.turn_s), paired_minima(carry.slices, found.slices),
-            pending, shifts,
+            red, bstar, nominal(length), _bstar_at(turn.nominal_burns, length, carry.nominal_bstar), arc(length),
+            paired_minima(carry.slices, found.slices), pending, shifts, _after(turn.nominal_burns, length),
         )
 
     def _figures(
@@ -1277,33 +1361,52 @@ def _cell_figures(cell: OutcomeMetrics, slices: np.ndarray) -> NodeFigures:
 
 # ── The tree's sentences ─────────────────────────────────────────────────────
 
-def _lines(scenario: Scenario) -> tuple[str, ...]:
-    span_s = _searched_span_s(scenario)
-    turn_s = span_s / scenario.turns
+def _hours(seconds: Sequence[float]) -> str:
+    """Two or more times in hours, as a transfer's line lists its burns: "0.10 h and 0.20 h"."""
+    return _listed([f"{s / _SECONDS_PER_HOUR:.2f} h" for s in seconds], "and")
+
+
+def _header(scenario: Scenario, plan: TurnPlan) -> str:
+    """The tree's first line: its size and its turns, equal ones as before or as the engine set them (SPC-187)."""
     rows, responses = len(scenario.adversary_actions), len(scenario.friendly_responses)
-    t3 = "" if scenario.turns < MAX_TURNS else _TREE_HEADER_T3.format(
-        t3=scenario.epoch_utc + timedelta(seconds=2 * turn_s),
+    t3 = "" if plan.turns < MAX_TURNS else _TREE_HEADER_T3.format(
+        t3=scenario.epoch_utc + timedelta(seconds=plan.start_s(3)),
     )
-    header = TREE_HEADER.format(
-        turns=scenario.turns, rows=rows, responses=responses, nodes=branches(rows, responses, scenario.turns),
-        turn_h=turn_s / _SECONDS_PER_HOUR, span_h=span_s / _SECONDS_PER_HOUR,
-        t2=scenario.epoch_utc + timedelta(seconds=turn_s), t3=t3,
-    )
-    again = tuple(
-        TREE_RED_AGAIN.format(row=i + 1, name=a.name, offset=_offset_s(scenario, a) / _SECONDS_PER_HOUR)
-        for i, a in enumerate(scenario.adversary_actions) if a.hypothesis is not None
-    )
+    shared = {
+        "turns": plan.turns, "rows": rows, "responses": responses, "nodes": branches(rows, responses, plan.turns),
+        "span_h": plan.span_s / _SECONDS_PER_HOUR, "t2": scenario.epoch_utc + timedelta(seconds=plan.start_s(2)),
+        "t3": t3,
+    }
+    if scenario.turn_rule is TurnRule.EQUAL:
+        return TREE_HEADER.format(turn_h=plan.length_s(1) / _SECONDS_PER_HOUR, **shared)
+    lengths = [f"turn {k} {'runs ' if k == 1 else ''}{plan.length_s(k) / _SECONDS_PER_HOUR:.2f} h"
+               for k in range(1, plan.turns + 1)]
+    return TREE_HEADER_BURNS.format(lengths=_listed(lengths, "and"), **shared)
+
+
+def _again(scenario: Scenario, plan: TurnPlan) -> tuple[str, ...]:
+    """Each burning row's line: when it burns again, or, for a transfer, when each of its burns falls (SPC-187)."""
+    lines = []
+    for i, action in enumerate(scenario.adversary_actions):
+        offsets = plan.burns_s[i]
+        if len(offsets) > 1:
+            lines.append(
+                TREE_TRANSFER_AGAIN.format(row=i + 1, name=action.name, n=len(offsets), offsets=_hours(offsets)),
+            )
+        elif offsets:
+            lines.append(TREE_RED_AGAIN.format(row=i + 1, name=action.name, offset=offsets[0] / _SECONDS_PER_HOUR))
+    return tuple(lines)
+
+
+def _lines(scenario: Scenario, plan: TurnPlan) -> tuple[str, ...]:
     counted = remainder_counted(scenario)
-    return (header, *(() if counted is None else (counted,)), TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS,
-            *again, TREE_RESPONSE_AGAIN)
+    return (_header(scenario, plan), *(() if counted is None else (counted,)), TREE_PROPAGATOR, TREE_NODE_MEANS,
+            TREE_PATH_MEANS, *_again(scenario, plan), TREE_RESPONSE_AGAIN)
 
 
-def _windows(scenario: Scenario) -> tuple[SeparationWindow, ...]:
-    span_s = _searched_span_s(scenario)
-    turn_s = span_s / scenario.turns
+def _windows(scenario: Scenario, plan: TurnPlan) -> tuple[SeparationWindow, ...]:
     return tuple(
-        SeparationWindow(scenario.epoch_utc + timedelta(seconds=k * turn_s), span_s - k * turn_s)
-        for k in range(scenario.turns)
+        SeparationWindow(scenario.epoch_utc + timedelta(seconds=at_s), plan.span_s - at_s) for at_s in plan.starts_s
     )
 
 
@@ -1318,7 +1421,7 @@ def _budget_refusal(scenario: Scenario, budget_s: float, k: int, done: int) -> s
 def _build(scenario: Scenario, result: ScenarioResult, one: TurnOne) -> GameTree:
     """Turn by turn under the one budget; a stop part-way keeps the turns built in full and says why."""
     tree = _Tree(scenario, result, one)
-    lines, windows = _lines(scenario), _windows(scenario)
+    lines, windows = _lines(scenario, tree.plan), _windows(scenario, tree.plan)
     levels: list[list[_Branch]] = []
     try:
         levels.append(tree.roots())
@@ -1362,8 +1465,9 @@ def evaluate_tree(
     if refusal is not None:
         result = evaluate_scenario(scenario, strategy, sampler=sampler, run=run)
         return dataclasses.replace(result, tree=GameTree(scenario.turns, (), (), 0, refusal, (refusal,)))
-    turn_s = _searched_span_s(scenario) / scenario.turns
-    result, one = _evaluate(scenario, strategy, sampler, run, turn_s)
+    # Not refused, so the turns were set (SPC-187): turn 1's sampling keeps each sample where turn 1 ends.
+    plan = cast("TurnPlan", turn_plan(scenario))
+    result, one = _evaluate(scenario, strategy, sampler, run, plan.length_s(1))
     scenario = result.scenario
     tree = _build(scenario, result, one)
     _require_tree_propagator(tree, result.outcome_matrix)

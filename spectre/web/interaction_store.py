@@ -15,9 +15,10 @@ probe and the ledger says so. It counts only when filed as REAL data, and
 is closer than the one before only by more than UDL_MARGIN_KM.
 
 SPC-174 reads the hostile seed list from the path the deployment configures
-(SPECTRE_HOSTILE_SEEDS): owner data, possibly classified, never bundled. A
-file that cannot be read, is too large or is malformed is refused whole and
-the refusal stated; its contents and its path never reach the page.
+(SPECTRE_HOSTILE_SEEDS): deployment data, never bundled, that never becomes
+classified, so a path names its seed (SPC-180). A file that cannot be read,
+is too large or is malformed is refused whole and the refusal stated; its
+contents and its path never reach the page.
 """
 
 from __future__ import annotations

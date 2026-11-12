@@ -1,7 +1,8 @@
 """The hostile seed list is owner data, read from a configured path, never bundled (SPC-174).
 
-Concept section 9, decision 5: the seed list may become classified, so it is
-kept as data under UK sovereign handling, not in a bundled file. The path is
+Concept section 9, decision 5: the seed list never becomes classified; it is
+deployment data, an analyst's list for one deployment, so it is not a bundled
+file and a propagated path names each seed (decision 15, SPC-180). The path is
 set in configuration (SPECTRE_HOSTILE_SEEDS); none is shipped, and with none
 configured propagation adds nothing and the ledger says so. A file that
 cannot be read, or is malformed, is refused and the refusal stated; its
@@ -169,5 +170,5 @@ class TestTheSessionReadsThePaths:
         held = store.held_interactions(state, "100", _NOW)
         obj = HeldObject("100", None, None, None, Custody.HELD, interactions=held.edges, seed_paths=held.paths)
         labels = [i.label for i in obj.items(_NOW, "GEO")]
-        assert "1 hop from a hostile seed, through OBJ-900" in labels
+        assert "1 hop from hostile seed OBJ-900 (900)" in labels
 

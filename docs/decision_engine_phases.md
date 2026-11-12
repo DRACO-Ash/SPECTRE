@@ -295,8 +295,11 @@ section 7.5, and section 9, decision 9.
   So the line never says "Decide by" a past time, and it agrees with the advice below it.
 ● The sweep's advice is judged against the action line: the Threat band at which the owner may set that a response
   changes, HIGH by default, tuned, not sourced, said in a sentence of its own beside every advice that names it.
-  When the Threat range straddles it and a collection that could move the range off it lands before decide-by, the
-  sweep would collect first; with no such collection, or decide-by passed, it says act on the ceiling.
+  When the Threat range straddles it and a collection with value above 0, whose result SPECTRE can read, lands
+  before decide-by, the sweep would collect first (SPC-182: owner ruling, 2026-11-05, as concept section 4.10 first
+  said, so a collection need not be able to move the range off the line); with no such collection, or decide-by
+  passed, it says act on the ceiling. A collection whose result SPECTRE cannot read, holding UDL conjunctions or a
+  second provider's history, never counts, since its result never lands.
 ● The engine collects first only for a collection whose outcomes give different recommended responses (SPC-204, set
   out below). The outcome matrix reads no Threat band, so none does, and the advice says the collection would narrow
   the Threat range but cannot change the recommended response, and never says to delay the decision for it.
@@ -356,7 +359,8 @@ decision 13).
 ● Each figure's basis names how many of the row's burns it applies: the sampled closest approach and its time
   name the burns red flies before the span searched ends, custody names the burn it reads, our sized burn names
   the burns it was sized against, and a lookup or the score applies none.
-● The game tree refuses a row of several burns (below, D3 and D7), and the one-turn result stands with the reason.
+● The game tree gives each burn of the transfer a turn of its own (below, D3, SPC-187); before SPC-187 it refused
+  a row of several burns, and a record written then is still built that way.
 
 Decisions taken building it, Claude's and not rulings:
 ● **Each later burn's spread.** A later burn is sampled with the row's pointing, timing and drag spreads, and a
@@ -374,8 +378,9 @@ Decisions taken building it, Claude's and not rulings:
 ● **The later burns' frame.** The solver's arrival burn is split anew at red's own state on the two-body transfer
   arc (`maneuvers.Burn.own_ric`); the sweep's own figures are unchanged. The engine's RK45 arc, with J2 and drag,
   differs slightly from that two-body arc, as the departure burn's SGP4 start does.
-● **The tree refuses every row carrying more than one burn**, even when only one of them is applied, since each
-  later turn burns again from the row's first burn as hypothesised.
+● **The tree refused every row carrying more than one burn**, even when only one of them was applied, since each
+  later turn burned again from the row's first burn as hypothesised. Since SPC-187 the engine sets the turns so each
+  applied burn has one of its own; a record built over equal turns still refuses such a row.
 ● **Show trajectory** draws the first burn the row applies, since the view takes one burn, and the cell names the
   later burns it does not draw.
 ● **The panel's fields set burn 1 only.** The later burns are carried as the sweep gave them; a transfer carries at
@@ -385,9 +390,12 @@ Decisions taken building it, Claude's and not rulings:
 
 **Status: built (SPC-130 to SPC-132).**
 
-● Each adversary row has a labelled **Load from NOTSO** control. Loading shows a suggested P and Conf from the bound
-  red track's NOTSO history, with its basis and an unticked control to apply it. Nothing is written into P or Conf;
-  a ticked suggestion is applied at Evaluate only while it is still the one shown.
+● Every adversary row's **NOTSO suggestion** shows as the panel opens and follows every change (SPC-185): a
+  suggested P and Conf from the bound red track's NOTSO history, with its basis and an unticked control to apply
+  it. Nothing is written into P or Conf; applying stays the operator's tick, and a ticked suggestion is applied at
+  Evaluate only while it is still the one shown. Owner ruling, 2026-11-05: load every row automatically when the
+  panel opens. Before, from SPC-131, each row had a Load from NOTSO control and no row's history was read until
+  the operator pressed it.
 ● P is the chance of at least one reported event of the row's action type within the horizon, at the rate the
   history shows over the periods the cache covers. Gaps in the cache and time before launch are left out, never read
   as quiet. Nothing is offered below 3 events or under 0.01. Conf is capped at 0.3, the most Threat Understanding
@@ -401,7 +409,7 @@ Decisions taken building it, Claude's and not rulings:
 ● The results show a NOTSO timeline per applied suggestion: covered periods, gaps and each counted notice, readable
   without colour.
 
-Concept section 9 records these as decision 16 (what Load from NOTSO loads), decision 17 (the interval on a
+Concept section 9 records these as decision 16 (what the panel loads from NOTSO), decision 17 (the interval on a
 NOTSO-derived P) and decision 18 (how the interval reaches the pick).
 
 ## Phase 4: the game tree and its view
@@ -461,13 +469,20 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
 ● **D2. One propagator.** Every figure in a tree is RK45 with J2 and exponential drag for both orbits, from their
   SGP4 states at the scenario epoch, since no element set exists for an orbit after a burn. Turn 1's computed cells
   go on RK45 too, with the SGP4 figure shown beside them, and no node or cell names SGP4. Owner ruling, 2026-11-05: keep.
-● **D3. Equal turns, every burn inside its own.** The span searched is split into equal turns. Each row's red burn
-  falls at the same offset after each turn starts, and each response executes its time to execute after each turn
-  starts, with a target separation sized again against red's nominal burn in that turn. A burn that falls outside
-  its turn refuses the tree. Owner ruling, 2026-11-05: accept unequal turns, with their lengths determined by the engine, never set
-  by the operator (SPC-187). Until then a row carrying several burns of one transfer (SPC-184) refuses the tree,
-  since equal turns put a row's burn at one time in every turn and cannot give each burn a turn of its own;
-  unequal turns are SPC-187.
+● **D3. Turns set by the engine, every burn inside its own.** As first built the span searched was split into equal
+  turns, each row's red burn at the same offset after each turn started, and a row of several burns refused the
+  tree. Owner ruling, 2026-11-05: accept unequal turns, with their lengths determined by the engine, never set by the
+  operator (SPC-187). **Built:** `turn_update.turn_plan` places each boundary from the rows' burn times so every burn
+  falls inside its own turn. A row's burns fall one to a turn: taken in turn 1, its burn j falls in turn j at its own
+  time; taken in turn k, its burn j falls in turn k + j - 1, the same time after that turn starts as burn j does
+  after turn j starts, so a single burn falls at the same offset after each turn starts, as before; a burn that would
+  fall after the last turn is not made. Each response executes its time to execute after each turn starts, with a
+  target separation sized again against red's nominal burns in that turn. A transfer taken in turn 1 makes its later
+  burns in the turns they fall in, carried there sample by sample as the matrix flew them, whatever red does next, so
+  it is one action with one P, as SPC-184 holds. The tree is refused, and the one-turn result stands, when a row
+  makes more burns within the span than there are turns, when no moment falls after one row's burn j and by another
+  row's burn j + 1, or when a burn made again, or a response's burn, falls outside a turn it is made in, each naming
+  the burn and the turn.
 ● **D4. Samples carried as themselves.** Sample k is carried from turn to turn as sample k. Each turn's draws are
   seeded from the row's seed, the turn and the red path, so the same evaluation gives the same tree. A sample whose
   drawn timing puts its burn after its turn ends keeps that burn, and the turn after makes it then. Owner ruling, 2026-11-05: keep.
@@ -482,8 +497,9 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   about 15,400 and is refused. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178, built), then measure trees under
   load and set their own cap from the measurements (SPC-188); until then the tree shares the matrix's cap.
 ● **D7. Refused before anything runs, the matrix kept.** An unbound or out-of-date side, a row with no orbit to carry
-  on, a row of several burns (SPC-184), a burn outside its turn, too many branches or too high a cost refuses the
-  tree, in that order, and the one-turn result stands with the reason. Owner ruling, 2026-11-05: keep.
+  on, turns the engine cannot set with every burn inside its own (SPC-187; over equal turns, a row of several burns,
+  SPC-184, then a burn outside its turn), too many branches or too high a cost refuses the tree, in that order, and
+  the one-turn result stands with the reason. Owner ruling, 2026-11-05: keep.
 ● **D8. Never cut short silently.** A spent budget keeps the deepest turn built in full, naming the run's own budget;
   a failed or unconverged branch keeps the turns built and names the branch, since a pick over a tree missing a
   branch could miss its worst case. Owner ruling, 2026-11-05: keep.
@@ -502,6 +518,30 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   3-turn tree. A persistent-intent model needs a stated prior strength, which is the owner's decision. A row's
   applied NOTSO suggestion carries its interval into a range on every share it touches. Owner ruling, 2026-11-05: keep P as entered
   each turn.
+
+### Turns set by the engine (SPC-187)
+
+**Status: built.** Owner ruling, 2026-11-05, on D3: unequal turns, their lengths set by the engine, never by the
+operator. D3 above says what the engine does. The result's first line names each turn's length and says the engine
+set them from the rows' burn times; a transfer's line names each of its burns' times after its own turn starts.
+
+Decisions taken building it, Claude's and not rulings:
+● **Where a boundary goes.** At the equal split where that falls after every row's burn of the turn ending and by
+  every row's next burn, so trees whose burns fit equal turns are built exactly as before; otherwise midway between
+  the latest burn of the turn ending and the earliest of the next, or, with no burn after it, midway between that
+  burn and the end of the span searched (`turn_update._MIDWAY`, 0.5). A row whose first burn falls at or after the
+  end of the span searched refuses the tree, naming that burn, before any boundary is placed. The midway point
+  leaves each burn's timing spread the most room either side.
+● **A transfer is committed once taken.** Taken in turn 1 its later burns are carried into the turns they fall in,
+  as the matrix flew them, whatever red's move in those turns, since the transfer is one action with one P
+  (SPC-184). Taken again in a later turn it makes each burn the same time after its own turn starts.
+● **No two burns of one transfer share a turn.** A transfer making more burns within the span than there are turns
+  refuses the tree, rather than putting two in the last turn.
+● **Records built over equal turns.** Stored inputs version 5 holds the turn rule. Versions 1 to 4, written by 0.28.0
+  to 0.36.0, hold none and read as equal turns (`TurnRule.EQUAL`), so a tree recorded then is built over the same
+  equal turns, with the same seeds, and replays exactly; the replay says so before it compares anything. The
+  provenance hash leaves the turn rule out for one turn and for equal turns, so those records' input hashes still
+  match. A scenario over equal turns is never stored again.
 
 ### Decisions taken building the view (SPC-142)
 
@@ -930,9 +970,10 @@ evaluation is repeated.
 ● **Claude's design choices, awaiting the owner's ruling:**
   ■ Relevance is judged by the primary rule's pick on the results page, since that is the recommendation shown; a
     result read on its own judges it by the rule the evaluation ran.
-  ■ The sweep's own gates stand beneath it: the range must straddle the action line and the cue must be able to take
-    the range off it, as well as change the pick and land by decide-by. Relevance is added, not substituted, so the
-    action line stays the owner's knob.
+  ■ The sweep's own gates stand beneath it: the range must straddle the action line and the cue must have value
+    above 0 and a result SPECTRE can read (since SPC-182, no longer that it can take the range off the line), as
+    well as change the pick and land by decide-by. Relevance is added, not substituted, so the action line stays the
+    owner's knob.
   ■ The matrix under another picture is built again from the evaluation's plans, not by a whole new evaluation,
     which would sample and propagate again for each outcome. To make that the same evaluation, every plan is now
     made from the scenario with its picture taken out, which changes nothing today, since no plan read it. A result
@@ -1164,9 +1205,9 @@ that rating stands until the security lead has signed the model and the evaluati
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
 ● **Constraint libraries** (SPC-195): rules drawn from doctrine or rules of engagement that would mark responses not
   permitted without the operator ticking each are the owner's to supply; until then each veto is the operator's.
-● **A game tree over a transfer of several burns.** The matrix carries every burn of the transfer (SPC-184), but
-  the tree's equal turns cannot place them, so such a row refuses the tree. Unequal turns, set by the engine, are
-  SPC-187.
+● **A transfer of more burns than turns in a game tree.** The engine gives each burn a turn of its own (SPC-187),
+  and the tree runs at most 3 turns, so a transfer making more than 3 burns within the span searched refuses the tree;
+  its matrix still carries every burn.
 
 ## Summary
 

@@ -25,9 +25,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, cast
 
-from spectre.domain.decision import Scenario, SelectorStrategy, _searched_span_s, permitted_responses, row_shares
+from spectre.domain.decision import Scenario, SelectorStrategy, permitted_responses, row_shares
 from spectre.domain.provenance import Basis, FigureBasis
-from spectre.domain.turn_update import Posterior, Seen, likelihood, model_lines, posteriors, seen_after, seen_lines
+from spectre.domain.turn_update import (
+    Posterior,
+    Seen,
+    TurnPlan,
+    likelihood,
+    model_lines,
+    plan_or_equal,
+    posteriors,
+    seen_after,
+    seen_lines,
+)
 
 # ── What the result says (SPC-141; the view is SPC-142) ──────────────────────
 
@@ -157,8 +167,8 @@ class _Member(NamedTuple):
 
 
 class _Selector:
-    def __init__(self, scenario: Scenario, strategy: SelectorStrategy, turns: int, turn_s: float) -> None:
-        self.scenario, self.strategy, self.turns, self.turn_s = scenario, strategy, turns, turn_s
+    def __init__(self, scenario: Scenario, strategy: SelectorStrategy, turns: int, plan: TurnPlan) -> None:
+        self.scenario, self.strategy, self.turns, self.plan = scenario, strategy, turns, plan
         # Each red move's share: its P, the remainder of P a move of its own (SPC-203); over their sum under 0.29.0's rule.
         self.shares = list(row_shares(scenario))
         self.allowed = set(permitted_responses(scenario))
@@ -184,7 +194,7 @@ class _Selector:
         groups: dict[Seen, list[_Member]] = {}
         for m, n in moves:
             reds = (*m.reds, n.action)
-            seen = seen_after(self.scenario, reds, self.turn_s)
+            seen = seen_after(self.scenario, reds, self.plan)
             groups.setdefault(seen, []).append(_Member(n.children, reds, m.weight * self.shares[n.action]))
         return self._combine([
             (self.value(groups[seen], k + 1, (*after, (r, seen))), sum(m.weight for m in groups[seen]))
@@ -279,13 +289,13 @@ def select(
     scenario: Scenario, roots: Sequence[TreeNode], turns: int, strategy: SelectorStrategy, *, matrix_pick: int | None,
 ) -> TreeSelection:
     """*strategy*'s picks over the first *turns* turns of the tree under *roots*, beside the one-turn matrix's pick,
-    *matrix_pick*, which a turn-1 pick that differs from it names; None when the matrix has no pick. Each turn is the
-    span searched split equally."""
-    turn_s = _searched_span_s(scenario) / scenario.turns
-    selector = _Selector(scenario, strategy, turns, turn_s)
+    *matrix_pick*, which a turn-1 pick that differs from it names; None when the matrix has no pick. Each turn is as
+    the engine set it (SPC-187)."""
+    plan = plan_or_equal(scenario)
+    selector = _Selector(scenario, strategy, turns, plan)
     selector.value([_Member(roots, (), 1.0)], 1, ())
     picks = selector.own()
-    gives = likelihood(scenario, turn_s) if turns > 1 else ()
+    gives = likelihood(scenario, plan) if turns > 1 else ()
     posts = posteriors(scenario, gives) if gives and strategy is SelectorStrategy.EXPECTED_VALUE else ()
     stated = _stated(scenario.observed, posts)
     span = _SPAN_ONE if turns == 1 else _SPAN.format(turns=turns)
@@ -304,11 +314,11 @@ def follows_picks(scenario: Scenario, selection: TreeSelection, steps: Sequence[
     """Whether every response on the sequence *steps*, (red's move, our response) per turn, is the rule's pick for
     its turn after what the turns before it showed: the plan the recommendation follows, whatever red does
     (SPC-142). False where the rule has no pick."""
-    turn_s = _searched_span_s(scenario) / scenario.turns
+    plan = plan_or_equal(scenario)
     picks = {p.after: p.pick for p in selection.picks}
     after: After = ()
     for k, (_, response) in enumerate(steps, start=1):
         if picks.get(after) != response:
             return False
-        after = (*after, (response, seen_after(scenario, [a for a, _ in steps[:k]], turn_s)))
+        after = (*after, (response, seen_after(scenario, [a for a, _ in steps[:k]], plan)))
     return True

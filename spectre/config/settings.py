@@ -415,9 +415,10 @@ class Settings:
         default_factory=lambda: os.environ.get("SPECTRE_CLASSIFICATION", "").strip() or "UNCLASSIFIED"
     )
     # The analyst-adjudicated hostile seed list for Interactions (SPC-174).
-    # Owner data that may be classified (threat concept section 9, decision
-    # 5), so it is a path the deployment sets, never a bundled file; none is
-    # shipped, and with none set propagation adds nothing.
+    # Deployment data that never becomes classified (threat concept section
+    # 9, decision 5): an analyst's list for one deployment, so it is a path
+    # the deployment sets, never a bundled file; none is shipped, and with
+    # none set propagation adds nothing.
     hostile_seeds_path: str = field(
         default_factory=lambda: os.environ.get("SPECTRE_HOSTILE_SEEDS", "").strip()
     )

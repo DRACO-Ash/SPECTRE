@@ -24,7 +24,9 @@ a figure that cannot be read is refused; either refusal is a sentence the
 ledger states, never an edge.
 
 SPC-174 adds hostile seeds: analyst-adjudicated hostile objects, read from a
-list the owner configures (section 9, decision 5), never bundled. Suspicion
+list the deployment configures (section 9, decision 5), never bundled. The
+list never becomes classified, so a path names its seed by catalogue number
+and name (decision 15, SPC-180). Suspicion
 flows from an object to the seeds it approached, at most two hops away (it
 approached the seed, or approached an object that approached it); a third
 hop adds nothing, and a benign seed propagates nothing, not even trust
@@ -439,11 +441,27 @@ def parse_seed_list(text: str) -> SeedList:
 
 @dataclass(frozen=True)
 class SeedPath:
-    """A path from an object to a hostile seed: the edges it walks, the object's own first."""
+    """A path from an object to a hostile seed: the edges it walks, the object's own first.
+
+    The seed list never becomes classified (section 9, decision 5), so a path
+    names its seed by catalogue number and name, on screen and in the ledger
+    (decision 15, SPC-180).
+    """
 
     seed: str
     hops: int
     edges: tuple[Edge | MissEdge, ...]
+
+    @property
+    def seed_name(self) -> str:
+        """The seed's name as the last edge's approach named it, or "" when it was held by number alone."""
+        name = self.edges[-1].target.strip()
+        return "" if not name or _node(name) == self.seed else name
+
+    @property
+    def seed_label(self) -> str:
+        """The seed as the page names it: its name and catalogue number, or the number alone."""
+        return f"{self.seed_name} ({self.seed})" if self.seed_name else self.seed
 
 
 def _node(satno: str) -> str:

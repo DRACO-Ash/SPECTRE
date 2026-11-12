@@ -286,7 +286,10 @@ class TestTheRecordCueFollowsTheRecordsLevel:
     def test_any_lower_level_moves_no_band_when_dated(self, level: str) -> None:
         situation = tu.with_record(_situation(0), {"threat_level": level})
         assert situation.record_prior is None
-        (record,) = [c for c in tu.cues((_INTEL, *_ROWS[1:2]), situation) if c.record]
+        # As intel_items builds an undated record below HIGH: no floor. Dating it adds none, and since SPC-186 any
+        # floor the chain held would count at the dated copy's reliability, so the worked example's row 1 is not used.
+        undated = replace(_INTEL, floor_to=None)
+        (record,) = [c for c in tu.cues((undated, *_ROWS[1:2]), situation) if c.record]
         assert record.hostile == record.benign == (Band.MINIMAL, Band.CRITICAL)
         assert (record.steps, record.effect) == (0, "would firm up Identity and move no Threat band")
 

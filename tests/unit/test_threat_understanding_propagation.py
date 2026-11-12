@@ -74,7 +74,7 @@ class TestTheValues:
         assert (item.dimension, item.floor_to, item.basis, item.grade) == (
             Dimension.INTERACTIONS, Band.MEDIUM, Basis.COMPUTED, "B2")
         assert (item.derived_from, item.observed_at) == ("seed:100", _BURN)
-        assert item.label == "1 hop from a hostile seed, through OBJ-900"
+        assert item.label == "1 hop from hostile seed OBJ-900 (900)"
         assert item.note == ("an analyst-adjudicated hostile seed it approached; propagation sets the Threat floor "
                              "to MEDIUM at most")
 
@@ -84,8 +84,8 @@ class TestTheValues:
         (item,) = tu.propagation_items([path], _NOW)
         (weakest,) = tu.interaction_items([weak])
         assert _q(item) == pytest.approx(_q(weakest) * 0.25)
-        # The seed list may be classified (section 9, decision 5): the label names no seed it does not pass.
-        assert item.label == "2 hops from a hostile seed, through OBJ-200"
+        # The seed list never becomes classified (section 9, decisions 5 and 15): the seed is always named.
+        assert item.label == "2 hops from hostile seed OBJ-900 (900), through OBJ-200"
         assert item.note == ("an analyst-adjudicated hostile seed an object it approached approached; propagation "
                              "sets the Threat floor to MEDIUM at most")
 

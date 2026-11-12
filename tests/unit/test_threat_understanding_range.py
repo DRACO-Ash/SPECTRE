@@ -109,17 +109,20 @@ class TestAReadingNeedsAnEarnedDimensionAndItsOwnQ:
         assert (result.floor, result.ceiling) == (Band.MEDIUM, Band.CRITICAL)
         assert (_row(result, "dated role").applied, _row(result, "dated role").status) == (True, Status.COUNTED)
 
-    def test_a_folded_copy_applies_no_reading(self) -> None:
-        # Section 5.3: "Same group, folded unless it is the strongest". A share below half read
-        # from the same history as a stronger ample reserve is a copy, not a second reading.
+    def test_a_weaker_copys_reading_counts_once_at_its_chains_best_reliability(self) -> None:
+        # Concept section 9, decision 6 (SPC-186): the share below half (q 0.34) alone earns no Capability,
+        # but read from the same history as the ample reserve (q 0.61) it counts once, at the chain's q.
         ample = replace(_UDL_RESERVE, label="UDL reserve ample", extraction=0.9)
         share = replace(_UDL_RESERVE, label="UDL share below half", ceiling_to=Band.MEDIUM)
         alone = _range([ample])
         result = _range([ample, share])
-        assert (result.floor, result.ceiling, result.coverage) == (alone.floor, alone.ceiling, alone.coverage)
+        assert (alone.ceiling, result.ceiling, result.coverage) == (Band.CRITICAL, Band.MEDIUM, alone.coverage)
         row = _row(result, "UDL share below half")
-        assert (row.status, row.applied) == (Status.FOLDED, False)
-        assert row.note == "same source chain as UDL reserve ample; not counted again"
+        assert (row.status, row.applied) == (Status.COUNTED, True)
+        assert row.note == ("its reading counts once, at its source chain's best reliability, q 0.61 from UDL "
+                            "reserve ample")
+        assert (_row(result, "UDL reserve ample").status, _row(result, "UDL reserve ample").applied) == (
+            Status.COUNTED, False)
 
     def test_a_weaker_reading_from_the_same_history_is_folded_under_a_stronger_one(self) -> None:
         # The anomaly index (q 0.41) shares the burn's history (q 0.61): only the burn reads.
@@ -130,16 +133,18 @@ class TestAReadingNeedsAnEarnedDimensionAndItsOwnQ:
         assert (_row(result, "UDL burn unusual").applied, _row(result, "UDL posture").applied) == (True, False)
         assert _row(result, "UDL posture").status is Status.FOLDED
 
-    def test_a_stronger_coverage_only_figure_from_the_same_history_folds_a_reading(self) -> None:
-        # The cost of I2 for I1 (an owner decision): a stronger figure joining the group
-        # takes the lead, so the weaker member's reading no longer applies.
+    def test_a_stronger_coverage_only_figure_from_the_same_history_never_folds_a_reading(self) -> None:
+        # Concept section 9, decision 6, owner ruling 2026-11-05 (SPC-186): the strongest reading in the
+        # chain counts once, at the chain's best reliability, so a new copy never widens the range.
         posture = _item(label="UDL posture", extraction=0.6, floor_to=Band.MEDIUM)
         vouch = replace(_ALLIED, floor_to=None)
         count = _item(label="UDL burn count", extraction=1.0)
         assert _range([posture, vouch]).floor is Band.MEDIUM
         result = _range([posture, vouch, count])
-        assert result.floor is Band.MINIMAL
-        assert _row(result, "UDL posture").note == "same source chain as UDL burn count; not counted again"
+        assert result.floor is Band.MEDIUM
+        assert (_row(result, "UDL posture").applied, _row(result, "UDL posture").status) == (True, Status.COUNTED)
+        assert _row(result, "UDL posture").note == (
+            "its reading counts once, at its source chain's best reliability, q 0.68 from UDL burn count")
 
     def test_on_equal_q_the_reading_leads_whatever_order_the_labels_sort_in(self) -> None:
         posture = _item(label="z posture aggressive", floor_to=Band.MEDIUM)
@@ -164,6 +169,97 @@ class TestAReadingNeedsAnEarnedDimensionAndItsOwnQ:
         reading = _item(label="posture", credibility=1, extraction=extraction, floor_to=Band.MEDIUM)
         result = _range([reading])
         assert result.floor is (Band.MEDIUM if applies else Band.MINIMAL)
+
+
+class TestTheStrongestReadingInAChainCountsOnce:
+    """Concept section 9, decision 6, owner ruling 2026-11-05 (SPC-186).
+
+    Any reading from a source chain counts once, at the chain's best
+    reliability, so a new copy never widens the range.
+    """
+
+    _VOUCH = replace(_ALLIED, floor_to=None)
+
+    def test_a_reading_too_weak_alone_reads_at_its_chains_best_q(self) -> None:
+        weak = _item(label="UDL posture", source_grade="C", credibility=3, extraction=0.6, floor_to=Band.MEDIUM)
+        count = _item(label="UDL burn count", extraction=1.0)
+        assert tu.reliability(weak, _NOW) < 0.25 <= tu.reliability(count, _NOW)
+        assert _range([weak, self._VOUCH]).floor is Band.MINIMAL
+        assert _range([weak, count, self._VOUCH]).floor is Band.MEDIUM
+
+    def test_below_threshold_names_the_chains_q(self) -> None:
+        weak = _item(label="UDL posture", source_grade="C", credibility=3, extraction=0.5, floor_to=Band.MEDIUM)
+        count = _item(label="UDL burn count", source_grade="C", credibility=3, extraction=0.6)
+        result = _range([weak, count, self._VOUCH])
+        assert result.floor is Band.MINIMAL
+        row = _row(result, "UDL posture")
+        assert (row.status, row.note) == (Status.BELOW_THRESHOLD, f"q {tu.reliability(count, _NOW):.2f} below 0.25")
+
+    def test_the_strongest_reading_leads_whatever_its_q(self) -> None:
+        unusual = _item(label="UDL burn unusual", floor_to=Band.MEDIUM, extraction=1.0)
+        unprecedented = _item(label="UDL burn unprecedented", floor_to=Band.HIGH, extraction=0.5, controlled=True)
+        result = _range([unusual, unprecedented, self._VOUCH])
+        assert result.floor is Band.HIGH
+        assert _row(result, "UDL burn unusual").status is Status.FOLDED
+        assert _row(result, "UDL burn unusual").note == "same source chain as UDL burn unprecedented; not counted again"
+
+    def test_a_floor_a_later_hostile_burn_has_ended_does_not_lead_over_a_live_one(self) -> None:
+        # Concept section 9, decision 7: only a later unusual or unprecedented burn ends a hostile floor.
+        early = _item(label="UDL burn early", floor_to=Band.HIGH, observed_at=_NOW - 3 * _DAY, extraction=1.0,
+                      controlled=True)
+        late = _item(label="UDL burn late", floor_to=Band.MEDIUM, observed_at=_BURN_AT, extraction=1.0)
+        result = _range([early, late, self._VOUCH], burns=(HeldBurn(_BURN_AT, Normality.UNUSUAL),))
+        assert result.floor is Band.MEDIUM
+        assert (_row(result, "UDL burn late").applied, _row(result, "UDL burn early").applied) == (True, False)
+
+    def test_an_ended_floor_alone_in_its_chain_still_reads_while_earned(self) -> None:
+        early = _item(label="UDL burn early", floor_to=Band.HIGH, observed_at=_NOW - 3 * _DAY, extraction=1.0,
+                      controlled=True)
+        count = _item(label="UDL burn count", extraction=1.0)
+        burns = (HeldBurn(_BURN_AT, Normality.UNUSUAL),)
+        assert _range([early, self._VOUCH], burns=burns).floor is Band.HIGH
+        result = _range([early, count, self._VOUCH], burns=burns)
+        assert result.floor is Band.HIGH
+        # Read on its own q, not the later count's 0.68, since the unusual burn ended it (decision 7).
+        own = tu.reliability(early, _NOW, burns=burns)
+        assert _row(result, "UDL burn early").note == (
+            f"its reading counts once, at its own q {own:.2f}, since a later burn ended it")
+        assert round(own, 2) < round(tu.reliability(count, _NOW), 2)
+
+    def test_a_later_copy_never_revives_a_floor_a_later_burn_has_ended(self) -> None:
+        # Decision 7: once a later unusual burn ends it, the floor is tested on its own q (0.10 now), never on a
+        # later copy's (0.68), so the copy cannot bring it back.
+        ended = _item(label="UDL posture", source_grade="C", credibility=3, extraction=0.6, floor_to=Band.HIGH,
+                      observed_at=_NOW - 3 * _DAY)
+        count = _item(label="UDL burn count", extraction=1.0, observed_at=_NOW)
+        burns = (HeldBurn(_BURN_AT, Normality.UNUSUAL),)
+        assert round(tu.reliability(ended, _NOW, burns=burns), 2) == 0.10
+        assert _range([ended, self._VOUCH], burns=burns).floor is Band.MINIMAL
+        result = _range([ended, count, self._VOUCH], burns=burns)
+        assert result.floor is Band.MINIMAL
+        row = _row(result, "UDL posture")
+        assert (row.applied, row.status) == (False, Status.BELOW_THRESHOLD)
+        assert row.note == "q 0.10 below 0.25"
+
+    def test_a_new_copy_in_any_chain_never_widens_the_range(self) -> None:
+        # Every member of every group gains copies: the same reading or none, weaker or stronger. The pool's burn
+        # is judged at the same moment as the pool's floors, so no floor here is one a later burn has ended: the one
+        # exception to the property, decision 7, is pinned by the two tests above.
+        checked = 0
+        for subset in _subsets(_POOL):
+            before = _range(subset, burns=_POOL_BURNS)
+            for member in subset:
+                for extraction in (member.extraction / 2, 1.0):
+                    for reading in ({}, {"floor_to": None, "ceiling_to": None}):
+                        copy = replace(member, label=f"{member.label} (copy)", extraction=extraction, **reading)
+                        after = _range([*subset, copy], burns=_POOL_BURNS)
+                        if _conflicted(after) != _conflicted(before):
+                            # A copy that adds or settles a conflict is I3's, which widens the range on purpose.
+                            continue
+                        checked += 1
+                        assert after.floor >= before.floor and after.ceiling <= before.ceiling, (
+                            [i.label for i in subset], copy.label, extraction, reading)
+        assert checked > 3000
 
 
 class TestTheRange:

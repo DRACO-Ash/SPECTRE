@@ -1447,8 +1447,9 @@ def _section_13_decision_engine(doc: Document) -> None:
         ],
     )
     _add_body(doc,
-        "P and Conf are yours. Load from NOTSO, on each row, shows a suggested P and Conf from the red track's "
-        "NOTSO history with its basis and an interval on P. It writes nothing: tick it to apply it at Evaluate, "
+        "P and Conf are yours. As the panel opens, each row shows a NOTSO suggestion: a suggested P and Conf from "
+        "the red track's NOTSO history with its basis and an interval on P. It writes nothing: tick it to apply it "
+        "at Evaluate, "
         "and it is applied only while it is still the one shown. Gaps in the NOTSO cache are never read as quiet, "
         "and nothing is offered below 3 events."
     )
@@ -1565,8 +1566,8 @@ def _section_13_decision_engine(doc: Document) -> None:
         "the sweep. An old picture may no longer hold: weigh its age, or sweep again. The sweep's advice is judged "
         "against the action line, the Threat band at which the owner may set that a response changes, HIGH by "
         "default, tuned, not sourced, and the results say so in a sentence of their own. If the Threat range "
-        "straddles the action line and a collection that could take the range off it lands before decide-by, the "
-        "sweep would collect first; otherwise it says act on the ceiling. Collections are listed beside the ranking "
+        "straddles the action line and a collection that could narrow it, whose result SPECTRE can read, lands "
+        "before decide-by, the sweep would collect first; otherwise it says act on the ceiling. Collections are listed beside the ranking "
         "and never scored, so the recommendation is always one of your own responses."
     )
     _add_body(doc,
@@ -1661,9 +1662,15 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
                 "most) or by cost, is refused as soon as you press Evaluate, naming the largest depth that would "
                 "fit. The remainder of P counts as one of red's moves, and the refusal says so. A tree missing what it needs still evaluates as one turn, and the results say why.")
-    _add_bullet(doc, "A row carrying several burns of one transfer refuses the tree: equal turns put a row's burn "
-                "at the same time in every turn, so they cannot give each burn a turn of its own. The result is "
-                "one turn and says so.")
+    _add_bullet(doc, "The engine sets each turn's length from the rows' burn times, so every burn falls inside "
+                "its own turn; you never set a length. Turns are equal where every burn fits; otherwise a turn ends "
+                "midway between the last burn it holds and the first burn of the next turn, or, "
+                "with no burn after it, midway between that burn and the end of the span searched. "
+                "A row carrying several burns of one transfer gives each burn a turn of its own, so it needs at "
+                "least as many turns as burns, and the results say so if it has fewer.")
+    _add_bullet(doc, "A transfer taken in turn 1 makes its later burns in the turns they fall in, whatever red "
+                "does next; taken again in a later turn, it makes each burn the same time after its own turn "
+                "starts, and a burn that would fall after the last turn is not made.")
     _add_bullet(doc, "Each later turn starts where the last one left both orbits, after red's burn and yours. "
                 "Every figure in a tree is propagated by RK45 for both orbits.")
     _add_bullet(doc, "The results show the recommendation per turn for the rule in use: turn 1's pick, then the "

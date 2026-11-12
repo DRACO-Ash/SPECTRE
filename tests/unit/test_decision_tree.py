@@ -39,7 +39,6 @@ from spectre.domain.decision_tree import (
     SENTENCES,
     TREE_BRANCH_REFUSED,
     TREE_BUDGET,
-    TREE_BURN_OUTSIDE,
     TREE_LOOKUP_ROW,
     TREE_NODE_MEANS,
     TREE_PATH_MEANS,
@@ -56,6 +55,7 @@ from spectre.domain.decision_tree import (
     path_figures,
 )
 from spectre.domain.provenance import Basis
+from spectre.domain.turn_update import TREE_BURN_OUTSIDE_TURN
 from tests.unit import _decision_tree_cases as cases
 from tests.unit._decision_reference import COPLANAR_LEO, EPOCH, PLANE_CHANGE, REFERENCE_CASES, ReferenceCase
 from tests.unit._i13 import i13_problems
@@ -140,17 +140,20 @@ class TestALookupRowRefusesTheTree:
 
 
 class TestEveryBurnFallsInsideItsOwnTurn:
+    """16, with the turns the engine sets from the rows' burn times (SPC-187); equal turns are a record's alone
+    (tests/unit/test_decision_tree_turns.py)."""
+
     def test_a_response_executing_after_its_turn_ends_is_named(self) -> None:
-        """16: a 3 h time to execute against 2 h turns."""
+        """16: a 3 h time to execute against 2 h turns, the equal split, since no row burns."""
         scenario = cases.scenario([cases.still()], [cases.hold(), cases.avoid(hours=3.0)], horizon_h=4.0)
-        refusal = TREE_BURN_OUTSIDE.format(what="Avoid's burn", h=3.0, turn_h=2.0)
+        refusal = TREE_BURN_OUTSIDE_TURN.format(what="Avoid's burn", h=3.0, k=1, turn_h=2.0)
         _assert_one_turn_kept(scenario, evaluate_tree(scenario), refusal)
 
-    @pytest.mark.parametrize("offset_h", [2.5, 2.0])
-    def test_a_red_burn_outside_its_turn_is_named(self, offset_h: float) -> None:
-        """16: after the turn ends, or as it ends."""
+    @pytest.mark.parametrize(("offset_h", "turn_h"), [(2.5, 0.75), (2.0, 1.0)])
+    def test_a_red_burn_outside_its_turn_is_named(self, offset_h: float, turn_h: float) -> None:
+        """16: turn 1 ends midway between the burn and the span's end, so turn 2 is too short to burn again in."""
         scenario = cases.scenario([cases.still(), cases.evasive(offset_h=offset_h)], [cases.hold()], horizon_h=4.0)
-        refusal = TREE_BURN_OUTSIDE.format(what="Evasive's burn", h=offset_h, turn_h=2.0)
+        refusal = TREE_BURN_OUTSIDE_TURN.format(what="Evasive's burn", h=offset_h, k=2, turn_h=turn_h)
         result = evaluate_tree(scenario, sampler=_Fake())
         assert result.tree is not None
         assert result.tree.refusal == refusal
@@ -550,8 +553,9 @@ class TestEachNodeCarriesItsBasis:
         """19: the header, the method and each red move again, in order."""
         tree = _tree(sampled_tree)
         assert tree.lines[0] == (
-            "A 2-turn tree: 2 red moves and 2 responses each turn, 20 branches. Each turn is 0.5 h of the 1.0 h "
-            "searched; turn 2 starts at 12:30 UTC."
+            "A 2-turn tree: 2 red moves and 2 responses each turn, 20 branches. The engine sets each turn from the "
+            "rows' burn times, so every burn falls inside its own turn: turn 1 runs 0.50 h and turn 2 0.50 h, of the "
+            "1.0 h searched; turn 2 starts at 12:30 UTC."
         )
         assert tree.lines[1:4] == (TREE_PROPAGATOR, TREE_NODE_MEANS, TREE_PATH_MEANS)
         assert tree.lines[4] == TREE_RED_AGAIN.format(row=2, name="Evasive", offset=0.1)

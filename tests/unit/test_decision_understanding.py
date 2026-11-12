@@ -5,9 +5,12 @@ The operator's fourth output is the recommended response. Concept section
 which the owner may set that a response changes (HIGH by default, tuned, not
 sourced), and a cue SPECTRE can read lands before decide-by, the sweep's
 advice is to collect first, naming the cue; when nothing lands in time, or
-decide-by has passed, it is to act on the ceiling. Only a cue with an outcome
-that takes the range off the line counts. The engine collects first only for
-such a cue whose outcomes give different recommended responses (SPC-204), which
+decide-by has passed, it is to act on the ceiling. Any cue with value above 0
+counts, whether or not one of its outcomes takes the range off the line (the
+owner's ruling of 2026-11-05 on concept section 9, decision 10, SPC-182); a cue
+whose result SPECTRE cannot read never counts, since its result never lands.
+The engine collects first only for a cue whose outcomes give different
+recommended responses (SPC-204), which
 the matrix, reading no Threat band, never gives, so the engine's tests of
 collect first put the stand-in of tests/unit/_band_stand_in.py in place. Section 7.5: cues
 that need an analyst or a sensor become collection rows, each named by its cue,
@@ -64,12 +67,20 @@ def _cue(observation: str = _HISTORY, steps: int = 3, hours: float = 0.5, *, fed
     )
 
 
-def _outcomes(cue: tu.Cue, benign: tuple[Band, Band], hostile: tuple[Band, Band]) -> tu.Cue:
-    """*cue* with the range it would read on each outcome."""
-    return dataclasses.replace(cue, benign=benign, hostile=hostile)
+def _outcomes(cue: tu.Cue, benign: tuple[Band, Band], hostile: tuple[Band, Band],
+              now: tuple[Band, Band] = (Band.LOW, Band.CRITICAL)) -> tu.Cue:
+    """*cue* with the range it would read on each outcome, and its effect worded from them against the range *now*,
+    as the model words it, so the fixture never says what its outcomes do not do."""
+    parts = [
+        *([f"raise the Threat floor to {hostile[0].name}"] if hostile[0] > now[0] else []),
+        *([f"lower the Threat ceiling to {benign[1].name}"] if benign[1] < now[1] else []),
+    ]
+    effect = "could " + " or ".join(parts) if parts else "would firm up Behaviour and move no Threat band"
+    return dataclasses.replace(cue, benign=benign, hostile=hostile, effect=effect)
 
 
-#: A cue whose either outcome leaves a LOW to CRITICAL range across HIGH: it lowers the ceiling only to HIGH.
+#: A cue whose either outcome leaves a LOW to CRITICAL range across HIGH: it lowers the ceiling only to HIGH, so it
+#: has value above 0 without taking the range off the line.
 _UNDECIDING = _outcomes(_cue("pull its GCAT catalogue entry", steps=1, hours=0.25), (Band.LOW, Band.HIGH),
                         (Band.LOW, Band.CRITICAL))
 
@@ -152,34 +163,42 @@ class TestCollectFirst:
 
     def test_the_action_line_is_the_operators_to_set(self) -> None:
         assert tu.ACTION_LINE is Band.HIGH
-        lowers = _outcomes(_cue(), (Band.HIGH, Band.HIGH), (Band.HIGH, Band.CRITICAL))
+        lowers = _outcomes(_cue(), (Band.HIGH, Band.HIGH), (Band.HIGH, Band.CRITICAL), now=(Band.HIGH, Band.CRITICAL))
         advice = _advice(action_line=Band.CRITICAL, floor=Band.HIGH, cues=(lowers,))
         assert advice.advice is tu.Advice.COLLECT_FIRST
 
-    def test_a_cue_that_leaves_the_range_across_the_line_either_way_does_not_count(self) -> None:
-        """Collecting it could not change the decision, so it spends time before decide-by for nothing."""
+    def test_a_cue_that_leaves_the_range_across_the_line_either_way_still_counts(self) -> None:
+        """Concept section 9, decision 10 (SPC-182): any cue with value above 0 may trigger collect first."""
         advice = _advice(floor=Band.LOW, cues=(_UNDECIDING,))
-        assert advice.advice is tu.Advice.ACT_ON_CEILING
-        assert advice.cue is None
+        assert advice.advice is tu.Advice.COLLECT_FIRST
+        assert advice.cue == _UNDECIDING
         assert advice.sentence == (
-            "Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from LOW to CRITICAL, across "
-            "the action line at Threat HIGH, and no collection SPECTRE can read could move it off that line."
+            "Collect first: pull its GCAT catalogue entry, about 15 min, lands before decide-by at 15:00 UTC on "
+            "4 Nov. The Threat range runs from LOW to CRITICAL, across the action line at Threat HIGH, and this "
+            "could lower the Threat ceiling to HIGH."
         )
 
     @pytest.mark.parametrize(("benign", "hostile"), [
         ((Band.LOW, Band.MEDIUM), (Band.LOW, Band.CRITICAL)), ((Band.LOW, Band.CRITICAL), (Band.HIGH, Band.CRITICAL)),
     ], ids=["the benign ceiling falls under the line", "the hostile floor reaches it"])
-    def test_a_cue_with_an_outcome_off_the_line_counts(self, benign: tuple[Band, Band],
-                                                       hostile: tuple[Band, Band]) -> None:
-        """It is named over a quicker cue that could not change the decision."""
+    def test_a_cue_off_the_line_is_ranked_with_the_rest_by_steps_per_hour(
+            self, benign: tuple[Band, Band], hostile: tuple[Band, Band]) -> None:
+        """Taking the range off the line earns no precedence: the quicker cue with value above 0 is named."""
         cue = _outcomes(_cue(steps=1, hours=0.5), benign, hostile)
         assert cue.steps_per_hour < _UNDECIDING.steps_per_hour
-        assert _advice(floor=Band.LOW, cues=(_UNDECIDING, cue)).cue == cue
+        assert _advice(floor=Band.LOW, cues=(_UNDECIDING, cue)).cue == _UNDECIDING
 
-    def test_the_cues_that_land_are_only_those_that_could_change_the_decision(self) -> None:
-        deciding = _cue()
-        landing = tu.landing_cues((_UNDECIDING, deciding), now=_NOW, decide_at=_NOW + timedelta(hours=6))
-        assert landing == (deciding,)
+    def test_the_cues_that_land_are_every_one_with_value_above_0_spectre_can_read(self) -> None:
+        other = _cue()
+        unread, still = _cue(_RECORD, fed=False), _cue("pull its GCAT catalogue entry", steps=0)
+        landing = tu.landing_cues((_UNDECIDING, other, unread, still), now=_NOW, decide_at=_NOW + timedelta(hours=6))
+        assert landing == (other, _UNDECIDING)
+
+    def test_a_cue_whose_result_spectre_cannot_read_never_counts_however_much_it_could_move(self) -> None:
+        """Its result never lands, so it cannot be collected before decide-by (SPC-182, Claude's call, kept)."""
+        advice = _advice(floor=Band.LOW, cues=(_cue(steps=4, hours=0.25, fed=False),))
+        assert advice.advice is tu.Advice.ACT_ON_CEILING
+        assert advice.sentence.endswith("and no collection SPECTRE can read would narrow it.")
 
     def test_the_model_ranks_the_cues_and_the_first_one_spectre_can_read_is_named(self) -> None:
         """With nothing held, holding conjunctions ranks first but cannot be read yet, so the history is named."""

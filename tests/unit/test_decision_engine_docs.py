@@ -55,7 +55,7 @@ class TestThePhaseDocument:
         "topic",
         [
             "Bound", "Computed", "Sampled", "Lookup", "Our response burns", "collect first", "Threat range",
-            "Load from NOTSO", "95 in 100 Poisson interval", "turn depth", "update after turn 1",
+            "NOTSO suggestion", "95 in 100 Poisson interval", "turn depth", "update after turn 1",
             "deepest turn built in full", "What remains out of scope",
         ],
     )
@@ -75,7 +75,7 @@ class TestTheOperatorGuide:
         "topic",
         [
             "Bind to real objects", "Computed", "Sampled", "Lookup", "target separation", "Collect First",
-            "Load from NOTSO", "an interval on P", "Turn depth", "update after turn 1", "deepest turn built in full",
+            "NOTSO suggestion", "an interval on P", "Turn depth", "update after turn 1", "deepest turn built in full",
             "What It Does Not Do", "Minimin",
         ],
     )
@@ -85,6 +85,11 @@ class TestTheOperatorGuide:
     def test_it_no_longer_names_a_rule_the_engine_does_not_have(self) -> None:
         assert "MAXIMIN" not in _read("docs/generate_guide.py")
         assert "Maximin" not in _guide_section()
+
+    def test_it_says_where_a_turn_ends_when_no_burn_follows(self) -> None:
+        """SPC-187: with no burn after it, a turn ends midway to the end of the span searched, not to a next burn."""
+        section = " ".join(_guide_section().split())
+        assert "with no burn after it, midway between that burn and the end of the span searched" in section
 
     def test_its_section_follows_the_house_style(self) -> None:
         section = _guide_section()
