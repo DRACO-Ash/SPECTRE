@@ -28,11 +28,11 @@ def phase_angle_deg(r_chaser: np.ndarray, v_chaser: np.ndarray, r_target: np.nda
     """
     h = np.cross(r_chaser, v_chaser)
     h_norm = float(np.linalg.norm(h))
-    if h_norm == 0.0:
+    if not h_norm:
         raise ValueError("the chaser's orbital plane is undefined")
     normal = h / h_norm
     in_plane = r_target - float(np.dot(r_target, normal)) * normal
-    if float(np.linalg.norm(in_plane)) == 0.0:
+    if not float(np.linalg.norm(in_plane)):
         raise ValueError("the target lies on the chaser's orbit normal")
     return math.degrees(math.atan2(float(np.dot(normal, np.cross(r_chaser, in_plane))),
                                    float(np.dot(r_chaser, in_plane))))

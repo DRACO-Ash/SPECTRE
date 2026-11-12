@@ -187,7 +187,7 @@ def _collision_prob(rec: dict[str, Any]) -> str:
     value = _finite(raw)
     if value is None or not 0.0 <= value <= 1.0:
         return UNREADABLE
-    return "0" if value == 0.0 else f"{value:.2e}"
+    return "0" if not value else f"{value:.2e}"
 
 
 def _nested(rec: dict[str, Any], side: int) -> dict[str, Any]:

@@ -61,7 +61,7 @@ function threatFilter(q) {
 /* ── Data Mode filter (show only rows matching a UDL dataMode tag) ── */
 function sweepDmFilter(val) {
   document.querySelectorAll('.threat-parent').forEach(function(parent) {
-    var dm = (parent.getAttribute('data-dm') || '').toUpperCase();
+    var dm = (parent.dataset.dm || '').toUpperCase();
     var match = val === '' || dm === val.toUpperCase();
     parent.style.display = match ? '' : 'none';
     var gIdx = parent.id.replace('threat-group-', '');
@@ -102,7 +102,7 @@ function childSort(gIdx, col, type) {
   dataRows.sort(function(a, b) {
     var av = a.cells[col].textContent.trim();
     var bv = b.cells[col].textContent.trim();
-    if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
+    if (type === 'num') { av = Number.parseFloat(av) || 0; bv = Number.parseFloat(bv) || 0; }
     if (av < bv) return state.asc ? -1 : 1;
     if (av > bv) return state.asc ? 1 : -1;
     return 0;
@@ -175,7 +175,7 @@ function threatSort(col, type) {
   groups.sort(function(a, b) {
     var av = a[0].cells[col].textContent.trim();
     var bv = b[0].cells[col].textContent.trim();
-    if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
+    if (type === 'num') { av = Number.parseFloat(av) || 0; bv = Number.parseFloat(bv) || 0; }
     if (av < bv) return sort.asc ? -1 : 1;
     if (av > bv) return sort.asc ? 1 : -1;
     return 0;

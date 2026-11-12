@@ -9,7 +9,7 @@
    Context: adjudication (spectre.web.adjudication_log.view). #}
 <section class="adjudication" id="adjudication" aria-label="Adjudicate this Threat range">
   <div class="adjudication-report">{{ adjudication.report }}</div>
-  {% if adjudication.message %}<div class="adjudication-message" role="status">{{ adjudication.message }}</div>{% endif %}
+  {% if adjudication.message %}<div class="adjudication-message" aria-live="polite" aria-atomic="true">{{ adjudication.message }}</div>{% endif %}
   {% if adjudication.subject %}
   <details class="adjudication-details"{% if adjudication.message %} open{% endif %}>
     <summary>Adjudicate: {{ adjudication.range_text }}</summary>

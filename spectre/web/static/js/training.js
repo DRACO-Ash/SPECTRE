@@ -75,8 +75,8 @@ function updateObjectivesJson() {
 SPECTRE.action('updateObjectivesJson', function () { updateObjectivesJson(); });
 
 SPECTRE.init('scenario-attempt', function (marker) {
-  if (!marker.hasAttribute('data-remaining-s')) return;
-  var remaining = Number(marker.getAttribute('data-remaining-s'));
+  if (marker.dataset.remainingS === undefined) return;
+  var remaining = Number(marker.dataset.remainingS);
   var form = document.getElementById('scenario-submit-form');
   var timerInterval = setInterval(function() {
     var display = document.getElementById('timer-display');

@@ -216,7 +216,8 @@ async def check_once(
     watch.next_check_at = now + CHECK_EVERY
     try:
         return await _check(state, key, watch, now, compute)
-    except Exception as exc:  # noqa: BLE001 - one failed check must not end the watch; it says so and retries
+    # BLE001: one failed check must not end the watch; it says so and retries.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Burn watch check failed for %s: %s", log_safe(watch.red_satno),
                        log_safe(exc.__cause__ or exc))
         times = {"now": _hm(now), "next": _hm(watch.next_check_at)}
@@ -275,7 +276,8 @@ async def watch_loop(
         await asyncio.sleep(TICK_S)
 
 
-def start_watch(  # noqa: PLR0913 - the watch, its owner and the injected pieces, the last three named at the call
+# PLR0913: the watch, its owner and the injected pieces, the last three named at the call.
+def start_watch(  # noqa: PLR0913
     state: SessionState, key: SessionKey, watch: BurnWatch, *,
     first_history: asyncio.Task[Any] | None, compute: Compute,
     spawn: Callable[[Any, SessionKey | None], asyncio.Task[None]],

@@ -429,7 +429,8 @@ async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
             satno, state.udl_username, state.udl_password,
             state.udl_data_mode, source=state.udl_tle_source,
         ))
-    except Exception as exc:  # noqa: BLE001 - any UDL failure becomes a stated problem
+    # BLE001: any UDL failure becomes a stated problem.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Held history: UDL fetch failed for %s: %s", log_safe(satno), log_safe(exc))
         return None, "The element-set history could not be fetched from UDL."
     if not fetched.merged_text.strip():

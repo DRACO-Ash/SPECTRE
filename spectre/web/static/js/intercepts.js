@@ -133,7 +133,7 @@ SPECTRE.action('setManoeuvreStart', function (el) {
 /* ── Relative geometry panel: charts and view tabs ── */
 function geometryCharts(panel) {
   /* Every id in this panel carries the route's prefix, so a second panel on the page finds only its own nodes. */
-  var IDS = panel.getAttribute('data-id-prefix');
+  var IDS = panel.dataset.idPrefix;
   /* ── Parse server-rendered chart data (safe — no user strings in data): a JSON string, read from its data block ── */
   var block = document.getElementById(IDS + 'cw-data');
   if (!block) { return; }
@@ -343,8 +343,8 @@ function geometryCharts(panel) {
    intercept panel and a Decision Engine view open on the same page each find,
    close and return focus for their own panel only. */
 function geometryExit(panel) {
-  var IDS = panel.getAttribute('data-id-prefix');
-  var OPENER = panel.getAttribute('data-opener');
+  var IDS = panel.dataset.idPrefix;
+  var OPENER = panel.dataset.opener;
 
   /* The control that opened this panel: the intercept result's button, or
      the Decision Engine cell whose form was submitted. Falls back to

@@ -943,19 +943,19 @@ def _slowest_km_s(state: np.ndarray) -> float:
 def _pad_s(offsets_km: np.ndarray, state: np.ndarray) -> float:
     """How far past each end an arc must run for every one of *offsets_km* to be read from it, s; 0 with none."""
     largest = float(np.max(np.abs(offsets_km), initial=0.0))
-    return 0.0 if largest == 0.0 else largest / _slowest_km_s(state) + _PAD_MARGIN_S
+    return 0.0 if not largest else largest / _slowest_km_s(state) + _PAD_MARGIN_S
 
 
 def _shifted(arc: _Trajectory, dt_s: float) -> _Trajectory:
     """*arc* *dt_s* later along itself: the object where the arc puts it dt_s on (SPC-202). *arc* itself for 0."""
-    if dt_s == 0.0:
+    if not dt_s:
         return arc
     return lambda t: arc(t + dt_s)
 
 
 def _shift_s(offset_km: float, state: np.ndarray) -> float:
     """The time an object at *state* takes to cover *offset_km* along its orbit, s: the shift that moves it so far."""
-    return 0.0 if offset_km == 0.0 else offset_km / float(np.linalg.norm(state[3:]))
+    return 0.0 if not offset_km else offset_km / float(np.linalg.norm(state[3:]))
 
 
 #: What every separation series propagates with, stated on the series.
@@ -1226,7 +1226,7 @@ def run_separation_series(  # noqa: PLR0913
 
 def _offsets(error: ElsetError | None, seed: int, n: int) -> np.ndarray | None:
     """Each sample's along-track offsets, or None when there is no error to draw."""
-    if error is None or (error.red_km == 0.0 and error.blue_km == 0.0):
+    if error is None or not (error.red_km or error.blue_km):
         return None
     return elset_offsets_km(error, seed, n)
 
@@ -1348,7 +1348,7 @@ def rk45_arc(state: np.ndarray, span_s: float, bstar: float, pad_s: float = 0.0)
 def shift_pad_s(shifts_s: np.ndarray | None) -> float:
     """How far past each end an arc must run for every one of *shifts_s* to be read from it, s; 0 with none."""
     largest = 0.0 if shifts_s is None else float(np.max(np.abs(shifts_s), initial=0.0))
-    return 0.0 if largest == 0.0 else largest + _PAD_MARGIN_S
+    return 0.0 if not largest else largest + _PAD_MARGIN_S
 
 
 def along_track_shifts_s(offsets_km: np.ndarray, state: np.ndarray) -> np.ndarray:
@@ -1492,7 +1492,7 @@ def _shifts(
 def _padded_arc(state: np.ndarray, span_s: float, bstar: float, pad_s: float) -> _Trajectory | None:
     """*state* at the window start integrated over the window and *pad_s* past each end; the window alone for 0."""
     ahead = _dense_arc(state, 0.0, span_s + pad_s, bstar)
-    if pad_s == 0.0 or ahead is None:
+    if not pad_s or ahead is None:
         return ahead
     back = _dense_arc(state, 0.0, -pad_s, bstar)
     return None if back is None else _spliced(back, ahead, 0.0)
@@ -1559,7 +1559,8 @@ def _spliced(before: _Trajectory, after: _Trajectory, at_s: float) -> _Trajector
     return lambda t: before(t) if t < at_s else after(t)
 
 
-def _try_sample(  # noqa: PLR0913, PLR0917 - one sample's draw, its shared arcs and what it is searched against
+# PLR0913, PLR0917: one sample's draw, its shared arcs and what it is searched against.
+def _try_sample(  # noqa: PLR0913, PLR0917
     sample: np.ndarray, arcs: _Arcs, bstar_post: float, window: SeparationWindow,
     blues: Sequence[_Trajectory | str], keep: Callable[[_RedArc], None] | None = None,
     later: tuple[RedBurn, ...] = (),

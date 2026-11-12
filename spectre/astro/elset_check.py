@@ -59,12 +59,13 @@ _TWO_LINES = "it does not hold two element lines"
 _FIRST_YEAR_OF_THE_1900S = 57
 
 #: A decimal number as the format writes one: a sign, digits and at most one decimal point, padded with spaces, as
-#: in " 97.4000" or "-.00002182". No exponent, underscore or word, each of which float() reads.
-_DECIMAL = re.compile(r" *[+-]?[0-9]*\.?[0-9]+ *")
+#: in " 97.4000" or "-.00002182". No exponent, underscore or word, each of which float() reads. re.ASCII keeps \d to
+#: the digits 0 to 9, as float() would also read other scripts' digits.
+_DECIMAL = re.compile(r" *[+-]?\d*\.?\d+ *", re.ASCII)
 #: A mantissa with an implied decimal point and a one-digit power of 10 (" 10270-3", "-11606-4", " 00000+0").
-_IMPLIED_EXPONENT = re.compile(r" *[+-]?[0-9]{1,5}[+-][0-9] *")
+_IMPLIED_EXPONENT = re.compile(r" *[+-]?\d{1,5}[+-]\d *", re.ASCII)
 #: The epoch: a two-digit year, then the day of the year and its fraction.
-_EPOCH_FIELD = re.compile(r" *([0-9]{2})( *[0-9]+(?:\.[0-9]*)?) *")
+_EPOCH_FIELD = re.compile(r" *(\d{2})( *\d+(?:\.\d*)?) *", re.ASCII)
 
 
 class _Field(NamedTuple):
@@ -286,7 +287,8 @@ def check_elset(tle: str, satno: int | None = None, *, record: Mapping[str, obje
     also be for that catalogue number: an answer for another object is not the set asked for. *record* is the UDL
     record the set came in, when it came from UDL: its ephemType and uct flag are read from it."""
     lines = _lines(tle)
-    if len(lines) < 2:  # noqa: PLR2004 - two element lines
+    # PLR2004: two element lines.
+    if len(lines) < 2:  # noqa: PLR2004
         return ElsetCheck((_TWO_LINES,))
     line1, line2 = lines[-2], lines[-1]
     structure = _structure(line1, line2)

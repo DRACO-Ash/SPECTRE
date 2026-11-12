@@ -277,6 +277,22 @@ if [ -f "$LEDGER" ]; then
     fi
 fi
 
+# ── Code Quality rules the gate has raised before ─────────────────────────────
+# Submissions failed Code Quality on rules a script can see: 0.6.0 (36), 0.6.1
+# (2), 0.6.3 (10). scripts/sonar_rules.py reproduces each of those verdicts at
+# the gate's own lines (docs/SONAR-RULES.md), so a package is not built while
+# one of them lands on changed code. SONAR_BASE names where the platform's
+# new-code window starts, master by default.
+# A missing checker stops the build rather than skipping the check.
+echo
+echo "  checking changed code against the rules the gate has raised before..."
+if ! python3 scripts/sonar_rules.py "${SONAR_BASE:-master}"; then
+    echo "FAIL: the Code Quality gate has failed a submission on each rule above,"
+    echo "      or the check could not run (see above)."
+    echo "      Fix them, or record why a finding is wrong in docs/SONAR-RULES.md."
+    exit 1
+fi
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 mkdir -p "$OUT_DIR"
 rm -f "$ZIP_PATH"

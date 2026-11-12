@@ -214,7 +214,8 @@ def _pair(inner: Codec) -> Codec:
 
     def read_pair(value: Any, where: str) -> tuple[Any, Any]:
         items = _list_in(value, where)
-        if len(items) != 2:  # noqa: PLR2004 - a pair
+        # PLR2004: a pair.
+        if len(items) != 2:  # noqa: PLR2004
             raise _refuse(where, f"{len(items)} items where a pair belongs")
         return read(items[0], f"{where}[0]"), read(items[1], f"{where}[1]")
 

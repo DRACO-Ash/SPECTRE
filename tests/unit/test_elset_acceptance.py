@@ -245,6 +245,19 @@ class TestOnlyAsciiIsRead:
         corrupted = _with(_GOOD, 2, 27, character, checksum=False)
         assert check_elset(corrupted).failures == ("line 2 holds a character that is not plain ASCII",)
 
+    def test_the_field_patterns_read_ascii_digits_only(self) -> None:
+        """SPC-233 wrote [0-9] as \\d (python:S6353) with re.ASCII, so the patterns accept exactly what they did."""
+        from spectre.astro.elset_check import _DECIMAL, _EPOCH_FIELD, _IMPLIED_EXPONENT
+
+        wide = "\N{FULLWIDTH DIGIT FIVE}"
+        assert _DECIMAL.fullmatch(f" 97.{wide}") is None
+        assert _IMPLIED_EXPONENT.fullmatch(f" 1027{wide}-3") is None
+        assert _EPOCH_FIELD.fullmatch(f"2{wide}100.5") is None
+        assert _DECIMAL.fullmatch("-.00002182") is not None
+        assert _IMPLIED_EXPONENT.fullmatch("-11606-4") is not None
+        epoch = _EPOCH_FIELD.fullmatch("26100.50000000")
+        assert epoch is not None and epoch.groups() == ("26", "100.50000000")
+
     def test_the_checksum_counts_a_unicode_digit_as_0_and_never_raises(self) -> None:
         """Like any character but an ASCII digit or a minus sign, it counts 0: in place of a 7 the sum is out."""
         from spectre.astro.propagator import tle_checksum_valid

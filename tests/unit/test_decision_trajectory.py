@@ -237,8 +237,9 @@ class TestThePage:
         source = (Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js" / "decision.js").read_text(
             encoding="utf-8")
         script = source[source.index("SPECTRE.init('geometry-opener'"):source.index("/* ── Sampled times")]
-        assert "setAttribute('data-geometry-opener'" in script
-        assert "removeAttribute('data-geometry-opener')" in script
+        # Through dataset since SPC-233 (javascript:S7761), the same data-geometry-opener attribute.
+        assert "form.dataset.geometryOpener = 'true'" in script
+        assert "delete f.dataset.geometryOpener" in script
         assert "document.addEventListener" not in script, "scoped to the results table, not the whole console"
 
     def test_each_form_posts_the_route_fields(self, plane: ScenarioResult) -> None:

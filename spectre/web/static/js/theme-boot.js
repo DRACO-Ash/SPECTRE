@@ -11,8 +11,8 @@
     var t = localStorage.getItem('spectre-theme');
     var valid = ['ops', 'steel'];
     if (t && valid.includes(t)) {
-      root.setAttribute('data-theme', t);
-      root.setAttribute('data-spectre-theme', t === 'steel' ? 'light' : 'dark');
+      root.dataset.theme = t;
+      root.dataset.spectreTheme = t === 'steel' ? 'light' : 'dark';
     } else if (t) {
       localStorage.removeItem('spectre-theme');
     }

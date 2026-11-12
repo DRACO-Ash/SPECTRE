@@ -413,7 +413,7 @@ def _direction(inputs: _Inputs, parts: Sequence[str], row: int) -> tuple[float, 
     if all(v is None for v in values):
         return None
     r, i, c = (v or 0.0 for v in values)
-    if r == i == c == 0.0:
+    if not (r or i or c):
         inputs.refuse(_HYPOTHESIS_ZERO.format(row=row))
     return (r, i, c)
 

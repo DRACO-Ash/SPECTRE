@@ -138,6 +138,8 @@ __all__ = [
 ]
 
 _SECONDS_PER_DAY = 86400.0
+#: The word that joins the items of a list in a sentence, and that separates two sources a record names.
+_AND = " and "
 
 # Admiralty source reliability, the letter, as a weight. A: own or allied
 # sensor, analyst-adjudicated. B: the 18 SDS catalogue through UDL, and GCAT.
@@ -1009,7 +1011,7 @@ def _volatility(result: ThreatRange, situation: Situation) -> tuple[Understandin
         *([burn] if (burn := _unsettled_burn(situation)) else []),
         *(["a truncated history"] if situation.history_truncated else []),
     ]
-    return (Understanding.MODERATE, " and ".join(parts)) if parts else (Understanding.HIGH, "")
+    return (Understanding.MODERATE, _AND.join(parts)) if parts else (Understanding.HIGH, "")
 
 
 def _caps(situation: Situation) -> list[_Finding]:
@@ -1114,7 +1116,7 @@ _INTEL_GRADE = "C"
 _INTEL_CREDIBILITY = 2
 _INTEL_CREDIBILITY_THIN = 3
 #: Separators that mark a record naming more than one source.
-_SOURCE_SEPARATORS = ("/", ";", " and ")
+_SOURCE_SEPARATORS = ("/", ";", _AND)
 #: The record field an analyst dates a record with, ISO 8601. None of the 44
 #: bundled records carries one yet.
 RECORD_DATE_FIELD = "assessed_at"
@@ -1251,7 +1253,12 @@ def record_date(record: Mapping[str, Any] | None) -> datetime | None:
 
 def _identity_note(dated: datetime | None, source: str, single: bool, level: str, band: Band | None) -> str:
     """What the record is, as section 7.3 lists it ("undated, single open source"), and any unread level."""
-    sourced = ("single open source" if single else "") if source else "unsourced"
+    if not source:
+        sourced = "unsourced"
+    elif single:
+        sourced = "single open source"
+    else:
+        sourced = ""
     record = ", ".join(word for word in ("" if dated else "undated", sourced) if word)
     unread = f"its threat level '{level}' is not a recognised band, so it carries no reading" if (
         level and band is None) else ""
@@ -1472,7 +1479,12 @@ def _weakest_provider(edge: Edge | MissEdge, grades: Mapping[str, str]) -> str:
 
 
 def _miss_note(edge: MissEdge, routine: bool) -> str:
-    whose = _MISS_ROUTINE if routine else (_MISS_OURS if edge.ours else _MISS_NOT_OURS)
+    if routine:
+        whose = _MISS_ROUTINE
+    elif edge.ours:
+        whose = _MISS_OURS
+    else:
+        whose = _MISS_NOT_OURS
     if edge.source is not MissSource.UDL:
         return whose
     return f"{'one of yours' if edge.ours else 'not one of yours'}; {_PROBE_NOTE}"
@@ -1906,7 +1918,7 @@ def _effect(now: ThreatRange, benign: ThreatRange, hostile: ThreatRange, dimensi
     ]
     if parts:
         return "could " + " or ".join(parts)
-    return f"would firm up {' and '.join(d.value for d in dimensions)} and move no Threat band"
+    return f"would firm up {_AND.join(d.value for d in dimensions)} and move no Threat band"
 
 
 def _cue(items: tuple[EvidenceItem, ...], situation: Situation, now: ThreatRange, collection: _Collection) -> Cue:
@@ -2067,7 +2079,7 @@ def cue_text(cue: Cue, *, threat: bool = True) -> str:
     Threat bands and steps worked out against a ceiling no geometry has set.
     """
     if not threat:
-        firms = " and ".join(d.value for d in cue.dimensions)
+        firms = _AND.join(d.value for d in cue.dimensions)
         return f"{cue.observation}: would firm up {firms}, about {_duration(cue.hours)}"
     steps = "step" if cue.steps == 1 else "steps"
     return f"{cue.observation}: {cue.effect}, {cue.steps} Threat {steps}, about {_duration(cue.hours)}"

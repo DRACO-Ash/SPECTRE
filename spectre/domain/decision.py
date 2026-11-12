@@ -563,7 +563,7 @@ def _unit_ric(direction: Sequence[float]) -> tuple[float, float, float]:
             f"A direction is three finite parts, radial, in-track and cross-track; got {tuple(direction)!r}."
         )
     peak = max(abs(c) for c in parts)
-    if peak == 0.0:
+    if not peak:
         raise ValueError("A direction of zero cannot be normalised, and no direction is assumed in its place.")
     scaled = tuple(c / peak for c in parts)
     norm = math.hypot(*scaled)
@@ -1299,7 +1299,7 @@ class OutcomeMetrics:
         never shown as held or lost (SPC-179)."""
         if self.custody_maintained:
             return "held"
-        if self.custody_degraded_hours == 0.0:
+        if not self.custody_degraded_hours:
             return "lost"
         return "degraded, then lost" if self.custody_gap_hours > 0.0 else "degraded"
 
@@ -1452,11 +1452,11 @@ def _require_custody(cell: OutcomeMetrics) -> None:
         raise ValueError("custody and its gap share one basis")
     if (cell.custody_state is not None) != (kind is Basis.COMPUTED):
         raise ValueError("custody_state is set exactly when custody's basis is computed")
-    if cell.custody_degraded_hours != 0.0 and cell.custody_state is not Custody.DEGRADED:
+    if cell.custody_degraded_hours and cell.custody_state is not Custody.DEGRADED:
         raise ValueError("only custody computed as degraded at the scenario epoch has degraded hours")
     if cell.custody_state is None:
         return
-    if cell.custody_maintained and cell.custody_gap_hours != 0.0:
+    if cell.custody_maintained and cell.custody_gap_hours:
         raise ValueError(f"computed custody maintained has no gap; got {cell.custody_gap_hours!r} h")
     if cell.custody_state is not Custody.HELD and cell.custody_maintained:
         raise ValueError(f"custody {cell.custody_state.value} at the scenario epoch is not maintained")
@@ -2853,7 +2853,8 @@ class Sampler(Protocol):
     samples draw element-set error (SPC-202), which is every bound row under that rule.
     """
 
-    def __call__(  # noqa: PLR0913 - the series' own keywords, each passed only when used
+    # PLR0913: the series' own keywords, each passed only when used.
+    def __call__(  # noqa: PLR0913
         self, hypothesis: ManoeuvreHypothesis, blue: BlueTrack, window: SeparationWindow, /, *,
         tick: Tick | None = ..., blue_burns: Sequence[BlueBurn] = ..., keep_at_s: Sequence[float] = ...,
         red_then: Sequence[ManoeuvreHypothesis] = ..., elset_error: ElsetError | None = ...,
@@ -4823,7 +4824,7 @@ def _rescored(result: ScenarioResult, outcome: Scenario) -> list[list[OutcomeMet
         for friendly, cell in zip(outcome.friendly_responses, row, strict=True):
             figures = cell_figures(cell)
             shift = _score(outcome, friendly, figures) - _score(result.scenario, friendly, figures)
-            cells.append(cell if shift == 0.0 else dataclasses.replace(cell, composite_score=cell.composite_score + shift))
+            cells.append(cell if not shift else dataclasses.replace(cell, composite_score=cell.composite_score + shift))
         rows.append(cells)
     return rows
 
@@ -5151,7 +5152,8 @@ def _start_line(burns: RowBurns | None, scenario_epoch: datetime) -> str | None:
     if burns is None or burns.all_dropped or burns.applied[0] == 1:
         return None
     k, at = burns.applied[0], burns.first.epoch_utc
-    before = "the burn before it is" if k == 2 else "the burns before it are"   # noqa: PLR2004 - burn 1 alone
+    # PLR2004: burn 1 alone.
+    before = "the burn before it is" if k == 2 else "the burns before it are"  # noqa: PLR2004
     return _STARTS_LATER.format(k=k, at=at, h=(at - scenario_epoch).total_seconds() / 3600.0, before=before)
 
 

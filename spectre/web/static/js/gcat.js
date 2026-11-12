@@ -63,4 +63,4 @@ function gcatSync(dsKey) {
 SPECTRE.action('gcatCatTab', gcatCatTab);
 SPECTRE.action('gcatSelectDs', gcatSelectDs);
 SPECTRE.action('gcatClearSearch', function (el) { gcatClearSearch(el.dataset.dataset); });
-SPECTRE.init('gcat-sync', function (marker) { gcatSync(marker.getAttribute('data-dataset')); });
+SPECTRE.init('gcat-sync', function (marker) { gcatSync(marker.dataset.dataset); });

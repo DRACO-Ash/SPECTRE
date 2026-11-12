@@ -776,7 +776,9 @@ class TestRefusalsTellNothingOfAnotherOperatorsRecords:
         theirs = _flat(_decide(client, other, record.id, "deferred"))
         missing = _flat(_decide(client, other, 2_000_000_000, "deferred"))
         assert _NOT_YOURS in theirs
-        assert theirs.replace(str(record.id), "N") == missing.replace("2000000000", "N")
+        # Put the real id into the refusal for the missing one, rather than masking the real id: a small id also
+        # appears in the page's own text ("0.65rem"), so masking it depended on which id the record drew (SPC-233).
+        assert theirs == missing.replace("2000000000", str(record.id))
 
     def test_a_decided_record_refuses_any_second_post_as_decided(self, client: TestClient) -> None:
         """Whatever the second post holds, the refusal is that the record is decided."""

@@ -611,7 +611,8 @@ _NODES = frozenset({"asc_node", "desc_node"})
 
 def _shape_of(tle: str) -> tuple[float, float]:
     """Eccentricity and inclination (degrees) of *tle*."""
-    sat = TLEOrbit(tle)._sat  # noqa: SLF001 - the parsed record already held, not a second parse
+    # SLF001: the parsed record already held, not a second parse.
+    sat = TLEOrbit(tle)._sat  # noqa: SLF001
     return float(sat.ecco), math.degrees(float(sat.inclo))
 
 
@@ -2037,7 +2038,8 @@ class _SweepBasis(NamedTuple):
     now: datetime
 
 
-def _sweep_basis(  # noqa: PLR0913 - one argument per thing the runs hold constant, all named at the call
+# PLR0913: one argument per thing the runs hold constant, all named at the call.
+def _sweep_basis(  # noqa: PLR0913
     state: object, targets: list[ThreatTarget], *, manual: dict[str, str], red_regime: str,
     max_dv_m_s: float, now: datetime,
 ) -> _SweepBasis:
@@ -2301,8 +2303,10 @@ def _build_change(
         least_warning_by_target(before, basis.max_dv_m_s),
         least_warning_by_target(after, basis.max_dv_m_s),
     )
-    not_swept = (f"Not swept, so {'its' if len(skipped) == 1 else 'their'} warning change is not computed: {named}."
-                 if skipped else "")
+    not_swept = ""
+    if skipped:
+        whose = "its" if len(skipped) == 1 else "their"
+        not_swept = f"Not swept, so {whose} warning change is not computed: {named}."
     changed = tuple(r for r in rows if r.change.name != "UNCHANGED")
     top = next((r for r in rows if r.change.name in ("CUT", "NEWLY_IN_REACH")), None)
     verdicts = burn_verdicts(context.history.pol, context.history.assessment) if context.history.assessment else {}
@@ -2579,7 +2583,8 @@ def _flown_epoch(red_tle: str, now: datetime) -> datetime | None:
     return age.epoch if age else None
 
 
-def _watch_after_sweep(  # noqa: PLR0913 - one argument per thing the watch starts from, all named at the call
+# PLR0913: one argument per thing the watch starts from, all named at the call.
+def _watch_after_sweep(  # noqa: PLR0913
     state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None], *,
     history: _RedHistory, history_task: asyncio.Task[HeldHistory] | None,
     flown: tuple[CustodyStatus, datetime | None],
@@ -2991,6 +2996,15 @@ async def threat_sweep(
 
 
 
+def _refresh_note(actor: ThreatActor, outcome: object) -> str:
+    """One actor's line when its live set was not fetched: a refusal's own sentence, or what went wrong."""
+    if isinstance(outcome, str):
+        return outcome
+    why = f" ({_refusal_reason(outcome)})" if isinstance(outcome, BaseException) else ""
+    return (f"{actor.actor_name} ({actor.actor_satno}): live element set not fetched{why}; "
+            "screened on the set already held")
+
+
 async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[str]:
     """Fetch live element sets for actors that have none, or only synthetic.
 
@@ -3025,14 +3039,7 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
-    held = "screened on the set already held"
-    return [
-        outcome if isinstance(outcome, str)
-        else f"{a.actor_name} ({a.actor_satno}): live element set not fetched"
-        + (f" ({_refusal_reason(outcome)}); {held}" if isinstance(outcome, BaseException) else f"; {held}")
-        for a, outcome in zip(missing, outcomes, strict=True)
-        if outcome is not True
-    ]
+    return [_refresh_note(a, outcome) for a, outcome in zip(missing, outcomes, strict=True) if outcome is not True]
 
 
 
@@ -3247,8 +3254,9 @@ async def screen_config(
     })
 
 
+# PLR0913, PLR0917: one argument per field of the adjudication form.
 @router.post("/adjudicate", response_model=None)
-async def threat_adjudicate(  # noqa: PLR0913, PLR0917 - one argument per field of the adjudication form
+async def threat_adjudicate(  # noqa: PLR0913, PLR0917
     request: Request,
     current_user: Annotated[User, Depends(require_login)],
     ledger_hash: Annotated[str, Form(max_length=64)] = "",

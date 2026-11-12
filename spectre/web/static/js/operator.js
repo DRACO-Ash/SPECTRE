@@ -51,7 +51,7 @@ SPECTRE.action('fetchOrbitalEvents', function () { fetchOrbitalEvents(); });
 function sbTab(btn) {
   var tabs = document.querySelectorAll('.stab');
   var panels = document.querySelectorAll('.sidebar-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -63,7 +63,7 @@ function sbTab(btn) {
 function assetTab(btn) {
   var tabs = document.querySelectorAll('.atab');
   var panels = document.querySelectorAll('.asset-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -75,7 +75,7 @@ function assetTab(btn) {
 function heroTab(btn) {
   var tabs = document.querySelectorAll('.htab');
   var panels = document.querySelectorAll('.hero-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -102,7 +102,7 @@ function heroTab(btn) {
 function engineTab(btn) {
   var tabs = document.querySelectorAll('.etab');
   var panels = document.querySelectorAll('.engine-tab-panel');
-  var target = btn.getAttribute('data-panel');
+  var target = btn.dataset.panel;
   tabs.forEach(function(t) { t.classList.remove('active'); });
   panels.forEach(function(p) { p.classList.remove('active'); });
   btn.classList.add('active');
@@ -162,7 +162,7 @@ function openDecisionPanel() {
    htmx compiles with new Function and the policy refuses (app.py) */
 document.body.addEventListener('htmx:afterRequest', function (e) {
   var elt = e.detail && e.detail.elt;
-  if (e.detail.successful && elt && elt.hasAttribute && elt.hasAttribute('data-opens-decision')) openDecisionPanel();
+  if (e.detail.successful && elt && elt.dataset && elt.dataset.opensDecision !== undefined) openDecisionPanel();
 });
 
 /* Switch to Trade-Space engine sub-tab programmatically */
@@ -254,7 +254,7 @@ SPECTRE.switchToEngine = switchToEngine;
     if (layout.classList.contains('sidebar-collapsed')) return;
     e.preventDefault();
     startX = e.clientX;
-    startW = parseInt(getComputedStyle(layout).gridTemplateColumns) || 500;
+    startW = Number.parseInt(getComputedStyle(layout).gridTemplateColumns) || 500;
     handle.classList.add('dragging');
     layout.classList.add('resizing');
     document.addEventListener('mousemove', onMove);
@@ -640,8 +640,8 @@ SPECTRE.action('hrrSearch', function (el) { window._hrrSearch(el.value); });
 
   function spectreSetTheme(theme) {
     if (THEMES.indexOf(theme) === -1) return;        // only allow known themes
-    document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.setAttribute('data-spectre-theme', theme === 'steel' ? 'light' : 'dark');
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.spectreTheme = theme === 'steel' ? 'light' : 'dark';
     try { localStorage.setItem(KEY, theme); } catch (_) {}
     var picker = document.getElementById('theme-picker');
     if (picker && picker.value !== theme) picker.value = theme;
@@ -652,7 +652,7 @@ SPECTRE.action('hrrSearch', function (el) { window._hrrSearch(el.value); });
   /* Sync the dropdown to whatever theme is active (set from localStorage
      by theme-boot.js in <head> before first paint) */
   (function syncPicker() {
-    var current = document.documentElement.getAttribute('data-theme') || 'ops';
+    var current = document.documentElement.dataset.theme || 'ops';
     var picker  = document.getElementById('theme-picker');
     if (picker) picker.value = current;
   })();
@@ -692,11 +692,11 @@ SPECTRE.action('closeSplash', function () {
 SPECTRE.init('udl-chip', function (el) {
   var d = document.getElementById('udl-dropdown');
   if (!d) return;
-  if (el.hasAttribute('data-chip-close')) { d.removeAttribute('open'); }
+  if (el.dataset.chipClose !== undefined) { d.removeAttribute('open'); }
   var dot = d.querySelector('.chip-dot');
-  if (dot) dot.className = 'chip-dot dot-' + el.getAttribute('data-chip-state');
+  if (dot) dot.className = 'chip-dot dot-' + el.dataset.chipState;
   var lbl = d.querySelector('.chip-label');
-  if (lbl) lbl.textContent = el.getAttribute('data-chip-label');
+  if (lbl) lbl.textContent = el.dataset.chipLabel;
 });
 
 /* ── Element-set refresh note (partials/elset_refresh_note.html) ────────────
@@ -720,7 +720,7 @@ SPECTRE.action('dropElsetMode', function (el) {
    were before this change; that is recorded for the owner rather than changed here (SPC-199). */
 SPECTRE.afterSettle('clearAssetForm', function (form, event) {
   if (!event.detail || event.detail.elt !== form) return;
-  var satno = document.getElementById(form.getAttribute('data-satno-field'));
+  var satno = document.getElementById(form.dataset.satnoField);
   if (satno) { satno.value = ''; }
   form.querySelectorAll('input:not([type=radio]):not([type=hidden]),textarea').forEach(function (el) {
     el.value = '';
@@ -730,7 +730,7 @@ SPECTRE.afterSettle('clearAssetForm', function (form, event) {
 /* ── Catalogue search (partials/catalog_results.html) ───────────────────────
    Sending an object to a side opens the first details of that side's panel, as hx-on::after-request did. */
 SPECTRE.afterRequest('openSideDetails', function (button) {
-  var details = document.querySelector('.panel-' + button.getAttribute('data-side') + ' details');
+  var details = document.querySelector('.panel-' + button.dataset.side + ' details');
   if (details) { details.setAttribute('open', ''); }
 });
 
@@ -746,8 +746,8 @@ function hrrSort(th) {
   rows.sort(function(a, b) {
     var av = (a.cells[col].dataset.val !== undefined ? a.cells[col].dataset.val : a.cells[col].textContent).trim();
     var bv = (b.cells[col].dataset.val !== undefined ? b.cells[col].dataset.val : b.cells[col].textContent).trim();
-    var an = parseFloat(av), bn = parseFloat(bv);
-    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    var an = Number.parseFloat(av), bn = Number.parseFloat(bv);
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) return asc ? an - bn : bn - an;
     return asc ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   rows.forEach(function(r) { tbody.appendChild(r); });

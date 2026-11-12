@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-12
+
+**Every Code Quality rule the App Store gate has raised, checked before it runs (charming-dirac c930087).**
+
+### Added
+- `scripts/sonar_rules.py` checks changed code against the 14 SonarQube rules the gate has raised, scoped as the gate scopes: changed lines and elements against a base, thresholds when crossed. `check-quality.sh` and the App Store packager fail on a blocking finding (SPC-233).
+- `docs/SONAR-RULES.md`, the rule ledger: each rule, the release that raised it, its calibration and the procedure for a new one. `docs/CODE-QUALITY-GATE.md` now says the new-code window runs from master, 0.6.4 (SPC-233).
+
+### Changed
+- Every blocking finding since master is cleared, with no change in behaviour, by the owner's ruling that issues are converted as code is touched: first-party JavaScript reads `data-*` attributes through `dataset` and uses `Number.parseFloat`, `Number.parseInt` and `Number.isNaN`; Python has no exact float equalities or nested conditional expressions; Decision Engine row fields, the sweep search and the time-to-execute fields carry labels a screen reader announces; live status messages use `aria-live` (SPC-233).
+- The three changed-line checks (`sonar_rules.py`, `sonar_scope.py`, `cognitive_complexity.py`) and `check-quality.sh` read the diff whatever the caller's `diff.noprefix` or `diff.mnemonicPrefix` setting, which had hidden every finding; a base that names no commit stops them with exit 2 instead of being handed to git or read as nothing changed; with no local master they measure from `origin/master`; the packager stops if the checker is missing (SPC-233 review).
+- One finding stays: the closest-approach chart's `<canvas role="img">`, which no native element can replace without losing its accessible name. `docs/SONAR-RULES.md` sets out the alternative (SPC-233).
+
 ## [0.34.0] - 2026-11-12
 
 **The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c3e).**

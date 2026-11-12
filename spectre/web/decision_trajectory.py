@@ -114,7 +114,8 @@ def _sampled_view(result: ScenarioResult, carried: AdversaryHypothesis, burns: R
 
 def _later_note(burns: RowBurns | None) -> str | None:
     """Which applied burns the view leaves out, for a row of several burns (SPC-184); None otherwise."""
-    if burns is None or len(burns.applied) < 2:   # noqa: PLR2004 - one burn applied leaves none out
+    # PLR2004: one burn applied leaves none out.
+    if burns is None or len(burns.applied) < 2:  # noqa: PLR2004
         return None
     later = [str(k) for k in burns.applied[1:]]
     named = f"burn {later[0]} is" if len(later) == 1 else f"burns {', '.join(later[:-1])} and {later[-1]} are"

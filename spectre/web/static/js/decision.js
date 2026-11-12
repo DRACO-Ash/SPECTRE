@@ -12,8 +12,8 @@ function decisionAddRow(containerId, templateId) {
   var container = document.getElementById(containerId);
   var template = document.getElementById(templateId);
   if (!container || !template) return;
-  var c = Number(container.getAttribute('data-row-count') || '0') + 1;
-  container.setAttribute('data-row-count', String(c));
+  var c = Number(container.dataset.rowCount || '0') + 1;
+  container.dataset.rowCount = String(c);
   var row = template.content.firstElementChild.cloneNode(true);
   row.querySelectorAll('input').forEach(function (input) {
     if (input.value.indexOf('__ROW__') !== -1) { input.value = input.value.replace('__ROW__', String(c)); }
@@ -24,7 +24,7 @@ function decisionAddRow(containerId, templateId) {
 SPECTRE.action('addAdvRow', function () { decisionAddRow('adv-rows', 'adv-row-template'); });
 SPECTRE.action('addFrRow', function () { decisionAddRow('fr-rows', 'fr-row-template'); });
 SPECTRE.action('removeRow', function (btn) {
-  var row = btn.closest('.' + btn.getAttribute('data-row-class'));
+  var row = btn.closest('.' + btn.dataset.rowClass);
   if (row) row.remove();
 });
 
@@ -38,9 +38,9 @@ SPECTRE.init('geometry-opener', function (region) {
     var form = event.target;
     if (!form.classList || !form.classList.contains('show-trajectory')) { return; }
     table.querySelectorAll('form.show-trajectory[data-geometry-opener]').forEach(function (f) {
-      f.removeAttribute('data-geometry-opener');
+      delete f.dataset.geometryOpener;
     });
-    form.setAttribute('data-geometry-opener', 'true');
+    form.dataset.geometryOpener = 'true';
   }, true);
 });
 
@@ -50,13 +50,13 @@ var tcaHistogramChart = null;
 function tcaHistogram(cell) {
   var block = document.getElementById('tca-hist-data-' + cell);
   document.querySelectorAll('.tca-histogram [data-cell]').forEach(function (el) {
-    el.hidden = el.getAttribute('data-cell') !== cell;
+    el.hidden = el.dataset.cell !== cell;
   });
   if (!block || typeof Chart === 'undefined') { return; }
   var data = JSON.parse(block.textContent);
   /* The bars and the axis take the table's own text: its edges are stated exactly, so nothing here rounds a time. */
   var table = Array.prototype.find.call(document.querySelectorAll('.tca-histogram table[data-cell]'), function (t) {
-    return t.getAttribute('data-cell') === cell;
+    return t.dataset.cell === cell;
   });
   var labels = table ? Array.prototype.map.call(table.querySelectorAll('tbody tr td:first-child'), function (td) { return td.textContent; }) : [];
   var axis = table ? table.querySelector('thead th').textContent : '';

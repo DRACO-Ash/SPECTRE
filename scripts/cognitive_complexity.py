@@ -361,18 +361,29 @@ def changed_line_ranges(base: str) -> dict[str, list[tuple[int, int]]]:
     # 67-complexity function puts that function in the gate's window, and a
     # check that cannot see uncommitted work would report it clean right up to
     # the moment of upload. That is exactly how this was found.
+    # A base that names no commit stops the check: a diff that cannot run used to read as nothing changed.
+    known = subprocess.run(  # noqa: S603
+        [git, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}"],
+        cwd=_ROOT, capture_output=True, text=True, check=False,
+    )
+    if known.returncode != 0:
+        print(f"cognitive_complexity: base {base!r} is not a commit here", file=sys.stderr)
+        raise SystemExit(2)
+    base = known.stdout.strip()
     merge_base = subprocess.run(  # noqa: S603
         [git, "merge-base", base, "HEAD"],
         cwd=_ROOT, capture_output=True, text=True, check=False,
     )
     anchor = merge_base.stdout.strip() if merge_base.returncode == 0 else base
 
+    # Prefixes set here, not read from the caller's config (diff.noprefix would hide every path).
     result = subprocess.run(  # noqa: S603
-        [git, "diff", "-U0", anchor],
+        [git, "diff", "-U0", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", anchor, "--"],
         cwd=_ROOT, capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
-        return {}
+        print(f"cognitive_complexity: git diff against {anchor} failed: {result.stderr.strip()}", file=sys.stderr)
+        raise SystemExit(2)
 
     ranges: dict[str, list[tuple[int, int]]] = {}
     current = None

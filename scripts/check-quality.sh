@@ -14,6 +14,24 @@
 set -eu
 
 BASE="${1:-master}"
+# A stale local base makes every commit released since it was last pulled read
+# as this branch's work. Use the remote-tracking branch when the local one is
+# behind it; CI fetches the base fresh, a developer's checkout often has not. A
+# release commit, the usual base for one release's own change, has no remote
+# branch and is used as given.
+# A CI checkout often holds origin/master and no local master. A base that names
+# no commit at all stops the run: it is never handed to git as an option.
+if ! git rev-parse --verify --quiet --end-of-options "$BASE^{commit}" >/dev/null 2>&1; then
+    if git rev-parse --verify --quiet --end-of-options "origin/$BASE^{commit}" >/dev/null 2>&1; then
+        BASE="origin/$BASE"
+    else
+        echo "FAIL: base '$BASE' is not a commit here." >&2
+        exit 2
+    fi
+elif git rev-parse --verify --quiet "origin/$BASE" >/dev/null 2>&1 \
+        && git merge-base --is-ancestor "$BASE" "origin/$BASE" 2>/dev/null; then
+    BASE="origin/$BASE"
+fi
 COVERAGE_XML="coverage.xml"
 COVERAGE_FLOOR=80
 DUPLICATION_CEILING=3
@@ -123,6 +141,21 @@ elif python3 -c "import sys; sys.exit(0 if float('$OVERALL') + 0.05 >= float('$D
     printf '        ratchet at %s%% so this cannot slip, but the gap is real and open.\n' "$DECLARED"
 else
     fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
+fi
+
+# ── Rules the gate has raised on this project ───────────────────────────────
+# Every failed Code Quality submission from 0.6.0 to 0.6.3 was a rule ruff does
+# not approximate: duplicated literals, form labels, ARIA roles, the Number
+# globals and five others. scripts/sonar_rules.py encodes each, scoped the way
+# the gate scopes (changed lines and elements, thresholds when crossed), and is
+# calibrated against every release from 0.6.1 to 0.6.5 (docs/SONAR-RULES.md).
+# It reads templates and spectre/web/static/js/ as well as Python, so it runs
+# before the exit below for a change that touches no Python.
+printf '\n== Rules the gate has raised on this project (docs/SONAR-RULES.md) ==\n'
+if python3 scripts/sonar_rules.py "$BASE"; then
+    pass "no rule the gate has raised before lands on changed code"
+else
+    fail "the findings above are rules the gate has already failed a submission on"
 fi
 
 if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then

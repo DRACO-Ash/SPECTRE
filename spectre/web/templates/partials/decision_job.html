@@ -3,7 +3,7 @@
    (SamplingProgress or none) and cancellable, optional: whether Cancel still stops it, which it does not while the
    decision record is written (SPC-192). Only a job underway polls; the results that replace it do not, so the
    polling ends there. #}
-<div class="decision-job" role="status" aria-live="polite"
+<div class="decision-job" aria-live="polite" aria-atomic="true"
      style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.9rem"
      {% if polling and job is not none %}hx-get="/plan/decision/job?job_id={{ job.job_id | urlencode }}" hx-trigger="every 2s"
      hx-target="#decision-results" hx-swap="innerHTML"{% endif %}>

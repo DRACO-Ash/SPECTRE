@@ -2454,7 +2454,11 @@
   "files": [
    "scripts/check-quality.sh",
    "spectre/web/static/js/"
-  ]
+  ],
+  "state": "built",
+  "est": 600,
+  "version": "0.35.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-234",

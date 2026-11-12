@@ -305,9 +305,12 @@ class NotsoPrior:
 
     @property
     def basis_line(self) -> str:
-        gaps = "" if self.gaps == 0 else _GAPS.format(
-            n=self.gaps, s="" if self.gaps == 1 else "s", verb="is a gap" if self.gaps == 1 else "are gaps",
-        )
+        if self.gaps == 0:
+            gaps = ""
+        elif self.gaps == 1:
+            gaps = _GAPS.format(n=self.gaps, s="", verb="is a gap")
+        else:
+            gaps = _GAPS.format(n=self.gaps, s="s", verb="are gaps")
         return _BASIS.format(
             action=_label(self.action_type), horizon=self.horizon_hours, events=self.events, notices=self.notices,
             start=_date(self.span_start), end=_date(self.span_end), days=self.covered_days, gaps=gaps,

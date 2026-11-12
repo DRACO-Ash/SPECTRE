@@ -14,8 +14,8 @@ SPECTRE.action('polSource', function (radio) {
 
 /* ── Results: the charts, drawn from /pol/chart-data/<satno> ── */
 function polCharts(marker) {
-  var SATNO   = marker.getAttribute('data-satno');
-  var IS_GEO  = marker.getAttribute('data-geo') === 'true';
+  var SATNO   = marker.dataset.satno;
+  var IS_GEO  = marker.dataset.geo === 'true';
 
   var ZOOM_CFG = {
     pan:  { enabled: true, mode: 'xy' },
@@ -299,8 +299,8 @@ function polSort(th) {
   rows.sort(function (a, b) {
     var av = (a.cells[col].dataset.val !== undefined ? a.cells[col].dataset.val : a.cells[col].textContent).trim();
     var bv = (b.cells[col].dataset.val !== undefined ? b.cells[col].dataset.val : b.cells[col].textContent).trim();
-    var an = parseFloat(av), bn = parseFloat(bv);
-    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    var an = Number.parseFloat(av), bn = Number.parseFloat(bv);
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) return asc ? an - bn : bn - an;
     return asc ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   rows.forEach(function (r) { tbody.appendChild(r); });

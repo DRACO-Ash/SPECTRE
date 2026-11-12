@@ -1072,7 +1072,7 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
     def test_the_shared_handler_exists(self) -> None:
         """Every opt-in above relies on it, so its absence breaks all of them at once."""
         handler = self._keydown_listener()
-        assert "data-activate" in handler and "el.click()" in handler, (
+        assert "dataset.activate" in handler and "el.click()" in handler, (
             "the keydown listener in core.js no longer clicks an opted-in element, "
             "so every data-activate is now a silent no-op"
         )
@@ -1088,7 +1088,7 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         stopPropagation guard and the key path had none.
         """
         handler = self._keydown_listener()
-        assert "var el = event.target;" in handler and "el.hasAttribute('data-activate')" in handler, (
+        assert "var el = event.target;" in handler and "el.dataset.activate === undefined" in handler, (
             "the keydown listener no longer checks that the opted-in element is the "
             "one with focus, so every nested button, link and input inside an "
             "activatable row is now unreachable from the keyboard"

@@ -151,5 +151,6 @@ class TestTheControls:
         # hx-on handler, which htmx compiles with new Function, which the policy refuses.
         listener = re.search(r"addEventListener\('htmx:afterRequest', function \(e\) \{(.*?)\}\);", script, re.S)
         assert listener is not None
-        assert "data-opens-decision" in listener.group(1) and "e.detail.successful" in listener.group(1)
+        # data-opens-decision, read through dataset since SPC-233 (javascript:S7761).
+        assert "dataset.opensDecision" in listener.group(1) and "e.detail.successful" in listener.group(1)
         assert "openDecisionPanel()" in listener.group(1)

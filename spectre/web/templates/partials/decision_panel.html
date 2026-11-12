@@ -224,7 +224,7 @@
       <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
                                    gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="adv_id" value="A{{ loop.index }}">
-        <input type="text"   name="adv_name"{% if row is not none %} value="{{ row.name }}"{% endif %} placeholder="Name (e.g. Proximity approach)"
+        <input type="text"   name="adv_name" aria-label="Adversary action name"{% if row is not none %} value="{{ row.name }}"{% endif %} placeholder="Name (e.g. Proximity approach)"
                style="font-size:0.63rem">
         <select name="adv_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
@@ -282,7 +282,7 @@
       <div class="fr-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;
                                   gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="fr_id" value="R1">
-        <input type="text"   name="fr_name" placeholder="Name (e.g. Collision avoidance)"
+        <input type="text"   name="fr_name" aria-label="Friendly response name" placeholder="Name (e.g. Collision avoidance)"
                style="font-size:0.63rem">
         <select name="fr_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
@@ -294,7 +294,7 @@
                placeholder="Cost" style="font-size:0.63rem" title="Normalised cost [0,1]">
         <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
-        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1"
+        <input type="number" name="fr_time" aria-label="Time to execute, hours" value="6" min="0.1" max="720" step="0.1"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
         <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
@@ -398,11 +398,13 @@
 <div id="decision-results"></div>
 
 {# The rows Add Adversary Action and Add Friendly Response build: decision.js clones one, writing the row's own
-   number where __ROW__ stands. Inert until cloned, so nothing in them posts (SPC-199). #}
+   number where __ROW__ stands. Inert until cloned, so nothing in them posts (SPC-199). Every clone of a row is the
+   same markup and says only what the server row says, so a field in either is named with aria-label rather than
+   by an id a <label for> would point at (SPC-233). #}
 <template id="adv-row-template">
   <div class="adv-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
     <input type="hidden" name="adv_id" value="A__ROW__">
-    <input type="text" name="adv_name" placeholder="Adversary action name" style="font-size:0.63rem">
+    <input type="text" name="adv_name" placeholder="Adversary action name" aria-label="Adversary action name" style="font-size:0.63rem">
     <select name="adv_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
       <option value="sensor_retask">Sensor Retask</option>
@@ -419,7 +421,7 @@
 <template id="fr-row-template">
   <div class="fr-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
     <input type="hidden" name="fr_id" value="R__ROW__">
-    <input type="text" name="fr_name" placeholder="Friendly response name" style="font-size:0.63rem">
+    <input type="text" name="fr_name" placeholder="Friendly response name" aria-label="Friendly response name" style="font-size:0.63rem">
     <select name="fr_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
       <option value="sensor_retask">Sensor Retask</option>
@@ -428,7 +430,7 @@
     </select>
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Normalised cost [0,1]">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
-    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" style="font-size:0.63rem" title="Time to execute (h)">
+    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" aria-label="Time to execute, hours" style="font-size:0.63rem" title="Time to execute (h)">
     <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
     {{ response_burn_fields(hyp) }}
     {{ response_veto_fields(hyp, "R__ROW__") }}

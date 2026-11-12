@@ -68,8 +68,8 @@
      element itself, not an ancestor. */
   document.addEventListener('focusin', function (event) {
     var el = event.target;
-    if (!el || !el.getAttribute) { return; }
-    var fn = registries.action[el.getAttribute('data-action-focus')];
+    if (!el || !el.dataset) { return; }
+    var fn = registries.action[el.dataset.actionFocus];
     if (fn) { fn(el, event); }
   });
 
@@ -80,7 +80,7 @@
      that behaves like a button must answer to both keys, and its default scroll is suppressed. */
   document.addEventListener('keydown', function (event) {
     var el = event.target;
-    if (!el || !el.hasAttribute || !el.hasAttribute('data-activate')) { return; }
+    if (!el || !el.dataset || el.dataset.activate === undefined) { return; }
     if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
       event.preventDefault();
       el.click();
@@ -109,7 +109,7 @@
     found.forEach(function (el) {
       if (el.spectreInitDone) { return; }
       el.spectreInitDone = true;
-      var fn = registries.init[el.getAttribute('data-init')];
+      var fn = registries.init[el.dataset.init];
       if (fn) { fn(el); }
     });
   }

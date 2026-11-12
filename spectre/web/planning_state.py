@@ -360,5 +360,6 @@ _default_elset_refusals: list[str] = []
 
 def set_default_elset_refusals(sentences: list[str]) -> None:
     """Store the refusals of the default watchlist's element sets, for each new session's run log."""
-    global _default_elset_refusals  # noqa: PLW0603 - boot-time default state, as the setters above
+    # PLW0603: boot-time default state, as the setters above.
+    global _default_elset_refusals  # noqa: PLW0603
     _default_elset_refusals = list(sentences)

@@ -1304,3 +1304,12 @@ The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c
 | DAST | **EVIDENCED** | A hidden form input and a provider name shown on two pages | The provider is bounded to 64 characters and kept only for a UDL mode; templates escape it; no inline script (the browser tests run under `script-src 'self'`). | Then a page reflects the field unescaped; the report names the page. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+## 0.35.0
+
+Every Code Quality rule the gate has raised, checked before it runs (charming-dirac c930087).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | 100 blocking findings cleared across the new-code window, which runs from master 77a1088 (0.6.4): 34 S7761, 19 S1244, 16 S7632, 13 S7773, 6 S3358, 6 labels, 3 S6353, 2 S6819, 1 S1192 | `scripts/sonar_rules.py 77a1088`: 99 blocking before, and 2 more unlabelled fields the new label lines brought into the diff; 1 after (the chart canvas, Web:S6819, kept for its accessible name). `scripts/check-quality.sh` against 0.34.0: every leg green. | Then the gate raises a rule the checker does not yet encode, or the canvas; the report names it, and `docs/SONAR-RULES.md` gives the four steps for adding a rule. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+

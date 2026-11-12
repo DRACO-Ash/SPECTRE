@@ -87,7 +87,8 @@ def age_text(hours: float) -> str:
 _age = age_text
 
 
-def assess_custody(  # noqa: PLR0913 - one argument per fact the rule reads, all named at the call
+# PLR0913: one argument per fact the rule reads, all named at the call.
+def assess_custody(  # noqa: PLR0913
     *,
     elset_hours: float | None,
     limit_hours: float,
@@ -223,7 +224,7 @@ class CustodyOverHorizon:
     @property
     def maintained(self) -> bool:
         """Never lost and never degraded within the horizon: held throughout."""
-        return self.lost_from_h is None and self.degraded_hours == 0.0
+        return self.lost_from_h is None and not self.degraded_hours
 
     @property
     def lost_from_epoch(self) -> bool:

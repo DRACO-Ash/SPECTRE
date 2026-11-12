@@ -424,7 +424,8 @@ async def _discover_tle_sources(username: str, password: str, state: SessionStat
         records = _normalise_elset_records(resp.json())
         remember_sources(state, [str(rec.get("source") or "") for rec in records if isinstance(rec, dict)])
         logger.info("UDL TLE sources discovered: %s", log_safe(state.udl_available_sources))
-    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the source list as it was
+    # BLE001: a background task; a failure leaves the source list as it was.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("_discover_tle_sources failed (non-critical): %s", log_safe(exc, limit=500))
 
 

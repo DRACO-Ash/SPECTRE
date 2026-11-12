@@ -70,9 +70,9 @@ def custody_value(path: PathFigures, horizon_h: float) -> str:
     if path.custody_maintained:
         return _HELD.format(h=horizon_h)
     degraded = getattr(path, "custody_degraded_hours", 0.0)
-    if degraded == 0.0:
+    if not degraded:
         return _LOST.format(gap=path.custody_gap_hours, h=horizon_h)
-    if path.custody_gap_hours == 0.0:
+    if not path.custody_gap_hours:
         return _DEGRADED.format(d=span_text(degraded), h=horizon_h)
     return _DEGRADED_THEN_LOST.format(d=span_text(degraded), gap=path.custody_gap_hours, h=horizon_h)
 

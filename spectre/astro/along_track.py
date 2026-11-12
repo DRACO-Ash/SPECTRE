@@ -36,8 +36,15 @@ def position_error_km(age_days: float, regime: str) -> float:
     return at_epoch + per_day * max(age_days, 0.0)
 
 
+def _checksum_value(c: str) -> int:
+    """What one character adds to a TLE line checksum: a digit its value, a minus sign 1, anything else 0."""
+    if c.isdigit():
+        return int(c)
+    return 1 if c == "-" else 0
+
+
 def _checksum(line: str) -> int:
-    return sum(int(c) if c.isdigit() else (1 if c == "-" else 0) for c in line[:68]) % 10
+    return sum(_checksum_value(c) for c in line[:68]) % 10
 
 
 def shift_along_track(tle: str, km: float) -> str:
