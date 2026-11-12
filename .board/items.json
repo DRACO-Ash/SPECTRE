@@ -2471,7 +2471,11 @@
   "files": [
    "spectre/astro/maneuvers.py",
    "spectre/data/"
-  ]
+  ],
+  "state": "built",
+  "est": 840,
+  "version": "0.36.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-235",
@@ -2525,7 +2529,11 @@
    "spectre/astro/maneuvers.py",
    "spectre/web/templates/partials/intercept_result.html",
    "spectre/web/templates/partials/all_intercepts_result.html"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.36.0",
+  "actualNote": "folded into SPC-234; not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-239",
@@ -2552,6 +2560,20 @@
   "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks.",
   "files": [
    "spectre/web/routes/udl.py"
+  ]
+ },
+ {
+  "ref": "SPC-241",
+  "priority": "high",
+  "order": 10,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 15,
+  "task": "Confirm the U//DS-JCO-NOTIF dissemination control does not carry over to spectre/data/manoeuvre_evidence.json in a public repository",
+  "note": "0.36.0 ships the derived file. The 0.36.0 review found only catalogue numbers, satellite names, counts, ISO dates and delta-V figures, no personal data or message text; fleet.source names the export file (notification_2026-03-27..., 3,124 messages). The derived file carries no marking. If the control does carry over, the file and its fleet.source come out of the repository and the release.",
+  "files": [
+   "spectre/data/manoeuvre_evidence.json"
   ]
  }
 ]

@@ -1313,3 +1313,14 @@ Every Code Quality rule the gate has raised, checked before it runs (charming-di
 | Code Quality | **EVIDENCED** | 100 blocking findings cleared across the new-code window, which runs from master 77a1088 (0.6.4): 34 S7761, 19 S1244, 16 S7632, 13 S7773, 6 S3358, 6 labels, 3 S6353, 2 S6819, 1 S1192 | `scripts/sonar_rules.py 77a1088`: 99 blocking before, and 2 more unlabelled fields the new label lines brought into the diff; 1 after (the chart canvas, Web:S6819, kept for its accessible name). `scripts/check-quality.sh` against 0.34.0: every leg green. | Then the gate raises a rule the checker does not yet encode, or the canvas; the report names it, and `docs/SONAR-RULES.md` gives the four steps for adding a rule. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
 
+
+## 0.36.0
+
+Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2), with the Max ΔV default of 171.8 m/s by the owner's ruling of 2026-11-12.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New modules `spectre/astro/flight.py`, `targeting.py`, `spectre/domain/manoeuvre_evidence.py`, `realism.py`; changes to `maneuvers.py`, `maneuver.py`, two templates and `operator.js` | `scripts/sonar_rules.py 39d5363`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.35.0: complexity none over 15, changed-line coverage 99%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **EVIDENCED** | Three new form fields and three now bounded | Every numeric field on both Intercept Engine routes refuses infinity, NaN and out-of-range values with a 422; satellite names from the record and cache are autoescaped (a `<script>` name renders escaped); no inline script. | Then a page reflects a field unescaped or a value reaches a 500; the report names the page and parameter. |
+| Secret and data scanning | **HYGIENE** | `spectre/data/manoeuvre_evidence.json` added | Catalogue numbers, satellite names, counts, ISO dates and delta-V figures only; no personal data or message text. The export it was built from is not in this branch. Its dissemination marking is the owner's to confirm (SPC-241). | Then the scanner names a field in the file; it comes out with its `fleet.source`. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |

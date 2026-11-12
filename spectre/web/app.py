@@ -28,7 +28,7 @@ from spectre.data.intel import satno_from_tle
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
 from spectre.web.decision_job import server_starting, server_stopping
-from spectre.web.format_units import format_m_s, format_tof_label
+from spectre.web.format_units import format_m_s, format_tof_label, is_computed
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
 from spectre.web.planning_state import set_default_elset_refusals, set_default_hrr_objects, set_default_hrr_tles
@@ -37,6 +37,7 @@ from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
 from spectre.web.routes.geometry import router as geometry_router
 from spectre.web.routes.login import router as login_router
+from spectre.web.routes.maneuver import ENGINE_BUDGET_HOLDER, ENGINE_DEFAULT_BUDGET_M_S
 from spectre.web.routes.maneuver import router as maneuver_router
 from spectre.web.routes.operator import router as operator_router
 from spectre.web.routes.plan import router as plan_router
@@ -57,6 +58,7 @@ templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL
 templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 templates.env.filters["m_s"] = format_m_s        # {{ dv | m_s }} → delta-v in m/s, honestly rounded
 templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m", one definition
+templates.env.filters["computed"] = is_computed    # {% if miss | computed %}: a finite figure, not NaN (SPC-238)
 templates.env.filters["satno"] = satno_from_tle  # {{ tle | satno }} is the catalogue number or None, Alpha-5 read
 
 
@@ -79,6 +81,10 @@ def banner_class(marking: str) -> str:
 templates.env.globals["spectre_version"] = __version__
 templates.env.globals["classification_marking"] = get_settings().classification_marking
 templates.env.globals["classification_class"] = banner_class(get_settings().classification_marking)
+# The Intercept Engine's default Max delta-V: the most any satellite in the NOTSO record spent on station in 14 days,
+# 171.8 m/s, in place of 500 (owner ruling 2026-11-12, SPC-234).
+templates.env.globals["engine_budget_m_s"] = ENGINE_DEFAULT_BUDGET_M_S
+templates.env.globals["engine_budget_holder"] = ENGINE_BUDGET_HOLDER
 
 
 logger = logging.getLogger(__name__)

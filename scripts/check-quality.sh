@@ -99,6 +99,20 @@ changed_in() {
     done
 }
 
+coverage_is_current() {
+    # A report older than the code it scores is not evidence: diff-cover skips
+    # every file the report does not hold, so four modules new on the
+    # charming-dirac branch went unmeasured against an older report and the
+    # step passed at 89% (d3447e2, SPC-234). A changed source or test file
+    # newer than the report stops the run: an edited test changes what the
+    # report measured as surely as edited code does.
+    for f in $(changed_in "$SOURCE_DIRS $TEST_DIRS"); do
+        if [ "$f" -nt "$COVERAGE_XML" ]; then
+            fail "$COVERAGE_XML is older than $f; rerun pytest --cov --cov-report=xml:$COVERAGE_XML"
+        fi
+    done
+}
+
 SRC_FILES=$(changed_in "$SOURCE_DIRS" | tr '\n' ' ')
 TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
 
@@ -111,6 +125,9 @@ TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
 # green from underneath the bar it exists to enforce. Declare the standard once,
 # here, and report the distance to it on every run so it cannot be silent again.
 HOUSE_COVERAGE_STANDARD=80
+# Both coverage legs read the report, so its age is checked before either.
+[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
+coverage_is_current
 printf '\n== Whole-repository coverage against the house standard ==\n'
 OVERALL=$(python3 -c "
 import sys, xml.etree.ElementTree as E
@@ -202,7 +219,6 @@ else
 fi
 
 printf '\n== Coverage on changed lines ==\n'
-[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
 if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --include-untracked --fail-under="$COVERAGE_FLOOR" >"$OUT/diffcov.out" 2>&1; then
     pass "$(grep -E '^Coverage: ' "$OUT/diffcov.out" || echo "at or above ${COVERAGE_FLOOR}%")"
 else

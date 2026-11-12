@@ -8,7 +8,7 @@ state vectors.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -19,7 +19,7 @@ import numpy as np
 from spectre.astro.closest_approach import closest_approach
 from spectre.astro.constants import MU_EARTH, R_EARTH
 from spectre.astro.cw_geometry import CWState, _cw_propagate, _eci_to_hill_matrix, _initial_hill_state
-from spectre.astro.kepler import propagate_two_body
+from spectre.astro.kepler import KeplerConvergenceError, propagate_two_body
 from spectre.astro.lambert import LambertSolution, cheapest_lambert, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
@@ -1752,25 +1752,84 @@ def miss_not_read() -> Iterator[None]:
         _MISS_NOT_READ.reset(token)
 
 
+@dataclass(frozen=True)
+class FlownApproach:
+    """The closest a flown plan brings red to the target, km, and when; NaN and None when it was not computed."""
+
+    miss_km: float
+    at: datetime | None
+
+    @property
+    def computed(self) -> bool:
+        """Whether there is a figure: NaN is never read as arriving (charming-dirac 5e13b5b, SPC-238)."""
+        return math.isfinite(self.miss_km)
+
+
+#: A flown miss nothing reads (inside miss_not_read) or one the search could not run for (SPC-238).
+NOT_COMPUTED = FlownApproach(math.nan, None)
+
+
+def _after_burn(leg: StateVector, epoch: datetime, dv: np.ndarray, mu: float) -> StateVector:
+    """*leg* coasted two-body to *epoch*, then *dv* applied: the state just after that burn."""
+    dt = (epoch - leg.epoch).total_seconds()
+    r, v = propagate_two_body(leg.r, leg.v, dt, mu) if dt else (leg.r, leg.v)
+    return StateVector(epoch=epoch, r=r, v=np.asarray(v, dtype=float) + np.asarray(dv, dtype=float))
+
+
+def orbit_period_s(sv: StateVector, mu: float = MU_EARTH) -> float | None:
+    """The period of the orbit *sv* is on, s; None when it is not closed."""
+    energy = float(np.dot(sv.v, sv.v)) / 2.0 - mu / float(np.linalg.norm(sv.r))
+    return 2.0 * math.pi * math.sqrt((-mu / (2.0 * energy)) ** 3 / mu) if energy < 0.0 else None
+
+
+def flown_approach(
+    sv: StateVector, burns: Sequence[tuple[datetime, np.ndarray]], target: TLEOrbit, span_s: float,
+    mu: float = MU_EARTH,
+) -> FlownApproach:
+    """The closest *target* comes to an object at *sv* that makes *burns* and coasts two-body for *span_s* seconds.
+
+    The one flown-miss path (0.33.0, SPC-234): plane change, phasing and the R-bar hop fly their single burn through
+    it, and spectre.astro.flight.fly flies every burn of any plan through it for the Intercept Engine. Each burn is
+    (epoch, ECI delta-V, km/s), applied in time order; between burns the motion is two-body, and the target is on
+    SGP4. The search is spectre.astro.closest_approach (SPC-102), sampled _APPROACH_SAMPLES_PER_REV times a
+    revolution of the shortest orbit flown after a burn. A span of 0 is the separation at *sv* itself.
+
+    NOT_COMPUTED inside miss_not_read, and when the search cannot run: no finite separation, or more samples than
+    closest_approach takes, which an R-bar time of about 70 days in LEO needs. That failed the method on the
+    manoeuvre page while the sweep, which reads no miss, solved it (SPC-238).
+    """
+    if _MISS_NOT_READ.get():
+        return NOT_COMPUTED
+    legs = [sv]
+    for epoch, dv in sorted(burns, key=lambda b: b[0]):
+        legs.append(_after_burn(legs[-1], epoch, dv, mu))
+    flown = legs[1:] or legs
+
+    def separation(t: float) -> float:
+        when = sv.epoch + timedelta(seconds=t)
+        leg = next(s for s in reversed(legs) if s.epoch <= when or s is legs[0])
+        r, _ = propagate_two_body(leg.r, leg.v, t - (leg.epoch - sv.epoch).total_seconds(), mu)
+        return float(np.linalg.norm(r - target.propagate(when).r))
+
+    if not span_s > 0.0:
+        return FlownApproach(separation(0.0), sv.epoch)
+    periods = [p for p in (orbit_period_s(s, mu) for s in flown) if p is not None]
+    step_s = min(min(periods, default=span_s) / _APPROACH_SAMPLES_PER_REV, span_s)
+    try:
+        found = closest_approach(separation, span_s, step_s=step_s, tolerance_s=_APPROACH_TCA_TOLERANCE_S)
+    except KeplerConvergenceError:
+        raise  # a propagator fault, a ValueError by type, is not the search being unable to run
+    except ValueError:
+        return NOT_COMPUTED
+    return FlownApproach(found.miss_km, sv.epoch + timedelta(seconds=found.tca_s))
+
+
 def _flown_closest_km(sv: StateVector, dv: np.ndarray, target: TLEOrbit, span_s: float, mu: float) -> float:
     """The closest *target* comes to an object that burns *dv* at *sv* and coasts two-body for *span_s* seconds.
 
-    The search is spectre.astro.closest_approach (SPC-102), sampled _APPROACH_SAMPLES_PER_REV times a revolution
-    of the orbit after the burn. A span of 0 is the separation at the burn itself. NaN inside miss_not_read.
+    flown_approach with the one burn; NaN inside miss_not_read or when the search cannot run (SPC-238).
     """
-    if _MISS_NOT_READ.get():
-        return math.nan
-
-    def separation(t: float) -> float:
-        return _separation(_coast(sv, dv, sv.epoch + timedelta(seconds=t), mu), target)
-
-    if not span_s > 0.0:
-        return separation(0.0)
-    r, v = sv.r, sv.v + dv
-    energy = float(np.dot(v, v)) / 2.0 - mu / float(np.linalg.norm(r))
-    period_s = 2.0 * math.pi * math.sqrt((-mu / (2.0 * energy)) ** 3 / mu) if energy < 0.0 else span_s
-    step_s = min(period_s / _APPROACH_SAMPLES_PER_REV, span_s)
-    return closest_approach(separation, span_s, step_s=step_s, tolerance_s=_APPROACH_TCA_TOLERANCE_S).miss_km
+    return flown_approach(sv, [(sv.epoch, dv)], target, span_s, mu).miss_km
 
 
 def _hop_closest_km(separation: np.ndarray, axis: np.ndarray, advance_km: float) -> float:

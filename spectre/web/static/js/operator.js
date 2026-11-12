@@ -370,10 +370,15 @@ SPECTRE.switchToEngine = switchToEngine;
               tooltip: {
                 callbacks: {
                   label: function(ctx) {
+                    // A flown miss the search could not compute arrives as null, never NaN (SPC-238).
+                    function missText(km) {
+                      if (km === null || km === undefined) { return 'Miss: not computed'; }
+                      return 'Miss: ' + km.toFixed(1) + ' km';
+                    }
                     var pt = ctx.raw;
                     return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
                             'Transfer: ' + fmtTime(pt.x),
-                            pt.score !== undefined ? 'Score: ' + pt.score + '/100' : 'Miss: ' + pt.miss.toFixed(1) + ' km'];
+                            pt.score === undefined ? missText(pt.miss) : 'Score: ' + pt.score + '/100'];
                   }
                 },
                 backgroundColor: '#001529', titleColor: '#C8A415',

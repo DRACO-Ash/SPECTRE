@@ -299,7 +299,7 @@ retained and shown separately. Modelling the transferred quantity is not
 possible on open sources: the reported 142 kg hydrazine transfer is secondary
 reporting the assessment itself marks unconfirmed.
 
-### R7. Do not act on the first watchlist recommendation as written (no change)
+### R7. Do not act on the first watchlist recommendation as written (no change; engine default overruled 2026-11-12)
 
 "Set the GEO alert threshold at about 0.1 km/s, not 0.5 km/s."
 
@@ -310,6 +310,21 @@ would shrink the set of intercepts the sweep considers, which is the opposite of
 what the recommendation intends. The posture bands in `manoeuvre_calibration`
 already place the GEO watch floor at 100 m/s, with that reasoning cited in the
 module. This recommendation is already satisfied, in the right place.
+
+**Overruled for the Intercept Engine by the owner's ruling of 2026-11-12
+(SPC-234).** The Intercept Engine's Max ΔV now defaults to 171.8 m/s, the most
+any satellite spent on station in 14 days in JCO's NOTSO record
+(`ENGINE_DEFAULT_BUDGET_M_S` in `spectre/web/routes/maneuver.py`, read from
+`spectre/data/manoeuvre_evidence.json`), not 500 m/s. It is still a budget, not
+an alert threshold, and the lower figure shrinks what the engine considers: the
+intercept envelope counts only the transfers within it, evasion is sized within
+it, typed minimum-time arrives later because it spends less, and each row's
+budget share is taken against it. That record is a floor on what satellites have
+done, not a ceiling on what they could do: a satellite that has never shown a
+large on-station burn may still hold the propellant for one. The operator can
+type any figure, and rows above it are still listed. The threat sweep and asset
+screening keep `DEFAULT_SWEEP_BUDGET_M_S` at 500 m/s, so this paragraph's warning
+about the sweep stands unchanged.
 
 Recording it here so it is not "fixed" later by someone matching on the number.
 

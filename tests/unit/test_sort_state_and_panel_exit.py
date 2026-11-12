@@ -48,7 +48,7 @@ _SCRIPTS = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / 
 # should have. The counts are deliberate: a new sortable column added without
 # aria-sort fails here rather than shipping silent.
 _SORTABLE_TABLES = [
-    ("all_intercepts_result.html", "aiSort", 7),
+    ("all_intercepts_result.html", "aiSort", 8),  # Realism joined in SPC-234
     ("threat_sweep.html", "threatSort", 7),
     ("threat_sweep.html", "childSort", 6),
     ("hrr_panel.html", "hrrSort", 10),  # blue and red tables, five columns each

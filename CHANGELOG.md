@@ -9,6 +9,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-12
+
+**Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2).**
+
+### Added
+- The Intercept Engine flies every red approach's burns and reports the closest it comes, beside its 1-sigma element-set error band, through the one flown-miss path 0.33.0's solvers use. Hops are not flown, and the row says so (SPC-234).
+- Red approaches are searched over burn point, time of flight, revolutions and hops for the cheapest plan that arrives. A row that never arrives is kept and labelled "No approach"; "Use the values typed below" keeps the old behaviour (SPC-234).
+- Each red approach is banded Seen before, Possible or Unrealistic against JCO's NOTSO on-station record, `spectre/data/manoeuvre_evidence.json`, merged with the NOTSO cache. Only arriving, realistic rows set the worst case and the most likely course of action (SPC-234).
+- `check-quality.sh` refuses a coverage report older than any changed source or test file, before any leg reads it (SPC-234).
+
+### Changed
+- Arrival is judged in one place, within the approach radius plus the larger of 1 m and a millionth of the radius, so a plan aimed at the radius is not rejected for rounding. A plan whose target is already inside the radius with no burn reads "Already within" and does not count (SPC-234 review).
+- Live NOTSO cache records raise a satellite's own figures and replace a blank name; the fleet-wide ceiling that bounds Possible comes from the shipped, reviewed record alone. A malformed record is skipped on its own, and the merge is held until the cache changes (SPC-234 review).
+- The Intercept Engine refuses a coast or intercept time over a year, a standoff over 100,000 km, and infinity or NaN in any of them, with a 422 rather than a 500 or a silent change (SPC-234 review).
+- The Intercept Engine's Max ΔV defaults to 171.8 m/s, overruling R7 for the engine by the owner's ruling of 2026-11-12. The threat sweep and asset screening keep 500 m/s (SPC-234).
+- COLA, Evasion and Formation are listed as avoidance and defence, and J2 drift as an assessment, never as red threats (SPC-234).
+
+### Fixed
+- A flown closest approach that cannot be computed reads "not computed" and no longer fails the method; the trade-space data gives it as null and the CSV export as "not computed". A propagator fault still fails the method (SPC-238).
+- A red element set that has decayed by the manoeuvre start is reported in each method's row instead of failing the whole Intercept Engine page (SPC-234 review).
+
 ## [0.35.0] - 2026-11-12
 
 **Every Code Quality rule the App Store gate has raised, checked before it runs (charming-dirac c930087).**

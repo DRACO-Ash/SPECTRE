@@ -136,12 +136,14 @@
     <div style="font-size:1.15rem; font-weight:700; color:var(--text-bright); line-height:1.1">
       {% if result.score is not none %}
         {{ result.score | round(0) | int }}
-      {% else %}
+      {% elif result.intercept_range_km | computed %}
         {{ "%.1f" | format(result.intercept_range_km) }}
+      {% else %}
+        not computed
       {% endif %}
     </div>
     <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.08rem">
-      {% if result.score is none %}km{% elif result.provenance == "heuristic" %}/100 · heuristic{% endif %}
+      {% if result.score is none and result.intercept_range_km | computed %}km{% elif result.provenance == "heuristic" %}/100 · heuristic{% endif %}
     </div>
   </div>
 
@@ -176,7 +178,8 @@ Method: {{ result.method.value | upper }}
 Total ΔV:     {{ result.total_delta_v_m_s | m_s }} m/s
 Arrival:      {{ result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC') }}
 {% if result.score is not none %}Score:        {{ result.score | round(0) | int }}{% if result.provenance == "heuristic" %}/100 ({{ result.score_kind }}, heuristic){% else %} ({{ result.score_kind }}){% endif %}
-{% else %}Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
+{% elif result.intercept_range_km | computed %}Miss Dist:    {{ "%.1f" | format(result.intercept_range_km) }} km
+{% else %}Miss Dist:    not computed
 {% endif %}Threat:       {{ intel.threat_level }}
 Observability:{{ intel.obs_level }}
 {% for b in result.burns %}  Burn {{ b.burn_number }} ({{ b.segment_name }})  epoch={{ b.burn_epoch.strftime('%Y-%m-%dT%H:%M:%SZ') }}  ΔV={{ b.delta_v_m_s | m_s }} m/s  [P={{ "%.4f"|format(b.dv_prograde) }} N={{ "%.4f"|format(b.dv_normal) }} R={{ "%.4f"|format(b.dv_radial) }}]

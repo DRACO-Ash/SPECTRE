@@ -1174,9 +1174,35 @@ def _section_10_intercept_calculations(doc: Document) -> None:
             ["Manoeuvre Start", "UTC epoch for the first burn", "Current UTC time"],
             ["Coast Hours", "Coast duration before first burn (hours)", "1.0"],
             ["Intercept Hours", "Time of flight for Lambert solver (hours)", "6.0"],
-            ["Max ΔV", "Upper bound on acceptable ΔV (m/s)", "500"],
+            ["Targeting", "Search: try burning now and at the red satellite's next apogee, perigee and nodes, with a range of times of flight, revolutions and hops, and keep each red approach's cheapest plan that arrives. Typed: solve each method once with the values below.", "Search for the cheapest approach"],
+            ["Approach within", "How close, in metres, a red approach must come to the target to count; 0 means 50 km.", "0 (50 km)"],
+            ["Max ΔV", "ΔV budget (m/s) for evasion, the envelope and typed minimum-time, and the reference for each row's budget share. The default is the most any satellite in JCO's NOTSO record spent on station in 14 days (owner ruling, 12 November 2026).", "171.8"],
             ["Intercept Data Mode", "Re-fetch red/blue TLEs from UDL under this data mode before computing. Leave blank to use session TLEs.", "Session default (REAL)"],
         ],
+    )
+
+    _add_heading_h2(doc, "Red Approaches, Realism and the Most Likely Course of Action")
+    _add_body(doc,
+        "Calculate All Intercepts ranks the 23 methods in three groups: red approaches first, then avoidance and "
+        "defence (COLA, Evasion and Formation Defence, blue's options, never ranked as red threats), then the "
+        "assessments, J2 drift among them."
+    )
+    _add_bullet(doc, "Flown closest approach: each red approach's burns are flown (two-body for red between burns, "
+                     "SGP4 for the target) and the closest it comes to the target is reported, with the 1-sigma "
+                     "element-set error band beside it. The V-bar and H-bar hops keep their own estimate, and say so. "
+                     "A figure that could not be computed reads \"not computed\" and never counts as arriving.")
+    _add_bullet(doc, "Realism: Seen before (within what this satellite has spent on station in its busiest 14 days), "
+                     "Possible (within 171.8 m/s, the most any satellite in the NOTSO record spent) or Unrealistic. "
+                     "The record is a floor on what satellites have done, not a ceiling on what they could do.")
+    _add_bullet(doc, "No approach: the plan never comes within the approach distance. Such rows, and Unrealistic ones, "
+                     "stay listed, dimmed, with their reason; they cannot set the worst case.")
+    _add_bullet(doc, "Most likely course of action: the cheapest red approach that arrives and is Seen before or "
+                     "Possible, with its burn point, ΔV and closest approach.")
+    _add_body(doc,
+        "Expand a row to see the burn point, coast, time of flight, revolutions or hops the search kept, how many "
+        "options it compared, the closest approach and the realism reason. When searching, minimum-time is given "
+        "36.8 m/s, what nine in ten satellites stay within over 14 days, or the red satellite's own busiest 14 days "
+        "if that is more."
     )
 
     _add_heading_h2(doc, "Interpreting the Burn Table")
@@ -1223,7 +1249,7 @@ def _section_11_trade_space(doc: Document) -> None:
         "Run intercept calculations with different methods and parameters. After "
         "the second solution, the trade-space chart appears automatically below the "
         "burn table. Hover over any point to see the method, ΔV, transfer time, and "
-        "miss distance."
+        "miss distance, or \"not computed\" where it could not be."
     )
     _add_body(doc,
         "Look for the Pareto front — solutions in the lower-left region of the chart "
