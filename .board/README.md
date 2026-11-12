@@ -100,6 +100,12 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-11-05 | Game tree D6, cost cap | Measure trees and set their own cap (SPC-188) |
 | 2026-11-05 | Game tree D14, the plan's marks | Mark the best branch under each response (SPC-189) |
 | 2026-11-05 | Game tree D15, the view | An interactive tree diagram (SPC-190) |
+| 2026-11-12 | JCO NOTSO export (`U//DS-JCO-NOTIF`, personal data) on `claude/charming-dirac-qcrnpv`, a public repository | The owner's own confirmation; acceptable as held. Its derived evidence (`manoeuvre_evidence.json`) may be ported |
+| 2026-11-12 | `charming-dirac` branch | Port the small changes as V0.33, then the rest; the branch is then retired |
+| 2026-11-12 | Asset screening age rule (charming-dirac 1357a67) | Keep the 15-year cut: a payload over 15 years with no intel record is not screened, and the page says which were left out |
+| 2026-11-12 | Sweep rows that do not reach the target (d2e6513) | Keep and label: port the corrected miss figures only; rows that do not reach stay, labelled and never ranked |
+| 2026-11-12 | Intercept Engine Max delta-V default (d3447e2) | 171.8 m/s from the NOTSO export's largest on-station burn window; R7's 500 m/s is overruled |
+| 2026-11-12 | Latent Code Quality issues (562b6c9) | Convert as touched, the documented policy; the Sonar checker (c930087) gates new code only |
 
 ## Decision Engine plan
 
