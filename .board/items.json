@@ -2695,6 +2695,10 @@
   "files": [
    "tests/integration/test_decision_record_route.py",
    "tests/conftest.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.44.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  }
 ]

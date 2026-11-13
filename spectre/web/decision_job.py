@@ -22,6 +22,8 @@ Bounded on purpose, after the burn watch (spectre.web.burn_watch):
   thread kept sampling.
 * Once sampling finishes it writes the evaluation's decision record (SPC-192) before the page shows the
   results, and Cancel no longer stops it then; a job that stops before that, or fails, writes none.
+* The server's stop waits, up to STOP_WAIT_S, for the jobs sampling or writing a record to end (SPC-242), so
+  one writing its record finishes the write rather than being cancelled in the middle of it.
 * It is not filed with the UDL login's tasks: a UDL logout ends the UDL
   connection, not the sign-in, and the job holds no UDL password.
 
@@ -144,6 +146,8 @@ _SHUTTING_DOWN = threading.Event()
 #: The loop holds only weak references to tasks, so a job's task could be collected before it finished
 #: (audit F-143); this set holds them until they are done.
 _TASKS: set[asyncio.Task[None]] = set()
+#: Each started job by its task, in the order started, until the task is done: what the server's stop waits on.
+_JOBS: dict[asyncio.Task[None], DecisionJob] = {}
 #: One sampling slot per event loop. The server runs one loop; a semaphore is tied to the loop it first waits
 #: on, so each loop a test runs gets its own.
 _SLOTS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
@@ -166,6 +170,45 @@ def server_starting() -> None:
 def server_stopping() -> None:
     """The lifespan's end: every job stops at its next sample."""
     _SHUTTING_DOWN.set()
+
+
+#: How long the server's stop waits for its jobs to end (SPC-242). It assumes the platform allows at least 10 s
+#: between asking the container to stop and killing it, Docker's default (docs/architecture.md, "Stopping the
+#: server"). A job sampling stops at its next sample, a few seconds at most. One writing its record finishes the
+#: write, which on SQLite the 5 s lock wait bounds; PostgreSQL sets no statement timeout, and a write waiting for a
+#: pooled connection gives up only after the pool's 30 s, so there the bound is this wait's alone. The bound is the
+#: wait's, not the whole exit's: once it ends, the event loop's own close still joins the default executor, so a
+#: worker thread finishes the sample it is in before the process exits.
+STOP_WAIT_S: float = 8.0
+#: The states a job is waited on in: sampling, on a worker thread that stops at its next sample, or writing its
+#: record. One reading custody or queued for the slot holds no database connection, and the loop's close cancels it
+#: at once; it checks still_wanted before it samples or writes, so once the stop is set it would write nothing.
+_WAITED_ON = (JobState.RUNNING, JobState.RECORDING)
+
+
+async def jobs_ended(timeout_s: float | None = None) -> None:
+    """The lifespan's end, after server_stopping: wait up to *timeout_s*, STOP_WAIT_S when None, for this loop's jobs
+    that are sampling or writing a record to end; log any still running then, whose record may be lost.
+
+    Without the wait the loop's own close cancelled each job wherever it was, a record's write included. That record
+    was lost, though one being written is meant to stand (_finish), and on SQLite a write cancelled inside a
+    statement that still had a row not yet fetched kept its connection's write lock while the job was held, so
+    every later write failed (SPC-242). A job not yet writing at the stop sees it before it writes: the state is set
+    to RECORDING with no await after still_wanted is checked.
+    """
+    bound = STOP_WAIT_S if timeout_s is None else timeout_s
+    loop = asyncio.get_running_loop()
+    held = [task for task, job in _JOBS.items()
+            if task.get_loop() is loop and not task.done() and job.state in _WAITED_ON]
+    if not held:
+        return
+    logger.info("Waiting up to %g s for %d decision job(s) sampling or writing a record to end", bound, len(held))
+    _done, pending = await asyncio.wait(held, timeout=bound)
+    if pending:
+        logger.warning(
+            "%d decision job(s) still running after %g s left to the event loop's close; "
+            "a record being written is lost", len(pending), bound,
+        )
 
 
 def still_wanted(state: SessionState, key: SessionKey, job: DecisionJob) -> str:
@@ -339,7 +382,14 @@ def start_job(
     """
     job.waiting = _slot().locked()
     state.decision_job = job
-    job.task = spawn(run_job(state, key, job))
+    task = job.task = spawn(run_job(state, key, job))
+    _JOBS[task] = job
+    task.add_done_callback(_forget_job)
+
+
+def _forget_job(task: asyncio.Task[None]) -> None:
+    """Drop a finished job from those the server's stop waits on."""
+    _JOBS.pop(task, None)
 
 
 #: The states a job is still underway in, and the page polls; Cancel stops all but the last, writing its record.

@@ -1397,3 +1397,13 @@ The force model measured against a higher-fidelity one, and every sampled note s
 | Code Quality | **EVIDENCED** | Changes to `monte_carlo.py` (two figure tables and their words) and `decision.py` (the sampled basis note takes red's regime); a new measuring reference under `tests/unit/` | `scripts/sonar_rules.py 3c8fe56`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 3c8fe56: all PASS. Full suite on Python 3.12, figures in the commit. An independent review killed 18 of 18 mutants; its two findings are fixed. | Then a rule names the line; fix it in the next release. |
 | DAST | **HYGIENE** | One clause added to the sampled basis note on the Decision Engine results | No new input; the clause is built from constants and the regime read from the element set, and autoescaped. | Then a page reflects a field unescaped; the report names the page. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the reference uses numpy and scipy, already locked, and ships nowhere. | n/a. |
+
+## 0.44.0
+
+A decision record being written when the server stops now stands.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision_job.py` (`jobs_ended`, the stop bound) and `app.py` (the shutdown step awaits it); `docs/architecture.md` states the stop assumption | `scripts/sonar_rules.py c318760`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against c318760 and against master: all PASS. Full suite on Python 3.12, figures in the commit; the PostgreSQL decision subset passes. An independent review confirmed the cause by intervention; its findings are fixed and 21 of 23 mutants die, the other two explained. | Then a rule names the line; fix it in the next release. |
+| SCA | **EVIDENCED** | `opentelemetry-api` 1.45.1 to 1.45.2 (CVE-2026-126360), carried from c318760 | `pip-audit` on `requirements.txt`: 1 vulnerability before, none after. | Then pip-audit names the package; recompile its pin with `scripts/lock.sh`'s command and `--upgrade-package`. |
+| Other gates | **HYGIENE** | Shutdown takes up to 8 s longer when a job is sampling or writing a record | No Dockerfile or image change. | n/a. |

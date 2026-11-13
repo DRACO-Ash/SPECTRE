@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-13
+
+**A decision record being written when the server stops now stands.**
+
+### Fixed
+- The server now waits, up to 8 s, for decision jobs that are sampling or writing their record when it stops, so a record being written is committed rather than cancelled part-way. A job still reading custody or queued is not waited on. Before, the record was lost, on PostgreSQL as on SQLite, and on SQLite the cancelled write could keep its write lock, so later writes failed with "database is locked". A job given up at the bound is logged by count. The 8 s bound assumes the platform allows at least 10 s to stop, Docker's default; no platform figure is confirmed (`docs/architecture.md`). In the test suite this showed as a test-order fault in `test_decision_record_route.py` (SPC-242).
+
 ### Security
 - `opentelemetry-api` 1.45.1 to 1.45.2, for CVE-2026-126360: a crafted `traceparent` value could make the trace-context propagator's regular expression run in quadratic time. It reaches SPECTRE only as a FastAPI dependency; only that pin moved in the lock files, which were recompiled with the repository's own command and a targeted upgrade.
 

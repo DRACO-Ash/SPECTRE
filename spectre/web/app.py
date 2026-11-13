@@ -27,7 +27,7 @@ from spectre.config.settings import (
 from spectre.data.intel import satno_from_tle
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
-from spectre.web.decision_job import server_starting, server_stopping
+from spectre.web.decision_job import jobs_ended, server_starting, server_stopping
 from spectre.web.format_units import format_m_s, format_tof_label, is_computed
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
@@ -253,6 +253,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # A sampled evaluation's worker thread stops at its next sample, so the exit does not wait out its budget.
     server_stopping()
     logger.info("SPECTRE %s shutting down", __version__)
+    # Then wait for the jobs sampling or writing a record, so one writing its decision record finishes it (SPC-242).
+    await jobs_ended()
 
 
 # ── Security response headers ─────────────────────────────────────────────────

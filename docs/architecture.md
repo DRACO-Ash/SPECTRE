@@ -182,6 +182,19 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/spectre_db
 ```
 No code changes required — the async SQLAlchemy adapter handles the swap.
 
+### Stopping the server
+
+When the server is asked to stop, a Decision Engine job that is sampling stops at its next sample, and one
+writing its decision record finishes the write (SPC-242). The lifespan's end waits up to `STOP_WAIT_S`, 8 s, in
+`spectre/web/decision_job.py` for those jobs, then logs any still running, whose record is lost. A job still
+reading custody or queued for the sampling slot holds no database connection and is cancelled at once. After the
+wait, the event loop's own close still lets a worker thread finish the sample it is in, so the whole exit can take
+a little longer than 8 s.
+
+Assumption, for the owner to confirm: the platform allows at least 10 s between asking the container to stop and
+killing it, which is Docker's default stop timeout. No platform figure has been confirmed. Should the platform
+allow less, lower `STOP_WAIT_S` with it, or a record being written at the stop can be lost.
+
 ### Provenance tagging
 
 Every planning run is assigned a `run_id` (UUID) bound to `structlog` context at run start, appearing in all log records for that run.
