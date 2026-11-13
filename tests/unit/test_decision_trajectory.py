@@ -11,6 +11,7 @@ drawn. A lookup or refused cell has no link. The m/s conversion is made once, he
 from __future__ import annotations
 
 import copy
+import dataclasses
 import html
 import re
 from datetime import datetime, timedelta
@@ -116,8 +117,8 @@ class TestOurBurn:
         assert found is not None and figure is not None and figure.sized.burn is not None
         cell.ca_computed = found._replace(window=found.window._replace(span_s=span_h * 3600.0))
         burn = BlueBurn(at_h * 3600.0, figure.sized.burn.delta_v_ric_km_s)
-        cell.ca_response = copy.replace(figure, sized=figure.sized._replace(burn=burn),
-                                        burn_at_utc=EPOCH + timedelta(hours=at_h))
+        cell.ca_response = dataclasses.replace(figure, sized=figure.sized._replace(burn=burn),
+                                               burn_at_utc=EPOCH + timedelta(hours=at_h))
         result.outcome_matrix[0][_AVOID] = cell
         return result
 

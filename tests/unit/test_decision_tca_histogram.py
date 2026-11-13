@@ -278,17 +278,32 @@ class TestThePage:
             assert cast_histogram(cell).caption in html.unescape(" ".join(panel.split()))
 
     def test_the_controls_are_labelled(self, sampled: ScenarioResult) -> None:
-        """49, in the results: the select is tied to its label, the canvas named, the figures a table too."""
+        """49, in the results: the select is tied to its label and the figures are a table too."""
         panel = _histogram_panel(_render(sampled))
         units = {cast_histogram(cell).clock_unit for _i, _j, cell in _sampled_cells(sampled)}
         assert units == {"h:mm"}
         assert '<label for="tca-hist-cell"' in panel and ">Sampled cell<" in panel
         assert 'id="tca-hist-cell"' in panel
-        assert 'aria-label="Histogram of sampled times of closest approach for the selected cell"' in panel
         assert "<summary>Histogram as a table</summary>" in panel
         for heading in ("TCA from (h:mm after the scenario epoch)", "TCA to (h:mm after the scenario epoch)",
                         "Samples"):
             assert f">{heading}</th>" in panel
+
+    def test_the_chart_is_a_figure_named_by_its_caption(self, sampled: ScenarioResult) -> None:
+        """Sonar raises S6819 on role="img" on a canvas (PR 35). The figure's caption names the chart for a screen
+        reader; the canvas is hidden from it, and the table beside it carries the same counts."""
+        panel = _histogram_panel(_render(sampled))
+        canvas = re.search(r"<canvas[^>]*>", panel)
+        assert canvas is not None
+        assert 'id="tca-hist-chart"' in canvas.group(0) and 'aria-hidden="true"' in canvas.group(0)
+        assert "role=" not in canvas.group(0) and "aria-label=" not in canvas.group(0)
+        figure = re.search(r"<figure[^>]*>(.*?)</figure>", panel, re.S)
+        assert figure is not None and canvas.group(0) in figure.group(1)
+        assert re.search(
+            r'<figcaption class="visually-hidden">Histogram of sampled times of closest approach for the selected '
+            r"cell;\s+the table below gives the same counts\.</figcaption>",
+            figure.group(1),
+        )
 
     def test_the_chart_labels_its_bars_from_the_table(self, sampled: ScenarioResult) -> None:
         """The bars are labelled with the table's exact edges and the axis with its heading: nothing in the script

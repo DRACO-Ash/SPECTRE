@@ -4142,7 +4142,8 @@ def _plan_sampling(
     )
 
 
-def _plan_row(
+# PLR0913, PLR0917: the row and each thing its sampling plan is drawn from.
+def _plan_row(  # noqa: PLR0913, PLR0917
     row: _Row, refusal: str | None, sampler: Sampler, budget: _Budget | None, responses: _Responses,
     keep_at_s: Sequence[float] = (),
 ) -> RowSampling:

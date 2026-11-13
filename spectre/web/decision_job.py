@@ -410,7 +410,8 @@ def _red_name(job: DecisionJob) -> str:
     return "the red track" if red is None else red.stk_name
 
 
-def _message(job: DecisionJob) -> str:
+# PLR0911: one return per state a job can be in.
+def _message(job: DecisionJob) -> str:  # noqa: PLR0911
     epoch, budget = job.scenario.epoch_utc, EVALUATION_BUDGET_S
     if job.state is JobState.CUSTODY and job.custody is not None:   # the red track's name is escaped where rendered
         return _CUSTODY.format(wait=job.custody.wait_s, red=_red_name(job), fetch=job.custody.fetch)

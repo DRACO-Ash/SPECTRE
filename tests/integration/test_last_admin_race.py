@@ -17,6 +17,7 @@ from sqlalchemy import update
 from spectre.web.models import User
 from spectre.web.routes import admin
 from tests.conftest import csrf_headers
+from tests.integration.test_admin_route_outcomes import remove_accounts
 from tests.integration.test_login_hardening import _admin_cookies, _create_operator, _login, _user_id
 
 
@@ -27,8 +28,10 @@ def two_admins(client: Any) -> Any:
     other = _user_id(client, cookies, "second_admin")
     client.post(f"/admin/users/{other}", data={"role": "admin"}, cookies=cookies, headers=csrf_headers(cookies))
     yield cookies, other
-    # Leave testadmin an admin for the rest of the suite.
+    # Leave testadmin the only admin for the rest of the suite: a second admin left behind made the PostgreSQL
+    # lock test count three admins, not the two its race needs (PR 35).
     client.cookies.clear()
+    remove_accounts(client, ("second_admin",))
 
 
 def _race(monkeypatch: pytest.MonkeyPatch, rival: str) -> None:

@@ -70,7 +70,7 @@ has edited since master is not reported.
 | `javascript:S7773` | 0.6.1 (2) | `parseFloat` and `isNaN` in the intercept sort, added by the 0.6.1 fix itself | `Number.parseFloat`, `Number.isNaN` | Bare `parseFloat`, `parseInt`, `isNaN`, `isFinite` in `spectre/web/static/js/` and templates | `Number.isNaN` does not coerce, so it is equivalent only on a number: every site SPC-233 changed tests the result of `Number.parseFloat`. |
 | `javascript:S7761` | 0.6.0 | `item.setAttribute('data-idx', ...)` | `item.dataset.idx = ...` | `get/set/remove/hasAttribute` with a whole literal `data-*` name | FACT: `getAttribute('data-sort-' + col)` passed; a built name is not flagged. An absent attribute reads `undefined` through `dataset`, not `null`, so a test for presence becomes `=== undefined`. |
 | `Web:InputWithoutLabelCheck` | 0.6.3 (9) | Fields whose `title` was rewritten, which had a placeholder and no label | An `id` and a `<label for>`, visually hidden where the layout shows the purpose | An `input`, `select` or `textarea` (not hidden, submit, button, reset or image) with no wrapping `<label>`, no `<label for>` matching its `id`, and no non-blank `aria-label` or `aria-labelledby` | FACT: a wrapping label passes (the Max ΔV inputs, touched in 0.6.3, were not flagged). FACT: markup inside a `<script>` string is not parsed. INFERENCE, not yet scored: `aria-label` passes, as it gives the field its accessible name. SPC-233 uses it only on the Decision Engine's adversary and friendly rows: `decision.js` clones a `<template>` row, so an `id` could not be unique, and `tests/unit/test_decision_row_templates.py` holds the template and the server row to the same text, which a visually hidden label would break. Everywhere else a field gets an `id` and a `<label for>`. If the gate raises an `aria-label` field, `decisionAddRow` must number ids as it numbers values. |
-| `Web:S6819` | 0.6.0, 0.6.3 | `role="button"` and `role="heading"` on spans, `role="status"` on a static banner | A native element (`<button>`, `<h3>`), `role="note"` for a static banner, `aria-live="polite"` for a live region | A role with a native element equivalent, `role="img"` on `<svg>` and `<img>` aside | `role="note"` and `aria-live` have passed every scan (0.6.4 shipped `aria-live` in place of `role="status"`). `aria-atomic="true"` keeps what `role="status"` implied. UNKNOWN: whether the gate raises `role="img"` on a `<canvas>`; see below. |
+| `Web:S6819` | 0.6.0, 0.6.3 | `role="button"` and `role="heading"` on spans, `role="status"` on a static banner | A native element (`<button>`, `<h3>`), `role="note"` for a static banner, `aria-live="polite"` for a live region | A role with a native element equivalent, `role="img"` on `<svg>` and `<img>` aside | `role="note"` and `aria-live` have passed every scan (0.6.4 shipped `aria-live` in place of `role="status"`). `aria-atomic="true"` keeps what `role="status"` implied. FACT: the gate raises `role="img"` on a `<canvas>` (PR 35, against master); see below. |
 | `Web:JinjaCommentInTag` | 0.6.0 (3) | `{# #}` comments inside `<tr>` tags mentioning `role="button"`, `aria-controls`, `aria-label` | Comment moved above the tag | A `{# #}` inside a tag: blocking when it holds `=`, `role` or `aria-`, a warning otherwise | FACT: Sonar's HTML parser read the comment's words as attributes and raised S6819 and S6793 on them. A comment without such words inside a `<button>` passed 0.6.3. |
 
 Rules raised once and fixed by restructuring rather than by a pattern, so not
@@ -113,12 +113,12 @@ of them, and the clearing brought 2 more labels into the window (the Time to
 execute fields above), which it also cleared. One remains:
 
 ● `Web:S6819` on `<canvas id="tca-hist-chart" role="img" aria-label="...">` in
-  `partials/decision_results.html`. No native element can hold a Chart.js
-  drawing, and `role="img"` with `aria-label` is how a canvas chart gets an
-  accessible name; dropping the role leaves the chart unnamed to a screen
-  reader. Whether the gate raises it is UNKNOWN. If it does, the choice is the
-  owner's: a `<figure>` with a caption naming the chart, the canvas hidden
-  from assistive technology and the table beside it carrying the figures.
+  `partials/decision_results.html`. FACT: the gate raised it on PR 35, scored
+  against master on 13 November 2026. Fixed there the way this ledger set out,
+  a call Claude made for the owner to confirm: the canvas sits in a `<figure>`
+  whose visually hidden caption names the chart and points to the table below,
+  and the canvas is hidden from assistive technology, so a screen reader reads
+  the caption and the table's exact counts rather than an image.
 
 `python3 scripts/sonar_rules.py --all` checks every line, not just changed
 ones. On 12 November 2026 it found 124 blocking issues: the canvas above, and

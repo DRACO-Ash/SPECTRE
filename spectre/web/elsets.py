@@ -88,7 +88,8 @@ def log_skipped_by_type(subject: str, sets: Iterable[tuple[str, Mapping[str, obj
         logger.info("%s: element sets skipped by type: %s", log_safe(subject), log_safe(named, limit=500))
 
 
-def refused(
+# PLR0913: the set and where it entered, all but the name and the set named at the call.
+def refused(  # noqa: PLR0913
     name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None,
     record: Mapping[str, object] | None = None, now: datetime | None = None,
 ) -> str | None:

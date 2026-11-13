@@ -192,6 +192,11 @@ class TestTemplates:
         """0.6.3 passed decision_panel's rows built in a template literal."""
         assert _html('<script>div.innerHTML = `<input type="text" name="fr_name">`;</script>') == []
 
+    @pytest.mark.parametrize("end", ["</script >", "</SCRIPT>", "</script\n>", '</script foo="bar">'])
+    def test_every_end_tag_html_reads_ends_the_script(self, end: str) -> None:
+        """HTML ends a script at each of these (CodeQL py/bad-tag-filter on PR 35)."""
+        assert _html(f'<script>div.innerHTML = `<input type="text" name="fr_name">`;{end}') == []
+
     def test_an_edit_anywhere_in_the_element_brings_it_into_scope(self) -> None:
         """0.6.3: a rewritten title, two lines below the tag's first line, counted."""
         markup = '<input id="red-satno"\n       name="satno"\n       title="new text" />\n'

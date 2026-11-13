@@ -94,7 +94,8 @@ def _type_exclusion(name: str, record: dict[str, Any] | None) -> Exclusion | Non
     )
 
 
-def why_not_an_actor(
+# PLR0913: one argument per fact the screen reads about one object, the mode named at the call.
+def why_not_an_actor(  # noqa: PLR0913
     name: str,
     record: dict[str, Any] | None,
     tle: str | None,

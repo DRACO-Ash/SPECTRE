@@ -552,9 +552,13 @@
   <script type="application/json" id="tca-hist-data-{{ hi }}-{{ hj }}">{{ h.chart_data | tojson }}</script>
   <p class="tca-hist-caption" data-cell="{{ hi }}-{{ hj }}"{% if not loop.first %} hidden{% endif %} style="font-size:0.58rem; color:var(--text-dim); margin:0.3rem 0">{{ h.caption }}</p>
   {% endfor %}
-  <div style="position:relative; height:200px">
-    <canvas id="tca-hist-chart" role="img" aria-label="Histogram of sampled times of closest approach for the selected cell"></canvas>
-  </div>
+  <figure style="margin:0">
+    <figcaption class="visually-hidden">Histogram of sampled times of closest approach for the selected cell;
+      the table below gives the same counts.</figcaption>
+    <div style="position:relative; height:200px">
+      <canvas id="tca-hist-chart" aria-hidden="true"></canvas>
+    </div>
+  </figure>
   <details style="font-size:0.58rem; color:var(--text-dim); margin-top:0.3rem">
     <summary>Histogram as a table</summary>
     {% for hi, hj, h in hist_cells %}

@@ -376,7 +376,7 @@ def _skip_jinja(text: str, i: int) -> int:
 
 def _script_spans(text: str) -> list[tuple[int, int]]:
     """Where <script> bodies are: Sonar does not parse their contents as HTML."""
-    return [(m.start(), m.end()) for m in re.finditer(r"<script\b.*?</script>", text, re.S | re.I)]
+    return [(m.start(), m.end()) for m in re.finditer(r"<script\b.*?</script\b[^>]*>", text, re.S | re.I)]
 
 
 def tags(text: str) -> Iterator[Tag]:

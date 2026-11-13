@@ -74,8 +74,9 @@ _FIRST_YEAR_OF_THE_1900S = 57
 _DECIMAL = re.compile(r" *[+-]?\d*\.?\d+ *", re.ASCII)
 #: A mantissa with an implied decimal point and a one-digit power of 10 (" 10270-3", "-11606-4", " 00000+0").
 _IMPLIED_EXPONENT = re.compile(r" *[+-]?\d{1,5}[+-]\d *", re.ASCII)
-#: The epoch: a two-digit year, then the day of the year and its fraction.
-_EPOCH_FIELD = re.compile(r" *(\d{2})( *\d+(?:\.\d*)?) *", re.ASCII)
+#: The epoch, its padding stripped first: a two-digit year, then the day of the year and its fraction. Stripping
+#: first leaves the pattern no run of spaces to backtrack over at either end.
+_EPOCH_FIELD = re.compile(r"(\d{2})( *\d+(?:\.\d*)?)", re.ASCII)
 
 
 class _Field(NamedTuple):
@@ -129,7 +130,7 @@ def tle_epoch(line1: str) -> datetime | None:
     Day 0, or a day past the last of its year (365, or 366 in a leap year), is a corrupt field, not a date a timedelta
     should quietly roll into the neighbouring year (audit F-255). Digits only: "inf" or "nan" is no day.
     """
-    match = _EPOCH_FIELD.fullmatch(line1[_EPOCH])
+    match = _EPOCH_FIELD.fullmatch(line1[_EPOCH].strip(" "))
     if match is None:
         return None
     two_digit = int(match.group(1))

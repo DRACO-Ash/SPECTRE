@@ -87,8 +87,9 @@ def age_text(hours: float) -> str:
 _age = age_text
 
 
-# PLR0913: one argument per fact the rule reads, all named at the call.
-def assess_custody(  # noqa: PLR0913
+# PLR0911, PLR0913: one return per custody state, checked in order; one argument per fact the rule reads, all
+# named at the call.
+def assess_custody(  # noqa: PLR0911, PLR0913
     *,
     elset_hours: float | None,
     limit_hours: float,

@@ -353,7 +353,8 @@ class Decided:
     problem: str = ""
 
 
-def _refusal(row: DecisionRecord, decision: str, rationale: str) -> str:
+# PLR0911: one return per refusal, checked in order.
+def _refusal(row: DecisionRecord, decision: str, rationale: str) -> str:  # noqa: PLR0911
     """Why *decision* with *rationale* cannot be recorded on *row*, checked in order; empty when it can."""
     if row.decided_at is not None:
         return _ONCE
