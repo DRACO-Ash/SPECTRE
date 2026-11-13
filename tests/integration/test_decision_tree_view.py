@@ -361,6 +361,102 @@ class TestReadable:
         assert "&lt;script&gt;" in section
 
 
+def _boxes(section: str) -> dict[str, list[str]]:
+    """Each drawn box's figures, by its branch's key, as the page writes them."""
+    svg = section[section.index("<svg"):section.index("</svg>")]
+    found: dict[str, list[str]] = {}
+    for chunk in svg.split('<g class="tree-dbox"')[1:]:
+        key = re.search(r'data-key="([^"]+)"', chunk)
+        assert key is not None
+        found[key.group(1)] = [
+            html.unescape(t) for t in re.findall(r'<text class="tree-dfigure"[^>]*>([^<]*)</text>', chunk)
+        ]
+    return found
+
+
+def _listed(section: str) -> dict[str, list[str]]:
+    """Each branch's figures in the plain sections, by its key: the figures list before the branches under it."""
+    found: dict[str, list[str]] = {}
+    for chunk in section.split('<details class="tree-node"')[1:]:
+        key = re.search(r'data-key="([^"]+)"', chunk)
+        assert key is not None
+        figures = chunk[chunk.index('<ul class="tree-figures"'):chunk.index("</ul>")]
+        found[key.group(1)] = [_text(li) for li in re.findall(r'<li class="tree-figure"[^>]*>(.*?)</li>', figures)]
+    return found
+
+
+class TestTheDrawnTree:
+    """SPC-190: the tree drawn beside the plain branches, the same figures in both, static without script."""
+
+    def test_every_node_in_the_drawing_shows_the_figures_its_text_section_shows(
+        self, client: Any, auth_cookie: str, no_job: Any,
+    ) -> None:
+        for result in (still_result(_MINIMAX), sampled_result(_EV)):
+            section = _section(_results(client, auth_cookie, result))
+            drawn, listed = _boxes(section), _listed(section)
+            assert len(drawn) == len(listed) == section.count('<details class="tree-node"') > 0
+            assert drawn.keys() == listed.keys()
+            for key, figures in drawn.items():
+                assert len(figures) == 2
+                assert [f for f in figures if f in listed[key]] == figures, key
+
+    def test_it_sits_beside_the_branches_with_its_caption(self, client: Any, auth_cookie: str, no_job: Any) -> None:
+        section = _section(_results(client, auth_cookie, still_result()))
+        figure = section.index('<figure class="tree-diagram"')
+        assert section.index("tree-lines") < figure < section.index('<ul class="tree-nodes"')
+        assert 'aria-labelledby="decision-tree-diagram-caption"' in section
+        caption = re.search(r'<figcaption id="decision-tree-diagram-caption"[^>]*>([^<]*)</figcaption>', section)
+        assert caption is not None
+        assert caption.group(1) == (
+            "The tree drawn, turn 1 on the left. Each box shows its branch's sequence score and closest approach "
+            "along it, as the branches below list them; the branches below are the same tree in words."
+        )
+
+    def test_without_script_it_shows_in_full_and_offers_no_control(
+        self, client: Any, auth_cookie: str, no_job: Any,
+    ) -> None:
+        section = _section(_results(client, auth_cookie, still_result()))
+        assert "<script" not in section
+        assert not re.search(r"\son[a-z]+\s*=", section), "a handler attribute"
+        assert section.count('<g class="tree-dtoggle" display="none"') == 4
+        assert 'class="tree-dtoggle"' not in section.replace('<g class="tree-dtoggle" display="none"', "")
+        buttons = re.findall(r"<button [^>]*>", section)
+        assert len(buttons) == 3
+        assert all(" hidden" in b and 'type="button"' in b for b in buttons)
+        assert 'data-init="tree-diagram"' in section
+        svg = re.search(r"<svg [^>]*>", section)
+        assert svg is not None
+        assert re.search(r'width="\d+" height="\d+(\.\d+)?" viewBox="0 0 \d+ \d+(\.\d+)?"', svg.group(0))
+
+    def test_its_controls_carry_their_names(self, client: Any, auth_cookie: str, no_job: Any) -> None:
+        view = tree_view(still_result())
+        assert view is not None
+        section = _section(_results(client, auth_cookie, still_result()))
+        for node in view.nodes:
+            assert f'aria-label="Collapse the branches after {html.escape(node.heading, quote=True)}"' in section
+            assert f'data-expand-label="Open the branches after {html.escape(node.heading, quote=True)}"' in section
+
+    def test_a_screen_reader_meets_each_box_once(self, client: Any, auth_cookie: str, no_job: Any) -> None:
+        """Its visible lines are its words: no title repeats them."""
+        section = _section(_results(client, auth_cookie, still_result(_MINIMAX)))
+        svg = section[section.index("<svg"):section.index("</svg>")]
+        assert "<title" not in svg
+        assert "aria-hidden" not in svg
+        view = tree_view(still_result(_MINIMAX))
+        assert view is not None and view.diagram is not None
+        for box in view.diagram.boxes:
+            for line in box.lines:
+                assert svg.count(f">{html.escape(line.text, quote=True)}</text>") >= 1
+        headings = re.findall(r'<text class="tree-dtitle"[^>]*>([^<]*)</text>', svg)
+        assert len(headings) == len(view.diagram.boxes) == len({b.key for b in view.diagram.boxes})
+
+    def test_the_console_loads_its_script(self, client: Any, auth_cookie: str) -> None:
+        page = client.get("/", cookies={"spectre_session": auth_cookie}).text
+        assert '<script src="/static/js/tree_diagram.js" defer></script>' in page
+        script = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js" / "tree_diagram.js"
+        assert "SPECTRE.init('tree-diagram'" in script.read_text("utf-8")
+
+
 class TestStrictUndefined:
     def _env(self) -> Environment:
         from spectre.web.app import templates

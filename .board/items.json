@@ -1849,7 +1849,11 @@
   ],
   "deps": [
    "SPC-189"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-191",
@@ -2318,7 +2322,11 @@
   "note": "Evaluation finding F-20 (Low, §1b, L1), evaluation/EVALUATION.md. Remediation: document the assumption; add an interaction term if the analyst session supports one. Closing evidence: the documented assumption or a tested term.",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-220",
@@ -2330,7 +2338,11 @@
   "note": "Evaluation finding F-21 (Low, §1d, L1), evaluation/EVALUATION.md. Remediation: name it in the guide's limitations. Closing evidence: the guide text.",
   "files": [
    "spectre/domain/decision_tree.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-221",
@@ -2608,7 +2620,11 @@
   "files": [
    "spectre/web/routes/threat.py",
    "spectre/domain/actor_eligibility.py"
-  ]
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-240",

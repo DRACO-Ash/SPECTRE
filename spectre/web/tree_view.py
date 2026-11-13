@@ -10,6 +10,11 @@ The per-turn recommendation and the update after turn 1 are the selection's own 
 that reads no probability the second part is headed as what each turn lets us see, since nothing is updated. A
 branch whose own response is marked not permitted (SPC-195) says so, with the reason, beside its heading; a later
 branch below it says that it follows that response, so every sequence such a response starts is shown as excluded.
+
+The tree is also drawn (SPC-190): diagram lays it out left to right, a column per turn and each branch a box beside its
+children, and the template writes it as SVG beside the plain branches, which stay its text alternative. Each box shows
+its branch's heading and DIAGRAM_FIGURES, written as the branch writes them, so the drawing cannot say otherwise.
+static/js/tree_diagram.js lays it out again, the same way, when a branch is collapsed, and zooms it.
 """
 
 from __future__ import annotations
@@ -19,7 +24,13 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from spectre.domain.custody import span_text
-from spectre.domain.decision import REMAINDER_LABEL, ScenarioResult, SelectorStrategy
+from spectre.domain.decision import (
+    MAX_TURNS,
+    REMAINDER_LABEL,
+    TERMS_INDEPENDENT_LINE,
+    ScenarioResult,
+    SelectorStrategy,
+)
 from spectre.domain.decision_figures import TcaUncertainty
 from spectre.domain.decision_tree import GameNode, GameTree, PathFigures
 from spectre.domain.provenance import FigureBasis
@@ -38,7 +49,30 @@ FIGURE_LABELS = (
     "Custody along the sequence",
     "Sequence score",
 )
+#: The figures each drawn box shows, of FIGURE_LABELS (SPC-190): the sequence's score and closest approach along it.
+DIAGRAM_FIGURES = (FIGURE_LABELS[6], FIGURE_LABELS[3])
 PLAN_MARK = "On the plan {rule} recommends"
+#: What a drawn box says of its place (SPC-190): on the plan, with the plan's star, a best continuation, a response
+#: marked not permitted, and a branch after one. The list below names the rule; the drawing does not repeat it.
+_DRAWN_PLAN = "\u2605 On the plan"
+_DRAWN_CONTINUATION = "Best continuation, not on the plan"
+_DRAWN_NOT_PERMITTED = "Not permitted"
+_DRAWN_FOLLOWS = "Excluded: it follows a response not permitted"
+_COLLAPSE = "Collapse the branches after {heading}"
+_EXPAND = "Open the branches after {heading}"
+#: The drawing's geometry in its own units (SPC-190): a character's width at its 10-unit monospace text, a box's
+#: padding, a line's height, the gaps between columns and between rows, and the margin. A box is as wide as its
+#: longest line and tall enough for five: its heading, the remainder's caveat where red's move is the remainder of P,
+#: two figures and its mark.
+_CHAR_W = 6.0
+_PAD = 8.0
+_LINE_H = 13.0
+_LINES = 5
+_COL_GAP = 40.0
+_ROW_GAP = 10.0
+_MARGIN = 10.0
+#: The radius of a box's control, in the drawing's units.
+_TOGGLE_R = 7.0
 #: Beside the best branch under a response the rule does not pick (SPC-189, design D14): in words of its own, never
 #: the plan's, and with no star.
 CONTINUATION_MARK = (
@@ -47,6 +81,13 @@ CONTINUATION_MARK = (
 HEADING = "Game tree: {turns} turns"
 HEADING_NOT_BUILT = "Game tree: {turns} turns asked for, none built"
 UPDATE_HEADING = "The update after turn 1"
+#: Beside the tree (SPC-220, evaluation F-21): the engine looks at most MAX_TURNS turns ahead, and the branches of the
+#: last turn shown, the deepest built in full, are valued as if no one moves after it.
+LEAVES_LINE = (
+    "Each branch of the last turn shown, turn {turns} here and turn {most} at most, is valued as if no one moves "
+    "after it: its figures run to the end of the span searched with neither red nor us burning again, so a move "
+    "either side would make later is in no figure."
+)
 UPDATE_HEADING_NO_PROBABILITY = "What each turn lets us see"
 _HEADING = "Turn {k} of {turns}: red {action}, our {response}"
 #: Beside the heading of a branch whose red move is the remainder of P: the engine's, not the operator's (SPC-203).
@@ -116,6 +157,73 @@ class NodeView:
     #: (SPC-189); else empty. Never set on a branch on the plan.
     continuation: str = ""
 
+    @property
+    def key(self) -> str:
+        """This branch's key, its red move and our response turn by turn, "0.1-2.3": the drawing's and the list's."""
+        return "-".join(f"{action}.{response}" for action, response in self.steps)
+
+
+@dataclass(frozen=True)
+class DiagramLine:
+    """One line of text in a drawn box: what it is ("title", "remainder", "figure" or "mark"), its baseline and its
+    words."""
+
+    kind: str
+    y:    float
+    text: str
+
+
+@dataclass(frozen=True)
+class DiagramBox:
+    """One branch drawn: its key and its parent's ("" for turn 1), where it sits, what it says, and its control."""
+
+    key:            str
+    parent:         str
+    x:              float
+    y:              float
+    title:          str
+    figures:        tuple[str, ...]
+    #: "plan", "continuation", "not-permitted" or "": what mark says, for the box's outline.
+    mark_kind:      str
+    mark:           str
+    lines:          tuple[DiagramLine, ...]
+    #: The SVG path from its parent's right side to its own left side; "" for turn 1.
+    edge:           str
+    #: Whether branches follow it, so it carries a control to collapse them.
+    toggle:         bool
+    collapse_label: str
+    expand_label:   str
+
+
+@dataclass(frozen=True)
+class TreeDiagram:
+    """The tree drawn: its size, its geometry, which tree_diagram.js reads to lay it out again, and its boxes in the
+    order the branches are listed."""
+
+    width:     float
+    height:    float
+    margin:    float
+    box_w:     float
+    box_h:     float
+    col_gap:   float
+    row_gap:   float
+    char_w:    float
+    pad:       float
+    boxes:     tuple[DiagramBox, ...]
+
+    @property
+    def col_pitch(self) -> float:
+        return self.box_w + self.col_gap
+
+    @property
+    def row_pitch(self) -> float:
+        return self.box_h + self.row_gap
+
+    @property
+    def toggle_at(self) -> str:
+        """Where a box's control sits, as an SVG translation: just past its right side, where its branches leave."""
+        return f"translate({self.box_w + _TOGGLE_R + 2:g} {self.box_h / 2:g})"
+
 
 @dataclass(frozen=True)
 class TreeView:
@@ -134,6 +242,11 @@ class TreeView:
     update:         tuple[str, ...]
     update_basis:   FigureView | None
     nodes:          tuple[NodeView, ...]
+    #: The assumptions the tree's figures rest on, beside it when it is built: the last turn's branches valued as if
+    #: no one moves after it (SPC-220), and the score's terms added with nothing joining them (SPC-219).
+    assumptions:    tuple[str, ...] = ()
+    #: The tree drawn (SPC-190); None when no branch was built.
+    diagram:        TreeDiagram | None = None
 
 
 def _figure(label: str, value: str, basis: FigureBasis, extra: str = "") -> FigureView:
@@ -245,6 +358,100 @@ class _Builder:
         )
 
 
+def _mark(node: NodeView, vetoed: Sequence[bool]) -> tuple[str, str]:
+    """What a drawn box says of its place, and its kind: not permitted first, as the list greys it, then the plan,
+    then a best continuation."""
+    if node.not_permitted:
+        return "not-permitted", _DRAWN_NOT_PERMITTED if vetoed[node.steps[-1][1]] else _DRAWN_FOLLOWS
+    if node.on_plan:
+        return "plan", _DRAWN_PLAN
+    if node.continuation:
+        return "continuation", _DRAWN_CONTINUATION
+    return "", ""
+
+
+def _texts(node: NodeView, vetoed: Sequence[bool]) -> tuple[str, tuple[str, ...], str, str]:
+    """A box's title, figures, mark kind and mark."""
+    shown = {f.label: f"{f.label}: {f.value} ({f.kind})" for f in node.figures}
+    return (node.heading, tuple(shown[label] for label in DIAGRAM_FIGURES), *_mark(node, vetoed))
+
+
+def _lines(node: NodeView, figures: tuple[str, ...], mark: str) -> tuple[DiagramLine, ...]:
+    """A box's lines: its heading, the caveat the list sets beside a remainder branch's heading (SPC-203), its
+    figures and its mark."""
+    words = [
+        ("title", node.heading), *([("remainder", node.remainder)] if node.remainder else []),
+        *(("figure", f) for f in figures), *([("mark", mark)] if mark else []),
+    ]
+    return tuple(DiagramLine(kind, _PAD + _LINE_H * (i + 1) - 3.0, text) for i, (kind, text) in enumerate(words))
+
+
+def _edge(parent: tuple[float, float], child: tuple[float, float], box_w: float, box_h: float) -> str:
+    x1, y1, x2, y2 = parent[0] + box_w, parent[1] + box_h / 2, child[0], child[1] + box_h / 2
+    middle = (x1 + x2) / 2
+    return f"M{x1:g} {y1:g} C{middle:g} {y1:g} {middle:g} {y2:g} {x2:g} {y2:g}"
+
+
+def _order(nodes: Sequence[NodeView], parent: str = "") -> list[tuple[NodeView, str]]:
+    """Every branch under *nodes* with its parent's key, in the order the branches are listed."""
+    found: list[tuple[NodeView, str]] = []
+    for node in nodes:
+        found += [(node, parent), *_order(node.children, node.key)]
+    return found
+
+
+def _places(
+    order: Sequence[tuple[NodeView, str]], row_pitch: float, col_pitch: float,
+) -> dict[str, tuple[float, float]]:
+    """Where each box sits: each leaf the next row in the listed order, each branch with branches after it midway
+    between its first and last, read last to first so its branches are placed before it; each turn a column."""
+    leaves = [node.key for node, _ in order if not node.children]
+    ys = {key: _MARGIN + row * row_pitch for row, key in enumerate(leaves)}
+    for node, _ in reversed(order):
+        if node.children:
+            ys[node.key] = (ys[node.children[0].key] + ys[node.children[-1].key]) / 2
+    return {node.key: (_MARGIN + (node.turn - 1) * col_pitch, ys[node.key]) for node, _ in order}
+
+
+def diagram(nodes: Sequence[NodeView], vetoed: Sequence[bool]) -> TreeDiagram | None:
+    """The tree *nodes* drawn (SPC-190), with *vetoed* saying which responses are marked not permitted; None for no
+    node. tree_diagram.js lays out the branches left showing the way _places does."""
+    if not nodes:
+        return None
+    order = _order(nodes)
+    texts = {node.key: _texts(node, vetoed) for node, _ in order}
+    lines = {node.key: _lines(node, texts[node.key][1], texts[node.key][3]) for node, _ in order}
+    longest = max(len(line.text) for box in lines.values() for line in box)
+    box_w, box_h = float(round(longest * _CHAR_W + 2 * _PAD)), 2 * _PAD + _LINES * _LINE_H
+    row_pitch, col_pitch = box_h + _ROW_GAP, box_w + _COL_GAP
+    where = _places(order, row_pitch, col_pitch)
+    boxes = []
+    for node, parent in order:
+        title, figures, mark_kind, mark = texts[node.key]
+        x, y = where[node.key]
+        boxes.append(DiagramBox(
+            node.key, parent, x, y, title, figures, mark_kind, mark, lines[node.key],
+            _edge(where[parent], (x, y), box_w, box_h) if parent else "", bool(node.children),
+            _COLLAPSE.format(heading=title), _EXPAND.format(heading=title),
+        ))
+    rows = sum(not node.children for node, _ in order)
+    turns = max(node.turn for node, _ in order)
+    return TreeDiagram(
+        2 * _MARGIN + (turns - 1) * col_pitch + box_w, 2 * _MARGIN + (rows - 1) * row_pitch + box_h,
+        _MARGIN, box_w, box_h, _COL_GAP, _ROW_GAP, _CHAR_W, _PAD, tuple(boxes),
+    )
+
+
+def _assumptions(nodes: Sequence[NodeView]) -> tuple[str, ...]:
+    """The lines beside a tree built: its last turn shown, the deepest branch built in full where the tree was built
+    in part, valued as if no one moves after it (SPC-220), and the score's terms added with nothing joining them
+    (SPC-219). None for a tree with no branch."""
+    if not nodes:
+        return ()
+    deepest = max(node.turn for node, _ in _order(nodes))
+    return LEAVES_LINE.format(turns=deepest, most=MAX_TURNS), TERMS_INDEPENDENT_LINE
+
+
 def _update(result: ScenarioResult, selection: TreeSelection | None) -> tuple[str, ...]:
     """The selection's update lines; with no pick, that a stated observation updated nothing, else nothing."""
     if selection is not None:
@@ -271,4 +478,6 @@ def tree_view(result: ScenarioResult) -> TreeView | None:
         _update(result, selection),
         None if stated is None else FigureView(UPDATE_HEADING, stated.line, stated.basis.kind.value, stated.basis.note),
         nodes,
+        _assumptions(nodes),
+        diagram(nodes, [bool(f.not_permitted) for f in result.scenario.friendly_responses]),
     )

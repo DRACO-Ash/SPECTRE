@@ -408,6 +408,17 @@ _SCORE_NOTE = (
 )
 
 
+#: Beside the outcome matrix and the game tree, where the composite score is shown (SPC-219, evaluation F-20). The score
+#: adds custody lost and closest approach as separate weighted terms (score_terms, _score); no source for a term joining
+#: them was found, so none is added and the assumption is stated. Not part of any record: it changes no figure.
+TERMS_INDEPENDENT_LINE = (
+    "Custody lost and closest approach are added to the score as separate terms, with nothing joining them: a close "
+    "approach while custody is lost scores what the two score apart, no more, though an approach we cannot see may "
+    "be worse than the two added together. No source for a term joining them was found, so none is added. An "
+    "unsourced assumption, listed in docs/lookup-register.md."
+)
+
+
 def outcome_bases(
     *,
     custody_maintained: FigureBasis,
@@ -2605,6 +2616,12 @@ class ScenarioResult:
     def score_scales_line(self) -> str:
         """How the score values closest approach and our delta-V, at this scenario's keep-out distance (SPC-191)."""
         return SCORE_SCALES_LINE.format(keep=_keep_out_text(self.scenario.keep_out_km))
+
+    @property
+    def terms_independent_line(self) -> str:
+        """That custody lost and closest approach are separate terms of the score, with nothing joining them
+        (SPC-219)."""
+        return TERMS_INDEPENDENT_LINE
 
     # ── The operator's judgements and the code version (SPC-196, evaluation F-05) ──
 

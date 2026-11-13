@@ -58,6 +58,14 @@ Closest approach and our delta-V are each valued in orders of magnitude (SPC-191
 penalty at or inside the keep-out distance the operator sets on the panel and none at 50,000 km, and our delta-V
 reaches its full penalty at the engine's 1,000 m/s per-burn limit. The next section sets out both scales.
 
+Custody lost and closest approach are separate terms (SPC-219, evaluation F-20). The score adds each term, weighted,
+with nothing joining them (`decision.score_terms`, `decision._score`): a close approach while custody is lost scores
+what the two score apart, no more, though an approach we cannot see may be worse than the two added together. No
+source for a term joining them was found, so none is added and the assumption is stated instead: beside the outcome
+matrix and the game tree (`decision.TERMS_INDEPENDENT_LINE`), in the operator guide's limitations and in the lookup
+register's assumptions with no constant. A sourced interaction term would change every score, so a record's replay
+would then need the stored inputs version raised; none is planned.
+
 ## Score scales (SPC-191)
 
 **Status: built. Each scale is Claude's design choice, not a ruling.** Evaluation finding F-10 (Critical) found the
@@ -474,9 +482,15 @@ NOTSO-derived P) and decision 18 (how the interval reaches the pick).
   behind it. A branch on the plan the recommendation follows says so in words. Under a response the rule does not
   pick, the best continuation, every later response the rule's pick there, says so in words of its own, in italic
   with no star, never as the plan (SPC-189). Responses that tie are each named, and the plan follows each (SPC-206).
+● Beside the tree, two notes say what its figures assume (SPC-220, SPC-219): each branch of the last turn shown, turn 3
+  at most and the deepest built in full for a tree built in part, is valued as if no one moves after it, to the end of the span searched, so a move either side would make
+  later is in no figure; and custody lost and closest approach are added to each sequence's score as separate
+  terms. Both are stated only for a tree built (`tree_view.LEAVES_LINE`, `decision.TERMS_INDEPENDENT_LINE`).
+● **The tree drawn** (SPC-190), beside the branches: the section after next says how.
 ● A tree built in part names the deepest turn built in full and shows nothing below it. A tree refused before it
   runs is headed as asked for and none built, and states why.
-● The view reads at phone width, says everything in words as well as colour, and adds no script.
+● The view reads at phone width and says everything in words as well as colour. Its only script collapses and zooms
+  the drawn tree; the drawing and the branches in words work without it.
 
 ### Design decisions D1 to D11 (SPC-140, SPC-141)
 
@@ -585,7 +599,8 @@ The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC
   the best branch under each response, including responses the rule would not pick (SPC-189). **Built (SPC-189):**
   the section after next says how.
 ● **D15. Plain details and summary.** The tree is server-rendered with no script and no new library, so nothing is
-  added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190).
+  added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190). **Built (SPC-190):** the
+  section after next says how; the plain branches stay as its text alternative.
 
 ### The tree's own cost cap (SPC-188)
 
@@ -641,6 +656,31 @@ the rule would not pick.
   below it, its best continuation does. Under a response marked not permitted (SPC-195) nothing is valued, so no
   branch below it is marked.
 ● Nothing a record holds changes: the marks are worked out from the selection when the view is built.
+
+### The tree drawn (SPC-190)
+
+**Status: built. Claude's design, not a ruling:** a server-rendered drawing with a first-party script, so no
+third-party library joins the supply chain; the owner may still ask for a vendored one (D15).
+
+● **Drawn on the server.** `tree_view.diagram` lays the tree out left to right, turn 1 in the first column and each
+  later turn in the next, each leaf a row of its own and each branch with branches after it midway between its first
+  and last, and `partials/decision_tree.html` writes it as one inline SVG above the plain branches. Each box carries
+  its branch's heading and two of its own figures, its sequence's score and closest approach along it, each with its
+  basis kind in words, written exactly as the branch below writes them, so the two cannot differ; a test holds every
+  box's figures to that branch's text. A box on the plan says "On the plan" with its star, a best continuation under
+  a response the rule does not pick says "Best continuation, not on the plan", and a branch excluded as not permitted
+  is dashed and says so, so nothing rests on colour.
+● **Without script** the drawing shows in full and does nothing more; its collapse and zoom controls stay hidden, so
+  no control is offered that cannot work. It sits in a frame of its own that scrolls.
+● **With script** (`static/js/tree_diagram.js`, under the policy's script-src 'self', with no inline script and no
+  handler attribute) each box with branches after it carries a control that collapses or opens them: a button in
+  the tab order, Enter or Space working it, its name saying what it will do and to which branch, and aria-expanded
+  saying whether its branches show. Zoom in, zoom out and reset are buttons beside the drawing, and the drawing
+  scrolls inside its own box when zoomed, so the page never scrolls sideways at phone width.
+● The plain branches below stay the text alternative: everything the drawing shows is there in words, with every
+  figure and its basis.
+● `tests/browser/test_panels.py` collapses a branch, opens it again and zooms, by mouse and by keyboard, in Chromium
+  under the policy.
 
 ## The decision record (SPC-192)
 
@@ -1446,6 +1486,10 @@ earlier release replays exactly; the stored inputs stay at version 6.
 ● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
 ● **Constraint libraries** (SPC-195): rules drawn from doctrine or rules of engagement that would mark responses not
   permitted without the operator ticking each are the owner's to supply; until then each veto is the operator's.
+● **A term joining custody and closest approach** (SPC-219, evaluation F-20): none was sourced, so the score adds
+  them as separate terms and says so beside the matrix and the tree.
+● **Moves after the last turn** (SPC-220, evaluation F-21): the tree looks at most 3 turns ahead, and its last
+  turn's branches are valued as if no one moves after it, said beside the tree and in the guide's limitations.
 ● **A transfer of more burns than turns in a game tree.** The engine gives each burn a turn of its own (SPC-187),
   and the tree runs at most 3 turns, so a transfer making more than 3 burns within the span searched refuses the tree;
   its matrix still carries every burn.
@@ -1476,3 +1520,6 @@ earlier release replays exactly; the stored inputs stay at version 6.
 | SPC-213 | P5 labelled with its own half-width; the convergence figure named apart as the widest of three | Built |
 | SPC-214 | The production RK45's own error, measured against a tight reference, stated in the sampled basis note | Built; tolerances unchanged by ruling |
 | SPC-215 | Each element set stated in its regime, by period and eccentricity, and whose staleness limit and error rate it takes | Built; no regime-specific figure sourced |
+| SPC-219 | Custody lost and closest approach stated as separate terms of the score, with no term joining them, beside the matrix and the tree | Built; no interaction term sourced |
+| SPC-220 | The last turn's branches stated as valued as if no one moves after it, beside the tree | Built |
+| SPC-190 | The game tree drawn beside its branches: collapsible and zoomable by mouse and keyboard, static without script | Built |

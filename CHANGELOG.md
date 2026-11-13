@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-13
+
+**The game tree drawn, two scoring assumptions stated, and the asset screen judging age on the set it uses.**
+
+### Added
+- The game tree is drawn beside its branches, collapsible and zoomable by mouse and keyboard, and shown in full without script. Each box shows the branch's own sequence score and closest approach as the text list writes them, and a remainder branch carries its caveat (SPC-190).
+- Beside the outcome matrix and the game tree, a note says custody lost and closest approach are added to the score as separate terms, so an approach we cannot see may be worse than the two added together. It is an unsourced assumption, also stated in the guide's limitations and the lookup register (SPC-219, F-20).
+- Beside the game tree, a note says each branch of the last turn shown is valued as if no one moves after it, also in the guide's limitations (SPC-220, F-21).
+
+### Changed
+- The asset screen fetches a payload's live element set before judging its age, walking the watchlist in order and fetching only until the 60-actor cap is filled, so an old payload is left out on the first screen as on the next. Objects left out are listed in watchlist order (SPC-239).
+- A bundled synthetic element set's placeholder designator is no longer read as a launch year, so bundled objects are not cut as past their working life from 2036 (SPC-239).
+
 ## [0.40.0] - 2026-11-13
 
 **Hop plans flown and costed burn by burn, and every limit names its orbit class.**

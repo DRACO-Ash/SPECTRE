@@ -317,6 +317,10 @@
   {% if rules_shown is not none %}
   <p class="star-legend" style="margin:0 0 0.2rem; font-size:0.6rem; color:var(--text-dim)">{{ rules_shown.star_line }}</p>
   {% endif %}
+  {# How the score joins custody and closest approach: it does not (SPC-219, evaluation F-20). #}
+  {% if result.terms_independent_line is defined %}
+  <p class="terms-independent" role="note" style="margin:0 0 0.2rem; font-size:0.6rem; color:var(--text-dim)">{{ result.terms_independent_line }}</p>
+  {% endif %}
 
   <div style="overflow-x:auto">
   <table style="width:100%; font-size:0.62rem; border-collapse:collapse">

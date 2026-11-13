@@ -7,6 +7,7 @@ result without a reason, and that the three-click path actually resolves.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -323,3 +324,86 @@ class TestOnlyPayloadsThatCanActAreScreened:
             "No red HRR object in a regime compatible with GEO can act. Not screened, as not able to act: "
             "1 rocket body: CZ-3B R/B (named as rocket body)."
         ) in text
+
+
+_OLD_PAYLOAD_TLE = _RED_TLE.replace("16065A  ", "04042A  ", 1)
+#: A bundled bootstrap set: the generator's placeholder designator, 20001A, on a number no intelligence record holds.
+_BUNDLED_STYLE_TLE = _RED_TLE.replace("16065A  ", "20001A  ", 1).replace("41838", "99021")
+_NOT_SCREENED = re.compile(r'<p class="field-meta" role="note">(Not screened, as not able to act: [^<]*)</p>')
+
+
+class TestEligibilityIsJudgedOnTheSetScreened:
+    """SPC-239: whether a payload is past its working life is judged on the element set it is screened on, the same on
+    a first screen, which fetches that set, as on the next, which reads it from the cache; and a bundled synthetic
+    set's placeholder designator is not read as a launch year."""
+
+    _OBJECTS = (
+        {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        {"satno": "28451", "name": "FENGYUN 2C", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+    )
+
+    def test_an_old_payload_fetched_on_the_first_screen_is_left_out_on_it_as_on_the_next(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.web.routes import udl
+        from spectre.web.routes.udl import FetchedElset
+
+        fetched: list[int] = []
+
+        async def _fetch(satno: int, *_a: object, **_k: object) -> FetchedElset | None:
+            fetched.append(satno)
+            return FetchedElset(_OLD_PAYLOAD_TLE, "REAL", "18th SPCS") if satno == 28451 else None
+
+        monkeypatch.setattr(udl, "fetch_tle_for_satno", _fetch)
+        state = session_state(auth_cookie)
+        saved = (state.udl_username, state.udl_password, list(state.hrr_objects), dict(state.hrr_tle_cache),
+                 dict(state.hrr_tle_data_mode))
+        state.udl_username, state.udl_password = "u", "p"
+        state.hrr_objects = [dict(o) for o in self._OBJECTS]
+        state.hrr_tle_cache.update({"41838": _RED_TLE, "30793": _ASSET_TLE})
+        state.hrr_tle_data_mode.update({"41838": "REAL", "30793": "REAL"})
+        state.hrr_tle_cache.pop("28451", None)
+        try:
+            first = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000)
+            second = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.udl_password, state.hrr_objects = saved[:3]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[3])
+            state.hrr_tle_data_mode.clear()
+            state.hrr_tle_data_mode.update(saved[4])
+        texts = [" ".join(r.text.split()) for r in (first, second)]  # type: ignore[attr-defined]
+        assert fetched == [28451], "only the payload with no set held is fetched, once"
+        notes = [_NOT_SCREENED.findall(t) for t in texts]
+        assert notes[0] == notes[1] == [
+            "Not screened, as not able to act: 1 past working life: FENGYUN 2C (launched 2004). A payload is taken "
+            "to be past its working life 15 years after launch, an assumption, unless the intelligence record holds "
+            "it as operational or degraded."
+        ]
+        assert ["1 candidate actor(s) in GEO" in t for t in texts] == [True, True]
+
+    def test_a_bundled_synthetic_set_is_not_cut_by_its_placeholder_designator(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(threat, "_utc_now", lambda: datetime(2036, 3, 1, 12, 0, tzinfo=UTC))
+        state = session_state(auth_cookie)
+        saved = (state.udl_username, list(state.hrr_objects), dict(state.hrr_tle_cache), dict(state.hrr_tle_data_mode))
+        state.udl_username = None
+        state.hrr_objects = [
+            {"satno": "99021", "name": "SHIYAN BOOTSTRAP", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        ]
+        state.hrr_tle_cache["99021"] = _BUNDLED_STYLE_TLE
+        state.hrr_tle_data_mode["99021"] = "SYNTHETIC"
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.hrr_objects = saved[:2]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[2])
+            state.hrr_tle_data_mode.clear()
+            state.hrr_tle_data_mode.update(saved[3])
+        text = " ".join(resp.text.split())  # type: ignore[attr-defined]
+        assert _NOT_SCREENED.findall(text) == []
+        assert "past working life" not in text
+        assert "1 candidate actor(s) in GEO" in text

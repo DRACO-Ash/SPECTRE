@@ -12,11 +12,16 @@ intelligence record is not screened, and the page says which were left out.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from spectre.domain.actor_eligibility import WORKING_LIFE_YEARS, why_not_an_actor
 
 _YEAR = 2026
+#: The objects of the bundled bootstrap watchlist, spectre/data/hrr_default.json, blue and red.
+_BUNDLED_OBJECTS = 38
 
 
 def _tle(designator: str) -> str:
@@ -90,3 +95,42 @@ class TestTheIntelligenceRecordOverrides:
         records = _load()
         assert records
         assert [satno for satno, rec in records.items() if _why("X", tle=_tle("90001A"), intel=rec)] == []
+
+
+class TestASyntheticSetsPlaceholderDesignatorIsNotALaunchYear:
+    """SPC-239. Every bundled bootstrap set carries designator 20001A, a placeholder the generator wrote, so from 2036
+    the age rule would cut every bundled object with no intelligence record. A SYNTHETIC set's designator is not read
+    as a launch year: such an object is dated by the catalogue alone, and with no catalogue date it is screened."""
+
+    _IN_2036 = 2036
+
+    def test_a_synthetic_set_is_not_dated_by_its_designator(self) -> None:
+        found = why_not_an_actor("SJ-21", None, _tle("20001A"), None, self._IN_2036, tle_data_mode="SYNTHETIC")
+        assert found is None
+
+    def test_a_real_set_with_the_same_designator_still_is(self) -> None:
+        found = why_not_an_actor("SJ-21", None, _tle("20001A"), None, self._IN_2036, tle_data_mode="REAL")
+        assert found is not None and (found.kind, found.detail) == ("past working life", "launched 2020")
+
+    def test_the_catalogue_date_still_dates_a_synthetic_set(self) -> None:
+        record = {"objectType": "PAYLOAD", "launchDate": "2004-09-01"}
+        found = why_not_an_actor("X", record, _tle("20001A"), None, _YEAR, tle_data_mode="SYNTHETIC")
+        assert found is not None and (found.kind, found.detail) == ("past working life", "launched 2004")
+
+    def test_no_bundled_object_is_cut_by_age_in_2036_even_with_no_intelligence_record(self) -> None:
+        """Every object of the bundled watchlist, read as the console reads it, with its intelligence record set aside,
+        is still screened in 2036: none is cut by the placeholder's year."""
+        from spectre.web.routes.udl import parse_hrr_notification
+
+        bundled = Path(__file__).resolve().parents[2] / "spectre" / "data" / "hrr_default.json"
+        blue, red = parse_hrr_notification(json.loads(bundled.read_text("utf-8"))[0])
+        objects = blue + red
+        assert len(objects) == _BUNDLED_OBJECTS
+        assert {o["tle_data_mode"] for o in objects} == {"SYNTHETIC"}
+        cut = {
+            o["name"]: found.detail
+            for o in objects
+            if (found := why_not_an_actor(o["name"], None, o["tle"], None, self._IN_2036,
+                                          tle_data_mode=o["tle_data_mode"])) is not None
+        }
+        assert cut == {}

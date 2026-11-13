@@ -714,6 +714,15 @@ th[tabindex="0"]:focus-visible,
   outline-offset: -2px;
 }
 
+/* The drawn game tree's collapse control (SPC-190) is an SVG group, where
+   Chromium draws no outline it can be relied on to show, so focus thickens
+   and recolours its circle instead. */
+.tree-dtoggle:focus { outline: none; }
+.tree-dtoggle:focus-visible circle {
+  stroke: var(--spectre-focus-ring);
+  stroke-width: 3;
+}
+
 /* The engine tab bar is var(--navy-deep) in BOTH themes, so it keeps the
    dark-surface ring when the rest of the console goes light. */
 .etab:focus-visible {

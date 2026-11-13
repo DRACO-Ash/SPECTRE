@@ -249,3 +249,23 @@ harness is `spectre/domain/likelihood_calibration.py`). Whether the label should
 | posture multiplier | our posture change multiplies that closest approach by 1 plus 2 times its cost | `_POSTURE_CA_PER_COST` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
 | delta-V per cost | our manoeuvre with no sized burn spends its cost times 50 m/s of delta-V | `_LOOKUP_DV_KM_S_PER_COST` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
 | time to closest approach | the closest approach comes at 0.4 of the horizon | `_LOOKUP_TCA_SHARE` | `spectre/domain/decision.py` `_lookup_cell` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+
+## Assumptions with no constant
+
+*Built for SPC-219 and SPC-220, evaluation findings F-20 and F-21 (Low).* Two assumptions shape every score and every
+game tree but hold no number, so neither has a row in the tables above, which hold the code to each value. Each is
+listed here with its basis, and each is stated on screen where it bites.
+
+● **Custody lost and closest approach are independent** (SPC-219, evaluation F-20). The composite score adds the
+  custody term and the closest-approach term, each weighted, with no term joining them (`spectre/domain/decision.py`
+  `score_terms` and `_score`): a close approach while custody is lost scores what the two score apart, no more,
+  though an approach we cannot see may be worse than the two added together. Basis: none: unsourced judgement. No source for an interaction term was found, so none is added. Stated beside the
+  outcome matrix and the game tree (`spectre/domain/decision.py` `TERMS_INDEPENDENT_LINE`) and in the operator
+  guide's limitations. Owner: unassigned. Set: 2026-04-06 (f73ba47), when the score was first a weighted sum; stated
+  since SPC-219 (not yet released).
+● **No one moves after the last turn** (SPC-220, evaluation F-21). A game tree looks at most `MAX_TURNS`, 3, turns
+  ahead (`spectre/domain/decision.py`), and each branch of its last turn is valued from that turn's start to the end
+  of the span searched as if neither side burns again (`spectre/domain/decision_tree.py`). Basis: none: unsourced
+  judgement. Stated beside the tree (`spectre/web/tree_view.py` `LEAVES_LINE`) and in the operator guide's
+  limitations. Owner: unassigned. Set: 2026-11-04 (d1aac06, SPC-140, 0.23.0); stated since SPC-220 (not yet
+  released).

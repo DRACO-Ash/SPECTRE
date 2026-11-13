@@ -47,6 +47,14 @@ _ACTIVE_STATUSES = frozenset({"OPERATIONAL", "DEGRADED"})
 _DESIGNATOR_YEAR = slice(9, 11)
 _YEAR_PIVOT = 57
 
+#: Data modes whose designator is a placeholder, not a launch record (SPC-239).
+#: The bundled bootstrap watchlist's SYNTHETIC sets all carry 20001A, written by
+#: scripts/build-hrr-default.py, so read as a launch year it would cut every
+#: bundled object without an intelligence record from 2036. Such an object is
+#: dated by the catalogue's launch date alone, and with none it is screened, as
+#: any object nothing dates is.
+PLACEHOLDER_DESIGNATOR_MODES = frozenset({"SYNTHETIC"})
+
 
 @dataclass(frozen=True)
 class Exclusion:
@@ -56,11 +64,13 @@ class Exclusion:
     detail: str   # one clause for the operator, e.g. "launched 2004"
 
 
-def _launch_year(record: dict[str, Any] | None, tle: str | None) -> int | None:
-    """The launch year from the catalogue, or from the TLE's international designator."""
+def _launch_year(record: dict[str, Any] | None, tle: str | None, tle_data_mode: str) -> int | None:
+    """The launch year from the catalogue, or from the TLE's international designator unless it is a placeholder."""
     launch = str((record or {}).get("launchDate") or "")[:4]
     if launch.isdigit():
         return int(launch)
+    if tle_data_mode.strip().upper() in PLACEHOLDER_DESIGNATOR_MODES:
+        return None
     line1 = next((ln for ln in (tle or "").splitlines() if ln.startswith("1 ")), "")
     digits = line1[_DESIGNATOR_YEAR]
     if len(digits) == len("00") and digits.isdigit():
@@ -90,18 +100,22 @@ def why_not_an_actor(
     tle: str | None,
     intel: dict[str, Any] | None,
     this_year: int,
+    *,
+    tle_data_mode: str = "REAL",
 ) -> Exclusion | None:
     """Why the object called *name* cannot act, or None if it is screened.
 
-    *record* is its UDL on-orbit catalogue entry, *tle* its element set and
-    *intel* its assessed intelligence record; any may be missing.
+    *record* is its UDL on-orbit catalogue entry, *tle* the element set it is
+    screened on, in *tle_data_mode*, and *intel* its assessed intelligence
+    record; any may be missing. A set in a mode of PLACEHOLDER_DESIGNATOR_MODES
+    is not read for a launch year.
     """
     if intel and str(intel.get("status") or "").strip().upper() in _ACTIVE_STATUSES:
         return None
     excluded = _type_exclusion(name, record)
     if excluded:
         return excluded
-    year = _launch_year(record, tle)
+    year = _launch_year(record, tle, tle_data_mode)
     if year is not None and this_year - year > WORKING_LIFE_YEARS:
         return Exclusion("past working life", f"launched {year}")
     return None

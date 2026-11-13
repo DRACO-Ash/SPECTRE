@@ -69,7 +69,7 @@ class TestServedAsScript:
         page = _pages(client, auth_cookie)["/"]
         names = {Path(src).name for src in _SCRIPT_SRC.findall(page) if src.startswith("/static/js/")}
         assert names == {"theme-boot.js", "core.js", "operator.js", "sweep.js", "intercepts.js", "pol.js", "gcat.js",
-                         "decision.js"}
+                         "decision.js", "tree_diagram.js"}
 
 
 class TestEveryNameIsRegistered:

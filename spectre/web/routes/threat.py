@@ -1178,37 +1178,76 @@ def _red_in_reach(obj: dict[str, Any], asset_regime: str) -> ThreatActor | None:
     )
 
 
-def _build_actor_list(
-    state: object, asset_regime: str, this_year: int,
-) -> tuple[list[ThreatActor], list[tuple[str, Exclusion]]]:
-    """Candidate threat actors for an asset in *asset_regime*, and who was left out and why.
+def _actors_in_reach(state: object, asset_regime: str) -> list[ThreatActor]:
+    """Candidate threat actors for an asset in *asset_regime*: red HRR objects whose regime could physically reach it.
 
-    Red HRR objects whose regime could physically reach the asset's. The filter
-    is ``regimes_compatible`` rather than equality on purpose: a GTO or HEO
-    object crosses both the LEO and GEO belts, so excluding it would be a false
-    negative on exactly the case worth catching.
+    The filter is ``regimes_compatible`` rather than equality on purpose: a GTO
+    or HEO object crosses both the LEO and GEO belts, so excluding it would be
+    a false negative on exactly the case worth catching.
+    """
+    found = (_red_in_reach(obj, asset_regime) for obj in state.hrr_objects)  # type: ignore[attr-defined]
+    return [actor for actor in found if actor is not None]
 
-    Of those, only payloads that can still act are actors
+
+def _judge_actors(
+    state: object, actors: list[ThreatActor], this_year: int, catalogue: dict[str, dict[str, Any]], *, read_sets: bool,
+) -> tuple[list[ThreatActor], list[tuple[ThreatActor, Exclusion]]]:
+    """Of *actors*, those that can still act, and who was left out and why.
+
+    Only payloads that can still act are actors
     (``spectre.domain.actor_eligibility``): rocket bodies, debris, decayed
     objects and payloads past their working life in *this_year* come back as
-    exclusions, each with its reason, so the page can name them.
+    exclusions, each with its reason, so the page can name them. *catalogue* is
+    the UDL on-orbit catalogue by number, read once per screen. With
+    *read_sets* each is judged on the element set held for it now, in its data
+    mode, which is the set it is screened on once the screen has refreshed it
+    (SPC-239); without, on its catalogue entry, name and intelligence record
+    alone, which leaves out only what no element set could bring back in.
     """
-    actors: list[ThreatActor] = []
-    excluded: list[tuple[str, Exclusion]] = []
-    catalogue = _catalogue_index()
-    for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        actor = _red_in_reach(obj, asset_regime)
-        if actor is None:
-            continue
+    kept: list[ThreatActor] = []
+    excluded: list[tuple[ThreatActor, Exclusion]] = []
+    modes = state.hrr_tle_data_mode  # type: ignore[attr-defined]
+    for actor in actors:
         satno = actor.actor_satno
+        tle = _resolve_hrr_tle(state, satno) if read_sets else None
         reason = why_not_an_actor(
-            actor.actor_name, catalogue.get(satno), _resolve_hrr_tle(state, satno), get_intel(satno), this_year,
+            actor.actor_name, catalogue.get(satno), tle, get_intel(satno), this_year,
+            tle_data_mode=str(modes.get(satno, "REAL")),
         )
         if reason is None:
-            actors.append(actor)
+            kept.append(actor)
         else:
-            excluded.append((actor.actor_name, reason))
-    return actors, excluded
+            excluded.append((actor, reason))
+    return kept, excluded
+
+
+class _Walk(NamedTuple):
+    """What walking the payloads to the cap found: those kept, those cut by age, each failed fetch's note by number,
+    and how many were not reached."""
+
+    kept: list[ThreatActor]
+    aged: list[tuple[ThreatActor, Exclusion]]
+    refreshed: dict[str, str]
+    unreached: int
+
+
+async def _walk_to_cap(
+    state: object, able: list[ThreatActor], this_year: int, catalogue: dict[str, dict[str, Any]],
+) -> _Walk:
+    """Fetch and judge *able* in watchlist order, a batch of the slots still free at a time, until _MAX_SCREEN_ACTORS
+    are kept after the age check, and stop (V0.41 review): the fetches are those the cap needs, not one per payload."""
+    kept: list[ThreatActor] = []
+    aged: list[tuple[ThreatActor, Exclusion]] = []
+    refreshed: dict[str, str] = {}
+    pending = list(able)
+    while pending and len(kept) < _MAX_SCREEN_ACTORS:
+        room = _MAX_SCREEN_ACTORS - len(kept)
+        batch, pending = pending[:room], pending[room:]
+        refreshed.update(await _refresh_outcomes(state, batch))
+        batch_kept, batch_aged = _judge_actors(state, batch, this_year, catalogue, read_sets=True)
+        kept += batch_kept
+        aged += batch_aged
+    return _Walk(kept, aged, refreshed, len(pending))
 
 
 def _exclusion_note(excluded: list[tuple[str, Exclusion]]) -> str:
@@ -3044,9 +3083,14 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
     per actor whose fetch failed: it is then screened on the set already
     held, and the operator is told so (F-135), as the sweep does.
     """
+    return list((await _refresh_outcomes(state, actors)).values())
+
+
+async def _refresh_outcomes(state: object, actors: list[ThreatActor]) -> dict[str, str]:
+    """_refresh_actor_tles's notes keyed by the actor's catalogue number, so a caller can keep those it screens."""
     missing = [a for a in actors if _needs_live_tle(state, a.actor_satno)]
     if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return []
+        return {}
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -3070,7 +3114,10 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
-    return [_refresh_note(a, outcome) for a, outcome in zip(missing, outcomes, strict=True) if outcome is not True]
+    return {
+        a.actor_satno: _refresh_note(a, outcome)
+        for a, outcome in zip(missing, outcomes, strict=True) if outcome is not True
+    }
 
 
 
@@ -3152,16 +3199,27 @@ class _Candidates(NamedTuple):
     error: str = ""
     #: The sentence naming the objects left out as not able to act, and why; "" when none was.
     not_screened: str = ""
+    #: One note per actor screened whose live element set was not fetched (F-135).
+    refresh_notes: list[str] = []
 
 
-def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
-    """Choose which red objects to screen against this asset.
+async def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
+    """Choose which red objects to screen against this asset, fetching the element sets they are screened on.
 
     Every empty outcome carries a different sentence. An operator reading
     "no candidates" has to be able to tell a missing watchlist from a
     watchlist whose red objects are all in the wrong regime, because one is a
     setup problem and the other is a finding; and both from a watchlist whose
     red objects in reach are all stages, debris or past their working life.
+
+    A payload's age is judged on the element set it will be screened on
+    (SPC-239). Stages, debris, decayed objects and payloads the catalogue or
+    the intelligence record already settles are judged first, and nothing is
+    fetched for those left out; the rest are walked in watchlist order, their
+    live sets fetched and then judged on, until the cap is filled
+    (_walk_to_cap). The objects left out are named in watchlist order. Until 0.41.0 the age was judged on the set cached
+    before the fetch, so an old payload with nothing cached was screened on a
+    first screen and left out on the next.
     """
     if not state.hrr_objects:  # type: ignore[attr-defined]
         return _Candidates(error=(
@@ -3174,7 +3232,13 @@ def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Can
         1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
-    actors, excluded = _build_actor_list(state, asset_regime, this_year)
+    in_reach = _actors_in_reach(state, asset_regime)
+    catalogue = _catalogue_index()
+    able, settled = _judge_actors(state, in_reach, this_year, catalogue, read_sets=False)
+    walk = await _walk_to_cap(state, able, this_year, catalogue)
+    actors = walk.kept
+    place = {id(actor): i for i, actor in enumerate(in_reach)}
+    excluded = [(a.actor_name, why) for a, why in sorted(settled + walk.aged, key=lambda pair: place[id(pair[0])])]
     not_screened = _exclusion_note(excluded) if excluded else ""
     if not actors and excluded:
         return _Candidates(error=(
@@ -3188,14 +3252,18 @@ def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Can
         ))
 
     notes: list[str] = []
-    if len(actors) > _MAX_SCREEN_ACTORS:
+    if walk.unreached:
+        # The payloads past the cap are not fetched, so their age is not judged: the count is of those not left out
+        # before the walk stopped.
         notes.append(
-            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors)} "
+            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors) + walk.unreached} "
             "(compute cap). Ranking covers the truncated set only."
         )
-        actors = actors[:_MAX_SCREEN_ACTORS]
 
-    return _Candidates(actors=actors, red_population=red_population, notes=notes, not_screened=not_screened)
+    return _Candidates(
+        actors=actors, red_population=red_population, notes=notes, not_screened=not_screened,
+        refresh_notes=[walk.refreshed[a.actor_satno] for a in actors if a.actor_satno in walk.refreshed],
+    )
 
 
 class _ResolvedAsset(NamedTuple):
@@ -3365,15 +3433,14 @@ async def threat_screen(
     )
 
     # ── Enumerate candidate actors ───────────────────────────────────────────
-    candidates = _select_candidates(state, asset_regime, now.year)
+    # Fetches any missing or synthetic element set before a payload's age is judged on it (SPC-239).
+    candidates = await _select_candidates(state, asset_regime, now.year)
     if candidates.error:
         return _fail(candidates.error)
     actors = candidates.actors
     screened_from = candidates.red_population
     errors.extend(candidates.notes)
-
-    # ── Fetch any missing or synthetic actor element sets ────────────────────
-    refresh_notes = await _refresh_actor_tles(state, actors)
+    refresh_notes = candidates.refresh_notes
 
     # ── Screen, off the event loop ───────────────────────────────────────────
     loop = asyncio.get_running_loop()
@@ -3384,7 +3451,7 @@ async def threat_screen(
     errors.extend(run.notes)
 
     screening = rank_actors(run.verdicts)
-    # Read after _refresh_actor_tles, which replaces synthetic sets when it can.
+    # Read after _select_candidates's refresh, which replaces synthetic sets when it can.
     asset_mode = "MANUAL" if manual_asset_tle else state.hrr_tle_data_mode.get(asset_satno, "REAL")
     actor_modes = {
         v.actor_satno: state.hrr_tle_data_mode.get(v.actor_satno, "REAL")

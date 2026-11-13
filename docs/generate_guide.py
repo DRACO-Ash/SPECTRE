@@ -1340,6 +1340,13 @@ def _section_13_decision_engine(doc: Document) -> None:
         "finding F-18 of the independent evaluation). A response marked not permitted is still greyed."
     )
     _add_body(doc,
+        "The score adds custody lost and closest approach as separate terms, with nothing joining them (SPC-219, "
+        "finding F-20 of the independent evaluation): a close approach while custody is lost scores what the two "
+        "score apart, no more, though an approach you cannot see may be worse than the two added together. No "
+        "source for a term joining them was found, so none is added, and a note beside the matrix and the game tree "
+        "says so."
+    )
+    _add_body(doc,
         "Training only (SPC-207, finding F-17 of the independent evaluation). Where nothing is computed or sampled, "
         "a figure is set by one of seven relations of the lookup model: the custody rule, a sensor retask's custody "
         "gap of half its time to execute, a closest approach by red's action type (200 km against a manoeuvre, "
@@ -1730,6 +1737,17 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "for example 'Best continuation under minimax after Avoid in turn 1, which minimax does not pick "
                 "there; not on the plan' (SPC-189). Responses that tie in a turn are each named, and the plan "
                 "follows each.")
+    _add_bullet(doc, "Above the branches the tree is drawn (SPC-190): a box for each branch, from turn 1 on the left "
+                "to the last turn on the right, naming red's move and your response with the branch's sequence "
+                "score and closest approach along it, each with its basis, the same figures the branch below shows. "
+                "A box on the plan, a best continuation and a branch not permitted each say so in words. Each box "
+                "with branches after it has a button that collapses or opens them, and Zoom in, Zoom out and Reset "
+                "buttons sit beside the drawing; each works from the keyboard with Tab, Enter and Space. Without "
+                "script the drawing shows in full and its buttons are hidden. The branches below stay the text "
+                "version of the drawing.")
+    _add_bullet(doc, "Beside the tree two notes say what its figures assume: each branch of the last turn shown, the "
+                "deepest built in full, is valued as if no one moves after it (SPC-220), and the score's terms are "
+                "added with nothing joining them (SPC-219).")
     _add_bullet(doc, "A tree that runs out of budget shows the deepest turn built in full and says so.")
     _add_body(doc,
         "What turn 1 shows of red is read through the red track's custody: lost at a burn shows a burn, held "
@@ -1818,6 +1836,13 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "It does not model a sensor's line of sight to red.")
     _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
                 "P as entered.")
+    _add_bullet(doc, "It adds custody lost and closest approach to the score as separate terms, with nothing joining "
+                "them, so losing custody does not make a close approach count for more (SPC-219, finding F-20 of "
+                "the independent evaluation). No source for a term joining them was found; the matrix and the game "
+                "tree say so.")
+    _add_bullet(doc, "Its game tree looks at most 3 turns ahead, and each branch of the last turn is valued as if no "
+                "one moves after it, to the end of the span searched: a move red or you would make later is in no "
+                "figure (SPC-220, finding F-21 of the independent evaluation). The tree says so beside it.")
     _add_bullet(doc, "Its game tree models one impulsive burn per adversary row per turn, so a row carrying several "
                 "burns of one transfer is evaluated as one turn.")
     _add_bullet(doc, "It does not guess burns a sweep solution does not list: a V-bar or H-bar hop solution lists only "

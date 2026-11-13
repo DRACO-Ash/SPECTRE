@@ -1365,3 +1365,14 @@ Hop plans flown and costed burn by burn, and every limit names its orbit class.
 | Code Quality | **EVIDENCED** | Changes to `along_track.py`, `maneuvers.py`, `monte_carlo.py`, `propagator.py`, `elset_approach.py`, `custody.py`, `decision.py`, `decision_figures.py`, `decision_envelope.py`, `decision_tree.py`, `interaction_graph.py`, `turn_update.py`, the threat, POL and manoeuvre routes and their templates | `scripts/sonar_rules.py 292fa2c`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.39.0: complexity none over 15, changed-line coverage 99%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
 | DAST | **HYGIENE** | Wording changed on the decision, sweep, POL and intercept pages | No new input; all new text is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.41.0
+
+The game tree drawn, two scoring assumptions stated, and the asset screen judging age on the set it uses.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `threat.py` routes, `actor_eligibility.py`, `tree_view.py`, `decision.py`, the decision tree and results templates; new `spectre/web/static/js/tree_diagram.js` | `scripts/sonar_rules.py f5825cb`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.40.0: complexity none over 15, changed-line coverage 100%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | An inline SVG drawing and three zoom buttons added to the Decision Engine results; two notes added | No new input. Every label in the drawing is autoescaped by Jinja, tested with a hostile name; the script is first-party and loaded from `'self'`, with no inline script or handler. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | A new first-party script file | It reads and writes only attributes and classes on the drawing; no `innerHTML`, `eval` or network call. | Then the scanner flags the script; the finding names the line. |
+| Other gates | **HYGIENE** | The asset screen's UDL fetches are bounded by the 60-actor cap, as before | No dependency, Dockerfile or image change. | n/a. |

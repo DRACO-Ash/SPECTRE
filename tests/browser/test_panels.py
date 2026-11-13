@@ -8,6 +8,7 @@ fragment.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -143,6 +144,135 @@ class TestDecisionResults:
         page.keyboard.press("Escape")
         assert page.locator("#decision-geom-panel").count() == 0
         assert page.evaluate("document.activeElement.getAttribute('aria-label')") == label
+        _assert_clean(console)
+
+
+@pytest.fixture(scope="module")
+def tree_results() -> str:
+    """The results of a real 2-turn tree, with its view, as the route renders them."""
+    from spectre.domain.decision import SelectorStrategy
+    from spectre.web.tree_view import tree_view
+    from tests.unit._tree_view_cases import still_result
+
+    result = still_result(SelectorStrategy.MINIMAX)
+    return _render("partials/decision_results.html", result=result, tree=tree_view(result))
+
+
+_VISIBLE_BOXES = "document.querySelectorAll('#decision-tree-diagram g.tree-dbox:not([display])').length"
+_EDGES = (
+    "Array.from(document.querySelectorAll('#decision-tree-diagram path.tree-dedge'))"
+    ".map(e => [e.dataset.child, e.getAttribute('d'), e.getAttribute('display')])"
+)
+
+
+def _numbers(text: str) -> list[float]:
+    """The numbers in an SVG transform or path, in order."""
+    return [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text)]
+
+
+class TestTheTreeDiagram:
+    """SPC-190: the drawn tree collapses and zooms, by mouse and by keyboard, under the policy."""
+
+    def _tree(self, console: Console, tree_results: str) -> Any:
+        page = console.open()
+        page.click('.htab[data-panel="hero-decision"]')
+        page.wait_for_selector("#decision-results", state="attached")
+        console.inject(tree_results, "#decision-results")
+        page.wait_for_selector('#decision-tree-diagram g.tree-dtoggle[role="button"]')
+        return page
+
+    def test_a_branch_collapses_and_opens_by_mouse_and_keyboard(self, console: Console, tree_results: str) -> None:
+        page = self._tree(console, tree_results)
+        toggles = page.locator('#decision-tree-diagram g.tree-dtoggle[role="button"]')
+        assert toggles.count() == 4
+        assert page.evaluate(_VISIBLE_BOXES) == 20
+        height = float(page.locator("#decision-tree-diagram").get_attribute("height") or 0)
+        first = toggles.nth(0)
+        name = first.get_attribute("aria-label") or ""
+        assert name.startswith("Collapse the branches after Turn 1 of 2: red ")
+        first.click()
+        assert first.get_attribute("aria-expanded") == "false"
+        assert (first.get_attribute("aria-label") or "").startswith("Open the branches after Turn 1 of 2: red ")
+        assert page.evaluate(_VISIBLE_BOXES) == 16
+        assert float(page.locator("#decision-tree-diagram").get_attribute("height") or 0) < height
+        first.focus()
+        page.keyboard.press("Enter")
+        assert first.get_attribute("aria-expanded") == "true"
+        assert page.evaluate(_VISIBLE_BOXES) == 20
+        assert float(page.locator("#decision-tree-diagram").get_attribute("height") or 0) == height
+        page.keyboard.press("Space")
+        assert first.get_attribute("aria-expanded") == "false"
+        assert page.evaluate(_VISIBLE_BOXES) == 16
+        assert page.evaluate("document.activeElement.getAttribute('aria-expanded')") == "false"
+        _assert_clean(console)
+
+    def test_every_control_starts_open_and_named_to_collapse(self, console: Console, tree_results: str) -> None:
+        page = self._tree(console, tree_results)
+        states = page.evaluate(
+            "Array.from(document.querySelectorAll('#decision-tree-diagram g.tree-dtoggle')).map("
+            "t => [t.getAttribute('role'), t.getAttribute('tabindex'), t.getAttribute('aria-expanded'),"
+            " t.getAttribute('aria-label'), t.getAttribute('display')])",
+        )
+        assert len(states) == 4
+        for role, tabindex, expanded, label, display in states:
+            assert (role, tabindex, expanded, display) == ("button", "0", "true", None)
+            assert label.startswith("Collapse the branches after Turn 1 of 2: red ")
+        _assert_clean(console)
+
+    def test_the_line_to_a_hidden_box_is_hidden(self, console: Console, tree_results: str) -> None:
+        page = self._tree(console, tree_results)
+        page.locator('#decision-tree-diagram g.tree-dtoggle[role="button"]').nth(0).click()
+        hidden = set(page.evaluate(
+            "Array.from(document.querySelectorAll('#decision-tree-diagram g.tree-dbox[display=\"none\"]'))"
+            ".map(b => b.dataset.key)",
+        ))
+        assert len(hidden) == 4
+        edges = page.evaluate(_EDGES)
+        assert len(edges) == 16
+        assert {child for child, _, display in edges if display == "none"} == hidden
+        assert sum(display is None for _, _, display in edges) == 12
+        _assert_clean(console)
+
+    def test_laid_out_again_with_every_branch_open_it_matches_the_server(
+        self, console: Console, tree_results: str,
+    ) -> None:
+        """The script lays the tree out as tree_view does: collapsed and opened again, every box and line is where
+        the server drew it."""
+        served = {key: _numbers(at) for key, at in re.findall(
+            r'<g class="tree-dbox" data-key="([^"]+)"[^>]*transform="([^"]+)"', tree_results)}
+        lines = {key: _numbers(d) for key, d in re.findall(
+            r'<path class="tree-dedge" data-child="([^"]+)" d="([^"]+)"', tree_results)}
+        assert len(served) == 20 and len(lines) == 16
+        page = self._tree(console, tree_results)
+        toggles = page.locator('#decision-tree-diagram g.tree-dtoggle[role="button"]')
+        for i in range(4):
+            toggles.nth(i).click()
+        assert page.evaluate(_VISIBLE_BOXES) == 4
+        for i in range(4):
+            toggles.nth(i).click()
+        assert page.evaluate(_VISIBLE_BOXES) == 20
+        boxes = page.evaluate(
+            "Array.from(document.querySelectorAll('#decision-tree-diagram g.tree-dbox'))"
+            ".map(b => [b.dataset.key, b.getAttribute('transform')])",
+        )
+        assert {key: _numbers(at) for key, at in boxes} == pytest.approx(served)
+        assert {child: _numbers(d) for child, d, _ in page.evaluate(_EDGES)} == pytest.approx(lines)
+        _assert_clean(console)
+
+    def test_it_zooms_in_and_out_and_resets(self, console: Console, tree_results: str) -> None:
+        page = self._tree(console, tree_results)
+        svg = page.locator("#decision-tree-diagram")
+        width = float(svg.get_attribute("width") or 0)
+        assert width > 0
+        page.click('button.tree-zoom[data-zoom="in"]')
+        assert float(svg.get_attribute("width") or 0) == pytest.approx(width * 1.25)
+        page.focus('button.tree-zoom[data-zoom="out"]')
+        page.keyboard.press("Enter")
+        page.keyboard.press("Enter")
+        assert float(svg.get_attribute("width") or 0) == pytest.approx(width / 1.25)
+        page.click('button.tree-zoom[data-zoom="reset"]')
+        assert float(svg.get_attribute("width") or 0) == pytest.approx(width)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth") is True
         _assert_clean(console)
 
 
