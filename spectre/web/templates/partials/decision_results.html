@@ -59,6 +59,7 @@
     {% endif %}
     Data mode {{ b.data_mode }}{% if b.data_mode not in ("REAL", "MANUAL") %} {% set badge_mode = b.data_mode %}{% include "partials/_provenance_badge.html" %}{% endif %}{% if b.training %}, training{% endif %}.
     <span style="display:block">{{ b.sentence }}</span>
+    {% if b.regime_line is defined and b.regime_line %}<span class="elset-regime" style="display:block">{{ b.regime_line }}</span>{% endif %}
     {% if b.custody is defined and b.custody is not none %}
     <span class="custody-at-evaluation" style="display:block">Custody at evaluation: {{ b.custody.sentence }}</span>
     {% endif %}

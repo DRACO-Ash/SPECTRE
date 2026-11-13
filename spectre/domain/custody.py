@@ -97,15 +97,19 @@ def assess_custody(  # noqa: PLR0913
     normality: Normality | None,
     history_problem: str,
     truncated_at: datetime | None,
+    limit_figure: str = "",
 ) -> CustodyStatus:
     """Whether the object is in custody, from its orbit's age and its history.
 
     *elset_hours* is the newest element set's age, ``None`` when no epoch can
     be read. *normality* is the verdict on its latest burn, ``None`` when the
     history holds no burn. *history_problem* is why there is no history, empty
-    when there is one.
+    when there is one. *limit_figure* says whose figure the limit is,
+    "LEO figure applied to HEO/Molniya, unsourced for this regime", and is
+    named beside the limit wherever it is shown (V0.40 review, SPC-215).
     """
     limit = f"{limit_hours:.0f} h"
+    tail = _figure_tail(limit_figure)
     if elset_hours is None:
         return CustodyStatus(
             Custody.LOST,
@@ -115,10 +119,10 @@ def assess_custody(  # noqa: PLR0913
     if elset_hours > limit_hours:
         return CustodyStatus(
             Custody.LOST,
-            f"Custody lost: its newest element set is {_age(elset_hours)} old against a {limit} limit, "
+            f"Custody lost: its newest element set is {_age(elset_hours)} old against a {limit} limit{tail}, "
             "so its warning time is out of date and a burn since then would not be seen.",
         )
-    current = f"its orbit is current ({_age(elset_hours)} old, limit {limit})"
+    current = f"its orbit is current ({_age(elset_hours)} old, limit {limit}{tail})"
     if history_problem:
         return CustodyStatus(
             Custody.DEGRADED,
@@ -139,7 +143,7 @@ def assess_custody(  # noqa: PLR0913
         )
     return CustodyStatus(
         Custody.HELD,
-        f"Custody held: its orbit is {_age(elset_hours)} old (limit {limit}) and {elset_count} "
+        f"Custody held: its orbit is {_age(elset_hours)} old (limit {limit}{tail}) and {elset_count} "
         f"element sets over {history_days:.0f} days judge its burns.",
     )
 
@@ -149,13 +153,13 @@ def assess_custody(  # noqa: PLR0913
 _SECONDS_PER_HOUR = 3600.0
 
 _THROUGH = (
-    "Custody {state} through the {h:g} h horizon: its newest element set stays within its {limit} limit until "
+    "Custody {state} through the {h:g} h horizon: its newest element set stays within its {limit} limit{mid} until "
     "{until:%Y-%m-%d %H:%M} UTC, after the horizon ends."
 )
 #: _THROUGH when the newest element set reaches its limit exactly as the horizon ends: it is still within it then,
 #: since custody is lost only once its age is strictly past the limit (SPC-119).
 _THROUGH_TO_THE_END = (
-    "Custody {state} through the {h:g} h horizon: its newest element set reaches its {limit} limit at "
+    "Custody {state} through the {h:g} h horizon: its newest element set reaches its {limit} limit{mid} at "
     "{until:%Y-%m-%d %H:%M} UTC, as the horizon ends, and passes it only after."
 )
 _ALREADY_LOST = (
@@ -165,8 +169,8 @@ _ALREADY_LOST = (
 )
 _AGES_OUT = (
     "Custody lost from {at:%Y-%m-%d %H:%M} UTC, {from_h:.1f} h into the horizon, for up to {lost:.1f} h: its "
-    "newest element set then passes its {limit} limit, so unless a newer one arrives, whether a burn is normal and "
-    "how it changes your warning time cannot be judged."
+    "newest element set then passes its {limit} limit{tail}, so unless a newer one arrives, whether a burn is "
+    "normal and how it changes your warning time cannot be judged."
 )
 #: Follows _THROUGH for custody degraded through the horizon, and precedes the loss for custody degraded first.
 _DEGRADED_WHY = (
@@ -240,8 +244,14 @@ def _burn_h(horizon: Horizon, elset_hours: float) -> float | None:
     return (burn - horizon.start_utc).total_seconds() / _SECONDS_PER_HOUR
 
 
+def _figure_tail(figure: str) -> str:
+    """", the LEO figure applied to HEO/Molniya, unsourced for this regime" beside a limit, or "" with none given."""
+    return f", the {figure}" if figure else ""
+
+
 def custody_over_horizon(
     status: CustodyStatus, *, elset_hours: float | None, limit_hours: float | None, horizon: Horizon,
+    limit_figure: str = "",
 ) -> CustodyOverHorizon:
     """*status*, assessed at the horizon's start, carried over it assuming no newer element set arrives.
 
@@ -254,7 +264,7 @@ def custody_over_horizon(
         raise ValueError(f"a horizon has a length; got {h!r} h")
     if status.state is Custody.LOST or elset_hours is None or limit_hours is None or elset_hours > limit_hours:
         return CustodyOverHorizon(status.state, 0.0, h, LossCause.ALREADY_LOST, _ALREADY_LOST.format(h=h))
-    over = _carried(status.state, elset_hours, limit_hours, horizon)
+    over = _carried(status.state, elset_hours, limit_hours, horizon, limit_figure)
     if status.state is not Custody.DEGRADED:
         return over
     degraded_h = h if over.lost_from_h is None else over.lost_from_h
@@ -267,7 +277,9 @@ def custody_over_horizon(
     return dataclasses.replace(over, sentence=sentence, degraded_hours=degraded_h)
 
 
-def _carried(state: Custody, elset_hours: float, limit_hours: float, horizon: Horizon) -> CustodyOverHorizon:
+def _carried(
+    state: Custody, elset_hours: float, limit_hours: float, horizon: Horizon, figure: str = "",
+) -> CustodyOverHorizon:
     """Custody current at the epoch, *state* held or degraded, carried until the element set ages out or a burn
     newer than it, whichever is first."""
     h = horizon.hours
@@ -282,11 +294,12 @@ def _carried(state: Custody, elset_hours: float, limit_hours: float, horizon: Ho
     if from_h >= h:
         until = horizon.start_utc + timedelta(hours=limit_hours - elset_hours)
         template = _THROUGH_TO_THE_END if at_end else _THROUGH
-        sentence = template.format(state=state.value, h=h, limit=limit, until=until)
+        mid = f"{_figure_tail(figure)}," if figure else ""
+        sentence = template.format(state=state.value, h=h, limit=limit, mid=mid, until=until)
         return CustodyOverHorizon(state, None, 0.0, None, sentence)
     at = horizon.start_utc + timedelta(hours=from_h)
     if from_h < 0.0:
         return CustodyOverHorizon(state, 0.0, h, cause, _BURN_MADE.format(h=h, at=at))
     template = _BURN_AHEAD if cause is LossCause.BURN else _AGES_OUT
-    sentence = template.format(at=at, from_h=from_h, lost=h - from_h, limit=limit)
+    sentence = template.format(at=at, from_h=from_h, lost=h - from_h, limit=limit, tail=_figure_tail(figure))
     return CustodyOverHorizon(state, from_h, h - from_h, cause, sentence)

@@ -485,9 +485,17 @@ def vbar_hop_intercept(
 ) -> InterceptSolution:
     """V-bar hop approach sequence along the velocity vector.
 
-    Executes a multi-hop V-bar approach using two radial burns per hop.
-    If *hop_distance_km* is ``None``, derives it from the current
-    along-track separation divided by *n_hops*.
+    Each hop is two radial impulses half an orbit apart, an entry and a stop, each n·d/4 (Clohessy-Wiltshire): the
+    entry starts the hop and, half an orbit on, the radial rate it gave is reversed, so the same impulse stops it.
+    An outward impulse drifts the chaser backwards along V-bar, so the hop fires inward to advance on a target ahead
+    and outward to fall back on one behind (SPC-237). A hop's stop and the next hop's entry fall at the same instant,
+    the same way, so they are one burn of twice the size: *n_hops* hops are n_hops + 1 burns, whose sizes add up to
+    the sequence's cost. The solution used to list only the first entry and the last stop, which flown advance one
+    hop's distance while the cost counted every hop (V0.40 review). If *hop_distance_km* is ``None``, it is the
+    current along-track separation divided by *n_hops*.
+
+    The miss is the closest red comes to the target flying every burn (flown_approach), as the other approaches
+    report theirs; NaN inside miss_not_read.
 
     Args:
         red_tle: TLE of the manoeuvring satellite.
@@ -508,40 +516,40 @@ def vbar_hop_intercept(
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
     dr = np.array(sv_blue.r) - np.array(sv_red.r)
-    v_hat_d = sv_red.v / sv_red.v_mag
+    on_axis = float(np.dot(dr, sv_red.v / sv_red.v_mag))
     if hop_distance_km is None:
-        along_track_sep = abs(float(np.dot(dr, v_hat_d)))
-        hop_distance_km = max(along_track_sep / n_hops, 1.0)
+        hop_distance_km = max(abs(on_axis) / n_hops, 1.0)
+    # +1 for a target ahead along V-bar, -1 for one behind (SPC-237).
+    side = math.copysign(1.0, on_axis)
 
     result = vbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
     t_arrival = t_departure + timedelta(seconds=result.total_time_s)
-
-    # First radial burn (entry): magnitude = dv_per_hop / 2
-    v_hat = sv_red.v / sv_red.v_mag
-    h_vec = np.cross(sv_red.r, sv_red.v)
-    h_mag = float(np.linalg.norm(h_vec))
-    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    b_hat = np.cross(v_hat, n_hat)  # radial direction
-    dv_mag = result.delta_v_per_hop / 2.0
-    burn1 = _make_burn(1, t_departure, b_hat * dv_mag, sv_red)
-
-    # Final corrective burn (anti-radial, closing the last hop)
-    sv_red_arr = red_orbit.propagate(t_arrival)
-    v_hat_a = sv_red_arr.v / sv_red_arr.v_mag
-    h_a = np.cross(sv_red_arr.r, sv_red_arr.v)
-    h_a_mag = float(np.linalg.norm(h_a))
-    n_hat_a = h_a / h_a_mag if h_a_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    b_hat_a = np.cross(v_hat_a, n_hat_a)
-    burn2 = _make_burn(2, t_arrival, -b_hat_a * dv_mag, sv_red_arr)
+    impulse = result.delta_v_per_hop / 2.0
+    burns: list[Burn] = []
+    # Each burn is radial at red's own position then, the plan flown two-body to it, as flight.fly flies it.
+    sv = sv_red
+    for k in range(n_hops + 1):
+        at = t_departure + timedelta(seconds=k * result.time_per_hop_s)
+        sv = _after_burn(sv, at, np.zeros(3), mu)
+        size = impulse if k in (0, n_hops) else 2.0 * impulse
+        burn = _make_burn(k + 1, at, -side * sv.r / sv.r_mag * size, sv)
+        burns.append(burn)
+        sv = _after_burn(sv, at, burn.delta_v, mu)
 
     return InterceptSolution(
         method="vbar_hop",
-        burns=[burn1, burn2],
+        burns=burns,
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=_hop_closest_km(dr, v_hat_d, result.total_advance_km),
+        miss_distance_km=_flown_plan_km(sv_red, burns, blue_orbit, result.total_time_s, mu),
     )
+
+
+def _flown_plan_km(sv: StateVector, burns: Sequence[Burn], target: TLEOrbit, span_s: float, mu: float) -> float:
+    """The closest *target* comes to red flying every one of *burns* from *sv* for *span_s* s; NaN inside
+    miss_not_read or when the search cannot run."""
+    return flown_approach(sv, [(b.epoch, b.delta_v) for b in burns], target, span_s, mu).miss_km
 
 
 def hbar_hop_intercept(
@@ -555,9 +563,14 @@ def hbar_hop_intercept(
 ) -> InterceptSolution:
     """H-bar hop approach sequence in the orbit-normal direction.
 
-    Executes a multi-hop H-bar approach using normal burns at node
-    crossings.  If *hop_distance_km* is ``None``, derives it from the
-    current cross-track separation divided by *n_hops*.
+    Out-of-plane motion is simple harmonic, so each hop is one normal burn of n·d at a plane crossing, along the
+    out-of-plane velocity there, which raises the swing by d (tactical.hbar_hop_sequence): *n_hops* burns half an
+    orbit apart, alternating in direction, whose sizes add up to the sequence's cost. The swing peaks a quarter orbit
+    after the last burn, on the side that burn points to, which is set to the target's side. The solution used to
+    list a first burn and a second at arrival, the same way, which is not the sequence it costed (V0.40 review). If
+    *hop_distance_km* is ``None``, it is the current cross-track separation divided by *n_hops*.
+
+    The miss is the closest red comes to the target flying every burn (flown_approach); NaN inside miss_not_read.
 
     Args:
         red_tle: TLE of the manoeuvring satellite.
@@ -578,34 +591,32 @@ def hbar_hop_intercept(
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
     dr = np.array(sv_blue.r) - np.array(sv_red.r)
-    n_hat0 = _unit_normal(sv_red)
+    cross_track = float(np.dot(dr, _unit_normal(sv_red)))
     if hop_distance_km is None:
-        cross_track_sep = abs(float(np.dot(dr, n_hat0)))
-        hop_distance_km = max(cross_track_sep / n_hops, 1.0)
+        hop_distance_km = max(abs(cross_track) / n_hops, 1.0)
 
     result = hbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
     t_arrival = t_departure + timedelta(seconds=result.total_time_s)
-
-    # First normal burn in the orbit-normal (H-bar) direction
-    h_vec = np.cross(sv_red.r, sv_red.v)
-    h_mag = float(np.linalg.norm(h_vec))
-    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    burn1 = _make_burn(1, t_departure, n_hat * result.delta_v_per_hop, sv_red)
-
-    # Final corrective burn (anti-normal)
-    sv_red_arr = red_orbit.propagate(t_arrival)
-    h_arr = np.cross(sv_red_arr.r, sv_red_arr.v)
-    h_arr_mag = float(np.linalg.norm(h_arr))
-    n_hat_arr = h_arr / h_arr_mag if h_arr_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    burn2 = _make_burn(2, t_arrival, n_hat_arr * result.delta_v_per_hop, sv_red_arr)
+    # Burn k points (-1)^k times the first, so the last, which sets the side of the final peak, points to the target.
+    last = math.copysign(1.0, cross_track)
+    burns: list[Burn] = []
+    # Each burn is along red's own orbit normal then, the plan flown two-body to it, as flight.fly flies it.
+    sv = sv_red
+    for k in range(n_hops):
+        at = t_departure + timedelta(seconds=k * result.time_per_hop_s)
+        sv = _after_burn(sv, at, np.zeros(3), mu)
+        sense = last * (-1.0) ** (n_hops - 1 - k)
+        burn = _make_burn(k + 1, at, sense * _unit_normal(sv) * result.delta_v_per_hop, sv)
+        burns.append(burn)
+        sv = _after_burn(sv, at, burn.delta_v, mu)
 
     return InterceptSolution(
         method="hbar_hop",
-        burns=[burn1, burn2],
+        burns=burns,
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=_hop_closest_km(dr, n_hat0, result.total_advance_km),
+        miss_distance_km=_flown_plan_km(sv_red, burns, blue_orbit, result.total_time_s, mu),
     )
 
 
@@ -1831,21 +1842,6 @@ def _flown_closest_km(sv: StateVector, dv: np.ndarray, target: TLEOrbit, span_s:
     """
     return flown_approach(sv, [(sv.epoch, dv)], target, span_s, mu).miss_km
 
-
-def _hop_closest_km(separation: np.ndarray, axis: np.ndarray, advance_km: float) -> float:
-    """The closest a hop sequence along *axis* comes to the target, in the sequence's own linear model.
-
-    Hops advance along one axis only, toward the target: V-bar hops along-track, H-bar hops cross-track. The path
-    comes closest where it is level with the target on that axis, or at its end when it stops short; what is left
-    is that shortfall and the whole of the separation off the axis. The miss used to be the sequence's total
-    advance, the distance it travels, so an H-bar sequence read 3 km from a target it left 600 km away.
-    """
-    on_axis = float(np.dot(separation, axis))
-    off_axis = float(np.linalg.norm(separation - on_axis * axis))
-    shortfall = abs(on_axis) - advance_km
-    # NaN-safe (charming-dirac 5e13b5b): max(0.0, nan) is 0.0, which would read a failed figure as reaching it.
-    along = shortfall if math.isnan(shortfall) or shortfall > 0.0 else 0.0
-    return math.hypot(along, off_axis)
 
 def _make_burn(
     number: int,

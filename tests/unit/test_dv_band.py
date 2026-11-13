@@ -51,6 +51,13 @@ def test_the_band_says_what_it_rests_on() -> None:
     assert "A sensitivity, not a confidence interval." in band["dv_band_basis"]
 
 
+def test_the_band_states_the_regime_and_whose_rate_it_is() -> None:
+    """SPC-215: the rate applied is stated for the interceptor's regime, by period and eccentricity."""
+    band, _ = _band(_EPOCH + timedelta(hours=6), _CO_ORBITAL)
+    assert ("(for the interceptor's regime, GEO: 2 km plus 1 km a day, GEO figure, set for GEO; tuned, not "
+            "sourced)") in band["dv_band_basis"]
+
+
 def test_older_element_sets_widen_the_band() -> None:
     fresh, _ = _band(_EPOCH + timedelta(hours=6), _CO_ORBITAL)
     stale, _ = _band(_EPOCH + timedelta(days=5), _CO_ORBITAL)

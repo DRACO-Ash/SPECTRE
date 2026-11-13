@@ -1189,8 +1189,10 @@ def _section_10_intercept_calculations(doc: Document) -> None:
     )
     _add_bullet(doc, "Flown closest approach: each red approach's burns are flown (two-body for red between burns, "
                      "SGP4 for the target) and the closest it comes to the target is reported, with the 1-sigma "
-                     "element-set error band beside it. The V-bar and H-bar hops keep their own estimate, and say so. "
-                     "A figure that could not be computed reads \"not computed\" and never counts as arriving.")
+                     "element-set error band beside it. The V-bar and H-bar hops list every burn of the sequence, "
+                     "and are flown too. "
+                     "A figure that could not be computed reads \"not computed\" and never counts as arriving. The "
+                     "V-bar hop burns toward the target's side: inward for a target ahead, outward for one behind.")
     _add_bullet(doc, "Realism: Seen before (within what this satellite has spent on station in its busiest 14 days), "
                      "Possible (within 171.8 m/s, the most any satellite in the NOTSO record spent) or Unrealistic. "
                      "The record is a floor on what satellites have done, not a ceiling on what they could do.")
@@ -1353,8 +1355,9 @@ def _section_13_decision_engine(doc: Document) -> None:
     )
     _add_body(doc,
         "Element-set error is in every closest approach the engine propagates (SPC-202, evaluation finding F-11). "
-        "Its model is the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day in LEO "
-        "and MEO, 2 km plus 1 km a day at GEO and beyond, at each element set's age. In a sampled cell every sample "
+        "Its model is the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day by the "
+        "LEO figure, which MEO and HEO/Molniya sets take too, and 2 km plus 1 km a day by the GEO figure, for GEO and "
+        "sets beyond the GEO band, at each element set's age. In a sampled cell every sample "
         "also draws each object's element-set error along track, red and blue each their own, so the band, P5 and "
         "the score read the moved objects; no radial or cross-track part is drawn. A computed cell keeps its miss "
         "as the figure and shows a band beside it, the miss less and plus both sets' error at the closest approach "
@@ -1402,6 +1405,13 @@ def _section_13_decision_engine(doc: Document) -> None:
         "hours otherwise, Molniya-class and other HEO orbits included), and record both in the result's provenance. Unbound, every figure is a lookup. Bound, the "
         "engine computes or samples what it can, and never falls back on a lookup constant where a computed or "
         "sampled figure exists."
+    )
+    _add_body(doc,
+        "Beside each bound set the results state its regime, read from its period and eccentricity: LEO, MEO, "
+        "HEO/Molniya, GEO or other deep-space. They say whose staleness limit and element-set error rate it takes. "
+        "No figure has been sourced for any regime, so where the set takes another regime's figure the results say "
+        "so, for example \"LEO figure applied to HEO/Molniya, unsourced for this regime\". The red card, the "
+        "sweep's element-set ages and delta-V band, and the Intercept Engine's error band say the same."
     )
     _add_body(doc,
         "Every element set passes one acceptance check before SPECTRE holds it, whichever way it arrives: from UDL, "
@@ -1544,7 +1554,10 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "along track at each set's age at the scenario epoch. The row scores on P5. It is refused, and says why, for fewer "
                 "than 50 samples, an out-of-date orbit, a red element set newer than the burn, or a cost over the "
                 "cap. The row counts as converged when P5, P50 and P95 are each known to within 1 km, or 5 per "
-                "cent of P5 where larger.")
+                "cent of P5 where larger. The basis note gives how closely P5 itself is known, its own half-width, "
+                "and names apart the widest of the three, the figure convergence is judged on. It also states the "
+                "integrator's own error against a tight reference: by 72 h up to 0.89 km per object in LEO, 0.015 "
+                "km at GEO and 0.38 km in a pair's separation, less at shorter horizons.")
     _add_bullet(doc, "A row of several burns is sampled from the first burn it applies, and costed from that "
                 "burn. Every later burn is drawn at its own time with the row's pointing, timing and drag spreads, "
                 "and a delta-V spread in proportion to its size. A burn due after the span searched ends is flown "

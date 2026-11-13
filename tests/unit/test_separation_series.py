@@ -179,16 +179,19 @@ def test_a_half_width_exactly_at_the_relative_tolerance_has_converged(monkeypatc
     """SPC-117: at a P5 over 20 km the tolerance is 5 % of it; a half-width just over that has not converged."""
     monkeypatch.setattr(monte_carlo, "miss_tolerance_km", lambda p5: 0.05 * 400.0 if math.isfinite(p5) else 1.0)
     for half_width, converged in ((20.0, True), (math.nextafter(20.0, math.inf), False)):
-        monkeypatch.setattr(monte_carlo, "percentile_half_width_km", lambda *_, hw=half_width, **__: hw)
+        # The widest of the three half-widths is the convergence figure (SPC-213): P5's own is set apart from it.
+        monkeypatch.setattr(monte_carlo, "percentile_half_widths_km", lambda *_, hw=half_width, **__: (0.5, 0.5, hw))
         series = run_separation_series(_hypothesis(n_samples=1), _BLUE, _WINDOW)
         assert series.tolerance_km == 20.0
         assert series.converged is converged
 
 
 def test_a_half_width_exactly_at_the_tolerance_has_converged(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(monte_carlo, "percentile_half_width_km", lambda *_, **__: CONVERGENCE_TOLERANCE_KM)
+    widths = (0.25, CONVERGENCE_TOLERANCE_KM, 0.5)
+    monkeypatch.setattr(monte_carlo, "percentile_half_widths_km", lambda *_, **__: widths)
     series = run_separation_series(_hypothesis(n_samples=1), _BLUE, _WINDOW)
     assert series.percentile_half_width_km == CONVERGENCE_TOLERANCE_KM
+    assert series.p5_half_width_km == 0.25
     assert series.converged is True
 
 

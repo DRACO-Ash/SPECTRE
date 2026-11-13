@@ -333,9 +333,10 @@ class TestASampledRow:
         assert avoid.ca_response.buys_km == pytest.approx(10.6, abs=0.6)
         assert avoid.ca_response.buys_km == avoid.ca_percentiles[5] - hold.ca_percentiles[5]
         assert avoid.figure_bases.delta_v_cost_km_s.kind is Basis.COMPUTED
-        assert avoid.figure_bases.closest_approach_km.note.endswith(
-            "and our burn is applied to the blue asset in every sample"
-        )
+        # The integrator's own error ends the note (SPC-214).
+        assert ("and our burn is applied to the blue asset in every sample; RK45 runs up to 1.0 h here, from the "
+                "window's start to its end; integrator error, not in the spread: "
+                in avoid.figure_bases.closest_approach_km.note)
         assert avoid.ca_response.line.startswith("Our burn: ")
         assert "sized on the hypothesis's nominal burn to put its closest approach at 20 km. Across samples it buys +" \
             in avoid.ca_response.line

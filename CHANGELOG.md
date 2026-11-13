@@ -9,6 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-13
+
+**Hop plans flown and costed burn by burn, and every limit names its orbit class.**
+
+### Changed
+- V-bar and H-bar hop plans now record every burn, so the burns add up to the stated cost, and each hop row is flown like every other approach. Arrival is judged on the flown closest approach; a hop plan that does not arrive reads "No approach". V-bar entry and correction burns are signed by the side the target is on (SPC-237).
+- Every staleness limit and error-model figure on the decision, sweep and POL pages names whose figure it is, for example "against a 24 h limit, the LEO figure applied to HEO/Molniya, unsourced for this regime". Orbits are classed as LEO, MEO, GEO, HEO/Molniya or other deep-space; a geosynchronous period within 20.5 min with eccentricity under 0.25 reads as GEO. The bands are registered as unsourced judgement (SPC-215).
+- The sampled spread reports P5's own half-width, and a non-finite miss is no longer hidden: the widest half-width reads NaN and the cell is not converged (SPC-213).
+- The sampled note states the RK45 integration error measured against DOP853, keyed to the longest span actually integrated, and says "measured to 72 h only" past 72 h (SPC-214).
+
 ## [0.39.0] - 2026-11-13
 
 **Lookup results labelled training only, and the update's likelihood stated as uncalibrated.**

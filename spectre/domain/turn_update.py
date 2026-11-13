@@ -351,6 +351,7 @@ def seen_after(scenario: Scenario, red_path: Sequence[int], turns: TurnPlan | fl
     burns = burns_on(scenario, red_path, plan)
     over = custody_over_horizon(
         red.custody, elset_hours=red.age_hours, limit_hours=red.limit_hours,
+        limit_figure=red.limit_figure,
         horizon=Horizon(scenario.epoch_utc, scenario.horizon_hours, min(burns, default=None)),
     )
     k = len(red_path)

@@ -21,6 +21,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.astro.response_burn import BurnAxis, SizedBurn
 
 _SECONDS_PER_MINUTE = 60.0
@@ -36,7 +37,7 @@ _ONE_DECIMAL_BELOW_S = 1800.0
 #: The hover on a TCA with an uncertainty. The element-set model is spectre/astro/along_track.py's.
 TCA_TITLE = (
     "TCA known to {pm}: element-set error of {pos:.1f} km at the TCA, both objects combined in quadrature (the "
-    "sweep's 1 km at epoch plus 2 km a day in LEO, 2 km plus 1 km a day at GEO), over a closing speed of "
+    "sweep's " + ERROR_MODEL_WORDS + "), over a closing speed of "
     "{v:,.1f} m/s. All of the error is taken along the approach, so it errs wide; our burn's execution error is not "
     "in it."
 )
@@ -67,8 +68,7 @@ TCA_NO_SPEED = "No TCA uncertainty: this series recorded no closing speed for th
 
 #: The model every element-set error sentence names, with its source: spectre/astro/along_track.py's _ERROR_MODEL_KM.
 ELSET_MODEL = (
-    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus "
-    "2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond"
+    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: " + ERROR_MODEL_WORDS
 )
 #: What a sampled closest approach draws, in its basis (SPC-202).
 SAMPLED_ELSET = (

@@ -228,7 +228,7 @@
           {% if t.revolutions %}<dt>Revolutions</dt><dd style="margin:0">{{ t.revolutions }}</dd>{% endif %}
           {% if t.hops %}<dt>Hops</dt><dd style="margin:0">{{ t.hops }}</dd>{% endif %}
           <dt>Closest approach</dt>
-          <dd style="margin:0">{{ t.closest_text }}{% if t.flown and t.closest_after %}, {{ t.closest_after }} after the burn{% elif not t.flown %} (the solver's estimate: its burn list holds the first and last of the hops, so it was not flown){% endif %}</dd>
+          <dd style="margin:0">{{ t.closest_text }}{% if t.closest_after %}, {{ t.closest_after }} after the burn{% endif %}</dd>
         </dl>
         {% if t.band %}
         <p class="elset-band" style="margin:0.3rem 0 0; font-size:0.6rem; color:var(--text-dim)">Beside it, {{ t.band.note }}.</p>

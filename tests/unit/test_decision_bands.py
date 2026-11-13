@@ -22,6 +22,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.domain.decision import (
     _ROW_ELSET,
     LOOKUP_CELL_TITLE,
@@ -37,7 +38,7 @@ from tests.unit.test_decision_sampled import _LOW, _REST, _bound, _evasive, _Fak
 _DISTRIBUTION = (
     "Distribution of 50 sampled misses: P5 3.0 km, P50 8.0 km, P95 20.0 km; spread 5.0 km (1 sigma); each "
     "percentile known to within 0.40 km (95 % bootstrap). Not in this spread: element-set error, which the sweep "
-    "takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, and the hypothesis being wrong."
+    "takes as " + ERROR_MODEL_WORDS + ", and the hypothesis being wrong."
 )
 _MISSES = np.array([miss for miss, _tca in (*_LOW, *_REST)])
 

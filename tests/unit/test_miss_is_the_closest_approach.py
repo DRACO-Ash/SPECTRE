@@ -7,8 +7,8 @@ asked for; the V-bar and H-bar hops the distance they travel, so an H-bar sequen
 
 ● plane change, phasing and the R-bar hop fly their burn two-body and take the closest approach over the transfer
   (a revolution after a plane change, which arrives the moment it fires), found by spectre.astro.closest_approach;
-● the V-bar and H-bar hops carry only their first and last burn, so their figure is the closest the hop path comes
-  in the sequence's own linear model: the shortfall along the hop axis and the whole of the separation off it.
+● the V-bar and H-bar hops carried only their first and last burn, so their figure was the closest the hop path came
+  in the sequence's own linear model; since the V0.40 review they list every burn and report the flown miss too.
 
 Only the figures change. The sweep decides arrival by method (threat_assessment.arrives_at_target), never by this
 figure, so a plane change stays listed, labelled "aligns planes only" and never ranked (owner ruling, 2026-11-12).
@@ -100,36 +100,41 @@ class TestTheFlownSearch:
 
 
 class TestHopSequences:
-    def test_the_v_bar_hop_reports_what_its_path_leaves_not_the_distance_travelled(self) -> None:
+    """Since the V0.40 review the hops list every burn of the sequence, and report the flown miss as the rest do."""
+
+    def test_the_v_bar_hop_reports_what_its_burns_achieve(self) -> None:
         separation, along, _ = _states()
-        on_axis = float(np.dot(separation, along))
-        off_axis = float(np.linalg.norm(separation - on_axis * along))
+        assert abs(float(np.dot(separation, along))) > 700.0
         sol = maneuvers.vbar_hop_intercept(_RED_GEO, _BLUE_GEO, _START)
-        assert abs(on_axis) > 700.0
-        assert sol.miss_distance_km == pytest.approx(off_axis, abs=1e-6), "the hops cover the along-track gap"
-        assert sol.miss_distance_km < 20.0
+        span_s = (sol.arrival_epoch - sol.departure_epoch).total_seconds()
+        least = flight_dense(sol, span_s)
+        assert sol.miss_distance_km == pytest.approx(least, abs=0.5)
+        assert sol.miss_distance_km < 30.0, "the hops cover the along-track gap"
 
     def test_the_h_bar_hop_reports_the_along_track_gap_it_never_covers(self) -> None:
-        separation, along, normal = _states()
+        separation, _, normal = _states()
         on_axis = abs(float(np.dot(separation, normal)))
-        off_axis = float(np.linalg.norm(separation - np.dot(separation, normal) * normal))
         sol = maneuvers.hbar_hop_intercept(_RED_GEO, _BLUE_GEO, _START)
         # Three hops of the 1 km floor each, against a cross-track gap of almost nothing.
         assert on_axis < 3.0
-        assert sol.miss_distance_km == pytest.approx(off_axis, abs=1e-6)
         assert sol.miss_distance_km > 700.0, "it read 3 km, the distance travelled"
 
-    def test_a_short_sequence_reports_its_shortfall_along_the_axis(self) -> None:
-        separation = np.array([0.0, 100.0, 0.0])
-        axis = np.array([0.0, 1.0, 0.0])
-        assert maneuvers._hop_closest_km(separation, axis, 40.0) == pytest.approx(60.0)
-        assert maneuvers._hop_closest_km(separation, axis, 140.0) == pytest.approx(0.0), "overshoot passes the target"
 
-    def test_a_nan_shortfall_is_never_read_as_arriving(self) -> None:
-        """max(0.0, nan) is 0.0: written that way a failed figure would read as reaching the target (5e13b5b)."""
-        axis = np.array([0.0, 1.0, 0.0])
-        assert math.isnan(maneuvers._hop_closest_km(np.array([0.0, math.nan, 0.0]), axis, 3.0))
-        assert math.isnan(maneuvers._hop_closest_km(np.array([0.0, 100.0, 0.0]), axis, math.nan))
+def flight_dense(sol: maneuvers.InterceptSolution, span_s: float) -> float:
+    """The least separation, every _DENSE_STEP_S, of red flying all of *sol*'s burns two-body against the target."""
+    red = TLEOrbit(_RED_GEO).propagate(sol.departure_epoch)
+    target = TLEOrbit(_BLUE_GEO)
+    burns = sorted(sol.burns, key=lambda b: b.epoch)
+    least, r, v, at = math.inf, red.r, red.v, sol.departure_epoch
+    for k in range(int(span_s / _DENSE_STEP_S) + 1):
+        when = sol.departure_epoch + timedelta(seconds=k * _DENSE_STEP_S)
+        for burn in [b for b in burns if at <= b.epoch <= when]:
+            r, v = propagate_two_body(r, v, (burn.epoch - at).total_seconds(), MU_EARTH)
+            v, at = v + burn.delta_v, burn.epoch
+        here, _ = propagate_two_body(r, v, (when - at).total_seconds(), MU_EARTH)
+        least = min(least, float(np.linalg.norm(here - target.propagate(when).r)))
+        burns = [b for b in burns if b.epoch > when]
+    return least
 
 
 class TestTheSweepDoesNotPayForAFigureItNeverReads:

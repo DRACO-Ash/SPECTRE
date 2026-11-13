@@ -54,8 +54,9 @@ _SECONDS_PER_DAY = 86_400.0
 def elset_position_error_km(tle: str, epoch: datetime, at: datetime) -> float:
     """The position error the sweep assumes for *tle*, whose epoch is *epoch*, aged to *at* (SPC-118).
 
-    The model is spectre/astro/along_track.py's, tuned rather than sourced: 1 km at epoch plus 2 km a day in LEO
-    and MEO, 2 km plus 1 km a day at GEO and beyond, the regime read from the element set's own elements.
+    The model is spectre/astro/along_track.py's, tuned rather than sourced: 1 km at epoch plus 2 km a day by the LEO
+    figure, 2 km plus 1 km a day by the GEO figure, chosen by the regime family read from the element set's own
+    elements; along_track.error_rate_words says whose figure a set takes (SPC-215).
     """
     return position_error_km((at - epoch).total_seconds() / _SECONDS_PER_DAY, regime_from_tle(tle))
 

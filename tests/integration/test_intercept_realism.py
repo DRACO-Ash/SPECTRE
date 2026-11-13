@@ -212,9 +212,11 @@ class TestTheRows:
         lambert = self._row(self._items(search=False), maneuver.InterceptMethod.LAMBERT)
         assert lambert["targeting"]["tried"] == 1 and lambert["targeting"]["burn_point"] == maneuver._TYPED
 
-    def test_hops_are_not_flown(self) -> None:
+    def test_hops_are_flown_and_searched(self) -> None:
+        """Since the V0.40 review the hops list every burn, so they are flown as every red approach is."""
         vbar = self._row(self._items(), maneuver.InterceptMethod.VBAR_HOP)
-        assert vbar["targeting"]["flown"] is False and vbar["targeting"]["hops"] in (1, 2, 3, 4, 5)
+        assert "flown" not in vbar["targeting"] and vbar["targeting"]["hops"] in (1, 2, 3, 4, 5)
+        assert vbar["targeting"]["closest_km"] < realism.CLOSE_APPROACH_KM
 
     def test_the_band_is_both_sets_error_at_the_closest_approach(self) -> None:
         lambert = self._row(self._items(search=False), maneuver.InterceptMethod.LAMBERT)

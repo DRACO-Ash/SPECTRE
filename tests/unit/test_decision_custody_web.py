@@ -56,8 +56,8 @@ class TestRedCustody:
         status = await red_custody(_state(), _red(), _NOW)
         assert status.state is Custody.DEGRADED
         assert status.sentence == (
-            "Custody degraded: its orbit is current (5.0 h old, limit 72 h), but whether its burns are normal cannot "
-            "be judged. UDL is not connected, so no element-set history is held."
+            "Custody degraded: its orbit is current (5.0 h old, limit 72 h, the GEO figure, set for GEO), but whether "
+            "its burns are normal cannot be judged. UDL is not connected, so no element-set history is held."
         )
 
     async def test_a_fresh_held_history_is_held(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,7 +74,8 @@ class TestRedCustody:
         status = await red_custody(state, _red(), _NOW)
         assert status.state is Custody.HELD
         assert status.sentence == (
-            "Custody held: its orbit is 5.0 h old (limit 72 h) and 412 element sets over 190 days judge its burns."
+            "Custody held: its orbit is 5.0 h old (limit 72 h, the GEO figure, set for GEO) and 412 element sets over "
+            "190 days judge its burns."
         )
         assert resets == [(state.elset_histories[_SATNO].pol, _NOW - timedelta(days=3))]
 
@@ -91,8 +92,8 @@ class TestRedCustody:
         status = await red_custody(state, _red(), _NOW)
         assert status.state is Custody.DEGRADED
         assert status.sentence == (
-            "Custody degraded: its orbit is current (5.0 h old, limit 72 h), but 412 element sets over 190 days is "
-            "too little history to judge its burns."
+            "Custody degraded: its orbit is current (5.0 h old, limit 72 h, the GEO figure, set for GEO), but 412 "
+            "element sets over 190 days is too little history to judge its burns."
         )
 
     async def test_no_readable_epoch_is_lost(self) -> None:

@@ -2219,7 +2219,11 @@
   "files": [
    "spectre/astro/monte_carlo.py",
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-214",
@@ -2231,7 +2235,11 @@
   "note": "Evaluation finding F-27 (Medium, L2, L3), evaluation/EVALUATION.md. Remediation: tighten the tolerances or state the integrator error in the sampled basis note. Closing evidence: P-13 under 0.1 km at 72 h, or the error stated.",
   "files": [
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-215",
@@ -2244,7 +2252,11 @@
   "files": [
    "spectre/astro/along_track.py",
    "spectre/web/elsets.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-216",
@@ -2561,7 +2573,11 @@
   "note": "Found by the 0.33.0 review (plausible, not flown). vbar_hop_intercept fires +b_hat, which drifts red backwards in the linear model; for a target ahead the recorded burn moves red away. The 0.33.0 miss figure uses abs(on_axis), so both sides read the same closest approach. Pre-existing in the solver; fly both sides to confirm, then sign the burn by the target's side.",
   "files": [
    "spectre/astro/maneuvers.py"
-  ]
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-238",

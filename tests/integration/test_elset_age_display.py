@@ -67,6 +67,16 @@ class TestTheRedCard:
         assert "Provider:</strong> ExoAnalytic &middot; REAL" in card
         assert "Source:</strong> REAL" not in card
 
+    def test_the_card_states_the_regime_and_whose_limit_it_is(
+        self, client: Any, auth_cookie: str, red_state: Any,
+    ) -> None:
+        """SPC-215: the regime by period and eccentricity, and whose staleness limit is applied."""
+        from spectre.domain.models import RedTrack
+
+        red_state.red_tracks = [RedTrack(name="GEO1", tle=_tle(datetime.now(tz=UTC) - timedelta(hours=5)))]
+        card = _card(client, auth_cookie, "GEO1")
+        assert ">GEO: staleness limit 72 h, GEO figure, set for GEO</span>" in card
+
     def test_a_hand_entered_set_says_so(self, client: Any, auth_cookie: str, red_state: Any) -> None:
         from spectre.domain.models import RedTrack
 
@@ -100,6 +110,7 @@ class TestTheSweep:
         assert "Element set ages" in text
         assert "2.0 h" in text, "the interceptor's age"
         assert "</span>, from 18th SPCS." in text, "and the provider that filed it"
+        assert "Interceptor regime GEO: staleness limit 72 h, GEO figure, set for GEO." in text, "SPC-215"
         assert "1 stale" in text and "BLUE-GEO" in text, "the stale target is named"
 
     def test_a_pasted_interceptor_set_is_not_given_the_tracks_provider(
@@ -135,7 +146,7 @@ class TestTheSweep:
         resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "max_dv_m_s": "0.001"})
         text = " ".join(resp.text.split())
         assert "No intercept solutions found" in text
-        assert "1 stale</span>: BLUE-GEO." in text
+        assert "1 stale</span>: BLUE-GEO (GEO: staleness limit 72 h, GEO figure, set for GEO)." in text
 
     def test_a_target_skipped_for_its_regime_is_not_aged(
         self, client: Any, auth_cookie: str, red_state: Any,
@@ -152,7 +163,7 @@ class TestTheSweep:
         resp = _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none", "max_dv_m_s": "0.001"})
         text = " ".join(resp.text.split())
         assert "BLUE-LEO: skipped" in text and "(regime mismatch)" in text
-        assert "1 stale</span>: BLUE-GEO." in text
+        assert "1 stale</span>: BLUE-GEO (GEO: staleness limit 72 h, GEO figure, set for GEO)." in text
 
     def test_a_set_found_mismatched_after_the_cap_is_not_aged(self) -> None:
         """The cap reads the cache before the last-chance fetch; the runner reads the frozen sets after it. A target
@@ -171,7 +182,7 @@ class TestTheSweep:
             red_regime="GEO", max_dv_m_s=500.0, blue_satnos=frozenset(), now=now,
         )
         ages = _elset_ages(_tle(now - timedelta(hours=2)), basis, now)
-        assert (ages["count"], ages["stale"]) == (1, ["BLUE-GEO"])
+        assert (ages["count"], ages["stale"]) == (1, ["BLUE-GEO (GEO: staleness limit 72 h, GEO figure, set for GEO)"])
         assert ages["red"].label == "2.0 h"
 
     def test_a_stale_interceptor_is_flagged(self, client: Any, auth_cookie: str, red_state: Any) -> None:

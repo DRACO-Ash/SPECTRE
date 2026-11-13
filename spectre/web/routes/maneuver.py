@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from spectre.astro import targeting
+from spectre.astro.along_track import error_rate_words
 from spectre.astro.constants import regimes_compatible
 from spectre.astro.elset_approach import elset_position_error_km
 from spectre.astro.elset_check import HELD_KEPT, tle_epoch
@@ -1126,18 +1127,14 @@ _SEARCH_AXES: dict[InterceptMethod, tuple[str, ...]] = {
 }
 _DEFENCE_METHODS = frozenset({InterceptMethod.COLA, InterceptMethod.EVASION, InterceptMethod.FORMATION})
 
-#: The hop solvers list the first and last burn of a multi-hop plan, so flying those two burns alone misplaces the
-#: red satellite. Their own closest approach in the sequence's linear model (0.33.0) stands, and the row says it was
-#: not flown.
-_NOT_FLOWN = frozenset({InterceptMethod.VBAR_HOP, InterceptMethod.HBAR_HOP})
-
 #: The burn point name for a plan solved with the typed values.
 _TYPED = "Typed coast"
 
 #: The element-set error band beside a flown closest approach (SPC-202's model, SPC-234).
 _ELSET_BAND_NOTE = (
     "element-set error {sigma:.1f} km (1 sigma), {low:.1f} to {high:.1f} km: red's {red:.1f} km and blue's "
-    "{blue:.1f} km along track at the closest approach, in quadrature; the sweep's rule of thumb, tuned, not sourced"
+    "{blue:.1f} km along track at the closest approach, in quadrature; the sweep's rule of thumb, tuned, not sourced: "
+    "red's {red_rate}, blue's {blue_rate}"
 )
 
 
@@ -1208,19 +1205,16 @@ def _solver_for(method: InterceptMethod, args: _InterceptArgs, budget_m_s: float
 
 
 def _measure_for(method: InterceptMethod, args: _InterceptArgs, approach_km: float) -> targeting.Measure:
-    """How *method*'s closest approach is measured: flown, or for the hops their own figure.
+    """How *method*'s closest approach is measured: every red approach is flown, the V-bar and H-bar hops too, now
+    that their solvers list every burn of the sequence (V0.40 review); they read their linear model's figure before.
 
     A plan that arrives is also measured against the closest the target comes over the same window with no burn, so
     a target already within the radius is not an arrival. Only an arriving plan needs it, so only it pays for the
     second flight.
     """
     def measured(sol: InterceptSolution) -> targeting.Measured:
-        if method in _NOT_FLOWN:
-            miss = sol.miss_distance_km
-            at = sol.arrival_epoch if math.isfinite(miss) else None
-        else:
-            flight = fly(sol, args.red_tle, args.blue_tle)
-            miss, at = flight.miss_km, flight.at
+        flight = fly(sol, args.red_tle, args.blue_tle)
+        miss, at = flight.miss_km, flight.at
         coast = baseline(sol, args.red_tle, args.blue_tle).miss_km if targeting.arrives(miss, approach_km) else math.nan
         return targeting.Measured(miss, at, coast)
     return measured
@@ -1305,7 +1299,8 @@ def _elset_band(red_tle: str, blue_tle: str, at: datetime | None, miss_km: float
     low, high = max(miss_km - sigma, 0.0), miss_km + sigma
     return {
         "sigma_km": sigma, "low_km": low, "high_km": high, "red_km": red_km, "blue_km": blue_km,
-        "note": _ELSET_BAND_NOTE.format(sigma=sigma, low=low, high=high, red=red_km, blue=blue_km),
+        "note": _ELSET_BAND_NOTE.format(sigma=sigma, low=low, high=high, red=red_km, blue=blue_km,
+                                        red_rate=error_rate_words(red_tle), blue_rate=error_rate_words(blue_tle)),
     }
 
 
@@ -1338,7 +1333,6 @@ def _targeting_view(method: InterceptMethod, t: targeting.Targeted, judged: _Ass
         "closest_after": _duration(after),
         "approach": t.approach,
         "already_within": t.already_within,
-        "flown": method not in _NOT_FLOWN,
         "band": _elset_band(judged.red_tle, judged.blue_tle, t.closest_at, t.closest_km),
         "tried": t.tried,
         "refused": t.refused,

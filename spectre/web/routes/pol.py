@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from spectre.astro.along_track import figure_applied
 from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
 from spectre.astro.elset_check import history_refusal, refused_type
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
@@ -613,6 +614,7 @@ def custody_from_history(
         normality=normality.verdict if normality else None,
         history_problem=problem,
         truncated_at=pol.history_truncated_at if pol else None,
+        limit_figure=age.regime.applied if age and age.regime else "",
     )
 
 
@@ -652,9 +654,12 @@ def _pol_custody(pol: Any, latest_burn: BurnNormality | None, now: datetime) -> 
     if not records:
         return None
     hours = max((now - records[-1].epoch).total_seconds() / 3600.0, 0.0)
+    family = str(getattr(pol, "regime", "") or "")
     return assess_custody(
         elset_hours=hours,
-        limit_hours=limit_hours_for_regime(str(getattr(pol, "regime", "") or "")),
+        limit_hours=limit_hours_for_regime(family),
+        # Whose figure the limit is, the regime read from the newest set and the figure from the family it is chosen by.
+        limit_figure=figure_applied(str(getattr(records[-1], "tle", "") or ""), family),
         elset_count=int(getattr(pol, "tle_count", len(records))),
         history_days=float(getattr(pol, "span_days", 0.0) or 0.0),
         normality=latest_burn.verdict if latest_burn else None,

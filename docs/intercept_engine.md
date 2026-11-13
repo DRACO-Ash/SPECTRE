@@ -172,8 +172,34 @@ each burn is applied in turn, two-body between burns, and the separation from th
 arrival by `spectre.astro.closest_approach`, 96 samples a revolution, each minimum refined to a second. A plan that
 arrives the moment it fires, such as a plane change, is flown for one revolution. This is one path with 0.33.0's:
 plane change, phasing and the R-bar hop fly their own burn through the same `maneuvers.flown_approach`, and inside
-the batch each solver runs under `miss_not_read`, so a kept plan is flown once. The hops keep 0.33.0's figure in the
-sequence's own linear model, because their solvers list only the first and last burn, and the row says so. Each
+the batch each solver runs under `miss_not_read`, so a kept plan is flown once. The V-bar and H-bar hops are flown
+too since the V0.40 review: they kept 0.33.0's figure in the sequence's own linear model, because their solvers listed
+only the first and last burn.
+
+**The V-bar hop's side (SPC-237).** In the linear model an outward radial impulse drifts the chaser backwards along
+V-bar, so the hop's entry burn fired outward whatever side the target was on, and for a target ahead it moved red
+away. Flown through `spectre.astro.flight.fly` on the GEO pair 736 km apart (0.39.0), the target ahead was never
+approached (736.0 km closest, 735.7 km with no burn, 1,004.6 km apart at arrival), while a target behind closed to
+467.1 km. Both burns are now signed by the target's side, inward for a target ahead and outward for one behind, and
+the correction fires the same way in the local frame as the entry, so it stops the radial drift (it used to double
+it). Flown again, three hops close a target ahead to 498.7 km and one behind to 467.1 km; one hop closes them to
+11.5 km and 13.4 km. The hop's figure takes the side it travels to: the miss reads the gap along V-bar from the
+signed advance, where it used to take `abs()` of the gap and so read a hop the wrong way as closing it.
+
+**Every hop's burns (V0.40 review).** The hop solvers listed a sequence's first and last burn only, while the cost
+counted every hop: on the GEO pair, three V-bar hops read 6.42 km, arriving, at 26.84 m/s, though the two burns
+recorded totalled 8.95 m/s and flew to 498.7 km (target ahead) or 467.1 km (behind). Now the V-bar hop lists n + 1
+burns for n hops: an entry, each hop's stop merged with the next hop's entry, which fall at one instant the same way
+and so are one burn of twice the size, and a last stop. The H-bar hop lists its n normal burns, half an orbit apart
+and alternating, the last pointing to the target's side. Each burn is computed at red's own flown state then, and
+the burns add up to the cost. Each solution's miss is the flown one, and each hop row is flown through
+`spectre.astro.flight.fly` and judged on that. Flown, three V-bar hops close the GEO pair to 23.3 km (target ahead)
+and 23.9 km (behind), against the linear model's 6.4 km, so they arrive within the 50 km default. In LEO the flight
+basis decides the figure: red flies two-body and the target SGP4, and over 1.5 orbits the two part by tens of km,
+so on the ISS and a copy 50 km along track: with the target behind, red closes to 44.1 km and counts as arriving
+within 50 km, against the linear model's 0.2 km; with the target ahead the row reads "Already within", since with no
+burn at all the two close to 4.2 km. The H-bar hop, against these co-planar pairs, covers
+no along-track gap and reads "No approach". Each
 flown miss is shown with SPC-202's 1-sigma element-set error band beside it: both sets' along-track error at the
 closest approach, by `spectre/astro/along_track.py`'s model, in quadrature. When the search cannot run (no finite
 separation, or past `closest_approach`'s 100,000 samples, as an R-bar time of about 70 days in LEO needs), the miss

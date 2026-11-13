@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.astro.closest_approach import ClosestApproach
 from spectre.astro.elset_approach import elset_position_error_km
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, SeparationWindow, elset_state, run_separation_series
@@ -58,7 +59,7 @@ class TestAComputedCell:
         assert tca is not None
         assert tca.title == (
             "TCA known to ± 1.2 h: element-set error of 4.7 km at the TCA, both objects combined in quadrature (the "
-            "sweep's 1 km at epoch plus 2 km a day in LEO, 2 km plus 1 km a day at GEO), over a closing speed of "
+            "sweep's " + ERROR_MODEL_WORDS + "), over a closing speed of "
             "1.1 m/s. All of the error is taken along the approach, so it errs wide; our burn's execution error is "
             "not in it."
         )

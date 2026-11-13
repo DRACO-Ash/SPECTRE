@@ -21,7 +21,13 @@ from typing import Annotated, Any, NamedTuple
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.astro.along_track import position_error_km, shift_along_track
+from spectre.astro.along_track import (
+    error_rate_words,
+    figure_applied,
+    position_error_km,
+    regime_basis,
+    shift_along_track,
+)
 from spectre.astro.constants import normalise_regime, regimes_compatible
 from spectre.astro.elset_check import HELD_KEPT
 from spectre.astro.events import EventType, find_orbital_events
@@ -1670,7 +1676,8 @@ def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, An
         "red": elset_age(red_tle, now),
         "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
         "oldest": max(targets, key=lambda t: t[1].hours)[1] if targets else None,
-        "stale": [name for name, age in targets if age.stale],
+        # Each stale target named with its regime and whose limit it is past (SPC-215, V0.40 review).
+        "stale": [f"{name} ({age.regime_line})" if age.regime_line else name for name, age in targets if age.stale],
         "count": len(targets),
     }
 
@@ -2158,7 +2165,7 @@ def _unseen_burn(red_epoch: datetime, newest: datetime) -> WarningChange:
     )
 
 
-def _no_burn(pol: Any, now: datetime, limit_hours: float) -> WarningChange:
+def _no_burn(pol: Any, now: datetime, limit_hours: float, figure: str = "") -> WarningChange:
     """The window held no confirmed burn: say what was looked at, never "nothing moved"."""
     newest = pol.records[-1].epoch if pol.records else now
     confirmed = sorted(pol.manoeuvres, key=lambda m: m.burn_epoch)
@@ -2168,7 +2175,8 @@ def _no_burn(pol: Any, now: datetime, limit_hours: float) -> WarningChange:
     return WarningChange(
         Status.NO_BURN,
         f"No confirmed burn in its element sets from {_when(window_start)} to its newest, {_when(newest)}: "
-        f"the last {limit_hours:.0f} h, its element-set age limit. There is no burn to compare. {last}",
+        f"the last {limit_hours:.0f} h, its element-set age limit{_figure_tail(figure)}. There is no burn to compare. "
+        f"{last}",
     )
 
 
@@ -2193,7 +2201,7 @@ def _burn_selection(
         newest = _newer_than_held(pol, red_epoch)
         if red_epoch is not None and newest is not None:
             return _unseen_burn(red_epoch, newest)
-        return _no_burn(pol, basis.now, limit)
+        return _no_burn(pol, basis.now, limit, _red_figure(pol, basis))
     latest = burns[-1]
     if red_epoch is not None and red_epoch < latest.burn_window[1]:
         return WarningChange(
@@ -2209,7 +2217,8 @@ def _burn_selection(
         return WarningChange(
             Status.NOT_COMPUTED,
             f"That burn's warning change is not computed: its last element set before the burn is "
-            f"{age_text(before_age)} old against a {limit:.0f} h limit, too old to fly to now.",
+            f"{age_text(before_age)} old against a {limit:.0f} h limit{_figure_tail(_red_figure(pol, basis))}, too "
+            "old to fly to now.",
         )
     return burns
 
@@ -2648,6 +2657,24 @@ def _band_runs(worst: ThreatSweepEntry, red_tle: str, target_tle: str, errors_km
     return values
 
 
+def _figure_tail(figure: str) -> str:
+    """", the LEO figure applied to HEO/Molniya, unsourced for this regime" beside a limit, or "" (SPC-215)."""
+    return f", the {figure}" if figure else ""
+
+
+def _red_figure(pol: Any, basis: _SweepBasis) -> str:
+    """Whose figure red's element-set age limit is: the regime of its newest held set, the figure the sweep chose
+    by the interceptor's regime family (SPC-215)."""
+    records = getattr(pol, "records", None) or []
+    return figure_applied(str(getattr(records[-1], "tle", "") or ""), basis.red_regime) if records else ""
+
+
+def _regime_of(tle: str) -> str:
+    """The regime *tle* is stated in (SPC-215), or "not readable"."""
+    basis = regime_basis(tle)
+    return "not readable" if basis is None else basis.regime
+
+
 #: Re-solves needed before a spread says anything: one alone has nothing to differ from.
 _MIN_BAND_RUNS: int = 2
 
@@ -2673,10 +2700,11 @@ def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis
     dv_spread = max(abs(dv - worst.delta_v_m_s) for dv, _ in values)
     tof_minutes = max(abs(tof - worst.tof_hours) for _, tof in values) * 60.0
     red_age, target_age = (age_text(a.hours) if a else "unknown" for a in ages)
+    # Both orbits take the rate for the interceptor's regime family; the words say whose figure that is (SPC-215).
     how = (f"re-solved with the interceptor's orbit moved {red_km:.0f} km and the target's {target_km:.0f} km along "
-           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} old (1 km plus "
-           "2 km a day of age in LEO and MEO, 2 km plus 1 km a day at GEO; tuned, not sourced). A sensitivity, not a "
-           "confidence interval.")
+           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} old (for the "
+           f"interceptor's regime, {_regime_of(red_tle)}: {error_rate_words(red_tle)}; tuned, not sourced). A "
+           "sensitivity, not a confidence interval.")
     if worst.method == "min_time":
         # The minimum-time solver spends the whole budget by construction, so
         # its delta-V cannot move; its flight time, the warning, is what does.

@@ -762,6 +762,7 @@ def _path_custody(scenario: Scenario, steps: Sequence[PathStep]) -> _PathCustody
     burns = [s.red_burn_utc for s in steps if s.red_burn_utc is not None]
     over = custody_over_horizon(
         red.custody, elset_hours=red.age_hours, limit_hours=red.limit_hours,
+        limit_figure=red.limit_figure,
         horizon=Horizon(scenario.epoch_utc, scenario.horizon_hours, min(burns, default=None)),
     )
     bases = custody_bases(red.stk_name, over, _PATH_CUSTODY_NOTE, scenario.horizon_hours)

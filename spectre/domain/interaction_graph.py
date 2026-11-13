@@ -202,6 +202,8 @@ class SetAge:
     label: str
     epoch: datetime | None
     limit_hours: float
+    # Whose figure the limit is, "LEO figure applied to HEO/Molniya, unsourced for this regime" (SPC-215); "" unread.
+    figure: str = ""
 
 
 def _out_of_date(element_set: SetAge, now: datetime) -> str | None:
@@ -210,8 +212,9 @@ def _out_of_date(element_set: SetAge, now: datetime) -> str | None:
         return f"the {element_set.label} element set's epoch cannot be read, so its age is unknown"
     age_h = (now - element_set.epoch).total_seconds() / _SECONDS_PER_HOUR
     if age_h > element_set.limit_hours:
+        figure = f", the {element_set.figure}" if element_set.figure else ""
         return (f"the {element_set.label} element set is out of date, {age_text(age_h)} old against a "
-                f"{element_set.limit_hours:.0f} h limit")
+                f"{element_set.limit_hours:.0f} h limit{figure}")
     return None
 
 

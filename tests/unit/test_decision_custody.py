@@ -56,7 +56,8 @@ _DEGRADED = CustodyStatus(
 _LOST = CustodyStatus(Custody.LOST, "Custody lost: its newest element set is 30.0 h old against a 24 h limit.")
 
 _HELD_THROUGH = (
-    "Custody held through the 1 h horizon: its newest element set stays within its 24 h limit until "
+    "Custody held through the 1 h horizon: its newest element set stays within its 24 h limit, the LEO figure, set "
+    "for LEO, until "
     "2026-10-18 12:00 UTC, after the horizon ends."
 )
 _WORST_CASE = (
@@ -79,7 +80,8 @@ _CUSTODY_NOTE = (
     "limit or a burn is newer than it, and a manoeuvre that names no burn time takes the worst case. " + BASIS
 )
 _DEGRADED_THROUGH = (
-    "Custody degraded through the 1 h horizon: its newest element set stays within its 24 h limit until "
+    "Custody degraded through the 1 h horizon: its newest element set stays within its 24 h limit, the LEO figure, "
+    "set for LEO, until "
     "2026-10-18 12:00 UTC, after the horizon ends. Degraded, neither held nor lost: how a burn changes your warning "
     "time can be judged, but whether it is normal cannot."
 )

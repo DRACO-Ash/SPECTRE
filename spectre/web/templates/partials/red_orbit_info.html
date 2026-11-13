@@ -5,6 +5,7 @@
     {% if age %}
     <span class="{{ 'badge-warn' if age.stale else 'badge-ok' }}"
           title="Age now. STALE is past {{ '%.0f' | format(age.limit_hours) }} hours, the limit for this regime">{{ age.label }} old{% if age.stale %} STALE{% endif %}</span>
+    {% if age.regime_line is defined and age.regime_line %}<span class="elset-regime" title="The regime by period and eccentricity, and whose staleness limit applies (SPC-215)">{{ age.regime_line }}</span>{% endif %}
     {% endif %}
     {% if data_mode == "MANUAL" %}
     <span title="This element set was entered by hand, not fetched from UDL"><strong>Source:</strong> entered by hand</span>

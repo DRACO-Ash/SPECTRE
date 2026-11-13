@@ -31,6 +31,7 @@ from datetime import timedelta
 
 import pytest
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.astro.monte_carlo import (
     CONVERGENCE_TOLERANCE_KM,
     MISS_TOLERANCE_FRACTION,
@@ -136,6 +137,9 @@ class TestOnTheMeasuredCases:
             " In 100 of 100 samples the objects were already opening when the window began, so the closest approach "
             "was before it."
         )
+        # The integrator's error is stated for what RK45 runs, from the burn 2 h before to the window's end (V0.40).
+        note = cell.figure_bases.closest_approach_km.note
+        assert "RK45 runs up to 3.0 h here, from the burn to the window's end; " in note
 
 
 class TestWhatThePageSays:
@@ -170,8 +174,8 @@ class TestWhatThePageSays:
             "larger (95 % bootstrap): more samples would move them by less than that. Whether a move that size "
             "matters depends on how close is too close for your asset, which this page is not told. It says nothing "
             "about whether the element-set error drawn is right, spectre/astro/along_track.py's model, the threat "
-            "sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day in LEO and MEO, 2 km plus 1 km a "
-            "day at GEO and beyond, at each set's age at the scenario epoch ({ages}), or about the hypothesis being "
+            "sweep's rule of thumb, tuned, not sourced: " + ERROR_MODEL_WORDS + ", at each set's age at the "
+            "scenario epoch ({ages}), or about the hypothesis being "
             "wrong."
         )
         assert "reach" not in CONVERGED_MEANS_ELSET

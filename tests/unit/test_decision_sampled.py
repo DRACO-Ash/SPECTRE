@@ -29,6 +29,7 @@ from typing import Any, NamedTuple, NoReturn
 import numpy as np
 import pytest
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.astro.closest_approach import ClosestApproach
 from spectre.astro.monte_carlo import (
     BlueTrack,
@@ -184,7 +185,7 @@ def _series(
         window=window, approaches=approaches, n_samples_run=50, n_failed=n_failed, n_reentered=0,
         miss_km_p5=3.0, miss_km_p50=8.0, miss_km_p95=20.0, miss_km_std=5.0,
         percentile_half_width_km=half_width, converged=converged, random_seed=42,
-        integration_s=0.0, wall_time_seconds=0.0,
+        integration_s=0.0, wall_time_seconds=0.0, p5_half_width_km=0.15,
     )
 
 
@@ -317,11 +318,16 @@ class TestASampledCell:
         bases = _cells(sampled, 0)[0].figure_bases
         assert bases.closest_approach_km == FigureBasis(
             Basis.SAMPLED,
-            "P5 of 50 sampled misses, known to within 0.40 km (95 % bootstrap): 1 in 20 samples came closer. "
+            "P5 of 50 sampled misses, known to within 0.15 km (95 % bootstrap): 1 in 20 samples came closer. "
+            "Convergence is judged on the widest of the P5, P50 and P95 half-widths, 0.40 km. "
             "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, "
             "propagated with the blue asset over 1.0 h of the 1 h horizon from the scenario epoch, while both element "
             "sets are within their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not "
-            "sampled, and our response is not applied to the blue orbit",
+            "sampled, and our response is not applied to the blue orbit; RK45 runs up to 1.0 h here, from the window's "
+            "start to its end; integrator error, not in the spread: RK45 at "
+            "rtol 1e-08 and atol 1e-10, against DOP853 at rtol 1e-12 on three reference pairs, put each object within "
+            "0.1 km of the reference in LEO and 0.003 km at GEO by 24 h, and the pair's separation within 0.02 km; "
+            "between two unlike orbits the separation error can reach both objects' errors added",
         )
         assert bases.time_to_closest_hours == FigureBasis(
             Basis.SAMPLED,
@@ -851,7 +857,7 @@ class TestTheResultCountsItsSampledCells:
             "Sampled cells score on P5, the miss that 1 in 20 samples beat, not the median. The spread covers the "
             "hypothesis, its delta-V, pointing, timing and drag, and each object's element-set error along track, "
             "drawn in every sample from spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, "
-            "not sourced: 1 km at epoch plus 2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond, at "
+            "not sourced: " + ERROR_MODEL_WORDS + ", at "
             "its set's age at the scenario epoch: red's set 0.0 h old and blue's 0.0 h old. Element-set error across "
             "track, and the hypothesis being wrong, are not in it. Our response is not applied to the blue orbit yet, "
             "so every response in a sampled row has the same closest approach. The score values closest approach in "

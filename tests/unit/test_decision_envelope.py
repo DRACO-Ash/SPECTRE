@@ -172,7 +172,7 @@ class TestDeepSpaceIsFlaggedNotRefused:
         assert lines[0] == (
             f"The red element set PROBE_RED is a GEO set, propagated with SDP4, SGP4's deep-space branch (period "
             f"about {period:.1f} min): the staleness limit applied to it, 72 h, and the element-set error model are "
-            "the engine's GEO rules of thumb, tuned rather than sourced (SPC-215 will source them), so its age, the "
+            "the engine's GEO rules of thumb, tuned rather than sourced (no source found, SPC-215), so its age, the "
             "element-set error drawn in every sample and set beside every computed miss, the closest approach and "
             "score that read that error, and the uncertainty of its time of closest approach may be misstated. Its "
             "figures stand, flagged."

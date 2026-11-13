@@ -185,7 +185,10 @@ class TestTheResult:
         blue = _line(block, "Blue")
         assert "Data mode REAL" in blue
         assert "provenance-badge" not in blue[blue.index("Data mode REAL"):blue.index("Orbit current")]
-        assert "Orbit current: 5.0 h old at evaluation, limit 72 h." in text
+        assert "Orbit current: 5.0 h old at evaluation, limit 72 h, the GEO figure, set for GEO." in text
+        # SPC-215: each bound set states its regime and whose figures the engine applies to it.
+        assert re.search(r"Regime GEO \(period 14\d\d min, e 0\.\d{3}\): staleness limit 72 h and element-set error "
+                         r"2 km plus 1 km a day, GEO figure, set for GEO\.", _line(block, "Blue"))
         assert BINDING_NOTE in text
         assert held.log_entries[-1].endswith(" Bound to red RX and blue BY.")
         unbound = _evaluate(client, auth_cookie, _form())
@@ -224,10 +227,12 @@ class TestTheResult:
         assert resp.status_code == 200
         text = html.unescape(_flat(re.sub(r"<[^>]+>", "", resp.text)))
         assert (
-            "Custody at evaluation: Custody degraded: its orbit is current (5.0 h old, limit 72 h), but whether its "
+            "Custody at evaluation: Custody degraded: its orbit is current (5.0 h old, limit 72 h, the GEO figure, set "
+            "for GEO), but whether its "
             "burns are normal cannot be judged. UDL is not connected, so no element-set history is held."
         ) in text
-        assert "Custody degraded through the 24 h horizon: its newest element set stays within its 72 h limit" in text
+        assert ("Custody degraded through the 24 h horizon: its newest element set stays within its 72 h limit, "
+                "the GEO figure, set for GEO, until") in text
         assert (
             "Degraded, neither held nor lost: how a burn changes your warning time can be judged, but whether it is "
             "normal cannot."
@@ -262,8 +267,8 @@ class TestTheResult:
         assert badge.group(1) == f"Age at evaluation. STALE is past {limit} hours, the limit for this regime"
         text = _flat(re.sub(r"<[^>]+>", "", resp.text))
         assert (
-            f"Orbit out of date: {age} old at evaluation against a {limit} h limit, "
-            "so a burn since its epoch would not be seen."
+            f"Orbit out of date: {age} old at evaluation against a {limit} h limit, the {'LEO' if leo else 'GEO'} "
+            f"figure, set for {'LEO' if leo else 'GEO'}, so a burn since its epoch would not be seen."
         ) in text
         assert "Blue: not bound." in text
 

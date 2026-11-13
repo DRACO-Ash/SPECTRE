@@ -142,6 +142,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 import numpy as np
 
+from spectre.astro.along_track import ERROR_MODEL_WORDS, error_rate_words, regime_basis
 from spectre.astro.closest_approach import ClosestApproach
 from spectre.astro.elset_approach import (
     ElsetApproach,
@@ -165,6 +166,7 @@ from spectre.astro.monte_carlo import (
     _ric_split,
     elset_state,
     hypothesis_from_tle_record,
+    integrator_error_words,
     rk45_sgp4_gap_km,
     run_separation_series,
     separation_integration_s,
@@ -1432,8 +1434,7 @@ _CA_BAND = "Sampled: P5 {p5:.1f} km to P95 {p95:.1f} km, median {p50:.1f} km, ea
 _CA_DISTRIBUTION = (
     "Distribution of {n} sampled misses: P5 {p5:.1f} km, P50 {p50:.1f} km, P95 {p95:.1f} km; spread {std:.1f} km "
     "(1 sigma); each percentile known to within {hw:.2f} km (95 % bootstrap). Not in this spread: element-set "
-    "error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, and the "
-    "hypothesis being wrong."
+    "error, which the sweep takes as " + ERROR_MODEL_WORDS + ", and the hypothesis being wrong."
 )
 #: The band's hover once each sample draws element-set error (SPC-202).
 _CA_DISTRIBUTION_ELSET = (
@@ -1552,13 +1553,18 @@ def _require_age_facts(elset: BoundElset) -> None:
 
 
 _FRESHNESS_SENTENCES: dict[Freshness, str] = {
-    Freshness.CURRENT: "Orbit current: {age} old at evaluation, limit {limit}.",
+    Freshness.CURRENT: "Orbit current: {age} old at evaluation, limit {limit}{figure}.",
     Freshness.OUT_OF_DATE: (
-        "Orbit out of date: {age} old at evaluation against a {limit} limit, "
+        "Orbit out of date: {age} old at evaluation against a {limit} limit{figure}, "
         "so a burn since its epoch would not be seen."
     ),
     Freshness.UNKNOWN: "Its epoch cannot be read, so its age is unknown; read it as out of date.",
 }
+#: A bound set's regime and whose figures the engine applies to it (SPC-215, evaluation F-29).
+_REGIME_LINE = (
+    "Regime {regime} (period {period:.0f} min, e {e:.3f}): staleness limit {limit:.0f} h and element-set error "
+    "{rate}."
+)
 
 
 @dataclass(frozen=True)
@@ -1607,7 +1613,27 @@ class BoundElset:
     @property
     def sentence(self) -> str:
         """The orbit's age in a sentence: it says orbit, never custody."""
-        return _FRESHNESS_SENTENCES[self.freshness].format(age=self.age_label, limit=self.limit_label)
+        figure = self.limit_figure
+        return _FRESHNESS_SENTENCES[self.freshness].format(
+            age=self.age_label, limit=self.limit_label, figure=f", the {figure}" if figure else "",
+        )
+
+    @property
+    def limit_figure(self) -> str:
+        """Whose figure the staleness limit is, in words, "LEO figure applied to HEO/Molniya, unsourced for this
+        regime" (V0.40 review); "" when the set's regime cannot be read."""
+        basis = regime_basis(self.tle)
+        return "" if basis is None else basis.applied
+
+    @property
+    def regime_line(self) -> str:
+        """The set's regime, by its period and eccentricity, and whose staleness limit and element-set error rate the
+        engine applies to it (SPC-215, evaluation F-29); empty when its limit or elements cannot be read."""
+        basis = regime_basis(self.tle)
+        if basis is None or self.limit_hours is None:
+            return ""
+        return _REGIME_LINE.format(regime=basis.regime, period=basis.period_min, e=basis.eccentricity,
+                                   limit=self.limit_hours, rate=error_rate_words(self.tle))
 
 
 @dataclass(frozen=True)
@@ -3132,20 +3158,28 @@ _UNCONVERGED = (
     "(1 km, or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the "
     "{cap:,.0f} sample-hour cap."
 )
+#: The sampled basis note. P5 carries its own half-width and convergence's figure, the widest of the three, is named
+#: apart (SPC-213, F-26); the integrator's own error ends it (SPC-214, F-27).
 _SAMPLED_CA_NOTE = (
-    "P5 of {n} sampled misses, known to within {hw:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
-    "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated "
-    "with the blue asset over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element "
-    "sets are within their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not "
-    "sampled, {ours}"
+    "P5 of {n} sampled misses, known to within {hw5:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
+    "Convergence is judged on the widest of the P5, P50 and P95 half-widths, {hw:.2f} km. Each sample is the "
+    "hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated with the blue asset "
+    "over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element sets are within "
+    "their limits, by RK45 with J2 and exponential drag; the element sets' own errors are not sampled, {ours}; "
+    "{integrator}"
 )
 #: _SAMPLED_CA_NOTE once each sample draws element-set error (SPC-202): SAMPLED_ELSET in place of its last clause.
 _SAMPLED_CA_NOTE_ELSET = (
-    "P5 of {n} sampled misses, known to within {hw:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
-    "Each sample is the hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated "
-    "with the blue asset over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element "
-    "sets are within their limits, by RK45 with J2 and exponential drag; {elset}; {ours}"
+    "P5 of {n} sampled misses, known to within {hw5:.2f} km (95 % bootstrap): 1 in 20 samples came closer. "
+    "Convergence is judged on the widest of the P5, P50 and P95 half-widths, {hw:.2f} km. Each sample is the "
+    "hypothesis's burn drawn from its delta-V, pointing, timing and drag spreads, propagated with the blue asset "
+    "over {span:.1f} h of the {horizon:g} h horizon from the scenario epoch, while both element sets are within "
+    "their limits, by RK45 with J2 and exponential drag; {elset}; {ours}; {integrator}"
 )
+#: How long RK45 runs for a sampled row, before the integrator's error for that span (V0.40 review).
+_INTEGRATED = "RK45 runs up to {h:.1f} h here, from {start}; "
+_FROM_BURN = "the burn to the window's end"
+_FROM_WINDOW = "the window's start to its end"
 _NO_BURN_ENDING = "and our response is not applied to the blue orbit"
 _BURN_ENDING = "and our burn is applied to the blue asset in every sample"
 _SAMPLED_TIME_NOTE = (
@@ -3950,13 +3984,27 @@ def _plan_row(
     return RowSampling(None, refusal) if refusal is not None else _run(row, sampler, budget, responses, keep_at_s)
 
 
+def _integrated_hours(window: SeparationWindow, burn_at: datetime | None) -> float:
+    """The longest span RK45 integrates for a series over *window*, h (V0.40 review): each sample's red arc runs
+    from the nominal burn at *burn_at*, back to the window's start or on to its end, so from whichever is earlier,
+    the burn or the window's start, to the window's end; blue runs the window."""
+    start = window.start_utc if burn_at is None else min(burn_at, window.start_utc)
+    end = window.start_utc + timedelta(seconds=window.span_s)
+    return (end - start).total_seconds() / _SECONDS_PER_HOUR
+
+
 def _sampled_bases(
     series: SeparationSeries, horizon_hours: float, *, burnt: bool = False, drawn: ElsetErrorAt | None = None,
+    burn_at: datetime | None = None,
 ) -> OutcomeBases:
     n, span = len(series.approaches), series.window.span_s / _SECONDS_PER_HOUR
     ours = _BURN_ENDING if burnt else _NO_BURN_ENDING
+    integrated = _integrated_hours(series.window, burn_at)
+    early = burn_at is not None and burn_at < series.window.start_utc
+    integrator = _INTEGRATED.format(h=integrated, start=_FROM_BURN if early else _FROM_WINDOW)
     note = (_SAMPLED_CA_NOTE if drawn is None else _SAMPLED_CA_NOTE_ELSET).format(
-        n=n, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours, ours=ours,
+        n=n, hw5=series.p5_half_width_km, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours,
+        ours=ours, integrator=integrator + integrator_error_words(integrated),
         elset="" if drawn is None else SAMPLED_ELSET.format(**drawn.words()),
     )
     return outcome_bases(
@@ -4004,7 +4052,9 @@ def _sampled_cell(
     drawn = None if series.elset_error is None else elset_error_at(
         cast("ScenarioBinding", scenario.binding), scenario.epoch_utc,
     )
-    bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt, drawn=drawn))
+    burn_at = None if adversary.hypothesis is None else adversary.hypothesis.hypothesis.epoch_utc
+    bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt, drawn=drawn,
+                                          burn_at=burn_at))
     built = _Built(figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, bases)
     tca, sampled_tca = _sampled_tca(scenario, series)
     return _outcome(
@@ -4077,7 +4127,7 @@ def _burnt_series(series: SeparationSeries, after: BurnSeries) -> SeparationSeri
         series, approaches=after.approaches, closing_speeds_km_s=after.closing_speeds_km_s, n_failed=after.n_failed,
         miss_km_p5=stats.p5, miss_km_p50=stats.p50, miss_km_p95=stats.p95, miss_km_std=stats.std,
         percentile_half_width_km=stats.half_width_km, converged=stats.converged, tolerance_km=stats.tolerance_km,
-        after_burns=(),
+        p5_half_width_km=stats.p5_half_width_km, after_burns=(),
     )
 
 
@@ -4314,7 +4364,7 @@ COMPUTED_CAVEAT = (
     "goes if the red track does not move, so every row whose action does not move it shares one figure. Our "
     "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
     "approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as "
-    "1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it."
+    + ERROR_MODEL_WORDS + ", is not in it."
 )
 #: COMPUTED_CAVEAT once the band is shown beside the miss (SPC-202).
 COMPUTED_CAVEAT_ELSET = (
@@ -4332,7 +4382,7 @@ COMPUTED_CAVEAT_WITH_BURNS = (
     "Computed cells propagate both bound orbits as their element sets stand, with no red burn, so every row whose "
     "action does not move the red track shares its no-burn figure. A response with a target separation applies our "
     "burn to the blue asset, so its cells differ from the rest of the row. Element-set error, which the sweep takes "
-    "as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in any of them."
+    "as " + ERROR_MODEL_WORDS + ", is not in any of them."
 )
 #: COMPUTED_CAVEAT_WITH_BURNS once the band is shown beside the miss (SPC-202).
 COMPUTED_CAVEAT_WITH_BURNS_ELSET = (
@@ -4832,6 +4882,7 @@ def _row_custody(action: AdversaryAction, red: BoundElset, scenario: Scenario) -
     burn = None if burns is None else burns.first.epoch_utc
     over = custody_over_horizon(
         cast("CustodyStatus", red.custody), elset_hours=red.age_hours, limit_hours=red.limit_hours,
+        limit_figure=red.limit_figure,
         horizon=Horizon(scenario.epoch_utc, h, burn),
     )
     if action.hypothesis is None and action.action_type is ActionType.MANOEUVRE and not over.lost_from_epoch:

@@ -229,7 +229,7 @@ def _set_age(label: str, tle: str | None, now: datetime) -> ig.SetAge:
     age = elset_age(tle, now) if tle else None
     if age is None:
         return ig.SetAge(label, None, limit_hours_for_regime(""))
-    return ig.SetAge(label, age.epoch, age.limit_hours)
+    return ig.SetAge(label, age.epoch, age.limit_hours, age.regime.applied if age.regime else "")
 
 
 def _search(burns: Sequence[ig.Burn], before_tle: str, after_tle: str, target: Target,

@@ -140,6 +140,11 @@ class TLEOrbit:
         return 2.0 * math.pi / float(self._sat.no_kozai)
 
     @property
+    def eccentricity(self) -> float:
+        """The element set's mean eccentricity, as SGP4 reads it."""
+        return float(self._sat.ecco)
+
+    @property
     def init_error(self) -> int:
         """SGP4's own error code from starting on this set: 0 when it can propagate from it."""
         return int(self._sat.error)

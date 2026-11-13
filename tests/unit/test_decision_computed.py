@@ -31,6 +31,7 @@ from typing import Any, NoReturn
 import pytest
 
 from spectre.astro import monte_carlo
+from spectre.astro.along_track import ERROR_MODEL_WORDS
 from spectre.astro.closest_approach import ClosestApproach
 from spectre.astro.elset_approach import (
     ElsetApproach,
@@ -452,8 +453,8 @@ _COMPUTED_CAVEAT = (
     "pair goes if the red track does not move, so every row whose action does not move it shares one figure. Our "
     "response is not applied to the blue orbit yet, so every response in a computed row has the same closest "
     "approach, and the ranking within it is decided by lookup figures. Element-set error, by "
-    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus "
-    "2 km a day in LEO and MEO, 2 km plus 1 km a day at GEO and beyond, is shown beside each computed miss as a band, "
+    "spectre/astro/along_track.py's model, the threat sweep's rule of thumb, tuned, not sourced: " + ERROR_MODEL_WORDS
+    + ", is shown beside each computed miss as a band, "
     "the miss less and plus both sets' error at the closest approach in quadrature (1 sigma), read at each set's age "
     "then (red's set 0.0 h old and blue's 0.0 h old at the scenario epoch, older by the time to the closest "
     "approach), and the score reads the band's lower edge: Claude's choice, since you read the closer case to "

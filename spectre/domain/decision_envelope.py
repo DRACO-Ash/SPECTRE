@@ -8,7 +8,8 @@ sentence. What is read here is what a bound element set itself says, flagged on 
   (propagator.TLEOrbit.deep_space). Flagged, not refused: SDP4 is a sound propagator, but the staleness limit and the
   element-set error model the engine applies to the set are rules of thumb. For a GEO set they are the GEO ones,
   tuned rather than sourced; for any other orbit on SDP4 they were set for LEO and GEO and are not validated for it
-  (evaluation F-29). No new limit is invented here; SPC-215 will source them.
+  (evaluation F-29). No new limit is invented here: SPC-215 found none sourced for any regime, and states each bound
+  set's regime, by period and eccentricity, and whose figures it takes, on the set's own line in the result.
 ● An object below the re-entry floor at an instant searched (F-30). The SGP4 search refuses it
   (elset_approach.elset_closest_approach), every computed cell says so, and the result says it here once.
 
@@ -39,7 +40,7 @@ DEEP_SPACE = (
 DEEP_SPACE_GEO = (
     "The {side} element set {name} is a GEO set, propagated with SDP4, SGP4's deep-space branch (period about "
     "{period:.1f} min): the staleness limit applied to it, {limit:g} h, and the element-set error model are the "
-    "engine's GEO rules of thumb, tuned rather than sourced (SPC-215 will source them), so its age and the "
+    "engine's GEO rules of thumb, tuned rather than sourced (no source found, SPC-215), so its age and the "
     "uncertainty of its time of closest approach may be misstated. Its figures stand, flagged."
 )
 #: What an unvalidated or unsourced error model misstates under SPC-202's rule, where it also sets every sample's draw,

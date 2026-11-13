@@ -516,6 +516,38 @@ _ZERO_DV_KM_S = 1e-12
 RK45_RTOL = 1e-8
 RK45_ATOL = 1e-10
 
+#: The production RK45's own error, km, against the same equations integrated by DOP853 at rtol 1e-12 and atol
+#: 1e-14 (SPC-214, evaluation F-27), measured by tests/unit/test_integrator_error.py on three reference pairs at
+#: B* 1e-4: two in LEO (circular at 500 km and 51.6 degrees, and at 550 km and 97.4 degrees) and one at GEO. Keyed
+#: by horizon, h: the largest position error of any object up to it in LEO, the same at GEO, and the largest error
+#: in any pair's separation, each rounded up. The tolerances are not tightened (lead's ruling for SPC-214), since
+#: that would move stored figures and runtime; the error is stated in the sampled basis note instead.
+INTEGRATOR_ERROR_KM: dict[int, tuple[float, float, float]] = {
+    24: (0.10, 0.003, 0.02),
+    48: (0.39, 0.005, 0.11),
+    72: (0.89, 0.015, 0.38),
+}
+_INTEGRATOR_ERROR = (
+    "integrator error, not in the spread: RK45 at rtol {rtol:g} and atol {atol:g}, against DOP853 at rtol 1e-12 "
+    "on three reference pairs, put each object within {leo:g} km of the reference in LEO and {geo:g} km at GEO by "
+    "{h} h, and the pair's separation within {sep:g} km; between two unlike orbits the separation error can reach "
+    "both objects' errors added"
+)
+_INTEGRATOR_UNMEASURED = "; it was measured to {h} h only, and grows with time"
+
+
+def integrator_error_words(horizon_hours: float) -> str:
+    """The production RK45's error by *horizon_hours*, in words for the sampled basis note (SPC-214).
+
+    The figures are those of the shortest horizon measured at or past it; past the longest measured they are the
+    longest's, and the words say the horizon is past what was measured.
+    """
+    measured = sorted(INTEGRATOR_ERROR_KM)
+    h = next((m for m in measured if horizon_hours <= m), measured[-1])
+    leo, geo, sep = INTEGRATOR_ERROR_KM[h]
+    words = _INTEGRATOR_ERROR.format(rtol=RK45_RTOL, atol=RK45_ATOL, leo=leo, geo=geo, sep=sep, h=h)
+    return words + (_INTEGRATOR_UNMEASURED.format(h=h) if horizon_hours > h else "")
+
 
 def _ballistic_coefficient_kg_m2(bstar: float) -> float:
     """m / (Cd A), kg/m^2, from the SGP4 drag term B* (1/Earth radii).
@@ -624,19 +656,30 @@ def miss_tolerance_km(p5_km: float) -> float:
     return max(CONVERGENCE_TOLERANCE_KM, MISS_TOLERANCE_FRACTION * p5_km)
 
 
-def percentile_half_width_km(sma_values: list[float], seed: int = 0) -> float:
-    """The widest 95 % bootstrap half-width of SMA P5, P50 and P95, in km.
+def percentile_half_widths_km(values: Sequence[float], seed: int = 0) -> tuple[float, float, float]:
+    """The 95 % bootstrap half-widths of P5, P50 and P95 of *values*, each its own, in km (SPC-213, F-26).
 
-    Infinite below 50 samples, where the bootstrap itself is not trusted.
+    All three come from the same resamples, so the widest is exactly what percentile_half_width_km has always
+    returned. Each is infinite below 50 samples, where the bootstrap itself is not trusted.
     """
-    arr = np.asarray(sma_values, dtype=float)
+    arr = np.asarray(values, dtype=float)
     if arr.size < _MIN_CONVERGENCE_SAMPLES:
-        return math.inf
+        return math.inf, math.inf, math.inf
     rng = np.random.default_rng(seed)
     resamples = arr[rng.integers(0, arr.size, size=(_BOOTSTRAP_RESAMPLES, arr.size))]
     shown = np.percentile(resamples, _SHOWN_PERCENTILES, axis=1)
     lo, hi = np.percentile(shown, [2.5, 97.5], axis=1)
-    return float(np.max((hi - lo) / 2.0))
+    p5, p50, p95 = ((hi - lo) / 2.0).tolist()
+    return float(p5), float(p50), float(p95)
+
+
+def percentile_half_width_km(sma_values: list[float], seed: int = 0) -> float:
+    """The widest 95 % bootstrap half-width of SMA P5, P50 and P95, in km: the convergence figure.
+
+    Infinite below 50 samples, where the bootstrap itself is not trusted.
+    """
+    # np.max, as before SPC-213: it carries a NaN wherever it falls, where Python's max() keeps whatever comes first.
+    return float(np.max(percentile_half_widths_km(sma_values, seed)))
 
 
 def check_convergence(
@@ -989,7 +1032,11 @@ class BlueBurn(NamedTuple):
 
 
 class MissStats(NamedTuple):
-    """P5, P50 and P95 of a set of misses, their spread, and how closely the percentiles are known, km."""
+    """P5, P50 and P95 of a set of misses, their spread, and how closely the percentiles are known, km.
+
+    ``half_width_km`` is the widest of the three half-widths, the figure convergence is judged on;
+    ``p5_half_width_km`` is P5's own, the one that says how closely P5 is known (SPC-213).
+    """
 
     p5: float
     p50: float
@@ -998,6 +1045,7 @@ class MissStats(NamedTuple):
     half_width_km: float
     tolerance_km: float
     converged: bool
+    p5_half_width_km: float = math.inf
 
 
 class BurnSeries(NamedTuple):
@@ -1078,6 +1126,9 @@ class SeparationSeries:
     # Each sample's red state and B* at a game tree's turn boundary, and its smallest separation from each blue
     # within the turn (SPC-140); None unless a boundary was asked for. Arrays, so never compared.
     kept: Kept | None = field(default=None, compare=False)
+    # How closely P5 alone is known, km, its own 95 % bootstrap half-width (SPC-213, F-26); percentile_half_width_km
+    # is the widest of P5's, P50's and P95's, the figure convergence is judged on.
+    p5_half_width_km: float = math.inf
     # The element-set error each sample drew, red's and blue's 1 sigma (SPC-202); None when none was drawn.
     elset_error: ElsetError | None = None
 
@@ -1256,6 +1307,7 @@ def _series_of(
         miss_km_p95=stats.p95,
         miss_km_std=stats.std,
         percentile_half_width_km=stats.half_width_km,
+        p5_half_width_km=stats.p5_half_width_km,
         converged=stats.converged,
         random_seed=ran.seed,
         wall_time_seconds=time.monotonic() - ran.started,
@@ -1269,13 +1321,14 @@ def _series_of(
 def _miss_stats(misses: Sequence[float], seed: int) -> MissStats:
     """P5, P50 and P95 of *misses*, their spread, half-width and tolerance; NaN percentiles with no misses."""
     values = np.asarray(misses, dtype=float)
-    half_width = percentile_half_width_km(values.tolist(), seed=seed)
+    widths = percentile_half_widths_km(values.tolist(), seed=seed)
+    half_width = float(np.max(widths))
     p5, p50, p95 = (
         (float(p) for p in np.percentile(values, _SHOWN_PERCENTILES)) if values.size else (math.nan,) * 3
     )
     tolerance = miss_tolerance_km(p5)
     std = float(np.std(values)) if values.size else math.nan
-    return MissStats(p5, p50, p95, std, half_width, tolerance, half_width <= tolerance)
+    return MissStats(p5, p50, p95, std, half_width, tolerance, half_width <= tolerance, widths[0])
 
 
 def _burn_series(burn: BlueBurn, outcomes: Sequence[Sampled | str], seed: int) -> BurnSeries:

@@ -28,12 +28,12 @@
     <strong>Element set ages</strong> at sweep time:
     {% if elset_ages.red %}
     Interceptor <span class="{{ 'badge-warn' if elset_ages.red.stale else 'badge-ok' }}"
-      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>{% if red_elset_source is defined and red_elset_source %}, from {{ red_elset_source }}{% endif %}.
+      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>{% if red_elset_source is defined and red_elset_source %}, from {{ red_elset_source }}{% endif %}.{% if elset_ages.red.regime_line is defined and elset_ages.red.regime_line %} <span class="elset-regime">Interceptor regime {{ elset_ages.red.regime_line }}.</span>{% endif %}
     {% endif %}
     {% if elset_ages.count %}
     Targets {{ elset_ages.newest.label }} to {{ elset_ages.oldest.label }} old{% if elset_ages.stale %},
-    <span class="badge-warn" title="Past the regime limit: {{ elset_ages.stale | join(', ') }}">{{ elset_ages.stale | length }} stale</span>:
-    {{ elset_ages.stale | join(', ') }}{% endif %}.
+    <span class="badge-warn" title="Past the staleness limit applied to each one's regime: {{ elset_ages.stale | join('; ') }}">{{ elset_ages.stale | length }} stale</span>:
+    {{ elset_ages.stale | join('; ') }}{% endif %}.
     {% endif %}
   </div>
   {% endif %}

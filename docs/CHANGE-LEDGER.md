@@ -1355,3 +1355,13 @@ Lookup results labelled training only, and the update's likelihood stated as unc
 | DAST | **HYGIENE** | One label added to the results and records pages | No new input; the label is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
 | SAST | **HYGIENE** | A new command reads a local CSV | The file is read as text with `csv`, every value is parsed and range-checked, and nothing is evaluated or written. | Then the scanner flags the file read; the finding names the line. |
 | Other gates | **HYGIENE** | One nullable column added to the decision record, migrated in place | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.40.0
+
+Hop plans flown and costed burn by burn, and every limit names its orbit class.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `along_track.py`, `maneuvers.py`, `monte_carlo.py`, `propagator.py`, `elset_approach.py`, `custody.py`, `decision.py`, `decision_figures.py`, `decision_envelope.py`, `decision_tree.py`, `interaction_graph.py`, `turn_update.py`, the threat, POL and manoeuvre routes and their templates | `scripts/sonar_rules.py 292fa2c`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.39.0: complexity none over 15, changed-line coverage 99%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | Wording changed on the decision, sweep, POL and intercept pages | No new input; all new text is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |

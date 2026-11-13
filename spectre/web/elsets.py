@@ -8,6 +8,9 @@ Staleness uses the thresholds the TLE filter already applies to data gaps
 (spectre.config.constants.TLE_FILTER): 72 hours for the regimes GEO and DEEP
 (a perigee beyond GEO), where tracking updates are slower and the orbit changes
 slowly, and 24 hours for everything else, HEO and Molniya-class included.
+Neither is sourced for any regime. Each age states the set's regime, by its
+period and eccentricity, and whose limit it is: "LEO figure applied to
+HEO/Molniya, unsourced for this regime" (SPC-215, evaluation F-29).
 
 Every element set the session is about to hold passes the one acceptance check first (SPC-201, evaluation F-25):
 refused names the set's failures in a sentence, logs it without the set's text, and the caller stores nothing.
@@ -23,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from spectre.astro.along_track import RegimeBasis, regime_basis
 from spectre.astro.elset_check import (
     HELD_KEPT,
     NOT_STORED,
@@ -156,6 +160,16 @@ class ElsetAge:
     epoch: datetime
     hours: float
     limit_hours: float
+    # The set's regime and whose limit it is (SPC-215); None when the set's elements cannot be read.
+    regime: RegimeBasis | None = None
+
+    @property
+    def regime_line(self) -> str:
+        """The regime and whose limit applies, for beside the age: "HEO/Molniya: staleness limit 24 h, LEO figure
+        applied to HEO/Molniya, unsourced for this regime"; empty when the regime cannot be read."""
+        if self.regime is None:
+            return ""
+        return f"{self.regime.regime}: staleness limit {self.limit_hours:.0f} h, {self.regime.applied}"
 
     @property
     def days(self) -> float:
@@ -201,7 +215,7 @@ def elset_age(tle: str, now: datetime) -> ElsetAge | None:
     if epoch is None:
         return None
     hours = max((now - epoch).total_seconds() / 3600.0, 0.0)
-    return ElsetAge(epoch=epoch, hours=hours, limit_hours=_limit_hours(tle))
+    return ElsetAge(epoch=epoch, hours=hours, limit_hours=_limit_hours(tle), regime=regime_basis(tle))
 
 
 def _is_newer(candidate: str, held: str) -> bool:

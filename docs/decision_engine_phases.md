@@ -232,8 +232,10 @@ tests/unit/test_decision_reference_cases.py.
   hypothesis being sampled, the samples done and the budget used, with a Cancel button. One sampled evaluation runs
   on the server at a time; a second waits and its budget starts when it runs. A stopped evaluation scores nothing and
   says why.
-● **On screen** (SPC-115): a sampled cell shows P5 to P95 with the median, the half-width P5 is known to, and the
-  score's spread across samples. Since SPC-202 every sample also draws both objects' element-set error along track,
+● **On screen** (SPC-115): a sampled cell shows P5 to P95 with the median, the half-width all three are known to, and
+  the score's spread across samples. Since SPC-213 the closest approach's basis note gives P5 its own half-width and
+  names the convergence figure apart, as the widest of the three, and since SPC-214 it states the integrator's own
+  error. Since SPC-202 every sample also draws both objects' element-set error along track,
   and the cell says so with each side's error and age; the hover names what is still not in the band: element-set
   error across track and the hypothesis being wrong.
 
@@ -875,8 +877,8 @@ the engine with no checksum or range check: probe P-14 changed one digit of an i
 the old checksum, and the computed miss moved from 10.4 to 13.4 km with no flag; the background refresh replaced a
 good held set with it; an inclination of 597.4 degrees was accepted. Finding F-09 (Critical, gate G10), with F-30 and
 F-31, found no stated operating design domain, and decayed objects passing silently; F-29 found deep-space orbits
-evaluated with no regime statement, which this closes in part, by a flag, leaving the limits sourced for them to
-SPC-215. Gates G9 and G10 were rated Red; those ratings stand until the evaluation is repeated.
+evaluated with no regime statement, which this closed in part, by a flag; SPC-215 states each set's regime and
+whose figures it takes, and found no source for regime-specific ones. Gates G9 and G10 were rated Red; those ratings stand until the evaluation is repeated.
 
 ● **The operating envelope is written down** in docs/decision-engine-envelope.md: the regimes, element-set ages,
   horizons, scenario sizes, turns and inputs the engine is fit for, each with where in the code it is enforced and
@@ -894,7 +896,7 @@ SPC-215. Gates G9 and G10 were rated Red; those ratings stand until the evaluati
 ● **Checked at evaluation entry.** Each bound set on SDP4, SGP4's deep-space branch, is flagged under "Outside the
   operating envelope" on the result, not refused: for a GEO set, its staleness limit and element-set error model are
   the GEO rules of thumb, tuned rather than sourced; for any other orbit on SDP4 they are rules of thumb set for LEO
-  and GEO, not validated for it. Limits sourced for them are SPC-215. An object below the re-entry floor at an
+  and GEO, not validated for it. SPC-215 found no source for limits of their own. An object below the re-entry floor at an
   instant the SGP4 search reads, or that SGP4 itself reports decayed, is refused there and said once on the result
   (F-30). All 5 weights at 0 are
   refused beside the form, and expected value with every row at P 0 gives no pick and says so (F-31); since SPC-203 the remainder of P
@@ -1371,6 +1373,58 @@ its basis, and label every result resting on an unsourced one training only, nam
   reported as calibration evidence. The tests run the harness on small hand-made fixtures whose scores are worked
   by hand; they test the code, not the likelihood. The owner supplies held histories in the format above.
 
+## P5's own half-width, the integrator's error and each set's regime (SPC-213, SPC-214, SPC-215)
+
+**Status: built.** Evaluation findings F-26, F-27 and F-29 (Medium). No stored figure changes, so a record from an
+earlier release replays exactly; the stored inputs stay at version 6.
+
+● **P5 labelled with its own half-width** (SPC-213, F-26). The sampled basis note read "P5 of n sampled misses,
+  known to within h km", where h was the widest of the P5, P50 and P95 bootstrap half-widths. With a long upper tail
+  that overstated how closely P5 is known many times over (probe P-11: 18 to 45 times). The note now gives P5 its own
+  half-width, `monte_carlo.percentile_half_widths_km`, from the same resamples, and says "Convergence is judged on
+  the widest of the P5, P50 and P95 half-widths", naming that figure. Convergence still reads the widest, so no
+  refusal and no figure moves. `tests/unit/test_p5_half_width.py` holds the label to P5's own half-width on a case
+  where it is under a hundredth of the widest.
+● **The integrator's own error, stated** (SPC-214, F-27). The lead ruled not to tighten RK45_RTOL 1e-8 and
+  RK45_ATOL 1e-10, since that would move stored figures and runtime, and to state the error instead.
+  `tests/unit/test_integrator_error.py` integrates three reference pairs (B* 1e-4) on both production paths and by
+  DOP853 at rtol 1e-12 and atol 1e-14, reading position and separation every 60 s. The largest error up to each
+  horizon:
+
+  | Horizon | Position, LEO | Position, GEO | Separation, any pair |
+  |-------|------------|------------|------------|
+  | 24 h | 0.092 km | 0.0029 km | 0.0118 km |
+  | 48 h | 0.386 km | 0.0043 km | 0.108 km |
+  | 72 h | 0.881 km | 0.0148 km | 0.379 km |
+
+  The LEO figures are the 550 km, 97.4 degree orbit's; the 500 km, 51.6 degree orbit gives 0.068, 0.285 and
+  0.653 km, which agrees with probe P-13's 0.285 and 0.652 km. P-13 reported up to 0.353 km of separation error at
+  72 h; this pair gives 0.379 km. `monte_carlo.INTEGRATOR_ERROR_KM` holds each figure rounded up, and the sampled
+  basis note states those for the shortest measured horizon at or past the scenario's, and that between two unlike
+  orbits the separation error can reach both objects' errors added. The horizon it reads is the longest span RK45
+  runs for the row, from the nominal burn, or the window's start when that is earlier, to the window's end: a 72 h
+  window with its burn 48 h before it runs 120 h. Past 72 h it says the error was measured to 72 h only.
+● **Each element set stated in its regime** (SPC-215, F-29). `along_track.orbit_regime` classifies a set by its
+  period and eccentricity: HEO/Molniya at an eccentricity of 0.25 or more; GEO for a period within 20.5 min of the
+  sidereal day, whatever the apsides; otherwise LEO or MEO by the apsides against the altitude bands in
+  `spectre/astro/constants.py`, and other deep-space for the rest at SGP4's deep-space period or over. A period or
+  eccentricity that is not a finite orbit's is refused, and the set's line says its regime is not readable. No
+  staleness limit or error rate could be sourced exactly for any regime, so each set keeps the figure it had, LEO's
+  or GEO's, chosen as before by `constants.classify_orbit_regime`, which is left as it was so that no figure moves:
+  it reads a geosynchronous set of e about 0.0095 or more as MEO, so that set is stated "LEO figure applied to GEO,
+  unsourced for this regime".
+● **Where it is stated.** Every staleness limit quoted on the decision page, the threat sweep and the Pattern of
+  Life page is followed by whose figure it is: the bound sets' lines ("Orbit current: 5.0 h old at evaluation, limit
+  72 h, the GEO figure, set for GEO."), each bound set's regime line, custody at evaluation and over the horizon, the
+  red card, the sweep's element-set ages and each stale target, the sweep's warning-change sentences, the burn
+  differential's out-of-date sentence and the POL page's custody. Every element-set error rate quoted names whose
+  figure it is, by set (the sweep's delta-V band, the Intercept Engine's band, the bound sets' lines) or as the model
+  in general, "1 km at epoch plus 2 km a day by the LEO figure and 2 km plus 1 km a day by the GEO figure", which
+  says which sets take which (`along_track.ERROR_MODEL_WORDS`). `tests/integration/test_limit_states_its_regime.py`
+  searches the three rendered pages for a limit quoted with no figure. Not covered: the burn watch's own figures and
+  the Threat Understanding's window, which apply the limit but quote no hours. `tests/unit/test_orbit_regime.py`
+  holds one case per regime and each classifier boundary. The SDP4 flag of SPC-200 stands.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
@@ -1382,7 +1436,9 @@ its basis, and label every result resting on an unsourced one training only, nam
   training only. A relation that gains a verified source can have its register row and label changed together.
 ● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
 ● **Element-set error across track** is not drawn, and the along-track model is a rule of thumb, tuned, not sourced
-  (SPC-202); sourced error rates per regime are SPC-215.
+  (SPC-202). SPC-215 found no source for an error rate or staleness limit in any regime: each set states its regime
+  and whose figure it takes, and a source found later can replace a figure in its register row.
+● **The integrator's error is stated, not reduced** (SPC-214): the tolerances stay as they are, by the lead's ruling.
 ● **A sensor's line of sight to red is not modelled.** Custody is about information, not geometry, and our response
   is not applied to it.
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
@@ -1417,3 +1473,6 @@ its basis, and label every result resting on an unsourced one training only, nam
 | SPC-211 | Decide-by only on the operator's own response time; with none set it says it needs one | Built |
 | SPC-207 | The lookup model's relations registered, each an unsourced judgement; every result resting on one labelled training only, on screen and on the record | Built |
 | SPC-210 | The update's likelihood said to be uncalibrated wherever its probability is shown; a calibration harness with no data yet | Harness built; no calibration data |
+| SPC-213 | P5 labelled with its own half-width; the convergence figure named apart as the widest of three | Built |
+| SPC-214 | The production RK45's own error, measured against a tight reference, stated in the sampled basis note | Built; tolerances unchanged by ruling |
+| SPC-215 | Each element set stated in its regime, by period and eccentricity, and whose staleness limit and error rate it takes | Built; no regime-specific figure sourced |

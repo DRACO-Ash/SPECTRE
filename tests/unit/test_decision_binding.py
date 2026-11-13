@@ -229,11 +229,12 @@ class TestFreshness:
 
     def test_each_freshness_has_its_sentence(self) -> None:
         current = _elset(hours=5.0, limit=72.0)
-        assert current.sentence == "Orbit current: 5.0 h old at evaluation, limit 72 h."
+        # Whose figure the limit is follows it (SPC-215, V0.40 review).
+        assert current.sentence == "Orbit current: 5.0 h old at evaluation, limit 72 h, the GEO figure, set for GEO."
         assert current.age_label == "5.0 h" and current.limit_label == "72 h"
         old = _elset(hours=13 * 24.0, limit=72.0)
         assert old.sentence == (
-            "Orbit out of date: 13.0 d old at evaluation against a 72 h limit, "
+            "Orbit out of date: 13.0 d old at evaluation against a 72 h limit, the GEO figure, set for GEO, "
             "so a burn since its epoch would not be seen."
         )
         unknown = _elset(hours=None, limit=None)

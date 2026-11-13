@@ -2,7 +2,7 @@
  "schema": 1,
  "project": {"name": "SPECTRE", "ref_prefix": "SPC-"},
  "releases": {
-  "naming": "V{major}.{minor}", "start": "V0.40",
+  "naming": "V{major}.{minor}", "start": "V0.41",
   "floor_min": 720, "cap_min": 840,
   "overhead_min": 0, "pace": 1.0, "gate_savings": true, "fill_to_floor": true
  },

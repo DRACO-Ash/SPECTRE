@@ -156,7 +156,9 @@ class TestWhatTheBurnChanged:
         assert alert.change.status is Status.NOT_COMPUTED
         assert alert.change.headline.startswith("That burn's warning change is not computed: its last element set "
                                                 "before the burn is")
-        assert alert.change.headline.endswith("old against a 24 h limit, too old to fly to now.")
+        assert alert.change.headline.endswith("old against a 24 h limit, the LEO figure, set for LEO, too old to "
+                                              "fly to "
+                                              "now.")
         assert calls == []
 
     @pytest.mark.parametrize("sets_between", [1, 2])
