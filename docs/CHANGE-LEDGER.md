@@ -1344,3 +1344,14 @@ Ties named, the tree's own cost cap, and decide-by on your own response time.
 | Code Quality | **EVIDENCED** | Changes to `decision.py`, `decision_tree.py`, `tree_selectors.py`, `rule_comparison.py`, `decision_inputs.py`, `decision_replay.py`, `decide_by.py`, `tree_view.py`, the threat routes, the Decision Engine and sweep templates; new `scripts/measure_tree_cost.py` | `scripts/sonar_rules.py 3070ce7`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.37.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
 | DAST | **HYGIENE** | Score colours removed, one label added to the rankings, the response-time placeholders changed | No new input; all new text is autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.39.0
+
+Lookup results labelled training only, and the update's likelihood stated as uncalibrated.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `turn_update.py`, `decision_record.py`, `decision_replay.py`, `decision_job.py`, `database.py`, `models.py`, the Decision Engine results and records templates; new `likelihood_calibration.py` and `scripts/calibrate_likelihood.py` | `scripts/sonar_rules.py b43f9c1`: 0 blocking, 1 advisory (S1192 in `decision.py`, over on the base). `scripts/check-quality.sh` against 0.38.0: complexity none over 15, changed-line coverage 100%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | One label added to the results and records pages | No new input; the label is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | A new command reads a local CSV | The file is read as text with `csv`, every value is parsed and range-checked, and nothing is evaluated or written. | Then the scanner flags the file read; the finding names the line. |
+| Other gates | **HYGIENE** | One nullable column added to the decision record, migrated in place | No dependency, Dockerfile or image change. | n/a. |

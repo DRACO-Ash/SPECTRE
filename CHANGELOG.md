@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-13
+
+**Lookup results labelled training only, and the update's likelihood stated as uncalibrated.**
+
+### Added
+- A calibration harness, `scripts/calibrate_likelihood.py`, reads held histories as a CSV (`history,predicted,observed`) and reports a Brier score, a reliability table by bin and the count, naming the data and the scoring code by SHA-256. No held histories exist yet, so no calibration is claimed; the score measures the probabilities in the file, and is evidence about the update only if the update produced them (SPC-210).
+
+### Changed
+- The lookup model's seven relations are registered as unsourced judgements. Every result resting on one is labelled "Training only", naming each relation, at the top of the results, in the session log, in the replay and in a new `training_only` column of the decision record. The numbers are unchanged and older records replay exactly (SPC-207).
+- Wherever the update's posterior share is shown, it says the likelihood is uncalibrated, with no calibration data yet (SPC-210).
+
 ## [0.38.0] - 2026-11-12
 
 **Ties named, the tree's own cost cap, and decide-by on your own response time.**

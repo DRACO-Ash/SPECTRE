@@ -1338,6 +1338,20 @@ def _section_13_decision_engine(doc: Document) -> None:
         "finding F-18 of the independent evaluation). A response marked not permitted is still greyed."
     )
     _add_body(doc,
+        "Training only (SPC-207, finding F-17 of the independent evaluation). Where nothing is computed or sampled, "
+        "a figure is set by one of seven relations of the lookup model: the custody rule, a sensor retask's custody "
+        "gap of half its time to execute, a closest approach by red's action type (200 km against a manoeuvre, "
+        "5,000 km against no action, 10,000 km against a sensor retask, 3,000 km against any other), our "
+        "manoeuvre's and our posture change's multipliers on that miss, our delta-V of cost times 50 m/s with no "
+        "burn sized, and a closest approach at 0.4 of the horizon. None has a source; each is listed in "
+        "docs/lookup-register.md as an unsourced judgement. A result whose figures, in the matrix or in any branch "
+        "of a game tree, rest on any of them says so at the top of the results, starting 'Training only.', and names "
+        "each relation in words: use it to train, not to decide. The label comes first in the results, before the "
+        "collect-first advice and every pick. A fully bound scenario with every figure computed "
+        "or sampled carries no label. Your decision record keeps the label as shown, and the Decision records page "
+        "shows it; a record written before the label was recorded reads 'Training-only label: not recorded'."
+    )
+    _add_body(doc,
         "Element-set error is in every closest approach the engine propagates (SPC-202, evaluation finding F-11). "
         "Its model is the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day in LEO "
         "and MEO, 2 km plus 1 km a day at GEO and beyond, at each element set's age. In a sampled cell every sample "
@@ -1712,6 +1726,20 @@ def _section_13_decision_engine(doc: Document) -> None:
         "pick to update, so an observation stated with a depth of 1 is refused beside the form. Minimax and "
         "minimin do not use probability: in place of the update the results show 'What each turn lets us see', "
         "the same custody rule that sets what each later pick may depend on, and say nothing was updated."
+    )
+    _add_body(doc,
+        "The update's likelihood is uncalibrated (SPC-210, finding F-22 of the independent evaluation). It treats "
+        "what custody shows as certain, and no held history of what red did has been scored against it, so there "
+        "is no calibration data yet. Wherever the update's share of the weight is shown, the likelihood model's line "
+        "and the update's basis both say so. A calibration harness exists for when held histories are supplied: "
+        "scripts/calibrate_likelihood.py reads a UTF-8 comma-separated file with the header "
+        "history,predicted,observed (an identifier, the probability from 0 to 1 the update gave the outcome, and 1 "
+        "or 0 for whether it came about) and reports the Brier score, a reliability table by bin and the sample "
+        "count. It names the file by the SHA-256 of its bytes, and the code by SPECTRE's version and the SHA-256 "
+        "of the scoring module and of the command, each covering that one file only. The score measures the "
+        "probabilities in the file: it says something about the update's likelihood only if the update produced "
+        "them for real held outcomes, which the harness cannot check. Until it has been run on such histories, read "
+        "the update's shares as the custody rule's arithmetic, not as a calibrated probability."
     )
 
     _add_heading_h2(doc, "Recording Your Decision")

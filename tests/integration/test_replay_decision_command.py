@@ -22,7 +22,7 @@ from sqlalchemy import update
 import spectre
 from spectre.domain.decision import SelectorStrategy
 from spectre.domain.decision_tree import evaluate_tree
-from spectre.web.decision_record import NO_INPUTS, Operator, write_record
+from spectre.web.decision_record import NO_INPUTS, NO_TRAINING_LABEL, SOURCED_RELATIONS, Operator, write_record
 from spectre.web.models import DecisionRecord
 from tests.integration.test_decision_record_route import _sign_in
 from tests.integration.test_training_integrity import _db
@@ -225,3 +225,43 @@ def spectre_version(record_id: int, client: TestClient) -> str:
         return str(row.code_version)
 
     return str(_db(client, read))
+
+
+class TestTheTrainingOnlyLabel:
+    """SPC-207: the command says the record's training-only label before the report, as the records page shows it."""
+
+    def test_a_labelled_record_says_its_label(
+        self, client: TestClient, command: ModuleType, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record_id = _written(client, "replay_label", _lookup(), SelectorStrategy.MINIMAX)
+        label = _db(client, _label_of(record_id))
+        assert label is not None and label.startswith("Training only. ")
+        code, lines = _run(command, capsys, str(record_id))
+        assert code == 0
+        assert lines[2] == label
+
+    def test_a_record_from_before_the_label_says_none_was_recorded(
+        self, client: TestClient, command: ModuleType, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record_id = _written(client, "replay_no_label", _lookup(), SelectorStrategy.MINIMAX)
+        _alter(client, record_id, training_only=None)
+        code, lines = _run(command, capsys, str(record_id))
+        assert code == 0
+        assert lines[2] == NO_TRAINING_LABEL
+
+    def test_a_record_resting_on_none_says_so(
+        self, client: TestClient, command: ModuleType, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record_id = _written(client, "replay_sourced", _lookup(), SelectorStrategy.MINIMAX)
+        _alter(client, record_id, training_only="")
+        code, lines = _run(command, capsys, str(record_id))
+        assert code == 0
+        assert lines[2] == SOURCED_RELATIONS
+
+
+def _label_of(record_id: int) -> Any:
+    async def read(session: Any) -> str | None:
+        row = await session.get(DecisionRecord, record_id)
+        return None if row is None else row.training_only
+
+    return read

@@ -14,7 +14,10 @@ with that likelihood. It says which turn-1 branch we are on, not what red does n
 is weighed by the rows' P as entered, since nothing sourced says how its turn-1 move bears on its next. A row whose
 P is a NOTSO suggestion the operator applied carries its interval into the posterior, which is shown across the
 range it takes over those intervals, and every share is shown rounded down, so none reads stronger than its inputs.
-The rule is the custody rule, not calibrated against any outcome, so the posterior is a lookup.
+The rule is the custody rule, not calibrated against any outcome, so the posterior is a lookup. No calibration data
+exists yet (SPC-210, evaluation F-22): spectre.domain.likelihood_calibration is the harness a back-test runs through,
+but no held history has been run through it, so wherever the update's probability is shown, in the likelihood model's
+line and in the update's basis, it says the likelihood is uncalibrated with no calibration data yet (UNCALIBRATED).
 
 Nothing here writes a probability into a row; the selectors show the posterior only under expected value, the one
 rule that reads P. Under minimax and minimin the same model says only what each turn lets us see (SPC-142).
@@ -63,8 +66,8 @@ if TYPE_CHECKING:
 __all__ = [
     "INDEPENDENT_TURNS", "LIKELIHOOD_MODEL", "POSTERIOR_EVERY_ROW", "POSTERIOR_NO_WEIGHT", "POSTERIOR_NOTE",
     "POSTERIOR_ONE_ROW", "POSTERIOR_SHARES", "SEEN_MODEL", "SENTENCES", "TREE_BURN_OUTSIDE_TURN", "TREE_NO_BOUNDARY",
-    "TREE_TOO_FEW_TURNS", "Posterior", "Seen", "TurnPlan", "burns_on", "likelihood", "model_lines", "plan_or_equal",
-    "posteriors", "row_hypotheses", "seen_after", "seen_lines", "share_ranges", "turn_plan",
+    "TREE_TOO_FEW_TURNS", "UNCALIBRATED", "Posterior", "Seen", "TurnPlan", "burns_on", "likelihood", "model_lines",
+    "plan_or_equal", "posteriors", "row_hypotheses", "seen_after", "seen_lines", "share_ranges", "turn_plan",
 ]
 
 _SECONDS_PER_HOUR = 3600.0
@@ -79,13 +82,20 @@ _HUNDREDTHS = 100
 
 # ── What the result says (SPC-141; the view is SPC-142) ──────────────────────
 
+#: Said wherever the update's probability is shown (SPC-210, evaluation F-22): in the likelihood model's line and in
+#: the update's basis. It stays until held histories have been run through spectre.domain.likelihood_calibration
+#: and the owner rules on what they show.
+UNCALIBRATED = (
+    "the likelihood is uncalibrated, with no calibration data yet: no held history of what red did has been "
+    "scored against it (SPC-210)"
+)
 LIKELIHOOD_MODEL = (
     "The update after turn 1 rests on this likelihood model: what turn 1 lets us see of red is the bound red "
     "track's custody, as the sweep judges it, carried over turn 1 with each row's burn. Custody lost at a burn in "
     "the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody "
     "degraded, lost for any other reason, or not read, shows nothing. {rows}. Each row gives what it gives for certain, so rows "
-    "that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome, so "
-    "the update is a lookup; the same rule reads turn 2 in a 3-turn tree."
+    "that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome: "
+    f"{UNCALIBRATED}. So the update is a lookup; the same rule reads turn 2 in a 3-turn tree."
 )
 # Under minimax and minimin (SPC-142): the same model sets what each later pick may see, but nothing is updated.
 SEEN_MODEL = (
@@ -115,7 +125,7 @@ _FROM_REMAINDER = "the engine's remainder of P, the chance that none of your act
 _GIVES = "{lead} {row}, {name}, gives {seen}"
 POSTERIOR_NOTE = (
     "the rows' P restricted to those that give what turn 1 shows, renormalised, under the custody rule as the "
-    "likelihood model, a lookup"
+    f"likelihood model, a lookup; {UNCALIBRATED}"
 )
 
 # Why the engine sets no turns (SPC-187): the tree is refused before anything runs and the one-turn result stands.
@@ -136,8 +146,8 @@ TREE_BURN_OUTSIDE_TURN = (
 
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
-    LIKELIHOOD_MODEL, SEEN_MODEL, INDEPENDENT_TURNS, POSTERIOR_SHARES, POSTERIOR_ONE_ROW, POSTERIOR_EVERY_ROW, POSTERIOR_NO_WEIGHT,
-    TREE_TOO_FEW_TURNS, TREE_NO_BOUNDARY, TREE_BURN_OUTSIDE_TURN,
+    UNCALIBRATED, LIKELIHOOD_MODEL, SEEN_MODEL, INDEPENDENT_TURNS, POSTERIOR_SHARES, POSTERIOR_ONE_ROW,
+    POSTERIOR_EVERY_ROW, POSTERIOR_NO_WEIGHT, TREE_TOO_FEW_TURNS, TREE_NO_BOUNDARY, TREE_BURN_OUTSIDE_TURN,
 )
 
 

@@ -11,6 +11,11 @@ value is numeric in turn, so a table of tuples of numbers counts. Every such con
 conversions and display limits too, each in the section it belongs to. The lookup model's own functions hold no bare
 number but 0 and 1, so a rule of thumb cannot return there as a literal unseen. The values a new panel starts at are
 held to the constants the register lists, so the panel cannot start elsewhere while the register stays green.
+
+The lookup model's relations (SPC-207, evaluation F-17) are a table of their own: each relation the code names is
+listed, in its order, with the words the training-only label gives it, the constants it reads and its basis, and a
+relation the code labels training only must say "unsourced judgement", each constant it names listed above with the
+training-only source.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from spectre.domain.decision import (
     DEFAULT_RESPONSE_COST,
     DEFAULT_REVERSIBILITY,
     DEFAULT_TIME_TO_EXECUTE_H,
+    LOOKUP_RELATION_WORDS,
+    LookupRelation,
     Scenario,
 )
 from spectre.domain.decision_figures import DEFAULT_BUDGET_KM_S
@@ -50,7 +57,7 @@ _ENGINE = (
     "spectre/domain/rule_comparison.py", "spectre/domain/decision_inputs.py", "spectre/domain/decision_replay.py",
     "spectre/domain/decision_figures.py", "spectre/domain/decision_transfer.py", "spectre/domain/decision_judgement.py",
     "spectre/domain/decide_by.py", "spectre/domain/notso_prior.py", "spectre/domain/decision_envelope.py",
-    "spectre/domain/weight_stability.py",
+    "spectre/domain/weight_stability.py", "spectre/domain/likelihood_calibration.py",
 )
 #: The lookup model's functions, which hold no bare number but these.
 _LOOKUP_MODEL = ("_lookup_figures", "_lookup_cell")
@@ -76,10 +83,13 @@ def _ticked(cell: str) -> list[str]:
 
 
 def entries(text: str) -> list[Entry]:
-    """Every row of every register table: a row whose first cell is the header's "Constant" or a rule is skipped."""
+    """Every row of every constants table: a row whose first cell is the header's "Constant" or a rule is skipped, and
+    so is every row of the lookup model's relations, a table of its own (relations below)."""
     found = []
+    in_relations = False
     for line in text.splitlines():
-        if not line.startswith("| ") or line.startswith(("| Constant ", "|---")):
+        in_relations = line.startswith("|") and (in_relations or line.startswith("| Relation "))
+        if in_relations or not line.startswith("| ") or line.startswith(("| Constant ", "|---")):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         assert len(cells) == 7, f"a register row has 7 cells: {line}"
@@ -87,6 +97,73 @@ def entries(text: str) -> list[Entry]:
         (literal, *_), (path, name) = _ticked(value), _ticked(where)
         found.append(Entry(label, ast.literal_eval(literal), path, name, source, owner, when))
     return found
+
+
+@dataclass(frozen=True)
+class RelationRow:
+    """One row of the lookup model's relations (SPC-207)."""
+
+    name: str
+    words: str
+    constants: str
+    path: str
+    function: str
+    basis: str
+    owner: str
+    when: str
+
+
+#: The basis of a relation with no source: the code labels every result resting on it training only.
+UNSOURCED = "unsourced judgement"
+#: The source the constants table gives a constant of an unsourced relation.
+TRAINING_SOURCE = "labelled training only (SPC-207)"
+
+
+def relations(text: str) -> list[RelationRow]:
+    """Every row of the lookup model's relations: the table whose header's first cell is "Relation"."""
+    found = []
+    in_relations = False
+    for line in text.splitlines():
+        in_relations = line.startswith("|") and (in_relations or line.startswith("| Relation "))
+        if not in_relations or line.startswith(("| Relation ", "|---")):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        assert len(cells) == 7, f"a relation row has 7 cells: {line}"
+        name, words, constants, where, basis, owner, when = cells
+        path, function = _ticked(where)
+        found.append(RelationRow(name, words, constants, path, function, basis, owner, when))
+    return found
+
+
+def _function_source(source: str, name: str) -> str:
+    node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == name)
+    return ast.get_source_segment(source, node) or ""
+
+
+def relation_problems(rows: list[RelationRow], listed: list[Entry]) -> list[str]:
+    """Each way the relations table and the code part: a relation listed or named out of step, its words, its basis,
+    or a constant it names that its function does not read or the constants table does not list as training only."""
+    problems = []
+    if [r.name for r in rows] != [r.value for r in LookupRelation]:
+        problems.append(f"the register lists {[r.name for r in rows]}, the code {[r.value for r in LookupRelation]}")
+    sources = {e.name: e.source for e in listed}
+    for row in rows:
+        words = LOOKUP_RELATION_WORDS.get(LookupRelation(row.name)) if row.name in set(LookupRelation) else None
+        if row.words != words:
+            problems.append(f"{row.name}: the register's words differ from the label's")
+        if row.basis != UNSOURCED:
+            problems.append(f"{row.name}: labelled training only, so its basis is {UNSOURCED!r}, not {row.basis!r}")
+        if not (row.owner and _DATE.search(row.when)):
+            problems.append(f"{row.name}: no owner or date")
+        if row.constants.startswith("none:"):
+            continue
+        body = _function_source(_source(row.path), row.function)
+        for name in _ticked(row.constants):
+            if name not in body:
+                problems.append(f"{row.name}: {row.function} does not read {name}")
+            if TRAINING_SOURCE not in sources.get(name, ""):
+                problems.append(f"{row.name}: {name} is not listed with the training-only source")
+    return problems
 
 
 def _module(path: str) -> ModuleType:
@@ -247,6 +324,59 @@ class TestTheRegisterMatchesTheCode:
         assert "2026-11-05" in by_name["DEGRADED_CUSTODY_WEIGHT"].owner
         assert "SPC-178" in by_name["EVALUATION_BUDGET_S"].owner
         assert by_name["_OTHER_CA_KM"].owner == "unassigned"
+
+
+class TestTheLookupModelsRelations:
+    """SPC-207, evaluation F-17: every relation has a row stating its basis, and the label's words are the
+    register's."""
+
+    def test_every_relation_is_listed_with_its_basis_and_the_labels_words(self, register: list[Entry]) -> None:
+        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        assert len(rows) == len(LookupRelation) == 7
+        assert relation_problems(rows, register) == []
+
+    def test_none_has_a_source(self, register: list[Entry]) -> None:
+        assert {r.basis for r in relations(_REGISTER.read_text(encoding="utf-8"))} == {UNSOURCED}
+
+    @pytest.mark.parametrize("name", [
+        "_BASE_CA_KM", "_OTHER_CA_KM", "_MANOEUVRE_CA_PER_COST", "_POSTURE_CA_PER_COST", "_LOOKUP_DV_KM_S_PER_COST",
+        "_RETASK_GAP_SHARE", "_LOOKUP_TCA_SHARE",
+    ])
+    def test_each_constant_of_a_relation_says_its_results_are_training_only(
+        self, register: list[Entry], name: str,
+    ) -> None:
+        (entry,) = [e for e in register if e.name == name]
+        assert entry.source == (
+            "none: unsourced judgement, so a result resting on it is labelled training only (SPC-207)"
+        )
+
+    def test_the_relations_table_is_not_read_as_constants(self, register: list[Entry]) -> None:
+        assert not {e.name for e in register} & {r.value for r in LookupRelation}
+
+    def test_a_relation_out_of_step_is_caught(self, register: list[Entry]) -> None:
+        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        moved = [dataclasses.replace(rows[1], words="half its time", basis="Smith (2020)"), *rows[2:]]
+        problems = relation_problems(moved, register)
+        assert problems[0].startswith("the register lists ['sensor-retask gap', ")
+        assert "sensor-retask gap: the register's words differ from the label's" in problems
+        assert "sensor-retask gap: labelled training only, so its basis is 'unsourced judgement', not 'Smith (2020)'" \
+            in problems
+
+    def test_a_constant_the_function_does_not_read_or_the_table_does_not_mark_is_caught(
+        self, register: list[Entry],
+    ) -> None:
+        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        wrong = dataclasses.replace(rows[1], constants="`_CA_NORMALISATION_KM`", owner="", when="")
+        assert relation_problems([rows[0], wrong, *rows[2:]], register) == [
+            "sensor-retask gap: no owner or date",
+            "sensor-retask gap: _lookup_figures does not read _CA_NORMALISATION_KM",
+            "sensor-retask gap: _CA_NORMALISATION_KM is not listed with the training-only source",
+        ]
+
+    def test_an_unknown_relation_has_no_words(self, register: list[Entry]) -> None:
+        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        problems = relation_problems([dataclasses.replace(rows[0], name="tide rule"), *rows[1:]], register)
+        assert "tide rule: the register's words differ from the label's" in problems
 
 
 class TestTheCheckBitesBothWays:

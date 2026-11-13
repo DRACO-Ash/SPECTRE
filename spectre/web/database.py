@@ -188,6 +188,8 @@ async def _apply_migrations(conn: Any) -> None:
         ("decision_records", "inputs_sha256", "VARCHAR(64)"),
         # The recommendation's weight stability as the results said it (SPC-205): none on a record written before.
         ("decision_records", "weight_stability", "TEXT"),
+        # The training-only label as the results showed it (SPC-207): none on a record written before.
+        ("decision_records", "training_only", "TEXT"),
     ]
     for table, column, definition in migrations:
         _assert_safe_ddl(table, column, definition)

@@ -4,7 +4,9 @@
 modules, and every lookup and rule of thumb it reads from other modules to set a figure, a score, a pick or its
 advice, with its value, where it is in the code, what it does, its source, who may change it and when it was set.*
 
-A figure the results mark "(lookup)" rests on one or more of the constants below. The values a new panel starts the
+A figure the results mark "(lookup)" rests on one or more of the constants below. The lookup model's own relations
+are listed again, each as a relation with its basis, in the last section (SPC-207, evaluation F-17): none has a
+source, so a result resting on any of them is labelled training only, naming each. The values a new panel starts the
 operator's inputs at are listed here too, in their own section, so their source and date are known. Once the
 operator evaluates with one, set or kept, the result marks it "(judgement)" under "Judgement inputs": the form
 records no edit of these, so a value kept where the panel started it is the operator's judgement as much as one
@@ -36,7 +38,8 @@ default below, which the operator kept by leaving it blank, and is marked "(judg
 ● one of the Decision Engine's own modules gains a module-level numeric constant this register does not list. They
   are `decision.py`, `decision_tree.py`, `tree_selectors.py`, `turn_update.py`, `rule_comparison.py`,
   `decision_inputs.py`, `decision_replay.py`, `decision_figures.py`, `decision_transfer.py`,
-  `decision_judgement.py`, `decide_by.py`, `notso_prior.py`, `decision_envelope.py` and `weight_stability.py`, all in `spectre/domain/`. A constant is numeric
+  `decision_judgement.py`, `decide_by.py`, `notso_prior.py`, `decision_envelope.py`, `weight_stability.py` and
+  `likelihood_calibration.py`, all in `spectre/domain/`. A constant is numeric
   when it is a number (not a truth value), or a non-empty table, tuple, list or set whose every value is numeric in
   turn, so a table of tuples of numbers counts. A name assigned alone, annotated, or unpacked from a tuple is read
   alike. Every such constant is listed, including limits and unit conversions, in the section it belongs to, so none
@@ -45,7 +48,11 @@ default below, which the operator kept by leaving it blank, and is marked "(judg
   than 0 and 1, so its rules of thumb stay named constants this register holds;
 ● a field of the panel, or a weight of the route's form, starts at a value other than the constant listed for it
   below;
-● a row leaves its source, owner or date empty.
+● a row leaves its source, owner or date empty;
+● the lookup model's relations below differ from the code's: a relation the code names that the register does not
+  list, or the reverse, words the label would give that differ from the register's, a basis other than "unsourced
+  judgement" while the code labels the relation training only, or a constant named there that the constants above
+  do not list with the training-only source.
 
 Constants of other modules are listed where the engine reads them to set a figure, a score, a pick or its advice,
 and are held to their value, but a new constant in those modules is not caught by the completeness check. The Threat
@@ -56,13 +63,13 @@ Understanding with their bases, not those constants, except the ones below that 
 
 | Constant | Value | Where | What it does | Source | Owner | Set |
 |---|---|---|---|---|---|---|
-| Lookup closest approach per adversary action type, km | `{"ActionType.NO_ACTION": 5000.0, "ActionType.MANOEUVRE": 200.0, "ActionType.SENSOR_RETASK": 10000.0}` | `spectre/domain/decision.py` `_BASE_CA_KM` | The closest approach of an unbound cell, or of a bound cell nothing computed or sampled, by red's action type | none: rule of thumb | unassigned | 2026-04-06 (f73ba47), as a table since 2026-11-03 (45d79c9, 0.13.0) |
-| Lookup closest approach of any other action type, km | `3000.0` | `spectre/domain/decision.py` `_OTHER_CA_KM` | The same, for a posture change | none: rule of thumb | unassigned | 2026-04-06 (f73ba47) |
-| Closest-approach multiplier for a manoeuvre response | `5.0` | `spectre/domain/decision.py` `_MANOEUVRE_CA_PER_COST` | Raises a lookup closest approach to x(1 + 5 x cost) against our manoeuvre | none: rule of thumb | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
-| Closest-approach multiplier for a posture change | `2.0` | `spectre/domain/decision.py` `_POSTURE_CA_PER_COST` | Raises a lookup closest approach to x(1 + 2 x cost) against our posture change | none: rule of thumb | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
-| Lookup delta-V per unit of cost, km/s | `0.05` | `spectre/domain/decision.py` `_LOOKUP_DV_KM_S_PER_COST` | Our delta-V for a manoeuvre with no sized burn: cost x 0.05 km/s, 0 to 50 m/s | none: rule of thumb | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
-| Sensor-retask custody gap, share of its time to execute | `0.5` | `spectre/domain/decision.py` `_RETASK_GAP_SHARE` | Against a manoeuvre, a sensor retask holds custody with a gap of half its time to execute | none: rule of thumb | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
-| Lookup time to closest approach, share of the horizon | `0.4` | `spectre/domain/decision.py` `_LOOKUP_TCA_SHARE` | The time to closest approach of a lookup cell | none: rule of thumb | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
+| Lookup closest approach per adversary action type, km | `{"ActionType.NO_ACTION": 5000.0, "ActionType.MANOEUVRE": 200.0, "ActionType.SENSOR_RETASK": 10000.0}` | `spectre/domain/decision.py` `_BASE_CA_KM` | The closest approach of an unbound cell, or of a bound cell nothing computed or sampled, by red's action type | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47), as a table since 2026-11-03 (45d79c9, 0.13.0) |
+| Lookup closest approach of any other action type, km | `3000.0` | `spectre/domain/decision.py` `_OTHER_CA_KM` | The same, for a posture change | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47) |
+| Closest-approach multiplier for a manoeuvre response | `5.0` | `spectre/domain/decision.py` `_MANOEUVRE_CA_PER_COST` | Raises a lookup closest approach to x(1 + 5 x cost) against our manoeuvre | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
+| Closest-approach multiplier for a posture change | `2.0` | `spectre/domain/decision.py` `_POSTURE_CA_PER_COST` | Raises a lookup closest approach to x(1 + 2 x cost) against our posture change | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
+| Lookup delta-V per unit of cost, km/s | `0.05` | `spectre/domain/decision.py` `_LOOKUP_DV_KM_S_PER_COST` | Our delta-V for a manoeuvre with no sized burn: cost x 0.05 km/s, 0 to 50 m/s | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
+| Sensor-retask custody gap, share of its time to execute | `0.5` | `spectre/domain/decision.py` `_RETASK_GAP_SHARE` | Against a manoeuvre, a sensor retask holds custody with a gap of half its time to execute | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
+| Lookup time to closest approach, share of the horizon | `0.4` | `spectre/domain/decision.py` `_LOOKUP_TCA_SHARE` | The time to closest approach of a lookup cell | none: unsourced judgement, so a result resting on it is labelled training only (SPC-207) | unassigned | 2026-04-06 (f73ba47); named in SPC-196 |
 | Closest approach scale, far anchor, km | `50_000.0` | `spectre/domain/decision.py` `_CA_NORMALISATION_KM` | A miss at or beyond it scores no closest-approach penalty | none: rule of thumb, kept from before SPC-191 | unassigned | 2026-04-06 (f73ba47) |
 | Element-set error model: at epoch, km, and per day of age, km, keyed by a slow regime (GEO or DEEP) | `{False: (1.0, 2.0), True: (2.0, 1.0)}` | `spectre/astro/along_track.py` `_ERROR_MODEL_KM` | Since SPC-202 the engine reads it to set every propagated closest approach: each sample of a sampled cell draws each object's along-track error from a normal distribution of this 1 sigma at its set's age at the scenario epoch, and a computed cell's band is the miss less and plus both sets' error at its closest approach in quadrature, its score reading the lower edge; the TCA's uncertainty reads it too (SPC-118) | none: the threat sweep's rule of thumb, tuned, not sourced | unassigned | 2026-11-02 (07b8883, SPC-005, as the sweep's); read by the miss since 2026-11-11 (SPC-202, not yet released) |
 | Our delta-V scale, full penalty, m/s | `1000.0` | `spectre/domain/decision_transfer.py` `MAX_BURN_M_S` | Our delta-V scores its full penalty at the engine's per-burn limit, and a later burn above it is refused | none: the limit on burn 1's own field | unassigned | 2026-11-10 (6b87a96, 0.25.0) |
@@ -171,6 +178,8 @@ numeric constant in the Decision Engine's own modules.
 | Seconds in an hour, for the update | `3600.0` | `spectre/domain/turn_update.py` `_SECONDS_PER_HOUR` | Converts hours | definition | unassigned | 2026-11-04 (d1aac06, 0.23.0) |
 | On a turn's boundary, h | `2.7777777777777776e-07` | `spectre/domain/turn_update.py` `_ON_THE_BOUNDARY_H` | A moment within a millisecond of a turn's boundary is on it | definition: burn times are kept to the microsecond | unassigned | 2026-11-04 (d1aac06, 0.23.0) |
 | Hundredths, for the update | `100` | `spectre/domain/turn_update.py` `_HUNDREDTHS` | Rounds a P down or up to hundredths for display | display | unassigned | 2026-11-04 (d1aac06, 0.23.0) |
+| Bins of the calibration report's reliability table | `10` | `spectre/domain/likelihood_calibration.py` `DEFAULT_BINS` | The reliability table of a back-test of the update's likelihood splits predicted probability from 0 to 1 into this many equal bins unless the script is asked for another number; it sets no figure the engine shows | display: a tenth of probability a bin; not sourced | unassigned (Claude's choice, not a ruling) | 2026-11-13 (SPC-210, not yet released) |
+| A held history's outcome, as written and as scored | `{"0": 0, "1": 1}` | `spectre/domain/likelihood_calibration.py` `_OUTCOMES` | Reads a held history's observed field: 1 the outcome came about, 0 it did not; anything else is refused | definition: the Brier score's outcome is 1 or 0 | unassigned | 2026-11-13 (SPC-210, not yet released) |
 | Where a turn ends when the equal split does not fit | `0.5` | `spectre/domain/turn_update.py` `_MIDWAY` | A turn boundary falls this far from the latest burn of the turn ending to the earliest burn of the next, or to the end of the span searched when no burn follows, when the equal split does not fall between them | none: Claude's choice, leaving each burn's timing spread equal room either side | the owner: ruling of 2026-11-05 that the engine sets unequal turns (SPC-187); the placement is Claude's | 2026-11-12 (SPC-187, 0.37.0) |
 | Stored inputs schema version | `6` | `spectre/domain/decision_inputs.py` `VERSION` | The version of the stored inputs this code writes; version 2 adds each response's veto, version 3 the probability rule and the remainder of P, version 4 the miss rule, version 5 the turn rule, version 6 the tree's cost cap | definition | unassigned | 2026-11-10 (73245d9, 0.28.0); version 2 since 2026-11-11 (0.29.0, SPC-195); version 3 since 2026-11-11 (SPC-203, 0.30.0); version 4 since 2026-11-11 (SPC-202, 0.32.0); version 5 since 2026-11-12 (SPC-187, 0.37.0); version 6 since 2026-11-12 (SPC-188, 0.38.0) |
 | Stored inputs versions read | `(1, 2, 3, 4, 5, 6)` | `spectre/domain/decision_inputs.py` `VERSIONS` | The stored-input versions this code reads, so a record of 0.28.0 to 0.37.0 still reads and replays under the rules it was evaluated by, a game tree over its equal turns and against the cost cap it shared with the matrix | definition | unassigned | 2026-11-11 (0.29.0, SPC-195); version 3 added 2026-11-11 (SPC-203, 0.30.0); version 4 added 2026-11-11 (SPC-202, 0.32.0); version 5 added 2026-11-12 (SPC-187, 0.37.0); version 6 added 2026-11-12 (SPC-188, 0.38.0) |
@@ -204,3 +213,33 @@ from. The days in a year are read from the calendar, not held as a number.
 | First two-digit year of the 1900s | `57` | `spectre/astro/elset_check.py` `_FIRST_YEAR_OF_THE_1900S` | An epoch year from 57 is read as 1957 on, below it as 2000 on | definition: the two-line element format's year convention; the first satellite flew in 1957 | unassigned | 2026-11-10 (SPC-201); the same rule read the epoch in the UDL routes before |
 | SGP4's decay error | `6` | `spectre/astro/propagator.py` `SGP4_DECAYED` | The error SGP4 sets when the radius falls under one Earth radius: read as re-entry, so the result says the object has decayed | definition: SGP4's own error code (Vallado and others, 2006) | unassigned | 2026-11-10 (SPC-200) |
 | Longest refusal logged, characters | `1000` | `spectre/web/elsets.py` `_REFUSAL_LOG_LIMIT` | A refusal sentence is logged up to this many characters; every failure the check can name fits | display: a flood guard on the log | unassigned (Claude's choice, not a ruling) | 2026-11-10 (SPC-201) |
+
+## The lookup model's relations
+
+*Built for SPC-207, evaluation finding F-17 (Medium). The lead ruled on 2026-11-13 to source each relation through
+this register as far as honesty allows and to label every result resting on an unsourced one training only.* Each
+relation below sets a figure where nothing is computed or sampled: in an unbound scenario every figure, and in a bound
+one the custody a red track whose custody was not read leaves to the rule, the closest approach and its time of a row
+refused or with no hypothesis, and our delta-V where no burn was sized. No source was found for any of them, so each
+basis is "unsourced judgement" and none of the numbers has changed. A result whose figures, in the matrix or in a game
+tree's nodes, rest on any of them says so above its recommendation, "Training only.", naming each in the words below,
+and its decision record keeps that label (`spectre/domain/decision.py` `LookupRelation`, `ScenarioResult.training_only`).
+
+Custody taken at its worst case, a burn at the scenario epoch for a manoeuvre naming no burn time, is a bound chosen
+on purpose, not a relation, and is not listed. Other unsourced judgements the engine reads are not relations of the
+lookup model, so they bring no label: the score's weights and its 50,000 km far anchor, which are value judgements,
+the element-set error model and the archetypes' spreads, which shape computed and sampled figures, and the
+collect-first times, which time advice and no figure, each listed in the sections above with its own source; and the
+update's custody likelihood (`spectre/domain/turn_update.py`), an unsourced judgement with no constant to list here,
+which every place showing the update's probability says is uncalibrated, with no calibration data yet (SPC-210; its
+harness is `spectre/domain/likelihood_calibration.py`). Whether the label should extend to them is for the owner.
+
+| Relation | In the label | Constants | Where | Basis | Owner | Set |
+|---|---|---|---|---|---|---|
+| custody rule | custody is lost when red manoeuvres and our response neither manoeuvres nor retasks a sensor, for the row's custody gap share of the horizon, and is held otherwise | none: it reads the row's custody gap share, the operator's judgement, which a new row starts at `DEFAULT_CUSTODY_GAP_FRACTION` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); the gap from the row's own share since 2026-11-03 (22196c7, 0.17.0); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| sensor-retask gap | against a manoeuvre, a sensor retask's custody gap is 0.5 of its time to execute | `_RETASK_GAP_SHARE` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| closest approach by action type | the closest approach is 200 km against a manoeuvre, 5,000 km against no action, 10,000 km against a sensor retask and 3,000 km against any other action | `_BASE_CA_KM`, `_OTHER_CA_KM` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| manoeuvre multiplier | our manoeuvre multiplies that closest approach by 1 plus 5 times its cost | `_MANOEUVRE_CA_PER_COST` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| posture multiplier | our posture change multiplies that closest approach by 1 plus 2 times its cost | `_POSTURE_CA_PER_COST` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| delta-V per cost | our manoeuvre with no sized burn spends its cost times 50 m/s of delta-V | `_LOOKUP_DV_KM_S_PER_COST` | `spectre/domain/decision.py` `_lookup_figures` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |
+| time to closest approach | the closest approach comes at 0.4 of the horizon | `_LOOKUP_TCA_SHARE` | `spectre/domain/decision.py` `_lookup_cell` | unsourced judgement | unassigned | 2026-04-06 (f73ba47); labelled training only since 2026-11-13 (SPC-207, not yet released) |

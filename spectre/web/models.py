@@ -140,9 +140,9 @@ class DecisionRecord(Base):
 
     Since 0.28.0 it also holds the deployment's primary rule and whether the rule used differed (SPC-194), and the
     evaluation's canonical inputs with their SHA-256, element-set text included, so the recommendation can be replayed
-    from the record alone (SPC-193, F-02), and since SPC-205 the recommendation's weight stability as the results
-    said it. No retention is applied; how long records are kept and who may read them
-    is the owner's decision (SPC-228), and it covers the stored inputs too.
+    from the record alone (SPC-193, F-02), since SPC-205 the recommendation's weight stability as the results
+    said it, and since SPC-207 its training-only label. No retention is applied; how long records are kept and who
+    may read them is the owner's decision (SPC-228), and it covers the stored inputs too.
 
     Only generic types, so the table is the same on SQLite and PostgreSQL. Operator text is Text, never
     String(n): PostgreSQL enforces a length SQLite ignores, so a name one database stored the other would refuse.
@@ -208,3 +208,7 @@ class DecisionRecord(Base):
     #: change of one weight that changes the primary rule's pick on the one-turn matrix, or why there is none to show.
     #: None on a record written before it was recorded, which init_db upgrades in place.
     weight_stability: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The training-only label as the results showed it (SPC-207, evaluation F-17), naming each unsourced relation of
+    #: the lookup model the result rests on; "" when it rests on none. None on a record written before it was
+    #: recorded, which init_db upgrades in place.
+    training_only: Mapped[str | None] = mapped_column(Text, nullable=True)

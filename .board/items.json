@@ -2132,7 +2132,11 @@
   "note": "Evaluation finding F-17 (Medium, L1, L2), evaluation/EVALUATION.md. Remediation: restrict lookup-only results to training, or source each relation through the F-05 register. Closing evidence: register entries, or an enforced training-only label.",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.39.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-208",
@@ -2167,12 +2171,14 @@
   "priority": "med",
   "order": 2,
   "group": "eval-accred",
-  "minutes": 360,
+  "minutes": 0,
   "task": "F-22: the update's likelihood is a deterministic custody rule, stated as uncalibrated; no calibration evidence exist…",
-  "note": "Evaluation finding F-22 (Medium, §1e, L3, L4), evaluation/EVALUATION.md. Remediation: back-test the custody likelihood on held histories and report a Brier score. Closing evidence: a calibration report with its data and code.",
+  "note": "Evaluation finding F-22 (Medium, §1e, L3, L4), evaluation/EVALUATION.md. Remediation: back-test the custody likelihood on held histories and report a Brier score. Closing evidence: a calibration report with its data and code. 0.39.0 built the harness (scripts/calibrate_likelihood.py, CSV history,predicted,observed) and states the likelihood as uncalibrated wherever the posterior is shown. No real held histories exist in the repository. Closing needs the owner to supply held histories whose predicted probabilities the update produced and whose outcomes come from a source other than the custody it read.",
   "files": [
    "spectre/domain/turn_update.py"
-  ]
+  ],
+  "needs_owner": true,
+  "human_minutes": 120
  },
  {
   "ref": "SPC-211",

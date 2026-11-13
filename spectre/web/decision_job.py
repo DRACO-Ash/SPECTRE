@@ -183,8 +183,16 @@ def evaluated_line(scenario: Scenario, result: ScenarioResult) -> str:
     return (
         f"[Decision] Evaluated '{log_safe(scenario.name)}': "
         f"{len(scenario.adversary_actions)} adversary actions × {len(scenario.friendly_responses)} friendly "
-        f"responses. Modelled recommendation: {_recommendation(result)}{bound}{_transfers_line(scenario, result)}"
+        f"responses. Modelled recommendation: {_recommendation(result)}{_training(result)}{bound}"
+        f"{_transfers_line(scenario, result)}"
     )
+
+
+def _training(result: ScenarioResult) -> str:
+    """The result's training-only label beside its recommendation, naming each unsourced relation it rests on, as
+    the results page shows it first (SPC-207); nothing when it rests on none."""
+    label = result.training_only
+    return "" if label is None else f" {label}"
 
 
 def _recommendation(result: ScenarioResult) -> str:

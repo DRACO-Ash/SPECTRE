@@ -15,7 +15,10 @@ records page says which were and why; no vetoed response is ever held as a pick,
 operator's decision only with a rationale. Since SPC-205 a record keeps the recommendation's weight stability as the
 results said it, weight_stability's own line, in a column of its own: worked out when the record is written, since
 the stored inputs hold the scores but not the figures each score's terms come from, and working them out again would
-mean evaluating the scenario again.
+mean evaluating the scenario again. Since SPC-207 a record keeps the result's training-only label as the results
+showed it, naming each unsourced relation of the lookup model the result rests on, or "" when it rests on none; a
+record from before holds none, and the records page says so. The label is no input and no pick, so the replay neither
+reads nor compares it, and a record from before replays as it did.
 """
 
 from __future__ import annotations
@@ -211,6 +214,7 @@ def new_record(
         turns=scenario.turns, keep_out_km=scenario.keep_out_km,
         primary_rule=primary.value, rule_differed=result.robust_strategy is not primary,
         inputs=inputs, inputs_sha256=inputs_sha256, weight_stability=_kept(weight_stability(result, primary).line),
+        training_only=_kept(result.training_only or ""),
     )
 
 
@@ -440,6 +444,13 @@ _STABILITY = "Weight stability: {line}"
 NO_STABILITY = (
     "Weight stability: not recorded; this record was written by a version of SPECTRE that did not record it."
 )
+#: What the records page says of a record resting on no unsourced relation of the lookup model, and of one written
+#: before the label was recorded (SPC-207); a record resting on any shows its label as the results did.
+SOURCED_RELATIONS = "Rests on no unsourced relation of the lookup model."
+NO_TRAINING_LABEL = (
+    "Training-only label: not recorded (this record predates it): it was written by a version of SPECTRE that did "
+    "not record whether its result rests on an unsourced relation of the lookup model."
+)
 #: The rule used and its pick, on a record that holds a primary rule, whose results named the primary's pick the
 #: recommendation; and on one from before, whose results recommended the rule used's pick alone.
 _USED = "Rule used: {rule}, picking {pick}."
@@ -479,6 +490,14 @@ class ListedRecord:
     not_permitted: tuple[str, ...] = ()
     #: The recommendation's weight stability as the results said it, or that the record holds none (SPC-205).
     stability: str = NO_STABILITY
+    #: The training-only label as the results showed it, that the result rests on no unsourced relation of the lookup
+    #: model, or that the record holds neither (SPC-207).
+    training_only: str = NO_TRAINING_LABEL
+
+    @property
+    def training(self) -> bool:
+        """Whether the record says its result is for training only, so the page marks it so."""
+        return self.training_only not in (SOURCED_RELATIONS, NO_TRAINING_LABEL)
 
     @property
     def primary_recorded(self) -> bool:
@@ -554,4 +573,13 @@ def listed(row: DecisionRecord, viewer: Operator) -> ListedRecord:
             _NOT_PERMITTED.format(name=r["name"], id=r["id"], reason=r["not_permitted"]) for r in _vetoed(row)
         ),
         stability=NO_STABILITY if row.weight_stability is None else _STABILITY.format(line=row.weight_stability),
+        training_only=training_text(row.training_only),
     )
+
+
+def training_text(label: str | None) -> str:
+    """What the records page and scripts/replay_decision.py say of a record's training-only label (SPC-207): the
+    label, that there is none to give, or that none was recorded."""
+    if label is None:
+        return NO_TRAINING_LABEL
+    return label or SOURCED_RELATIONS

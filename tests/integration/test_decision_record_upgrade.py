@@ -1,4 +1,4 @@
-"""A database made by 0.27.0 is upgraded in place (SPC-194, SPC-193, SPC-205).
+"""A database made by 0.27.0 is upgraded in place (SPC-194, SPC-193, SPC-205, SPC-207).
 
 0.27.0 created decision_records without the primary rule, whether the chosen rule differed, or the stored inputs.
 init_db adds each missing column to the table already there, keeping every record it holds, and a record from
@@ -72,8 +72,9 @@ INSERT INTO decision_records (
     'Held to it', '2026-11-09 10:05:00'
 )
 """
-#: The columns 0.28.0 adds to decision_records, and the weight stability's (SPC-205).
-_ADDED = {"primary_rule", "rule_differed", "inputs", "inputs_sha256", "weight_stability"}
+#: The columns 0.28.0 adds to decision_records, the weight stability's (SPC-205) and the training-only label's
+#: (SPC-207).
+_ADDED = {"primary_rule", "rule_differed", "inputs", "inputs_sha256", "weight_stability", "training_only"}
 
 
 def _columns(sync_conn: Any) -> set[str]:
@@ -143,6 +144,17 @@ class TestA0270DatabaseIsUpgradedInPlace:
         assert listed(row, Operator(3, "veteran")).stability == (
             "Weight stability: not recorded; this record was written by a version of SPECTRE that did not record it."
         )
+
+    def test_the_old_record_holds_no_training_label_and_says_so(self, old_database: Any) -> None:
+        """SPC-207: a record written before the training-only label was recorded reads as one that recorded none."""
+        _columns_, row, _count = _boot_and_read(old_database)
+        assert row.training_only is None
+        shown = listed(row, Operator(3, "veteran"))
+        assert shown.training_only == (
+            "Training-only label: not recorded (this record predates it): it was written by a version of SPECTRE "
+            "that did not record whether its result rests on an unsourced relation of the lookup model."
+        )
+        assert shown.training is False
 
     def test_the_old_record_holds_no_inputs_and_replay_says_why(self, old_database: Any) -> None:
         _columns_, row, _count = _boot_and_read(old_database)

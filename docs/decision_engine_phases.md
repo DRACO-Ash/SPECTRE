@@ -11,7 +11,9 @@ probability over mutually exclusive actions with the remainder weighed (SPC-203)
 engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205); and for element-set error in
 every closest approach the engine propagates (SPC-202); and for 0.38.0: a game tree's own cost cap, measured under
 load (SPC-188), the best branch under each response (SPC-189), ties shown as ties (SPC-206), scores with no colour
-bands (SPC-208) and decide-by only on the operator's own response time (SPC-211).
+bands (SPC-208) and decide-by only on the operator's own response time (SPC-211); and for the lookup model's
+relations registered and every result resting on one labelled training only (SPC-207), and the update's likelihood
+said to be uncalibrated, with a calibration harness that has no data yet (SPC-210).
 The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
 why.*
 
@@ -455,8 +457,9 @@ NOTSO-derived P) and decision 18 (how the interval reaches the pick).
   and when each row burns again.
 ● **The recommendation per turn** for the selector in use: turn 1's pick, then each later turn's pick after each
   thing the turns before may show, following our own picks. A turn-1 pick that differs from the matrix's says so.
-● **The update after turn 1**, under expected value: the likelihood model, naming what each row shows, then the
-  update for the observation the operator stated, with its basis, or a line saying no observation was stated so
+● **The update after turn 1**, under expected value: the likelihood model, naming what each row shows and saying
+  the likelihood is uncalibrated, with no calibration data yet (SPC-210), then the update for the observation the
+  operator stated, with its basis, which says the same, or a line saying no observation was stated so
   nothing was updated. An observation no row gives under the model, a tree with no later turn built, or a tree that
   gives no pick updates nothing and says so.
 ● **What each turn lets us see**, in the same place under minimax or minimin: the same custody rule, naming what
@@ -530,7 +533,9 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   not which; held through it shows no burn; degraded, lost for another reason, or not read, shows nothing. Each row
   gives one of these for certain. This was chosen over a new detection model with made-up rates. The update is a
   lookup. Owner ruling, 2026-11-05: keep. Degraded custody scores between held and lost since SPC-179, but it is
-  neither held through a turn nor lost at a burn from held, so it still shows nothing.
+  neither held through a turn nor lost at a burn from held, so it still shows nothing. Since SPC-210 (evaluation
+  F-22) the results say wherever the update's probability is shown that the likelihood is uncalibrated, with no
+  calibration data yet.
 ● **D11. Red's next move is weighed by P as entered.** Nothing sourced says how red's turn-1 move bears on its next,
   so the update says which turn-1 branch we are on, not what red does next, and the same rule reads turn 2 in a
   3-turn tree. A persistent-intent model needs a stated prior strength, which is the owner's decision. A row's
@@ -1295,11 +1300,86 @@ that rating stands until the security lead has signed the model and the evaluati
   A response marked not permitted is still greyed, which says it is no candidate, not how good its score is.
   `tests/unit/test_decision_score_colours.py` pins it.
 
+## The lookup model's relations: training only (SPC-207)
+
+**Status: built.** Evaluation finding F-17 (Medium). The lead's ruling of 2026-11-13: register each relation with
+its basis, and label every result resting on an unsourced one training only, naming it; change no number.
+
+● **The relations.** Where nothing is computed or sampled the engine sets a figure by seven relations: the custody
+  rule (custody lost when red manoeuvres and our response neither manoeuvres nor retasks a sensor, for the row's
+  custody gap share of the horizon); a sensor retask's custody gap of 0.5 of its time to execute against a
+  manoeuvre; the closest approach by red's action type (200 km against a manoeuvre, 5,000 km against no action,
+  10,000 km against a sensor retask, 3,000 km against any other); our manoeuvre's multiplier of 1 plus 5 times its
+  cost on that miss; our posture change's of 1 plus 2 times its cost; our delta-V with no sized burn of cost times
+  50 m/s; and a closest approach at 0.4 of the horizon. Each has a row in `docs/lookup-register.md`, "The lookup
+  model's relations", with its words, constants, place in the code and basis. No source was found for any of them,
+  so each basis is "unsourced judgement"; none of the numbers changed.
+● **The label.** `ScenarioResult.lookup_relations` reads which relations a result rests on from the bases its own
+  figures carry, in every cell of the matrix and every node of a game tree, so no path that sets a lookup figure
+  can leave its relation unnamed. A result resting on any says first, at the top of the results and above anything
+  that names a response (the collect-first advice, the headline and every rule's pick), "Training only.", that it
+  rests on unsourced relations of the lookup model, so use it to train, not to decide, and names each in the
+  register's words. The words are built from the constants, so the label cannot say one number while the code uses
+  another. A result that cannot say which it rests on is shown as resting on every one; the page never shows a
+  result without the label it needs, and `tests/unit/test_lookup_relations.py` fails if any response is named
+  above it. The session log's "Modelled recommendation" line carries the label too. Custody taken at its worst case,
+  a burn at the epoch for a manoeuvre row with no burn time, is a bound chosen on purpose, not the custody rule, and
+  brings no label.
+● **The record.** The decision record keeps the label as the results showed it, in a new nullable column,
+  `training_only`, or "" for a result resting on none; `init_db` adds the column to an older database in place. The
+  records page shows it, marked in bold when it is a label, and a record from before reads "Training-only label: not
+  recorded (this record predates it)". `scripts/replay_decision.py` says the same before its comparison. The label
+  is no input and no pick, so a replay says it and does not compare it: the stored inputs are unchanged at version
+  6, and a record from before the label, simulated by nulling the column, replays exactly.
+● **Not in the label** (Claude's reading, for the owner): the score's weights and its 50,000 km far anchor, which are
+  value judgements; the element-set error model and the archetypes' spreads, which shape computed and sampled
+  figures; the collect-first times and decide-by's response time; and the update's custody likelihood, said
+  instead to be uncalibrated (SPC-210). Each but the last is listed in the register with its own source; the
+  update's likelihood holds no constant to list, and the register's relations section names it and SPC-210.
+  `tests/unit/test_lookup_relations.py`, `tests/unit/test_lookup_register.py` and
+  `tests/integration/test_decision_training_only_record.py` pin it.
+
+## The update's likelihood: uncalibrated, and the harness to calibrate it (SPC-210)
+
+**Status: harness built; no calibration data.** Evaluation finding F-22 (Medium).
+
+● **What is said.** The update after turn 1 rests on the custody rule as its likelihood: each row gives what it gives
+  for certain. Nothing has scored that rule against what happened. Wherever the update's probability is shown, in
+  the likelihood model's line and in the update's basis, the results say "the likelihood is uncalibrated, with no
+  calibration data yet: no held history of what red did has been scored against it (SPC-210)".
+  `tests/unit/test_update_uncalibrated.py` renders the update for every observation and fails if a share of the
+  weight is shown without those words.
+● **The harness.** `spectre/domain/likelihood_calibration.py` reads held histories and reports their Brier score
+  (the mean squared difference between each predicted probability in the file and its outcome, 0 at best, 1 at
+  worst), a reliability table in equal bins of predicted probability (each bin's count, mean predicted probability
+  and observed rate) and the sample count. It names the data file by the SHA-256 of its bytes, and the code by
+  SPECTRE's version string and the SHA-256 of the scoring module's bytes and of the command's; each hash covers that
+  one file only. `scripts/calibrate_likelihood.py HISTORIES.csv` runs it, with an optional number of bins from 1 to
+  1,000 (10 unless given; any other number is a usage error), and writes nothing.
+● **What the score measures.** The probabilities in the file, set against their outcomes. The harness never runs the
+  update, so a score is evidence about the update's custody likelihood only if those probabilities were produced by
+  it for real held outcomes, which the harness cannot check; the report says so.
+● **The input.** UTF-8 text, a byte order mark allowed, comma-separated, header `history,predicted,observed` matched
+  exactly, case included, one held history a line:
+  `history` an identifier unique in the file, such as the record or event it came from; `predicted` the probability
+  from 0 to 1 the update gave the outcome, such as the share of the weight on red having burnt in turn 1 after what
+  custody showed; `observed` 1 if the outcome came about and 0 if not, from a source other than the custody the
+  update read. Anything else is refused, naming the physical line the record starts on.
+● **No data yet.** No held history in the repository fits: the NOTSO cache holds reported events only, with no
+  probability the update gave and no window where red was seen not to burn; the manoeuvre evidence summarises burns
+  per object; no element-set or custody history is shipped. None was simulated or made up, and no Brier score is
+  reported as calibration evidence. The tests run the harness on small hand-made fixtures whose scores are worked
+  by hand; they test the code, not the likelihood. The owner supplies held histories in the format above.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
   ranking a weighted heuristic. Since SPC-205 the results show how far one weight can move before the
   recommendation changes; swing-weight elicitation remains SPC-151.
+● **Calibrating the update's likelihood** (SPC-210): the harness is built, but no held history exists in the
+  repository to run through it. Until the owner supplies some, the likelihood stays uncalibrated and says so.
+● **Sources for the lookup model's relations** (SPC-207): none was found, so every result resting on one is labelled
+  training only. A relation that gains a verified source can have its register row and label changed together.
 ● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
 ● **Element-set error across track** is not drawn, and the along-track model is a rule of thumb, tuned, not sourced
   (SPC-202); sourced error rates per regime are SPC-215.
@@ -1335,3 +1415,5 @@ that rating stands until the security lead has signed the model and the evaluati
 | SPC-206 | A tie within a stated tolerance named as a tie, every tied response shown | Built |
 | SPC-208 | Composite scores with no colour bands | Built |
 | SPC-211 | Decide-by only on the operator's own response time; with none set it says it needs one | Built |
+| SPC-207 | The lookup model's relations registered, each an unsourced judgement; every result resting on one labelled training only, on screen and on the record | Built |
+| SPC-210 | The update's likelihood said to be uncalibrated wherever its probability is shown; a calibration harness with no data yet | Harness built; no calibration data |

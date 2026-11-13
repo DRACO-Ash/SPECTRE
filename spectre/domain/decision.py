@@ -134,7 +134,7 @@ import logging
 import math
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
@@ -2154,6 +2154,25 @@ class ScenarioResult:
         return f"{modelled} {_TO_EARN[_bound_sides(getattr(self.scenario, 'binding', None))]}"
 
     @property
+    def lookup_relations(self) -> tuple[LookupRelation, ...]:
+        """Every unsourced relation of the lookup model a figure of this result rests on, each once, in the register's
+        order: read from the bases of each cell of the matrix and of each node of a game tree (SPC-207)."""
+        actions, responses = self.scenario.adversary_actions, self.scenario.friendly_responses
+        used: set[LookupRelation] = set()
+        for action, row in zip(actions, self.outcome_matrix, strict=True):
+            for response, cell in zip(responses, row, strict=True):
+                used |= lookup_relations(action, response, _cell_bases(cell))
+        for node in _tree_nodes(() if self.tree is None else self.tree.roots):
+            used |= lookup_relations(actions[node.action], responses[node.response], _node_bases(node))
+        return tuple(r for r in LookupRelation if r in used)
+
+    @property
+    def training_only(self) -> str | None:
+        """The training-only label naming every unsourced relation this result rests on; None when it rests on none
+        (SPC-207, evaluation F-17). The results page shows it above the recommendation and the record keeps it."""
+        return training_only_label(self.lookup_relations)
+
+    @property
     def custody_rule_of_thumb(self) -> bool:
         """Whether any cell's custody is still the rule of thumb, so the page says so only then.
 
@@ -2691,6 +2710,124 @@ _RETASK_GAP_SHARE = 0.5
 _LOOKUP_TCA_SHARE = 0.4
 #: The score's far anchor for closest approach, km: no threat at or beyond it (SPC-191 keeps it from before).
 _CA_NORMALISATION_KM = 50_000.0
+
+
+# ── The lookup model's relations, and the training-only label (SPC-207, evaluation F-17) ──
+
+class LookupRelation(StrEnum):
+    """One relation of the lookup model, by the name the register and the label give it, in the register's order.
+
+    None has a source: each is an unsourced judgement (docs/lookup-register.md), so a result resting on any of them
+    is labelled training only, naming each. The custody rule has no constant of its own: it reads the row's custody
+    gap share, the operator's judgement, and sets which responses keep custody.
+    """
+
+    CUSTODY = "custody rule"
+    RETASK_GAP = "sensor-retask gap"
+    MISS_BY_ACTION = "closest approach by action type"
+    MANOEUVRE_MISS = "manoeuvre multiplier"
+    POSTURE_MISS = "posture multiplier"
+    DELTA_V = "delta-V per cost"
+    TCA = "time to closest approach"
+
+
+#: Red's action types as the closest approach by action type names them; any other is a posture change.
+_ACTION_WORDS: dict[ActionType, str] = {
+    ActionType.MANOEUVRE: "a manoeuvre", ActionType.NO_ACTION: "no action", ActionType.SENSOR_RETASK: "a sensor retask",
+}
+
+
+def relation_words() -> dict[LookupRelation, str]:
+    """Each relation in words, its numbers read from the constants the lookup model holds, so the words cannot say
+    one number while the code uses another."""
+    by_action = [f"{_BASE_CA_KM[kind]:,.0f} km against {words}" for kind, words in _ACTION_WORDS.items()]
+    return {
+        LookupRelation.CUSTODY: (
+            "custody is lost when red manoeuvres and our response neither manoeuvres nor retasks a sensor, for the "
+            "row's custody gap share of the horizon, and is held otherwise"
+        ),
+        LookupRelation.RETASK_GAP: (
+            f"against a manoeuvre, a sensor retask's custody gap is {_RETASK_GAP_SHARE:g} of its time to execute"
+        ),
+        LookupRelation.MISS_BY_ACTION: (
+            f"the closest approach is {', '.join(by_action)} and {_OTHER_CA_KM:,.0f} km against any other action"
+        ),
+        LookupRelation.MANOEUVRE_MISS: (
+            f"our manoeuvre multiplies that closest approach by 1 plus {_MANOEUVRE_CA_PER_COST:g} times its cost"
+        ),
+        LookupRelation.POSTURE_MISS: (
+            f"our posture change multiplies that closest approach by 1 plus {_POSTURE_CA_PER_COST:g} times its cost"
+        ),
+        LookupRelation.DELTA_V: (
+            f"our manoeuvre with no sized burn spends its cost times {from_km_s(_LOOKUP_DV_KM_S_PER_COST):g} m/s of "
+            "delta-V"
+        ),
+        LookupRelation.TCA: f"the closest approach comes at {_LOOKUP_TCA_SHARE:g} of the horizon",
+    }
+
+
+LOOKUP_RELATION_WORDS: dict[LookupRelation, str] = relation_words()
+#: The label a result resting on one unsourced relation carries, on screen and in its decision record.
+TRAINING_ONLY_ONE = (
+    "Training only. This result rests on an unsourced relation of the lookup model, a judgement with no source behind "
+    "it (docs/lookup-register.md, SPC-207), so use it to train, not to decide: {relations}."
+)
+#: What the results page shows of a result that cannot say which relations it rests on: it fails closed, read as
+#: resting on every one, as a result that cannot say whether it is modelled is shown as modelled.
+TRAINING_ONLY_UNKNOWN = (
+    "Training only. This result cannot say which unsourced relations of the lookup model it rests on, so read it as "
+    "resting on every one of them (docs/lookup-register.md, SPC-207): use it to train, not to decide."
+)
+#: The same, for several.
+TRAINING_ONLY_MANY = (
+    "Training only. This result rests on unsourced relations of the lookup model, judgements with no source behind "
+    "them (docs/lookup-register.md, SPC-207), so use it to train, not to decide: {relations}."
+)
+
+
+def lookup_relations(
+    action: AdversaryAction, response: FriendlyResponse, bases: OutcomeBases,
+) -> frozenset[LookupRelation]:
+    """The relations a cell of *action* against *response* rests on, read from its figures' bases: a figure the
+    lookup model set is a lookup. Custody taken at its worst case, a burn at the epoch, is a bound chosen on purpose,
+    not the custody rule."""
+    used: set[LookupRelation] = set()
+    if bases.custody_maintained.kind is Basis.LOOKUP and bases.custody_maintained.note != _WORST_CASE_NOTE:
+        used.add(LookupRelation.CUSTODY)
+        if action.action_type is ActionType.MANOEUVRE and response.action_type is ActionType.SENSOR_RETASK:
+            used.add(LookupRelation.RETASK_GAP)
+    if bases.closest_approach_km.kind is Basis.LOOKUP:
+        used.add(LookupRelation.MISS_BY_ACTION)
+        if response.action_type is ActionType.MANOEUVRE:
+            used.add(LookupRelation.MANOEUVRE_MISS)
+        elif response.action_type is ActionType.POSTURE_CHANGE:
+            used.add(LookupRelation.POSTURE_MISS)
+    if bases.delta_v_cost_km_s.kind is Basis.LOOKUP and response.action_type is ActionType.MANOEUVRE:
+        used.add(LookupRelation.DELTA_V)
+    if bases.time_to_closest_hours.kind is Basis.LOOKUP:
+        used.add(LookupRelation.TCA)
+    return frozenset(used)
+
+
+def training_only_label(relations: Sequence[LookupRelation]) -> str | None:
+    """The training-only label naming each of *relations*; None for none."""
+    if not relations:
+        return None
+    named = "; ".join(f"the {r.value}, that {LOOKUP_RELATION_WORDS[r]}" for r in relations)
+    return (TRAINING_ONLY_ONE if len(relations) == 1 else TRAINING_ONLY_MANY).format(relations=named)
+
+
+def _tree_nodes(roots: Sequence[Any]) -> Iterator[Any]:
+    """Every node under *roots*, depth first, a hand-built node included."""
+    for node in roots:
+        yield node
+        yield from _tree_nodes(getattr(node, "children", ()))
+
+
+def _node_bases(node: Any) -> OutcomeBases:
+    """A node's bases; an unrecorded basis reads as a lookup, never as computed, as a cell's does."""
+    bases = getattr(getattr(node, "figures", None), "bases", None)
+    return bases if isinstance(bases, OutcomeBases) else LOOKUP_BASES
 
 
 def compute_outcome_metrics(

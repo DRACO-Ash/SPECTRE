@@ -16,8 +16,19 @@
    engine's remainder, not the operator's row, in the matrix and the rankings; each row shows beside its P the share
    of expected value it takes, written as its P is so the two read alike, each guarded so an older result renders.
    A tie (SPC-206) names every tied response in the headline and stars each. No composite score is coloured by band:
-   no sourced threshold exists, so the number stands with its words (SPC-208, evaluation F-18). #}
+   no sourced threshold exists, so the number stands with its words (SPC-208, evaluation F-18). A result resting on an
+   unsourced relation of the lookup model is labelled training only first, above anything that names a response,
+   naming each relation; one that cannot say is labelled as resting on every one (SPC-207, evaluation F-17). #}
 {% import "partials/_modelled.html" as modelled %}
+
+{# ── Training only (SPC-207, evaluation F-17): a result resting on any unsourced relation of the lookup model says
+     so first, above everything that names a response (the collect-first advice, the headline and every rule's pick),
+     naming each relation. Fails closed: a result that cannot say is shown as resting on every one, in
+     decision.TRAINING_ONLY_UNKNOWN's words, never without the label. ── #}
+{% set training_only = result.training_only if result.training_only is defined else "Training only. This result cannot say which unsourced relations of the lookup model it rests on, so read it as resting on every one of them (docs/lookup-register.md, SPC-207): use it to train, not to decide." %}
+{% if training_only %}
+<p class="training-only" role="note" style="margin:0 0 0.4rem; font-size:0.66rem; font-weight:700; color:var(--gold); overflow-wrap:anywhere">{{ training_only }}</p>
+{% endif %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}

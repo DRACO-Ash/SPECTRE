@@ -12,6 +12,10 @@ the evaluation recorded ran out of its time budget. It writes nothing: a SQLite 
 
     python scripts/replay_decision.py RECORD_ID
 
+Before the comparison it says the record's training-only label (SPC-207) as the Decision records page shows it: the
+label naming each unsourced relation of the lookup model the result rested on, that it rested on none, or that the
+record predates the label. The label is no input and no pick, so it is said, not compared.
+
 Exit codes: 0 the replay matches the record; 1 it differs; 2 a usage error; 3 nothing to replay: no record with
 that id, a record written before 0.28.0 with no stored inputs, inputs the strict reader refuses, or a database
 that cannot be read or is not there.
@@ -32,7 +36,7 @@ if str(_ROOT) not in sys.path:
 import spectre  # noqa: E402 - after the repository root is on the path
 from spectre.domain.decision_inputs import InputsRefusedError  # noqa: E402
 from spectre.domain.decision_replay import said_first  # noqa: E402
-from spectre.web.decision_record import replay_record, stored_of  # noqa: E402
+from spectre.web.decision_record import replay_record, stored_of, training_text  # noqa: E402
 from spectre.web.models import DecisionRecord  # noqa: E402
 
 MATCHES, DIFFERS, USAGE, NOTHING = 0, 1, 2, 3
@@ -107,6 +111,9 @@ def _replayed(row: DecisionRecord) -> int:
         _say(str(refused))
         return NOTHING
     _say(*said_first(stored, spectre.__version__))
+    # The record's training-only label as the records page shows it (SPC-207): no input and no pick, so it is said,
+    # not compared, and a record from before it says none was recorded.
+    _say(training_text(row.training_only))
     done = replay_record(row, stored=stored, running=spectre.__version__)
     _say(*done.report)
     return MATCHES if done.matches else DIFFERS
