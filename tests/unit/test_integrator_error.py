@@ -137,10 +137,10 @@ class TestTheWords:
     def test_the_sampled_note_ends_with_it(self) -> None:
         series = _series(_SKEWED)
         note = decision._sampled_bases(series, 12.0).closest_approach_km.note
-        # Then the WGS-72 to WGS-84 handover (SPC-225) and the seed (SPC-224).
+        # Then the WGS-72 to WGS-84 handover (SPC-225), the forces left out (SPC-209) and the seed (SPC-224).
         assert note.endswith(
             f"; {monte_carlo.integrator_error_words(12.0)}; {monte_carlo.handover_words(12.0)}; "
-            f"{decision.seed_words(series)}",
+            f"{monte_carlo.force_model_words(12.0)}; {decision.seed_words(series)}",
         )
         assert "by 24 h" in note
 
@@ -161,10 +161,11 @@ class TestTheSpanIsWhatRK45Runs:
         assert note.endswith(
             "RK45 runs up to 120.0 h here, from the burn to the window's end; "
             f"{monte_carlo.integrator_error_words(120.0)}; {monte_carlo.handover_words(120.0)}; "
-            f"{decision.seed_words(series)}",
+            f"{monte_carlo.force_model_words(120.0)}; {decision.seed_words(series)}",
         )
         assert monte_carlo.integrator_error_words(120.0).endswith("; it was measured to 72 h only, and grows with time")
         assert monte_carlo.handover_words(120.0).endswith("; it was measured to 72 h only, and grows with time")
+        assert monte_carlo.force_model_words(120.0).endswith("; it was measured to 72 h only, and grows with time")
 
     def test_a_burn_inside_the_window_integrates_the_window(self) -> None:
         window = self._window(30.0)

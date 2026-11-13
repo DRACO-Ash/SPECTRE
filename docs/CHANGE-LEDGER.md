@@ -1387,3 +1387,13 @@ Scores, inputs, seeds, constants and dates checked before anything is recommende
 | DAST | **HYGIENE** | New refusal sentences and notes on the decision, sweep, POL, UDL and threat pages | No new input field; every new sentence is built from constants or validated figures and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
 | SAST | **HYGIENE** | Form fields now refused when absent; element sets refused when dated in the future | Refusal only narrows what is accepted; nothing is evaluated or written from the new paths. | Then the scanner flags the parse; the finding names the line. |
 | Other gates | **HYGIENE** | Stored decision inputs go to version 7; earlier versions replay exactly | No dependency, Dockerfile or image change; no schema migration. | n/a. |
+
+## 0.43.0
+
+The force model measured against a higher-fidelity one, and every sampled note saying where it holds.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `monte_carlo.py` (two figure tables and their words) and `decision.py` (the sampled basis note takes red's regime); a new measuring reference under `tests/unit/` | `scripts/sonar_rules.py 3c8fe56`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 3c8fe56: all PASS. Full suite on Python 3.12, figures in the commit. An independent review killed 18 of 18 mutants; its two findings are fixed. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | One clause added to the sampled basis note on the Decision Engine results | No new input; the clause is built from constants and the regime read from the element set, and autoescaped. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the reference uses numpy and scipy, already locked, and ships nowhere. | n/a. |

@@ -1,9 +1,9 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.43: 1 items, 900 priced min, gates container, lint, quality, sast, tests
-  forecast 15h00 to 15h00 (middle 15h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-209       900m  placed alone: it does not fit any release
-  lane 1 (900m): SPC-209
+V0.44: 1 items, 120 priced min, gates lint, tests
+  forecast 2h00 to 2h00 (middle 2h00), people's time 0 min, evidence: settings (nothing measured yet)
+    SPC-242       120m  priority low; anchors the release
+  lane 1 (120m): SPC-242
 
 waiting: SPC-080 - needs an owner answer
 
@@ -40,5 +40,4 @@ off path: SPC-084 - research: no release gate
 off path: SPC-085 - research: no release gate
 
 off path: SPC-151 - research: no release gate
-WARNING SPC-209: needs 900 min, over the 840 cap on its own
 WARNING SPC-032: cannot be placed, its dependencies never become ready

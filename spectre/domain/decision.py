@@ -166,6 +166,7 @@ from spectre.astro.monte_carlo import (
     _ric_split,
     confirmed,
     elset_state,
+    force_model_words,
     handover_words,
     hypothesis_from_tle_record,
     integrator_error_words,
@@ -4173,16 +4174,18 @@ def seed_words(series: SeparationSeries) -> str:
     return SEED_TWO.format(seed=series.random_seed, check=series.check.seed)
 
 
-def _sampled_bases(
+# PLR0913: the series and the horizon, then what the note says about it, each named at the call.
+def _sampled_bases(  # noqa: PLR0913
     series: SeparationSeries, horizon_hours: float, *, burnt: bool = False, drawn: ElsetErrorAt | None = None,
-    burn_at: datetime | None = None,
+    burn_at: datetime | None = None, regime: str | None = None,
 ) -> OutcomeBases:
     n, span = len(series.approaches), series.window.span_s / _SECONDS_PER_HOUR
     ours = _BURN_ENDING if burnt else _NO_BURN_ENDING
     integrated = _integrated_hours(series.window, burn_at)
     early = burn_at is not None and burn_at < series.window.start_utc
     integrator = _INTEGRATED.format(h=integrated, start=_FROM_BURN if early else _FROM_WINDOW)
-    handover = f"{handover_words(integrated)}; {seed_words(series)}"
+    # Then the forces RK45 leaves out, measured by regime and burn size, for red's regime (SPC-209, evaluation F-19).
+    handover = f"{handover_words(integrated)}; {force_model_words(integrated, regime)}; {seed_words(series)}"
     note = (_SAMPLED_CA_NOTE if drawn is None else _SAMPLED_CA_NOTE_ELSET).format(
         n=n, hw5=series.p5_half_width_km, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours,
         ours=ours, integrator=f"{integrator}{integrator_error_words(integrated)}; {handover}",
@@ -4211,6 +4214,13 @@ def _cell_caveat(series: SeparationSeries) -> str:
     return caveat
 
 
+def _red_regime(scenario: Scenario) -> str | None:
+    """Red's regime by its element set, as along_track.orbit_regime states it, for the force-model words (SPC-209);
+    None when it cannot be read. A sampled cell's scenario is bound to red."""
+    basis = regime_basis(cast("BoundElset", cast("ScenarioBinding", scenario.binding).red).tle)
+    return None if basis is None else basis.regime
+
+
 def _sampled_cell(
     adversary: AdversaryAction, scenario: Scenario, series: SeparationSeries, custody: _RowCustody | None,
     response: _ResponseCell,
@@ -4235,7 +4245,7 @@ def _sampled_cell(
     )
     burn_at = None if adversary.hypothesis is None else adversary.hypothesis.hypothesis.epoch_utc
     bases = response.bases(_sampled_bases(series, scenario.horizon_hours, burnt=response.burnt, drawn=drawn,
-                                          burn_at=burn_at))
+                                          burn_at=burn_at, regime=_red_regime(scenario)))
     built = _Built(figures, series.earliest_tca_at_or_below_p5_s / _SECONDS_PER_HOUR, bases)
     tca, sampled_tca = _sampled_tca(scenario, series)
     return _outcome(

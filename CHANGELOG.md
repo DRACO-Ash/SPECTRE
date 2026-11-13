@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-13
+
+**The force model measured against a higher-fidelity one, and every sampled note saying where it holds.**
+
+### Changed
+- The RK45 force model (two-body, J2 and drag) is measured against a reference that adds J3 and J4, the Moon, the Sun and solar radiation pressure, on 6 pairs across LEO, MEO, GEO and HEO/Molniya, with burns of none, 0.1, 1 and 10 m/s, and with both objects alike or one at a quarter or none of the other's area-to-mass ratio. The omitted forces move a GEO object up to 23.8 km by 72 h and a pair's separation up to 4.2 km. Set against the sampled spread at any instant up to 72 h, they exceed it with no burn and with 0.1 m/s in LEO and at GEO, are over a tenth of it with 1 m/s in LEO, and under a tenth with 1 m/s elsewhere and with 10 m/s everywhere. The module's claim that burn dispersion dominates is corrected, the table is in `docs/decision_engine_phases.md`, and each sampled basis note now states the figures for red's own regime. The physics is unchanged and old records replay exactly; stating the omission rather than changing the physics is Claude's judgement for the owner to confirm (SPC-209, F-19).
+
 ## [0.42.0] - 2026-11-13
 
 **Scores, inputs, seeds, constants and dates checked before anything is recommended.**

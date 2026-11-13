@@ -2168,7 +2168,11 @@
   "note": "Evaluation finding F-19 (Medium, §1g, L2), evaluation/EVALUATION.md. Remediation: compare against a higher-fidelity propagator by regime and burn size, and state where the claim holds. Closing evidence: a comparison table by regime.",
   "files": [
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.43.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-210",
@@ -2679,5 +2683,18 @@
   ],
   "state": "closed",
   "supersededBy": "Owner ruling 2026-11-12: the U//DS-JCO-NOTIF control does not carry over to the derived file; keep spectre/data/manoeuvre_evidence.json in the repository."
+ },
+ {
+  "ref": "SPC-242",
+  "priority": "low",
+  "order": 21,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "Fix the test-order fault: some groupings of test_decision_record_route.py fail with 'database is locked'",
+  "note": "Found building SPC-209: one 18-part split of the suite put 64 errors and 6 failures into test_decision_record_route.py, reproduced on an untouched 1023223 tree. No single file paired with it reproduces it. The whole suite in one process passes. Find the test that leaves a SQLite connection or transaction open.",
+  "files": [
+   "tests/integration/test_decision_record_route.py",
+   "tests/conftest.py"
+  ]
  }
 ]

@@ -21,9 +21,22 @@ Design notes
 - Perturbations are applied in the Radial-In track-Cross track (RIC) frame and
   then rotated to ECI before integration — physically meaningful for pointing
   errors.
-- Propagation uses J2 + simplified exponential atmosphere drag.  At 48 h, the
-  MC uncertainty envelope from ΔV variation dominates over force-model error,
-  so high-fidelity ephemeris is unnecessary.
+- Propagation uses J2 + simplified exponential atmosphere drag. It leaves out
+  J3 and J4, the Moon, the Sun and solar radiation pressure. Measured against
+  a reference with them on 6 pairs across LEO, MEO, GEO and HEO/Molniya
+  (SPC-209, evaluation F-19, tests/unit/test_force_model_error.py), they move
+  each object up to 24 km at GEO by 72 h. Two objects of the same
+  area-to-mass ratio move largely alike, so a close pair's separation moves
+  under 0.1 km at GEO; when one has none and the other 0.02 m^2/kg, it moves
+  2.4 km. Set against the spread of the burn the engine samples, at any
+  instant up to 72 h, they compare by burn size. With no burn the spread is
+  drag's alone, and they
+  exceed it in every regime. With a burn of 0.1 m/s they can exceed it in
+  LEO and at GEO and are over a tenth of it in MEO and HEO/Molniya; with
+  1 m/s, over a tenth in LEO and under a tenth elsewhere; with 10 m/s, under
+  a tenth everywhere. FORCE_MODEL_KM and FORCE_MODEL_SHARE state the
+  figures, and the sampled basis note says so for red's regime. The physics
+  is stated, not changed: Claude's judgement, for the owner to confirm.
 - Concurrency: ThreadPoolExecutor. The equations of motion are a Python
   function, so the integrator holds the GIL for most of each step and threads
   give little speed-up; they were described as releasing it (audit F-221).
@@ -37,7 +50,7 @@ import functools
 import logging
 import math
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -557,9 +570,83 @@ _WGS_HANDOVER = (
     "constants, and flies them with WGS-84's; flown with WGS-72's instead, each object of three reference pairs "
     "moved up to {leo:g} km in LEO and {geo:g} km at GEO by {h} h, and the pair's separation up to {sep:g} km"
 )
+#: What the force model leaves out, km: J3 and J4, the Moon, the Sun and solar radiation pressure, measured by
+#: tests/unit/test_force_model_error.py (SPC-209, evaluation F-19) against a reference with them, on 6 reference
+#: pairs, one to three per regime, at B* 1e-4 and Cr 1.3, with red given an in-track burn of none, 0.1, 1 or 10 m/s.
+#: Keyed by horizon, h: the largest position change of any object up to it in LEO, MEO, at GEO and in HEO/Molniya;
+#: the largest change in any pair's separation with any of those burns when both objects have an area-to-mass ratio
+#: of 0.02 m^2/kg, so radiation pressure moves them alike; and the same when red has 0.005 or none. Each is rounded up
+#: to 0.01 km. Whether to state the omission rather than change the physics is Claude's judgement, for the owner to
+#: confirm.
+FORCE_MODEL_KM: dict[int, tuple[float, float, float, float, float, float]] = {
+    24: (2.33, 1.31, 7.24, 2.8, 1.32, 1.36),
+    48: (4.67, 2.31, 15.08, 5.41, 2.74, 2.81),
+    72: (7.01, 3.25, 23.81, 7.89, 4.05, 4.16),
+}
+#: By regime, the largest share of the sampled spread the same separation change reaches, for burns of 0.1, 1 and
+#: 10 m/s: the change, the worse of alike and unlike objects, over the spread of the samples' separation at the same
+#: instant, at any instant read every 10 min up to 72 h, in any of the regime's pairs, rounded up to 2 significant
+#: figures. The spread is the engine's own draws at the Intercept / Approach archetype's spreads, the tightest it
+#: holds; with no burn it is drag's spread alone, which the change exceeds in every regime. Measured as above.
+FORCE_MODEL_SHARE: dict[str, tuple[float, float, float]] = {
+    "LEO": (1.8, 0.14, 0.016),
+    "MEO": (0.36, 0.036, 0.0038),
+    "GEO": (4.9, 0.074, 0.0063),
+    "HEO/Molniya": (0.91, 0.089, 0.0082),
+}
+_SHARE_BURNS_M_S = ("0.1", "1", "10")
+# Where a share is comparable to the spread rather than small beside it: an order of magnitude.
+_TENTH = 0.1
+_FORCE_MODEL = (
+    "force model, not in the spread: RK45 leaves out J3 and J4, the Moon, the Sun and solar radiation pressure, which "
+    "against a higher-fidelity reference moved each object of 6 reference pairs up to {leo:g} km in LEO, {meo:g} km "
+    "in MEO, {geo:g} km at GEO and {heo:g} km in HEO/Molniya by {h} h, and a pair's separation up to {alike:g} km when "
+    "both objects have the same area-to-mass ratio and up to {unlike:g} km when one has 0.02 m^2/kg and the other "
+    "0.005 or none; {where}, set against the spread sampled at any instant up to 72 h, between such unlike objects, "
+    "they are {shares}"
+)
+_REGIME_UNREAD = "red's regime could not be read"
+_WORST_MEASURED = ", so in whichever of LEO, MEO, GEO and HEO/Molniya each is largest"
 
 
-def _measured_at(table: dict[int, tuple[float, float, float]], horizon_hours: float) -> int:
+def _or(items: Sequence[str]) -> str:
+    """*items* joined in words: "a", "a or b", "a, b or c"."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} or {items[-1]}"
+
+
+def _burn_share(burn_m_s: str, share: float, it: str = "") -> str:
+    """A burn and its share of the spread: "1 m/s (0.14 times)"."""
+    return f"{burn_m_s} m/s ({share:g} times{it})"
+
+
+def _share_words(shares: Sequence[float]) -> str:
+    """Where the force model's separation change is larger than, over a tenth of and under a tenth of the sampled
+    spread, by burn, in words (SPC-209)."""
+    paired = list(zip(_SHARE_BURNS_M_S, shares, strict=True))
+    larger = [_burn_share(b, s, " it") for b, s in paired if s >= 1.0]
+    over = [_burn_share(b, s) for b, s in paired if _TENTH <= s < 1.0]
+    under = [_burn_share(b, s) for b, s in paired if s < _TENTH]
+    head = "larger than it with no burn, when it is drag's alone" + (
+        f", and with a burn of {_or(larger)}" if larger else ""
+    )
+    rest = ([f"over a tenth of it with a burn of {_or(over)}"] if over else []) + (
+        [f"under a tenth with a burn of {_or(under)}"] if under else []
+    )
+    if not rest:
+        return head
+    return f"{head}, and {rest[0]}" if len(rest) == 1 else f"{head}, {rest[0]} and {rest[1]}"
+
+
+def _where(regime: str | None) -> tuple[str, tuple[float, float, float]]:
+    """How the words name *regime*, and its shares; for one not measured or not read, the worst measured by burn."""
+    if regime in FORCE_MODEL_SHARE:
+        return (f"at {regime}" if regime == "GEO" else f"in {regime}"), FORCE_MODEL_SHARE[regime]
+    small, medium, large = (max(s[j] for s in FORCE_MODEL_SHARE.values()) for j in range(3))
+    named = _REGIME_UNREAD if regime is None else f"{regime} was not measured"
+    return named + _WORST_MEASURED, (small, medium, large)
+
+
+def _measured_at(table: Mapping[int, tuple[float, ...]], horizon_hours: float) -> int:
     """The shortest horizon *table* was measured at that is at or past *horizon_hours*; the longest past them all."""
     measured = sorted(table)
     return next((m for m in measured if horizon_hours <= m), measured[-1])
@@ -582,6 +669,18 @@ def handover_words(horizon_hours: float) -> str:
     h = _measured_at(WGS_HANDOVER_KM, horizon_hours)
     leo, geo, sep = WGS_HANDOVER_KM[h]
     words = _WGS_HANDOVER.format(leo=leo, geo=geo, sep=sep, h=h)
+    return words + (_INTEGRATOR_UNMEASURED.format(h=h) if horizon_hours > h else "")
+
+
+def force_model_words(horizon_hours: float, regime: str | None = None) -> str:
+    """What the force model leaves out by *horizon_hours*, chosen as integrator_error_words is, and in *regime*,
+    red's as along_track.orbit_regime states it, how that compares with the sampled spread by burn size, in words
+    (SPC-209). A regime not measured, or not read, takes the worst measured for each burn and says so."""
+    h = _measured_at(FORCE_MODEL_KM, horizon_hours)
+    leo, meo, geo, heo, alike, unlike = FORCE_MODEL_KM[h]
+    where, shares = _where(regime)
+    words = _FORCE_MODEL.format(leo=leo, meo=meo, geo=geo, heo=heo, alike=alike, unlike=unlike, h=h, where=where,
+                                shares=_share_words(shares))
     return words + (_INTEGRATOR_UNMEASURED.format(h=h) if horizon_hours > h else "")
 
 

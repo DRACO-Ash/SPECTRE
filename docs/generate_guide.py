@@ -1858,6 +1858,13 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "It holds no constraint library: a response is marked not permitted only when you tick it.")
     _add_bullet(doc, "It draws element-set error along track only, from a rule of thumb, tuned, not sourced; "
                 "error across track is not in any band.")
+    _add_bullet(doc, "It does not model J3 and J4, the Moon, the Sun or solar radiation pressure: they move each "
+                "object up to 24 km at GEO by 72 h. Two objects of the same area-to-mass ratio move largely alike, "
+                "but when they differ the separation moves too, by up to 2.4 km at GEO (SPC-209, finding F-19 of "
+                "the independent evaluation). Set against the spread a row samples, they exceed the sampled spread "
+                "with no burn, and can with a burn of 0.1 m/s in LEO and at GEO; they are under a tenth of it from "
+                "1 m/s outside LEO and from 10 m/s in LEO. Each sampled closest approach's basis note says so for "
+                "red's regime.")
     _add_bullet(doc, "It does not model a sensor's line of sight to red.")
     _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
                 "P as entered.")

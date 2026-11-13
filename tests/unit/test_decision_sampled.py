@@ -339,6 +339,14 @@ class TestASampledCell:
             "handover, not in the spread: RK45 starts from SGP4's states, which SGP4 works out with the WGS-72 "
             "constants, and flies them with WGS-84's; flown with WGS-72's instead, each object of three reference "
             "pairs moved up to 1.17 km in LEO and 0.48 km at GEO by 24 h, and the pair's separation up to 0.06 km; "
+            "force model, not in the spread: RK45 leaves out J3 and J4, the Moon, the Sun and solar radiation "
+            "pressure, which against a higher-fidelity reference moved each object of 6 reference pairs up to 2.33 km "
+            "in LEO, 1.31 km in MEO, 7.24 km at GEO and 2.8 km in HEO/Molniya by 24 h, and a pair's separation up to "
+            "1.32 km when both objects have the same area-to-mass ratio and up to 1.36 km when one has 0.02 m^2/kg and "
+            "the other 0.005 or none; in LEO, set against the spread sampled at any instant up to 72 h, between such "
+            "unlike objects, they are larger than it with no burn, when it is drag's alone, and with a burn of 0.1 m/s "
+            "(1.8 times it), over a tenth of it with a burn of 1 m/s (0.14 times) and under a tenth with a burn of "
+            "10 m/s (0.016 times); "
             "drawn on seed 42, its convergence checked on seed 43 as well, which converged too",
         )
         assert bases.time_to_closest_hours == FigureBasis(

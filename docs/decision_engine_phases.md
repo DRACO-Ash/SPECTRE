@@ -1540,6 +1540,125 @@ replays to, so the stored inputs go to version 7, which holds the convergence ru
   EPOCH" and name it apart from the age range, and the sweep's delta-V band says so rather than 0 h. Within the
   tolerance the age reads 0 h as before.
 
+## The force model measured against a reference (SPC-209)
+
+**Status: built.** Evaluation finding F-19 (Medium). The physics is not changed and no stored figure moves; the
+sampled basis note gains one clause, which no replay compares, so a record from an earlier release replays exactly
+and the stored inputs stay at version 7.
+
+● **The claim, as it stood.** The engine's RK45 flies two-body, J2 and exponential drag, and `monte_carlo.py` said
+  the spread of the burn dominates force-model error at 48 h, so a high-fidelity ephemeris is unnecessary. The
+  evaluation found RK45 and SDP4, which has lunisolar terms, 11 to 18 km apart at GEO over 48 to 72 h.
+● **The reference** (`tests/unit/_force_model_reference.py`), for measurement only: nothing in `spectre` imports it,
+  and it uses numpy and scipy alone. It adds to the engine's model J3 and J4 (EGM-96), the Moon (Montenbruck and
+  Gill, Satellite Orbits, 2000, section 3.3.2) and the Sun (Meeus, Astronomical Algorithms, 2nd ed., 1998, chapter
+  25) as point masses, and cannonball radiation pressure at Cr 1.3 in a cylindrical shadow with a smoothed edge;
+  drag is the engine's own. Every object of a run is flown in one call by DOP853 at rtol 1e-11.
+● **The reference checked first.** With the added forces off its equations are the engine's to 1e-13, and it flies
+  each object of the 6 pairs within 0.002 km of the engine's equations integrated at rtol 1e-12, and within the
+  engine's stated integrator error of the production RK45, over 72 h. Its J3 and J4 are the gradient of the zonal
+  potential. Its Sun reproduces Meeus's worked example 25.a and is within his stated 0.01 degree at the 2026
+  equinoxes and solstices (at most 0.0065); its Moon is within 0.0053 degree, 0.0022 degree and 51 km of Meeus's
+  example 47.a, which comes from a fuller lunar theory, and within 0.016 degree of conjunction and opposition at the
+  new and full moons of February and March 2026. No published accuracy for the lunar series could be confirmed in
+  this build, so 0.05 degree and 100 km are the bounds the test uses.
+● **What it flies** (SPC-209, F-19). `tests/unit/test_force_model_error.py` flies 6 pairs from their SGP4 states at
+  B* 1e-4, one to three per regime as `along_track.orbit_regime` states it: the 500 km co-planar and 550 km polar LEO
+  reference pairs and a 500 km co-planar pair whose closest approach comes about 26 h on; a co-planar MEO pair at
+  20,200 km and 55 degrees; the GEO drift-in pair, closest about 31 h on; and a Molniya pair (e 0.74, 63.4 degrees,
+  perigee 528 km). Blue's area-to-mass ratio is 0.02 m^2/kg. Red's is the same (alike), or 0.005 or none (unlike):
+  radiation pressure on two objects of one ratio largely cancels in their separation, and on two unlike objects does
+  not. The ratios are a judgement, far above the 5.8e-4 m^2/kg B* 1e-4 implies, so radiation pressure is not
+  understated. Red is given an in-track burn of none, 0.1, 1 or 10 m/s at the epoch: a collision-avoidance burn,
+  about half the evasive and station-keeping archetypes' 2 m/s, and the phasing archetype's. Every 60 s it reads how
+  far the reference moves each object and the pair's separation from where the engine's forces put them, the
+  integrator's own error kept out.
+● **What the forces move** (SPC-209, F-19), km, the largest up to each horizon: position, any object's with any burn
+  in any case; then the pair's separation, alike and, the worse of the two, unlike:
+
+| Pair | Horizon | Position | Alike: none | 0.1 m/s | 1 m/s | 10 m/s | Unlike: none | 0.1 m/s | 1 m/s | 10 m/s |
+|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| LEO, 500 km | 24 h | 0.916 | 0.223 | 0.224 | 0.234 | 0.328 | 0.259 | 0.260 | 0.270 | 0.363 |
+| LEO, 500 km | 48 h | 1.81 | 0.582 | 0.587 | 0.626 | 0.894 | 0.652 | 0.657 | 0.695 | 0.955 |
+| LEO, 500 km | 72 h | 2.71 | 1.06 | 1.07 | 1.14 | 1.35 | 1.16 | 1.17 | 1.24 | 1.42 |
+| LEO, 500 km, late | 24 h | 1.97 | 1.22 | 1.21 | 1.22 | 1.32 | 1.24 | 1.24 | 1.25 | 1.35 |
+| LEO, 500 km, late | 48 h | 3.91 | 2.55 | 2.56 | 2.59 | 2.74 | 2.62 | 2.63 | 2.66 | 2.80 |
+| LEO, 500 km, late | 72 h | 5.86 | 3.99 | 3.99 | 4.05 | 3.72 | 4.09 | 4.10 | 4.15 | 3.79 |
+| LEO, 550 km polar | 24 h | 2.32 | 0.121 | 0.118 | 0.080 | 0.185 | 0.126 | 0.126 | 0.101 | 0.186 |
+| LEO, 550 km polar | 48 h | 4.66 | 0.241 | 0.226 | 0.105 | 0.645 | 0.253 | 0.246 | 0.147 | 0.649 |
+| LEO, 550 km polar | 72 h | 7.01 | 0.362 | 0.323 | 0.201 | 1.25 | 0.378 | 0.358 | 0.212 | 1.26 |
+| MEO | 24 h | 1.30 | 0.005 | 0.005 | 0.004 | 0.016 | 0.394 | 0.394 | 0.397 | 0.420 |
+| MEO | 48 h | 2.30 | 0.011 | 0.011 | 0.012 | 0.054 | 0.790 | 0.791 | 0.795 | 0.828 |
+| MEO | 72 h | 3.25 | 0.020 | 0.020 | 0.024 | 0.135 | 1.19 | 1.19 | 1.19 | 1.25 |
+| GEO | 24 h | 7.23 | 0.025 | 0.025 | 0.023 | 0.181 | 0.722 | 0.744 | 0.768 | 0.622 |
+| GEO | 48 h | 15.08 | 0.049 | 0.043 | 0.038 | 0.488 | 1.60 | 1.59 | 1.53 | 1.11 |
+| GEO | 72 h | 23.81 | 0.083 | 0.073 | 0.058 | 0.943 | 2.42 | 2.41 | 2.28 | 1.41 |
+| HEO/Molniya | 24 h | 2.79 | 0.006 | 0.006 | 0.016 | 0.135 | 0.207 | 0.208 | 0.213 | 0.308 |
+| HEO/Molniya | 48 h | 5.40 | 0.013 | 0.014 | 0.059 | 0.555 | 0.727 | 0.733 | 0.780 | 1.23 |
+| HEO/Molniya | 72 h | 7.89 | 0.020 | 0.021 | 0.091 | 0.838 | 1.64 | 1.65 | 1.73 | 2.33 |
+
+  At GEO the omitted forces, the Moon's above all, move each object 15 km by 48 h and 24 km by 72 h, as the
+  evaluation found. Two alike objects move together, so a close pair's separation moves under 0.1 km outside LEO
+  with no burn; between unlike objects it moves 1.19 km in MEO, 2.42 km at GEO and 1.64 km in HEO/Molniya by 72 h.
+  In LEO J3 and J4 do most of it, and the 500 km pairs' separations move most when the pair is thousands of km apart.
+● **Against the spread sampled** (SPC-209, F-19). The spread is half the width from P5 to P95 of the pair's
+  separation over 200 of the engine's own draws (seed 42), flown by the engine's forces, at the Intercept / Approach
+  archetype's spreads, 3 per cent of the delta-V, 1.5 degrees and 15 s, the tightest the engine holds, and B* 1e-5;
+  with no burn it is drag's spread alone, nothing above 800 km, so the forces exceed it in every pair. The share is
+  the separation change, the worse of alike and unlike, over the spread at the same instant, the largest at any
+  instant read every 10 min up to the horizon. The miss share is how far the forces move the nominal closest approach
+  up to the horizon, over half the width from P5 to P95 of the samples' own closest approaches, the misses a sampled
+  cell's P5 is read from. Spread in km at the horizon:
+
+| Pair | Horizon | Spread: 0.1 m/s | 1 m/s | 10 m/s | Share: 0.1 m/s | 1 m/s | 10 m/s | Miss: 0.1 m/s | 1 m/s | 10 m/s |
+|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| LEO, 500 km | 24 h | 1.10 | 11.01 | 107.2 | 0.2350 | 0.0245 | 0.0033 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km | 48 h | 2.20 | 21.79 | 188.2 | 0.3007 | 0.0321 | 0.0049 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km | 72 h | 3.27 | 31.68 | 219.3 | 0.3616 | 0.0395 | 0.0064 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km, late | 24 h | 1.10 | 11.03 | 109.6 | 1.35 | 0.1347 | 0.0148 | 1.13 | 0.0890 | 0.0162 |
+| LEO, 500 km, late | 48 h | 2.23 | 22.17 | 198.7 | 1.35 | 0.1347 | 0.0148 | 0.3957 | 0.0890 | 0.0162 |
+| LEO, 500 km, late | 72 h | 3.35 | 32.63 | 242.4 | 1.35 | 0.1347 | 0.0155 | 0.3957 | 0.0890 | 0.0162 |
+| LEO, 550 km polar | 24 h | 0.125 | 6.92 | 109.7 | 1.78 | 0.0737 | 0.0018 | 0.0506 | 0.0003 | 0.0002 |
+| LEO, 550 km polar | 48 h | 0.484 | 19.44 | 209.2 | 1.78 | 0.0737 | 0.0031 | 0.0506 | 0.0003 | 0.0002 |
+| LEO, 550 km polar | 72 h | 1.26 | 32.10 | 285.6 | 1.78 | 0.0737 | 0.0044 | 0.0506 | 0.0003 | 0.0002 |
+| MEO | 24 h | 1.12 | 11.21 | 114.1 | 0.3524 | 0.0354 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| MEO | 48 h | 2.24 | 22.41 | 227.1 | 0.3530 | 0.0354 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| MEO | 72 h | 3.36 | 33.61 | 338.2 | 0.3539 | 0.0355 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| GEO | 24 h | 1.08 | 11.15 | 114.5 | 0.6910 | 0.0689 | 0.0054 | 0.6910 | 0.0241 | 0.0010 |
+| GEO | 48 h | 2.19 | 22.27 | 228.6 | 4.83 | 0.0740 | 0.0063 | 0.5663 | 0.0450 | 0.0010 |
+| GEO | 72 h | 3.34 | 33.37 | 342.1 | 4.83 | 0.0740 | 0.0063 | 0.5663 | 0.0479 | 0.0010 |
+| HEO/Molniya | 24 h | 0.168 | 1.68 | 17.17 | 0.5075 | 0.0492 | 0.0048 | 0.0042 | 0.0039 | 0.0000 |
+| HEO/Molniya | 48 h | 0.334 | 3.35 | 34.22 | 0.7138 | 0.0695 | 0.0065 | 0.0042 | 0.0039 | 0.0000 |
+| HEO/Molniya | 72 h | 0.502 | 5.03 | 51.23 | 0.9053 | 0.0885 | 0.0081 | 0.0042 | 0.0039 | 0.0000 |
+
+● **Where the claim holds, and where it does not.** With no burn the forces exceed the sampled spread in every
+  regime. With a burn of 0.1 m/s they can exceed it in LEO (1.78 times, the polar pair) and at GEO (4.83 times, by
+  48 h), and reach 0.35 of it in MEO and 0.91 in HEO/Molniya. With 1 m/s they are over a tenth of it in LEO (0.135,
+  the late pair) and under a tenth elsewhere (at most 0.089, HEO/Molniya); with 10 m/s, under a fiftieth everywhere.
+  The closest approach a cell reads moves less against its own spread: under a tenth with 1 m/s or more in every
+  pair; with 0.1 m/s up to 0.69 at GEO, and 1.13 for the late LEO pair by 24 h, whose closest approach then falls at
+  the window's end. Against the element-set error each sample also draws, at least 1 km by the LEO figure and 2 km
+  by GEO's, the no-burn separation between alike objects is under a tenth outside LEO and at or over it in LEO by
+  72 h; between unlike objects at GEO it is over it (2.42 km). The spread grows with the burn and the archetype's
+  spreads, so the comparison here is at the tightest; a burn with no archetype is drawn at 1 m/s 1-sigma, wider still.
+  The omitted forces exceed the spread with no burn and with 0.1 m/s in LEO and at GEO, two of the four burn sizes,
+  and not over most of them in any regime, so the force model is stated, not changed: Claude's judgement, for the
+  owner to confirm.
+● **Where it is stated.** `monte_carlo.FORCE_MODEL_KM` holds, by horizon, the largest position change in LEO, MEO,
+  GEO and HEO/Molniya and the largest separation change of any pair and burn, alike and unlike;
+  `monte_carlo.FORCE_MODEL_SHARE` holds each regime's worst share for burns of 0.1, 1 and 10 m/s. The test holds
+  both, and these tables, to what is measured. Every sampled closest approach's basis note says, after the WGS-72
+  handover and for red's regime, for example in LEO: "force model, not in the spread: RK45 leaves out J3 and J4, the
+  Moon, the Sun and solar radiation pressure, which against a higher-fidelity reference moved each object of 6
+  reference pairs up to 7.01 km in LEO, 3.25 km in MEO, 23.81 km at GEO and 7.89 km in HEO/Molniya by 72 h, and a
+  pair's separation up to 4.05 km when both objects have the same area-to-mass ratio and up to 4.16 km when one has
+  0.02 m^2/kg and the other 0.005 or none; in LEO, set against the spread sampled at any instant up to 72 h, between
+  such unlike objects, they are larger than it with no burn, when it is drag's alone, and with a burn of 0.1 m/s
+  (1.8 times it), over a tenth of it with a burn of 1 m/s (0.14 times) and under a tenth with a burn of 10 m/s (0.016
+  times)", for the shortest horizon measured at or past the span RK45 runs. A regime not measured, or not read,
+  takes the worst measured for each burn and says so. The module's design note, the lookup register and the guide's
+  limitations say the same. The test takes about 50 s.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
@@ -1554,6 +1673,9 @@ replays to, so the stored inputs go to version 7, which holds the convergence ru
   (SPC-202). SPC-215 found no source for an error rate or staleness limit in any regime: each set states its regime
   and whose figure it takes, and a source found later can replace a figure in its register row.
 ● **The integrator's error is stated, not reduced** (SPC-214): the tolerances stay as they are, by the lead's ruling.
+● **J3 and J4, the Moon, the Sun and radiation pressure are stated, not modelled** (SPC-209): the engine still flies
+  two-body, J2 and drag. Whether to add the forces is the owner's call. The reference's Moon and Sun are low-precision
+  series and its shadow is smoothed; neither is in the product.
 ● **A sensor's line of sight to red is not modelled.** Custody is about information, not geometry, and our response
   is not applied to it.
 ● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
